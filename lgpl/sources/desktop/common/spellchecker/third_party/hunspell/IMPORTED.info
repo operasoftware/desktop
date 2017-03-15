@@ -1,0 +1,6 @@
+{
+  "BUILD.gn": {
+    "copied-from": "third_party/hunspell/BUILD.gn",
+    "last-sync": "ab95f6744e4377cc87511f6d960ceb575f5eb059"
+  }
+}

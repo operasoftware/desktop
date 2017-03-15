@@ -1,0 +1,20 @@
+Name: Simplified Wrapper and Interface Generator (SWIG)
+Short Name: swig
+URL: http://www.swig.org/download.html
+Version: 3.0.10
+License: GPL
+Security Critical: no
+
+Description:
+Simplified Wrapper and Interface Generator (SWIG) is an interface compiler
+that connects programs written in C and C++ with scripting languages such as
+Perl, Python, Ruby, and Tcl. It works by taking the declarations found in
+C/C++ header files and using them to generate the wrapper code that scripting
+languages need to access the underlying C/C++ code.
+
+Local Modifications:
+- LICENSE-GPL and LICENSE-UNIVERSITIES content added to LICENSE file
+- Removed all files except for Lib/ and LICENSE
+- Removed all non-python bindings from Lib/.
+- Edit Lib/python/pyruntime.swg to include Python.h without the _DEBUG macro to
+  avoid requiring python<ver>_d.lib since we do not intend to debug python.
