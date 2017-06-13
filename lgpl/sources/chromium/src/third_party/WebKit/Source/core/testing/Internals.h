@@ -27,14 +27,12 @@
 #ifndef Internals_h
 #define Internals_h
 
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
-#include "bindings/core/v8/Iterable.h"
+#include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/css/CSSComputedStyleDeclaration.h"
-#include "core/dom/ContextLifecycleObserver.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
@@ -49,6 +47,8 @@ class ClientRect;
 class ClientRectList;
 class DOMArrayBuffer;
 class DOMPoint;
+class DOMWindow;
+class Dictionary;
 class DictionaryTest;
 class Document;
 class DocumentMarker;
@@ -58,6 +58,7 @@ class GCObservation;
 class HTMLInputElement;
 class HTMLMediaElement;
 class HTMLSelectElement;
+class HTMLVideoElement;
 class InternalRuntimeFlags;
 class InternalSettings;
 class LayerRectList;
@@ -67,7 +68,6 @@ class Location;
 class Node;
 class OriginTrialsTest;
 class Page;
-class PrivateScriptTest;
 class Range;
 class SerializedScriptValue;
 class ShadowRoot;
@@ -78,29 +78,24 @@ template <typename NodeType>
 class StaticNodeTypeList;
 using StaticNodeList = StaticNodeTypeList<Node>;
 
-class Internals final : public GarbageCollectedFinalized<Internals>,
-                        public ScriptWrappable,
-                        public ContextLifecycleObserver,
-                        public ValueIterable<int> {
+class Internals final : public GarbageCollected<Internals>,
+                        public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(Internals);
 
  public:
   static Internals* create(ExecutionContext* context) {
     return new Internals(context);
   }
-  virtual ~Internals();
 
   static void resetToConsistentState(Page*);
 
   String elementLayoutTreeAsText(Element*, ExceptionState&);
 
-  String address(Node*);
-
   GCObservation* observeGC(ScriptValue);
 
   bool isPreloaded(const String& url);
   bool isPreloadedBy(const String& url, Document*);
+  bool isLoading(const String& url);
   bool isLoadingFromMemoryCache(const String& url);
   int getResourcePriority(const String& url, Document*);
   String getResourceHeader(const String& url, const String& header, Document*);
@@ -262,7 +257,9 @@ class Internals final : public GarbageCollectedFinalized<Internals>,
   Vector<AtomicString> userPreferredLanguages() const;
   void setUserPreferredLanguages(const Vector<String>&);
 
-  unsigned activeDOMObjectCount(Document*);
+  unsigned mediaKeysCount();
+  unsigned mediaKeySessionCount();
+  unsigned suspendableObjectCount(Document*);
   unsigned wheelEventHandlerCount(Document*);
   unsigned scrollEventHandlerCount(Document*);
   unsigned touchStartOrMoveEventHandlerCount(Document*);
@@ -370,9 +367,10 @@ class Internals final : public GarbageCollectedFinalized<Internals>,
   void setIsCursorVisible(Document*, bool, ExceptionState&);
 
   String effectivePreload(HTMLMediaElement*);
-
   void mediaPlayerRemoteRouteAvailabilityChanged(HTMLMediaElement*, bool);
   void mediaPlayerPlayingRemotelyChanged(HTMLMediaElement*, bool);
+  void setMediaElementNetworkState(HTMLMediaElement*, int state);
+  void setPersistent(HTMLVideoElement*, bool);
 
   void registerURLSchemeAsBypassingContentSecurityPolicy(const String& scheme);
   void registerURLSchemeAsBypassingContentSecurityPolicy(
@@ -382,13 +380,15 @@ class Internals final : public GarbageCollectedFinalized<Internals>,
       const String& scheme);
 
   TypeConversions* typeConversions() const;
-  PrivateScriptTest* privateScriptTest() const;
   DictionaryTest* dictionaryTest() const;
   UnionTypesTest* unionTypesTest() const;
   OriginTrialsTest* originTrialsTest() const;
   CallbackFunctionTest* callbackFunctionTest() const;
 
   Vector<String> getReferencedFilePaths() const;
+
+  void startStoringCompositedLayerDebugInfo(Document*, ExceptionState&);
+  void stopStoringCompositedLayerDebugInfo(Document*, ExceptionState&);
 
   void startTrackingRepaints(Document*, ExceptionState&);
   void stopTrackingRepaints(Document*, ExceptionState&);
@@ -419,7 +419,12 @@ class Internals final : public GarbageCollectedFinalized<Internals>,
   int selectPopupItemStyleFontHeight(Node*, int);
   void resetTypeAheadSession(HTMLSelectElement*);
 
+  Node* visibleSelectionAnchorNode();
+  unsigned visibleSelectionAnchorOffset();
+  Node* visibleSelectionFocusNode();
+  unsigned visibleSelectionFocusOffset();
   ClientRect* selectionBounds(ExceptionState&);
+  String textAffinity();
 
   bool loseSharedGraphicsContext3D();
 
@@ -491,9 +496,18 @@ class Internals final : public GarbageCollectedFinalized<Internals>,
   float visualViewportScrollY();
 
   // Return true if the given use counter exists for the given document.
-  // |useCounterId| must be one of the values from the UseCounter::Feature enum.
-  bool isUseCounted(Document*, int useCounterId);
+  // |feature| must be one of the values from the UseCounter::Feature enum.
+  bool isUseCounted(Document*, uint32_t feature);
   bool isCSSPropertyUseCounted(Document*, const String&);
+
+  // Observes changes on Document's UseCounter. Returns a promise that is
+  // resolved when |feature| is counted. When |feature| was already counted,
+  // it's immediately resolved.
+  ScriptPromise observeUseCounter(ScriptState*, Document*, uint32_t feature);
+
+  // Used by the iterable<>.
+  unsigned length() const { return 5; }
+  int anonymousIndexedGetter(uint32_t index) const { return index * index; }
 
   String unscopableAttribute();
   String unscopableMethod();
@@ -508,11 +522,6 @@ class Internals final : public GarbageCollectedFinalized<Internals>,
   // Translate given platform monotonic time in seconds to high resolution
   // document time in seconds
   double monotonicTimeToZeroBasedDocumentTime(double, ExceptionState&);
-
-  void setMediaElementNetworkState(HTMLMediaElement*, int state);
-
-  // TODO(liberato): remove once autoplay gesture override experiment concludes.
-  void triggerAutoplayViewportCheck(HTMLMediaElement*);
 
   // Returns the run state of the node's scroll animator (see
   // ScrollAnimatorCompositorCoordinater::RunState), or -1 if the node does not
@@ -545,8 +554,7 @@ class Internals final : public GarbageCollectedFinalized<Internals>,
                            unsigned index,
                            ExceptionState&);
   Member<InternalRuntimeFlags> m_runtimeFlags;
-
-  IterationSource* startIteration(ScriptState*, ExceptionState&) override;
+  Member<Document> m_document;
 };
 
 }  // namespace blink

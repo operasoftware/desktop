@@ -160,21 +160,21 @@ class CORE_EXPORT RuleSet : public GarbageCollectedFinalized<RuleSet> {
 
   const HeapTerminatedArray<RuleData>* idRules(const AtomicString& key) const {
     ASSERT(!m_pendingRules);
-    return m_idRules.get(key);
+    return m_idRules.at(key);
   }
   const HeapTerminatedArray<RuleData>* classRules(
       const AtomicString& key) const {
     ASSERT(!m_pendingRules);
-    return m_classRules.get(key);
+    return m_classRules.at(key);
   }
   const HeapTerminatedArray<RuleData>* tagRules(const AtomicString& key) const {
     ASSERT(!m_pendingRules);
-    return m_tagRules.get(key);
+    return m_tagRules.at(key);
   }
   const HeapTerminatedArray<RuleData>* shadowPseudoElementRules(
       const AtomicString& key) const {
     ASSERT(!m_pendingRules);
-    return m_shadowPseudoElementRules.get(key);
+    return m_shadowPseudoElementRules.at(key);
   }
   const HeapVector<RuleData>* linkPseudoClassRules() const {
     ASSERT(!m_pendingRules);
@@ -187,6 +187,10 @@ class CORE_EXPORT RuleSet : public GarbageCollectedFinalized<RuleSet> {
   const HeapVector<RuleData>* focusPseudoClassRules() const {
     ASSERT(!m_pendingRules);
     return &m_focusPseudoClassRules;
+  }
+  const HeapVector<RuleData>* placeholderPseudoRules() const {
+    DCHECK(!m_pendingRules);
+    return &m_placeholderPseudoRules;
   }
   const HeapVector<RuleData>* universalRules() const {
     ASSERT(!m_pendingRules);
@@ -214,12 +218,6 @@ class CORE_EXPORT RuleSet : public GarbageCollectedFinalized<RuleSet> {
   }
   const HeapVector<MinimalRuleData>& slottedPseudoElementRules() const {
     return m_slottedPseudoElementRules;
-  }
-  const MediaQueryResultList& viewportDependentMediaQueryResults() const {
-    return m_viewportDependentMediaQueryResults;
-  }
-  const MediaQueryResultList& deviceDependentMediaQueryResults() const {
-    return m_deviceDependentMediaQueryResults;
   }
 
   unsigned ruleCount() const { return m_ruleCount; }
@@ -300,6 +298,7 @@ class CORE_EXPORT RuleSet : public GarbageCollectedFinalized<RuleSet> {
   HeapVector<RuleData> m_linkPseudoClassRules;
   HeapVector<RuleData> m_cuePseudoRules;
   HeapVector<RuleData> m_focusPseudoClassRules;
+  HeapVector<RuleData> m_placeholderPseudoRules;
   HeapVector<RuleData> m_universalRules;
   HeapVector<RuleData> m_shadowHostRules;
   RuleFeatureSet m_features;
@@ -309,9 +308,6 @@ class CORE_EXPORT RuleSet : public GarbageCollectedFinalized<RuleSet> {
   HeapVector<MinimalRuleData> m_deepCombinatorOrShadowPseudoRules;
   HeapVector<MinimalRuleData> m_contentPseudoElementRules;
   HeapVector<MinimalRuleData> m_slottedPseudoElementRules;
-
-  MediaQueryResultList m_viewportDependentMediaQueryResults;
-  MediaQueryResultList m_deviceDependentMediaQueryResults;
 
   unsigned m_ruleCount;
   Member<PendingRuleMaps> m_pendingRules;

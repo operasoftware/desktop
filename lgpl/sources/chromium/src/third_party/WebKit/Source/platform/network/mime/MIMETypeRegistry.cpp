@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "platform/MIMETypeRegistry.h"
+#include "platform/network/mime/MIMETypeRegistry.h"
 
 #include "base/files/file_path.h"
 #include "base/power_save_mode/power_save_mode_monitor.h"
@@ -25,7 +25,7 @@ struct MimeRegistryPtrHolder {
  public:
   MimeRegistryPtrHolder() {
     Platform::current()->interfaceProvider()->getInterface(
-        mojo::GetProxy(&mimeRegistry));
+        mojo::MakeRequest(&mimeRegistry));
   }
   ~MimeRegistryPtrHolder() {}
 
@@ -194,7 +194,7 @@ MIMETypeRegistry::SupportsType MIMETypeRegistry::supportsMediaMIMEType(
     const String& codecs) {
   const std::string asciiMimeType = ToLowerASCIIOrEmpty(mimeType);
   std::vector<std::string> codecVector;
-  media::ParseCodecString(ToASCIIOrEmpty(codecs), &codecVector, false);
+  media::SplitCodecsToVector(ToASCIIOrEmpty(codecs), &codecVector, false);
   if (ShouldDisableMediaMimeForPowerSaving(asciiMimeType, codecVector))
     return IsNotSupported;
   return static_cast<SupportsType>(
@@ -207,7 +207,7 @@ bool MIMETypeRegistry::isSupportedMediaSourceMIMEType(const String& mimeType,
   if (asciiMimeType.empty())
     return false;
   std::vector<std::string> parsedCodecIds;
-  media::ParseCodecString(ToASCIIOrEmpty(codecs), &parsedCodecIds, false);
+  media::SplitCodecsToVector(ToASCIIOrEmpty(codecs), &parsedCodecIds, false);
   if (ShouldDisableMediaSourceMimeForPowerSaving(asciiMimeType, parsedCodecIds))
     return false;
   return static_cast<MIMETypeRegistry::SupportsType>(
@@ -221,9 +221,10 @@ bool MIMETypeRegistry::isJavaAppletMIMEType(const String& mimeType) {
   // followed by any number of specific versions of the JVM, which is why we use
   // startsWith()
   return mimeType.startsWith("application/x-java-applet",
-                             TextCaseInsensitive) ||
-         mimeType.startsWith("application/x-java-bean", TextCaseInsensitive) ||
-         mimeType.startsWith("application/x-java-vm", TextCaseInsensitive);
+                             TextCaseASCIIInsensitive) ||
+         mimeType.startsWith("application/x-java-bean",
+                             TextCaseASCIIInsensitive) ||
+         mimeType.startsWith("application/x-java-vm", TextCaseASCIIInsensitive);
 }
 
 bool MIMETypeRegistry::isSupportedStyleSheetMIMEType(const String& mimeType) {
@@ -232,7 +233,7 @@ bool MIMETypeRegistry::isSupportedStyleSheetMIMEType(const String& mimeType) {
 
 bool MIMETypeRegistry::isSupportedFontMIMEType(const String& mimeType) {
   static const unsigned fontLen = 5;
-  if (!mimeType.startsWith("font/", TextCaseInsensitive))
+  if (!mimeType.startsWith("font/", TextCaseASCIIInsensitive))
     return false;
   String subType = mimeType.substring(fontLen).lower();
   return subType == "woff" || subType == "woff2" || subType == "otf" ||

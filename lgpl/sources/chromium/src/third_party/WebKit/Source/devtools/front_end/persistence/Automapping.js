@@ -83,8 +83,8 @@ Persistence.Automapping = class {
       this._onUISourceCodeRemoved(uiSourceCode);
     if (project.type() !== Workspace.projectTypes.FileSystem)
       return;
-    var fileSystem = /** @type {!Bindings.FileSystemWorkspaceBinding.FileSystem} */ (project);
-    for (var gitFolder of fileSystem.gitFolders())
+    var fileSystem = /** @type {!Persistence.FileSystemWorkspaceBinding.FileSystem} */ (project);
+    for (var gitFolder of fileSystem.initialGitFolders())
       this._projectFoldersIndex.removeFolder(gitFolder);
     this._projectFoldersIndex.removeFolder(fileSystem.fileSystemPath());
     this._scheduleRemap();
@@ -96,8 +96,8 @@ Persistence.Automapping = class {
   _onProjectAdded(project) {
     if (project.type() !== Workspace.projectTypes.FileSystem)
       return;
-    var fileSystem = /** @type {!Bindings.FileSystemWorkspaceBinding.FileSystem} */ (project);
-    for (var gitFolder of fileSystem.gitFolders())
+    var fileSystem = /** @type {!Persistence.FileSystemWorkspaceBinding.FileSystem} */ (project);
+    for (var gitFolder of fileSystem.initialGitFolders())
       this._projectFoldersIndex.addFolder(gitFolder);
     this._projectFoldersIndex.addFolder(fileSystem.fileSystemPath());
     this._scheduleRemap();
@@ -153,6 +153,9 @@ Persistence.Automapping = class {
         this._onBindingFailedForTest();
         return;
       }
+      // TODO(lushnikov): remove this check once there's a single uiSourceCode per url. @see crbug.com/670180
+      if (binding.network[Persistence.Automapping._binding] || binding.fileSystem[Persistence.Automapping._binding])
+        return;
 
       this._bindings.add(binding);
       binding.network[Persistence.Automapping._binding] = binding;

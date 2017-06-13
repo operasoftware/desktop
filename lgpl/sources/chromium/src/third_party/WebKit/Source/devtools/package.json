@@ -6,11 +6,13 @@
     "chrome": "node scripts/chrome_debug_launcher/launch_chrome.js",
     "server": "node scripts/hosted_mode/server.js",
     "test": "node scripts/npm_test.js",
-    "test:build": "node scripts/npm_test.js --build-only",
-    "test:run": "node scripts/npm_test.js --test-only",
+    "debug-test": "node scripts/npm_test.js --debug-devtools",
+    "compat-test": "node scripts/npm_test.js --compat-protocol=1.2",
     "lint": "eslint front_end",
-    "format": "node scripts/format.js",
-    "closure": "python scripts/compile_frontend.py"
+    "format": "git cl format --js .",
+    "closure": "python scripts/compile_frontend.py",
+    "setup-dtrun": "cd scripts/devtools_run && npm link",
+    "format-py": "yapf --exclude scripts/build/rjsmin.py -i --recursive scripts PRESUBMIT.py"
   },
   "repository": {
     "type": "git",
@@ -30,9 +32,6 @@
   },
   "homepage": "https://devtools.chrome.com",
   "devDependencies": {
-    "eslint": "3.10.0",
-    "clang-format": "1.0.45",
-    "async": "1.5.2",
-    "globby": "6.0.0"
+    "eslint": "3.10.0"
   }
 }

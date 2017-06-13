@@ -30,13 +30,14 @@
 
 #include "web/WebDataSourceImpl.h"
 
+#include <memory>
 #include "core/dom/Document.h"
+#include "core/loader/SubresourceFilter.h"
 #include "public/platform/WebDocumentSubresourceFilter.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebVector.h"
 #include "wtf/PtrUtil.h"
-#include <memory>
 
 namespace blink {
 
@@ -45,6 +46,8 @@ WebDataSourceImpl* WebDataSourceImpl::create(
     const ResourceRequest& request,
     const SubstituteData& data,
     ClientRedirectPolicy clientRedirectPolicy) {
+  DCHECK(frame);
+
   return new WebDataSourceImpl(frame, request, data, clientRedirectPolicy);
 }
 
@@ -52,7 +55,7 @@ const WebURLRequest& WebDataSourceImpl::originalRequest() const {
   return m_originalRequestWrapper;
 }
 
-const WebURLRequest& WebDataSourceImpl::request() const {
+const WebURLRequest& WebDataSourceImpl::getRequest() const {
   return m_requestWrapper;
 }
 
@@ -72,16 +75,13 @@ void WebDataSourceImpl::appendRedirect(const WebURL& url) {
   DocumentLoader::appendRedirect(url);
 }
 
-void WebDataSourceImpl::updateNavigation(
-    double redirectStartTime,
-    double redirectEndTime,
-    double fetchStartTime,
-    const WebVector<WebURL>& redirectChain) {
+void WebDataSourceImpl::updateNavigation(double redirectStartTime,
+                                         double redirectEndTime,
+                                         double fetchStartTime,
+                                         bool hasRedirect) {
   // Updates the redirection timing if there is at least one redirection
   // (between two URLs).
-  if (redirectChain.size() >= 2) {
-    for (size_t i = 0; i + 1 < redirectChain.size(); ++i)
-      didRedirect(redirectChain[i], redirectChain[i + 1]);
+  if (hasRedirect) {
     timing().setRedirectStart(redirectStartTime);
     timing().setRedirectEnd(redirectEndTime);
   }
@@ -111,7 +111,7 @@ WebDataSource::ExtraData* WebDataSourceImpl::getExtraData() const {
 void WebDataSourceImpl::setExtraData(ExtraData* extraData) {
   // extraData can't be a std::unique_ptr because setExtraData is a WebKit API
   // function.
-  m_extraData = wrapUnique(extraData);
+  m_extraData = WTF::wrapUnique(extraData);
 }
 
 void WebDataSourceImpl::setNavigationStartTime(double navigationStart) {
@@ -142,7 +142,7 @@ WebDataSourceImpl::WebDataSourceImpl(LocalFrame* frame,
                                      ClientRedirectPolicy clientRedirectPolicy)
     : DocumentLoader(frame, request, data, clientRedirectPolicy),
       m_originalRequestWrapper(DocumentLoader::originalRequest()),
-      m_requestWrapper(DocumentLoader::request()),
+      m_requestWrapper(DocumentLoader::getRequest()),
       m_responseWrapper(DocumentLoader::response()) {}
 
 WebDataSourceImpl::~WebDataSourceImpl() {
@@ -157,7 +157,8 @@ void WebDataSourceImpl::detachFromFrame() {
 
 void WebDataSourceImpl::setSubresourceFilter(
     WebDocumentSubresourceFilter* subresourceFilter) {
-  DocumentLoader::setSubresourceFilter(WTF::wrapUnique(subresourceFilter));
+  DocumentLoader::setSubresourceFilter(
+      SubresourceFilter::create(this, WTF::wrapUnique(subresourceFilter)));
 }
 
 DEFINE_TRACE(WebDataSourceImpl) {

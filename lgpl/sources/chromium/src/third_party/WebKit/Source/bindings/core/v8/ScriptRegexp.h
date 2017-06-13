@@ -29,9 +29,9 @@
 
 #include "bindings/core/v8/ScopedPersistent.h"
 #include "core/CoreExport.h"
+#include "v8/include/v8.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/text/WTFString.h"
-#include <v8.h>
 
 namespace blink {
 
@@ -47,6 +47,8 @@ class CORE_EXPORT ScriptRegexp {
     UTF16,  // NOLINT
   };
 
+  // For TextCaseSensitivity argument, TextCaseASCIIInsensitive and
+  // TextCaseUnicodeInsensitive has identical behavior. They just add "i" flag.
   ScriptRegexp(const String&,
                TextCaseSensitivity,
                MultilineMode = MultilineDisabled,

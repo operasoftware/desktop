@@ -41,8 +41,14 @@ void ColumnBalancer::traverseLines(const LayoutBlockFlow& blockFlow) {
        line = line->nextRootBox()) {
     LayoutUnit lineTopInFlowThread =
         m_flowThreadOffset + line->lineTopWithLeading();
-    if (lineTopInFlowThread < logicalTopInFlowThread())
-      continue;
+    if (lineTopInFlowThread < logicalTopInFlowThread()) {
+      // If the line is fully about the flow thread portion range we're working
+      // with, we can skip it. If its logical top is outside the range, but its
+      // logical bottom protrudes into the range, we need to examine it.
+      LayoutUnit lineBottom = line->lineBottomWithLeading();
+      if (m_flowThreadOffset + lineBottom <= logicalTopInFlowThread())
+        continue;
+    }
     if (lineTopInFlowThread >= logicalBottomInFlowThread())
       break;
     examineLine(*line);
@@ -52,7 +58,7 @@ void ColumnBalancer::traverseLines(const LayoutBlockFlow& blockFlow) {
 void ColumnBalancer::traverseChildren(const LayoutObject& object) {
   // The break-after value from the previous in-flow block-level object to be
   // joined with the break-before value of the next in-flow block-level sibling.
-  EBreak previousBreakAfterValue = BreakAuto;
+  EBreakBetween previousBreakAfterValue = EBreakBetween::kAuto;
 
   for (const LayoutObject* child = object.slowFirstChild(); child;
        child = child->nextSibling()) {
@@ -172,15 +178,20 @@ LayoutUnit InitialColumnHeightFinder::initialMinimalBalancedHeight() const {
 void InitialColumnHeightFinder::examineBoxAfterEntering(
     const LayoutBox& box,
     LayoutUnit childLogicalHeight,
-    EBreak previousBreakAfterValue) {
+    EBreakBetween previousBreakAfterValue) {
+  if (m_lastBreakSeen > flowThreadOffset()) {
+    // We have moved backwards. We're probably in a parallel flow, caused by
+    // floats, sibling table cells, etc.
+    m_lastBreakSeen = LayoutUnit();
+  }
   if (isLogicalTopWithinBounds(flowThreadOffset() - box.paginationStrut())) {
     if (box.needsForcedBreakBefore(previousBreakAfterValue)) {
       addContentRun(flowThreadOffset());
-    } else {
-      if (isFirstAfterBreak(flowThreadOffset())) {
-        // This box is first after a soft break.
-        recordStrutBeforeOffset(flowThreadOffset(), box.paginationStrut());
-      }
+    } else if (isFirstAfterBreak(flowThreadOffset()) &&
+               m_lastBreakSeen != flowThreadOffset()) {
+      // This box is first after a soft break.
+      m_lastBreakSeen = flowThreadOffset();
+      recordStrutBeforeOffset(flowThreadOffset(), box.paginationStrut());
     }
   }
 
@@ -228,13 +239,18 @@ void InitialColumnHeightFinder::examineLine(const RootInlineBox& line) {
   LayoutUnit lineTopInFlowThread = flowThreadOffset() + lineTop;
   LayoutUnit minimumLogialHeight =
       columnLogicalHeightRequirementForLine(line.block().styleRef(), line);
+  if (lineTopInFlowThread < LayoutUnit())
+    minimumLogialHeight += lineTopInFlowThread;
   m_tallestUnbreakableLogicalHeight =
       std::max(m_tallestUnbreakableLogicalHeight, minimumLogialHeight);
   ASSERT(
       isFirstAfterBreak(lineTopInFlowThread) || !line.paginationStrut() ||
       !isLogicalTopWithinBounds(lineTopInFlowThread - line.paginationStrut()));
-  if (isFirstAfterBreak(lineTopInFlowThread))
+  if (isFirstAfterBreak(lineTopInFlowThread) &&
+      m_lastBreakSeen != lineTopInFlowThread) {
+    m_lastBreakSeen = lineTopInFlowThread;
     recordStrutBeforeOffset(lineTopInFlowThread, line.paginationStrut());
+  }
 }
 
 void InitialColumnHeightFinder::recordStrutBeforeOffset(
@@ -244,7 +260,7 @@ void InitialColumnHeightFinder::recordStrutBeforeOffset(
   ASSERT(m_shortestStruts.size() == columnCount);
   unsigned index = groupAtOffset(offsetInFlowThread)
                        .columnIndexAtOffset(offsetInFlowThread - strut,
-                                            LayoutBox::AssociateWithLatterPage);
+                                            LayoutBox::AssociateWithFormerPage);
   if (index >= columnCount)
     return;
   m_shortestStruts[index] = std::min(m_shortestStruts[index], strut);
@@ -271,7 +287,7 @@ void InitialColumnHeightFinder::addContentRun(
     LayoutUnit endOffsetInFlowThread) {
   endOffsetInFlowThread -= spaceUsedByStrutsAt(endOffsetInFlowThread);
   if (!m_contentRuns.isEmpty() &&
-      endOffsetInFlowThread <= m_contentRuns.last().breakOffset())
+      endOffsetInFlowThread <= m_contentRuns.back().breakOffset())
     return;
   // Append another item as long as we haven't exceeded used column count. What
   // ends up in the overflow area shouldn't affect column balancing. However, if
@@ -284,7 +300,7 @@ void InitialColumnHeightFinder::addContentRun(
         columnSet().newFragmentainerGroupsAllowed())
       return;
   }
-  m_contentRuns.append(ContentRun(endOffsetInFlowThread));
+  m_contentRuns.push_back(ContentRun(endOffsetInFlowThread));
 }
 
 unsigned InitialColumnHeightFinder::contentRunIndexWithTallestColumns() const {
@@ -353,7 +369,7 @@ MinimumSpaceShortageFinder::MinimumSpaceShortageFinder(
 void MinimumSpaceShortageFinder::examineBoxAfterEntering(
     const LayoutBox& box,
     LayoutUnit childLogicalHeight,
-    EBreak previousBreakAfterValue) {
+    EBreakBetween previousBreakAfterValue) {
   LayoutBox::PaginationBreakability breakability =
       box.getPaginationBreakability();
 

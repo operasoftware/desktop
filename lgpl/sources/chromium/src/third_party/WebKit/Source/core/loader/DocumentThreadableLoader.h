@@ -33,11 +33,11 @@
 #define DocumentThreadableLoader_h
 
 #include "core/CoreExport.h"
-#include "core/fetch/RawResource.h"
-#include "core/fetch/ResourceOwner.h"
 #include "core/loader/ThreadableLoader.h"
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
+#include "platform/loader/fetch/RawResource.h"
+#include "platform/loader/fetch/ResourceOwner.h"
 #include "platform/network/HTTPHeaderMap.h"
 #include "platform/network/ResourceError.h"
 #include "platform/weborigin/Referrer.h"
@@ -52,6 +52,7 @@ class KURL;
 class ResourceRequest;
 class SecurityOrigin;
 class ThreadableLoaderClient;
+class ThreadableLoadingContext;
 
 class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
                                                    private RawResourceClient {
@@ -63,7 +64,7 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
                                         ThreadableLoaderClient&,
                                         const ThreadableLoaderOptions&,
                                         const ResourceLoaderOptions&);
-  static DocumentThreadableLoader* create(Document&,
+  static DocumentThreadableLoader* create(ThreadableLoadingContext&,
                                           ThreadableLoaderClient*,
                                           const ThreadableLoaderOptions&,
                                           const ResourceLoaderOptions&);
@@ -81,7 +82,7 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
  private:
   enum BlockingBehavior { LoadSynchronously, LoadAsynchronously };
 
-  DocumentThreadableLoader(Document&,
+  DocumentThreadableLoader(ThreadableLoadingContext&,
                            ThreadableLoaderClient*,
                            BlockingBehavior,
                            const ThreadableLoaderOptions&,
@@ -109,8 +110,6 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   void redirectBlocked() override;
   void dataDownloaded(Resource*, int) override;
   void didReceiveResourceTiming(Resource*, const ResourceTimingInfo&) override;
-
-  void cancelWithError(const ResourceError&);
 
   // Notify Inspector and log to console about resource response. Use this
   // method if response is not going to be finished normally.
@@ -142,7 +141,9 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   // Investigates the response for the preflight request. If successful,
   // the actual request will be made later in handleSuccessfulFinish().
   void handlePreflightResponse(const ResourceResponse&);
-  void handleError(const ResourceError&);
+
+  void dispatchDidFailAccessControlCheck(const ResourceError&);
+  void dispatchDidFail(const ResourceError&);
 
   void loadRequestAsync(const ResourceRequest&, ResourceLoaderOptions);
   void loadRequestSync(const ResourceRequest&, ResourceLoaderOptions);
@@ -182,10 +183,12 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   // End of ResourceOwner re-implementation, see above.
 
   const SecurityOrigin* getSecurityOrigin() const;
-  Document& document() const;
+
+  // TODO(kinuko): Remove dependency to document.
+  Document* document() const;
 
   ThreadableLoaderClient* m_client;
-  Member<Document> m_document;
+  Member<ThreadableLoadingContext> m_loadingContext;
 
   const ThreadableLoaderOptions m_options;
   // Some items may be overridden by m_forceDoNotAllowStoredCredentials and
@@ -199,8 +202,6 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   // True while the initial URL and all the URLs of the redirects this object
   // has followed, if any, are same-origin to getSecurityOrigin().
   bool m_sameOriginRequest;
-  // Set to true if the current request is cross-origin and not simple.
-  bool m_crossOriginNonSimpleRequest;
 
   // Set to true when the response data is given to a data consumer handle.
   bool m_isUsingDataConsumerHandle;
@@ -219,10 +220,10 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   ResourceRequest m_actualRequest;
   ResourceLoaderOptions m_actualOptions;
 
-  // stores simple request headers in case of a cross-origin redirect.
-  HTTPHeaderMap m_simpleRequestHeaders;
+  // stores request headers in case of a cross-origin redirect.
+  HTTPHeaderMap m_requestHeaders;
 
-  Timer<DocumentThreadableLoader> m_timeoutTimer;
+  TaskRunnerTimer<DocumentThreadableLoader> m_timeoutTimer;
   double
       m_requestStartedSeconds;  // Time an asynchronous fetch request is started
 

@@ -4,27 +4,25 @@
 
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/inspector/InspectorInstrumentation.h"
 
 namespace blink {
 
 ScriptPromiseResolver::ScriptPromiseResolver(ScriptState* scriptState)
-    : ActiveDOMObject(scriptState->getExecutionContext()),
+    : SuspendableObject(scriptState->getExecutionContext()),
       m_state(Pending),
       m_scriptState(scriptState),
-      m_timer(this, &ScriptPromiseResolver::onTimerFired),
+      m_timer(TaskRunnerHelper::get(TaskType::Microtask, getExecutionContext()),
+              this,
+              &ScriptPromiseResolver::onTimerFired),
       m_resolver(scriptState)
-#if ENABLE(ASSERT)
-      ,
-      m_isPromiseCalled(false)
-#endif
 {
-  if (getExecutionContext()->activeDOMObjectsAreStopped()) {
+  if (getExecutionContext()->isContextDestroyed()) {
     m_state = Detached;
     m_resolver.clear();
   }
-  InspectorInstrumentation::asyncTaskScheduled(getExecutionContext(), "Promise",
-                                               this);
+  probe::asyncTaskScheduled(getExecutionContext(), "Promise", this);
 }
 
 void ScriptPromiseResolver::suspend() {
@@ -44,7 +42,7 @@ void ScriptPromiseResolver::detach() {
   m_resolver.clear();
   m_value.clear();
   m_keepAlive.clear();
-  InspectorInstrumentation::asyncTaskCanceled(getExecutionContext(), this);
+  probe::asyncTaskCanceled(getExecutionContext(), this);
 }
 
 void ScriptPromiseResolver::keepAliveWhilePending() {
@@ -71,10 +69,10 @@ void ScriptPromiseResolver::onTimerFired(TimerBase*) {
 }
 
 void ScriptPromiseResolver::resolveOrRejectImmediately() {
-  ASSERT(!getExecutionContext()->activeDOMObjectsAreStopped());
-  ASSERT(!getExecutionContext()->activeDOMObjectsAreSuspended());
+  DCHECK(!getExecutionContext()->isContextDestroyed());
+  DCHECK(!getExecutionContext()->isContextSuspended());
   {
-    InspectorInstrumentation::AsyncTask asyncTask(getExecutionContext(), this);
+    probe::AsyncTask asyncTask(getExecutionContext(), this);
     if (m_state == Resolving) {
       m_resolver.resolve(m_value.newLocal(m_scriptState->isolate()));
     } else {
@@ -86,7 +84,7 @@ void ScriptPromiseResolver::resolveOrRejectImmediately() {
 }
 
 DEFINE_TRACE(ScriptPromiseResolver) {
-  ActiveDOMObject::trace(visitor);
+  SuspendableObject::trace(visitor);
 }
 
 }  // namespace blink

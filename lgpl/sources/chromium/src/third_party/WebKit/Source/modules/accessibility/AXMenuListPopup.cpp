@@ -84,7 +84,7 @@ int AXMenuListPopup::getSelectedIndex() const {
   return htmlSelectElement->selectedIndex();
 }
 
-bool AXMenuListPopup::press() const {
+bool AXMenuListPopup::press() {
   if (!m_parent)
     return false;
 
@@ -111,7 +111,7 @@ void AXMenuListPopup::addChildren() {
     AXMenuListOption* option = menuListOptionAXObject(optionElement);
     if (option) {
       option->setParent(this);
-      m_children.append(option);
+      m_children.push_back(option);
     }
   }
 }

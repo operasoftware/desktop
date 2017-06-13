@@ -155,7 +155,7 @@ void SVGTextLayoutEngine::recordTextFragment(SVGInlineTextBox* textBox) {
   // Figure out fragment metrics.
   computeCurrentFragmentMetrics(textBox);
 
-  textBox->textFragments().append(m_currentTextFragment);
+  textBox->textFragments().push_back(m_currentTextFragment);
   m_currentTextFragment = SVGTextFragment();
 }
 
@@ -237,7 +237,7 @@ void SVGTextLayoutEngine::layoutInlineTextBox(SVGInlineTextBox* textBox) {
   if (m_inPathLayout)
     return;
 
-  m_lineLayoutBoxes.append(textBox);
+  m_lineLayoutBoxes.push_back(textBox);
 }
 
 static bool definesTextLengthWithSpacing(const InlineFlowBox* start) {
@@ -396,7 +396,7 @@ void SVGTextLayoutEngine::layoutTextOnLineOrPath(
       break;
 
     const SVGCharacterData data =
-        logicalTextNode->characterDataMap().get(m_logicalCharacterOffset + 1);
+        logicalTextNode->characterDataMap().at(m_logicalCharacterOffset + 1);
 
     // TODO(fs): Use the return value to eliminate the additional
     // hash-lookup below when determining if this text box should be tagged

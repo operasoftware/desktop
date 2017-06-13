@@ -40,12 +40,9 @@ class GlobalFetchImpl final
                       const RequestInfo& input,
                       const Dictionary& init,
                       ExceptionState& exceptionState) override {
-    if (!scriptState->contextIsValid()) {
+    ExecutionContext* executionContext = m_fetchManager->getExecutionContext();
+    if (!scriptState->contextIsValid() || !executionContext) {
       // TODO(yhirano): Should this be moved to bindings?
-      exceptionState.throwTypeError("The global scope is shutting down.");
-      return ScriptPromise();
-    }
-    if (m_fetchManager->isStopped()) {
       exceptionState.throwTypeError("The global scope is shutting down.");
       return ScriptPromise();
     }
@@ -57,10 +54,7 @@ class GlobalFetchImpl final
     if (exceptionState.hadException())
       return ScriptPromise();
 
-    if (ExecutionContext* executionContext =
-            m_fetchManager->getExecutionContext())
-      InspectorInstrumentation::willSendXMLHttpOrFetchNetworkRequest(
-          executionContext, r->url());
+    probe::willSendXMLHttpOrFetchNetworkRequest(executionContext, r->url());
     return m_fetchManager->fetch(scriptState, r->passRequestData(scriptState));
   }
 
@@ -84,8 +78,8 @@ class GlobalFetchImpl final
 GlobalFetch::ScopedFetcher::~ScopedFetcher() {}
 
 GlobalFetch::ScopedFetcher* GlobalFetch::ScopedFetcher::from(
-    DOMWindow& window) {
-  return GlobalFetchImpl<LocalDOMWindow>::from(toLocalDOMWindow(window),
+    LocalDOMWindow& window) {
+  return GlobalFetchImpl<LocalDOMWindow>::from(window,
                                                window.getExecutionContext());
 }
 
@@ -98,11 +92,15 @@ GlobalFetch::ScopedFetcher* GlobalFetch::ScopedFetcher::from(
 DEFINE_TRACE(GlobalFetch::ScopedFetcher) {}
 
 ScriptPromise GlobalFetch::fetch(ScriptState* scriptState,
-                                 DOMWindow& window,
+                                 LocalDOMWindow& window,
                                  const RequestInfo& input,
                                  const Dictionary& init,
                                  ExceptionState& exceptionState) {
   UseCounter::count(window.getExecutionContext(), UseCounter::Fetch);
+  if (!window.frame()) {
+    exceptionState.throwTypeError("The global scope is shutting down.");
+    return ScriptPromise();
+  }
   return ScopedFetcher::from(window)->fetch(scriptState, input, init,
                                             exceptionState);
 }

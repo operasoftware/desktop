@@ -51,7 +51,7 @@ class CORE_EXPORT PrerendererClient : public Supplement<Page> {
   static PrerendererClient* from(Page*);
 
  protected:
-  PrerendererClient() {}
+  explicit PrerendererClient(Page&);
 };
 
 CORE_EXPORT void providePrerendererClientTo(Page&, PrerendererClient*);

@@ -36,12 +36,14 @@
 #include "public/platform/WebSize.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace {
+static const bool allowSVG = false;
+}
+
 namespace blink {
 
 static PassRefPtr<SharedBuffer> readFile(const char* fileName) {
-  String filePath = testing::blinkRootDir();
-  filePath.append("/Source/web/tests/data/");
-  filePath.append(fileName);
+  String filePath = testing::webTestDataPath(fileName);
 
   return testing::readFromFile(filePath);
 }
@@ -61,7 +63,8 @@ TEST(WebImageTest, ICOImage) {
   RefPtr<SharedBuffer> data = readFile("black-and-white.ico");
   ASSERT_TRUE(data.get());
 
-  WebVector<WebImage> images = WebImage::framesFromData(WebData(data));
+  WebVector<WebImage> images =
+      WebImage::framesFromData(WebData(data), allowSVG);
   ASSERT_EQ(2u, images.size());
   EXPECT_TRUE(images[0].size() == WebSize(2, 2));
   EXPECT_TRUE(images[1].size() == WebSize(1, 1));
@@ -77,13 +80,15 @@ TEST(WebImageTest, ICOValidHeaderMissingBitmap) {
   RefPtr<SharedBuffer> data = readFile("valid_header_missing_bitmap.ico");
   ASSERT_TRUE(data.get());
 
-  WebVector<WebImage> images = WebImage::framesFromData(WebData(data));
+  WebVector<WebImage> images =
+      WebImage::framesFromData(WebData(data), allowSVG);
   ASSERT_TRUE(images.isEmpty());
 }
 
 TEST(WebImageTest, BadImage) {
   const char badImage[] = "hello world";
-  WebVector<WebImage> images = WebImage::framesFromData(WebData(badImage));
+  WebVector<WebImage> images =
+      WebImage::framesFromData(WebData(badImage), allowSVG);
   ASSERT_EQ(0u, images.size());
 
   WebImage image = WebImage::fromData(WebData(badImage), WebSize());

@@ -7,7 +7,6 @@
 
 #include "core/CoreExport.h"
 #include "core/style/ComputedStyleConstants.h"
-#include "platform/fonts/TextBlob.h"
 #include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/LayoutRect.h"
@@ -47,17 +46,18 @@ class CORE_EXPORT TextPainter {
   void setCombinedText(LayoutTextCombine* combinedText) {
     m_combinedText = combinedText;
   }
+  void setEllipsisOffset(int offset) { m_ellipsisOffset = offset; }
 
   static void updateGraphicsContext(GraphicsContext&,
                                     const Style&,
                                     bool horizontal,
                                     GraphicsContextStateSaver&);
 
+  void clipDecorationsStripe(float upper, float stripeWidth, float dilation);
   void paint(unsigned startOffset,
              unsigned endOffset,
              unsigned length,
-             const Style&,
-             TextBlobPtr* cachedTextBlob = 0);
+             const Style&);
 
   struct Style {
     STACK_ALLOCATED();
@@ -102,8 +102,7 @@ class CORE_EXPORT TextPainter {
   template <PaintInternalStep step>
   void paintInternal(unsigned startOffset,
                      unsigned endOffset,
-                     unsigned truncationPoint,
-                     TextBlobPtr* cachedTextBlob = 0);
+                     unsigned truncationPoint);
 
   void paintEmphasisMarkForCombinedText();
 
@@ -116,6 +115,7 @@ class CORE_EXPORT TextPainter {
   AtomicString m_emphasisMark;
   int m_emphasisMarkOffset;
   LayoutTextCombine* m_combinedText;
+  int m_ellipsisOffset;
 };
 
 inline AffineTransform TextPainter::rotation(

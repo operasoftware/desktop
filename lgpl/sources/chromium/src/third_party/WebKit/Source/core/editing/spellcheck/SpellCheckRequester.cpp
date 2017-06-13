@@ -27,29 +27,25 @@
 
 #include "core/dom/Document.h"
 #include "core/dom/Node.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/markers/DocumentMarkerController.h"
 #include "core/editing/spellcheck/SpellChecker.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/html/TextControlElement.h"
 #include "platform/text/TextCheckerClient.h"
 
 namespace blink {
 
-SpellCheckRequest::SpellCheckRequest(
-    Range* checkingRange,
-    const String& text,
-    const Vector<uint32_t>& documentMarkersInRange,
-    const Vector<unsigned>& documentMarkerOffsets,
-    int requestNumber)
+SpellCheckRequest::SpellCheckRequest(Range* checkingRange,
+                                     const String& text,
+                                     int requestNumber)
     : m_requester(nullptr),
       m_checkingRange(checkingRange),
       m_rootEditableElement(
           blink::rootEditableElement(*m_checkingRange->startContainer())),
-      m_requestData(unrequestedTextCheckingSequence,
-                    text,
-                    documentMarkersInRange,
-                    documentMarkerOffsets),
+      m_requestData(unrequestedTextCheckingSequence, text),
       m_requestNumber(requestNumber) {
   DCHECK(m_checkingRange);
   DCHECK(m_checkingRange->isConnected());
@@ -81,24 +77,15 @@ SpellCheckRequest* SpellCheckRequest::create(
     return nullptr;
 
   String text =
-      plainText(checkingRange, TextIteratorEmitsObjectReplacementCharacter);
+      plainText(checkingRange, TextIteratorBehavior::Builder()
+                                   .setEmitsObjectReplacementCharacter(true)
+                                   .build());
   if (text.isEmpty())
     return nullptr;
 
   Range* checkingRangeObject = createRange(checkingRange);
 
-  const DocumentMarkerVector& markers =
-      checkingRangeObject->ownerDocument().markers().markersInRange(
-          checkingRange, DocumentMarker::SpellCheckClientMarkers());
-  Vector<uint32_t> hashes(markers.size());
-  Vector<unsigned> offsets(markers.size());
-  for (size_t i = 0; i < markers.size(); ++i) {
-    hashes[i] = markers[i]->hash();
-    offsets[i] = markers[i]->startOffset();
-  }
-
-  return new SpellCheckRequest(checkingRangeObject, text, hashes, offsets,
-                               requestNumber);
+  return new SpellCheckRequest(checkingRangeObject, text, requestNumber);
 }
 
 const TextCheckingRequestData& SpellCheckRequest::data() const {
@@ -138,6 +125,7 @@ SpellCheckRequester::SpellCheckRequester(LocalFrame& frame)
       m_lastRequestSequence(0),
       m_lastProcessedSequence(0),
       m_timerToProcessQueuedRequest(
+          TaskRunnerHelper::get(TaskType::UnspecedTimer, &frame),
           this,
           &SpellCheckRequester::timerFiredToProcessQueuedRequest) {}
 
@@ -224,13 +212,14 @@ void SpellCheckRequester::enqueueRequest(SpellCheckRequest* request) {
   // Spellcheck requests for chunks of text in the same element should not
   // overwrite each other.
   if (!continuation) {
-    for (auto& requestQueue : m_requestQueue) {
-      if (request->rootEditableElement() != requestQueue->rootEditableElement())
-        continue;
-
-      requestQueue = request;
-      return;
-    }
+    RequestQueue::const_iterator sameElementRequest =
+        std::find_if(m_requestQueue.begin(), m_requestQueue.end(),
+                     [request](const SpellCheckRequest* queuedRequest) -> bool {
+                       return request->rootEditableElement() ==
+                              queuedRequest->rootEditableElement();
+                     });
+    if (sameElementRequest != m_requestQueue.end())
+      m_requestQueue.remove(sameElementRequest);
   }
 
   m_requestQueue.append(request);
@@ -245,10 +234,11 @@ void SpellCheckRequester::didCheck(int sequence,
     return;
   }
 
-  frame().spellChecker().markAndReplaceFor(m_processingRequest, results);
+  if (results.size())
+    frame().spellChecker().markAndReplaceFor(m_processingRequest, results);
 
-  if (m_lastProcessedSequence < sequence)
-    m_lastProcessedSequence = sequence;
+  DCHECK_LT(m_lastProcessedSequence, sequence);
+  m_lastProcessedSequence = sequence;
 
   clearProcessingRequest();
   if (!m_requestQueue.isEmpty())

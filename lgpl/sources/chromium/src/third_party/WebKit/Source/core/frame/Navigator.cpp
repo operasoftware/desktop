@@ -25,18 +25,18 @@
 
 #include "bindings/core/v8/ScriptController.h"
 #include "core/dom/Document.h"
-#include "core/frame/FrameHost.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/NavigatorID.h"
 #include "core/frame/Settings.h"
 #include "core/loader/CookieJar.h"
 #include "core/loader/FrameLoader.h"
 #include "core/page/ChromeClient.h"
+#include "core/page/Page.h"
 #include "platform/Language.h"
 
 namespace blink {
 
-Navigator::Navigator(LocalFrame* frame) : DOMWindowProperty(frame) {}
+Navigator::Navigator(LocalFrame* frame) : DOMWindowClient(frame) {}
 
 String Navigator::productSub() const {
   return "20030107";
@@ -67,7 +67,7 @@ bool Navigator::cookieEnabled() const {
     return false;
 
   Settings* settings = frame()->settings();
-  if (!settings || !settings->cookieEnabled())
+  if (!settings || !settings->getCookieEnabled())
     return false;
 
   return cookiesEnabled(frame()->document());
@@ -76,12 +76,12 @@ bool Navigator::cookieEnabled() const {
 Vector<String> Navigator::languages() {
   Vector<String> languages;
 
-  if (!frame() || !frame()->host()) {
-    languages.append(defaultLanguage());
+  if (!frame() || !frame()->page()) {
+    languages.push_back(defaultLanguage());
     return languages;
   }
 
-  String acceptLanguages = frame()->host()->chromeClient().acceptLanguages();
+  String acceptLanguages = frame()->page()->chromeClient().acceptLanguages();
   acceptLanguages.split(',', languages);
 
   // Sanitizing tokens. We could do that more extensively but we should assume
@@ -98,7 +98,7 @@ Vector<String> Navigator::languages() {
 }
 
 DEFINE_TRACE(Navigator) {
-  DOMWindowProperty::trace(visitor);
+  DOMWindowClient::trace(visitor);
   Supplementable<Navigator>::trace(visitor);
 }
 

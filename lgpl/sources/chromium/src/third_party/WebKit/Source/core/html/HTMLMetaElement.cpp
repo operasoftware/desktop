@@ -26,11 +26,11 @@
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLHeadElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/inspector/ConsoleMessage.h"
-#include "core/loader/FrameLoaderClient.h"
 #include "core/loader/HttpEquiv.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "wtf/text/StringToNumber.h"
@@ -425,21 +425,20 @@ void HTMLMetaElement::processViewportContentAttribute(
   getViewportDescriptionFromContentAttribute(
       content, descriptionFromLegacyTag, &document(),
       document().settings() &&
-          document().settings()->viewportMetaZeroValuesQuirk());
+          document().settings()->getViewportMetaZeroValuesQuirk());
 
   document().setViewportDescription(descriptionFromLegacyTag);
 }
 
-void HTMLMetaElement::parseAttribute(const QualifiedName& name,
-                                     const AtomicString& oldValue,
-                                     const AtomicString& value) {
-  if (name == http_equivAttr || name == contentAttr) {
+void HTMLMetaElement::parseAttribute(
+    const AttributeModificationParams& params) {
+  if (params.name == http_equivAttr || params.name == contentAttr) {
     process();
     return;
   }
 
-  if (name != nameAttr)
-    HTMLElement::parseAttribute(name, oldValue, value);
+  if (params.name != nameAttr)
+    HTMLElement::parseAttribute(params);
 }
 
 Node::InsertionNotificationRequest HTMLMetaElement::insertedInto(
@@ -460,7 +459,7 @@ static bool inDocumentHead(HTMLMetaElement* element) {
 }
 
 void HTMLMetaElement::process() {
-  if (!isConnected())
+  if (!isInDocumentTree())
     return;
 
   // All below situations require a content attribute (which can be the empty
@@ -503,7 +502,7 @@ void HTMLMetaElement::process() {
 WTF::TextEncoding HTMLMetaElement::computeEncoding() const {
   HTMLAttributeList attributeList;
   for (const Attribute& attr : attributes())
-    attributeList.append(
+    attributeList.push_back(
         std::make_pair(attr.name().localName(), attr.value().getString()));
   return encodingFromMetaAttributes(attributeList);
 }

@@ -18,23 +18,23 @@ ParentFrameTaskRunners::ParentFrameTaskRunners(LocalFrame* frame)
     DCHECK(frame->document()->isContextThread());
 
   // For now we only support very limited task types.
-  for (auto type :
-       {TaskType::Internal, TaskType::Networking, TaskType::PostedMessage,
-        TaskType::CanvasBlobSerialization}) {
-    m_taskRunners.add(type, TaskRunnerHelper::get(type, frame));
+  for (auto type : {TaskType::UnspecedTimer, TaskType::UnspecedLoading,
+                    TaskType::Networking, TaskType::PostedMessage,
+                    TaskType::CanvasBlobSerialization, TaskType::Unthrottled}) {
+    m_taskRunners.insert(type, TaskRunnerHelper::get(type, frame));
   }
 }
 
-WebTaskRunner* ParentFrameTaskRunners::get(TaskType type) {
+RefPtr<WebTaskRunner> ParentFrameTaskRunners::get(TaskType type) {
   MutexLocker lock(m_taskRunnersMutex);
-  return m_taskRunners.get(type);
+  return m_taskRunners.at(type);
 }
 
 DEFINE_TRACE(ParentFrameTaskRunners) {
   ContextLifecycleObserver::trace(visitor);
 }
 
-void ParentFrameTaskRunners::contextDestroyed() {
+void ParentFrameTaskRunners::contextDestroyed(ExecutionContext*) {
   MutexLocker lock(m_taskRunnersMutex);
   for (auto& entry : m_taskRunners)
     entry.value = Platform::current()->currentThread()->getWebTaskRunner();

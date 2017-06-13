@@ -20,12 +20,13 @@ struct PaintPropertyTreeBuilderContext;
 struct PaintInvalidatorContext {
   PaintInvalidatorContext(
       const PaintPropertyTreeBuilderContext& treeBuilderContext)
-      : treeBuilderContext(treeBuilderContext) {}
+      : treeBuilderContext(treeBuilderContext), parentContext(nullptr) {}
 
   PaintInvalidatorContext(
       const PaintPropertyTreeBuilderContext& treeBuilderContext,
       const PaintInvalidatorContext& parentContext)
       : treeBuilderContext(treeBuilderContext),
+        parentContext(&parentContext),
         forcedSubtreeInvalidationFlags(
             parentContext.forcedSubtreeInvalidationFlags),
         paintInvalidationContainer(parentContext.paintInvalidationContainer),
@@ -39,6 +40,7 @@ struct PaintInvalidatorContext {
                                                       LayoutRect&) const;
 
   const PaintPropertyTreeBuilderContext& treeBuilderContext;
+  const PaintInvalidatorContext* parentContext;
 
   enum ForcedSubtreeInvalidationFlag {
     ForcedSubtreeInvalidationChecking = 1 << 0,
@@ -82,15 +84,13 @@ struct PaintInvalidatorContext {
   // LayoutObject::adjustVisualRectForCompositedScrolling().
   LayoutPoint oldLocation;
   LayoutPoint newLocation;
-
-  // Stores the old and new offsets to paint this object, relative to the
-  // containing transform node. They are for SPv2 only.
-  LayoutPoint oldPaintOffset;
-  LayoutPoint newPaintOffset;
 };
 
 class PaintInvalidator {
  public:
+  PaintInvalidator(GeometryMapper& geometryMapper)
+      : m_geometryMapper(geometryMapper) {}
+
   void invalidatePaintIfNeeded(FrameView&, PaintInvalidatorContext&);
   void invalidatePaintIfNeeded(const LayoutObject&, PaintInvalidatorContext&);
 
@@ -99,19 +99,20 @@ class PaintInvalidator {
   void processPendingDelayedPaintInvalidations();
 
  private:
-  LayoutRect mapLocalRectToPaintInvalidationBacking(
-      const LayoutObject&,
-      const FloatRect&,
-      const PaintInvalidatorContext&);
-  LayoutRect computeVisualRectInBacking(const LayoutObject&,
-                                        const PaintInvalidatorContext&);
-  LayoutPoint computeLocationInBacking(const LayoutObject&,
-                                       const PaintInvalidatorContext&);
-  void updatePaintingLayer(const LayoutObject&, PaintInvalidatorContext&);
-  void updateContext(const LayoutObject&, PaintInvalidatorContext&);
+  ALWAYS_INLINE LayoutRect
+  computeVisualRectInBacking(const LayoutObject&,
+                             const PaintInvalidatorContext&);
+  ALWAYS_INLINE LayoutPoint
+  computeLocationInBacking(const LayoutObject&, const PaintInvalidatorContext&);
+  ALWAYS_INLINE void updatePaintingLayer(const LayoutObject&,
+                                         PaintInvalidatorContext&);
+  ALWAYS_INLINE void updatePaintInvalidationContainer(const LayoutObject&,
+                                                      PaintInvalidatorContext&);
+  ALWAYS_INLINE void updateVisualRect(const LayoutObject&,
+                                      PaintInvalidatorContext&);
 
   Vector<const LayoutObject*> m_pendingDelayedPaintInvalidations;
-  GeometryMapper m_geometryMapper;
+  GeometryMapper& m_geometryMapper;
 };
 
 }  // namespace blink

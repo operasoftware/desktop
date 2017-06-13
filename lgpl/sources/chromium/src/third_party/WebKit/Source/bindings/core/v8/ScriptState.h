@@ -5,13 +5,14 @@
 #ifndef ScriptState_h
 #define ScriptState_h
 
+#include <memory>
+
 #include "bindings/core/v8/ScopedPersistent.h"
 #include "bindings/core/v8/V8PerContextData.h"
 #include "core/CoreExport.h"
+#include "v8/include/v8-debug.h"
+#include "v8/include/v8.h"
 #include "wtf/RefCounted.h"
-#include <memory>
-#include <v8-debug.h>
-#include <v8.h>
 
 namespace blink {
 
@@ -21,6 +22,48 @@ class ExecutionContext;
 class LocalFrame;
 class ScriptValue;
 
+// ScriptState is an abstraction class that holds all information about script
+// exectuion (e.g., v8::Isolate, v8::Context, DOMWrapperWorld, ExecutionContext
+// etc). If you need any info about the script execution, you're expected to
+// pass around ScriptState in the code base. ScriptState is in a 1:1
+// relationship with v8::Context.
+//
+// When you need ScriptState, you can add [CallWith=ScriptState] to IDL files
+// and pass around ScriptState into a place where you need ScriptState.
+//
+// In some cases, you need ScriptState in code that doesn't have any JavaScript
+// on the stack. Then you can store ScriptState on a C++ object using
+// RefPtr<ScriptState>.
+//
+// class SomeObject {
+//   void someMethod(ScriptState* scriptState) {
+//     m_scriptState = scriptState; // Record the ScriptState.
+//     ...;
+//   }
+//
+//   void asynchronousMethod() {
+//     if (!m_scriptState->contextIsValid()) {
+//       // It's possible that the context is already gone.
+//       return;
+//     }
+//     // Enter the ScriptState.
+//     ScriptState::Scope scope(m_scriptState.get());
+//     // Do V8 related things.
+//     ToV8(...);
+//   }
+//   RefPtr<ScriptState> m_scriptState;
+// };
+//
+// You should not store ScriptState on a C++ object that can be accessed
+// by multiple worlds. For example, you can store ScriptState on
+// ScriptPromiseResolver, ScriptValue etc because they can be accessed from one
+// world. However, you cannot store ScriptState on a DOM object that has
+// an IDL interface because the DOM object can be accessed from multiple
+// worlds. If ScriptState of one world "leak"s to another world, you will
+// end up with leaking any JavaScript objects from one Chrome extension
+// to another Chrome extension, which is a severe security bug.
+//
+// Lifetime:
 // ScriptState is created when v8::Context is created.
 // ScriptState is destroyed when v8::Context is garbage-collected and
 // all V8 proxy objects that have references to the ScriptState are destructed.
@@ -81,16 +124,6 @@ class CORE_EXPORT ScriptState : public RefCounted<ScriptState> {
     return from(info.Holder()->CreationContext());
   }
 
-  // Debugger context doesn't have associated ScriptState and when current
-  // context is debugger it should be treated as if context stack was empty.
-  static bool hasCurrentScriptState(v8::Isolate* isolate) {
-    v8::HandleScope scope(isolate);
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (context.IsEmpty())
-      return false;
-    return context != v8::Debug::GetDebugContext(isolate);
-  }
-
   static ScriptState* from(v8::Local<v8::Context> context) {
     ASSERT(!context.IsEmpty());
     ScriptState* scriptState =
@@ -123,7 +156,7 @@ class CORE_EXPORT ScriptState : public RefCounted<ScriptState> {
   }
   void detachGlobalObject();
   void clearContext() { return m_context.clear(); }
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   bool isGlobalObjectDetached() const { return m_globalObjectDetached; }
 #endif
 
@@ -152,8 +185,8 @@ class CORE_EXPORT ScriptState : public RefCounted<ScriptState> {
   // Otherwise, the v8::Context will leak.
   std::unique_ptr<V8PerContextData> m_perContextData;
 
-#if ENABLE(ASSERT)
-  bool m_globalObjectDetached;
+#if DCHECK_IS_ON()
+  bool m_globalObjectDetached = false;
 #endif
 };
 

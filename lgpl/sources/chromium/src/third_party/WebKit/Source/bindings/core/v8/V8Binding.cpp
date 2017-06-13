@@ -54,14 +54,14 @@
 #include "core/dom/QualifiedName.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/frame/Settings.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/loader/FrameLoader.h"
-#include "core/loader/FrameLoaderClient.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "core/workers/WorkletGlobalScope.h"
 #include "core/xml/XPathNSResolver.h"
-#include "platform/tracing/TracedValue.h"
+#include "platform/instrumentation/tracing/TracedValue.h"
 #include "wtf/MathExtras.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/Threading.h"
@@ -83,7 +83,7 @@ NodeFilter* toNodeFilter(v8::Local<v8::Value> callback,
   NodeFilter* filter = NodeFilter::create();
 
   v8::Local<v8::Value> filterWrapper =
-      toV8(filter, creationContext, scriptState->isolate());
+      ToV8(filter, creationContext, scriptState->isolate());
   if (filterWrapper.IsEmpty())
     return nullptr;
 
@@ -770,18 +770,6 @@ ExecutionContext* currentExecutionContext(v8::Isolate* isolate) {
   return toExecutionContext(isolate->GetCurrentContext());
 }
 
-ExecutionContext* enteredExecutionContext(v8::Isolate* isolate) {
-  ExecutionContext* context = toExecutionContext(isolate->GetEnteredContext());
-  if (!context) {
-    // We don't always have an entered execution context, for example during
-    // microtask callbacks from V8 (where the entered context may be the
-    // DOM-in-JS context). In that case, we fall back to the current context.
-    context = currentExecutionContext(isolate);
-    ASSERT(context);
-  }
-  return context;
-}
-
 Frame* toFrameIfNotDetached(v8::Local<v8::Context> context) {
   DOMWindow* window = toDOMWindow(context);
   if (window && window->isCurrentlyDisplayedInFrame())
@@ -790,18 +778,6 @@ Frame* toFrameIfNotDetached(v8::Local<v8::Context> context) {
   // did return |frame| we could get in trouble because the frame could be
   // navigated to another security origin.
   return nullptr;
-}
-
-EventTarget* toEventTarget(v8::Isolate* isolate, v8::Local<v8::Value> value) {
-  // We need to handle a DOMWindow specially, because a DOMWindow wrapper
-  // exists on a prototype chain of v8Value.
-  if (DOMWindow* window = toDOMWindow(isolate, value))
-    return static_cast<EventTarget*>(window);
-  if (V8EventTarget::hasInstance(value, isolate)) {
-    v8::Local<v8::Object> object = v8::Local<v8::Object>::Cast(value);
-    return toWrapperTypeInfo(object)->toEventTarget(object);
-  }
-  return 0;
 }
 
 void toFlexibleArrayBufferView(v8::Isolate* isolate,
@@ -855,21 +831,14 @@ v8::Local<v8::Context> toV8ContextEvenIfDetached(Frame* frame,
   return frame->windowProxy(world)->contextIfInitialized();
 }
 
-void crashIfIsolateIsDead(v8::Isolate* isolate) {
-  if (isolate->IsDead()) {
-    // FIXME: We temporarily deal with V8 internal error situations
-    // such as out-of-memory by crashing the renderer.
-    CRASH();
-  }
-}
-
 bool isValidEnum(const String& value,
                  const char** validValues,
                  size_t length,
                  const String& enumName,
                  ExceptionState& exceptionState) {
   for (size_t i = 0; i < length; ++i) {
-    if (value == validValues[i])
+    // Avoid the strlen inside String::operator== (because of the StringView).
+    if (WTF::equal(value.impl(), validValues[i]))
       return true;
   }
   exceptionState.throwTypeError("The provided value '" + value +

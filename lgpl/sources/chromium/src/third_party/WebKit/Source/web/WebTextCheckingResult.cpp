@@ -40,13 +40,12 @@ WebTextCheckingResult::operator TextCheckingResult() const {
   result.location = location;
   result.length = length;
   result.replacement = replacement;
-  result.hash = hash;
   if (result.decoration == TextDecorationTypeGrammar) {
     GrammarDetail detail;
     detail.location = 0;
     detail.length = length;
     detail.userDescription = replacement;
-    result.details.append(detail);
+    result.details.push_back(detail);
   }
 
   return result;

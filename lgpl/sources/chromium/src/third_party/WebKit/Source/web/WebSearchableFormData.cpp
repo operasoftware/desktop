@@ -67,23 +67,11 @@ void getFormEncoding(const HTMLFormElement& form, WTF::TextEncoding* encoding) {
     *encoding = WTF::TextEncoding(form.document().encoding());
 }
 
-// Returns true if the submit request results in an HTTP URL.
-bool isHTTPFormSubmit(const HTMLFormElement& form) {
-  // FIXME: This function is insane. This is an overly complicated way to get
-  // this information.
-  String action(form.action());
-  // The isNull() check is trying to avoid completeURL returning KURL() when
-  // passed a null string.
-  return form.document()
-      .completeURL(action.isNull() ? "" : action)
-      .protocolIs("http");
-}
-
 // If the form does not have an activated submit button, the first submit
 // button is returned.
 HTMLFormControlElement* buttonToActivate(const HTMLFormElement& form) {
   HTMLFormControlElement* firstSubmitButton = nullptr;
-  for (auto& element : form.associatedElements()) {
+  for (auto& element : form.listedElements()) {
     if (!element->isFormControlElement())
       continue;
     HTMLFormControlElement* control = toHTMLFormControlElement(element);
@@ -151,7 +139,7 @@ bool isInDefaultState(const HTMLFormControlElement& formElement) {
 //  - More than one text field
 HTMLInputElement* findSuitableSearchInputElement(const HTMLFormElement& form) {
   HTMLInputElement* textElement = nullptr;
-  for (const auto& item : form.associatedElements()) {
+  for (const auto& item : form.listedElements()) {
     if (!item->isFormControlElement())
       continue;
 
@@ -197,7 +185,7 @@ bool buildSearchString(const HTMLFormElement& form,
                        const WTF::TextEncoding& encoding,
                        const HTMLInputElement* textElement) {
   bool isElementFound = false;
-  for (const auto& item : form.associatedElements()) {
+  for (const auto& item : form.listedElements()) {
     if (!item->isFormControlElement())
       continue;
 
@@ -210,10 +198,10 @@ bool buildSearchString(const HTMLFormElement& form,
 
     for (const auto& entry : formData->entries()) {
       if (!encodedString->isEmpty())
-        encodedString->append('&');
+        encodedString->push_back('&');
       FormDataEncoder::encodeStringAsFormData(*encodedString, entry->name(),
                                               FormDataEncoder::NormalizeCRLF);
-      encodedString->append('=');
+      encodedString->push_back('=');
       if (&control == textElement) {
         encodedString->append("{searchTerms}", 13);
         isElementFound = true;
@@ -240,10 +228,6 @@ WebSearchableFormData::WebSearchableFormData(
 
   if (isPostForm &&
       !WebRuntimeFeatures::isWebSearchableFormDataPOSTSupportEnabled())
-    return;
-
-  // Allow HTTPS only when an input element is provided.
-  if (!isHTTPFormSubmit(*formElement) && !inputElement)
     return;
 
   WTF::TextEncoding encoding;

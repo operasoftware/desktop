@@ -37,10 +37,8 @@
 
 #include "platform/image-decoders/jpeg/JPEGImageDecoder.h"
 
-#include "platform/Histogram.h"
 #include "platform/PlatformInstrumentation.h"
 #include "wtf/PtrUtil.h"
-#include "wtf/Threading.h"
 #include <memory>
 
 extern "C" {
@@ -430,15 +428,6 @@ class JPEGImageReader final {
 
         m_state = JPEG_START_DECOMPRESS;
 
-        {
-          DEFINE_THREAD_SAFE_STATIC_LOCAL(
-              blink::CustomCountHistogram, dimensionsLocationHistogram,
-              new blink::CustomCountHistogram(
-                  "Blink.DecodedImage.EffectiveDimensionsLocation.JPEG", 0,
-                  50000, 50));
-          dimensionsLocationHistogram.count(m_nextReadPosition -
-                                            m_info.src->bytes_in_buffer - 1);
-        }
         // We can fill in the size now that the header is available.
         if (!m_decoder->setSize(m_info.image_width, m_info.image_height))
           return false;
@@ -463,8 +452,8 @@ class JPEGImageReader final {
           JOCTET* profile = nullptr;
           unsigned profileLength = 0;
           if (read_icc_profile(info(), &profile, &profileLength)) {
-            decoder()->setColorProfileAndComputeTransform(
-                reinterpret_cast<char*>(profile), profileLength);
+            decoder()->setEmbeddedColorProfile(reinterpret_cast<char*>(profile),
+                                               profileLength);
             free(profile);
           }
           if (decoder()->colorTransform()) {
@@ -539,7 +528,7 @@ class JPEGImageReader final {
             return false;  // I/O suspension.
 
           // If we've completed image output...
-          ASSERT(m_info.output_scanline == m_info.output_height);
+          DCHECK_EQ(m_info.output_scanline, m_info.output_height);
           m_state = JPEG_DONE;
         }
       // FALL THROUGH
@@ -721,9 +710,9 @@ void term_source(j_decompress_ptr jd) {
 }
 
 JPEGImageDecoder::JPEGImageDecoder(AlphaOption alphaOption,
-                                   ColorSpaceOption colorOptions,
+                                   const ColorBehavior& colorBehavior,
                                    size_t maxDecodedBytes)
-    : ImageDecoder(alphaOption, colorOptions, maxDecodedBytes) {}
+    : ImageDecoder(alphaOption, colorBehavior, maxDecodedBytes) {}
 
 JPEGImageDecoder::~JPEGImageDecoder() {}
 
@@ -748,18 +737,22 @@ void JPEGImageDecoder::setDecodedSize(unsigned width, unsigned height) {
 }
 
 IntSize JPEGImageDecoder::decodedYUVSize(int component) const {
-  ASSERT((component >= 0) && (component <= 2) && m_reader);
+  DCHECK_GE(component, 0);
+  DCHECK_LE(component, 2);
+  DCHECK(m_reader);
   const jpeg_decompress_struct* info = m_reader->info();
 
-  ASSERT(info->out_color_space == JCS_YCbCr);
+  DCHECK_EQ(info->out_color_space, JCS_YCbCr);
   return computeYUVSize(info, component);
 }
 
 size_t JPEGImageDecoder::decodedYUVWidthBytes(int component) const {
-  ASSERT((component >= 0) && (component <= 2) && m_reader);
+  DCHECK_GE(component, 0);
+  DCHECK_LE(component, 2);
+  DCHECK(m_reader);
   const jpeg_decompress_struct* info = m_reader->info();
 
-  ASSERT(info->out_color_space == JCS_YCbCr);
+  DCHECK_EQ(info->out_color_space, JCS_YCbCr);
   return computeYUVWidthBytes(info, component);
 }
 
@@ -804,7 +797,7 @@ void setPixel(ImageFrame& buffer,
               ImageFrame::PixelData* pixel,
               JSAMPARRAY samples,
               int column) {
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
 }
 
 // Used only for debugging with libjpeg (instead of libjpeg-turbo).
@@ -939,13 +932,13 @@ bool JPEGImageDecoder::outputScanlines() {
   // Initialize the framebuffer if needed.
   ImageFrame& buffer = m_frameBufferCache[0];
   if (buffer.getStatus() == ImageFrame::FrameEmpty) {
-    ASSERT(info->output_width ==
-           static_cast<JDIMENSION>(m_decodedSize.width()));
-    ASSERT(info->output_height ==
-           static_cast<JDIMENSION>(m_decodedSize.height()));
+    DCHECK_EQ(info->output_width,
+              static_cast<JDIMENSION>(m_decodedSize.width()));
+    DCHECK_EQ(info->output_height,
+              static_cast<JDIMENSION>(m_decodedSize.height()));
 
     if (!buffer.setSizeAndColorSpace(info->output_width, info->output_height,
-                                     colorSpace()))
+                                     colorSpaceForSkImages()))
       return setFailed();
 
     // The buffer is transparent outside the decoded area while the image is
@@ -982,7 +975,7 @@ bool JPEGImageDecoder::outputScanlines() {
     case JCS_CMYK:
       return outputRows<JCS_CMYK>(m_reader.get(), buffer);
     default:
-      ASSERT_NOT_REACHED();
+      NOTREACHED();
   }
 
   return setFailed();
@@ -1008,7 +1001,7 @@ void JPEGImageDecoder::decode(bool onlySize) {
     return;
 
   if (!m_reader) {
-    m_reader = makeUnique<JPEGImageReader>(this);
+    m_reader = WTF::makeUnique<JPEGImageReader>(this);
     m_reader->setData(m_data.get());
   }
 

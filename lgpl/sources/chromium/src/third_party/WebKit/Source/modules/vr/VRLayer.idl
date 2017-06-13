@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-typedef HTMLCanvasElement VRSource;
+typedef (HTMLCanvasElement or OffscreenCanvas) VRSource;
 
-// http://mozvr.github.io/webvr-spec/webvr.html#vrlayer
+// https://w3c.github.io/webvr/#interface-vrlayer
 
 dictionary VRLayer {
   // The canvas to be presented to the VRDisplay

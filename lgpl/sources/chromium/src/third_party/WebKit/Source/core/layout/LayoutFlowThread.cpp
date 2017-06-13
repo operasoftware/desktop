@@ -44,7 +44,7 @@ LayoutFlowThread* LayoutFlowThread::locateFlowThreadContainingBlockOf(
   ASSERT(descendant.isInsideFlowThread());
   LayoutObject* curr = const_cast<LayoutObject*>(&descendant);
   while (curr) {
-    if (curr->isSVG() && !curr->isSVGRoot())
+    if (curr->isSVGChild())
       return nullptr;
     if (curr->isLayoutFlowThread())
       return toLayoutFlowThread(curr);
@@ -78,18 +78,6 @@ void LayoutFlowThread::removeColumnSetFromThread(
   m_multiColumnSetIntervalTree.clear();
 }
 
-void LayoutFlowThread::invalidateColumnSets() {
-  if (m_columnSetsInvalidated) {
-    ASSERT(selfNeedsLayout());
-    return;
-  }
-
-  setNeedsLayoutAndFullPaintInvalidation(
-      LayoutInvalidationReason::ColumnsChanged);
-
-  m_columnSetsInvalidated = true;
-}
-
 void LayoutFlowThread::validateColumnSets() {
   m_columnSetsInvalidated = false;
   // Called to get the maximum logical width for the columnSet.
@@ -97,15 +85,18 @@ void LayoutFlowThread::validateColumnSets() {
   generateColumnSetIntervalTree();
 }
 
-bool LayoutFlowThread::mapToVisualRectInAncestorSpace(
+bool LayoutFlowThread::mapToVisualRectInAncestorSpaceInternal(
     const LayoutBoxModelObject* ancestor,
-    LayoutRect& rect,
+    TransformState& transformState,
     VisualRectFlags visualRectFlags) const {
   // A flow thread should never be an invalidation container.
   DCHECK(ancestor != this);
+  transformState.flatten();
+  LayoutRect rect(transformState.lastPlanarQuad().boundingBox());
   rect = fragmentsBoundingBox(rect);
-  return LayoutBlockFlow::mapToVisualRectInAncestorSpace(ancestor, rect,
-                                                         visualRectFlags);
+  transformState.setQuad(FloatQuad(FloatRect(rect)));
+  return LayoutBlockFlow::mapToVisualRectInAncestorSpaceInternal(
+      ancestor, transformState, visualRectFlags);
 }
 
 void LayoutFlowThread::layout() {
@@ -130,7 +121,8 @@ void LayoutFlowThread::computeLogicalHeight(
 }
 
 void LayoutFlowThread::absoluteQuadsForDescendant(const LayoutBox& descendant,
-                                                  Vector<FloatQuad>& quads) {
+                                                  Vector<FloatQuad>& quads,
+                                                  MapCoordinatesFlags mode) {
   LayoutPoint offsetFromFlowThread;
   for (const LayoutObject* object = &descendant; object != this;) {
     const LayoutObject* container = object->container();
@@ -149,7 +141,7 @@ void LayoutFlowThread::absoluteQuadsForDescendant(const LayoutBox& descendant,
     // coordinates for zero-height objects.
     fragment.inclusiveIntersect(iterator.fragmentainerInFlowThread());
     fragment.moveBy(-offsetFromFlowThread);
-    quads.append(descendant.localToAbsoluteQuad(FloatRect(fragment)));
+    quads.push_back(descendant.localToAbsoluteQuad(FloatRect(fragment), mode));
   }
 }
 

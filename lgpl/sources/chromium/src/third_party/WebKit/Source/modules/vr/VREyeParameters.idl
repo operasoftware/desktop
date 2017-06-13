@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// http://mozvr.github.io/webvr-spec/webvr.html#eyeparameters
+// https://w3c.github.io/webvr/#interface-vreyeparameters
 [
     OriginTrialEnabled=WebVR,
 ] interface VREyeParameters {
   /* These values will vary after a FOV has been set */
-  readonly attribute Float32Array offset;
+  [MeasureAs=VREyeParametersOffset] readonly attribute Float32Array offset;
   [DeprecateAs=VRDeprecatedFieldOfView] readonly attribute VRFieldOfView fieldOfView;
   readonly attribute unsigned long renderWidth;
   readonly attribute unsigned long renderHeight;

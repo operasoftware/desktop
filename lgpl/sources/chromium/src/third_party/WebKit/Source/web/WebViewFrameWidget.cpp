@@ -57,6 +57,11 @@ void WebViewFrameWidget::didExitFullscreen() {
   return m_webView->didExitFullscreen();
 }
 
+void WebViewFrameWidget::setSuppressFrameRequestsWorkaroundFor704763Only(
+    bool suppressFrameRequests) {
+  return m_webView->setSuppressFrameRequestsWorkaroundFor704763Only(
+      suppressFrameRequests);
+}
 void WebViewFrameWidget::beginFrame(double lastFrameTimeMonotonic) {
   return m_webView->beginFrame(lastFrameTimeMonotonic);
 }
@@ -84,7 +89,7 @@ void WebViewFrameWidget::themeChanged() {
 }
 
 WebInputEventResult WebViewFrameWidget::handleInputEvent(
-    const WebInputEvent& event) {
+    const WebCoalescedInputEvent& event) {
   return m_webView->handleInputEvent(event);
 }
 
@@ -119,14 +124,6 @@ WebRange WebViewFrameWidget::compositionRange() {
   return m_webView->compositionRange();
 }
 
-WebTextInputInfo WebViewFrameWidget::textInputInfo() {
-  return m_webView->textInputInfo();
-}
-
-WebTextInputType WebViewFrameWidget::textInputType() {
-  return m_webView->textInputType();
-}
-
 bool WebViewFrameWidget::selectionBounds(WebRect& anchor,
                                          WebRect& focus) const {
   return m_webView->selectionBounds(anchor, focus);
@@ -157,18 +154,6 @@ void WebViewFrameWidget::willCloseLayerTreeView() {
   return m_webView->willCloseLayerTreeView();
 }
 
-void WebViewFrameWidget::didAcquirePointerLock() {
-  return m_webView->didAcquirePointerLock();
-}
-
-void WebViewFrameWidget::didNotAcquirePointerLock() {
-  return m_webView->didNotAcquirePointerLock();
-}
-
-void WebViewFrameWidget::didLosePointerLock() {
-  return m_webView->didLosePointerLock();
-}
-
 WebColor WebViewFrameWidget::backgroundColor() const {
   return m_webView->backgroundColor();
 }
@@ -180,10 +165,6 @@ WebPagePopup* WebViewFrameWidget::pagePopup() const {
 bool WebViewFrameWidget::getCompositionCharacterBounds(
     WebVector<WebRect>& bounds) {
   return m_webView->getCompositionCharacterBounds(bounds);
-}
-
-void WebViewFrameWidget::applyReplacementRange(const WebRange& range) {
-  m_webView->applyReplacementRange(range);
 }
 
 void WebViewFrameWidget::updateBrowserControlsState(
@@ -223,8 +204,14 @@ void WebViewFrameWidget::scheduleAnimation() {
   m_webView->scheduleAnimationForWidget();
 }
 
-CompositorProxyClient* WebViewFrameWidget::createCompositorProxyClient() {
-  return m_webView->createCompositorProxyClient();
+CompositorWorkerProxyClient*
+WebViewFrameWidget::createCompositorWorkerProxyClient() {
+  return m_webView->createCompositorWorkerProxyClient();
+}
+
+AnimationWorkletProxyClient*
+WebViewFrameWidget::createAnimationWorkletProxyClient() {
+  return m_webView->createAnimationWorkletProxyClient();
 }
 
 void WebViewFrameWidget::setRootGraphicsLayer(GraphicsLayer* layer) {
@@ -235,14 +222,12 @@ void WebViewFrameWidget::setRootLayer(WebLayer* layer) {
   m_webView->setRootLayer(layer);
 }
 
-void WebViewFrameWidget::attachCompositorAnimationTimeline(
-    CompositorAnimationTimeline* compositorTimeline) {
-  m_webView->attachCompositorAnimationTimeline(compositorTimeline);
+WebLayerTreeView* WebViewFrameWidget::getLayerTreeView() const {
+  return m_webView->layerTreeView();
 }
 
-void WebViewFrameWidget::detachCompositorAnimationTimeline(
-    CompositorAnimationTimeline* compositorTimeline) {
-  m_webView->detachCompositorAnimationTimeline(compositorTimeline);
+CompositorAnimationHost* WebViewFrameWidget::animationHost() const {
+  return m_webView->animationHost();
 }
 
 HitTestResult WebViewFrameWidget::coreHitTestResultAt(const WebPoint& point) {

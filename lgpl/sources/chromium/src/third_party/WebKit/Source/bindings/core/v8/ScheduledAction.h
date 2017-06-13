@@ -36,14 +36,13 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/V8PersistentValueVector.h"
 #include "platform/heap/Handle.h"
+#include "v8/include/v8.h"
 #include "wtf/Forward.h"
-#include <v8.h>
 
 namespace blink {
 
 class LocalFrame;
 class ExecutionContext;
-class SourceLocation;
 class WorkerGlobalScope;
 
 class ScheduledAction final
@@ -52,15 +51,19 @@ class ScheduledAction final
 
  public:
   static ScheduledAction* create(ScriptState*,
+                                 ExecutionContext* target,
                                  const ScriptValue& handler,
                                  const Vector<ScriptValue>& arguments);
-  static ScheduledAction* create(ScriptState*, const String& handler);
+  static ScheduledAction* create(ScriptState*,
+                                 ExecutionContext* target,
+                                 const String& handler);
 
   ~ScheduledAction();
+  void dispose();
+
   DECLARE_TRACE();
 
   void execute(ExecutionContext*);
-  std::unique_ptr<SourceLocation> handlerLocation();
 
  private:
   ScheduledAction(ScriptState*,

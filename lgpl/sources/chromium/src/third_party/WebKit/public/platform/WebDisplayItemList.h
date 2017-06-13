@@ -12,14 +12,13 @@
 #include "WebSize.h"
 #include "WebVector.h"
 
+#include "cc/paint/paint_record.h"
+#include "third_party/skia/include/core/SkBlendMode.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
-#include "third_party/skia/include/core/SkRegion.h"
-#include "third_party/skia/include/core/SkXfermode.h"
 
 class SkColorFilter;
-class SkImageFilter;
 class SkMatrix44;
-class SkPicture;
+class SkPath;
 struct SkRect;
 class SkRRect;
 
@@ -38,20 +37,19 @@ class WebDisplayItemList {
   virtual ~WebDisplayItemList() {}
 
   virtual void appendDrawingItem(const WebRect& visualRect,
-                                 sk_sp<const SkPicture>) {}
+                                 sk_sp<const cc::PaintRecord>) {}
 
   virtual void appendClipItem(const WebRect& clipRect,
                               const WebVector<SkRRect>& roundedClipRects) {}
   virtual void appendEndClipItem() {}
-  virtual void appendClipPathItem(const SkPath&, SkRegion::Op, bool antialias) {
-  }
+  virtual void appendClipPathItem(const SkPath&, bool antialias) {}
   virtual void appendEndClipPathItem() {}
   virtual void appendFloatClipItem(const WebFloatRect& clipRect) {}
   virtual void appendEndFloatClipItem() {}
   virtual void appendTransformItem(const SkMatrix44&) {}
   virtual void appendEndTransformItem() {}
   virtual void appendCompositingItem(float opacity,
-                                     SkXfermode::Mode,
+                                     SkBlendMode,
                                      SkRect* bounds,
                                      SkColorFilter*) {}
   virtual void appendEndCompositingItem() {}

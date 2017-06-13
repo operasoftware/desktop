@@ -19,9 +19,7 @@ class CORE_EXPORT CSSPerspective : public CSSTransformComponent {
 
  public:
   static CSSPerspective* create(const CSSLengthValue*, ExceptionState&);
-  static CSSPerspective* fromCSSValue(const CSSFunctionValue& value) {
-    return nullptr;
-  }
+  static CSSPerspective* fromCSSValue(const CSSFunctionValue&);
 
   // Bindings require a non const return value.
   CSSLengthValue* length() const {
@@ -31,7 +29,7 @@ class CORE_EXPORT CSSPerspective : public CSSTransformComponent {
   TransformComponentType type() const override { return PerspectiveType; }
 
   // TODO: Implement asMatrix for CSSPerspective.
-  CSSMatrixTransformComponent* asMatrix() const override { return nullptr; }
+  CSSMatrixComponent* asMatrix() const override { return nullptr; }
 
   CSSFunctionValue* toCSSValue() const override;
 

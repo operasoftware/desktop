@@ -27,160 +27,102 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/**
- * @unrestricted
- */
-Resources.CookieItemsView = class extends UI.SimpleView {
-  constructor(treeElement, cookieDomain) {
-    super(Common.UIString('Cookies'));
+Resources.CookieItemsView = class extends Resources.StorageItemsView {
+  /**
+   * @param {!Resources.CookieTreeElement} treeElement
+   * @param {!SDK.CookieModel} model
+   * @param {string} cookieDomain
+   */
+  constructor(treeElement, model, cookieDomain) {
+    super(Common.UIString('Cookies'), 'cookiesPanel');
 
     this.element.classList.add('storage-view');
 
-    this._deleteButton = new UI.ToolbarButton(Common.UIString('Delete'), 'largeicon-delete');
-    this._deleteButton.setVisible(false);
-    this._deleteButton.addEventListener('click', this._deleteButtonClicked, this);
-
-    this._clearButton = new UI.ToolbarButton(Common.UIString('Clear'), 'largeicon-clear');
-    this._clearButton.setVisible(false);
-    this._clearButton.addEventListener('click', this._clearButtonClicked, this);
-
-    this._refreshButton = new UI.ToolbarButton(Common.UIString('Refresh'), 'largeicon-refresh');
-    this._refreshButton.addEventListener('click', this._refreshButtonClicked, this);
-
+    this._model = model;
     this._treeElement = treeElement;
     this._cookieDomain = cookieDomain;
 
-    this._emptyWidget = new UI.EmptyWidget(
-        cookieDomain ?
-            Common.UIString('This site has no cookies.') :
-            Common.UIString(
-                'By default cookies are disabled for local files.\nYou could override this by starting the browser with --enable-file-cookies command line flag.'));
-    this._emptyWidget.show(this.element);
-
-    this.element.addEventListener('contextmenu', this._contextMenu.bind(this), true);
+    this._totalSize = 0;
+    /** @type {?CookieTable.CookiesTable} */
+    this._cookiesTable = null;
+    this.setCookiesDomain(model, cookieDomain);
   }
 
   /**
-   * @override
-   * @return {!Array.<!UI.ToolbarItem>}
+   * @param {!SDK.CookieModel} model
+   * @param {string} domain
    */
-  syncToolbarItems() {
-    return [this._refreshButton, this._clearButton, this._deleteButton];
+  setCookiesDomain(model, domain) {
+    this._model = model;
+    this._cookieDomain = domain;
+    this.refreshItems();
   }
 
   /**
-   * @override
+   * @param {!SDK.Cookie} newCookie
+   * @param {?SDK.Cookie} oldCookie
+   * @param {function(?string)} callback
    */
-  wasShown() {
-    this._update();
+  _saveCookie(newCookie, oldCookie, callback) {
+    if (!this._model) {
+      callback(Common.UIString('Unable to save the cookie'));
+      return;
+    }
+    if (oldCookie && (newCookie.name() !== oldCookie.name() || newCookie.url() !== oldCookie.url()))
+      this._model.deleteCookie(oldCookie);
+    this._model.saveCookie(newCookie, callback);
   }
 
   /**
-   * @override
+   * @param {!SDK.Cookie} cookie
+   * @param {function()} callback
    */
-  willHide() {
-    this._deleteButton.setVisible(false);
-  }
-
-  _update() {
-    SDK.Cookies.getCookiesAsync(this._updateWithCookies.bind(this));
+  _deleteCookie(cookie, callback) {
+    this._model.deleteCookie(cookie, callback);
   }
 
   /**
    * @param {!Array.<!SDK.Cookie>} allCookies
    */
   _updateWithCookies(allCookies) {
-    this._cookies = this._filterCookiesForDomain(allCookies);
-
-    if (!this._cookies.length) {
-      // Nothing to show.
-      this._emptyWidget.show(this.element);
-      this._clearButton.setVisible(false);
-      this._deleteButton.setVisible(false);
-      if (this._cookiesTable)
-        this._cookiesTable.detach();
-      return;
-    }
+    this._totalSize = allCookies.reduce((size, cookie) => size + cookie.size(), 0);
 
     if (!this._cookiesTable) {
-      this._cookiesTable =
-          new Components.CookiesTable(false, this._update.bind(this), this._showDeleteButton.bind(this));
+      const parsedURL = this._cookieDomain.asParsedURL();
+      const domain = parsedURL ? parsedURL.host : '';
+      this._cookiesTable = new CookieTable.CookiesTable(
+          this._saveCookie.bind(this), this.refreshItems.bind(this), () => this.setCanDeleteSelected(true),
+          this._deleteCookie.bind(this), domain);
     }
 
-    this._cookiesTable.setCookies(this._cookies);
-    this._emptyWidget.detach();
+    var shownCookies = this.filter(allCookies, cookie => `${cookie.name()} ${cookie.value()} ${cookie.domain()}`);
+    this._cookiesTable.setCookies(shownCookies);
     this._cookiesTable.show(this.element);
-    this._treeElement.subtitle =
-        String.sprintf(Common.UIString('%d cookies (%s)'), this._cookies.length, Number.bytesToString(this._totalSize));
-    this._clearButton.setVisible(true);
-    this._deleteButton.setVisible(!!this._cookiesTable.selectedCookie());
+    this.setCanFilter(true);
+    this.setCanDeleteAll(true);
+    this.setCanDeleteSelected(!!this._cookiesTable.selectedCookie());
   }
 
   /**
-   * @param {!Array.<!SDK.Cookie>} allCookies
+   * @override
    */
-  _filterCookiesForDomain(allCookies) {
-    var cookies = [];
-    var resourceURLsForDocumentURL = [];
-    this._totalSize = 0;
-
-    /**
-     * @this {Resources.CookieItemsView}
-     */
-    function populateResourcesForDocuments(resource) {
-      var url = resource.documentURL.asParsedURL();
-      if (url && url.securityOrigin() === this._cookieDomain)
-        resourceURLsForDocumentURL.push(resource.url);
-    }
-    Bindings.forAllResources(populateResourcesForDocuments.bind(this));
-
-    for (var i = 0; i < allCookies.length; ++i) {
-      var pushed = false;
-      var size = allCookies[i].size();
-      for (var j = 0; j < resourceURLsForDocumentURL.length; ++j) {
-        var resourceURL = resourceURLsForDocumentURL[j];
-        if (SDK.Cookies.cookieMatchesResourceURL(allCookies[i], resourceURL)) {
-          this._totalSize += size;
-          if (!pushed) {
-            pushed = true;
-            cookies.push(allCookies[i]);
-          }
-        }
-      }
-    }
-    return cookies;
+  deleteAllItems() {
+    this._model.clear(this._cookieDomain, () => this.refreshItems());
   }
 
-  clear() {
-    this._cookiesTable.clear();
-    this._update();
-  }
-
-  _clearButtonClicked() {
-    this.clear();
-  }
-
-  _showDeleteButton() {
-    this._deleteButton.setVisible(true);
-  }
-
-  _deleteButtonClicked() {
+  /**
+   * @override
+   */
+  deleteSelectedItem() {
     var selectedCookie = this._cookiesTable.selectedCookie();
-    if (selectedCookie) {
-      selectedCookie.remove();
-      this._update();
-    }
+    if (selectedCookie)
+      this._model.deleteCookie(selectedCookie, () => this.refreshItems());
   }
 
-  _refreshButtonClicked(event) {
-    this._update();
-  }
-
-  _contextMenu(event) {
-    if (!this._cookies.length) {
-      var contextMenu = new UI.ContextMenu(event);
-      contextMenu.appendItem(Common.UIString('Refresh'), this._update.bind(this));
-      contextMenu.show();
-    }
+  /**
+   * @override
+   */
+  refreshItems() {
+    this._model.getCookiesForDomain(this._cookieDomain, cookies => this._updateWithCookies(cookies));
   }
 };

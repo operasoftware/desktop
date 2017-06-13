@@ -32,11 +32,12 @@
 
 #include "core/loader/NavigationScheduler.h"
 
+#include <memory>
 #include "bindings/core/v8/ScriptController.h"
 #include "core/events/Event.h"
-#include "core/fetch/ResourceLoaderOptions.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLFormElement.h"
 #include "core/inspector/InspectorInstrumentation.h"
@@ -45,19 +46,17 @@
 #include "core/loader/FormSubmission.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
-#include "core/loader/FrameLoaderClient.h"
 #include "core/loader/FrameLoaderStateMachine.h"
 #include "core/page/Page.h"
 #include "platform/Histogram.h"
 #include "platform/SharedBuffer.h"
 #include "platform/UserGestureIndicator.h"
-#include "platform/scheduler/CancellableTaskFactory.h"
+#include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCachePolicy.h"
 #include "public/platform/WebScheduler.h"
 #include "wtf/CurrentTime.h"
 #include "wtf/PtrUtil.h"
-#include <memory>
 
 namespace blink {
 
@@ -135,7 +134,7 @@ class ScheduledNavigation
   bool replacesCurrentItem() const { return m_replacesCurrentItem; }
   bool isLocationChange() const { return m_isLocationChange; }
   std::unique_ptr<UserGestureIndicator> createUserGestureIndicator() {
-    return makeUnique<UserGestureIndicator>(m_userGestureToken);
+    return WTF::makeUnique<UserGestureIndicator>(m_userGestureToken);
   }
 
   DEFINE_INLINE_VIRTUAL_TRACE() { visitor->trace(m_originDocument); }
@@ -155,7 +154,7 @@ class ScheduledURLNavigation : public ScheduledNavigation {
  protected:
   ScheduledURLNavigation(double delay,
                          Document* originDocument,
-                         const String& url,
+                         const KURL& url,
                          bool replacesCurrentItem,
                          bool isLocationChange)
       : ScheduledNavigation(delay,
@@ -186,10 +185,10 @@ class ScheduledURLNavigation : public ScheduledNavigation {
     frame->loader().load(request);
   }
 
-  String url() const { return m_url; }
+  KURL url() const { return m_url; }
 
  private:
-  String m_url;
+  KURL m_url;
   ContentSecurityPolicyDisposition m_shouldCheckMainWorldContentSecurityPolicy;
 };
 
@@ -197,7 +196,7 @@ class ScheduledRedirect final : public ScheduledURLNavigation {
  public:
   static ScheduledRedirect* create(double delay,
                                    Document* originDocument,
-                                   const String& url,
+                                   const KURL& url,
                                    bool replacesCurrentItem) {
     return new ScheduledRedirect(delay, originDocument, url,
                                  replacesCurrentItem);
@@ -226,7 +225,7 @@ class ScheduledRedirect final : public ScheduledURLNavigation {
  private:
   ScheduledRedirect(double delay,
                     Document* originDocument,
-                    const String& url,
+                    const KURL& url,
                     bool replacesCurrentItem)
       : ScheduledURLNavigation(delay,
                                originDocument,
@@ -240,7 +239,7 @@ class ScheduledRedirect final : public ScheduledURLNavigation {
 class ScheduledLocationChange final : public ScheduledURLNavigation {
  public:
   static ScheduledLocationChange* create(Document* originDocument,
-                                         const String& url,
+                                         const KURL& url,
                                          bool replacesCurrentItem) {
     return new ScheduledLocationChange(originDocument, url,
                                        replacesCurrentItem);
@@ -248,13 +247,13 @@ class ScheduledLocationChange final : public ScheduledURLNavigation {
 
  private:
   ScheduledLocationChange(Document* originDocument,
-                          const String& url,
+                          const KURL& url,
                           bool replacesCurrentItem)
       : ScheduledURLNavigation(0.0,
                                originDocument,
                                url,
                                replacesCurrentItem,
-                               !protocolIsJavaScript(url)) {}
+                               !url.protocolIsJavaScript()) {}
 };
 
 class ScheduledReload final : public ScheduledNavigation {
@@ -272,36 +271,32 @@ class ScheduledReload final : public ScheduledNavigation {
     request.setClientRedirect(ClientRedirectPolicy::ClientRedirect);
     maybeLogScheduledNavigationClobber(ScheduledNavigationType::ScheduledReload,
                                        frame);
-    frame->loader().load(request, FrameLoadTypeReload);
+    if (RuntimeEnabledFeatures::fasterLocationReloadEnabled())
+      frame->loader().load(request, FrameLoadTypeReloadMainResource);
+    else
+      frame->loader().load(request, FrameLoadTypeReload);
   }
 
  private:
   ScheduledReload() : ScheduledNavigation(0.0, nullptr, true, true) {}
 };
 
-class ScheduledPageBlock final : public ScheduledURLNavigation {
+class ScheduledPageBlock final : public ScheduledNavigation {
  public:
-  static ScheduledPageBlock* create(Document* originDocument,
-                                    const String& url) {
-    return new ScheduledPageBlock(originDocument, url);
+  static ScheduledPageBlock* create(Document* originDocument, int reason) {
+    return new ScheduledPageBlock(originDocument, reason);
   }
 
   void fire(LocalFrame* frame) override {
-    std::unique_ptr<UserGestureIndicator> gestureIndicator =
-        createUserGestureIndicator();
-    SubstituteData substituteData(SharedBuffer::create(), "text/plain", "UTF-8",
-                                  KURL(), ForceSynchronousLoad);
-    FrameLoadRequest request(originDocument(), url(), substituteData);
-    request.setReplacesCurrentItem(true);
-    request.setClientRedirect(ClientRedirectPolicy::ClientRedirect);
-    maybeLogScheduledNavigationClobber(
-        ScheduledNavigationType::ScheduledPageBlock, frame);
-    frame->loader().load(request);
+    frame->loader().client()->loadErrorPage(m_reason);
   }
 
  private:
-  ScheduledPageBlock(Document* originDocument, const String& url)
-      : ScheduledURLNavigation(0.0, originDocument, url, true, true) {}
+  ScheduledPageBlock(Document* originDocument, int reason)
+      : ScheduledNavigation(0.0, originDocument, true, true),
+        m_reason(reason) {}
+
+  int m_reason;
 };
 
 class ScheduledFormSubmission final : public ScheduledNavigation {
@@ -343,15 +338,12 @@ class ScheduledFormSubmission final : public ScheduledNavigation {
 
 NavigationScheduler::NavigationScheduler(LocalFrame* frame)
     : m_frame(frame),
-      m_navigateTaskFactory(
-          CancellableTaskFactory::create(this,
-                                         &NavigationScheduler::navigateTask)),
       m_frameType(m_frame->isMainFrame()
                       ? WebScheduler::NavigatingFrameType::kMainFrame
                       : WebScheduler::NavigatingFrameType::kChildFrame) {}
 
 NavigationScheduler::~NavigationScheduler() {
-  if (m_navigateTaskFactory->isPending()) {
+  if (m_navigateTaskHandle.isActive()) {
     Platform::current()->currentThread()->scheduler()->removePendingNavigation(
         m_frameType);
   }
@@ -389,13 +381,13 @@ inline bool NavigationScheduler::shouldScheduleReload() const {
 }
 
 inline bool NavigationScheduler::shouldScheduleNavigation(
-    const String& url) const {
+    const KURL& url) const {
   return m_frame->page() && m_frame->isNavigationAllowed() &&
-         (protocolIsJavaScript(url) ||
+         (url.protocolIsJavaScript() ||
           NavigationDisablerForBeforeUnload::isNavigationAllowed());
 }
 
-void NavigationScheduler::scheduleRedirect(double delay, const String& url) {
+void NavigationScheduler::scheduleRedirect(double delay, const KURL& url) {
   if (!shouldScheduleNavigation(url))
     return;
   if (delay < 0 || delay > INT_MAX / 1000)
@@ -429,7 +421,7 @@ bool NavigationScheduler::mustReplaceCurrentItem(LocalFrame* targetFrame) {
 }
 
 void NavigationScheduler::scheduleLocationChange(Document* originDocument,
-                                                 const String& url,
+                                                 const KURL& url,
                                                  bool replacesCurrentItem) {
   if (!shouldScheduleNavigation(url))
     return;
@@ -442,12 +434,9 @@ void NavigationScheduler::scheduleLocationChange(Document* originDocument,
   // minimize the navigator's ability to execute timing attacks.
   if (originDocument->getSecurityOrigin()->canAccess(
           m_frame->document()->getSecurityOrigin())) {
-    KURL parsedURL(ParsedURLString, url);
-    if (parsedURL.hasFragmentIdentifier() &&
-        equalIgnoringFragmentIdentifier(m_frame->document()->url(),
-                                        parsedURL)) {
-      FrameLoadRequest request(originDocument,
-                               m_frame->document()->completeURL(url), "_self");
+    if (url.hasFragmentIdentifier() &&
+        equalIgnoringFragmentIdentifier(m_frame->document()->url(), url)) {
+      FrameLoadRequest request(originDocument, url, "_self");
       request.setReplacesCurrentItem(replacesCurrentItem);
       if (replacesCurrentItem)
         request.setClientRedirect(ClientRedirectPolicy::ClientRedirect);
@@ -460,10 +449,10 @@ void NavigationScheduler::scheduleLocationChange(Document* originDocument,
                                            replacesCurrentItem));
 }
 
-void NavigationScheduler::schedulePageBlock(Document* originDocument) {
+void NavigationScheduler::schedulePageBlock(Document* originDocument,
+                                            int reason) {
   DCHECK(m_frame->page());
-  const KURL& url = m_frame->document()->url();
-  schedule(ScheduledPageBlock::create(originDocument, url));
+  schedule(ScheduledPageBlock::create(originDocument, reason));
 }
 
 void NavigationScheduler::scheduleFormSubmission(Document* document,
@@ -488,13 +477,13 @@ void NavigationScheduler::navigateTask() {
   if (!m_frame->page())
     return;
   if (m_frame->page()->suspended()) {
-    InspectorInstrumentation::frameClearedScheduledNavigation(m_frame);
+    probe::frameClearedScheduledNavigation(m_frame);
     return;
   }
 
   ScheduledNavigation* redirect(m_redirect.release());
   redirect->fire(m_frame);
-  InspectorInstrumentation::frameClearedScheduledNavigation(m_frame);
+  probe::frameClearedScheduledNavigation(m_frame);
 }
 
 void NavigationScheduler::schedule(ScheduledNavigation* redirect) {
@@ -523,28 +512,32 @@ void NavigationScheduler::startTimer() {
     return;
 
   DCHECK(m_frame->page());
-  if (m_navigateTaskFactory->isPending())
+  if (m_navigateTaskHandle.isActive())
     return;
   if (!m_redirect->shouldStartTimer(m_frame))
     return;
 
   WebScheduler* scheduler = Platform::current()->currentThread()->scheduler();
   scheduler->addPendingNavigation(m_frameType);
-  scheduler->loadingTaskRunner()->postDelayedTask(
-      BLINK_FROM_HERE, m_navigateTaskFactory->cancelAndCreate(),
-      m_redirect->delay() * 1000.0);
 
-  InspectorInstrumentation::frameScheduledNavigation(m_frame,
-                                                     m_redirect->delay());
+  // wrapWeakPersistent(this) is safe because a posted task is canceled when the
+  // task handle is destroyed on the dtor of this NavigationScheduler.
+  m_navigateTaskHandle =
+      scheduler->loadingTaskRunner()->postDelayedCancellableTask(
+          BLINK_FROM_HERE, WTF::bind(&NavigationScheduler::navigateTask,
+                                     wrapWeakPersistent(this)),
+          m_redirect->delay() * 1000.0);
+
+  probe::frameScheduledNavigation(m_frame, m_redirect->delay());
 }
 
 void NavigationScheduler::cancel() {
-  if (m_navigateTaskFactory->isPending()) {
+  if (m_navigateTaskHandle.isActive()) {
     Platform::current()->currentThread()->scheduler()->removePendingNavigation(
         m_frameType);
-    InspectorInstrumentation::frameClearedScheduledNavigation(m_frame);
+    probe::frameClearedScheduledNavigation(m_frame);
   }
-  m_navigateTaskFactory->cancel();
+  m_navigateTaskHandle.cancel();
   m_redirect.clear();
 }
 

@@ -4,6 +4,8 @@
 
 #include "bindings/core/v8/ScriptStreamer.h"
 
+#include <memory>
+
 #include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/ScriptStreamerThread.h"
 #include "bindings/core/v8/V8Binding.h"
@@ -17,8 +19,7 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebScheduler.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <memory>
-#include <v8.h>
+#include "v8/include/v8.h"
 
 namespace blink {
 
@@ -34,9 +35,9 @@ class ScriptStreamingTest : public ::testing::Test {
         m_settings(Settings::create()),
         m_resourceRequest("http://www.streaming-test.com/"),
         m_resource(ScriptResource::create(m_resourceRequest, "UTF-8")),
-        m_pendingScript(PendingScript::create(0, m_resource.get())) {
-    m_resource->setStatus(Resource::Pending);
-    m_pendingScript = PendingScript::create(0, m_resource.get());
+        m_pendingScript(PendingScript::createForTesting(m_resource.get())) {
+    m_resource->setStatus(ResourceStatus::Pending);
+    m_pendingScript = PendingScript::createForTesting(m_resource.get());
     ScriptStreamer::setSmallScriptThresholdForTesting(0);
   }
 
@@ -69,7 +70,7 @@ class ScriptStreamingTest : public ::testing::Test {
 
   void finish() {
     m_resource->finish();
-    m_resource->setStatus(Resource::Cached);
+    m_resource->setStatus(ResourceStatus::Cached);
   }
 
   void processTasksUntilStreamingComplete() {
@@ -81,7 +82,7 @@ class ScriptStreamingTest : public ::testing::Test {
     testing::runPendingTasks();
   }
 
-  WebTaskRunner* m_loadingTaskRunner;  // NOT OWNED
+  RefPtr<WebTaskRunner> m_loadingTaskRunner;
   std::unique_ptr<Settings> m_settings;
   // The Resource and PendingScript where we stream from. These don't really
   // fetch any data outside the test; the test controls the data by calling
@@ -91,17 +92,14 @@ class ScriptStreamingTest : public ::testing::Test {
   Persistent<PendingScript> m_pendingScript;
 };
 
-class TestScriptResourceClient
-    : public GarbageCollectedFinalized<TestScriptResourceClient>,
-      public ScriptResourceClient {
-  USING_GARBAGE_COLLECTED_MIXIN(TestScriptResourceClient);
+class TestPendingScriptClient
+    : public GarbageCollectedFinalized<TestPendingScriptClient>,
+      public PendingScriptClient {
+  USING_GARBAGE_COLLECTED_MIXIN(TestPendingScriptClient);
 
  public:
-  TestScriptResourceClient() : m_finished(false) {}
-
-  void notifyFinished(Resource*) override { m_finished = true; }
-  String debugName() const override { return "TestScriptResourceClient"; }
-
+  TestPendingScriptClient() : m_finished(false) {}
+  void pendingScriptFinished(PendingScript*) override { m_finished = true; }
   bool finished() const { return m_finished; }
 
  private:
@@ -114,7 +112,7 @@ TEST_F(ScriptStreamingTest, CompilingStreamedScript) {
   ScriptStreamer::startStreaming(
       getPendingScript(), ScriptStreamer::ParsingBlocking, m_settings.get(),
       scope.getScriptState(), m_loadingTaskRunner);
-  TestScriptResourceClient* client = new TestScriptResourceClient;
+  TestPendingScriptClient* client = new TestPendingScriptClient;
   getPendingScript()->watchForLoad(client);
 
   appendData("function foo() {");
@@ -136,7 +134,9 @@ TEST_F(ScriptStreamingTest, CompilingStreamedScript) {
   EXPECT_TRUE(sourceCode.streamer());
   v8::TryCatch tryCatch(scope.isolate());
   v8::Local<v8::Script> script;
-  EXPECT_TRUE(V8ScriptRunner::compileScript(sourceCode, scope.isolate())
+  EXPECT_TRUE(V8ScriptRunner::compileScript(sourceCode, scope.isolate(),
+                                            SharableCrossOrigin,
+                                            V8CacheOptionsDefault)
                   .ToLocal(&script));
   EXPECT_FALSE(tryCatch.HasCaught());
 }
@@ -149,7 +149,7 @@ TEST_F(ScriptStreamingTest, CompilingStreamedScriptWithParseError) {
   ScriptStreamer::startStreaming(
       getPendingScript(), ScriptStreamer::ParsingBlocking, m_settings.get(),
       scope.getScriptState(), m_loadingTaskRunner);
-  TestScriptResourceClient* client = new TestScriptResourceClient;
+  TestPendingScriptClient* client = new TestPendingScriptClient;
   getPendingScript()->watchForLoad(client);
   appendData("function foo() {");
   appendData("this is the part which will be a parse error");
@@ -173,7 +173,9 @@ TEST_F(ScriptStreamingTest, CompilingStreamedScriptWithParseError) {
   EXPECT_TRUE(sourceCode.streamer());
   v8::TryCatch tryCatch(scope.isolate());
   v8::Local<v8::Script> script;
-  EXPECT_FALSE(V8ScriptRunner::compileScript(sourceCode, scope.isolate())
+  EXPECT_FALSE(V8ScriptRunner::compileScript(sourceCode, scope.isolate(),
+                                             SharableCrossOrigin,
+                                             V8CacheOptionsDefault)
                    .ToLocal(&script));
   EXPECT_TRUE(tryCatch.HasCaught());
 }
@@ -185,7 +187,7 @@ TEST_F(ScriptStreamingTest, CancellingStreaming) {
   ScriptStreamer::startStreaming(
       getPendingScript(), ScriptStreamer::ParsingBlocking, m_settings.get(),
       scope.getScriptState(), m_loadingTaskRunner);
-  TestScriptResourceClient* client = new TestScriptResourceClient;
+  TestPendingScriptClient* client = new TestPendingScriptClient;
   getPendingScript()->watchForLoad(client);
   appendData("function foo() {");
 
@@ -196,8 +198,7 @@ TEST_F(ScriptStreamingTest, CancellingStreaming) {
   // Simulate cancelling the network load (e.g., because the user navigated
   // away).
   EXPECT_FALSE(client->finished());
-  getPendingScript()->stopWatchingForLoad();
-  getPendingScript()->releaseElementAndClear();
+  getPendingScript()->dispose();
   m_pendingScript = nullptr;  // This will destroy m_resource.
   m_resource = nullptr;
 
@@ -216,7 +217,7 @@ TEST_F(ScriptStreamingTest, SuppressingStreaming) {
   ScriptStreamer::startStreaming(
       getPendingScript(), ScriptStreamer::ParsingBlocking, m_settings.get(),
       scope.getScriptState(), m_loadingTaskRunner);
-  TestScriptResourceClient* client = new TestScriptResourceClient;
+  TestPendingScriptClient* client = new TestPendingScriptClient;
   getPendingScript()->watchForLoad(client);
   appendData("function foo() {");
   appendPadding();
@@ -249,7 +250,7 @@ TEST_F(ScriptStreamingTest, EmptyScripts) {
   ScriptStreamer::startStreaming(
       getPendingScript(), ScriptStreamer::ParsingBlocking, m_settings.get(),
       scope.getScriptState(), m_loadingTaskRunner);
-  TestScriptResourceClient* client = new TestScriptResourceClient;
+  TestPendingScriptClient* client = new TestPendingScriptClient;
   getPendingScript()->watchForLoad(client);
 
   // Finish the script without sending any data.
@@ -273,7 +274,7 @@ TEST_F(ScriptStreamingTest, SmallScripts) {
   ScriptStreamer::startStreaming(
       getPendingScript(), ScriptStreamer::ParsingBlocking, m_settings.get(),
       scope.getScriptState(), m_loadingTaskRunner);
-  TestScriptResourceClient* client = new TestScriptResourceClient;
+  TestPendingScriptClient* client = new TestPendingScriptClient;
   getPendingScript()->watchForLoad(client);
 
   appendData("function foo() { }");
@@ -300,7 +301,7 @@ TEST_F(ScriptStreamingTest, ScriptsWithSmallFirstChunk) {
   ScriptStreamer::startStreaming(
       getPendingScript(), ScriptStreamer::ParsingBlocking, m_settings.get(),
       scope.getScriptState(), m_loadingTaskRunner);
-  TestScriptResourceClient* client = new TestScriptResourceClient;
+  TestPendingScriptClient* client = new TestPendingScriptClient;
   getPendingScript()->watchForLoad(client);
 
   // This is the first data chunk which is small.
@@ -320,7 +321,9 @@ TEST_F(ScriptStreamingTest, ScriptsWithSmallFirstChunk) {
   EXPECT_TRUE(sourceCode.streamer());
   v8::TryCatch tryCatch(scope.isolate());
   v8::Local<v8::Script> script;
-  EXPECT_TRUE(V8ScriptRunner::compileScript(sourceCode, scope.isolate())
+  EXPECT_TRUE(V8ScriptRunner::compileScript(sourceCode, scope.isolate(),
+                                            SharableCrossOrigin,
+                                            V8CacheOptionsDefault)
                   .ToLocal(&script));
   EXPECT_FALSE(tryCatch.HasCaught());
 }
@@ -334,7 +337,7 @@ TEST_F(ScriptStreamingTest, EncodingChanges) {
   ScriptStreamer::startStreaming(
       getPendingScript(), ScriptStreamer::ParsingBlocking, m_settings.get(),
       scope.getScriptState(), m_loadingTaskRunner);
-  TestScriptResourceClient* client = new TestScriptResourceClient;
+  TestPendingScriptClient* client = new TestPendingScriptClient;
   getPendingScript()->watchForLoad(client);
 
   m_resource->setEncoding("UTF-8");
@@ -354,7 +357,9 @@ TEST_F(ScriptStreamingTest, EncodingChanges) {
   EXPECT_TRUE(sourceCode.streamer());
   v8::TryCatch tryCatch(scope.isolate());
   v8::Local<v8::Script> script;
-  EXPECT_TRUE(V8ScriptRunner::compileScript(sourceCode, scope.isolate())
+  EXPECT_TRUE(V8ScriptRunner::compileScript(sourceCode, scope.isolate(),
+                                            SharableCrossOrigin,
+                                            V8CacheOptionsDefault)
                   .ToLocal(&script));
   EXPECT_FALSE(tryCatch.HasCaught());
 }
@@ -369,7 +374,7 @@ TEST_F(ScriptStreamingTest, EncodingFromBOM) {
   ScriptStreamer::startStreaming(
       getPendingScript(), ScriptStreamer::ParsingBlocking, m_settings.get(),
       scope.getScriptState(), m_loadingTaskRunner);
-  TestScriptResourceClient* client = new TestScriptResourceClient;
+  TestPendingScriptClient* client = new TestPendingScriptClient;
   getPendingScript()->watchForLoad(client);
 
   // \xef\xbb\xbf is the UTF-8 byte order mark. \xec\x92\x81 are the raw bytes
@@ -388,7 +393,9 @@ TEST_F(ScriptStreamingTest, EncodingFromBOM) {
   EXPECT_TRUE(sourceCode.streamer());
   v8::TryCatch tryCatch(scope.isolate());
   v8::Local<v8::Script> script;
-  EXPECT_TRUE(V8ScriptRunner::compileScript(sourceCode, scope.isolate())
+  EXPECT_TRUE(V8ScriptRunner::compileScript(sourceCode, scope.isolate(),
+                                            SharableCrossOrigin,
+                                            V8CacheOptionsDefault)
                   .ToLocal(&script));
   EXPECT_FALSE(tryCatch.HasCaught());
 }

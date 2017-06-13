@@ -10,6 +10,7 @@
 #include "core/loader/EmptyClients.h"
 #include "core/paint/StubChromeClientForSPv2.h"
 #include "core/testing/DummyPageHolder.h"
+#include "platform/testing/RuntimeEnabledFeaturesTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
@@ -30,7 +31,7 @@ class StubWebMediaPlayer : public WebMediaPlayer {
   const WebLayer* getWebLayer() { return m_webLayer.get(); }
 
   // WebMediaPlayer
-  void load(LoadType, const WebMediaPlayerSource&, CORSMode) {
+  void load(LoadType, const WebMediaPlayerSource&, CORSMode, const WebString&) {
     m_networkState = NetworkStateLoaded;
     m_client->networkStateChanged();
     m_readyState = ReadyStateHaveEnoughData;
@@ -69,7 +70,7 @@ class StubWebMediaPlayer : public WebMediaPlayer {
   unsigned droppedFrameCount() const override { return 0; }
   size_t audioDecodedByteCount() const override { return 0; }
   size_t videoDecodedByteCount() const override { return 0; }
-  void paint(WebCanvas*, const WebRect&, SkPaint&) override {}
+  void paint(WebCanvas*, const WebRect&, PaintFlags&) override {}
 
  private:
   WebMediaPlayerClient* m_client;
@@ -78,28 +79,31 @@ class StubWebMediaPlayer : public WebMediaPlayer {
   ReadyState m_readyState = ReadyStateHaveNothing;
 };
 
-class StubFrameLoaderClient : public EmptyFrameLoaderClient {
+class StubLocalFrameClient : public EmptyLocalFrameClient {
  public:
-  // FrameLoaderClient
+  // LocalFrameClient
   std::unique_ptr<WebMediaPlayer> createWebMediaPlayer(
       HTMLMediaElement&,
       const WebMediaPlayerSource&,
       WebMediaPlayerClient* client) override {
-    return makeUnique<StubWebMediaPlayer>(client);
+    return WTF::makeUnique<StubWebMediaPlayer>(client);
   }
 };
 
-class VideoPainterTestForSPv2 : public ::testing::Test {
+class VideoPainterTestForSPv2 : public ::testing::Test,
+                                private ScopedSlimmingPaintV2ForTest {
+ public:
+  VideoPainterTestForSPv2() : ScopedSlimmingPaintV2ForTest(true) {}
+
  protected:
   void SetUp() override {
-    RuntimeEnabledFeatures::setSlimmingPaintV2Enabled(true);
     m_chromeClient = new StubChromeClientForSPv2();
-    m_frameLoaderClient = new StubFrameLoaderClient;
+    m_localFrameClient = new StubLocalFrameClient;
     Page::PageClients clients;
     fillWithEmptyClients(clients);
     clients.chromeClient = m_chromeClient.get();
     m_pageHolder = DummyPageHolder::create(
-        IntSize(800, 600), &clients, m_frameLoaderClient.get(),
+        IntSize(800, 600), &clients, m_localFrameClient.get(),
         [](Settings& settings) {
           settings.setAcceleratedCompositingEnabled(true);
         });
@@ -108,17 +112,14 @@ class VideoPainterTestForSPv2 : public ::testing::Test {
     document().setURL(KURL(KURL(), "https://example.com/"));
   }
 
-  void TearDown() override { m_featuresBackup.restore(); }
-
   Document& document() { return m_pageHolder->document(); }
   bool hasLayerAttached(const WebLayer& layer) {
     return m_chromeClient->hasLayer(layer);
   }
 
  private:
-  RuntimeEnabledFeatures::Backup m_featuresBackup;
   Persistent<StubChromeClientForSPv2> m_chromeClient;
-  Persistent<StubFrameLoaderClient> m_frameLoaderClient;
+  Persistent<StubLocalFrameClient> m_localFrameClient;
   std::unique_ptr<DummyPageHolder> m_pageHolder;
 };
 

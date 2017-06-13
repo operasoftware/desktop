@@ -34,8 +34,8 @@ namespace blink {
 
 class ExceptionState;
 class Frame;
+class FrameViewBase;
 class LayoutPart;
-class Widget;
 
 class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
                                           public FrameOwner {
@@ -44,11 +44,10 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
  public:
   ~HTMLFrameOwnerElement() override;
 
-  Frame* contentFrame() const { return m_contentFrame; }
   DOMWindow* contentWindow() const;
   Document* contentDocument() const;
 
-  void disconnectContentFrame();
+  virtual void disconnectContentFrame();
 
   // Most subclasses use LayoutPart (either LayoutEmbeddedObject or
   // LayoutIFrame) except for HTMLObjectElement and HTMLEmbedElement which may
@@ -60,9 +59,9 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   virtual bool loadedNonEmptyDocument() const { return false; }
   virtual void didLoadNonEmptyDocument() {}
 
-  void setWidget(Widget*);
-  Widget* releaseWidget();
-  Widget* ownedWidget() const;
+  void setWidget(FrameViewBase*);
+  FrameViewBase* releaseWidget();
+  FrameViewBase* ownedWidget() const;
 
   class UpdateSuspendScope {
     STACK_ALLOCATED();
@@ -76,19 +75,25 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   };
 
   // FrameOwner overrides:
-  void setContentFrame(Frame&) override;
-  void clearContentFrame() override;
-  void dispatchLoad() override;
-  SandboxFlags getSandboxFlags() const override { return m_sandboxFlags; }
+  Frame* contentFrame() const final { return m_contentFrame; }
+  void setContentFrame(Frame&) final;
+  void clearContentFrame() final;
+  void dispatchLoad() final;
+  SandboxFlags getSandboxFlags() const final { return m_sandboxFlags; }
   bool canRenderFallbackContent() const override { return false; }
   void renderFallbackContent() override {}
+  AtomicString browsingContextContainerName() const override {
+    return getAttribute(HTMLNames::nameAttr);
+  }
   ScrollbarMode scrollingMode() const override { return ScrollbarAuto; }
   int marginWidth() const override { return -1; }
   int marginHeight() const override { return -1; }
   bool allowFullscreen() const override { return false; }
   bool allowPaymentRequest() const override { return false; }
   AtomicString csp() const override { return nullAtom; }
-  const WebVector<WebPermissionType>& delegatedPermissions() const override;
+  const WebVector<mojom::blink::PermissionName>& delegatedPermissions()
+      const override;
+  const WebVector<WebFeaturePolicyFeature>& allowedFeatures() const override;
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -101,13 +106,13 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
                               bool replaceCurrentItem);
   bool isKeyboardFocusable() const override;
 
-  void disposeWidgetSoon(Widget*);
+  void disposeWidgetSoon(FrameViewBase*);
 
  private:
   // Intentionally private to prevent redundant checks when the type is
   // already HTMLFrameOwnerElement.
-  bool isLocal() const override { return true; }
-  bool isRemote() const override { return false; }
+  bool isLocal() const final { return true; }
+  bool isRemote() const final { return false; }
 
   bool isFrameOwnerElement() const final { return true; }
 
@@ -116,7 +121,7 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   }
 
   Member<Frame> m_contentFrame;
-  Member<Widget> m_widget;
+  Member<FrameViewBase> m_widget;
   SandboxFlags m_sandboxFlags;
 };
 
@@ -148,7 +153,12 @@ class SubframeLoadingDisabler {
   }
 
  private:
-  using SubtreeRootSet = HeapHashCountedSet<Member<Node>>;
+  // The use of UntracedMember<Node>  is safe as all SubtreeRootSet
+  // references are on the stack and reachable in case a conservative
+  // GC hits.
+  // TODO(sof): go back to HeapHashSet<> once crbug.com/684551 has been
+  // resolved.
+  using SubtreeRootSet = HashCountedSet<UntracedMember<Node>>;
 
   CORE_EXPORT static SubtreeRootSet& disabledSubtreeRoots();
 

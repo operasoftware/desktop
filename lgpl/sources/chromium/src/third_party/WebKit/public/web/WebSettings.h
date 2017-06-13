@@ -128,7 +128,7 @@ class WebSettings {
   virtual void setAcceleratedCompositingForTransitionEnabled(bool) {}
   // If set to true, allows frames with an https origin to display passive
   // contents at an insecure URL. Otherwise, disallows it. The
-  // FrameLoaderClient set to the frame may override the value set by this
+  // LocalFrameClient set to the frame may override the value set by this
   // method.
   virtual void setAccessibilityEnabled(bool) = 0;
   virtual void setAccessibilityPasswordValuesEnabled(bool) = 0;
@@ -137,7 +137,7 @@ class WebSettings {
   virtual void setAllowGeolocationOnInsecureOrigins(bool) = 0;
   // If set to true, allows frames with an https origin to run active
   // contents at an insecure URL. This includes WebSockets. Otherwise,
-  // disallows it. The FrameLoaderClient set to the frame may override the
+  // disallows it. The LocalFrameClient set to the frame may override the
   // value set by this method.
   virtual void setAllowRunningOfInsecureContent(bool) = 0;
   virtual void setAllowScriptsToCloseWindows(bool) = 0;
@@ -146,11 +146,11 @@ class WebSettings {
   virtual void setAlwaysShowContextMenuOnTouch(bool) = 0;
   virtual void setAntialiased2dCanvasEnabled(bool) = 0;
   virtual void setAntialiasedClips2dCanvasEnabled(bool) = 0;
-  virtual void setAutoplayExperimentMode(const WebString&) = 0;
   virtual void setAutoZoomFocusedNodeToLegibleScale(bool) = 0;
   virtual void setBrowserSideNavigationEnabled(bool) = 0;
   virtual void setClobberUserAgentInitialScaleQuirk(bool) = 0;
   virtual void setCookieEnabled(bool) = 0;
+  virtual void setCrossOriginMediaPlaybackRequiresUserGesture(bool) = 0;
   virtual void setNavigateOnDragDrop(bool) = 0;
   virtual void setCursiveFontFamily(const WebString&,
                                     UScriptCode = USCRIPT_COMMON) = 0;
@@ -163,7 +163,6 @@ class WebSettings {
   virtual void setDefaultVideoPosterURL(const WebString&) = 0;
   void setDeferred2dCanvasEnabled(bool) {}  // temporary stub
   virtual void setDeviceScaleAdjustment(float) = 0;
-  virtual void setDeviceSupportsMouse(bool) = 0;
   virtual void setDeviceSupportsTouch(bool) = 0;
   virtual void setDisableReadingFromCanvas(bool) = 0;
   virtual void setDoubleTapToZoomEnabled(bool) = 0;
@@ -192,7 +191,6 @@ class WebSettings {
   virtual void setJavaScriptCanAccessClipboard(bool) = 0;
   virtual void setJavaScriptCanOpenWindowsAutomatically(bool) = 0;
   virtual void setJavaScriptEnabled(bool) = 0;
-  void setLayerSquashingEnabled(bool) {}
   virtual void setLoadsImagesAutomatically(bool) = 0;
   virtual void setLoadWithOverviewMode(bool) = 0;
   virtual void setShouldReuseGlobalForUnownedMainFrame(bool) = 0;
@@ -203,8 +201,10 @@ class WebSettings {
   virtual void setMaxTouchPoints(int) = 0;
   virtual void setMediaControlsOverlayPlayButtonEnabled(bool) = 0;
   virtual void setMediaPlaybackRequiresUserGesture(bool) = 0;
+  virtual void setMediaPlaybackGestureWhitelistScope(const WebString&) = 0;
   virtual void setMediaEnabled(bool) = 0;
   virtual void setPresentationRequiresUserGesture(bool) = 0;
+  virtual void setEmbeddedMediaExperienceEnabled(bool) = 0;
   virtual void setMinimumAccelerated2dCanvasSize(int) = 0;
   virtual void setMinimumFontSize(int) = 0;
   virtual void setMinimumLogicalFontSize(int) = 0;
@@ -218,6 +218,8 @@ class WebSettings {
   virtual void setPictographFontFamily(const WebString&,
                                        UScriptCode = USCRIPT_COMMON) = 0;
   virtual void setPluginsEnabled(bool) = 0;
+  virtual void setEncryptedMediaEnabled(bool) = 0;
+  virtual void setPresentationReceiver(bool) = 0;
   virtual void setAvailablePointerTypes(int) = 0;
   virtual void setPrimaryPointerType(PointerType) = 0;
   virtual void setAvailableHoverTypes(int) = 0;
@@ -296,6 +298,8 @@ class WebSettings {
   virtual void setExpensiveBackgroundThrottlingInitialBudget(float) = 0;
   virtual void setExpensiveBackgroundThrottlingMaxBudget(float) = 0;
   virtual void setExpensiveBackgroundThrottlingMaxDelay(float) = 0;
+  virtual void setMediaControlsEnabled(bool) = 0;
+  virtual void setDoNotUpdateSelectionOnMutatingSelectionRange(bool) = 0;
 
  protected:
   ~WebSettings() {}

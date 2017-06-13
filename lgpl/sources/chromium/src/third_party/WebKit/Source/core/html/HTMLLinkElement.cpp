@@ -31,12 +31,12 @@
 #include "core/dom/Document.h"
 #include "core/dom/TaskRunnerHelper.h"
 #include "core/events/Event.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/CrossOriginAttribute.h"
 #include "core/html/LinkManifest.h"
 #include "core/html/imports/LinkImport.h"
 #include "core/inspector/ConsoleMessage.h"
-#include "core/loader/FrameLoaderClient.h"
 #include "core/loader/NetworkHintsInterface.h"
 #include "core/origin_trials/OriginTrials.h"
 #include "platform/weborigin/SecurityPolicy.h"
@@ -62,17 +62,17 @@ HTMLLinkElement* HTMLLinkElement::create(Document& document,
 
 HTMLLinkElement::~HTMLLinkElement() {}
 
-void HTMLLinkElement::parseAttribute(const QualifiedName& name,
-                                     const AtomicString& oldValue,
-                                     const AtomicString& value) {
+void HTMLLinkElement::parseAttribute(
+    const AttributeModificationParams& params) {
+  const QualifiedName& name = params.name;
+  const AtomicString& value = params.newValue;
   if (name == relAttr) {
     m_relAttribute = LinkRelAttribute(value);
     m_relList->setRelValues(value);
     process();
   } else if (name == hrefAttr) {
     // Log href attribute before logging resource fetching in process().
-    logUpdateAttributeIfIsolatedWorldAndInDocument("link", hrefAttr, oldValue,
-                                                   value);
+    logUpdateAttributeIfIsolatedWorldAndInDocument("link", params);
     process();
   } else if (name == typeAttr) {
     m_type = value;
@@ -82,8 +82,12 @@ void HTMLLinkElement::parseAttribute(const QualifiedName& name,
     process();
   } else if (name == referrerpolicyAttr) {
     m_referrerPolicy = ReferrerPolicyDefault;
-    if (!value.isNull())
-      SecurityPolicy::referrerPolicyFromString(value, &m_referrerPolicy);
+    if (!value.isNull()) {
+      SecurityPolicy::referrerPolicyFromString(
+          value, DoNotSupportReferrerPolicyLegacyKeywords, &m_referrerPolicy);
+      UseCounter::count(document(),
+                        UseCounter::HTMLLinkElementReferrerPolicyAttribute);
+    }
   } else if (name == sizesAttr) {
     m_sizes->setValue(value);
   } else if (name == mediaAttr) {
@@ -99,10 +103,10 @@ void HTMLLinkElement::parseAttribute(const QualifiedName& name,
   } else {
     if (name == titleAttr) {
       if (LinkStyle* link = linkStyle())
-        link->setSheetTitle(value, StyleEngine::UpdateActiveSheets);
+        link->setSheetTitle(value);
     }
 
-    HTMLElement::parseAttribute(name, oldValue, value);
+    HTMLElement::parseAttribute(params);
   }
 }
 
@@ -216,15 +220,10 @@ void HTMLLinkElement::removedFrom(ContainerNode* insertionPoint) {
     DCHECK(!linkStyle() || !linkStyle()->hasSheet());
     return;
   }
-  document().styleEngine().removeStyleSheetCandidateNode(*this);
-
-  StyleSheet* removedSheet = sheet();
-
+  document().styleEngine().removeStyleSheetCandidateNode(*this,
+                                                         *insertionPoint);
   if (m_link)
     m_link->ownerRemoved();
-
-  document().styleEngine().setNeedsActiveStyleUpdate(removedSheet,
-                                                     FullStyleUpdate);
 }
 
 void HTMLLinkElement::finishParsingChildren() {
@@ -260,6 +259,10 @@ void HTMLLinkElement::didSendDOMContentLoadedForLinkPrerender() {
   dispatchEvent(Event::create(EventTypeNames::webkitprerenderdomcontentloaded));
 }
 
+RefPtr<WebTaskRunner> HTMLLinkElement::getLoadingTaskRunner() {
+  return TaskRunnerHelper::get(TaskType::Networking, &document());
+}
+
 void HTMLLinkElement::valueWasSet() {
   setSynchronizedLazyAttribute(HTMLNames::sizesAttr, m_sizes->value());
   WebVector<WebSize> webIconSizes =
@@ -282,23 +285,25 @@ void HTMLLinkElement::notifyLoadedSheetAndAllCriticalSubresources(
 }
 
 void HTMLLinkElement::dispatchPendingEvent(
-    std::unique_ptr<IncrementLoadEventDelayCount>) {
+    std::unique_ptr<IncrementLoadEventDelayCount> count) {
   DCHECK(m_link);
   if (m_link->hasLoaded())
     linkLoaded();
   else
     linkLoadingErrored();
+
+  // Checks Document's load event synchronously here for performance.
+  // This is safe because dispatchPendingEvent() is called asynchronously.
+  count->clearAndCheckLoadEvent();
 }
 
 void HTMLLinkElement::scheduleEvent() {
-  // TODO(hiroshige): Use DOMManipulation task runner. Unthrottled
-  // is temporarily used for fixing https://crbug.com/649942 only on M-56.
-  TaskRunnerHelper::get(TaskType::Unthrottled, &document())
+  TaskRunnerHelper::get(TaskType::DOMManipulation, &document())
       ->postTask(
           BLINK_FROM_HERE,
-          WTF::bind(&HTMLLinkElement::dispatchPendingEvent,
-                    wrapPersistent(this),
-                    passed(IncrementLoadEventDelayCount::create(document()))));
+          WTF::bind(
+              &HTMLLinkElement::dispatchPendingEvent, wrapPersistent(this),
+              WTF::passed(IncrementLoadEventDelayCount::create(document()))));
 }
 
 void HTMLLinkElement::startLoadingDynamicSheet() {
@@ -326,7 +331,10 @@ const QualifiedName& HTMLLinkElement::subResourceAttributeName() const {
 }
 
 KURL HTMLLinkElement::href() const {
-  return document().completeURL(getAttribute(hrefAttr));
+  const String& url = getAttribute(hrefAttr);
+  if (url.isEmpty())
+    return KURL();
+  return document().completeURL(url);
 }
 
 const AtomicString& HTMLLinkElement::rel() const {
@@ -335,6 +343,10 @@ const AtomicString& HTMLLinkElement::rel() const {
 
 const AtomicString& HTMLLinkElement::type() const {
   return getAttribute(typeAttr);
+}
+
+const AtomicString& HTMLLinkElement::color() const {
+  return getAttribute(colorAttr);
 }
 
 bool HTMLLinkElement::async() const {

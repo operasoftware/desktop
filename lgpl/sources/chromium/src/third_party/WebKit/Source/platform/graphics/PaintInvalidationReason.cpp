@@ -54,6 +54,12 @@ const char* paintInvalidationReasonToString(PaintInvalidationReason reason) {
       return "layoutObject removal";
     case PaintInvalidationSVGResourceChange:
       return "SVG resource change";
+    case PaintInvalidationBackgroundOnScrollingContentsLayer:
+      return "background on scrolling contents layer";
+    case PaintInvalidationCaret:
+      return "caret";
+    case PaintInvalidationViewBackground:
+      return "view background";
     case PaintInvalidationForTesting:
       return "for testing";
     case PaintInvalidationDelayedFull:

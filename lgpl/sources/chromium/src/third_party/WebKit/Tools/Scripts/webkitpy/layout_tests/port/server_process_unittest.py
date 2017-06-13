@@ -30,11 +30,10 @@ import sys
 import time
 import unittest
 
-from webkitpy.layout_tests.port.factory import PortFactory
+from webkitpy.common.system.system_host import SystemHost
+from webkitpy.common.system.system_host_mock import MockSystemHost
 from webkitpy.layout_tests.port import server_process
-from webkitpy.common.system.systemhost import SystemHost
-from webkitpy.common.system.systemhost_mock import MockSystemHost
-from webkitpy.common.system.outputcapture import OutputCapture
+from webkitpy.layout_tests.port.factory import PortFactory
 
 
 class TrivialMockPort(object):
@@ -46,9 +45,6 @@ class TrivialMockPort(object):
 
     def results_directory(self):
         return "/mock-results"
-
-    def process_kill_time(self):
-        return 1
 
 
 class MockFile(object):

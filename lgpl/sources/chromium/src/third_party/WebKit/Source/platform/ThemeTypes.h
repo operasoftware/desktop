@@ -75,7 +75,6 @@ enum ControlPart {
   MediaTimeRemainingPart,
   MediaCastOffButtonPart,
   MediaOverlayCastOffButtonPart,
-  MediaOverlayDetachButtonPart,
   MediaTrackSelectionCheckmarkPart,
   MediaClosedCaptionsIconPart,
   MediaSubtitlesIconPart,

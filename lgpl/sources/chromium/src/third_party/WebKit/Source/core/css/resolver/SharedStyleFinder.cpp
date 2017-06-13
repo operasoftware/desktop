@@ -45,12 +45,13 @@
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/dom/shadow/InsertionPoint.h"
 #include "core/html/HTMLElement.h"
+#include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLOptGroupElement.h"
 #include "core/html/HTMLOptionElement.h"
 #include "core/style/ComputedStyle.h"
 #include "core/svg/SVGElement.h"
-#include "platform/tracing/TraceEvent.h"
+#include "platform/instrumentation/tracing/TraceEvent.h"
 #include "wtf/HashSet.h"
 #include "wtf/text/AtomicString.h"
 
@@ -198,6 +199,15 @@ bool SharedStyleFinder::sharingCandidateCanShareHostStyles(
   return elementShadow->hasSameStyles(*candidateShadow);
 }
 
+bool SharedStyleFinder::sharingCandidateAssignedToSameSlot(
+    Element& candidate) const {
+  HTMLSlotElement* elementSlot = element().assignedSlot();
+  HTMLSlotElement* candidateSlot = candidate.assignedSlot();
+  if (!elementSlot && !candidateSlot)
+    return true;
+  return elementSlot == candidateSlot;
+}
+
 bool SharedStyleFinder::sharingCandidateDistributedToSameInsertionPoint(
     Element& candidate) const {
   HeapVector<Member<InsertionPoint>, 8> insertionPoints,
@@ -251,6 +261,10 @@ bool SharedStyleFinder::canShareStyleWithElement(Element& candidate) const {
     return false;
   if (!sharingCandidateCanShareHostStyles(candidate))
     return false;
+  // For Shadow DOM V1
+  if (!sharingCandidateAssignedToSameSlot(candidate))
+    return false;
+  // For Shadow DOM V0
   if (!sharingCandidateDistributedToSameInsertionPoint(candidate))
     return false;
   if (candidate.isInTopLayer() != element().isInTopLayer())
@@ -272,6 +286,12 @@ bool SharedStyleFinder::canShareStyleWithElement(Element& candidate) const {
   // hasDirectionAuto into StyleResolver.
   if (candidate.isHTMLElement() && toHTMLElement(candidate).hasDirectionAuto())
     return false;
+
+  if (isHTMLImageElement(candidate) && isHTMLImageElement(element()) &&
+      toHTMLImageElement(candidate).isCollapsed() !=
+          toHTMLImageElement(element()).isCollapsed()) {
+    return false;
+  }
 
   if (candidate.isLink() && m_context.elementLinkState() != style->insideLink())
     return false;

@@ -38,7 +38,7 @@
 #include "WebSetSinkIdCallbacks.h"
 #include "WebString.h"
 
-class SkPaint;
+#include "cc/paint/paint_flags.h"
 
 namespace gpu {
 namespace gles2 {
@@ -105,12 +105,18 @@ class WebMediaPlayer {
   typedef WebString TrackId;
   enum TrackType { TextTrack, AudioTrack, VideoTrack };
 
+  // This must stay in sync with WebGLRenderingContextBase::TexImageFunctionID.
+  enum TexImageFunctionID {
+    TexImage2D,
+    TexSubImage2D,
+    TexImage3D,
+    TexSubImage3D
+  };
+
   virtual ~WebMediaPlayer() {}
 
-  virtual void load(LoadType,
-                    const WebMediaPlayerSource&,
-                    CORSMode,
-                    const WebString&) = 0;
+  virtual void load(LoadType, const WebMediaPlayerSource&, CORSMode,
+      const WebString&) = 0;
 
   // Playback controls.
   virtual void play() = 0;
@@ -123,6 +129,7 @@ class WebMediaPlayer {
   virtual void requestRemotePlayback() {}
   virtual void requestRemotePlaybackControl() {}
   virtual void requestRemotePlaybackStop() {}
+  virtual void requestRemotePlaybackDisabled(bool disabled) {}
   virtual void setPreload(Preload) {}
   virtual void setBufferingStrategy(BufferingStrategy) {}
   virtual WebTimeRanges buffered() const = 0;
@@ -185,7 +192,7 @@ class WebMediaPlayer {
   virtual size_t audioDecodedByteCount() const = 0;
   virtual size_t videoDecodedByteCount() const = 0;
 
-  virtual void paint(WebCanvas*, const WebRect&, SkPaint&) = 0;
+  virtual void paint(WebCanvas*, const WebRect&, cc::PaintFlags&) = 0;
 
   // TODO(dshwang): remove non-|target| version. crbug.com/349871
   virtual bool copyVideoTextureToPlatformTexture(gpu::gles2::GLES2Interface*,
@@ -222,6 +229,30 @@ class WebMediaPlayer {
     return false;
   }
 
+  // Do tex(Sub)Image2D/3D for current frame. If it is not implemented for given
+  // parameters or fails, it returns false.
+  // The method is wrapping calls to glTexImage2D, glTexSubImage2D,
+  // glTexImage3D and glTexSubImage3D and parameters have the same name and
+  // meaning.
+  // Texture needs to be created and bound to active texture unit before this
+  // call. In addition, TexSubImage2D and TexSubImage3D require that previous
+  // TexImage2D and TexSubImage3D calls, respectivelly, defined the texture
+  // content.
+  virtual bool texImageImpl(TexImageFunctionID functionID,
+                            unsigned target,
+                            gpu::gles2::GLES2Interface* gl,
+                            int level,
+                            int internalformat,
+                            unsigned format,
+                            unsigned type,
+                            int xoffset,
+                            int yoffset,
+                            int zoffset,
+                            bool flipY,
+                            bool premultiplyAlpha) {
+    return false;
+  }
+
   virtual WebAudioSourceProvider* getAudioSourceProvider() { return nullptr; }
 
   virtual void setContentDecryptionModule(
@@ -242,6 +273,20 @@ class WebMediaPlayer {
   // Inform WebMediaPlayer when the element has entered/exited fullscreen.
   virtual void enteredFullscreen() {}
   virtual void exitedFullscreen() {}
+
+  // Inform WebMediaPlayer when the element starts/stops being the dominant
+  // visible content. This will only be called after the monitoring of the
+  // intersection with viewport is activated by calling
+  // WebMediaPlayerClient::activateViewportIntersectionMonitoring().
+  virtual void becameDominantVisibleContent(bool isDominant) {}
+
+  // Inform WebMediaPlayer when the element starts/stops being the effectively
+  // fullscreen video, i.e. being the fullscreen element or child of the
+  // fullscreen element, and being dominant in the viewport.
+  //
+  // TODO(zqzhang): merge with becameDominantVisibleContent(). See
+  // https://crbug.com/696211
+  virtual void setIsEffectivelyFullscreen(bool) {}
 
   virtual void enabledAudioTracksChanged(
       const WebVector<TrackId>& enabledTrackIds) {}

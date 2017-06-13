@@ -7,10 +7,10 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/frame/FrameConsole.h"
-#include "core/frame/FrameHost.h"
 #include "core/frame/LocalFrame.h"
 #include "core/inspector/ConsoleMessage.h"
-#include "core/workers/WorkerGlobalScope.h"
+#include "core/page/Page.h"
+#include "core/workers/WorkerOrWorkletGlobalScope.h"
 
 namespace {
 
@@ -19,6 +19,7 @@ enum Milestone {
   M57,
   M58,
   M59,
+  M60,
 };
 
 const char* milestoneString(Milestone milestone) {
@@ -34,6 +35,8 @@ const char* milestoneString(Milestone milestone) {
       return "M58, around April 2017";
     case M59:
       return "M59, around June 2017";
+    case M60:
+      return "M60, around August 2017";
   }
 
   ASSERT_NOT_REACHED();
@@ -98,14 +101,14 @@ bool Deprecation::isSuppressed(CSSPropertyID unresolvedProperty) {
 
 void Deprecation::warnOnDeprecatedProperties(const LocalFrame* frame,
                                              CSSPropertyID unresolvedProperty) {
-  FrameHost* host = frame ? frame->host() : nullptr;
-  if (!host || host->deprecation().m_muteCount ||
-      host->deprecation().isSuppressed(unresolvedProperty))
+  Page* page = frame ? frame->page() : nullptr;
+  if (!page || page->deprecation().m_muteCount ||
+      page->deprecation().isSuppressed(unresolvedProperty))
     return;
 
   String message = deprecationMessage(unresolvedProperty);
   if (!message.isEmpty()) {
-    host->deprecation().suppress(unresolvedProperty);
+    page->deprecation().suppress(unresolvedProperty);
     ConsoleMessage* consoleMessage = ConsoleMessage::create(
         DeprecationMessageSource, WarningMessageLevel, message);
     frame->console().addMessage(consoleMessage);
@@ -113,22 +116,37 @@ void Deprecation::warnOnDeprecatedProperties(const LocalFrame* frame,
 }
 
 String Deprecation::deprecationMessage(CSSPropertyID unresolvedProperty) {
-  // TODO: Add a switch here when there are properties that we intend to
-  // deprecate.
-  // Returning an empty string for now.
-  return emptyString();
+  switch (unresolvedProperty) {
+    case CSSPropertyAliasMotionOffset:
+      return replacedWillBeRemoved("motion-offset", "offset-distance", M58,
+                                   "6390764217040896");
+    case CSSPropertyAliasMotionRotation:
+      return replacedWillBeRemoved("motion-rotation", "offset-rotate", M58,
+                                   "6390764217040896");
+    case CSSPropertyAliasMotionPath:
+      return replacedWillBeRemoved("motion-path", "offset-path", M58,
+                                   "6390764217040896");
+    case CSSPropertyMotion:
+      return replacedWillBeRemoved("motion", "offset", M58, "6390764217040896");
+    case CSSPropertyOffsetRotation:
+      return replacedWillBeRemoved("offset-rotation", "offset-rotate", M58,
+                                   "6390764217040896");
+
+    default:
+      return emptyString;
+  }
 }
 
 void Deprecation::countDeprecation(const LocalFrame* frame,
                                    UseCounter::Feature feature) {
   if (!frame)
     return;
-  FrameHost* host = frame->host();
-  if (!host || host->deprecation().m_muteCount)
+  Page* page = frame->page();
+  if (!page || page->deprecation().m_muteCount)
     return;
 
-  if (!host->useCounter().hasRecordedMeasurement(feature)) {
-    host->useCounter().recordMeasurement(feature);
+  if (!page->useCounter().hasRecordedMeasurement(feature)) {
+    page->useCounter().recordMeasurement(feature);
     ASSERT(!deprecationMessage(feature).isEmpty());
     ConsoleMessage* consoleMessage =
         ConsoleMessage::create(DeprecationMessageSource, WarningMessageLevel,
@@ -145,22 +163,13 @@ void Deprecation::countDeprecation(ExecutionContext* context,
     Deprecation::countDeprecation(*toDocument(context), feature);
     return;
   }
-  if (context->isWorkerGlobalScope())
-    toWorkerGlobalScope(context)->countDeprecation(feature);
+  if (context->isWorkerOrWorkletGlobalScope())
+    toWorkerOrWorkletGlobalScope(context)->countDeprecation(feature);
 }
 
 void Deprecation::countDeprecation(const Document& document,
                                    UseCounter::Feature feature) {
   Deprecation::countDeprecation(document.frame(), feature);
-}
-
-void Deprecation::countDeprecationIfNotPrivateScript(
-    v8::Isolate* isolate,
-    ExecutionContext* context,
-    UseCounter::Feature feature) {
-  if (DOMWrapperWorld::current(isolate).isPrivateScriptIsolatedWorld())
-    return;
-  Deprecation::countDeprecation(context, feature);
 }
 
 void Deprecation::countDeprecationCrossOriginIframe(
@@ -224,42 +233,6 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
       return replacedBy("'HTMLVideoElement.webkitExitFullScreen()'",
                         "'Document.exitFullscreen()'");
 
-    case UseCounter::PrefixedIndexedDB:
-      return replacedWillBeRemoved("'webkitIndexedDB'", "'indexedDB'", M57,
-                                   "5775330191081472");
-
-    case UseCounter::PrefixedIDBCursorConstructor:
-      return replacedWillBeRemoved("'webkitIDBCursor'", "'IDBCursor'", M57,
-                                   "5775330191081472");
-
-    case UseCounter::PrefixedIDBDatabaseConstructor:
-      return replacedWillBeRemoved("'webkitIDBDatabase'", "'IDBDatabase'", M57,
-                                   "5775330191081472");
-
-    case UseCounter::PrefixedIDBFactoryConstructor:
-      return replacedWillBeRemoved("'webkitIDBFactory'", "'IDBFactory'", M57,
-                                   "5775330191081472");
-
-    case UseCounter::PrefixedIDBIndexConstructor:
-      return replacedWillBeRemoved("'webkitIDBIndex'", "'IDBIndex'", M57,
-                                   "5775330191081472");
-
-    case UseCounter::PrefixedIDBKeyRangeConstructor:
-      return replacedWillBeRemoved("'webkitIDBKeyRange'", "'IDBKeyRange'", M57,
-                                   "5775330191081472");
-
-    case UseCounter::PrefixedIDBObjectStoreConstructor:
-      return replacedWillBeRemoved("'webkitIDBObjectStore'", "'IDBObjectStore'",
-                                   M57, "5775330191081472");
-
-    case UseCounter::PrefixedIDBRequestConstructor:
-      return replacedWillBeRemoved("'webkitIDBRequest'", "'IDBRequest'", M57,
-                                   "5775330191081472");
-
-    case UseCounter::PrefixedIDBTransactionConstructor:
-      return replacedWillBeRemoved("'webkitIDBTransaction'", "'IDBTransaction'",
-                                   M57, "5775330191081472");
-
     case UseCounter::PrefixedRequestAnimationFrame:
       return "'webkitRequestAnimationFrame' is vendor-specific. Please use the "
              "standard 'requestAnimationFrame' instead.";
@@ -268,20 +241,9 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
       return "'webkitCancelAnimationFrame' is vendor-specific. Please use the "
              "standard 'cancelAnimationFrame' instead.";
 
-    case UseCounter::PrefixedCancelRequestAnimationFrame:
-      return replacedWillBeRemoved("webkitCancelRequestAnimationFrame",
-                                   "cancelAnimationFrame", M57,
-                                   "5588435494502400");
-
     case UseCounter::PictureSourceSrc:
       return "<source src> with a <picture> parent is invalid and therefore "
              "ignored. Please use <source srcset> instead.";
-
-    case UseCounter::RadioNameMatchingASCIICaseless:
-    case UseCounter::RadioNameMatchingCaseFolding:
-      return willBeRemoved(
-          "Case-insensitive matching for <input type=radio name=...>", M57,
-          "6165799291060224");
 
     case UseCounter::ConsoleTimeline:
       return replacedBy("'console.timeline'", "'console.time'");
@@ -301,14 +263,26 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
     case UseCounter::PrefixedWindowURL:
       return replacedBy("'webkitURL'", "'URL'");
 
-    case UseCounter::PrefixedAudioContext:
-      return replacedBy("'webkitAudioContext'", "'AudioContext'");
-
-    case UseCounter::PrefixedOfflineAudioContext:
-      return replacedBy("'webkitOfflineAudioContext'", "'OfflineAudioContext'");
-
     case UseCounter::RangeExpand:
       return replacedBy("'Range.expand()'", "'Selection.modify()'");
+
+    // Blocked subresource requests:
+    case UseCounter::LegacyProtocolEmbeddedAsSubresource:
+      return String::format(
+          "Subresource requests using legacy protocols (like `ftp:`) are "
+          "deprecated, and will be blocked in %s. Please deliver "
+          "web-accessible resources over modern protocols like HTTPS. "
+          "See https://www.chromestatus.com/feature/5709390967472128 for more "
+          "details.",
+          milestoneString(M59));
+
+    case UseCounter::RequestedSubresourceWithEmbeddedCredentials:
+      return String::format(
+          "Subresource requests whose URLs contain embedded credentials (e.g. "
+          "`https://user:pass@host/`) are deprecated, and will be blocked in "
+          "%s. See https://www.chromestatus.com/feature/5669008342777856 for "
+          "more details.",
+          milestoneString(M59));
 
     // Powerful features on insecure origins (https://goo.gl/rStTGz)
     case UseCounter::DeviceMotionInsecureOrigin:
@@ -350,14 +324,6 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
              "secure origin, such as HTTPS. See https://goo.gl/rStTGz for more "
              "details.";
 
-    case UseCounter::EncryptedMediaInsecureOrigin:
-      return String::format(
-          "Using requestMediaKeySystemAccess() on insecure origins is "
-          "deprecated and will be removed in %s. You should consider "
-          "switching your application to a secure origin, such as HTTPS. See "
-          "https://goo.gl/rStTGz for more details.",
-          milestoneString(M58));
-
     case UseCounter::MediaSourceAbortRemove:
       return "Using SourceBuffer.abort() to abort remove()'s asynchronous "
              "range removal is deprecated due to specification change. Support "
@@ -383,6 +349,16 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
              "switching your application to a secure origin, such as HTTPS. "
              "See https://goo.gl/rStTGz for more details.";
 
+    case UseCounter::NotificationInsecureOrigin:
+    case UseCounter::NotificationAPIInsecureOriginIframe:
+    case UseCounter::NotificationPermissionRequestedInsecureOrigin:
+      return String::format(
+          "Using the Notification API on insecure origins is "
+          "deprecated and will be removed in %s. You should consider "
+          "switching your application to a secure origin, such as HTTPS. See "
+          "https://goo.gl/rStTGz for more details.",
+          milestoneString(M60));
+
     case UseCounter::ElementCreateShadowRootMultiple:
       return "Calling Element.createShadowRoot() for an element which already "
              "hosts a shadow root is deprecated. See "
@@ -399,47 +375,72 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
              "https://www.chromestatus.com/features/6750456638341120 for more "
              "details.";
 
-    case UseCounter::PrefixedPerformanceClearResourceTimings:
-      return replacedBy("'Performance.webkitClearResourceTimings'",
-                        "'Performance.clearResourceTimings'");
-
-    case UseCounter::PrefixedPerformanceSetResourceTimingBufferSize:
-      return replacedBy("'Performance.webkitSetResourceTimingBufferSize'",
-                        "'Performance.setResourceTimingBufferSize'");
-
-    case UseCounter::PrefixedPerformanceResourceTimingBufferFull:
-      return replacedBy("'Performance.onwebkitresourcetimingbufferfull'",
-                        "'Performance.onresourcetimingbufferfull'");
-
-    case UseCounter::WebAnimationHyphenatedProperty:
-      return "Hyphenated property names in Web Animations keyframes are "
-             "invalid and therefore ignored. Please use camelCase instead.";
-
-    case UseCounter::HTMLKeygenElement:
-      return willBeRemoved("The <keygen> element", M57, "5716060992962560");
-
-    case UseCounter::EncryptedMediaAllSelectedContentTypesMissingCodecs:
-      return String::format(
-          "EME requires that contentType strings accepted by "
-          "requestMediaKeySystemAccess() include codecs. Non-standard support "
-          "for contentType strings without codecs will be removed in %s. "
-          "Please specify the desired codec(s) as part of the contentType.",
-          milestoneString(M58));
-
-    case UseCounter::EncryptedMediaCapabilityNotProvided:
-      return String::format(
-          "EME requires that one of 'audioCapabilities' and "
-          "'videoCapabilities' must be non-empty. Non-standard support for "
-          "this will be removed in %s. Please specify at least one valid "
-          "capability for 'audioCapabilities' or 'videoCapabilities'.",
-          milestoneString(M58));
-
     case UseCounter::VRDeprecatedFieldOfView:
       return replacedBy("VREyeParameters.fieldOfView",
                         "projection matrices provided by VRFrameData");
 
     case UseCounter::VRDeprecatedGetPose:
       return replacedBy("VRDisplay.getPose()", "VRDisplay.getFrameData()");
+
+    case UseCounter::
+        ServiceWorkerRespondToNavigationRequestWithRedirectedResponse:
+      return String::format(
+          "The service worker responded to the navigation request with a "
+          "redirected response. This will result in an error in %s.",
+          milestoneString(M59));
+
+    case UseCounter::CSSSelectorInternalMediaControlsCastButton:
+      return willBeRemoved("-internal-media-controls-cast-button selector", M59,
+                           "5734009183141888");
+
+    case UseCounter::CSSSelectorInternalMediaControlsOverlayCastButton:
+      return willBeRemoved(
+          "-internal-media-controls-overlay-cast-button selector", M59,
+          "5714245488476160");
+
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackList:
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackListItem:
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackListItemInput:
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackListKindCaptions:
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackListKindSubtitles:
+      return willBeRemoved(
+          "-internal-media-controls-text-track-list* selectors", M59,
+          "5661431349379072");
+
+    case UseCounter::FileReaderSyncInServiceWorker:
+      return willBeRemoved("FileReaderSync in service workers", M59,
+                           "5739144722513920");
+
+    case UseCounter::CSSZoomReset:
+      return willBeRemoved("\"zoom: reset\"", M59, "4997605029314560");
+
+    case UseCounter::CSSZoomDocument:
+      return willBeRemoved("\"zoom: document\"", M59, "4997605029314560");
+
+    case UseCounter::SelectionAddRangeIntersect:
+      return "The behavior that Selection.addRange() merges existing Range and "
+             "the specified Range was removed. See "
+             "https://www.chromestatus.com/features/6680566019653632 for more "
+             "details.";
+
+    case UseCounter::SubtleCryptoOnlyStrictSecureContextCheckFailed:
+      return String::format(
+          "Web Crypto API usage inside secure frames with non-secure ancestors "
+          "is deprecated. The API will no longer be exposed in these contexts "
+          "as of %s. See https://www.chromestatus.com/features/5030265697075200"
+          " for more details.", milestoneString(M59));
+
+    case UseCounter::RtcpMuxPolicyNegotiate:
+      return String::format(
+          "The rtcpMuxPolicy option is being considered for "
+          "removal and may be removed no earlier than %s. If you depend on it, "
+          "please see https://www.chromestatus.com/features/5654810086866944 "
+          "for more details.",
+          milestoneString(M60));
+
+    case UseCounter::V8IDBFactory_WebkitGetDatabaseNames_Method:
+      return willBeRemoved("indexedDB.webkitGetDatabaseNames()", M60,
+                           "5725741740195840");
 
     // Features that aren't deprecated don't have a deprecation message.
     default:

@@ -44,7 +44,7 @@ Profiler.CPUProfileView = class extends Profiler.ProfileView {
    */
   wasShown() {
     super.wasShown();
-    var lineLevelProfile = Components.LineLevelProfile.instance();
+    var lineLevelProfile = PerfUI.LineLevelProfile.instance();
     lineLevelProfile.reset();
     lineLevelProfile.appendCPUProfile(this.profile);
   }
@@ -66,7 +66,7 @@ Profiler.CPUProfileView = class extends Profiler.ProfileView {
 
   /**
    * @override
-   * @return {!UI.FlameChartDataProvider}
+   * @return {!PerfUI.FlameChartDataProvider}
    */
   createFlameChartDataProvider() {
     return new Profiler.CPUFlameChartDataProvider(this.profile, this._profileHeader.target());
@@ -159,7 +159,7 @@ Profiler.CPUProfileType = class extends Profiler.ProfileType {
       resolvedTitle = this._anonymousConsoleProfileIdToTitle[data.id];
       delete this._anonymousConsoleProfileIdToTitle[data.id];
     }
-    var profile = new Profiler.CPUProfileHeader(data.scriptLocation.target(), this, resolvedTitle);
+    var profile = new Profiler.CPUProfileHeader(data.scriptLocation.debuggerModel.target(), this, resolvedTitle);
     profile.setProtocolProfile(cpuProfile);
     this.addProfile(profile);
     this._addMessageToConsole(
@@ -174,9 +174,9 @@ Profiler.CPUProfileType = class extends Profiler.ProfileType {
    */
   _addMessageToConsole(type, scriptLocation, messageText) {
     var script = scriptLocation.script();
-    var target = scriptLocation.target();
+    var target = scriptLocation.debuggerModel.target();
     var message = new SDK.ConsoleMessage(
-        target, SDK.ConsoleMessage.MessageSource.ConsoleAPI, SDK.ConsoleMessage.MessageLevel.Debug, messageText, type,
+        target, SDK.ConsoleMessage.MessageSource.ConsoleAPI, SDK.ConsoleMessage.MessageLevel.Verbose, messageText, type,
         undefined, undefined, undefined, undefined, [{
           functionName: '',
           scriptId: scriptLocation.scriptId,
@@ -189,21 +189,22 @@ Profiler.CPUProfileType = class extends Profiler.ProfileType {
   }
 
   startRecordingProfile() {
-    var target = UI.context.flavor(SDK.Target);
-    if (this._profileBeingRecorded || !target)
+    var cpuProfilerModel = UI.context.flavor(SDK.CPUProfilerModel);
+    if (this.profileBeingRecorded() || !cpuProfilerModel)
       return;
-    var profile = new Profiler.CPUProfileHeader(target, this);
+    var profile = new Profiler.CPUProfileHeader(cpuProfilerModel.target(), this);
     this.setProfileBeingRecorded(profile);
     SDK.targetManager.suspendAllTargets();
     this.addProfile(profile);
     profile.updateStatus(Common.UIString('Recording\u2026'));
     this._recording = true;
-    target.cpuProfilerModel.startRecording();
+    cpuProfilerModel.startRecording();
+    Host.userMetrics.actionTaken(Host.UserMetrics.Action.ProfilesCPUProfileTaken);
   }
 
   stopRecordingProfile() {
     this._recording = false;
-    if (!this._profileBeingRecorded || !this._profileBeingRecorded.target())
+    if (!this.profileBeingRecorded() || !this.profileBeingRecorded().target())
       return;
 
     var recordedProfile;
@@ -213,12 +214,12 @@ Profiler.CPUProfileType = class extends Profiler.ProfileType {
      * @this {Profiler.CPUProfileType}
      */
     function didStopProfiling(profile) {
-      if (!this._profileBeingRecorded)
+      if (!this.profileBeingRecorded())
         return;
       console.assert(profile);
-      this._profileBeingRecorded.setProtocolProfile(profile);
-      this._profileBeingRecorded.updateStatus('');
-      recordedProfile = this._profileBeingRecorded;
+      this.profileBeingRecorded().setProtocolProfile(profile);
+      this.profileBeingRecorded().updateStatus('');
+      recordedProfile = this.profileBeingRecorded();
       this.setProfileBeingRecorded(null);
     }
 
@@ -229,8 +230,10 @@ Profiler.CPUProfileType = class extends Profiler.ProfileType {
       this.dispatchEventToListeners(Profiler.ProfileType.Events.ProfileComplete, recordedProfile);
     }
 
-    this._profileBeingRecorded.target()
-        .cpuProfilerModel.stopRecording()
+    this.profileBeingRecorded()
+        .target()
+        .model(SDK.CPUProfilerModel)
+        .stopRecording()
         .then(didStopProfiling.bind(this))
         .then(SDK.targetManager.resumeAllTargets.bind(SDK.targetManager))
         .then(fireEvent.bind(this));
@@ -332,13 +335,14 @@ Profiler.CPUFlameChartDataProvider = class extends Profiler.ProfileFlameChartDat
    * @param {?SDK.Target} target
    */
   constructor(cpuProfile, target) {
-    super(target);
+    super();
     this._cpuProfile = cpuProfile;
+    this._target = target;
   }
 
   /**
    * @override
-   * @return {!UI.FlameChart.TimelineData}
+   * @return {!PerfUI.FlameChart.TimelineData}
    */
   _calculateTimelineData() {
     /** @type {!Array.<?Profiler.CPUFlameChartDataProvider.ChartEntry>} */
@@ -373,7 +377,6 @@ Profiler.CPUFlameChartDataProvider = class extends Profiler.ProfileFlameChartDat
     var entryTotalTimes = new Float32Array(entries.length);
     var entrySelfTimes = new Float32Array(entries.length);
     var entryStartTimes = new Float64Array(entries.length);
-    var minimumBoundary = this.minimumBoundary();
 
     for (var i = 0; i < entries.length; ++i) {
       var entry = entries[i];
@@ -386,7 +389,7 @@ Profiler.CPUFlameChartDataProvider = class extends Profiler.ProfileFlameChartDat
 
     this._maxStackDepth = maxDepth;
 
-    this._timelineData = new UI.FlameChart.TimelineData(entryLevels, entryTotalTimes, entryStartTimes, null);
+    this._timelineData = new PerfUI.FlameChart.TimelineData(entryLevels, entryTotalTimes, entryStartTimes, null);
 
     /** @type {!Array<!SDK.CPUProfileNode>} */
     this._entryNodes = entryNodes;

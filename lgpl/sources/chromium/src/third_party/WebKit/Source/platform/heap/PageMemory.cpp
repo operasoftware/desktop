@@ -8,23 +8,22 @@
 #include "wtf/AddressSanitizer.h"
 #include "wtf/Assertions.h"
 #include "wtf/Atomics.h"
-#include "wtf/allocator/PageAllocator.h"
 
 namespace blink {
 
 void MemoryRegion::release() {
-  WTF::freePages(m_base, m_size);
+  WTF::FreePages(m_base, m_size);
 }
 
 bool MemoryRegion::commit() {
-  WTF::recommitSystemPages(m_base, m_size);
-  return WTF::setSystemPagesAccessible(m_base, m_size);
+  WTF::RecommitSystemPages(m_base, m_size);
+  return WTF::SetSystemPagesAccessible(m_base, m_size);
 }
 
 void MemoryRegion::decommit() {
   ASAN_UNPOISON_MEMORY_REGION(m_base, m_size);
-  WTF::decommitSystemPages(m_base, m_size);
-  WTF::setSystemPagesInaccessible(m_base, m_size);
+  WTF::DecommitSystemPages(m_base, m_size);
+  WTF::SetSystemPagesInaccessible(m_base, m_size);
 }
 
 PageMemoryRegion::PageMemoryRegion(Address base,
@@ -66,14 +65,13 @@ PageMemoryRegion* PageMemoryRegion::allocate(size_t size,
   size = (size + WTF::kPageAllocationGranularityOffsetMask) &
          WTF::kPageAllocationGranularityBaseMask;
   Address base = static_cast<Address>(
-      WTF::allocPages(nullptr, size, blinkPageSize, WTF::PageInaccessible));
+      WTF::AllocPages(nullptr, size, blinkPageSize, WTF::PageInaccessible));
   if (!base)
     blinkGCOutOfMemory();
   return new PageMemoryRegion(base, size, numPages, regionTree);
 }
 
 PageMemoryRegion* RegionTree::lookup(Address address) {
-  MutexLocker locker(m_mutex);
   RegionTreeNode* current = m_root;
   while (current) {
     Address base = current->m_region->base();
@@ -94,7 +92,6 @@ PageMemoryRegion* RegionTree::lookup(Address address) {
 void RegionTree::add(PageMemoryRegion* region) {
   ASSERT(region);
   RegionTreeNode* newTree = new RegionTreeNode(region);
-  MutexLocker locker(m_mutex);
   newTree->addTo(&m_root);
 }
 
@@ -109,11 +106,6 @@ void RegionTreeNode::addTo(RegionTreeNode** context) {
 }
 
 void RegionTree::remove(PageMemoryRegion* region) {
-  // Deletion of large objects (and thus their regions) can happen
-  // concurrently on sweeper threads.  Removal can also happen during thread
-  // shutdown, but that case is safe.  Regardless, we make all removals
-  // mutually exclusive.
-  MutexLocker locker(m_mutex);
   ASSERT(region);
   ASSERT(m_root);
   Address base = region->base();

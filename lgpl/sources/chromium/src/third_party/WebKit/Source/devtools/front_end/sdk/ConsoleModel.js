@@ -34,10 +34,9 @@
 SDK.ConsoleModel = class extends SDK.SDKModel {
   /**
    * @param {!SDK.Target} target
-   * @param {?Protocol.LogAgent} logAgent
    */
-  constructor(target, logAgent) {
-    super(SDK.ConsoleModel, target);
+  constructor(target) {
+    super(target);
 
     /** @type {!Array.<!SDK.ConsoleMessage>} */
     this._messages = [];
@@ -45,16 +44,17 @@ SDK.ConsoleModel = class extends SDK.SDKModel {
     this._messageByExceptionId = new Map();
     this._warnings = 0;
     this._errors = 0;
-    this._revokedErrors = 0;
-    this._logAgent = logAgent;
+    /** @type {?Protocol.LogAgent} */
+    this._logAgent = target.hasLogCapability() ? target.logAgent() : null;
     if (this._logAgent) {
       target.registerLogDispatcher(new SDK.LogDispatcher(this));
       this._logAgent.enable();
-      if (!InspectorFrontendHost.isUnderTest()) {
+      if (!Host.isUnderTest()) {
         this._logAgent.startViolationsReport([
           {name: 'longTask', threshold: 200}, {name: 'longLayout', threshold: 30},
           {name: 'blockedEvent', threshold: 100}, {name: 'blockedParser', threshold: -1},
-          {name: 'handler', threshold: 150}, {name: 'recurringHandler', threshold: 50}
+          {name: 'handler', threshold: 150}, {name: 'recurringHandler', threshold: 50},
+          {name: 'discouragedAPIUse', threshold: -1}
         ]);
       }
     }
@@ -63,7 +63,7 @@ SDK.ConsoleModel = class extends SDK.SDKModel {
   /**
    * @param {!SDK.ExecutionContext} executionContext
    * @param {string} text
-   * @param {boolean=} useCommandLineAPI
+   * @param {boolean} useCommandLineAPI
    */
   static evaluateCommandInConsole(executionContext, text, useCommandLineAPI) {
     var target = executionContext.target();
@@ -116,7 +116,7 @@ SDK.ConsoleModel = class extends SDK.SDKModel {
     if (looksLikeAnObjectLiteral(text))
       text = '(' + text + ')';
 
-    executionContext.evaluate(text, 'console', !!useCommandLineAPI, false, false, true, true, printResult);
+    executionContext.evaluate(text, 'console', useCommandLineAPI, false, false, true, true, printResult);
     Host.userMetrics.actionTaken(Host.UserMetrics.Action.ConsoleEvaluated);
   }
 
@@ -124,32 +124,29 @@ SDK.ConsoleModel = class extends SDK.SDKModel {
    * @param {!SDK.ConsoleMessage} msg
    */
   addMessage(msg) {
-    if (this._isBlacklisted(msg))
-      return;
-
-    if (msg.source === SDK.ConsoleMessage.MessageSource.Worker && msg.target().subTargetsManager &&
-        msg.target().subTargetsManager.targetForId(msg.workerId))
+    if (msg.source === SDK.ConsoleMessage.MessageSource.Worker && SDK.targetManager.targetById(msg.workerId))
       return;
 
     if (msg.source === SDK.ConsoleMessage.MessageSource.ConsoleAPI && msg.type === SDK.ConsoleMessage.MessageType.Clear)
       this.clear();
-
-    if (msg.level === SDK.ConsoleMessage.MessageLevel.RevokedError && msg._revokedExceptionId) {
-      var exceptionMessage = this._messageByExceptionId.get(msg._revokedExceptionId);
-      if (!exceptionMessage)
-        return;
-      this._errors--;
-      this._revokedErrors++;
-      exceptionMessage.level = SDK.ConsoleMessage.MessageLevel.RevokedError;
-      this.dispatchEventToListeners(SDK.ConsoleModel.Events.MessageUpdated, exceptionMessage);
-      return;
-    }
 
     this._messages.push(msg);
     if (msg._exceptionId)
       this._messageByExceptionId.set(msg._exceptionId, msg);
     this._incrementErrorWarningCount(msg);
     this.dispatchEventToListeners(SDK.ConsoleModel.Events.MessageAdded, msg);
+  }
+
+  /**
+   * @param {number} exceptionId
+   */
+  revokeException(exceptionId) {
+    var exceptionMessage = this._messageByExceptionId.get(exceptionId);
+    if (!exceptionMessage)
+      return;
+    this._errors--;
+    exceptionMessage.level = SDK.ConsoleMessage.MessageLevel.Info;
+    this.dispatchEventToListeners(SDK.ConsoleModel.Events.MessageUpdated, exceptionMessage);
   }
 
   /**
@@ -165,32 +162,7 @@ SDK.ConsoleModel = class extends SDK.SDKModel {
       case SDK.ConsoleMessage.MessageLevel.Error:
         this._errors++;
         break;
-      case SDK.ConsoleMessage.MessageLevel.RevokedError:
-        this._revokedErrors++;
-        break;
     }
-  }
-
-  /**
-   * @param {!SDK.ConsoleMessage} msg
-   * @return {boolean}
-   */
-  _isBlacklisted(msg) {
-    if (msg.source !== SDK.ConsoleMessage.MessageSource.Network ||
-        msg.level !== SDK.ConsoleMessage.MessageLevel.Error || !msg.url || !msg.url.startsWith('chrome-extension'))
-      return false;
-
-    // ignore Chromecast's cast_sender spam
-    if (msg.url.includes('://boadgeojelhgndaghljhdicfkmllpafd') ||
-        msg.url.includes('://dliochdbjfkdbacpmhlcpmleaejidimm') ||
-        msg.url.includes('://pkedcjkdefgpdelpbcmbmeomcjbeemfm') ||
-        msg.url.includes('://fjhoaacokmgbjemoflkofnenfaiekifl') ||
-        msg.url.includes('://fmfcbgogabcbclcofgocippekhfcmgfj') ||
-        msg.url.includes('://enhhojjnijigcajfphajepfemndkmdlo') ||
-        msg.url.includes('://ekpaaapppgpmolpcldedioblbkmijaca'))
-      return true;
-
-    return false;
   }
 
   /**
@@ -209,7 +181,6 @@ SDK.ConsoleModel = class extends SDK.SDKModel {
     this._messages = [];
     this._messageByExceptionId.clear();
     this._errors = 0;
-    this._revokedErrors = 0;
     this._warnings = 0;
     this.dispatchEventToListeners(SDK.ConsoleModel.Events.ConsoleCleared);
   }
@@ -224,17 +195,12 @@ SDK.ConsoleModel = class extends SDK.SDKModel {
   /**
    * @return {number}
    */
-  revokedErrors() {
-    return this._revokedErrors;
-  }
-
-  /**
-   * @return {number}
-   */
   warnings() {
     return this._warnings;
   }
 };
+
+SDK.SDKModel.register(SDK.ConsoleModel, SDK.Target.Capability.None);
 
 /** @enum {symbol} */
 SDK.ConsoleModel.Events = {
@@ -284,7 +250,7 @@ SDK.ConsoleMessage = class {
       workerId) {
     this._target = target;
     this.source = source;
-    this.level = level;
+    this.level = /** @type {?SDK.ConsoleMessage.MessageLevel} */ (level);
     this.messageText = messageText;
     this.type = type || SDK.ConsoleMessage.MessageType.Log;
     /** @type {string|undefined} */
@@ -388,13 +354,6 @@ SDK.ConsoleMessage = class {
   }
 
   /**
-   * @param {number} revokedExceptionId
-   */
-  setRevokedExceptionId(revokedExceptionId) {
-    this._revokedExceptionId = revokedExceptionId;
-  }
-
-  /**
    * @return {?SDK.ConsoleMessage}
    */
   originatingMessage() {
@@ -436,8 +395,6 @@ SDK.ConsoleMessage = class {
 
     if (this._exceptionId || msg._exceptionId)
       return false;
-    if (this._revokedExceptionId || msg._revokedExceptionId)
-      return false;
 
     if (!this._isEqualStackTraces(this.stackTrace, msg.stackTrace))
       return false;
@@ -457,7 +414,7 @@ SDK.ConsoleMessage = class {
     return (this.target() === msg.target()) && (this.source === msg.source) && (this.type === msg.type) &&
         (this.level === msg.level) && (this.line === msg.line) && (this.url === msg.url) &&
         (this.messageText === msg.messageText) && (this.request === msg.request) &&
-        (this.executionContextId === msg.executionContextId) && (this.scriptId === msg.scriptId);
+        (this.executionContextId === msg.executionContextId);
   }
 
   /**
@@ -498,10 +455,11 @@ SDK.ConsoleMessage.MessageSource = {
   Rendering: 'rendering',
   CSS: 'css',
   Security: 'security',
-  Violation: 'violation',
-  Other: 'other',
   Deprecation: 'deprecation',
-  Worker: 'worker'
+  Worker: 'worker',
+  Violation: 'violation',
+  Intervention: 'intervention',
+  Other: 'other'
 };
 
 /**
@@ -532,14 +490,25 @@ SDK.ConsoleMessage.MessageType = {
  * @enum {string}
  */
 SDK.ConsoleMessage.MessageLevel = {
-  Log: 'log',
+  Verbose: 'verbose',
   Info: 'info',
   Warning: 'warning',
-  Error: 'error',
-  Debug: 'debug',
-  RevokedError: 'revokedError'  // This is frontend-only level, used to put exceptions to console.
+  Error: 'error'
 };
 
+/**
+ * @param {!SDK.ConsoleMessage.MessageLevel} level
+ * @return {number}
+ */
+SDK.ConsoleMessage.MessageLevel.ordinal = function(level) {
+  if (level === SDK.ConsoleMessage.MessageLevel.Verbose)
+    return 0;
+  if (level === SDK.ConsoleMessage.MessageLevel.Info)
+    return 1;
+  if (level === SDK.ConsoleMessage.MessageLevel.Warning)
+    return 2;
+  return 3;
+};
 
 /**
  * @implements {Protocol.LogDispatcher}

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
- * Copyright (C) 2014 Opera Software ASA. All rights reserved.
+ * Copyright (C) 2014 Opera Software AS. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -32,17 +32,15 @@
 #ifndef WebPluginContainerImpl_h
 #define WebPluginContainerImpl_h
 
-#include "core/frame/DOMWindowProperty.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "core/plugins/PluginView.h"
-#include "platform/Widget.h"
+#include "platform/FrameViewBase.h"
 #include "public/web/WebPluginContainer.h"
 #include "web/WebExport.h"
 #include "wtf/Compiler.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
-
-struct NPObject;
 
 namespace blink {
 
@@ -57,14 +55,13 @@ class ResourceResponse;
 class TouchEvent;
 class WebPlugin;
 class WheelEvent;
-class Widget;
 struct WebPrintParams;
 struct WebPrintPresetOptions;
 
 class WEB_EXPORT WebPluginContainerImpl final
     : public PluginView,
-      WTF_NON_EXPORTED_BASE(public WebPluginContainer),
-      public DOMWindowProperty {
+      NON_EXPORTED_BASE(public WebPluginContainer),
+      public ContextClient {
   USING_GARBAGE_COLLECTED_MIXIN(WebPluginContainerImpl);
   USING_PRE_FINALIZER(WebPluginContainerImpl, dispose);
 
@@ -84,7 +81,7 @@ class WEB_EXPORT WebPluginContainerImpl final
   void updateAllLifecyclePhases() override;
   void invalidatePaintIfNeeded() override { issuePaintInvalidations(); }
 
-  // Widget methods
+  // FrameViewBase methods
   void setFrameRect(const IntRect&) override;
   void paint(GraphicsContext&, const CullRect&) const override;
   void invalidateRect(const IntRect&) override;
@@ -224,11 +221,11 @@ class WEB_EXPORT WebPluginContainerImpl final
 };
 
 DEFINE_TYPE_CASTS(WebPluginContainerImpl,
-                  Widget,
-                  widget,
-                  widget->isPluginContainer(),
-                  widget.isPluginContainer());
-// Unlike Widget, we need not worry about object type for container.
+                  FrameViewBase,
+                  frameViewBase,
+                  frameViewBase->isPluginContainer(),
+                  frameViewBase.isPluginContainer());
+// Unlike FrameViewBase, we need not worry about object type for container.
 // WebPluginContainerImpl is the only subclass of WebPluginContainer.
 DEFINE_TYPE_CASTS(WebPluginContainerImpl,
                   WebPluginContainer,

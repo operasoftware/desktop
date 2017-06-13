@@ -30,7 +30,7 @@
 
 #include "web/ContextMenuClientImpl.h"
 
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/CSSPropertyNames.h"
 #include "core/HTMLNames.h"
 #include "core/InputTypeNames.h"
@@ -59,7 +59,7 @@
 #include "core/page/ContextMenuController.h"
 #include "core/page/Page.h"
 #include "platform/ContextMenu.h"
-#include "platform/Widget.h"
+#include "platform/FrameViewBase.h"
 #include "platform/exported/WrappedResourceResponse.h"
 #include "platform/text/TextBreakIterator.h"
 #include "platform/weborigin/KURL.h"
@@ -93,9 +93,10 @@ static WebURL urlFromFrame(LocalFrame* frame) {
     DocumentLoader* dl = frame->loader().documentLoader();
     if (dl) {
       WebDataSource* ds = WebDataSourceImpl::fromDocumentLoader(dl);
-      if (ds)
+      if (ds) {
         return ds->hasUnreachableURL() ? ds->unreachableURL()
-                                       : ds->request().url();
+                                       : ds->getRequest().url();
+      }
     }
   }
   return WebURL();
@@ -106,9 +107,9 @@ static bool IsWhiteSpaceOrPunctuation(UChar c) {
 }
 
 static String selectMisspellingAsync(LocalFrame* selectedFrame,
-                                     String& description,
-                                     uint32_t& hash) {
-  VisibleSelection selection = selectedFrame->selection().selection();
+                                     String& description) {
+  VisibleSelection selection =
+      selectedFrame->selection().computeVisibleSelectionInDOMTreeDeprecated();
   if (selection.isNone())
     return String();
 
@@ -120,7 +121,6 @@ static String selectMisspellingAsync(LocalFrame* selectedFrame,
   if (markers.size() != 1)
     return String();
   description = markers[0]->description();
-  hash = markers[0]->hash();
 
   // Cloning a range fails only for invalid ranges.
   Range* markerRange = selectionRange->cloneRange();
@@ -137,7 +137,7 @@ static String selectMisspellingAsync(LocalFrame* selectedFrame,
 
 bool ContextMenuClientImpl::shouldShowContextMenuFromTouch(
     const WebContextMenuData& data) {
-  return m_webView->page()->settings().alwaysShowContextMenuOnTouch() ||
+  return m_webView->page()->settings().getAlwaysShowContextMenuOnTouch() ||
          !data.linkURL.isEmpty() ||
          data.mediaType == WebContextMenuData::MediaTypeImage ||
          data.mediaType == WebContextMenuData::MediaTypeVideo ||
@@ -250,10 +250,11 @@ bool ContextMenuClientImpl::showContextMenu(const ContextMenu* defaultMenu,
              isHTMLEmbedElement(*r.innerNode())) {
     LayoutObject* object = r.innerNode()->layoutObject();
     if (object && object->isLayoutPart()) {
-      Widget* widget = toLayoutPart(object)->widget();
-      if (widget && widget->isPluginContainer()) {
+      FrameViewBase* frameViewBase = toLayoutPart(object)->widget();
+      if (frameViewBase && frameViewBase->isPluginContainer()) {
         data.mediaType = WebContextMenuData::MediaTypePlugin;
-        WebPluginContainerImpl* plugin = toWebPluginContainerImpl(widget);
+        WebPluginContainerImpl* plugin =
+            toWebPluginContainerImpl(frameViewBase);
         WebString text = plugin->plugin()->selectionAsText();
         if (!text.isEmpty()) {
           data.selectedText = text;
@@ -318,17 +319,14 @@ bool ContextMenuClientImpl::showContextMenu(const ContextMenu* defaultMenu,
     // user right-clicks a mouse on a word, Chrome just needs to find a
     // spelling marker on the word instead of spellchecking it.
     String description;
-    uint32_t hash = 0;
-    data.misspelledWord =
-        selectMisspellingAsync(selectedFrame, description, hash);
-    data.misspellingHash = hash;
+    data.misspelledWord = selectMisspellingAsync(selectedFrame, description);
     if (description.length()) {
       Vector<String> suggestions;
       description.split('\n', suggestions);
       data.dictionarySuggestions = suggestions;
     } else if (m_webView->spellCheckClient()) {
       int misspelledOffset, misspelledLength;
-      m_webView->spellCheckClient()->spellCheck(
+      m_webView->spellCheckClient()->checkSpelling(
           data.misspelledWord, misspelledOffset, misspelledLength,
           &data.dictionarySuggestions);
     }
@@ -443,7 +441,7 @@ static void populateSubMenuItems(const Vector<ContextMenuItem>& inputMenu,
                              outputItem.subMenuItems);
         break;
     }
-    subItems.append(outputItem);
+    subItems.push_back(outputItem);
   }
 
   WebVector<WebMenuItemInfo> outputItems(subItems.size());

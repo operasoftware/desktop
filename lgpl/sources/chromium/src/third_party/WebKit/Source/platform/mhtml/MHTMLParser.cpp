@@ -60,7 +60,7 @@ class MIMEHeader : public GarbageCollectedFinalized<MIMEHeader> {
   static MIMEHeader* parseHeader(SharedBufferChunkReader* crLFLineReader);
 
   bool isMultipart() const {
-    return m_contentType.startsWith("multipart/", TextCaseInsensitive);
+    return m_contentType.startsWith("multipart/", TextCaseASCIIInsensitive);
   }
 
   String contentType() const { return m_contentType; }
@@ -110,7 +110,7 @@ static KeyValueMap retrieveKeyValuePairs(SharedBufferChunkReader* buffer) {
       if (keyValuePairs.find(key) != keyValuePairs.end())
         DVLOG(1) << "Key duplicate found in MIME header. Key is '" << key
                  << "', previous value replaced.";
-      keyValuePairs.add(key, value.toString().stripWhiteSpace());
+      keyValuePairs.insert(key, value.toString().stripWhiteSpace());
       key = String();
       value.clear();
     }
@@ -134,7 +134,8 @@ MIMEHeader* MIMEHeader::parseHeader(SharedBufferChunkReader* buffer) {
   KeyValueMap::iterator mimeParametersIterator =
       keyValuePairs.find("content-type");
   if (mimeParametersIterator != keyValuePairs.end()) {
-    ParsedContentType parsedContentType(mimeParametersIterator->value);
+    ParsedContentType parsedContentType(mimeParametersIterator->value,
+                                        ParsedContentType::Mode::Relaxed);
     mimeHeader->m_contentType = parsedContentType.mimeType();
     if (!mimeHeader->isMultipart()) {
       mimeHeader->m_charset = parsedContentType.charset().stripWhiteSpace();
@@ -226,7 +227,7 @@ bool MHTMLParser::parseArchiveWithHeader(
         parseNextPart(*header, String(), String(), endOfArchiveReached);
     if (!resource)
       return false;
-    resources.append(resource);
+    resources.push_back(resource);
     return true;
   }
 
@@ -258,7 +259,7 @@ bool MHTMLParser::parseArchiveWithHeader(
       DVLOG(1) << "Failed to parse MHTML part.";
       return false;
     }
-    resources.append(resource);
+    resources.push_back(resource);
   }
   return true;
 }

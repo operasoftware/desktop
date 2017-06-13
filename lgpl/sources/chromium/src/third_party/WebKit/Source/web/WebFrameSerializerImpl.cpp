@@ -324,7 +324,7 @@ void WebFrameSerializerImpl::openTagToString(Element* element,
     // Rewrite the attribute value if requested.
     if (element->hasLegalLinkAttribute(attrName)) {
       // For links start with "javascript:", we do not change it.
-      if (!attrValue.startsWith("javascript:", TextCaseInsensitive)) {
+      if (!attrValue.startsWith("javascript:", TextCaseASCIIInsensitive)) {
         // Get the absolute link.
         KURL completeURL = param->document->completeURL(attrValue);
 
@@ -385,7 +385,7 @@ void WebFrameSerializerImpl::endTagToString(Element* element,
       result.append('>');
       // FIXME: This code is horribly wrong.  WebFrameSerializerImpl must die.
       if (!element->isHTMLElement() ||
-          !toHTMLElement(element)->ieForbidsInsertHTML()) {
+          toHTMLElement(element)->shouldSerializeEndTag()) {
         // We need to write end tag when it is required.
         result.append("</");
         result.append(element->nodeName().lower());

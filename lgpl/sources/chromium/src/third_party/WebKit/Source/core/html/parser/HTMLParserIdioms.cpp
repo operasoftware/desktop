@@ -329,7 +329,7 @@ static Vector<double> parseHTMLListOfFloatingPointNumbersInternal(
     size_t parsedLength = 0;
     double number = charactersToDouble(
         unparsedNumberStart, position - unparsedNumberStart, parsedLength);
-    numbers.append(checkDoubleValue(number, parsedLength != 0, 0));
+    numbers.push_back(checkDoubleValue(number, parsedLength != 0, 0));
 
     skipWhile<CharacterType, isSpaceOrDelimiter>(position, end);
   }
@@ -349,12 +349,13 @@ Vector<double> parseHTMLListOfFloatingPointNumbers(const String& input) {
 static const char charsetString[] = "charset";
 static const size_t charsetLength = sizeof("charset") - 1;
 
+// https://html.spec.whatwg.org/multipage/infrastructure.html#extracting-character-encodings-from-meta-elements
 String extractCharset(const String& value) {
   size_t pos = 0;
   unsigned length = value.length();
 
   while (pos < length) {
-    pos = value.find(charsetString, pos, TextCaseInsensitive);
+    pos = value.find(charsetString, pos, TextCaseASCIIInsensitive);
     if (pos == kNotFound)
       break;
 
@@ -397,7 +398,7 @@ String extractCharset(const String& value) {
   return "";
 }
 
-enum Mode {
+enum class MetaAttribute {
   None,
   Charset,
   Pragma,
@@ -406,7 +407,7 @@ enum Mode {
 WTF::TextEncoding encodingFromMetaAttributes(
     const HTMLAttributeList& attributes) {
   bool gotPragma = false;
-  Mode mode = None;
+  MetaAttribute mode = MetaAttribute::None;
   String charset;
 
   for (const auto& htmlAttribute : attributes) {
@@ -419,16 +420,17 @@ WTF::TextEncoding encodingFromMetaAttributes(
     } else if (charset.isEmpty()) {
       if (threadSafeMatch(attributeName, charsetAttr)) {
         charset = attributeValue;
-        mode = Charset;
+        mode = MetaAttribute::Charset;
       } else if (threadSafeMatch(attributeName, contentAttr)) {
         charset = extractCharset(attributeValue);
         if (charset.length())
-          mode = Pragma;
+          mode = MetaAttribute::Pragma;
       }
     }
   }
 
-  if (mode == Charset || (mode == Pragma && gotPragma))
+  if (mode == MetaAttribute::Charset ||
+      (mode == MetaAttribute::Pragma && gotPragma))
     return WTF::TextEncoding(stripLeadingAndTrailingHTMLSpaces(charset));
 
   return WTF::TextEncoding();

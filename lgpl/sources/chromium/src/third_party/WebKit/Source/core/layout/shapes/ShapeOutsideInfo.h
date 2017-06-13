@@ -31,7 +31,6 @@
 #define ShapeOutsideInfo_h
 
 #include "core/layout/shapes/Shape.h"
-#include "core/style/ComputedStyle.h"
 #include "core/style/ShapeValue.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/LayoutSize.h"
@@ -121,7 +120,7 @@ class ShapeOutsideInfo final {
 
   static std::unique_ptr<ShapeOutsideInfo> createInfo(
       const LayoutBox& layoutBox) {
-    return wrapUnique(new ShapeOutsideInfo(layoutBox));
+    return WTF::wrapUnique(new ShapeOutsideInfo(layoutBox));
   }
   static bool isEnabledFor(const LayoutBox&);
 
@@ -133,15 +132,15 @@ class ShapeOutsideInfo final {
 
   static ShapeOutsideInfo& ensureInfo(const LayoutBox& key) {
     InfoMap& infoMap = ShapeOutsideInfo::infoMap();
-    if (ShapeOutsideInfo* info = infoMap.get(&key))
+    if (ShapeOutsideInfo* info = infoMap.at(&key))
       return *info;
     InfoMap::AddResult result =
-        infoMap.add(&key, ShapeOutsideInfo::createInfo(key));
+        infoMap.insert(&key, ShapeOutsideInfo::createInfo(key));
     return *result.storedValue->value;
   }
-  static void removeInfo(const LayoutBox& key) { infoMap().remove(&key); }
+  static void removeInfo(const LayoutBox& key) { infoMap().erase(&key); }
   static ShapeOutsideInfo* info(const LayoutBox& key) {
-    return infoMap().get(&key);
+    return infoMap().at(&key);
   }
 
   void markShapeAsDirty() { m_shape.reset(); }

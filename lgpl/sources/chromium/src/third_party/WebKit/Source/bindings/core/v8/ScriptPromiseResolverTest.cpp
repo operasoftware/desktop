@@ -4,6 +4,8 @@
 
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 
+#include <memory>
+
 #include "bindings/core/v8/ScriptFunction.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/V8Binding.h"
@@ -11,8 +13,7 @@
 #include "core/dom/Document.h"
 #include "core/testing/DummyPageHolder.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <memory>
-#include <v8.h>
+#include "v8/include/v8.h"
 
 namespace blink {
 
@@ -61,7 +62,7 @@ class ScriptPromiseResolverTest : public ::testing::Test {
 };
 
 TEST_F(ScriptPromiseResolverTest, construct) {
-  ASSERT_FALSE(getExecutionContext()->activeDOMObjectsAreStopped());
+  ASSERT_FALSE(getExecutionContext()->isContextDestroyed());
   ScriptState::Scope scope(getScriptState());
   ScriptPromiseResolver::create(getScriptState());
 }
@@ -281,7 +282,7 @@ TEST_F(ScriptPromiseResolverTest, suspend) {
       BlinkGC::NoHeapPointersOnStack, BlinkGC::GCWithSweep, BlinkGC::ForcedGC);
   ASSERT_TRUE(ScriptPromiseResolverKeepAlive::isAlive());
 
-  getExecutionContext()->suspendActiveDOMObjects();
+  getExecutionContext()->suspendSuspendableObjects();
   resolver->resolve("hello");
   ThreadState::current()->collectGarbage(
       BlinkGC::NoHeapPointersOnStack, BlinkGC::GCWithSweep, BlinkGC::ForcedGC);

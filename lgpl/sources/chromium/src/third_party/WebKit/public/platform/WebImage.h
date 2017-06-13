@@ -71,7 +71,8 @@ class WebImage {
   // Returns a list of all frames in the image. Only the first frame at each
   // pixel size will be returned.
   BLINK_PLATFORM_EXPORT static WebVector<WebImage> framesFromData(
-      const WebData&);
+      const WebData&,
+      bool allowSVG);
 
   BLINK_PLATFORM_EXPORT void reset();
   BLINK_PLATFORM_EXPORT void assign(const WebImage&);

@@ -45,7 +45,7 @@ TAGS
 /build-aux/texinfo.tex
 
 # /build-aux/snippet/
-/build-aux/snippet/
+#/build-aux/snippet/
 
 # /contrib/
 /contrib/liblouis.elc
@@ -172,3 +172,4 @@ TAGS
 /tools/lou_trace
 /tools/lou_translate
 /tools/*.exe
+

@@ -9,44 +9,37 @@
 SDK.TracingManagerClient = function() {};
 
 SDK.TracingManagerClient.prototype = {
-  tracingStarted: function() {},
   /**
    * @param {!Array.<!SDK.TracingManager.EventPayload>} events
    */
-  traceEventsCollected: function(events) {},
-  tracingComplete: function() {},
+  traceEventsCollected(events) {},
+  tracingComplete() {},
   /**
    * @param {number} usage
    */
-  tracingBufferUsage: function(usage) {},
+  tracingBufferUsage(usage) {},
   /**
    * @param {number} progress
    */
-  eventsRetrievalProgress: function(progress) {}
+  eventsRetrievalProgress(progress) {}
 };
 
 /**
  * @unrestricted
  */
-SDK.TracingManager = class {
+SDK.TracingManager = class extends SDK.SDKModel {
   /**
    * @param {!SDK.Target} target
    */
   constructor(target) {
-    this._target = target;
+    super(target);
+    this._tracingAgent = target.tracingAgent();
     target.registerTracingDispatcher(new SDK.TracingDispatcher(this));
 
     /** @type {?SDK.TracingManagerClient} */
     this._activeClient = null;
     this._eventBufferSize = 0;
     this._eventsRetrieved = 0;
-  }
-
-  /**
-   * @return {?SDK.Target}
-   */
-  target() {
-    return this._target;
   }
 
   /**
@@ -84,17 +77,15 @@ SDK.TracingManager = class {
    * @param {!SDK.TracingManagerClient} client
    * @param {string} categoryFilter
    * @param {string} options
-   * @param {function(?string)=} callback
+   * @return {!Promise}
    */
-  start(client, categoryFilter, options, callback) {
+  start(client, categoryFilter, options) {
     if (this._activeClient)
       throw new Error('Tracing is already started');
     var bufferUsageReportingIntervalMs = 500;
     this._activeClient = client;
-    this._target.tracingAgent().start(
-        categoryFilter, options, bufferUsageReportingIntervalMs, SDK.TracingManager.TransferMode.ReportEvents,
-        callback);
-    this._activeClient.tracingStarted();
+    return this._tracingAgent.start(
+        categoryFilter, options, bufferUsageReportingIntervalMs, SDK.TracingManager.TransferMode.ReportEvents);
   }
 
   stop() {
@@ -103,9 +94,11 @@ SDK.TracingManager = class {
     if (this._finishing)
       throw new Error('Tracing is already being stopped');
     this._finishing = true;
-    this._target.tracingAgent().end();
+    this._tracingAgent.end();
   }
 };
+
+SDK.SDKModel.register(SDK.TracingManager, SDK.Target.Capability.Tracing);
 
 /** @typedef {!{
         cat: string,

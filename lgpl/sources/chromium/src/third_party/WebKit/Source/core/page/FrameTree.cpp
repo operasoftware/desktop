@@ -107,6 +107,7 @@ void FrameTree::setPrecalculatedName(const AtomicString& name,
   m_uniqueName = uniqueName;
 }
 
+DISABLE_CFI_PERF
 Frame* FrameTree::parent() const {
   if (!m_thisFrame->client())
     return nullptr;
@@ -115,7 +116,7 @@ Frame* FrameTree::parent() const {
 
 Frame* FrameTree::top() const {
   // FIXME: top() should never return null, so here are some hacks to deal
-  // with EmptyFrameLoaderClient and cases where the frame is detached
+  // with EmptyLocalFrameClient and cases where the frame is detached
   // already...
   if (!m_thisFrame->client())
     return m_thisFrame;
@@ -176,7 +177,7 @@ String FrameTree::generateUniqueNameCandidate(bool existingChildFrame) const {
   for (frame = m_thisFrame; frame; frame = frame->tree().parent()) {
     if (frame->tree().uniqueName().startsWith(framePathPrefix))
       break;
-    chain.append(frame);
+    chain.push_back(frame);
   }
   StringBuilder uniqueName;
   uniqueName.append(framePathPrefix);
@@ -455,6 +456,7 @@ bool FrameTree::isDescendantOf(const Frame* ancestor) const {
   return false;
 }
 
+DISABLE_CFI_PERF
 Frame* FrameTree::traverseNext(const Frame* stayWithin) const {
   Frame* child = firstChild();
   if (child) {

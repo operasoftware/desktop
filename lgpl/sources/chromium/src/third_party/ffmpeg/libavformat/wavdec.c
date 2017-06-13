@@ -65,34 +65,30 @@ static void set_spdif(AVFormatContext *s, WAVDemuxContext *wav)
 #if CONFIG_SPDIF_DEMUXER
     if (CONFIG_SPDIF_DEMUXER && s->streams[0]->codecpar->codec_tag == 1) {
         enum AVCodecID codec;
-        uint8_t *buf = NULL;
         int len = 1<<16;
         int ret = ffio_ensure_seekback(s->pb, len);
-        int64_t pos = avio_tell(s->pb);
 
-        if (ret < 0)
-            goto end;
-
-        buf = av_malloc(len);
-        if (!buf) {
-            ret = AVERROR(ENOMEM);
-            goto end;
+        if (ret >= 0) {
+            uint8_t *buf = av_malloc(len);
+            if (!buf) {
+                ret = AVERROR(ENOMEM);
+            } else {
+                int64_t pos = avio_tell(s->pb);
+                len = ret = avio_read(s->pb, buf, len);
+                if (len >= 0) {
+                    ret = ff_spdif_probe(buf, len, &codec);
+                    if (ret > AVPROBE_SCORE_EXTENSION) {
+                        s->streams[0]->codecpar->codec_id = codec;
+                        wav->spdif = 1;
+                    }
+                }
+                avio_seek(s->pb, pos, SEEK_SET);
+                av_free(buf);
+            }
         }
 
-        len = ret = avio_read(s->pb, buf, len);
-        if (ret < 0)
-            goto end;
-
-        ret = ff_spdif_probe(buf, len, &codec);
-        if (ret > AVPROBE_SCORE_EXTENSION) {
-            s->streams[0]->codecpar->codec_id = codec;
-            wav->spdif = 1;
-        }
-end:
-        avio_seek(s->pb, pos, SEEK_SET);
         if (ret < 0)
             av_log(s, AV_LOG_WARNING, "Cannot check for SPDIF\n");
-        av_free(buf);
     }
 #endif
 }
@@ -562,6 +558,22 @@ break_loop:
     if (sample_count)
         st->duration = sample_count;
 
+    if (st->codecpar->codec_id == AV_CODEC_ID_PCM_S32LE &&
+        st->codecpar->block_align == st->codecpar->channels * 4 &&
+        st->codecpar->bits_per_coded_sample == 32 &&
+        st->codecpar->extradata_size == 2 &&
+        AV_RL16(st->codecpar->extradata) == 1) {
+        st->codecpar->codec_id = AV_CODEC_ID_PCM_F16LE;
+        st->codecpar->bits_per_coded_sample = 16;
+    } else if (st->codecpar->codec_id == AV_CODEC_ID_PCM_S24LE &&
+               st->codecpar->block_align == st->codecpar->channels * 4 &&
+               st->codecpar->bits_per_coded_sample == 24) {
+        st->codecpar->codec_id = AV_CODEC_ID_PCM_F24LE;
+    } else if (st->codecpar->codec_id == AV_CODEC_ID_XMA1 ||
+               st->codecpar->codec_id == AV_CODEC_ID_XMA2) {
+        st->codecpar->block_align = 2048;
+    }
+
     ff_metadata_conv_ctx(s, NULL, wav_metadata_conv);
     ff_metadata_conv_ctx(s, NULL, ff_riff_info_conv);
 
@@ -713,6 +725,7 @@ static int wav_read_seek(AVFormatContext *s,
     case AV_CODEC_ID_MP3:
     case AV_CODEC_ID_AC3:
     case AV_CODEC_ID_DTS:
+    case AV_CODEC_ID_XMA2:
         /* use generic seeking with dynamically generated indexes */
         return -1;
     default:

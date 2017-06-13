@@ -517,9 +517,11 @@ void DeleteSelectionCommand::removeNode(
   }
 
   // FIXME: Update the endpoints of the range being deleted.
-  updatePositionForNodeRemoval(m_endingPosition, *node);
-  updatePositionForNodeRemoval(m_leadingWhitespace, *node);
-  updatePositionForNodeRemoval(m_trailingWhitespace, *node);
+  m_endingPosition = computePositionForNodeRemoval(m_endingPosition, *node);
+  m_leadingWhitespace =
+      computePositionForNodeRemoval(m_leadingWhitespace, *node);
+  m_trailingWhitespace =
+      computePositionForNodeRemoval(m_trailingWhitespace, *node);
 
   CompositeEditCommand::removeNode(node, editingState,
                                    shouldAssumeContentIsAlwaysEditable);
@@ -671,7 +673,7 @@ void DeleteSelectionCommand::handleGeneralDelete(EditingState* editingState) {
         Node* nextNode = NodeTraversal::nextSkippingChildren(*node);
         // if we just removed a node from the end container, update end position
         // so the check above will work
-        updatePositionForNodeRemoval(m_downstreamEnd, *node);
+        m_downstreamEnd = computePositionForNodeRemoval(m_downstreamEnd, *node);
         removeNode(node, editingState);
         if (editingState->isAborted())
           return;
@@ -818,6 +820,8 @@ void DeleteSelectionCommand::mergeParagraphs(EditingState* editingState) {
     return;
   }
 
+  RelocatablePosition relocatableStart(startOfParagraphToMove.deepEquivalent());
+
   // We need to merge into m_upstreamStart's block, but it's been emptied out
   // and collapsed by deletion.
   if (!mergeDestination.deepEquivalent().anchorNode() ||
@@ -828,16 +832,13 @@ void DeleteSelectionCommand::mergeParagraphs(EditingState* editingState) {
       (m_startsAtEmptyLine &&
        mergeDestination.deepEquivalent() !=
            startOfParagraphToMove.deepEquivalent())) {
-    PositionWithAffinity storedStartOfParagraphToMove =
-        startOfParagraphToMove.toPositionWithAffinity();
     insertNodeAt(HTMLBRElement::create(document()), m_upstreamStart,
                  editingState);
     if (editingState->isAborted())
       return;
     document().updateStyleAndLayoutIgnorePendingStylesheets();
     mergeDestination = createVisiblePosition(m_upstreamStart);
-    startOfParagraphToMove =
-        createVisiblePosition(storedStartOfParagraphToMove);
+    startOfParagraphToMove = createVisiblePosition(relocatableStart.position());
   }
 
   if (mergeDestination.deepEquivalent() ==
@@ -886,7 +887,7 @@ void DeleteSelectionCommand::mergeParagraphs(EditingState* editingState) {
           editingState);
       if (editingState->isAborted())
         return;
-      m_endingPosition = startOfParagraphToMove.deepEquivalent();
+      m_endingPosition = relocatableStart.position();
       return;
     }
   }
@@ -975,7 +976,7 @@ void DeleteSelectionCommand::removePreviouslySelectedEmptyTableRows(
 void DeleteSelectionCommand::calculateTypingStyleAfterDelete() {
   // Clearing any previously set typing style and doing an early return.
   if (!m_typingStyle) {
-    document().frame()->selection().clearTypingStyle();
+    document().frame()->editor().clearTypingStyle();
     return;
   }
 
@@ -1001,7 +1002,7 @@ void DeleteSelectionCommand::calculateTypingStyleAfterDelete() {
   // should have the same style as the just deleted ones, but, if we change the
   // selection, come back and start typing that style should be lost.  Also see
   // preserveTypingStyle() below.
-  document().frame()->selection().setTypingStyle(m_typingStyle);
+  document().frame()->editor().setTypingStyle(m_typingStyle);
 }
 
 void DeleteSelectionCommand::clearTransientState() {
@@ -1023,6 +1024,7 @@ void DeleteSelectionCommand::removeRedundantBlocks(EditingState* editingState) {
   Element* rootElement = rootEditableElement(*node);
 
   while (node != rootElement) {
+    ABORT_EDITING_COMMAND_IF(!node);
     if (isRemovableBlock(node)) {
       if (node == m_endingPosition.anchorNode())
         updatePositionForNodeRemovalPreservingChildren(m_endingPosition, *node);

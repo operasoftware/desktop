@@ -44,14 +44,11 @@ static const int kMaxRecursionDepth = 3;
 static const double progressNotificationIntervalMS = 50;
 
 FileWriter* FileWriter::create(ExecutionContext* context) {
-  FileWriter* fileWriter = new FileWriter(context);
-  fileWriter->suspendIfNeeded();
-  return fileWriter;
+  return new FileWriter(context);
 }
 
 FileWriter::FileWriter(ExecutionContext* context)
-    : ActiveScriptWrappable(this),
-      ActiveDOMObject(context),
+    : ContextLifecycleObserver(context),
       m_readyState(kInit),
       m_operationInProgress(OperationNone),
       m_queuedOperation(OperationNone),
@@ -71,14 +68,8 @@ const AtomicString& FileWriter::interfaceName() const {
   return EventTargetNames::FileWriter;
 }
 
-void FileWriter::contextDestroyed() {
-  // Make sure we've actually got something to stop, and haven't already called
-  // abort().
-  if (writer() && m_readyState == kWriting) {
-    doOperation(OperationAbort);
-    m_readyState = kDone;
-  }
-  resetWriter();
+void FileWriter::contextDestroyed(ExecutionContext*) {
+  dispose();
 }
 
 bool FileWriter::hasPendingActivity() const {
@@ -246,8 +237,7 @@ void FileWriter::completeAbort() {
 }
 
 void FileWriter::doOperation(Operation operation) {
-  InspectorInstrumentation::asyncTaskScheduled(getExecutionContext(),
-                                               "FileWriter", this);
+  probe::asyncTaskScheduled(getExecutionContext(), "FileWriter", this);
   switch (operation) {
     case OperationWrite:
       DCHECK_EQ(OperationNone, m_operationInProgress);
@@ -296,11 +286,11 @@ void FileWriter::signalCompletion(FileError::ErrorCode code) {
     fireEvent(EventTypeNames::write);
   fireEvent(EventTypeNames::writeend);
 
-  InspectorInstrumentation::asyncTaskCanceled(getExecutionContext(), this);
+  probe::asyncTaskCanceled(getExecutionContext(), this);
 }
 
 void FileWriter::fireEvent(const AtomicString& type) {
-  InspectorInstrumentation::AsyncTask asyncTask(getExecutionContext(), this);
+  probe::AsyncTask asyncTask(getExecutionContext(), this);
   ++m_recursionDepth;
   dispatchEvent(
       ProgressEvent::create(type, true, m_bytesWritten, m_bytesToWrite));
@@ -316,7 +306,13 @@ void FileWriter::setError(FileError::ErrorCode errorCode,
 }
 
 void FileWriter::dispose() {
-  contextDestroyed();
+  // Make sure we've actually got something to stop, and haven't already called
+  // abort().
+  if (writer() && m_readyState == kWriting) {
+    doOperation(OperationAbort);
+    m_readyState = kDone;
+  }
+  resetWriter();
 }
 
 DEFINE_TRACE(FileWriter) {
@@ -324,7 +320,7 @@ DEFINE_TRACE(FileWriter) {
   visitor->trace(m_blobBeingWritten);
   EventTargetWithInlineData::trace(visitor);
   FileWriterBase::trace(visitor);
-  ActiveDOMObject::trace(visitor);
+  ContextLifecycleObserver::trace(visitor);
 }
 
 }  // namespace blink

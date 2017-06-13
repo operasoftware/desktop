@@ -6,21 +6,44 @@
 
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
-#include "third_party/WebKit/public/platform/modules/bluetooth/web_bluetooth.mojom-blink.h"
 
 namespace blink {
 
-DOMException* BluetoothError::take(
-    ScriptPromiseResolver*,
-    int32_t
-        webError /* Corresponds to WebBluetoothResult in web_bluetooth.mojom */) {
-  switch (static_cast<mojom::blink::WebBluetoothResult>(webError)) {
+// static
+DOMException* BluetoothError::createDOMException(
+    BluetoothErrorCode error,
+    const String& detailedMessage) {
+  switch (error) {
+    case BluetoothErrorCode::InvalidService:
+    case BluetoothErrorCode::InvalidCharacteristic:
+    case BluetoothErrorCode::InvalidDescriptor:
+      return DOMException::create(InvalidStateError, detailedMessage);
+    case BluetoothErrorCode::ServiceNotFound:
+    case BluetoothErrorCode::CharacteristicNotFound:
+    case BluetoothErrorCode::DescriptorNotFound:
+      return DOMException::create(NotFoundError, detailedMessage);
+  }
+  NOTREACHED();
+  return DOMException::create(UnknownError);
+}
+
+// static
+DOMException* BluetoothError::createDOMException(
+    mojom::blink::WebBluetoothResult error) {
+  switch (error) {
     case mojom::blink::WebBluetoothResult::SUCCESS:
-      ASSERT_NOT_REACHED();
+    case mojom::blink::WebBluetoothResult::SERVICE_NOT_FOUND:
+    case mojom::blink::WebBluetoothResult::CHARACTERISTIC_NOT_FOUND:
+    case mojom::blink::WebBluetoothResult::DESCRIPTOR_NOT_FOUND:
+      // The above result codes are not expected here. SUCCESS is not
+      // an error and the others have a detailed message and are
+      // expected to be redirected to the switch above that handles
+      // BluetoothErrorCode.
+      NOTREACHED();
       return DOMException::create(UnknownError);
 #define MAP_ERROR(enumeration, name, message)         \
   case mojom::blink::WebBluetoothResult::enumeration: \
-    return DOMException::create(name, message)
+    return DOMException::create(name, message);
 
       // InvalidModificationErrors:
       MAP_ERROR(GATT_INVALID_ATTRIBUTE_LENGTH, InvalidModificationError,
@@ -31,6 +54,8 @@ DOMException* BluetoothError::take(
                 "GATT Service no longer exists.");
       MAP_ERROR(CHARACTERISTIC_NO_LONGER_EXISTS, InvalidStateError,
                 "GATT Characteristic no longer exists.");
+      MAP_ERROR(DESCRIPTOR_NO_LONGER_EXISTS, InvalidStateError,
+                "GATT Descriptor no longer exists.");
 
       // NetworkErrors:
       MAP_ERROR(CONNECT_ALREADY_IN_PROGRESS, NetworkError,
@@ -69,6 +94,17 @@ DOMException* BluetoothError::take(
                 "GATT operation already in progress.");
       MAP_ERROR(UNTRANSLATED_CONNECT_ERROR_CODE, NetworkError,
                 "Unknown ConnectErrorCode.");
+      MAP_ERROR(GATT_SERVER_NOT_CONNECTED, NetworkError,
+                "GATT Server is disconnected. Cannot perform GATT operations.");
+      MAP_ERROR(GATT_SERVER_DISCONNECTED, NetworkError,
+                "GATT Server disconnected while performing a GATT operation.");
+      MAP_ERROR(GATT_SERVER_DISCONNECTED_WHILE_RETRIEVING_CHARACTERISTICS,
+                NetworkError,
+                "GATT Server disconnected while retrieving characteristics.");
+      MAP_ERROR(
+          GATT_SERVER_NOT_CONNECTED_CANNOT_RETRIEVE_CHARACTERISTICS,
+          NetworkError,
+          "GATT Server is disconnected. Cannot retrieve characteristics.");
 
       // NotFoundErrors:
       MAP_ERROR(WEB_BLUETOOTH_NOT_SUPPORTED, NotFoundError,
@@ -87,14 +123,12 @@ DOMException* BluetoothError::take(
       MAP_ERROR(
           CHOOSER_NOT_SHOWN_USER_DENIED_PERMISSION_TO_SCAN, NotFoundError,
           "User denied the browser permission to scan for Bluetooth devices.");
-      MAP_ERROR(SERVICE_NOT_FOUND, NotFoundError,
-                "No Services with specified UUID found in Device.");
       MAP_ERROR(NO_SERVICES_FOUND, NotFoundError,
                 "No Services found in device.");
-      MAP_ERROR(CHARACTERISTIC_NOT_FOUND, NotFoundError,
-                "No Characteristics with specified UUID found in Service.");
       MAP_ERROR(NO_CHARACTERISTICS_FOUND, NotFoundError,
                 "No Characteristics found in service.");
+      MAP_ERROR(NO_DESCRIPTORS_FOUND, NotFoundError,
+                "No Descriptors found in Characteristic.");
       MAP_ERROR(BLUETOOTH_LOW_ENERGY_NOT_AVAILABLE, NotFoundError,
                 "Bluetooth Low Energy not available.");
 
@@ -115,6 +149,9 @@ DOMException* BluetoothError::take(
       MAP_ERROR(BLOCKLISTED_CHARACTERISTIC_UUID, SecurityError,
                 "getCharacteristic(s) called with blocklisted UUID. "
                 "https://goo.gl/4NeimX");
+      MAP_ERROR(BLOCKLISTED_DESCRIPTOR_UUID, SecurityError,
+                "getDescriptor(s) called with blocklisted UUID. "
+                "https://goo.gl/4NeimX");
       MAP_ERROR(BLOCKLISTED_READ, SecurityError,
                 "readValue() called on blocklisted object marked "
                 "exclude-reads. https://goo.gl/4NeimX");
@@ -134,13 +171,11 @@ DOMException* BluetoothError::take(
                 "UUID. https://goo.gl/4NeimX");
       MAP_ERROR(REQUEST_DEVICE_FROM_CROSS_ORIGIN_IFRAME, SecurityError,
                 "requestDevice() called from cross-origin iframe.");
-      MAP_ERROR(REQUEST_DEVICE_WITHOUT_FRAME, SecurityError,
-                "No window to show the requestDevice() dialog.");
 
 #undef MAP_ERROR
   }
 
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return DOMException::create(UnknownError);
 }
 

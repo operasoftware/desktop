@@ -104,7 +104,7 @@ void FontCache::setStatusFontMetrics(const wchar_t* familyName,
 FontCache::FontCache() : m_purgePreventCount(0) {
   m_fontManager = sk_ref_sp(s_staticFontManager);
   if (!m_fontManager)
-    m_fontManager.reset(SkFontMgr_New_DirectWrite());
+    m_fontManager = SkFontMgr_New_DirectWrite();
   ASSERT(m_fontManager.get());
 }
 
@@ -281,7 +281,7 @@ static bool typefacesHasWeightSuffix(const AtomicString& family,
   size_t numVariants = WTF_ARRAY_LENGTH(variantForSuffix);
   for (size_t i = 0; i < numVariants; i++) {
     const FamilyWeightSuffix& entry = variantForSuffix[i];
-    if (family.endsWith(entry.suffix, TextCaseInsensitive)) {
+    if (family.endsWith(entry.suffix, TextCaseUnicodeInsensitive)) {
       String familyName = family.getString();
       familyName.truncate(family.length() - entry.length);
       adjustedName = AtomicString(familyName);
@@ -318,7 +318,7 @@ static bool typefacesHasStretchSuffix(const AtomicString& family,
   size_t numVariants = WTF_ARRAY_LENGTH(variantForSuffix);
   for (size_t i = 0; i < numVariants; i++) {
     const FamilyStretchSuffix& entry = variantForSuffix[i];
-    if (family.endsWith(entry.suffix, TextCaseInsensitive)) {
+    if (family.endsWith(entry.suffix, TextCaseUnicodeInsensitive)) {
       String familyName = family.getString();
       familyName.truncate(family.length() - entry.length);
       adjustedName = AtomicString(familyName);
@@ -333,7 +333,8 @@ static bool typefacesHasStretchSuffix(const AtomicString& family,
 std::unique_ptr<FontPlatformData> FontCache::createFontPlatformData(
     const FontDescription& fontDescription,
     const FontFaceCreationParams& creationParams,
-    float fontSize) {
+    float fontSize,
+    AlternateFontName alternateFontName) {
   ASSERT(creationParams.creationType() == CreateFontByFamily);
 
   CString name;
@@ -346,8 +347,25 @@ std::unique_ptr<FontPlatformData> FontCache::createFontPlatformData(
     FontWeight variantWeight;
     FontStretch variantStretch;
 
-    if (typefacesHasWeightSuffix(creationParams.family(), adjustedName,
-                                 variantWeight)) {
+    // TODO: crbug.com/627143 LocalFontFaceSource.cpp, which implements
+    // retrieving src: local() font data uses getFontData, which in turn comes
+    // here, to retrieve fonts from the cache and specifies the argument to
+    // local() as family name. So we do not match by full font name or
+    // postscript name as the spec says:
+    // https://drafts.csswg.org/css-fonts-3/#src-desc
+
+    // Prevent one side effect of the suffix translation below where when
+    // matching local("Roboto Regular") it tries to find the closest match even
+    // though that can be a bold font in case of Roboto Bold.
+    if (alternateFontName == AlternateFontName::LocalUniqueFace) {
+      return nullptr;
+    }
+
+    if (alternateFontName == AlternateFontName::LastResort) {
+      if (!tf)
+        return nullptr;
+    } else if (typefacesHasWeightSuffix(creationParams.family(), adjustedName,
+                                        variantWeight)) {
       FontFaceCreationParams adjustedParams(adjustedName);
       FontDescription adjustedFontDescription = fontDescription;
       adjustedFontDescription.setWeight(variantWeight);
@@ -369,15 +387,16 @@ std::unique_ptr<FontPlatformData> FontCache::createFontPlatformData(
     }
   }
 
-  std::unique_ptr<FontPlatformData> result = wrapUnique(new FontPlatformData(
-      tf, name.data(), fontSize,
-      (fontDescription.weight() >= FontWeight600 && !tf->isBold()) ||
-          fontDescription.isSyntheticBold(),
-      ((fontDescription.style() == FontStyleItalic ||
-        fontDescription.style() == FontStyleOblique) &&
-       !tf->isItalic()) ||
-          fontDescription.isSyntheticItalic(),
-      fontDescription.orientation()));
+  std::unique_ptr<FontPlatformData> result =
+      WTF::wrapUnique(new FontPlatformData(
+          tf, name.data(), fontSize,
+          (fontDescription.weight() >= FontWeight600 && !tf->isBold()) ||
+              fontDescription.isSyntheticBold(),
+          ((fontDescription.style() == FontStyleItalic ||
+            fontDescription.style() == FontStyleOblique) &&
+           !tf->isItalic()) ||
+              fontDescription.isSyntheticItalic(),
+          fontDescription.orientation()));
 
   struct FamilyMinSize {
     const wchar_t* family;

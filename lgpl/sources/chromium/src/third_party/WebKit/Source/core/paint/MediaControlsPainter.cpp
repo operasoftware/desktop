@@ -27,7 +27,7 @@
 
 #include "core/paint/MediaControlsPainter.h"
 
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/TimeRanges.h"
 #include "core/html/shadow/MediaControlElementTypes.h"
@@ -60,7 +60,7 @@ static const float kDisabledAlpha = 0.4;
 static Image* platformResource(const char* name) {
   if (!gMediaControlImageMap)
     gMediaControlImageMap = new MediaControlImageMap();
-  if (Image* image = gMediaControlImageMap->get(name))
+  if (Image* image = gMediaControlImageMap->at(name))
     return image;
   if (Image* image = Image::loadPlatformResource(name).leakRef()) {
     gMediaControlImageMap->set(name, image);
@@ -253,23 +253,24 @@ static void paintSliderRangeHighlight(const IntRect& rect,
 
   // Fill highlight rectangle with gradient, potentially rounded if on left or
   // right edge.
-  SkPaint gradientPaint(context.fillPaint());
-  gradient->applyToPaint(gradientPaint, SkMatrix::I());
+  PaintFlags gradientFlags(context.fillFlags());
+  gradient->applyToFlags(gradientFlags, SkMatrix::I());
 
-  if (startOffset < borderRadius && endOffset < borderRadius)
+  if (startOffset < borderRadius && endOffset < borderRadius) {
     context.drawRRect(
         FloatRoundedRect(highlightRect, radii, radii, radii, radii),
-        gradientPaint);
-  else if (startOffset < borderRadius)
+        gradientFlags);
+  } else if (startOffset < borderRadius) {
     context.drawRRect(FloatRoundedRect(highlightRect, radii, FloatSize(0, 0),
                                        radii, FloatSize(0, 0)),
-                      gradientPaint);
-  else if (endOffset < borderRadius)
+                      gradientFlags);
+  } else if (endOffset < borderRadius) {
     context.drawRRect(FloatRoundedRect(highlightRect, FloatSize(0, 0), radii,
                                        FloatSize(0, 0), radii),
-                      gradientPaint);
-  else
-    context.drawRect(highlightRect, gradientPaint);
+                      gradientFlags);
+  } else {
+    context.drawRect(highlightRect, gradientFlags);
+  }
 }
 
 bool MediaControlsPainter::paintMediaSlider(const LayoutObject& object,
@@ -520,38 +521,6 @@ bool MediaControlsPainter::paintMediaCastButton(const LayoutObject& object,
                               isEnabled);
     case MediaOverlayCastOffButton:
       return paintMediaButton(paintInfo.context, rect, mediaOverlayCastOff);
-    default:
-      ASSERT_NOT_REACHED();
-      return false;
-  }
-}
-
-bool MediaControlsPainter::paintMediaDetachButton(const LayoutObject& object,
-                                                  const PaintInfo& paintInfo,
-                                                  const IntRect& rect) {
-  const HTMLMediaElement* mediaElement = toParentMediaElement(object);
-  if (!mediaElement)
-    return false;
-
-  static Image* mediaDetachButtonNormal =
-      platformResource("mediaplayerOverlayDetachNormal");
-  static Image* mediaDetachButtonHovered =
-      platformResource("mediaplayerOverlayDetachHovered");
-  static Image* mediaAttachButtonNormal =
-      platformResource("mediaplayerOverlayAttachNormal");
-  static Image* mediaAttachButtonHovered =
-      platformResource("mediaplayerOverlayAttachHovered");
-  switch (mediaControlElementType(object.node())) {
-    case MediaOverlayDetachButtonNormal:
-      return paintMediaButton(paintInfo.context, rect, mediaDetachButtonNormal);
-    case MediaOverlayDetachButtonHovered:
-      return paintMediaButton(paintInfo.context, rect,
-                              mediaDetachButtonHovered);
-    case MediaOverlayAttachButtonNormal:
-      return paintMediaButton(paintInfo.context, rect, mediaAttachButtonNormal);
-    case MediaOverlayAttachButtonHovered:
-      return paintMediaButton(paintInfo.context, rect,
-                              mediaAttachButtonHovered);
     default:
       ASSERT_NOT_REACHED();
       return false;

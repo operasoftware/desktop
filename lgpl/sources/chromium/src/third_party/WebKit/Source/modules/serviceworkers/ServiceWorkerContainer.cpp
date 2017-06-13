@@ -29,6 +29,9 @@
  */
 #include "modules/serviceworkers/ServiceWorkerContainer.h"
 
+#include <memory>
+#include <utility>
+#include "bindings/core/v8/CallbackPromiseAdapter.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptState.h"
@@ -40,61 +43,28 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/MessagePort.h"
+#include "core/events/MessageEvent.h"
+#include "core/frame/Deprecation.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "modules/EventTargetModules.h"
+#include "modules/serviceworkers/NavigatorServiceWorker.h"
 #include "modules/serviceworkers/ServiceWorker.h"
 #include "modules/serviceworkers/ServiceWorkerContainerClient.h"
 #include "modules/serviceworkers/ServiceWorkerError.h"
-#include "modules/serviceworkers/ServiceWorkerMessageEvent.h"
 #include "modules/serviceworkers/ServiceWorkerRegistration.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/weborigin/SchemeRegistry.h"
+#include "platform/weborigin/SecurityViolationReportingPolicy.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/modules/serviceworker/WebServiceWorker.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProvider.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerRegistration.h"
 #include "wtf/PtrUtil.h"
-#include <memory>
 
 namespace blink {
-
-class RegistrationCallback
-    : public WebServiceWorkerProvider::WebServiceWorkerRegistrationCallbacks {
- public:
-  explicit RegistrationCallback(ScriptPromiseResolver* resolver)
-      : m_resolver(resolver) {}
-  ~RegistrationCallback() override {}
-
-  void onSuccess(
-      std::unique_ptr<WebServiceWorkerRegistration::Handle> handle) override {
-    if (!m_resolver->getExecutionContext() ||
-        m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
-      return;
-    m_resolver->resolve(ServiceWorkerRegistration::getOrCreate(
-        m_resolver->getExecutionContext(), wrapUnique(handle.release())));
-  }
-
-  void onError(const WebServiceWorkerError& error) override {
-    if (!m_resolver->getExecutionContext() ||
-        m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
-      return;
-    ScriptState::Scope scope(m_resolver->getScriptState());
-    if (error.errorType == WebServiceWorkerError::ErrorTypeType) {
-      m_resolver->reject(V8ThrowException::createTypeError(
-          m_resolver->getScriptState()->isolate(), error.message));
-    } else {
-      m_resolver->reject(
-          ServiceWorkerErrorForUpdate::take(m_resolver.get(), error));
-    }
-  }
-
- private:
-  Persistent<ScriptPromiseResolver> m_resolver;
-  WTF_MAKE_NONCOPYABLE(RegistrationCallback);
-};
 
 class GetRegistrationCallback : public WebServiceWorkerProvider::
                                     WebServiceWorkerGetRegistrationCallbacks {
@@ -106,9 +76,9 @@ class GetRegistrationCallback : public WebServiceWorkerProvider::
   void onSuccess(std::unique_ptr<WebServiceWorkerRegistration::Handle>
                      webPassHandle) override {
     std::unique_ptr<WebServiceWorkerRegistration::Handle> handle =
-        wrapUnique(webPassHandle.release());
+        WTF::wrapUnique(webPassHandle.release());
     if (!m_resolver->getExecutionContext() ||
-        m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
+        m_resolver->getExecutionContext()->isContextDestroyed())
       return;
     if (!handle) {
       // Resolve the promise with undefined.
@@ -121,7 +91,7 @@ class GetRegistrationCallback : public WebServiceWorkerProvider::
 
   void onError(const WebServiceWorkerError& error) override {
     if (!m_resolver->getExecutionContext() ||
-        m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
+        m_resolver->getExecutionContext()->isContextDestroyed())
       return;
     m_resolver->reject(ServiceWorkerError::take(m_resolver.get(), error));
   }
@@ -129,42 +99,6 @@ class GetRegistrationCallback : public WebServiceWorkerProvider::
  private:
   Persistent<ScriptPromiseResolver> m_resolver;
   WTF_MAKE_NONCOPYABLE(GetRegistrationCallback);
-};
-
-class GetRegistrationsCallback : public WebServiceWorkerProvider::
-                                     WebServiceWorkerGetRegistrationsCallbacks {
- public:
-  explicit GetRegistrationsCallback(ScriptPromiseResolver* resolver)
-      : m_resolver(resolver) {}
-  ~GetRegistrationsCallback() override {}
-
-  void onSuccess(
-      std::unique_ptr<WebVector<WebServiceWorkerRegistration::Handle*>>
-          webPassRegistrations) override {
-    Vector<std::unique_ptr<WebServiceWorkerRegistration::Handle>> handles;
-    std::unique_ptr<WebVector<WebServiceWorkerRegistration::Handle*>>
-        webRegistrations = wrapUnique(webPassRegistrations.release());
-    for (auto& handle : *webRegistrations) {
-      handles.append(wrapUnique(handle));
-    }
-
-    if (!m_resolver->getExecutionContext() ||
-        m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
-      return;
-    m_resolver->resolve(
-        ServiceWorkerRegistrationArray::take(m_resolver.get(), &handles));
-  }
-
-  void onError(const WebServiceWorkerError& error) override {
-    if (!m_resolver->getExecutionContext() ||
-        m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
-      return;
-    m_resolver->reject(ServiceWorkerError::take(m_resolver.get(), error));
-  }
-
- private:
-  Persistent<ScriptPromiseResolver> m_resolver;
-  WTF_MAKE_NONCOPYABLE(GetRegistrationsCallback);
 };
 
 class ServiceWorkerContainer::GetRegistrationForReadyCallback
@@ -180,9 +114,10 @@ class ServiceWorkerContainer::GetRegistrationForReadyCallback
     ASSERT(m_ready->getState() == ReadyProperty::Pending);
 
     if (m_ready->getExecutionContext() &&
-        !m_ready->getExecutionContext()->activeDOMObjectsAreStopped())
+        !m_ready->getExecutionContext()->isContextDestroyed()) {
       m_ready->resolve(ServiceWorkerRegistration::getOrCreate(
-          m_ready->getExecutionContext(), wrapUnique(handle.release())));
+          m_ready->getExecutionContext(), WTF::wrapUnique(handle.release())));
+    }
   }
 
  private:
@@ -191,24 +126,27 @@ class ServiceWorkerContainer::GetRegistrationForReadyCallback
 };
 
 ServiceWorkerContainer* ServiceWorkerContainer::create(
-    ExecutionContext* executionContext) {
-  return new ServiceWorkerContainer(executionContext);
+    ExecutionContext* executionContext,
+    NavigatorServiceWorker* navigator) {
+  return new ServiceWorkerContainer(executionContext, navigator);
 }
 
 ServiceWorkerContainer::~ServiceWorkerContainer() {
   ASSERT(!m_provider);
 }
 
-void ServiceWorkerContainer::contextDestroyed() {
+void ServiceWorkerContainer::contextDestroyed(ExecutionContext*) {
   if (m_provider) {
     m_provider->setClient(0);
     m_provider = nullptr;
   }
+  m_navigator->clearServiceWorker();
 }
 
 DEFINE_TRACE(ServiceWorkerContainer) {
   visitor->trace(m_controller);
   visitor->trace(m_ready);
+  visitor->trace(m_navigator);
   EventTargetWithInlineData::trace(visitor);
   ContextLifecycleObserver::trace(visitor);
 }
@@ -310,7 +248,7 @@ void ServiceWorkerContainer::registerServiceWorkerImpl(
               WebURLRequest::RequestContextServiceWorker, scriptURL) &&
           csp->allowWorkerContextFromSource(
               scriptURL, ResourceRequest::RedirectStatus::NoRedirect,
-              ContentSecurityPolicy::SendReport))) {
+              SecurityViolationReportingPolicy::Report))) {
       callbacks->onError(WebServiceWorkerError(
           WebServiceWorkerError::ErrorTypeSecurity,
           String(
@@ -321,7 +259,8 @@ void ServiceWorkerContainer::registerServiceWorkerImpl(
     }
   }
 
-  m_provider->registerServiceWorker(patternURL, scriptURL, callbacks.release());
+  m_provider->registerServiceWorker(patternURL, scriptURL,
+                                    std::move(callbacks));
 }
 
 ScriptPromise ServiceWorkerContainer::registerServiceWorker(
@@ -344,19 +283,20 @@ ScriptPromise ServiceWorkerContainer::registerServiceWorker(
   if (!executionContext)
     return ScriptPromise();
 
-  KURL scriptURL =
-      enteredExecutionContext(scriptState->isolate())->completeURL(url);
+  KURL scriptURL = executionContext->completeURL(url);
   scriptURL.removeFragmentIdentifier();
 
   KURL patternURL;
   if (options.scope().isNull())
     patternURL = KURL(scriptURL, "./");
   else
-    patternURL = enteredExecutionContext(scriptState->isolate())
-                     ->completeURL(options.scope());
+    patternURL = executionContext->completeURL(options.scope());
 
-  registerServiceWorkerImpl(executionContext, scriptURL, patternURL,
-                            makeUnique<RegistrationCallback>(resolver));
+  registerServiceWorkerImpl(
+      executionContext, scriptURL, patternURL,
+      WTF::makeUnique<CallbackPromiseAdapter<ServiceWorkerRegistration,
+                                             ServiceWorkerErrorForUpdate>>(
+          resolver));
 
   return promise;
 }
@@ -398,8 +338,7 @@ ScriptPromise ServiceWorkerContainer::getRegistration(
     return promise;
   }
 
-  KURL completedURL =
-      enteredExecutionContext(scriptState->isolate())->completeURL(documentURL);
+  KURL completedURL = executionContext->completeURL(documentURL);
   completedURL.removeFragmentIdentifier();
   if (!documentOrigin->canRequest(completedURL)) {
     RefPtr<SecurityOrigin> documentURLOrigin =
@@ -413,8 +352,8 @@ ScriptPromise ServiceWorkerContainer::getRegistration(
                                  documentOrigin->toString() + "')."));
     return promise;
   }
-  m_provider->getRegistration(completedURL,
-                              new GetRegistrationCallback(resolver));
+  m_provider->getRegistration(
+      completedURL, WTF::makeUnique<GetRegistrationCallback>(resolver));
 
   return promise;
 }
@@ -451,7 +390,9 @@ ScriptPromise ServiceWorkerContainer::getRegistrations(
     return promise;
   }
 
-  m_provider->getRegistrations(new GetRegistrationsCallback(resolver));
+  m_provider->getRegistrations(
+      WTF::makeUnique<CallbackPromiseAdapter<ServiceWorkerRegistrationArray,
+                                             ServiceWorkerError>>(resolver));
 
   return promise;
 }
@@ -476,9 +417,10 @@ ScriptPromise ServiceWorkerContainer::ready(ScriptState* callerState) {
 
   if (!m_ready) {
     m_ready = createReadyProperty();
-    if (m_provider)
+    if (m_provider) {
       m_provider->getRegistrationForReady(
-          new GetRegistrationForReadyCallback(m_ready.get()));
+          WTF::makeUnique<GetRegistrationForReadyCallback>(m_ready.get()));
+    }
   }
 
   return m_ready->promise(callerState->world());
@@ -489,8 +431,8 @@ void ServiceWorkerContainer::setController(
     bool shouldNotifyControllerChange) {
   if (!getExecutionContext())
     return;
-  m_controller =
-      ServiceWorker::from(getExecutionContext(), wrapUnique(handle.release()));
+  m_controller = ServiceWorker::from(getExecutionContext(),
+                                     WTF::wrapUnique(handle.release()));
   if (m_controller)
     UseCounter::count(getExecutionContext(),
                       UseCounter::ServiceWorkerControlledPage);
@@ -501,18 +443,29 @@ void ServiceWorkerContainer::setController(
 void ServiceWorkerContainer::dispatchMessageEvent(
     std::unique_ptr<WebServiceWorker::Handle> handle,
     const WebString& message,
-    const WebMessagePortChannelArray& webChannels) {
+    WebMessagePortChannelArray webChannels) {
   if (!getExecutionContext() || !getExecutionContext()->executingWindow())
     return;
 
-  MessagePortArray* ports =
-      MessagePort::toMessagePortArray(getExecutionContext(), webChannels);
+  MessagePortArray* ports = MessagePort::toMessagePortArray(
+      getExecutionContext(), std::move(webChannels));
   RefPtr<SerializedScriptValue> value = SerializedScriptValue::create(message);
-  ServiceWorker* source =
-      ServiceWorker::from(getExecutionContext(), wrapUnique(handle.release()));
-  dispatchEvent(ServiceWorkerMessageEvent::create(
-      ports, value, source,
-      getExecutionContext()->getSecurityOrigin()->toString()));
+  ServiceWorker* source = ServiceWorker::from(
+      getExecutionContext(), WTF::wrapUnique(handle.release()));
+  dispatchEvent(MessageEvent::create(
+      ports, value, getExecutionContext()->getSecurityOrigin()->toString(),
+      String() /* lastEventId */, source, String() /* suborigin */));
+}
+
+void ServiceWorkerContainer::countFeature(uint32_t feature) {
+  if (!getExecutionContext())
+    return;
+  UseCounter::Feature useCounterFeature =
+      static_cast<UseCounter::Feature>(feature);
+  if (Deprecation::deprecationMessage(useCounterFeature).isEmpty())
+    UseCounter::count(getExecutionContext(), useCounterFeature);
+  else
+    Deprecation::countDeprecation(getExecutionContext(), useCounterFeature);
 }
 
 const AtomicString& ServiceWorkerContainer::interfaceName() const {
@@ -520,8 +473,11 @@ const AtomicString& ServiceWorkerContainer::interfaceName() const {
 }
 
 ServiceWorkerContainer::ServiceWorkerContainer(
-    ExecutionContext* executionContext)
-    : ContextLifecycleObserver(executionContext), m_provider(0) {
+    ExecutionContext* executionContext,
+    NavigatorServiceWorker* navigator)
+    : ContextLifecycleObserver(executionContext),
+      m_provider(0),
+      m_navigator(navigator) {
   if (!executionContext)
     return;
 

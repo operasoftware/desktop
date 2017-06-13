@@ -31,8 +31,8 @@
 
 namespace blink {
 
-void GradientGeneratedImage::draw(SkCanvas* canvas,
-                                  const SkPaint& paint,
+void GradientGeneratedImage::draw(PaintCanvas* canvas,
+                                  const PaintFlags& flags,
                                   const FloatRect& destRect,
                                   const FloatRect& srcRect,
                                   RespectImageOrientationEnum,
@@ -47,23 +47,25 @@ void GradientGeneratedImage::draw(SkCanvas* canvas,
   SkRect visibleDestRect;
   transform.mapRect(&visibleDestRect, visibleSrcRect);
 
-  SkPaint gradientPaint(paint);
-  m_gradient->applyToPaint(gradientPaint, transform);
-  canvas->drawRect(visibleDestRect, gradientPaint);
+  PaintFlags gradientFlags(flags);
+  m_gradient->applyToFlags(gradientFlags, transform);
+  canvas->drawRect(visibleDestRect, gradientFlags);
 }
 
 void GradientGeneratedImage::drawTile(GraphicsContext& context,
                                       const FloatRect& srcRect) {
-  SkPaint gradientPaint(context.fillPaint());
-  m_gradient->applyToPaint(gradientPaint, SkMatrix::I());
+  // TODO(ccameron): This function should not ignore |context|'s color behavior.
+  // https://crbug.com/672306
+  PaintFlags gradientFlags(context.fillFlags());
+  m_gradient->applyToFlags(gradientFlags, SkMatrix::I());
 
-  context.drawRect(srcRect, gradientPaint);
+  context.drawRect(srcRect, gradientFlags);
 }
 
-bool GradientGeneratedImage::applyShader(SkPaint& paint,
+bool GradientGeneratedImage::applyShader(PaintFlags& flags,
                                          const SkMatrix& localMatrix) {
   DCHECK(m_gradient);
-  m_gradient->applyToPaint(paint, localMatrix);
+  m_gradient->applyToFlags(flags, localMatrix);
 
   return true;
 }

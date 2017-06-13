@@ -28,6 +28,8 @@
 #define SelectionController_h
 
 #include "core/CoreExport.h"
+#include "core/dom/SynchronousMutationObserver.h"
+#include "core/editing/FrameSelection.h"
 #include "core/editing/TextGranularity.h"
 #include "core/editing/VisibleSelection.h"
 #include "core/page/EventWithHitTestResults.h"
@@ -35,19 +37,20 @@
 
 namespace blink {
 
-class FrameSelection;
 class HitTestResult;
 class LocalFrame;
 
 class CORE_EXPORT SelectionController final
-    : public GarbageCollectedFinalized<SelectionController> {
+    : public GarbageCollectedFinalized<SelectionController>,
+      public SynchronousMutationObserver {
   WTF_MAKE_NONCOPYABLE(SelectionController);
+  USING_GARBAGE_COLLECTED_MIXIN(SelectionController);
 
  public:
   static SelectionController* create(LocalFrame&);
+  virtual ~SelectionController();
   DECLARE_TRACE();
 
-  void documentDetached();
   void handleMousePressEvent(const MouseEventWithHitTestResults&);
   bool handleMousePressEventSingleClick(const MouseEventWithHitTestResults&);
   bool handleMousePressEventDoubleClick(const MouseEventWithHitTestResults&);
@@ -59,9 +62,10 @@ class CORE_EXPORT SelectionController final
                                const IntPoint&);
   bool handleMouseReleaseEvent(const MouseEventWithHitTestResults&,
                                const LayoutPoint&);
-  bool handlePasteGlobalSelection(const PlatformMouseEvent&);
-  bool handleGestureLongPress(const PlatformGestureEvent&,
-                              const HitTestResult&);
+  bool handlePasteGlobalSelection(const WebMouseEvent&);
+  bool handleGestureLongPress(const WebGestureEvent&, const HitTestResult&);
+  void handleGestureTwoFingerTap(const GestureEventWithHitTestResults&);
+  void handleGestureLongTap(const GestureEventWithHitTestResults&);
 
   bool pasteGlobalSelection();
 
@@ -94,24 +98,28 @@ class CORE_EXPORT SelectionController final
     DISALLOW_NEW();
 
    public:
-    DataForEventDispatchingSelectStart() {}
+    DataForEventDispatchingSelectStart() : m_handleVisible(false) {}
 
     void Init(Node* node,
               const VisibleSelectionInFlatTree selection,
-              TextGranularity granularity) {
+              TextGranularity granularity,
+              bool isHandleVisible) {
       m_node = Member<Node>(node);
       m_selection = selection;
       m_granularity = granularity;
+      m_handleVisible = isHandleVisible;
     }
 
     void Reset() {
       m_node.release();
       m_selection = VisibleSelectionInFlatTree();
+      m_handleVisible = false;
     }
 
     Node* node() const { return m_node.get(); }
     const VisibleSelectionInFlatTree& selection() const { return m_selection; }
     TextGranularity granularity() const { return m_granularity; }
+    bool isHandleVisible() const { return m_handleVisible; }
 
     DEFINE_INLINE_TRACE() {
       visitor->trace(m_node);
@@ -122,6 +130,7 @@ class CORE_EXPORT SelectionController final
     Member<Node> m_node;
     VisibleSelectionInFlatTree m_selection;
     TextGranularity m_granularity;
+    bool m_handleVisible;
   };
 
   explicit SelectionController(LocalFrame&);
@@ -135,7 +144,8 @@ class CORE_EXPORT SelectionController final
 
   Document& document() const;
 
-  void selectClosestWordFromHitTestResult(const HitTestResult&,
+  // Returns |true| if a word was selected.
+  bool selectClosestWordFromHitTestResult(const HitTestResult&,
                                           AppendTrailingWhitespace,
                                           SelectInputEventType);
   void selectClosestMisspellingFromHitTestResult(const HitTestResult&,
@@ -147,17 +157,21 @@ class CORE_EXPORT SelectionController final
       const MouseEventWithHitTestResults&);
   void setNonDirectionalSelectionIfNeeded(const VisibleSelectionInFlatTree&,
                                           TextGranularity,
-                                          EndPointsAdjustmentMode);
-  bool updateSelectionForMouseDownDispatchingSelectStart(
-      Node*,
-      const VisibleSelectionInFlatTree&,
-      TextGranularity);
+                                          EndPointsAdjustmentMode,
+                                          HandleVisibility);
+  void setCaretAtHitTestResult(const HitTestResult&);
   bool updateSelectionForEventDispatchingSelectStart(
       Node*,
       const VisibleSelectionInFlatTree&,
-      TextGranularity);
+      TextGranularity,
+      HandleVisibility);
 
   FrameSelection& selection() const;
+
+  // Implements |SynchronousMutationObserver|.
+  // TODO(yosin): We should relocate |m_originalBaseInFlatTree| when DOM tree
+  // changed.
+  void contextDestroyed(Document*) final;
 
   Member<LocalFrame> const m_frame;
   // TODO(yosin): We should use |PositionWIthAffinityInFlatTree| since we
@@ -178,6 +192,7 @@ class CORE_EXPORT SelectionController final
 };
 
 bool isLinkSelection(const MouseEventWithHitTestResults&);
+bool isLinkSelectable(Node*);
 bool isExtendingSelection(const MouseEventWithHitTestResults&);
 
 }  // namespace blink

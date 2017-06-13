@@ -80,6 +80,8 @@ TEST(LinkRelAttributeTest, Constructor) {
                        TouchPrecomposedIcon, false, false, false);
   testLinkRelAttribute("aPpLe-tOuCh-IcOn-pReCoMpOsEd", false,
                        TouchPrecomposedIcon, false, false, false);
+  testLinkRelAttribute("mask-icon", false, PinnedIcon, false, false, false);
+  testLinkRelAttribute("masK-iCon", false, PinnedIcon, false, false, false);
 
   testLinkRelAttribute("alternate stylesheet", true, InvalidIcon, true, false,
                        false);

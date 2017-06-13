@@ -31,17 +31,16 @@
 #include "modules/donottrack/NavigatorDoNotTrack.h"
 
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/frame/Navigator.h"
-#include "core/loader/FrameLoaderClient.h"
 
 namespace blink {
 
-NavigatorDoNotTrack::NavigatorDoNotTrack(LocalFrame* frame)
-    : DOMWindowProperty(frame) {}
+NavigatorDoNotTrack::NavigatorDoNotTrack(Navigator& navigator)
+    : Supplement<Navigator>(navigator) {}
 
 DEFINE_TRACE(NavigatorDoNotTrack) {
   Supplement<Navigator>::trace(visitor);
-  DOMWindowProperty::trace(visitor);
 }
 
 const char* NavigatorDoNotTrack::supplementName() {
@@ -52,7 +51,7 @@ NavigatorDoNotTrack& NavigatorDoNotTrack::from(Navigator& navigator) {
   NavigatorDoNotTrack* supplement = static_cast<NavigatorDoNotTrack*>(
       Supplement<Navigator>::from(navigator, supplementName()));
   if (!supplement) {
-    supplement = new NavigatorDoNotTrack(navigator.frame());
+    supplement = new NavigatorDoNotTrack(navigator);
     provideTo(navigator, supplementName(), supplement);
   }
   return *supplement;
@@ -63,9 +62,10 @@ String NavigatorDoNotTrack::doNotTrack(Navigator& navigator) {
 }
 
 String NavigatorDoNotTrack::doNotTrack() {
-  if (!frame() || !frame()->loader().client())
+  LocalFrame* frame = supplementable()->frame();
+  if (!frame || !frame->loader().client())
     return String();
-  return frame()->loader().client()->doNotTrackValue();
+  return frame->loader().client()->doNotTrackValue();
 }
 
 }  // namespace blink

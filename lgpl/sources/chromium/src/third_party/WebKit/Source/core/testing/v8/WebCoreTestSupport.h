@@ -26,23 +26,14 @@
 #ifndef WebCoreTestSupport_h
 #define WebCoreTestSupport_h
 
-#include <v8.h>
-
-namespace blink {
-class ScriptState;
-struct WrapperTypeInfo;
-}
+#include "v8/include/v8.h"
 
 namespace WebCoreTestSupport {
 
 void injectInternalsObject(v8::Local<v8::Context>);
 void resetInternalsObject(v8::Local<v8::Context>);
-void installConditionalFeaturesForTests(
-    const blink::WrapperTypeInfo*,
-    const blink::ScriptState*,
-    v8::Local<v8::Object> prototypeObject,
-    v8::Local<v8::Function> interfaceObject);
+void registerInstallConditionalFeaturesForTesting();
 
-}  // namespace blink
+}  // namespace WebCoreTestSupport
 
 #endif

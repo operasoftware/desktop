@@ -42,16 +42,16 @@
 
 namespace blink {
 
-class ConsoleMessage;
 class Document;
 class FetchEvent;
+class ParentFrameTaskRunners;
 class ServiceWorkerGlobalScope;
 class WebDataConsumerHandle;
 class WebEmbeddedWorkerImpl;
 class WebServiceWorkerContextClient;
 struct WebServiceWorkerError;
 class WebServiceWorkerRequest;
-class WebServiceWorkerResponse;
+class WebURLResponse;
 
 // This class is created and destructed on the main thread, but live most
 // of its time as a resident of the worker thread.
@@ -85,13 +85,13 @@ class ServiceWorkerGlobalScopeProxy final
       int eventID,
       const WebString& message,
       const WebSecurityOrigin& sourceOrigin,
-      const WebMessagePortChannelArray&,
+      WebMessagePortChannelArray,
       const WebServiceWorkerClientInfo&) override;
   void dispatchExtendableMessageEvent(
       int eventID,
       const WebString& message,
       const WebSecurityOrigin& sourceOrigin,
-      const WebMessagePortChannelArray&,
+      WebMessagePortChannelArray,
       std::unique_ptr<WebServiceWorker::Handle>) override;
   void dispatchFetchEvent(int fetchEventID,
                           const WebServiceWorkerRequest&,
@@ -109,16 +109,19 @@ class ServiceWorkerGlobalScopeProxy final
                                       const WebNotificationData&) override;
   void dispatchPushEvent(int, const WebString& data) override;
   void dispatchSyncEvent(int, const WebString& tag, LastChanceOption) override;
+  void dispatchPaymentRequestEvent(int, const WebPaymentAppRequest&) override;
   bool hasFetchEventHandler() override;
   void onNavigationPreloadResponse(
       int fetchEventID,
-      std::unique_ptr<WebServiceWorkerResponse>,
+      std::unique_ptr<WebURLResponse>,
       std::unique_ptr<WebDataConsumerHandle>) override;
   void onNavigationPreloadError(
       int fetchEventID,
       std::unique_ptr<WebServiceWorkerError>) override;
 
   // WorkerReportingProxy overrides:
+  void countFeature(UseCounter::Feature) override;
+  void countDeprecation(UseCounter::Feature) override;
   void reportException(const String& errorMessage,
                        std::unique_ptr<SourceLocation>,
                        int exceptionId) override;
@@ -161,7 +164,17 @@ class ServiceWorkerGlobalScopeProxy final
   WebEmbeddedWorkerImpl* m_embeddedWorker;
   Member<Document> m_document;
 
-  HeapHashMap<int, Member<FetchEvent>> m_pendingPreloadFetchEvents;
+  Member<ParentFrameTaskRunners> m_parentFrameTaskRunners;
+
+  // The worker thread uses this map to track |FetchEvent|s created
+  // on the worker thread (heap.) But as the proxy object is created
+  // on the main thread & its heap, we must use a cross-heap reference
+  // to each |FetchEvent| so as to obey the "per-thread heap rule" that
+  // a heap should only have per-thread heap references. Keeping a
+  // cross-heap reference requires the use of a CrossThreadPersistent<>
+  // to remain safe and sound.
+  //
+  HashMap<int, CrossThreadPersistent<FetchEvent>> m_pendingPreloadFetchEvents;
 
   WebServiceWorkerContextClient* m_client;
 

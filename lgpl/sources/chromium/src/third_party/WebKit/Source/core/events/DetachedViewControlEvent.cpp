@@ -1,4 +1,4 @@
-// Copyright (c) 2016 Opera Software ASA. All rights reserved.
+// Copyright (c) 2016 Opera Software AS. All rights reserved.
 
 #include "core/events/DetachedViewControlEvent.h"
 

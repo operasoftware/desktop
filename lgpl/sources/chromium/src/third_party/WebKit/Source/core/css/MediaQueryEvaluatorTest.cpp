@@ -64,6 +64,8 @@ TestCase screenTestCases[] = {
     {"(display-mode: @browser)", 0},
     {"(display-mode: 'browser')", 0},
     {"(display-mode: @junk browser)", 0},
+    {"(shape: rect)", 1},
+    {"(shape: round)", 0},
     {0, 0}  // Do not remove the terminator line.
 };
 
@@ -137,10 +139,10 @@ TestCase printTestCases[] = {
 
 void testMQEvaluator(TestCase* testCases,
                      const MediaQueryEvaluator& mediaQueryEvaluator) {
-  Persistent<MediaQuerySet> querySet = nullptr;
+  RefPtr<MediaQuerySet> querySet = nullptr;
   for (unsigned i = 0; testCases[i].input; ++i) {
     querySet = MediaQuerySet::create(testCases[i].input);
-    EXPECT_EQ(testCases[i].output, mediaQueryEvaluator.eval(querySet.get()));
+    EXPECT_EQ(testCases[i].output, mediaQueryEvaluator.eval(*querySet));
   }
 }
 
@@ -160,6 +162,7 @@ TEST(MediaQueryEvaluatorTest, Cached) {
   data.mediaType = MediaTypeNames::screen;
   data.strictMode = true;
   data.displayMode = WebDisplayModeBrowser;
+  data.displayShape = DisplayShapeRect;
   MediaValues* mediaValues = MediaValuesCached::create(data);
 
   MediaQueryEvaluator mediaQueryEvaluator(*mediaValues);
@@ -190,8 +193,8 @@ TEST(MediaQueryEvaluatorTest, DynamicNoView) {
   pageHolder.reset();
   ASSERT_EQ(nullptr, frame->view());
   MediaQueryEvaluator mediaQueryEvaluator(frame);
-  MediaQuerySet* querySet = MediaQuerySet::create("foobar");
-  EXPECT_FALSE(mediaQueryEvaluator.eval(querySet));
+  RefPtr<MediaQuerySet> querySet = MediaQuerySet::create("foobar");
+  EXPECT_FALSE(mediaQueryEvaluator.eval(*querySet));
 }
 
 TEST(MediaQueryEvaluatorTest, CachedFloatViewport) {

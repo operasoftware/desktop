@@ -22,7 +22,7 @@ bool StyleInheritedVariables::operator==(
     return false;
 
   for (const auto& iter : m_data) {
-    RefPtr<CSSVariableData> otherData = other.m_data.get(iter.key);
+    RefPtr<CSSVariableData> otherData = other.m_data.at(iter.key);
     if (!dataEquivalent(iter.value, otherData))
       return false;
   }
@@ -57,7 +57,7 @@ void StyleInheritedVariables::setRegisteredVariable(
   m_registeredData.set(name, const_cast<CSSValue*>(parsedValue));
 }
 
-CSSValue* StyleInheritedVariables::registeredVariable(
+const CSSValue* StyleInheritedVariables::registeredVariable(
     const AtomicString& name) const {
   auto result = m_registeredData.find(name);
   if (result != m_registeredData.end())

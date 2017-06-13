@@ -12,7 +12,6 @@ namespace blink {
 
 class LayoutBox;
 class LayoutRect;
-class LayoutSize;
 struct PaintInvalidatorContext;
 
 class BoxPaintInvalidator {
@@ -28,15 +27,21 @@ class BoxPaintInvalidator {
   PaintInvalidationReason invalidatePaintIfNeeded();
 
  private:
+  bool backgroundGeometryDependsOnLayoutOverflowRect();
+  bool backgroundPaintsOntoScrollingContentsLayer();
+  bool shouldFullyInvalidateBackgroundOnLayoutOverflowChange(
+      const LayoutRect& oldLayoutOverflow,
+      const LayoutRect& newLayoutOverflow);
+  void invalidateScrollingContentsBackgroundIfNeeded();
+
   PaintInvalidationReason computePaintInvalidationReason();
 
-  bool incrementallyInvalidatePaint();
+  bool incrementallyInvalidatePaint(PaintInvalidationReason,
+                                    const LayoutRect& oldRect,
+                                    const LayoutRect& newRect);
 
-  bool needsToSavePreviousBoxGeometries();
+  bool needsToSavePreviousContentBoxSizeOrLayoutOverflowRect();
   void savePreviousBoxGeometriesIfNeeded();
-  LayoutSize previousBorderBoxSize(const LayoutSize& previousVisualRectSize);
-  LayoutRect previousContentBoxRect();
-  LayoutRect previousLayoutOverflowRect();
 
   const LayoutBox& m_box;
   const PaintInvalidatorContext& m_context;

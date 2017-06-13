@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef CanvasAsyncBlobCreator_h
+#define CanvasAsyncBlobCreator_h
+
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/CoreExport.h"
 #include "core/dom/DOMTypedArray.h"
@@ -83,9 +86,9 @@ class CORE_EXPORT CanvasAsyncBlobCreator
   virtual void scheduleInitiateJpegEncoding(const double&);
   virtual void idleEncodeRowsPng(double deadlineSeconds);
   virtual void idleEncodeRowsJpeg(double deadlineSeconds);
-  virtual void postDelayedTaskToMainThread(const WebTraceLocation&,
-                                           std::unique_ptr<WTF::Closure>,
-                                           double delayMs);
+  virtual void postDelayedTaskToCurrentThread(const WebTraceLocation&,
+                                              std::unique_ptr<WTF::Closure>,
+                                              double delayMs);
   virtual void signalAlternativeCodePathFinishedForTesting() {}
   virtual void createBlobAndReturnResult();
   virtual void createNullAndReturnResult();
@@ -126,13 +129,14 @@ class CORE_EXPORT CanvasAsyncBlobCreator
 
   // PNG
   bool initializePngStruct();
-  void
-  encodeRowsPngOnMainThread();  // Similar to idleEncodeRowsPng without deadline
+  void forceEncodeRowsPngOnCurrentThread();  // Similar to idleEncodeRowsPng
+                                             // without deadline
 
   // JPEG
   bool initializeJpegStruct(double quality);
-  void encodeRowsJpegOnMainThread();  // Similar to idleEncodeRowsJpeg without
-                                      // deadline
+  void forceEncodeRowsJpegOnCurrentThread();  // Similar to idleEncodeRowsJpeg
+                                              // without
+                                              // deadline
 
   // WEBP
   void encodeImageOnEncoderThread(double quality);
@@ -142,3 +146,5 @@ class CORE_EXPORT CanvasAsyncBlobCreator
 };
 
 }  // namespace blink
+
+#endif  // CanvasAsyncBlobCreator_h

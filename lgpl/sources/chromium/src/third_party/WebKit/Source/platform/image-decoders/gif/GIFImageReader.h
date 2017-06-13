@@ -49,7 +49,7 @@
 
 #define MAX_DICTIONARY_ENTRY_BITS 12
 #define MAX_DICTIONARY_ENTRIES 4096  // 2^MAX_DICTIONARY_ENTRY_BITS
-#define MAX_COLORS 256
+#define MAX_COLORS 256u
 #define BYTES_PER_COLORMAP_ENTRY 3
 
 const int cLoopCountNotSeen = -2;
@@ -198,7 +198,7 @@ struct GIFFrameContext {
   ~GIFFrameContext() {}
 
   void addLzwBlock(size_t position, size_t size) {
-    m_lzwBlocks.append(GIFLZWBlock(position, size));
+    m_lzwBlocks.push_back(GIFLZWBlock(position, size));
   }
 
   bool decode(blink::FastSharedBufferReader*,
@@ -310,7 +310,7 @@ class PLATFORM_EXPORT GIFImageReader final {
     // after GIFControlExtension but before GIFImageHeader.
     // FIXME: This extra complexity is not necessary and we should just report
     // m_frames.size().
-    return m_frames.last()->isHeaderDefined() ? m_frames.size()
+    return m_frames.back()->isHeaderDefined() ? m_frames.size()
                                               : m_frames.size() - 1;
   }
   int loopCount() const { return m_loopCount; }

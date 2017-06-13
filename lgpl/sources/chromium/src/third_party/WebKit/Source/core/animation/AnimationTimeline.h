@@ -36,6 +36,7 @@
 #include "core/animation/Animation.h"
 #include "core/animation/EffectModel.h"
 #include "core/dom/Element.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "platform/Timer.h"
 #include "platform/animation/CompositorAnimationTimeline.h"
 #include "platform/heap/Handle.h"
@@ -74,7 +75,6 @@ class CORE_EXPORT AnimationTimeline
 
   Animation* play(AnimationEffectReadOnly*);
   HeapVector<Member<Animation>> getAnimations();
-  void restartAnimationsOnCompositorIfNeeded();
 
   void animationAttached(Animation&);
 
@@ -139,7 +139,10 @@ class CORE_EXPORT AnimationTimeline
    public:
     AnimationTimelineTiming(AnimationTimeline* timeline)
         : m_timeline(timeline),
-          m_timer(this, &AnimationTimelineTiming::timerFired) {
+          m_timer(TaskRunnerHelper::get(TaskType::UnspecedTimer,
+                                        timeline->document()),
+                  this,
+                  &AnimationTimelineTiming::timerFired) {
       DCHECK(m_timeline);
     }
 
@@ -152,7 +155,7 @@ class CORE_EXPORT AnimationTimeline
 
    private:
     Member<AnimationTimeline> m_timeline;
-    Timer<AnimationTimelineTiming> m_timer;
+    TaskRunnerTimer<AnimationTimelineTiming> m_timer;
   };
 
   friend class AnimationAnimationTimelineTest;

@@ -31,8 +31,6 @@
 #include "core/html/parser/HTMLEntityTable.h"
 #include "wtf/text/StringBuilder.h"
 
-using namespace WTF;
-
 namespace blink {
 
 static const UChar windowsLatin1ExtensionArray[32] = {
@@ -110,7 +108,7 @@ static bool consumeNamedEntity(SegmentedString& source,
     entitySearch.advance(cc);
     if (!entitySearch.isEntityPrefix())
       break;
-    consumedCharacters.append(cc);
+    consumedCharacters.push_back(cc);
     source.advanceAndASSERT(cc);
   }
   notEnoughCharacters = source.isEmpty();
@@ -136,7 +134,7 @@ static bool consumeNamedEntity(SegmentedString& source,
     for (int i = 0; i < length; ++i) {
       cc = source.currentChar();
       DCHECK_EQ(cc, static_cast<UChar>(*reference++));
-      consumedCharacters.append(cc);
+      consumedCharacters.push_back(cc);
       source.advanceAndASSERT(cc);
       ASSERT(!source.isEmpty());
     }
@@ -266,7 +264,7 @@ bool consumeHTMLEntity(SegmentedString& source,
     if (result > UCHAR_MAX_VALUE)
       result = kInvalidUnicode;
 
-    consumedCharacters.append(cc);
+    consumedCharacters.push_back(cc);
     source.advanceAndASSERT(cc);
   }
   ASSERT(source.isEmpty());

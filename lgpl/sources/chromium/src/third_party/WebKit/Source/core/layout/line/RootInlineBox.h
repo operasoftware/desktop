@@ -35,7 +35,6 @@ class HitTestResult;
 class LineLayoutBlockFlow;
 
 struct BidiStatus;
-struct GapRects;
 
 class RootInlineBox : public InlineFlowBox {
  public:
@@ -105,22 +104,25 @@ class RootInlineBox : public InlineFlowBox {
   void childRemoved(InlineBox*);
 
   bool lineCanAccommodateEllipsis(bool ltr,
-                                  int blockEdge,
-                                  int lineBoxEdge,
-                                  int ellipsisWidth);
+                                  LayoutUnit blockEdge,
+                                  LayoutUnit lineBoxEdge,
+                                  LayoutUnit ellipsisWidth);
   // Return the truncatedWidth, the width of the truncated text + ellipsis.
   LayoutUnit placeEllipsis(const AtomicString& ellipsisStr,
                            bool ltr,
                            LayoutUnit blockLeftEdge,
                            LayoutUnit blockRightEdge,
-                           LayoutUnit ellipsisWidth);
+                           LayoutUnit ellipsisWidth,
+                           LayoutUnit logicalLeftOffset,
+                           bool foundBox);
   // Return the position of the EllipsisBox or -1.
   LayoutUnit placeEllipsisBox(bool ltr,
                               LayoutUnit blockLeftEdge,
                               LayoutUnit blockRightEdge,
                               LayoutUnit ellipsisWidth,
                               LayoutUnit& truncatedWidth,
-                              bool& foundBox) final;
+                              bool& foundBox,
+                              LayoutUnit logicalLeftOffset) final;
 
   using InlineBox::hasEllipsisBox;
   EllipsisBox* ellipsisBox() const;
@@ -158,9 +160,9 @@ class RootInlineBox : public InlineFlowBox {
   void appendFloat(LayoutBox* floatingBox) {
     ASSERT(!isDirty());
     if (m_floats)
-      m_floats->append(floatingBox);
+      m_floats->push_back(floatingBox);
     else
-      m_floats = wrapUnique(new Vector<LayoutBox*>(1, floatingBox));
+      m_floats = WTF::wrapUnique(new Vector<LayoutBox*>(1, floatingBox));
   }
 
   Vector<LayoutBox*>* floatsPtr() {
@@ -202,9 +204,6 @@ class RootInlineBox : public InlineFlowBox {
   LayoutUnit logicalBottomLayoutOverflow() const {
     return InlineFlowBox::logicalBottomLayoutOverflow(lineBottom());
   }
-
-  // Used to calculate the underline offset for TextUnderlinePositionUnder.
-  LayoutUnit maxLogicalTop() const;
 
   Node* getLogicalStartBoxWithNode(InlineBox*&) const;
   Node* getLogicalEndBoxWithNode(InlineBox*&) const;

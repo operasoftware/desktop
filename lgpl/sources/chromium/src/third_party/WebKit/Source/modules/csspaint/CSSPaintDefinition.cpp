@@ -39,10 +39,11 @@ CSSPaintDefinition* CSSPaintDefinition::create(
     v8::Local<v8::Function> paint,
     Vector<CSSPropertyID>& nativeInvalidationProperties,
     Vector<AtomicString>& customInvalidationProperties,
+    Vector<CSSSyntaxDescriptor>& inputArgumentTypes,
     bool hasAlpha) {
-  return new CSSPaintDefinition(scriptState, constructor, paint,
-                                nativeInvalidationProperties,
-                                customInvalidationProperties, hasAlpha);
+  return new CSSPaintDefinition(
+      scriptState, constructor, paint, nativeInvalidationProperties,
+      customInvalidationProperties, inputArgumentTypes, hasAlpha);
 }
 
 CSSPaintDefinition::CSSPaintDefinition(
@@ -51,6 +52,7 @@ CSSPaintDefinition::CSSPaintDefinition(
     v8::Local<v8::Function> paint,
     Vector<CSSPropertyID>& nativeInvalidationProperties,
     Vector<AtomicString>& customInvalidationProperties,
+    Vector<CSSSyntaxDescriptor>& inputArgumentTypes,
     bool hasAlpha)
     : m_scriptState(scriptState),
       m_constructor(scriptState->isolate(), constructor),
@@ -59,13 +61,18 @@ CSSPaintDefinition::CSSPaintDefinition(
       m_hasAlpha(hasAlpha) {
   m_nativeInvalidationProperties.swap(nativeInvalidationProperties);
   m_customInvalidationProperties.swap(customInvalidationProperties);
+  m_inputArgumentTypes.swap(inputArgumentTypes);
 }
 
 CSSPaintDefinition::~CSSPaintDefinition() {}
 
-PassRefPtr<Image> CSSPaintDefinition::paint(const LayoutObject& layoutObject,
-                                            const IntSize& size,
-                                            float zoom) {
+PassRefPtr<Image> CSSPaintDefinition::paint(
+    const LayoutObject& layoutObject,
+    const IntSize& size,
+    float zoom,
+    const CSSStyleValueVector* paintArguments) {
+  DCHECK(paintArguments);
+
   const IntSize specifiedSize = getSpecifiedSize(size, zoom);
 
   ScriptState::Scope scope(m_scriptState.get());
@@ -83,19 +90,21 @@ PassRefPtr<Image> CSSPaintDefinition::paint(const LayoutObject& layoutObject,
   DCHECK(layoutObject.node());
 
   PaintRenderingContext2D* renderingContext = PaintRenderingContext2D::create(
-      ImageBuffer::create(wrapUnique(
+      ImageBuffer::create(WTF::wrapUnique(
           new RecordingImageBufferSurface(size, nullptr /* fallbackFactory */,
                                           m_hasAlpha ? NonOpaque : Opaque))),
       m_hasAlpha, zoom);
   PaintSize* paintSize = PaintSize::create(specifiedSize);
   StylePropertyMap* styleMap = FilteredComputedStylePropertyMap::create(
       CSSComputedStyleDeclaration::create(layoutObject.node()),
-      m_nativeInvalidationProperties, m_customInvalidationProperties);
+      m_nativeInvalidationProperties, m_customInvalidationProperties,
+      layoutObject.node());
 
   v8::Local<v8::Value> argv[] = {
-      toV8(renderingContext, m_scriptState->context()->Global(), isolate),
-      toV8(paintSize, m_scriptState->context()->Global(), isolate),
-      toV8(styleMap, m_scriptState->context()->Global(), isolate)};
+      ToV8(renderingContext, m_scriptState->context()->Global(), isolate),
+      ToV8(paintSize, m_scriptState->context()->Global(), isolate),
+      ToV8(styleMap, m_scriptState->context()->Global(), isolate),
+      ToV8(*paintArguments, m_scriptState->context()->Global(), isolate)};
 
   v8::Local<v8::Function> paint = m_paint.newLocal(isolate);
 
@@ -103,7 +112,7 @@ PassRefPtr<Image> CSSPaintDefinition::paint(const LayoutObject& layoutObject,
   block.SetVerbose(true);
 
   V8ScriptRunner::callFunction(paint, m_scriptState->getExecutionContext(),
-                               instance, 3, argv, isolate);
+                               instance, WTF_ARRAY_LENGTH(argv), argv, isolate);
 
   // The paint function may have produced an error, in which case produce an
   // invalid image.
@@ -112,7 +121,7 @@ PassRefPtr<Image> CSSPaintDefinition::paint(const LayoutObject& layoutObject,
   }
 
   return PaintGeneratedImage::create(
-      renderingContext->imageBuffer()->getPicture(), specifiedSize);
+      renderingContext->imageBuffer()->getRecord(), specifiedSize);
 }
 
 void CSSPaintDefinition::maybeCreatePaintInstance() {

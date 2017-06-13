@@ -75,13 +75,13 @@ void AXSpinButton::addChildren() {
       toAXSpinButtonPart(axObjectCache().getOrCreate(SpinButtonPartRole));
   incrementor->setIsIncrementor(true);
   incrementor->setParent(this);
-  m_children.append(incrementor);
+  m_children.push_back(incrementor);
 
   AXSpinButtonPart* decrementor =
       toAXSpinButtonPart(axObjectCache().getOrCreate(SpinButtonPartRole));
   decrementor->setIsIncrementor(false);
   decrementor->setParent(this);
-  m_children.append(decrementor);
+  m_children.push_back(decrementor);
 }
 
 void AXSpinButton::step(int amount) {
@@ -128,7 +128,7 @@ void AXSpinButtonPart::getRelativeBounds(
   *outContainer = parentObject();
 }
 
-bool AXSpinButtonPart::press() const {
+bool AXSpinButtonPart::press() {
   if (!m_parent || !m_parent->isSpinButton())
     return false;
 

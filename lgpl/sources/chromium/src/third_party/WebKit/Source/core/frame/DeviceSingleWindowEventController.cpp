@@ -12,7 +12,7 @@ namespace blink {
 
 DeviceSingleWindowEventController::DeviceSingleWindowEventController(
     Document& document)
-    : PlatformEventController(document.page()),
+    : PlatformEventController(document.frame()),
       m_needsCheckingNullEvents(true),
       m_document(document) {
   document.domWindow()->registerEventListenerObserver(this);
@@ -25,8 +25,8 @@ void DeviceSingleWindowEventController::didUpdateData() {
 }
 
 void DeviceSingleWindowEventController::dispatchDeviceEvent(Event* event) {
-  if (!document().domWindow() || document().activeDOMObjectsAreSuspended() ||
-      document().activeDOMObjectsAreStopped())
+  if (!document().domWindow() || document().isContextSuspended() ||
+      document().isContextDestroyed())
     return;
 
   document().domWindow()->dispatchEvent(event);
@@ -66,6 +66,24 @@ void DeviceSingleWindowEventController::didRemoveAllEventListeners(
     LocalDOMWindow*) {
   stopUpdating();
   m_hasEventListener = false;
+}
+
+bool DeviceSingleWindowEventController::isSameSecurityOriginAsMainFrame()
+    const {
+  if (!document().frame() || !document().page())
+    return false;
+
+  if (document().frame()->isMainFrame())
+    return true;
+
+  SecurityOrigin* mainSecurityOrigin =
+      document().page()->mainFrame()->securityContext()->getSecurityOrigin();
+
+  if (mainSecurityOrigin &&
+      document().getSecurityOrigin()->canAccess(mainSecurityOrigin))
+    return true;
+
+  return false;
 }
 
 DEFINE_TRACE(DeviceSingleWindowEventController) {

@@ -8,7 +8,7 @@
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ToV8.h"
 #include "core/CoreExport.h"
-#include <v8.h>
+#include "v8/include/v8.h"
 
 namespace blink {
 
@@ -29,7 +29,7 @@ inline ScriptValue v8IteratorResult(ScriptState* scriptState, const T& value) {
   return ScriptValue(
       scriptState,
       v8IteratorResultValue(scriptState->isolate(), false,
-                            toV8(value, scriptState->context()->Global(),
+                            ToV8(value, scriptState->context()->Global(),
                                  scriptState->isolate())));
 }
 

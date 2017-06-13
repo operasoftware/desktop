@@ -29,14 +29,16 @@
 
 #include "core/html/shadow/MediaControlElements.h"
 
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/InputTypeNames.h"
 #include "core/dom/ClientRect.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/Text.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/events/MouseEvent.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLLabelElement.h"
 #include "core/html/HTMLMediaSource.h"
@@ -97,22 +99,21 @@ bool isUserInteractionEventForSlider(Event* event, LayoutObject* layoutObject) {
 
   const AtomicString& type = event->type();
   return type == EventTypeNames::mouseover ||
-         type == EventTypeNames::mouseout || type == EventTypeNames::mousemove;
+         type == EventTypeNames::mouseout ||
+         type == EventTypeNames::mousemove ||
+         type == EventTypeNames::pointerover ||
+         type == EventTypeNames::pointerout ||
+         type == EventTypeNames::pointermove;
 }
 
-Element* elementFromCenter(Element& element, int offsetX, int offsetY) {
+Element* elementFromCenter(Element& element) {
   ClientRect* clientRect = element.getBoundingClientRect();
   int centerX =
       static_cast<int>((clientRect->left() + clientRect->right()) / 2);
   int centerY =
       static_cast<int>((clientRect->top() + clientRect->bottom()) / 2);
 
-  return element.document().elementFromPoint(centerX + offsetX,
-                                             centerY + offsetY);
-}
-
-Element* elementFromCenter(Element& element) {
-  return elementFromCenter(element, 0, 0);
+  return element.document().elementFromPoint(centerX, centerY);
 }
 
 bool hasDuplicateLabel(TextTrack* currentTrack) {
@@ -135,8 +136,10 @@ MediaControlPanelElement::MediaControlPanelElement(MediaControls& mediaControls)
     : MediaControlDivElement(mediaControls, MediaControlsPanel),
       m_isDisplayed(false),
       m_opaque(true),
-      m_transitionTimer(this, &MediaControlPanelElement::transitionTimerFired) {
-}
+      m_transitionTimer(TaskRunnerHelper::get(TaskType::UnspecedTimer,
+                                              &mediaControls.document()),
+                        this,
+                        &MediaControlPanelElement::transitionTimerFired) {}
 
 MediaControlPanelElement* MediaControlPanelElement::create(
     MediaControls& mediaControls) {
@@ -533,7 +536,7 @@ Element* MediaControlTextTrackListElement::createTextTrackListItem(
   trackItem->setShadowPseudoId(
       AtomicString("-internal-media-controls-text-track-list-item"));
   HTMLInputElement* trackItemInput =
-      HTMLInputElement::create(document(), nullptr, false);
+      HTMLInputElement::create(document(), false);
   trackItemInput->setShadowPseudoId(
       AtomicString("-internal-media-controls-text-track-list-item-input"));
   trackItemInput->setType(InputTypeNames::checkbox);
@@ -670,14 +673,14 @@ bool MediaControlDownloadButtonElement::shouldDisplayDownloadButton() {
   const KURL& url = mediaElement().currentSrc();
 
   // Check page settings to see if download is disabled.
-  if (document().page() && document().page()->settings().hideDownloadUI())
+  if (document().page() && document().page()->settings().getHideDownloadUI())
     return false;
 
   // URLs that lead to nowhere are ignored.
   if (url.isNull() || url.isEmpty())
     return false;
 
-  // Local files and blobs should not have a download button.
+  // Local files and blobs (including MSE) should not have a download button.
   if (url.isLocalFile() || url.protocolIs("blob"))
     return false;
 
@@ -693,7 +696,32 @@ bool MediaControlDownloadButtonElement::shouldDisplayDownloadButton() {
   if (HTMLMediaElement::isHLSURL(url))
     return false;
 
+  // Infinite streams don't have a clear end at which to finish the download
+  // (would require adding UI to prompt for the duration to download).
+  if (mediaElement().duration() == std::numeric_limits<double>::infinity())
+    return false;
+
+  // The attribute disables the download button.
+  if (mediaElement().controlsList()->shouldHideDownload()) {
+    UseCounter::count(mediaElement().document(),
+                      UseCounter::HTMLMediaElementControlsListNoDownload);
+    return false;
+  }
+
   return true;
+}
+
+void MediaControlDownloadButtonElement::setIsWanted(bool wanted) {
+  MediaControlElement::setIsWanted(wanted);
+
+  if (!isWanted())
+    return;
+
+  DCHECK(isWanted());
+  if (!m_showUseCounted) {
+    m_showUseCounted = true;
+    recordMetrics(DownloadActionMetrics::Shown);
+  }
 }
 
 void MediaControlDownloadButtonElement::defaultEventHandler(Event* event) {
@@ -702,6 +730,10 @@ void MediaControlDownloadButtonElement::defaultEventHandler(Event* event) {
       !(url.isNull() || url.isEmpty())) {
     Platform::current()->recordAction(
         UserMetricsAction("Media.Controls.Download"));
+    if (!m_clickUseCounted) {
+      m_clickUseCounted = true;
+      recordMetrics(DownloadActionMetrics::Clicked);
+    }
     if (!m_anchor) {
       HTMLAnchorElement* anchor = HTMLAnchorElement::create(document());
       anchor->setAttribute(HTMLNames::downloadAttr, "");
@@ -716,6 +748,14 @@ void MediaControlDownloadButtonElement::defaultEventHandler(Event* event) {
 DEFINE_TRACE(MediaControlDownloadButtonElement) {
   visitor->trace(m_anchor);
   MediaControlInputElement::trace(visitor);
+}
+
+void MediaControlDownloadButtonElement::recordMetrics(
+    DownloadActionMetrics metric) {
+  DEFINE_STATIC_LOCAL(EnumerationHistogram, downloadActionHistogram,
+                      ("Media.Controls.Download",
+                       static_cast<int>(DownloadActionMetrics::Count)));
+  downloadActionHistogram.count(static_cast<int>(metric));
 }
 
 // ----------------------------
@@ -758,18 +798,22 @@ void MediaControlTimelineElement::defaultEventHandler(Event* event) {
 
   MediaControlInputElement::defaultEventHandler(event);
 
-  if (event->type() == EventTypeNames::mouseover ||
-      event->type() == EventTypeNames::mouseout ||
-      event->type() == EventTypeNames::mousemove)
+  if (event->type() != EventTypeNames::input)
     return;
 
   double time = value().toDouble();
-  if (event->type() == EventTypeNames::input) {
-    // FIXME: This will need to take the timeline offset into consideration
-    // once that concept is supported, see https://crbug.com/312699
-    if (mediaElement().seekable()->contain(time))
-      mediaElement().setCurrentTime(time);
-  }
+
+  double duration = mediaElement().duration();
+  // Workaround for floating point error - it's possible for this element's max
+  // attribute to be rounded to a value slightly higher than the duration. If
+  // this happens and scrubber is dragged near the max, seek to duration.
+  if (time > duration)
+    time = duration;
+
+  // FIXME: This will need to take the timeline offset into consideration
+  // once that concept is supported, see https://crbug.com/312699
+  if (mediaElement().seekable()->contain(time))
+    mediaElement().setCurrentTime(time);
 
   LayoutSliderItem slider = LayoutSliderItem(toLayoutSlider(layoutObject()));
   if (!slider.isNull() && slider.inDragMode())
@@ -818,20 +862,10 @@ MediaControlVolumeSliderElement* MediaControlVolumeSliderElement::create(
 }
 
 void MediaControlVolumeSliderElement::defaultEventHandler(Event* event) {
-  if (event->isMouseEvent() &&
-      toMouseEvent(event)->button() !=
-          static_cast<short>(WebPointerProperties::Button::Left))
-    return;
-
   if (!isConnected() || !document().isActive())
     return;
 
   MediaControlInputElement::defaultEventHandler(event);
-
-  if (event->type() == EventTypeNames::mouseover ||
-      event->type() == EventTypeNames::mouseout ||
-      event->type() == EventTypeNames::mousemove)
-    return;
 
   if (event->type() == EventTypeNames::mousedown)
     Platform::current()->recordAction(
@@ -841,9 +875,11 @@ void MediaControlVolumeSliderElement::defaultEventHandler(Event* event) {
     Platform::current()->recordAction(
         UserMetricsAction("Media.Controls.VolumeChangeEnd"));
 
-  double volume = value().toDouble();
-  mediaElement().setVolume(volume);
-  mediaElement().setMuted(false);
+  if (event->type() == EventTypeNames::input) {
+    double volume = value().toDouble();
+    mediaElement().setVolume(volume);
+    mediaElement().setMuted(false);
+  }
 }
 
 bool MediaControlVolumeSliderElement::willRespondToMouseMoveEvents() {
@@ -887,6 +923,7 @@ MediaControlFullscreenButtonElement::create(MediaControls& mediaControls) {
   button->setType(InputTypeNames::button);
   button->setShadowPseudoId(
       AtomicString("-webkit-media-controls-fullscreen-button"));
+  button->setIsFullscreen(mediaControls.mediaElement().isFullscreen());
   button->setIsWanted(false);
   return button;
 }
@@ -896,11 +933,11 @@ void MediaControlFullscreenButtonElement::defaultEventHandler(Event* event) {
     if (mediaElement().isFullscreen()) {
       Platform::current()->recordAction(
           UserMetricsAction("Media.Controls.ExitFullscreen"));
-      mediaElement().exitFullscreen();
+      mediaControls().exitFullscreen();
     } else {
       Platform::current()->recordAction(
           UserMetricsAction("Media.Controls.EnterFullscreen"));
-      mediaElement().enterFullscreen();
+      mediaControls().enterFullscreen();
     }
     event->setDefaultHandled();
   }

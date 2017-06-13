@@ -155,9 +155,14 @@ class PLATFORM_EXPORT SimpleFontData : public FontData {
     m_missingGlyphData = glyphData;
   }
 
-  bool canRenderCombiningCharacterSequence(const UChar*, size_t) const;
-
   CustomFontData* customFontData() const { return m_customFontData.get(); }
+
+  unsigned VisualOverflowInflationForAscent() const {
+    return visual_overflow_inflation_for_ascent_;
+  }
+  unsigned VisualOverflowInflationForDescent() const {
+    return visual_overflow_inflation_for_descent_;
+  }
 
  protected:
   SimpleFontData(const FontPlatformData&,
@@ -184,9 +189,7 @@ class PLATFORM_EXPORT SimpleFontData : public FontData {
   FontPlatformData m_platformData;
   SkPaint m_paint;
 
-  bool m_isTextOrientationFallback;
   RefPtr<OpenTypeVerticalData> m_verticalData;
-  bool m_hasVerticalGlyphs;
 
   Glyph m_spaceGlyph;
   float m_spaceWidth;
@@ -214,6 +217,15 @@ class PLATFORM_EXPORT SimpleFontData : public FontData {
 
   RefPtr<CustomFontData> m_customFontData;
 
+  unsigned m_isTextOrientationFallback : 1;
+  unsigned m_hasVerticalGlyphs : 1;
+
+  // These are set to non-zero when ascent or descent is rounded or shifted
+  // to be smaller than the actual ascent or descent. When calculating visual
+  // overflows, we should add the inflations.
+  unsigned visual_overflow_inflation_for_ascent_ : 2;
+  unsigned visual_overflow_inflation_for_descent_ : 2;
+
 // See discussion on crbug.com/631032 and Skiaissue
 // https://bugs.chromium.org/p/skia/issues/detail?id=5328 :
 // On Mac we're still using path based glyph metrics, and they seem to be
@@ -237,7 +249,7 @@ ALWAYS_INLINE FloatRect SimpleFontData::boundsForGlyph(Glyph glyph) const {
 
   boundsResult = platformBoundsForGlyph(glyph);
   if (!m_glyphToBoundsMap)
-    m_glyphToBoundsMap = wrapUnique(new GlyphMetricsMap<FloatRect>);
+    m_glyphToBoundsMap = WTF::wrapUnique(new GlyphMetricsMap<FloatRect>);
   m_glyphToBoundsMap->setMetricsForGlyph(glyph, boundsResult);
 
   return boundsResult;

@@ -193,7 +193,7 @@ class BLINK_PLATFORM_EXPORT TaskQueueThrottler : public TimeDomain::Observer {
 
   const ThrottledTimeDomain* time_domain() const { return time_domain_.get(); }
 
-  base::TimeTicks AlignedThrottledRunTime(
+  static base::TimeTicks AlignedThrottledRunTime(
       base::TimeTicks unthrottled_runtime);
 
   const scoped_refptr<TaskQueue>& task_runner() const { return task_runner_; }

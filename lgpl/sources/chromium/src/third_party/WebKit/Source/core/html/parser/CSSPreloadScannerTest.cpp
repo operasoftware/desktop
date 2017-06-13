@@ -4,13 +4,13 @@
 
 #include "core/html/parser/CSSPreloadScanner.h"
 
-#include "core/fetch/FetchContext.h"
-#include "core/fetch/Resource.h"
-#include "core/fetch/ResourceFetcher.h"
 #include "core/frame/Settings.h"
 #include "core/html/parser/HTMLResourcePreloader.h"
 #include "core/testing/DummyPageHolder.h"
 #include "platform/heap/Heap.h"
+#include "platform/loader/fetch/FetchContext.h"
+#include "platform/loader/fetch/Resource.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/network/ResourceError.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/weborigin/KURL.h"
@@ -41,7 +41,7 @@ class PreloadRecordingCSSPreloaderResourceClient final
 
   void fetchPreloads(PreloadRequestStream& preloads) override {
     for (const auto& it : preloads)
-      m_preloadUrls.append(it->resourceURL());
+      m_preloadUrls.push_back(it->resourceURL());
     CSSPreloaderResourceClient::fetchPreloads(preloads);
   }
 
@@ -63,7 +63,7 @@ TEST_F(CSSPreloadScannerTest, ScanFromResourceClient) {
   KURL url(ParsedURLString, "http://127.0.0.1/foo.css");
   CSSStyleSheetResource* resource =
       CSSStyleSheetResource::createForTest(ResourceRequest(url), "utf-8");
-  resource->setStatus(Resource::Pending);
+  resource->setStatus(ResourceStatus::Pending);
 
   PreloadRecordingCSSPreloaderResourceClient* resourceClient =
       new PreloadRecordingCSSPreloaderResourceClient(resource, preloader);
@@ -71,9 +71,10 @@ TEST_F(CSSPreloadScannerTest, ScanFromResourceClient) {
   const char* data = "@import url('http://127.0.0.1/preload.css');";
   resource->appendData(data, strlen(data));
 
+  EXPECT_EQ(Resource::PreloadNotReferenced, resource->getPreloadResult());
   EXPECT_EQ(1u, resourceClient->m_preloadUrls.size());
   EXPECT_EQ("http://127.0.0.1/preload.css",
-            resourceClient->m_preloadUrls.first());
+            resourceClient->m_preloadUrls.front());
 }
 
 // Regression test for crbug.com/608310 where the client is destroyed but was
@@ -89,7 +90,7 @@ TEST_F(CSSPreloadScannerTest, DestroyClientBeforeDataSent) {
   KURL url(ParsedURLString, "http://127.0.0.1/foo.css");
   Persistent<CSSStyleSheetResource> resource =
       CSSStyleSheetResource::createForTest(ResourceRequest(url), "utf-8");
-  resource->setStatus(Resource::Pending);
+  resource->setStatus(ResourceStatus::Pending);
 
   new PreloadRecordingCSSPreloaderResourceClient(resource, preloader);
 
@@ -140,7 +141,7 @@ TEST_F(CSSPreloadScannerTest, DoNotExpectValidDocument) {
   KURL url(ParsedURLString, "http://127.0.0.1/foo.css");
   CSSStyleSheetResource* resource =
       CSSStyleSheetResource::createForTest(ResourceRequest(url), "utf-8");
-  resource->setStatus(Resource::Pending);
+  resource->setStatus(ResourceStatus::Pending);
 
   PreloadRecordingCSSPreloaderResourceClient* resourceClient =
       new PreloadRecordingCSSPreloaderResourceClient(resource, preloader);

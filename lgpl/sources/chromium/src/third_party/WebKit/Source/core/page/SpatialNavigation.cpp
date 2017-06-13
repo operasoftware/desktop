@@ -83,7 +83,7 @@ FocusCandidate::FocusCandidate(Node* node, WebFocusType type)
 
 bool isSpatialNavigationEnabled(const LocalFrame* frame) {
   return (frame && frame->settings() &&
-          frame->settings()->spatialNavigationEnabled());
+          frame->settings()->getSpatialNavigationEnabled());
 }
 
 bool isSpatialNavigationFindingFocusCandidateEnabled(LocalFrame* frame) {
@@ -100,7 +100,7 @@ void setSpatialNavigationFindingFocusCandidateEnabled(
 
 bool spatialNavigationIgnoresEventHandlers(const LocalFrame* frame) {
   return (frame && frame->settings() &&
-          frame->settings()->deviceSupportsTouch());
+          frame->settings()->getDeviceSupportsTouch());
 }
 
 static bool rectsIntersectOnOrthogonalAxis(WebFocusType type,
@@ -342,21 +342,21 @@ bool canScrollInDirection(const Node* container, WebFocusType type) {
   switch (type) {
     case WebFocusTypeLeft:
       return (container->layoutObject()->style()->overflowX() !=
-                  OverflowHidden &&
+                  EOverflow::kHidden &&
               container->layoutBox()->scrollLeft() > 0);
     case WebFocusTypeUp:
       return (container->layoutObject()->style()->overflowY() !=
-                  OverflowHidden &&
+                  EOverflow::kHidden &&
               container->layoutBox()->scrollTop() > 0);
     case WebFocusTypeRight:
       return (container->layoutObject()->style()->overflowX() !=
-                  OverflowHidden &&
+                  EOverflow::kHidden &&
               container->layoutBox()->scrollLeft() +
                       container->layoutBox()->clientWidth() <
                   container->layoutBox()->scrollWidth());
     case WebFocusTypeDown:
       return (container->layoutObject()->style()->overflowY() !=
-                  OverflowHidden &&
+                  EOverflow::kHidden &&
               container->layoutBox()->scrollTop() +
                       container->layoutBox()->clientHeight() <
                   container->layoutBox()->scrollHeight());
@@ -431,12 +431,12 @@ LayoutRect nodeRectInAbsoluteCoordinates(Node* node, bool ignoreBorder) {
   if (ignoreBorder) {
     rect.move(node->layoutObject()->style()->borderLeftWidth(),
               node->layoutObject()->style()->borderTopWidth());
-    rect.setWidth(rect.width() -
-                  node->layoutObject()->style()->borderLeftWidth() -
-                  node->layoutObject()->style()->borderRightWidth());
-    rect.setHeight(rect.height() -
-                   node->layoutObject()->style()->borderTopWidth() -
-                   node->layoutObject()->style()->borderBottomWidth());
+    rect.setWidth(LayoutUnit(
+        rect.width() - node->layoutObject()->style()->borderLeftWidth() -
+        node->layoutObject()->style()->borderRightWidth()));
+    rect.setHeight(LayoutUnit(
+        rect.height() - node->layoutObject()->style()->borderTopWidth() -
+        node->layoutObject()->style()->borderBottomWidth()));
   }
   return rect;
 }
@@ -638,9 +638,11 @@ bool canBeScrolledIntoView(WebFocusType type, const FocusCandidate& candidate) {
     LayoutRect parentRect = nodeRectInAbsoluteCoordinates(&parentNode);
     if (!candidateRect.intersects(parentRect)) {
       if (((type == WebFocusTypeLeft || type == WebFocusTypeRight) &&
-           parentNode.layoutObject()->style()->overflowX() == OverflowHidden) ||
+           parentNode.layoutObject()->style()->overflowX() ==
+               EOverflow::kHidden) ||
           ((type == WebFocusTypeUp || type == WebFocusTypeDown) &&
-           parentNode.layoutObject()->style()->overflowY() == OverflowHidden))
+           parentNode.layoutObject()->style()->overflowY() ==
+               EOverflow::kHidden))
         return false;
     }
     if (parentNode == candidate.enclosingScrollableBox)

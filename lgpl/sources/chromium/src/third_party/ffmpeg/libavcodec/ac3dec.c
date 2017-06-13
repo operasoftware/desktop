@@ -426,6 +426,10 @@ static int decode_exponents(AC3DecodeContext *s,
     group_size = exp_strategy + (exp_strategy == EXP_D45);
     for (grp = 0, i = 0; grp < ngrps; grp++) {
         expacc = get_bits(gbc, 7);
+        if (expacc >= 125) {
+            av_log(s->avctx, AV_LOG_ERROR, "expacc %d is out-of-range\n", expacc);
+            return AVERROR_INVALIDDATA;
+        }
         dexp[i++] = ungroup_3_in_7_bits_tab[expacc][0];
         dexp[i++] = ungroup_3_in_7_bits_tab[expacc][1];
         dexp[i++] = ungroup_3_in_7_bits_tab[expacc][2];
@@ -1422,6 +1426,13 @@ static int ac3_decode_frame(AVCodecContext * avctx, void *data,
                             (const uint16_t *) buf, cnt);
     } else
         memcpy(s->input_buffer, buf, FFMIN(buf_size, AC3_FRAME_BUFFER_SIZE));
+
+    /* if consistent noise generation is enabled, seed the linear feedback generator
+     * with the contents of the AC-3 frame so that the noise is identical across
+     * decodes given the same AC-3 frame data, for use with non-linear edititing software. */
+    if (s->consistent_noise_generation)
+        av_lfg_init_from_data(&s->dith_state, s->input_buffer, FFMIN(buf_size, AC3_FRAME_BUFFER_SIZE));
+
     buf = s->input_buffer;
     /* initialize the GetBitContext with the start of valid AC-3 Frame */
     if ((ret = init_get_bits8(&s->gbc, buf, buf_size)) < 0)

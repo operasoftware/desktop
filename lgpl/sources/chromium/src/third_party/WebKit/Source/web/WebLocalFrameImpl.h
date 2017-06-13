@@ -37,13 +37,15 @@
 #include "platform/heap/SelfKeepAlive.h"
 #include "public/platform/WebFileSystemType.h"
 #include "public/web/WebLocalFrame.h"
-#include "web/FrameLoaderClientImpl.h"
+#include "web/LocalFrameClientImpl.h"
 #include "web/UserMediaClientImpl.h"
 #include "web/WebExport.h"
 #include "web/WebFrameImplBase.h"
 #include "web/WebFrameWidgetBase.h"
+#include "web/WebInputMethodControllerImpl.h"
 #include "wtf/Compiler.h"
 #include "wtf/text/WTFString.h"
+
 #include <memory>
 
 namespace blink {
@@ -51,7 +53,6 @@ namespace blink {
 class ChromePrintContext;
 class IntSize;
 class KURL;
-class Range;
 class ScrollableArea;
 class SharedWorkerRepositoryClientImpl;
 class TextFinder;
@@ -68,7 +69,6 @@ class WebPerformance;
 class WebPlugin;
 class WebPluginContainerImpl;
 class WebScriptExecutionCallback;
-class WebSuspendableTask;
 class WebView;
 class WebViewImpl;
 enum class WebFrameLoadType;
@@ -81,19 +81,20 @@ class WebVector;
 // Implementation of WebFrame, note that this is a reference counted object.
 class WEB_EXPORT WebLocalFrameImpl final
     : public WebFrameImplBase,
-      WTF_NON_EXPORTED_BASE(public WebLocalFrame) {
+      NON_EXPORTED_BASE(public WebLocalFrame) {
  public:
   // WebFrame methods:
+  // TODO(dcheng): Fix sorting here; a number of method have been moved to
+  // WebLocalFrame but not correctly updated here.
   void close() override;
   WebString uniqueName() const override;
   WebString assignedName() const override;
   void setName(const WebString&) override;
   WebVector<WebIconURL> iconURLs(int iconTypesMask) const override;
-  void setRemoteWebLayer(WebLayer*) override;
   void setContentSettingsClient(WebContentSettingsClient*) override;
   void setSharedWorkerRepositoryClient(
       WebSharedWorkerRepositoryClient*) override;
-  WebSize scrollOffset() const override;
+  WebSize getScrollOffset() const override;
   void setScrollOffset(const WebSize&) override;
   WebSize contentsSize() const override;
   bool hasVisibleContent() const override;
@@ -107,8 +108,7 @@ class WEB_EXPORT WebLocalFrameImpl final
   void executeScript(const WebScriptSource&) override;
   void executeScriptInIsolatedWorld(int worldID,
                                     const WebScriptSource* sources,
-                                    unsigned numSources,
-                                    int extensionGroup) override;
+                                    unsigned numSources) override;
   void setIsolatedWorldSecurityOrigin(int worldID,
                                       const WebSecurityOrigin&) override;
   void setIsolatedWorldContentSecurityPolicy(int worldID,
@@ -132,13 +132,11 @@ class WEB_EXPORT WebLocalFrameImpl final
       int worldID,
       const WebScriptSource* sourcesIn,
       unsigned numSources,
-      int extensionGroup,
       WebVector<v8::Local<v8::Value>>* results) override;
   void requestExecuteScriptInIsolatedWorld(
       int worldID,
       const WebScriptSource* sourceIn,
       unsigned numSources,
-      int extensionGroup,
       bool userGesture,
       WebScriptExecutionCallback*) override;
   v8::Local<v8::Value> callFunctionEvenIfScriptDisabled(
@@ -163,7 +161,6 @@ class WEB_EXPORT WebLocalFrameImpl final
   void enableViewSourceMode(bool enable) override;
   bool isViewSourceModeEnabled() const override;
   void setReferrerForRequest(WebURLRequest&, const WebURL& referrer) override;
-  void dispatchWillSendRequest(WebURLRequest&) override;
   WebAssociatedURLLoader* createAssociatedURLLoader(
       const WebAssociatedURLLoaderOptions&) override;
   unsigned unloadListenerCount() const override;
@@ -205,6 +202,7 @@ class WEB_EXPORT WebLocalFrameImpl final
       const WebVector<WebCompositionUnderline>& underlines) override;
   void extendSelectionAndDelete(int before, int after) override;
   void deleteSurroundingText(int before, int after) override;
+  void deleteSurroundingTextInCodePoints(int before, int after) override;
   void setCaretVisible(bool) override;
   int printBegin(const WebPrintParams&,
                  const WebNode& constrainToNode) override;
@@ -267,15 +265,18 @@ class WEB_EXPORT WebLocalFrameImpl final
                 bool isClientRedirect) override;
   bool maybeRenderFallbackContent(const WebURLError&) const override;
   bool isLoading() const override;
-  bool isFrameDetachedForSpecialOneOffStopTheCrashingHackBug561873()
-      const override;
   bool isNavigationScheduledWithin(double interval) const override;
   void setCommittedFirstRealLoad() override;
   void setHasReceivedUserGesture() override;
+  void blinkFeatureUsageReport(const std::set<int>& features) override;
+  void mixedContentFound(const WebURL& mainResourceUrl,
+                         const WebURL& mixedContentUrl,
+                         WebURLRequest::RequestContext,
+                         bool wasAllowed,
+                         bool hadRedirect) override;
   void sendOrientationChangeEvent() override;
   WebSandboxFlags effectiveSandboxFlags() const override;
   void forceSandboxFlags(WebSandboxFlags) override;
-  void requestRunTask(WebSuspendableTask*) const override;
   void didCallAddSearchProvider() override;
   void didCallIsSearchProviderInstalled() override;
   void replaceSelection(const WebString&) override;
@@ -299,8 +300,19 @@ class WEB_EXPORT WebLocalFrameImpl final
   WebFrameWidgetBase* frameWidget() const override;
   void copyImageAt(const WebPoint&) override;
   void saveImageAt(const WebPoint&) override;
+  void setEngagementLevel(mojom::EngagementLevel) override;
   void clearActiveFindMatch() override;
   void usageCountChromeLoadTimes(const WebString& metric) override;
+  void setHasDetachedView(bool hasDetachedView) override;
+  bool hasDetachedView() const override;
+  base::SingleThreadTaskRunner* timerTaskRunner() override;
+  base::SingleThreadTaskRunner* loadingTaskRunner() override;
+  base::SingleThreadTaskRunner* unthrottledTaskRunner() override;
+  WebInputMethodControllerImpl* inputMethodController() const override;
+
+  void extractSmartClipData(WebRect rectInViewport,
+                            WebString& clipText,
+                            WebString& clipHtml) override;
 
   // WebFrameImplBase methods:
   void initializeCoreFrame(FrameHost*,
@@ -314,8 +326,12 @@ class WEB_EXPORT WebLocalFrameImpl final
 
   static WebLocalFrameImpl* create(WebTreeScopeType,
                                    WebFrameClient*,
+                                   blink::InterfaceProvider*,
+                                   blink::InterfaceRegistry*,
                                    WebFrame* opener);
   static WebLocalFrameImpl* createProvisional(WebFrameClient*,
+                                              blink::InterfaceProvider*,
+                                              blink::InterfaceRegistry*,
                                               WebRemoteFrame*,
                                               WebSandboxFlags);
   ~WebLocalFrameImpl() override;
@@ -406,15 +422,20 @@ class WEB_EXPORT WebLocalFrameImpl final
   void setContextMenuNode(Node* node) { m_contextMenuNode = node; }
   void clearContextMenuNode() { m_contextMenuNode.clear(); }
 
-  WebInputMethodControllerImpl* inputMethodController() const;
 
   DECLARE_TRACE();
 
  private:
-  friend class FrameLoaderClientImpl;
+  friend class LocalFrameClientImpl;
 
-  WebLocalFrameImpl(WebTreeScopeType, WebFrameClient*);
-  WebLocalFrameImpl(WebRemoteFrame*, WebFrameClient*);
+  WebLocalFrameImpl(WebTreeScopeType,
+                    WebFrameClient*,
+                    blink::InterfaceProvider*,
+                    blink::InterfaceRegistry*);
+  WebLocalFrameImpl(WebRemoteFrame*,
+                    WebFrameClient*,
+                    blink::InterfaceProvider*,
+                    blink::InterfaceRegistry*);
 
   // Inherited from WebFrame, but intentionally hidden: it never makes sense
   // to call these on a WebLocalFrameImpl.
@@ -436,7 +457,7 @@ class WEB_EXPORT WebLocalFrameImpl final
   // Returns true if the frame is focused.
   bool isFocused() const;
 
-  Member<FrameLoaderClientImpl> m_frameLoaderClientImpl;
+  Member<LocalFrameClientImpl> m_localFrameClientImpl;
 
   // The embedder retains a reference to the WebCore LocalFrame while it is
   // active in the DOM. This reference is released when the frame is removed
@@ -468,6 +489,10 @@ class WEB_EXPORT WebLocalFrameImpl final
   IntSize m_inputEventsOffsetForEmulation;
   float m_inputEventsScaleFactorForEmulation;
 
+  // Borrowed pointers to Mojo objects.
+  blink::InterfaceProvider* m_interfaceProvider;
+  blink::InterfaceRegistry* m_interfaceRegistry;
+
   WebDevToolsFrontendImpl* m_webDevToolsFrontend;
 
   Member<Node> m_contextMenuNode;
@@ -478,6 +503,8 @@ class WEB_EXPORT WebLocalFrameImpl final
   // Accomplish that by keeping a self-referential Persistent<>. It is
   // cleared upon close().
   SelfKeepAlive<WebLocalFrameImpl> m_selfKeepAlive;
+
+  bool m_hasDetachedView;
 };
 
 DEFINE_TYPE_CASTS(WebLocalFrameImpl,

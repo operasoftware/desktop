@@ -60,9 +60,9 @@ class CORE_EXPORT SVGAnimationElement : public SVGSMILElement {
   float getCurrentTime() const;
   float getSimpleDuration(ExceptionState&) const;
 
-  void beginElement();
+  void beginElement() { beginElementAt(0); }
   void beginElementAt(float offset);
-  void endElement();
+  void endElement() { endElementAt(0); }
   void endElementAt(float offset);
 
   DEFINE_MAPPED_ATTRIBUTE_EVENT_LISTENER(begin, beginEvent);
@@ -111,9 +111,7 @@ class CORE_EXPORT SVGAnimationElement : public SVGSMILElement {
  protected:
   SVGAnimationElement(const QualifiedName&, Document&);
 
-  void parseAttribute(const QualifiedName&,
-                      const AtomicString&,
-                      const AtomicString&) override;
+  void parseAttribute(const AttributeModificationParams&) override;
   void svgAttributeChanged(const QualifiedName&) override;
 
   String toValue() const;

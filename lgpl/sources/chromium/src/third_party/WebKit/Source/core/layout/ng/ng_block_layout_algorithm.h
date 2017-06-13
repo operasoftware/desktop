@@ -6,113 +6,95 @@
 #define NGBlockLayoutAlgorithm_h
 
 #include "core/CoreExport.h"
-#include "core/layout/ng/ng_box.h"
+#include "core/layout/ng/ng_block_node.h"
 #include "core/layout/ng/ng_constraint_space_builder.h"
 #include "core/layout/ng/ng_fragment_builder.h"
 #include "core/layout/ng/ng_layout_algorithm.h"
+#include "core/layout/ng/ng_units.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
 
 class ComputedStyle;
+class NGBlockBreakToken;
 class NGConstraintSpace;
-class NGPhysicalFragmentBase;
-class NGBreakToken;
+class NGInlineNode;
+class NGLayoutResult;
 
 // A class for general block layout (e.g. a <div> with no special style).
 // Lays out the children in sequence.
 class CORE_EXPORT NGBlockLayoutAlgorithm : public NGLayoutAlgorithm {
  public:
   // Default constructor.
-  // @param style Style reference of the block that is being laid out.
-  // @param first_child Our first child; the algorithm will use its NextSibling
-  //                    method to access all the children.
+  // @param node The input node to perform layout upon.
   // @param space The constraint space which the algorithm should generate a
   //              fragment within.
-  NGBlockLayoutAlgorithm(PassRefPtr<const ComputedStyle>,
-                         NGBox* first_child,
+  // @param break_token The break token from which the layout should start.
+  NGBlockLayoutAlgorithm(NGBlockNode* node,
                          NGConstraintSpace* space,
-                         NGBreakToken* break_token = nullptr);
+                         NGBlockBreakToken* break_token = nullptr);
 
-  NGLayoutStatus Layout(NGFragmentBase*,
-                        NGPhysicalFragmentBase**,
-                        NGLayoutAlgorithm**) override;
-
-  DECLARE_VIRTUAL_TRACE();
+  Optional<MinAndMaxContentSizes> ComputeMinAndMaxContentSizes() const override;
+  RefPtr<NGLayoutResult> Layout() override;
 
  private:
+  NGBoxStrut CalculateMargins(NGBlockNode* child,
+                              const NGConstraintSpace& space);
+
   // Creates a new constraint space for the current child.
-  NGConstraintSpace* CreateConstraintSpaceForCurrentChild() const;
-  bool LayoutCurrentChild();
+  RefPtr<NGConstraintSpace> CreateConstraintSpaceForChild(NGLayoutInputNode*);
+  void FinishChildLayout(NGLayoutInputNode*,
+                         NGConstraintSpace*,
+                         RefPtr<NGLayoutResult>);
 
-  // Computes collapsed margins for 2 adjoining blocks and updates the resultant
-  // fragment's MarginStrut if needed.
-  // See https://www.w3.org/TR/CSS2/box.html#collapsing-margins
-  //
-  // @param child_margins Margins information for the current child.
-  // @param fragment Current child's fragment.
-  // @return NGBoxStrut with margins block start/end.
-  NGBoxStrut CollapseMargins(const NGBoxStrut& child_margins,
-                             const NGFragment& fragment);
+  // Layout inline children.
+  void LayoutInlineChildren(NGInlineNode*, NGConstraintSpace*);
 
-  // Calculates position of the in-flow block-level fragment that needs to be
-  // positioned relative to the current fragment that is being built.
-  //
-  // @param fragment Fragment that needs to be placed.
-  // @param child_margins Margins information for the current child fragment.
-  // @return Position of the fragment in the parent's constraint space.
-  NGLogicalOffset PositionFragment(const NGFragmentBase& fragment,
-                                   const NGBoxStrut& child_margins);
+  // Final adjustments before fragment creation. We need to prevent the
+  // fragment from crossing fragmentainer boundaries, and rather create a break
+  // token if we're out of space.
+  void FinalizeForFragmentation();
 
-  // Calculates position of the float fragment that needs to be
-  // positioned relative to the current fragment that is being built.
-  //
-  // @param fragment Fragment that needs to be placed.
-  // @param margins Margins information for the fragment.
-  // @return Position of the fragment in the parent's constraint space.
-  NGLogicalOffset PositionFloatFragment(const NGFragmentBase& fragment,
-                                        const NGBoxStrut& margins);
+  // Calculates logical offset for the current fragment using either
+  // {@code content_size_} when the fragment doesn't know it's offset
+  // or {@code known_fragment_offset} if the fragment knows it's offset
+  // @return Fragment's offset relative to the fragment's parent.
+  NGLogicalOffset CalculateLogicalOffset(
+      const WTF::Optional<NGLogicalOffset>& known_fragment_offset);
 
-  // Updates block-{start|end} of the currently constructed fragment.
-  //
-  // This method is supposed to be called on every child but it only updates
-  // the block-start once (on the first non-zero height child fragment) and
-  // keeps updating block-end (on every non-zero height child).
-  void UpdateMarginStrut(const NGMarginStrut& from);
+  // Updates the fragment's BFC offset if it's not already set.
+  void UpdateFragmentBfcOffset(const NGLogicalOffset& offset);
 
-  // Read-only Getters.
-  const ComputedStyle& CurrentChildStyle() const {
-    DCHECK(current_child_);
-    return *current_child_->Style();
+  NGLogicalOffset GetChildSpaceOffset() const {
+    return NGLogicalOffset(border_and_padding_.inline_start, content_size_);
   }
 
   const NGConstraintSpace& ConstraintSpace() const {
+    DCHECK(constraint_space_);
     return *constraint_space_;
   }
 
-  const ComputedStyle& Style() const { return *style_; }
+  const ComputedStyle& Style() const { return node_->Style(); }
 
-  enum State { kStateInit, kStateChildLayout, kStateFinalize };
-  State state_;
+  // Mutable Getters.
+  NGConstraintSpace* MutableConstraintSpace() { return constraint_space_; }
 
-  RefPtr<const ComputedStyle> style_;
+  Persistent<NGBlockNode> node_;
+  NGConstraintSpace* constraint_space_;
 
-  Member<NGBox> first_child_;
-  Member<NGConstraintSpace> constraint_space_;
-  Member<NGBreakToken> break_token_;
-  Member<NGFragmentBuilder> builder_;
-  Member<NGConstraintSpaceBuilder> space_builder_;
-  Member<NGConstraintSpace> space_for_current_child_;
-  Member<NGBox> current_child_;
+  // The break token from which we are currently resuming layout.
+  NGBlockBreakToken* break_token_;
+
+  NGFragmentBuilder builder_;
+  NGConstraintSpaceBuilder space_builder_;
 
   NGBoxStrut border_and_padding_;
   LayoutUnit content_size_;
   LayoutUnit max_inline_size_;
   // MarginStrut for the previous child.
-  NGMarginStrut prev_child_margin_strut_;
-  // Whether the block-start was set for the currently built
-  // fragment's margin strut.
-  bool is_fragment_margin_strut_block_start_updated_ : 1;
+  NGMarginStrut curr_margin_strut_;
+  NGLogicalOffset curr_bfc_offset_;
+  NGBoxStrut curr_child_margins_;
 };
 
 }  // namespace blink

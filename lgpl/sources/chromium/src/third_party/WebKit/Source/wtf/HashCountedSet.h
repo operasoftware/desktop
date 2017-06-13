@@ -24,6 +24,7 @@
 #include "wtf/Assertions.h"
 #include "wtf/HashMap.h"
 #include "wtf/Vector.h"
+#include "wtf/allocator/PartitionAllocator.h"
 
 namespace WTF {
 
@@ -35,7 +36,7 @@ template <typename Value,
           typename Traits = HashTraits<Value>,
           typename Allocator = PartitionAllocator>
 class HashCountedSet {
-  WTF_USE_ALLOCATOR(HashCountedSet, Allocator);
+  USE_ALLOCATOR(HashCountedSet, Allocator);
   WTF_MAKE_NONCOPYABLE(HashCountedSet);
 
  private:
@@ -49,11 +50,18 @@ class HashCountedSet {
 
  public:
   typedef Value ValueType;
+  using value_type = ValueType;
   typedef typename ImplType::iterator iterator;
   typedef typename ImplType::const_iterator const_iterator;
   typedef typename ImplType::AddResult AddResult;
 
-  HashCountedSet() {}
+  HashCountedSet() {
+    static_assert(Allocator::isGarbageCollected ||
+                      !IsPointerToGarbageCollectedType<Value>::value,
+                  "Cannot put raw pointers to garbage-collected classes into "
+                  "an off-heap HashCountedSet. Use "
+                  "HeapHashCountedSet<Member<T>> instead.");
+  }
 
   void swap(HashCountedSet& other) { m_impl.swap(other.m_impl); }
 
@@ -73,7 +81,7 @@ class HashCountedSet {
     return m_impl.find(value);
   }
   bool contains(const ValueType& value) const { return m_impl.contains(value); }
-  unsigned count(const ValueType& value) const { return m_impl.get(value); }
+  unsigned count(const ValueType& value) const { return m_impl.at(value); }
 
   // Increases the count if an equal value is already present the return value
   // is a pair of an iterator to the new value's location, and a bool that is
@@ -110,7 +118,7 @@ template <typename T, typename U, typename V, typename W>
 inline typename HashCountedSet<T, U, V, W>::AddResult
 HashCountedSet<T, U, V, W>::add(const ValueType& value, unsigned count) {
   DCHECK_GT(count, 0u);
-  AddResult result = m_impl.add(value, 0);
+  AddResult result = m_impl.insert(value, 0);
   result.storedValue->value += count;
   return result;
 }
@@ -127,7 +135,7 @@ inline bool HashCountedSet<T, U, V, W>::remove(iterator it) {
     return false;
 
   unsigned oldVal = it->value;
-  ASSERT(oldVal);
+  DCHECK(oldVal);
   unsigned newVal = oldVal - 1;
   if (newVal) {
     it->value = newVal;

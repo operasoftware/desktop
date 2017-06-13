@@ -68,7 +68,7 @@ WebString WebHistoryItem::referrer() const {
   return m_private->referrer().referrer;
 }
 
-WebReferrerPolicy WebHistoryItem::referrerPolicy() const {
+WebReferrerPolicy WebHistoryItem::getReferrerPolicy() const {
   return static_cast<WebReferrerPolicy>(m_private->referrer().referrerPolicy);
 }
 
@@ -96,8 +96,8 @@ void WebHistoryItem::setVisualViewportScrollOffset(
   m_private->setVisualViewportScrollOffset(toScrollOffset(scrollOffset));
 }
 
-WebPoint WebHistoryItem::scrollOffset() const {
-  ScrollOffset offset = m_private->scrollOffset();
+WebPoint WebHistoryItem::getScrollOffset() const {
+  ScrollOffset offset = m_private->getScrollOffset();
   return WebPoint(offset.width(), offset.height());
 }
 
@@ -113,7 +113,7 @@ void WebHistoryItem::setPageScaleFactor(float scale) {
   m_private->setPageScaleFactor(scale);
 }
 
-WebVector<WebString> WebHistoryItem::documentState() const {
+WebVector<WebString> WebHistoryItem::getDocumentState() const {
   Vector<String> result;
   m_private->getDocumentState(&result);
   return result;
@@ -123,7 +123,7 @@ void WebHistoryItem::setDocumentState(const WebVector<WebString>& state) {
   // FIXME: would be nice to avoid the intermediate copy
   Vector<String> ds;
   for (size_t i = 0; i < state.size(); ++i)
-    ds.append(state[i]);
+    ds.push_back(state[i]);
   m_private->setDocumentState(ds);
 }
 
@@ -186,18 +186,27 @@ WebVector<WebString> WebHistoryItem::getReferencedFilePaths() const {
     for (size_t i = 0; i < formData->elements().size(); ++i) {
       const FormDataElement& element = formData->elements()[i];
       if (element.m_type == FormDataElement::encodedFile)
-        filePaths.add(element.m_filename);
+        filePaths.insert(element.m_filename);
     }
   }
 
   const Vector<String>& referencedFilePaths =
       m_private->getReferencedFilePaths();
   for (size_t i = 0; i < referencedFilePaths.size(); ++i)
-    filePaths.add(referencedFilePaths[i]);
+    filePaths.insert(referencedFilePaths[i]);
 
   Vector<String> results;
   copyToVector(filePaths, results);
   return results;
+}
+
+bool WebHistoryItem::didSaveScrollOrScaleState() const {
+  return m_private->didSaveScrollOrScaleState();
+}
+
+void WebHistoryItem::setDidSaveScrollOrScaleState(
+    bool hasSaveScrollOrScaleState) {
+  m_private->setDidSaveScrollOrScaleState(hasSaveScrollOrScaleState);
 }
 
 WebHistoryItem::WebHistoryItem(HistoryItem* item) : m_private(item) {}

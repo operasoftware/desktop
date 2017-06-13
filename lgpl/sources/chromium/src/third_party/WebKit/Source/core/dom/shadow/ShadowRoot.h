@@ -123,7 +123,15 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   void registerScopedHTMLStyleChild();
   void unregisterScopedHTMLStyleChild();
 
-  SlotAssignment& ensureSlotAssignment();
+  SlotAssignment& slotAssignment() {
+    DCHECK(m_slotAssignment);
+    return *m_slotAssignment;
+  }
+
+  HTMLSlotElement* assignedSlotFor(const Node&);
+  void didAddSlot(HTMLSlotElement&);
+  void didChangeHostChildSlotName(const AtomicString& oldValue,
+                                  const AtomicString& newValue);
 
   void distributeV1();
 
@@ -132,7 +140,7 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   String innerHTML() const;
   void setInnerHTML(const String&, ExceptionState& = ASSERT_NO_EXCEPTION);
 
-  Node* cloneNode(bool, ExceptionState&);
+  Node* cloneNode(bool, ExceptionState&) override;
 
   void setDelegatesFocus(bool flag) { m_delegatesFocus = flag; }
   bool delegatesFocus() const { return m_delegatesFocus; }
@@ -155,6 +163,7 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   void childrenChanged(const ChildrenChange&) override;
 
   ShadowRootRareDataV0& ensureShadowRootRareDataV0();
+  SlotAssignment& ensureSlotAssignment();
 
   void addChildShadowRoot() { ++m_childShadowRootCount; }
   void removeChildShadowRoot() {
@@ -162,9 +171,6 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
     --m_childShadowRootCount;
   }
   void invalidateDescendantInsertionPoints();
-
-  // ShadowRoots should never be cloned.
-  Node* cloneNode(bool) override { return nullptr; }
 
   Member<ShadowRootRareDataV0> m_shadowRootRareDataV0;
   Member<StyleSheetList> m_styleSheetList;

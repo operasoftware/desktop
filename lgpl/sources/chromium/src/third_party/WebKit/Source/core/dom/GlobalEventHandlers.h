@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Opera Software ASA. All rights reserved.
+ * Copyright (c) 2013, Opera Software AS. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -9,7 +9,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of Opera Software ASA nor the names of its
+ * 3. Neither the name of Opera Software AS nor the names of its
  *    contributors may be used to endorse or promote products derived
  *    from this software without specific prior written permission.
  *
@@ -59,6 +59,7 @@ DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(emptied);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(ended);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(error);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(focus);
+DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(gotpointercapture);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(input);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(invalid);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(keydown);
@@ -68,6 +69,7 @@ DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(load);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(loadeddata);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(loadedmetadata);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(loadstart);
+DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(lostpointercapture);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(mousedown);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(mouseenter);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(mouseleave);

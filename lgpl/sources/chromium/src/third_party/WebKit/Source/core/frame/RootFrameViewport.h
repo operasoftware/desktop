@@ -64,17 +64,13 @@ class CORE_EXPORT RootFrameViewport final
   IntRect visibleContentRect(
       IncludeScrollbarsInRect = ExcludeScrollbars) const override;
   bool shouldUseIntegerScrollOffset() const override;
-  LayoutRect visualRectForScrollbarParts() const override {
-    ASSERT_NOT_REACHED();
-    return LayoutRect();
-  }
   bool isActive() const override;
   int scrollSize(ScrollbarOrientation) const override;
   bool isScrollCornerVisible() const override;
   IntRect scrollCornerRect() const override;
   void updateScrollOffset(const ScrollOffset&, ScrollType) override;
   IntSize scrollOffsetInt() const override;
-  ScrollOffset scrollOffset() const override;
+  ScrollOffset getScrollOffset() const override;
   IntSize minimumScrollOffsetInt() const override;
   IntSize maximumScrollOffsetInt() const override;
   ScrollOffset maximumScrollOffset() const override;
@@ -100,12 +96,13 @@ class CORE_EXPORT RootFrameViewport final
   void updateCompositorScrollAnimations() override;
   void cancelProgrammaticScrollAnimation() override;
   ScrollBehavior scrollBehaviorStyle() const override;
-  Widget* getWidget() override;
+  FrameViewBase* getWidget() override;
   void clearScrollableArea() override;
   LayoutBox* layoutBox() const override;
   FloatQuad localToVisibleContentQuad(const FloatQuad&,
                                       const LayoutObject*,
                                       unsigned = 0) const final;
+  RefPtr<WebTaskRunner> getTimerTaskRunner() const final;
 
  private:
   RootFrameViewport(ScrollableArea& visualViewport,

@@ -6,9 +6,9 @@ import optparse
 import unittest
 
 from webkitpy.common.net.buildbot import Build
-from webkitpy.common.net.layouttestresults import LayoutTestResults
-from webkitpy.common.system.executive_mock import MockExecutive, MockExecutive2
-from webkitpy.common.system.outputcapture import OutputCapture
+from webkitpy.common.net.layout_test_results import LayoutTestResults
+from webkitpy.common.system.executive_mock import MockExecutive
+from webkitpy.common.system.output_capture import OutputCapture
 from webkitpy.layout_tests.builder_list import BuilderList
 from webkitpy.tool.commands.rebaseline import (
     AbstractParallelRebaselineCommand, CopyExistingBaselinesInternal,
@@ -25,7 +25,7 @@ class BaseTestCase(unittest.TestCase):
 
     def setUp(self):
         self.tool = MockWebKitPatch()
-        # lint warns that command_constructor might not be set, but this is intentional; pylint: disable=E1102
+        # Lint warns that command_constructor might not be set, but this is intentional; pylint: disable=not-callable
         self.command = self.command_constructor()
         self.command._tool = self.tool
         self.tool.builders = BuilderList({
@@ -117,114 +117,99 @@ class TestCopyExistingBaselinesInternal(BaseTestCase):
         options_dict.update(kwargs)
         return optparse.Values(options_dict)
 
-    def test_copy_baseline_mac(self):
-        port = self.tool.port_factory.get('test-mac-mac10.11')
+    def baseline_path(self, path_from_layout_test_dir):
+        port = self.tool.port_factory.get()
+        return self.tool.filesystem.join(port.layout_tests_dir(), path_from_layout_test_dir)
+
+    # The tests in this class all depend on the fall-back path graph
+    # that is set up in |TestPort.FALLBACK_PATHS|.
+
+    def test_copy_baseline_mac_newer_to_older_version(self):
+        # The test-mac-mac10.11 baseline is copied over to the test-mac-mac10.10
+        # baseline directory because test-mac-mac10.10 is the "immediate
+        # predecessor" in the fall-back graph.
         self._write(
-            port.host.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-mac-mac10.11/failures/expected/image-expected.txt'),
-            'original mac10.11 result')
+            self.baseline_path('platform/test-mac-mac10.11/failures/expected/image-expected.txt'),
+            'original test-mac-mac10.11 result')
         self.assertFalse(self.tool.filesystem.exists(
-            self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-mac-mac10.10/failures/expected/image-expected.txt')))
+            self.baseline_path('platform/test-mac-mac10.10/failures/expected/image-expected.txt')))
 
         self.command.execute(self.options(builder='MOCK Mac10.11', test='failures/expected/image.html'), [], self.tool)
 
-        # The Mac 10.11 baseline is copied over to the Mac 10.10 directory,
-        # because Mac10.10 is the "immediate predecessor" in the fallback tree.
-        # That means that normally for Mac10.10 if there's no Mac10.10-specific
-        # baseline, then we fall back to the Mac10.11 baseline.
-        # The idea is, if in the next step we download new baselines for Mac10.11
-        # but not Mac10.10, then mac10.10 will still have the correct baseline.
         self.assertEqual(
-            self._read(self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-mac-mac10.11/failures/expected/image-expected.txt')),
-            'original mac10.11 result')
+            self._read(self.baseline_path('platform/test-mac-mac10.11/failures/expected/image-expected.txt')),
+            'original test-mac-mac10.11 result')
         self.assertEqual(
-            self._read(self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-mac-mac10.10/failures/expected/image-expected.txt')),
-            'original mac10.11 result')
+            self._read(self.baseline_path('platform/test-mac-mac10.10/failures/expected/image-expected.txt')),
+            'original test-mac-mac10.11 result')
 
-    def test_copying_overwritten_baseline_to_multiple_locations(self):
-        self.tool.executive = MockExecutive2()
-
-    def test_copy_baseline_win7_to_linux_trusty(self):
-        port = self.tool.port_factory.get('test-win-win7')
+    def test_copy_baseline_win10_to_linux_trusty_and_win7(self):
+        # The test-win-win10 baseline is copied over to the test-linux-trusty
+        # and test-win-win7 baseline paths, since both of these are "immediate
+        # predecessors".
         self._write(
-            self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-win-win7/failures/expected/image-expected.txt'),
-            'original win7 result')
+            self.baseline_path('platform/test-win-win10/failures/expected/image-expected.txt'),
+            'original test-win-win10 result')
         self.assertFalse(self.tool.filesystem.exists(
-            self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-linux-trusty/failures/expected/image-expected.txt')))
+            self.baseline_path('platform/test-linux-trusty/failures/expected/image-expected.txt')))
 
-        self.command.execute(self.options(builder='MOCK Win7', test='failures/expected/image.html'), [], self.tool)
+        self.command.execute(self.options(builder='MOCK Win10', test='failures/expected/image.html'), [], self.tool)
 
-        # The Mac Win7 baseline is copied over to the Linux Trusty directory,
-        # because Linux Trusty is the baseline fallback "immediate predecessor" of Win7.
         self.assertEqual(
-            self._read(self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-win-win7/failures/expected/image-expected.txt')),
-            'original win7 result')
+            self._read(self.baseline_path('platform/test-win-win10/failures/expected/image-expected.txt')),
+            'original test-win-win10 result')
         self.assertEqual(
-            self._read(self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-linux-trusty/failures/expected/image-expected.txt')),
-            'original win7 result')
+            self._read(self.baseline_path('platform/test-linux-trusty/failures/expected/image-expected.txt')),
+            'original test-win-win10 result')
+        self.assertEqual(
+            self._read(self.baseline_path('platform/test-linux-trusty/failures/expected/image-expected.txt')),
+            'original test-win-win10 result')
 
     def test_no_copy_existing_baseline(self):
-        port = self.tool.port_factory.get('test-win-win7')
+        # If a baseline exists already for an "immediate prdecessor" baseline
+        # directory, (e.g. test-linux-trusty), then no "immediate successor"
+        # baselines (e.g. test-win-win10) are copied over.
         self._write(
-            self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-win-win7/failures/expected/image-expected.txt'),
-            'original win7 result')
+            self.baseline_path('platform/test-win-win10/failures/expected/image-expected.txt'),
+            'original test-win-win10 result')
         self._write(
-            self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-linux-trusty/failures/expected/image-expected.txt'),
-            'original linux trusty result')
+            self.baseline_path('platform/test-linux-trusty/failures/expected/image-expected.txt'),
+            'original test-linux-trusty result')
 
-        self.command.execute(self.options(builder='MOCK Win7', test='failures/expected/image.html'), [], self.tool)
+        self.command.execute(self.options(builder='MOCK Win10', test='failures/expected/image.html'), [], self.tool)
 
-        # Since a baseline existed already for Linux Trusty, the Win7 baseline is not copied over.
         self.assertEqual(
-            self._read(self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-win-win7/failures/expected/image-expected.txt')),
-            'original win7 result')
+            self._read(self.baseline_path('platform/test-win-win10/failures/expected/image-expected.txt')),
+            'original test-win-win10 result')
         self.assertEqual(
-            self._read(self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-linux-trusty/failures/expected/image-expected.txt')),
-            'original linux trusty result')
+            self._read(self.baseline_path('platform/test-linux-trusty/failures/expected/image-expected.txt')),
+            'original test-linux-trusty result')
 
     def test_no_copy_skipped_test(self):
-        port = self.tool.port_factory.get('test-win-win7')
+        # If a test is skipped on some platform, no baselines are copied over
+        # to that directory. In this example, the test is skipped on linux,
+        # so the test-win-win10 baseline is not copied over.
+        port = self.tool.port_factory.get('test-win-win10')
         self._write(
-            self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-win-win7/failures/expected/image-expected.txt'),
-            'original win7 result')
+            self.baseline_path('platform/test-win-win10/failures/expected/image-expected.txt'),
+            'original test-win-win10 result')
         self._write(
             port.path_to_generic_test_expectations_file(),
             ("[ Win ] failures/expected/image.html [ Failure ]\n"
              "[ Linux ] failures/expected/image.html [ Skip ]\n"))
 
-        self.command.execute(self.options(builder='MOCK Win7', test='failures/expected/image.html'), [], self.tool)
+        self.command.execute(self.options(builder='MOCK Win10', test='failures/expected/image.html'), [], self.tool)
 
-        # The Win7 baseline is not copied over to the Linux Trusty directory
-        # because the test is skipped on linux.
         self.assertFalse(
-            self.tool.filesystem.exists(self.tool.filesystem.join(
-                port.layout_tests_dir(),
-                'platform/test-linux-trusty/failures/expected/image-expected.txt')))
+            self.tool.filesystem.exists(self.baseline_path('platform/test-linux-trusty/failures/expected/image-expected.txt')))
+
+    def test_port_for_primary_baseline(self):
+        self.assertEqual(self.command._port_for_primary_baseline('test-linux-trusty').name(), 'test-linux-trusty')
+        self.assertEqual(self.command._port_for_primary_baseline('test-mac-mac10.11').name(), 'test-mac-mac10.11')
+
+    def test_port_for_primary_baseline_not_found(self):
+        with self.assertRaises(Exception):
+            self.command._port_for_primary_baseline('test-foo-foo4.7')
 
 
 class TestRebaselineTest(BaseTestCase):
@@ -298,7 +283,7 @@ class TestRebaselineTest(BaseTestCase):
         self.assertDictEqual(self.command.expectation_line_changes.to_dict(), {'remove-lines': []})
 
     def test_rebaseline_test_internal_with_port_that_lacks_buildbot(self):
-        self.tool.executive = MockExecutive2()
+        self.tool.executive = MockExecutive()
 
         port = self.tool.port_factory.get('test-win-win7')
         self._write(
@@ -381,7 +366,7 @@ class TestRebaselineJson(BaseTestCase):
 
     def setUp(self):
         super(TestRebaselineJson, self).setUp()
-        self.tool.executive = MockExecutive2()
+        self.tool.executive = MockExecutive()
 
     def tearDown(self):
         super(TestRebaselineJson, self).tearDown()
@@ -484,13 +469,29 @@ class TestRebaselineJson(BaseTestCase):
                   '--builder', 'MOCK Win7', '--test', 'userscripts/first-test.html', '--verbose', '--results-directory', '/tmp']]
             ])
 
+    def test_unstaged_baselines(self):
+        git = self.tool.git()
+        git.unstaged_changes = lambda: {
+            'third_party/WebKit/LayoutTests/x/foo-expected.txt': 'M',
+            'third_party/WebKit/LayoutTests/x/foo-expected.something': '?',
+            'third_party/WebKit/LayoutTests/x/foo-expected.png': '?',
+            'third_party/WebKit/LayoutTests/x/foo.html': 'M',
+            'docs/something.md': '?',
+        }
+        self.assertEqual(
+            self.command.unstaged_baselines(),
+            [
+                '/mock-checkout/third_party/WebKit/LayoutTests/x/foo-expected.png',
+                '/mock-checkout/third_party/WebKit/LayoutTests/x/foo-expected.txt',
+            ])
+
 
 class TestRebaselineJsonUpdatesExpectationsFiles(BaseTestCase):
     command_constructor = RebaselineJson
 
     def setUp(self):
         super(TestRebaselineJsonUpdatesExpectationsFiles, self).setUp()
-        self.tool.executive = MockExecutive2()
+        self.tool.executive = MockExecutive()
 
         def mock_run_command(*args, **kwargs):  # pylint: disable=unused-argument
             return '{"add": [], "remove-lines": [{"test": "userscripts/first-test.html", "builder": "MOCK Mac10.11"}]}\n'
@@ -679,7 +680,7 @@ class TestRebaselineExpectations(BaseTestCase):
     def test_rebaseline_expectations(self):
         self._zero_out_test_expectations()
 
-        self.tool.executive = MockExecutive2()
+        self.tool.executive = MockExecutive()
 
         for builder in ['MOCK Mac10.10', 'MOCK Mac10.11']:
             self.tool.buildbot.set_results(Build(builder), LayoutTestResults({
@@ -733,7 +734,7 @@ class TestRebaselineExpectations(BaseTestCase):
     def test_rebaseline_expectations_reftests(self):
         self._zero_out_test_expectations()
 
-        self.tool.executive = MockExecutive2()
+        self.tool.executive = MockExecutive()
 
         for builder in ['MOCK Mac10.10', 'MOCK Mac10.11']:
             self.tool.buildbot.set_results(Build(builder), LayoutTestResults({

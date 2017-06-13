@@ -59,7 +59,7 @@ class ExtraDataContainer : public ResourceRequest::ExtraData {
 
  private:
   explicit ExtraDataContainer(WebURLRequest::ExtraData* extraData)
-      : m_extraData(wrapUnique(extraData)) {}
+      : m_extraData(WTF::wrapUnique(extraData)) {}
 
   std::unique_ptr<WebURLRequest::ExtraData> m_extraData;
 };
@@ -239,7 +239,7 @@ WebURLRequest::FrameType WebURLRequest::getFrameType() const {
   return m_resourceRequest->frameType();
 }
 
-WebReferrerPolicy WebURLRequest::referrerPolicy() const {
+WebReferrerPolicy WebURLRequest::getReferrerPolicy() const {
   return static_cast<WebReferrerPolicy>(m_resourceRequest->getReferrerPolicy());
 }
 
@@ -303,13 +303,13 @@ void WebURLRequest::setUseStreamOnResponse(bool useStreamOnResponse) {
   m_resourceRequest->setUseStreamOnResponse(useStreamOnResponse);
 }
 
-WebURLRequest::SkipServiceWorker WebURLRequest::skipServiceWorker() const {
-  return m_resourceRequest->skipServiceWorker();
+WebURLRequest::ServiceWorkerMode WebURLRequest::getServiceWorkerMode() const {
+  return m_resourceRequest->getServiceWorkerMode();
 }
 
-void WebURLRequest::setSkipServiceWorker(
-    WebURLRequest::SkipServiceWorker skipServiceWorker) {
-  m_resourceRequest->setSkipServiceWorker(skipServiceWorker);
+void WebURLRequest::setServiceWorkerMode(
+    WebURLRequest::ServiceWorkerMode serviceWorkerMode) {
+  m_resourceRequest->setServiceWorkerMode(serviceWorkerMode);
 }
 
 bool WebURLRequest::shouldResetAppCache() const {
@@ -347,12 +347,13 @@ void WebURLRequest::setFetchRedirectMode(
   return m_resourceRequest->setFetchRedirectMode(redirect);
 }
 
-WebURLRequest::LoFiState WebURLRequest::getLoFiState() const {
-  return m_resourceRequest->loFiState();
+WebURLRequest::PreviewsState WebURLRequest::getPreviewsState() const {
+  return m_resourceRequest->previewsState();
 }
 
-void WebURLRequest::setLoFiState(WebURLRequest::LoFiState loFiState) {
-  return m_resourceRequest->setLoFiState(loFiState);
+void WebURLRequest::setPreviewsState(
+    WebURLRequest::PreviewsState previewsState) {
+  return m_resourceRequest->setPreviewsState(previewsState);
 }
 
 WebURLRequest::ExtraData* WebURLRequest::getExtraData() const {
@@ -407,6 +408,10 @@ WebURLRequest::LoadingIPCType WebURLRequest::getLoadingIPCType() const {
 
 void WebURLRequest::setNavigationStartTime(double navigationStartSeconds) {
   m_resourceRequest->setNavigationStartTime(navigationStartSeconds);
+}
+
+void WebURLRequest::setIsSameDocumentNavigation(bool isSameDocument) {
+  m_resourceRequest->setIsSameDocumentNavigation(isSameDocument);
 }
 
 WebURLRequest::InputToLoadPerfMetricReportPolicy

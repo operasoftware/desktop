@@ -38,7 +38,7 @@ static const double animationFrameDelay = 1.0 / 60;
 
 SVGImageChromeClient::SVGImageChromeClient(SVGImage* image)
     : m_image(image),
-      m_animationTimer(wrapUnique(new Timer<SVGImageChromeClient>(
+      m_animationTimer(WTF::wrapUnique(new Timer<SVGImageChromeClient>(
           this,
           &SVGImageChromeClient::animationTimerFired))),
       m_timelineState(Running) {}
@@ -82,7 +82,7 @@ void SVGImageChromeClient::resumeAnimation() {
   scheduleAnimation(nullptr);
 }
 
-void SVGImageChromeClient::scheduleAnimation(Widget*) {
+void SVGImageChromeClient::scheduleAnimation(FrameViewBase*) {
   // Because a single SVGImage can be shared by multiple pages, we can't key
   // our svg image layout on the page's real animation frame. Therefore, we
   // run this fake animation timer to trigger layout in SVGImages. The name,
@@ -112,7 +112,7 @@ void SVGImageChromeClient::animationTimerFired(TimerBase*) {
     return;
 
   // The SVGImageChromeClient object's lifetime is dependent on
-  // the ImageObserver (an ImageResource) of its image. Should it
+  // the ImageObserver (an ImageResourceContent) of its image. Should it
   // be dead and about to be lazily swept out, do not proceed.
   //
   // TODO(Oilpan): move (SVG)Image to the Oilpan heap, and avoid

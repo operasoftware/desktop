@@ -127,7 +127,7 @@ static inline void checkExistingName(const char*, const char*) {}
 #else
 
 static void checkExistingName(const char* alias, const char* atomicName) {
-  const char* oldAtomicName = textEncodingNameMap->get(alias);
+  const char* oldAtomicName = textEncodingNameMap->at(alias);
   if (!oldAtomicName)
     return;
   if (oldAtomicName == atomicName)
@@ -160,29 +160,29 @@ static bool isUndesiredAlias(const char* alias) {
 }
 
 static void addToTextEncodingNameMap(const char* alias, const char* name) {
-  ASSERT(strlen(alias) <= maxEncodingNameLength);
+  DCHECK_LE(strlen(alias), maxEncodingNameLength);
   if (isUndesiredAlias(alias))
     return;
-  const char* atomicName = textEncodingNameMap->get(name);
-  ASSERT(strcmp(alias, name) == 0 || atomicName);
+  const char* atomicName = textEncodingNameMap->at(name);
+  DCHECK(strcmp(alias, name) == 0 || atomicName);
   if (!atomicName)
     atomicName = name;
   checkExistingName(alias, atomicName);
-  textEncodingNameMap->add(alias, atomicName);
+  textEncodingNameMap->insert(alias, atomicName);
 }
 
 static void addToTextCodecMap(const char* name,
                               NewTextCodecFunction function,
                               const void* additionalData) {
-  const char* atomicName = textEncodingNameMap->get(name);
-  ASSERT(atomicName);
-  textCodecMap->add(atomicName, TextCodecFactory(function, additionalData));
+  const char* atomicName = textEncodingNameMap->at(name);
+  DCHECK(atomicName);
+  textCodecMap->insert(atomicName, TextCodecFactory(function, additionalData));
 }
 
 static void pruneBlacklistedCodecs() {
   for (size_t i = 0; i < WTF_ARRAY_LENGTH(textEncodingNameBlacklist); ++i) {
     const char* atomicName =
-        textEncodingNameMap->get(textEncodingNameBlacklist[i]);
+        textEncodingNameMap->at(textEncodingNameBlacklist[i]);
     if (!atomicName)
       continue;
 
@@ -191,19 +191,19 @@ static void pruneBlacklistedCodecs() {
     TextEncodingNameMap::const_iterator end = textEncodingNameMap->end();
     for (; it != end; ++it) {
       if (it->value == atomicName)
-        names.append(it->key);
+        names.push_back(it->key);
     }
 
     textEncodingNameMap->removeAll(names);
 
-    textCodecMap->remove(atomicName);
+    textCodecMap->erase(atomicName);
   }
 }
 
 static void buildBaseTextCodecMaps() {
-  ASSERT(isMainThread());
-  ASSERT(!textCodecMap);
-  ASSERT(!textEncodingNameMap);
+  DCHECK(isMainThread());
+  DCHECK(!textCodecMap);
+  DCHECK(!textEncodingNameMap);
 
   textCodecMap = new TextCodecMap;
   textEncodingNameMap = new TextEncodingNameMap;
@@ -242,9 +242,9 @@ static void extendTextCodecMaps() {
 std::unique_ptr<TextCodec> newTextCodec(const TextEncoding& encoding) {
   MutexLocker lock(encodingRegistryMutex());
 
-  ASSERT(textCodecMap);
-  TextCodecFactory factory = textCodecMap->get(encoding.name());
-  ASSERT(factory.function);
+  DCHECK(textCodecMap);
+  TextCodecFactory factory = textCodecMap->at(encoding.name());
+  DCHECK(factory.function);
   return factory.function(encoding, factory.additionalData);
 }
 
@@ -256,13 +256,13 @@ const char* atomicCanonicalTextEncodingName(const char* name) {
 
   MutexLocker lock(encodingRegistryMutex());
 
-  if (const char* atomicName = textEncodingNameMap->get(name))
+  if (const char* atomicName = textEncodingNameMap->at(name))
     return atomicName;
   if (atomicDidExtendTextCodecMaps())
     return 0;
   extendTextCodecMaps();
   atomicSetDidExtendTextCodecMaps();
-  return textEncodingNameMap->get(name);
+  return textEncodingNameMap->at(name);
 }
 
 template <typename CharacterType>

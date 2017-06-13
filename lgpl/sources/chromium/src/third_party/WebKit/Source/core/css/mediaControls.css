@@ -532,25 +532,3 @@ video::cue(u) {
 video::cue(i) {
     font-style: italic;
 }
-
-audio::-internal-media-controls-overlay-detach-button {
-  display:none;
-}
-
-video::-internal-media-controls-overlay-detach-button {
-    -webkit-appearance: -internal-media-overlay-detach-button;
-    display: flex;
-    position: absolute;
-    top: -24px;
-    left: 50%;
-    margin-right: 0;
-    margin-top: 0;
-    border: none;
-    box-sizing: border-box;
-    background-color: transparent;
-    width: 46px;
-    height: 24px;
-    padding: 0;
-    transform: translate(-24px, 0);
-    transition: top 0.3s;
-}

@@ -153,7 +153,7 @@ static inline void appendQuadsToSubtargetList(
   Vector<FloatQuad>::const_iterator it = quads.begin();
   const Vector<FloatQuad>::const_iterator end = quads.end();
   for (; it != end; ++it)
-    subtargets.append(SubtargetGeometry(node, *it));
+    subtargets.push_back(SubtargetGeometry(node, *it));
 }
 
 static inline void appendBasicSubtargetsForNode(
@@ -240,16 +240,16 @@ static inline void appendZoomableSubtargets(Node* node,
   Vector<FloatQuad> quads;
   FloatRect borderBoxRect(layoutObject->borderBoxRect());
   FloatRect contentBoxRect(layoutObject->contentBoxRect());
-  quads.append(layoutObject->localToAbsoluteQuad(borderBoxRect));
+  quads.push_back(layoutObject->localToAbsoluteQuad(borderBoxRect));
   if (borderBoxRect != contentBoxRect)
-    quads.append(layoutObject->localToAbsoluteQuad(contentBoxRect));
+    quads.push_back(layoutObject->localToAbsoluteQuad(contentBoxRect));
   // FIXME: For LayoutBlocks, add column boxes and content boxes cleared for
   // floats.
 
   Vector<FloatQuad>::const_iterator it = quads.begin();
   const Vector<FloatQuad>::const_iterator end = quads.end();
   for (; it != end; ++it)
-    subtargets.append(SubtargetGeometry(node, *it));
+    subtargets.push_back(SubtargetGeometry(node, *it));
 }
 
 static inline Node* parentShadowHostOrOwner(const Node* node) {
@@ -282,10 +282,10 @@ void compileSubtargetList(const HeapVector<Member<Node>>& intersectedNodes,
          visitedNode = visitedNode->parentOrShadowHostNode()) {
       // Check if we already have a result for a common ancestor from another
       // candidate.
-      respondingNode = responderMap.get(visitedNode);
+      respondingNode = responderMap.at(visitedNode);
       if (respondingNode)
         break;
-      visitedNodes.append(visitedNode);
+      visitedNodes.push_back(visitedNode);
       // Check if the node filter applies, which would mean we have found a
       // responding node.
       if (nodeFilter(visitedNode)) {
@@ -295,7 +295,7 @@ void compileSubtargetList(const HeapVector<Member<Node>>& intersectedNodes,
         for (visitedNode = parentShadowHostOrOwner(visitedNode); visitedNode;
              visitedNode = parentShadowHostOrOwner(visitedNode)) {
           HeapHashSet<Member<Node>>::AddResult addResult =
-              ancestorsToRespondersSet.add(visitedNode);
+              ancestorsToRespondersSet.insert(visitedNode);
           if (!addResult.isNewEntry)
             break;
         }
@@ -304,10 +304,10 @@ void compileSubtargetList(const HeapVector<Member<Node>>& intersectedNodes,
     }
     // Insert the detected responder for all the visited nodes.
     for (unsigned j = 0; j < visitedNodes.size(); j++)
-      responderMap.add(visitedNodes[j], respondingNode);
+      responderMap.insert(visitedNodes[j], respondingNode);
 
     if (respondingNode)
-      candidates.append(node);
+      candidates.push_back(node);
   }
 
   // We compile the list of component absolute quads instead of using the
@@ -319,7 +319,7 @@ void compileSubtargetList(const HeapVector<Member<Node>>& intersectedNodes,
     // preference to the inner-most event-handlers. So that a link is always
     // preferred even when contained in an element that monitors all
     // click-events.
-    Node* respondingNode = responderMap.get(candidate);
+    Node* respondingNode = responderMap.at(candidate);
     ASSERT(respondingNode);
     if (ancestorsToRespondersSet.contains(respondingNode))
       continue;
@@ -336,7 +336,7 @@ void compileSubtargetList(const HeapVector<Member<Node>>& intersectedNodes,
           replacement = nullptr;
           break;
         }
-        editableAncestors.add(replacement);
+        editableAncestors.insert(replacement);
         parent = parent->parentOrShadowHostNode();
       }
       candidate = replacement;

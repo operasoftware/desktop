@@ -47,7 +47,10 @@ class PLATFORM_EXPORT TranslateTransformOperation final
     return adoptRef(new TranslateTransformOperation(tx, ty, tz, type));
   }
 
-  virtual bool canBlendWith(const TransformOperation& other) const;
+  bool canBlendWith(const TransformOperation& other) const override;
+  bool dependsOnBoxSize() const override {
+    return m_x.isPercentOrCalc() || m_y.isPercentOrCalc();
+  }
 
   double x(const FloatSize& borderBoxSize) const {
     return floatValueForLength(m_x, borderBoxSize.width());
@@ -55,9 +58,6 @@ class PLATFORM_EXPORT TranslateTransformOperation final
   double y(const FloatSize& borderBoxSize) const {
     return floatValueForLength(m_y, borderBoxSize.height());
   }
-
-  double resolveX() const { return x(m_boxSize); }
-  double resolveY() const { return y(m_boxSize); }
 
   Length x() const { return m_x; }
   Length y() const { return m_y; }
@@ -77,6 +77,7 @@ class PLATFORM_EXPORT TranslateTransformOperation final
 
  private:
   OperationType type() const override { return m_type; }
+  OperationType primitiveType() const final { return Translate3D; }
 
   bool operator==(const TransformOperation& o) const override {
     if (!isSameType(o))
@@ -93,18 +94,6 @@ class PLATFORM_EXPORT TranslateTransformOperation final
     return zoomTranslate(factor);
   }
 
-  bool dependsOnBoxSize() const override {
-    return m_x.isPercentOrCalc() || m_y.isPercentOrCalc();
-  }
-
-  virtual bool updateBoxSize(const FloatSize& size) override {
-    if (m_boxSize == size)
-      return false;
-
-    m_boxSize = size;
-    return true;
-  }
-
   TranslateTransformOperation(const Length& tx,
                               const Length& ty,
                               double tz,
@@ -117,8 +106,6 @@ class PLATFORM_EXPORT TranslateTransformOperation final
   Length m_y;
   double m_z;
   OperationType m_type;
-
-  FloatSize m_boxSize;
 };
 
 DEFINE_TRANSFORM_TYPE_CASTS(TranslateTransformOperation);

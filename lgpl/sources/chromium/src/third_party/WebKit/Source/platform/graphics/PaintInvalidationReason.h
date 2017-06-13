@@ -33,6 +33,9 @@ enum PaintInvalidationReason {
   PaintInvalidationLayoutObjectInsertion,
   PaintInvalidationLayoutObjectRemoval,
   PaintInvalidationSVGResourceChange,
+  PaintInvalidationBackgroundOnScrollingContentsLayer,
+  PaintInvalidationCaret,
+  PaintInvalidationViewBackground,
   PaintInvalidationForTesting,
   // PaintInvalidationDelayedFull means that PaintInvalidationFull is needed in
   // order to fully paint the content, but that painting of the object can be

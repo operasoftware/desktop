@@ -11,6 +11,11 @@ dictionary PointerEventInit : MouseEventInit {
     float     pressure = 0;
     long      tiltX = 0;
     long      tiltY = 0;
+    float     tangentialPressure = 0;
+    long      twist = 0;
     DOMString pointerType = "";
     boolean   isPrimary = false;
+
+    // https://w3c.github.io/pointerevents/extension.html#extensions-to-the-pointerevent-interface
+    [RuntimeEnabled=CoalescedEvents] sequence<PointerEvent> coalescedEvents = [];
 };

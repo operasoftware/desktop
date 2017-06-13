@@ -5,12 +5,13 @@
 #ifndef ScriptStreamer_h
 #define ScriptStreamer_h
 
+#include <memory>
+
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
+#include "v8/include/v8.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/text/WTFString.h"
-#include <memory>
-#include <v8.h>
 
 namespace blink {
 
@@ -45,7 +46,7 @@ class CORE_EXPORT ScriptStreamer final
                              Type,
                              Settings*,
                              ScriptState*,
-                             WebTaskRunner*);
+                             RefPtr<WebTaskRunner>);
 
   // Returns false if we cannot stream the given encoding.
   static bool convertEncoding(const char* encodingName,
@@ -108,15 +109,15 @@ class CORE_EXPORT ScriptStreamer final
       Type scriptType,
       ScriptState* scriptState,
       v8::ScriptCompiler::CompileOptions compileOptions,
-      WebTaskRunner* loadingTaskRunner) {
+      RefPtr<WebTaskRunner> loadingTaskRunner) {
     return new ScriptStreamer(script, scriptType, scriptState, compileOptions,
-                              loadingTaskRunner);
+                              std::move(loadingTaskRunner));
   }
   ScriptStreamer(PendingScript*,
                  Type,
                  ScriptState*,
                  v8::ScriptCompiler::CompileOptions,
-                 WebTaskRunner*);
+                 RefPtr<WebTaskRunner>);
 
   void streamingComplete();
   void notifyFinishedToClient();
@@ -125,7 +126,7 @@ class CORE_EXPORT ScriptStreamer final
                                      Type,
                                      Settings*,
                                      ScriptState*,
-                                     WebTaskRunner*);
+                                     RefPtr<WebTaskRunner>);
 
   Member<PendingScript> m_pendingScript;
   // This pointer is weak. If PendingScript and its Resource are deleted
@@ -169,7 +170,7 @@ class CORE_EXPORT ScriptStreamer final
   // Encoding of the streamed script. Saved for sanity checking purposes.
   v8::ScriptCompiler::StreamedSource::Encoding m_encoding;
 
-  std::unique_ptr<WebTaskRunner> m_loadingTaskRunner;
+  RefPtr<WebTaskRunner> m_loadingTaskRunner;
 };
 
 }  // namespace blink

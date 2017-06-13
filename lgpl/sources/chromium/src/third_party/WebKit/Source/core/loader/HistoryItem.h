@@ -63,9 +63,15 @@ class CORE_EXPORT HistoryItem final
   EncodedFormData* formData();
   const AtomicString& formContentType() const;
 
+  void setDidSaveScrollOrScaleState(bool didSaveScrollOrScaleState) {
+    m_didSaveScrollOrScaleState = didSaveScrollOrScaleState;
+  }
+
+  bool didSaveScrollOrScaleState() const { return m_didSaveScrollOrScaleState; }
+
   const ScrollOffset& visualViewportScrollOffset() const;
   void setVisualViewportScrollOffset(const ScrollOffset&);
-  const ScrollOffset& scrollOffset() const;
+  const ScrollOffset& getScrollOffset() const;
   void setScrollOffset(const ScrollOffset&);
 
   float pageScaleFactor() const;
@@ -126,6 +132,7 @@ class CORE_EXPORT HistoryItem final
   Referrer m_referrer;
   String m_target;
 
+  bool m_didSaveScrollOrScaleState;
   ScrollOffset m_visualViewportScrollOffset;
   ScrollOffset m_scrollOffset;
   float m_pageScaleFactor;
@@ -155,7 +162,6 @@ class CORE_EXPORT HistoryItem final
   // info used to repost form data
   RefPtr<EncodedFormData> m_formData;
   AtomicString m_formContentType;
-
 };  // class HistoryItem
 
 }  // namespace blink

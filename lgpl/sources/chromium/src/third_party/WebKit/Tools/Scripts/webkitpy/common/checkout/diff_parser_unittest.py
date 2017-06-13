@@ -27,10 +27,10 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import cStringIO as StringIO
-import diff_parser
 import re
 import unittest
 
+from webkitpy.common.checkout import diff_parser
 from webkitpy.common.checkout.diff_test_data import DIFF_TEST_DATA
 
 
@@ -81,7 +81,7 @@ class DiffParserTest(unittest.TestCase):
 
     def test_diff_converter(self):
         comment_lines = [
-            "Hey guys,\n",
+            "Hey people,\n",
             "\n",
             "See my awesome patch below!\n",
             "\n",

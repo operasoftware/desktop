@@ -20,7 +20,6 @@
 
 #include "core/svg/SVGPathElement.h"
 
-#include "core/css/CSSIdentifierValue.h"
 #include "core/dom/StyleChangeReason.h"
 #include "core/layout/svg/LayoutSVGPath.h"
 #include "core/svg/SVGMPathElement.h"
@@ -30,37 +29,13 @@
 
 namespace blink {
 
-class SVGAnimatedPathLength final : public SVGAnimatedNumber {
- public:
-  static SVGAnimatedPathLength* create(SVGPathElement* contextElement) {
-    return new SVGAnimatedPathLength(contextElement);
-  }
-
-  SVGParsingError setBaseValueAsString(const String& value) override {
-    SVGParsingError parseStatus =
-        SVGAnimatedNumber::setBaseValueAsString(value);
-    if (parseStatus == SVGParseStatus::NoError && baseValue()->value() < 0)
-      parseStatus = SVGParseStatus::NegativeValue;
-    return parseStatus;
-  }
-
- private:
-  explicit SVGAnimatedPathLength(SVGPathElement* contextElement)
-      : SVGAnimatedNumber(contextElement,
-                          SVGNames::pathLengthAttr,
-                          SVGNumber::create()) {}
-};
-
 inline SVGPathElement::SVGPathElement(Document& document)
     : SVGGeometryElement(SVGNames::pathTag, document),
-      m_pathLength(SVGAnimatedPathLength::create(this)),
       m_path(SVGAnimatedPath::create(this, SVGNames::dAttr, CSSPropertyD)) {
-  addToPropertyMap(m_pathLength);
   addToPropertyMap(m_path);
 }
 
 DEFINE_TRACE(SVGPathElement) {
-  visitor->trace(m_pathLength);
   visitor->trace(m_path);
   SVGGeometryElement::trace(visitor);
 }
@@ -81,18 +56,8 @@ const StylePath* SVGPathElement::stylePath() const {
   return m_path->currentValue()->stylePath();
 }
 
-float SVGPathElement::pathLengthScaleFactor() const {
-  if (!pathLength()->isSpecified())
-    return 1;
-  float authorPathLength = pathLength()->currentValue()->value();
-  if (authorPathLength < 0)
-    return 1;
-  if (!authorPathLength)
-    return 0;
-  float computedPathLength = stylePath()->length();
-  if (!computedPathLength)
-    return 1;
-  return computedPathLength / authorPathLength;
+float SVGPathElement::computePathLength() const {
+  return stylePath()->length();
 }
 
 Path SVGPathElement::asPath() const {
@@ -154,14 +119,8 @@ void SVGPathElement::collectStyleForPresentationAttribute(
     // geometry sharing.
     if (const SVGElement* element = correspondingElement())
       path = toSVGPathElement(element)->path();
-
-    CSSPathValue* pathValue = path->currentValue()->pathValue();
-    if (pathValue->stylePath()->byteStream().isEmpty()) {
-      addPropertyToPresentationAttributeStyle(
-          style, CSSPropertyD, CSSIdentifierValue::create(CSSValueNone));
-      return;
-    }
-    addPropertyToPresentationAttributeStyle(style, CSSPropertyD, pathValue);
+    addPropertyToPresentationAttributeStyle(style, property->cssPropertyId(),
+                                            path->cssValue());
     return;
   }
   SVGGeometryElement::collectStyleForPresentationAttribute(name, value, style);

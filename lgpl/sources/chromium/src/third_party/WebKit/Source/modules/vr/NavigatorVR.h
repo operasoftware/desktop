@@ -6,9 +6,9 @@
 #define NavigatorVR_h
 
 #include "bindings/core/v8/ScriptPromise.h"
-#include "core/frame/DOMWindowProperty.h"
 #include "core/frame/LocalDOMWindow.h"
-#include "core/page/PageVisibilityObserver.h"
+#include "core/frame/Navigator.h"
+#include "core/page/FocusChangedObserver.h"
 #include "modules/ModulesExport.h"
 #include "modules/vr/VRDisplay.h"
 #include "modules/vr/VRDisplayEvent.h"
@@ -26,9 +26,8 @@ class VRController;
 class MODULES_EXPORT NavigatorVR final
     : public GarbageCollectedFinalized<NavigatorVR>,
       public Supplement<Navigator>,
-      public DOMWindowProperty,
-      public PageVisibilityObserver,
-      public LocalDOMWindow::EventListenerObserver {
+      public LocalDOMWindow::EventListenerObserver,
+      public FocusChangedObserver {
   USING_GARBAGE_COLLECTED_MIXIN(NavigatorVR);
   WTF_MAKE_NONCOPYABLE(NavigatorVR);
 
@@ -42,6 +41,7 @@ class MODULES_EXPORT NavigatorVR final
 
   VRController* controller();
   Document* document();
+  bool isFocused() { return m_focused; }
 
   // Queues up event to be fired soon.
   void enqueueVREvent(VRDisplayEvent*);
@@ -49,8 +49,8 @@ class MODULES_EXPORT NavigatorVR final
   // Dispatches a user gesture event immediately.
   void dispatchVRGestureEvent(VRDisplayEvent*);
 
-  // Inherited from PageVisibilityObserver.
-  void pageVisibilityChanged() override;
+  // Inherited from FocusChangedObserver.
+  void focusedFrameChanged() override;
 
   // Inherited from LocalDOMWindow::EventListenerObserver.
   void didAddEventListener(LocalDOMWindow*, const AtomicString&) override;
@@ -63,7 +63,7 @@ class MODULES_EXPORT NavigatorVR final
   friend class VRDisplay;
   friend class VRGetDevicesCallback;
 
-  explicit NavigatorVR(LocalFrame*);
+  explicit NavigatorVR(Navigator&);
 
   static const char* supplementName();
 
@@ -73,6 +73,7 @@ class MODULES_EXPORT NavigatorVR final
 
   // Whether this page is listening for vrdisplayactivate event.
   bool m_listeningForActivate = false;
+  bool m_focused = false;
 };
 
 }  // namespace blink

@@ -227,7 +227,8 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
 
   void invalidateDisplayItemClients(PaintInvalidationReason) const override;
 
-  void absoluteQuadsForSelf(Vector<FloatQuad>& quads) const override;
+  void absoluteQuadsForSelf(Vector<FloatQuad>& quads,
+                            MapCoordinatesFlags mode = 0) const override;
 
  private:
   LayoutObjectChildList* virtualChildren() final { return children(); }
@@ -294,9 +295,9 @@ class CORE_EXPORT LayoutInline : public LayoutBoxModelObject {
   // invalidation.
   LayoutRect localVisualRect() const override;
 
-  bool mapToVisualRectInAncestorSpace(
+  bool mapToVisualRectInAncestorSpaceInternal(
       const LayoutBoxModelObject* ancestor,
-      LayoutRect&,
+      TransformState&,
       VisualRectFlags = DefaultVisualRectFlags) const final;
 
   PositionWithAffinity positionForPoint(const LayoutPoint&) final;

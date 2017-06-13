@@ -19,7 +19,8 @@
 namespace blink {
 
 DeviceOrientationController::DeviceOrientationController(Document& document)
-    : DeviceSingleWindowEventController(document) {}
+    : DeviceSingleWindowEventController(document),
+      Supplement<Document>(document) {}
 
 DeviceOrientationController::~DeviceOrientationController() {}
 
@@ -52,8 +53,7 @@ void DeviceOrientationController::didAddEventListener(
     return;
 
   if (document().frame()) {
-    String errorMessage;
-    if (document().isSecureContext(errorMessage)) {
+    if (document().isSecureContext()) {
       UseCounter::count(document().frame(),
                         UseCounter::DeviceOrientationSecureOrigin);
     } else {
@@ -62,14 +62,24 @@ void DeviceOrientationController::didAddEventListener(
       HostsUsingFeatures::countAnyWorld(
           document(),
           HostsUsingFeatures::Feature::DeviceOrientationInsecureHost);
-      if (document().frame()->settings()->strictPowerfulFeatureRestrictions())
+      if (document()
+              .frame()
+              ->settings()
+              ->getStrictPowerfulFeatureRestrictions())
         return;
     }
   }
 
-  if (!m_hasEventListener)
+  if (!m_hasEventListener) {
     Platform::current()->recordRapporURL("DeviceSensors.DeviceOrientation",
                                          WebURL(document().url()));
+
+    if (!isSameSecurityOriginAsMainFrame()) {
+      Platform::current()->recordRapporURL(
+          "DeviceSensors.DeviceOrientationCrossOrigin",
+          WebURL(document().url()));
+    }
+  }
 
   DeviceSingleWindowEventController::didAddEventListener(window, eventType);
 }

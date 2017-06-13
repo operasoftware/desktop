@@ -21,29 +21,10 @@
 #include "core/html/forms/RadioButtonGroupScope.h"
 
 #include "core/InputTypeNames.h"
-#include "core/frame/Deprecation.h"
-#include "core/frame/FrameConsole.h"
-#include "core/frame/LocalFrame.h"
 #include "core/html/HTMLInputElement.h"
-#include "core/inspector/ConsoleMessage.h"
 #include "wtf/HashMap.h"
 
 namespace blink {
-
-namespace {
-
-void addSingletonDeprecationMessage(const LocalFrame* frame,
-                                    UseCounter::Feature feature,
-                                    const AtomicString& name1,
-                                    const AtomicString& name2) {
-  if (!frame)
-    return;
-  frame->console().addSingletonMessage(ConsoleMessage::create(
-      DeprecationMessageSource, WarningMessageLevel,
-      Deprecation::deprecationMessage(feature) + " Comparing name=" + name1 +
-          " and name=" + name2));
-}
-}
 
 class RadioButtonGroup : public GarbageCollected<RadioButtonGroup> {
  public:
@@ -114,7 +95,7 @@ void RadioButtonGroup::updateRequiredButton(MemberKeyValue& it,
 
 void RadioButtonGroup::add(HTMLInputElement* button) {
   DCHECK_EQ(button->type(), InputTypeNames::radio);
-  auto addResult = m_members.add(button, false);
+  auto addResult = m_members.insert(button, false);
   if (!addResult.isNewEntry)
     return;
   bool groupWasValid = isValid();
@@ -233,23 +214,10 @@ void RadioButtonGroupScope::addButton(HTMLInputElement* element) {
   if (!m_nameToGroupMap)
     m_nameToGroupMap = new NameToGroupMap;
 
-  auto keyValue = m_nameToGroupMap->add(element->name(), nullptr).storedValue;
-  if (!keyValue->value) {
+  auto keyValue =
+      m_nameToGroupMap->insert(element->name(), nullptr).storedValue;
+  if (!keyValue->value)
     keyValue->value = RadioButtonGroup::create();
-  } else {
-    if (keyValue->key == element->name()) {
-      UseCounter::count(element->document(),
-                        UseCounter::RadioNameMatchingStrict);
-    } else if (equalIgnoringASCIICase(keyValue->key, element->name())) {
-      addSingletonDeprecationMessage(element->document().frame(),
-                                     UseCounter::RadioNameMatchingASCIICaseless,
-                                     keyValue->key, element->name());
-    } else {
-      addSingletonDeprecationMessage(element->document().frame(),
-                                     UseCounter::RadioNameMatchingCaseFolding,
-                                     keyValue->key, element->name());
-    }
-  }
   keyValue->value->add(element);
 }
 
@@ -260,7 +228,7 @@ void RadioButtonGroupScope::updateCheckedState(HTMLInputElement* element) {
   DCHECK(m_nameToGroupMap);
   if (!m_nameToGroupMap)
     return;
-  RadioButtonGroup* group = m_nameToGroupMap->get(element->name());
+  RadioButtonGroup* group = m_nameToGroupMap->at(element->name());
   DCHECK(group);
   group->updateCheckedState(element);
 }
@@ -273,7 +241,7 @@ void RadioButtonGroupScope::requiredAttributeChanged(
   DCHECK(m_nameToGroupMap);
   if (!m_nameToGroupMap)
     return;
-  RadioButtonGroup* group = m_nameToGroupMap->get(element->name());
+  RadioButtonGroup* group = m_nameToGroupMap->at(element->name());
   DCHECK(group);
   group->requiredAttributeChanged(element);
 }
@@ -282,7 +250,7 @@ HTMLInputElement* RadioButtonGroupScope::checkedButtonForGroup(
     const AtomicString& name) const {
   if (!m_nameToGroupMap)
     return nullptr;
-  RadioButtonGroup* group = m_nameToGroupMap->get(name);
+  RadioButtonGroup* group = m_nameToGroupMap->at(name);
   return group ? group->checkedButton() : nullptr;
 }
 
@@ -292,7 +260,7 @@ bool RadioButtonGroupScope::isInRequiredGroup(HTMLInputElement* element) const {
     return false;
   if (!m_nameToGroupMap)
     return false;
-  RadioButtonGroup* group = m_nameToGroupMap->get(element->name());
+  RadioButtonGroup* group = m_nameToGroupMap->at(element->name());
   return group && group->isRequired() && group->contains(element);
 }
 
@@ -301,7 +269,7 @@ unsigned RadioButtonGroupScope::groupSizeFor(
   if (!m_nameToGroupMap)
     return 0;
 
-  RadioButtonGroup* group = m_nameToGroupMap->get(element->name());
+  RadioButtonGroup* group = m_nameToGroupMap->at(element->name());
   if (!group)
     return 0;
   return group->size();
@@ -314,7 +282,7 @@ void RadioButtonGroupScope::removeButton(HTMLInputElement* element) {
   if (!m_nameToGroupMap)
     return;
 
-  RadioButtonGroup* group = m_nameToGroupMap->get(element->name());
+  RadioButtonGroup* group = m_nameToGroupMap->at(element->name());
   if (!group)
     return;
   group->remove(element);

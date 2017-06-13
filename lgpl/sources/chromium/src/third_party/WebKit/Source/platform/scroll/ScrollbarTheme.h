@@ -37,7 +37,7 @@ namespace blink {
 
 class CullRect;
 class GraphicsContext;
-class PlatformMouseEvent;
+class WebMouseEvent;
 
 class PLATFORM_EXPORT ScrollbarTheme {
   WTF_MAKE_NONCOPYABLE(ScrollbarTheme);
@@ -58,6 +58,10 @@ class PLATFORM_EXPORT ScrollbarTheme {
 
   virtual ScrollbarPart hitTest(const ScrollbarThemeClient&, const IntPoint&);
 
+  // This returns a fixed value regardless of device-scale-factor.
+  // This returns thickness when scrollbar is painted.  i.e. It's not 0 even in
+  // overlay scrollbar mode.
+  // See also Scrollbar::scrollbarThickness().
   virtual int scrollbarThickness(ScrollbarControlSize = RegularScrollbar) {
     return 0;
   }
@@ -71,6 +75,13 @@ class PLATFORM_EXPORT ScrollbarTheme {
   virtual bool usesOverlayScrollbars() const { return false; }
   virtual void updateScrollbarOverlayColorTheme(const ScrollbarThemeClient&) {}
 
+  // If true, scrollbars that become invisible (i.e. overlay scrollbars that
+  // fade out) should be marked as disabled. This option exists since Mac and
+  // Aura overlays implement the fade out differently, with Mac painting code
+  // fading out the scrollbars. Aura scrollbars require disabling the scrollbar
+  // to prevent painting it.
+  virtual bool shouldDisableInvisibleScrollbars() const { return true; }
+
   virtual bool invalidateOnMouseEnterExit() { return false; }
   virtual bool invalidateOnWindowActiveChange() const { return false; }
 
@@ -83,6 +94,10 @@ class PLATFORM_EXPORT ScrollbarTheme {
     return AllParts;
   }
 
+  // Returns parts of the scrollbar which must be repainted following a change
+  // in enabled state.
+  virtual ScrollbarPart invalidateOnEnabledChange() const { return AllParts; }
+
   virtual void paintScrollCorner(GraphicsContext&,
                                  const DisplayItemClient&,
                                  const IntRect& cornerRect);
@@ -91,11 +106,11 @@ class PLATFORM_EXPORT ScrollbarTheme {
                               const IntRect&);
 
   virtual bool shouldCenterOnThumb(const ScrollbarThemeClient&,
-                                   const PlatformMouseEvent&);
+                                   const WebMouseEvent&);
   virtual bool shouldSnapBackToDragOrigin(const ScrollbarThemeClient&,
-                                          const PlatformMouseEvent&);
+                                          const WebMouseEvent&);
   virtual bool shouldDragDocumentInsteadOfThumb(const ScrollbarThemeClient&,
-                                                const PlatformMouseEvent&) {
+                                                const WebMouseEvent&) {
     return false;
   }
 
@@ -169,6 +184,24 @@ class PLATFORM_EXPORT ScrollbarTheme {
   virtual void unregisterScrollbar(ScrollbarThemeClient&) {}
 
   virtual bool isMockTheme() const { return false; }
+
+  virtual bool usesNinePatchThumbResource() const { return false; }
+
+  // For a nine-patch scrollbar, this defines the painting canvas size which the
+  // painting code will use to paint the scrollbar into. The actual scrollbar
+  // dimensions will be ignored for purposes of painting since the resource can
+  // be then resized without a repaint.
+  virtual IntSize ninePatchThumbCanvasSize(const ScrollbarThemeClient&) const {
+    NOTREACHED();
+    return IntSize();
+  }
+
+  // For a nine-patch resource, the aperture defines the center patch that will
+  // be stretched out.
+  virtual IntRect ninePatchThumbAperture(const ScrollbarThemeClient&) const {
+    NOTREACHED();
+    return IntRect();
+  }
 
   static ScrollbarTheme& theme();
 

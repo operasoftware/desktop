@@ -32,6 +32,7 @@
 #define IconURL_h
 
 #include "platform/geometry/IntSize.h"
+#include "platform/graphics/Color.h"
 #include "platform/weborigin/KURL.h"
 #include "wtf/Allocator.h"
 
@@ -42,6 +43,7 @@ enum IconType {
   Favicon = 1,
   TouchIcon = 1 << 1,
   TouchPrecomposedIcon = 1 << 2,
+  PinnedIcon = 1 << 3
 };
 
 struct IconURL {
@@ -51,6 +53,7 @@ struct IconURL {
   String m_mimeType;
   KURL m_iconURL;
   bool m_isDefaultIcon;
+  Color m_color;
 
   IconURL() : m_iconType(InvalidIcon), m_isDefaultIcon(false) {}
 

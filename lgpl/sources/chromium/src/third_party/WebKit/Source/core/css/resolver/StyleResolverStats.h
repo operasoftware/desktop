@@ -31,8 +31,8 @@
 #ifndef StyleResolverStats_h
 #define StyleResolverStats_h
 
-#include "platform/tracing/TraceEvent.h"
-#include "platform/tracing/TracedValue.h"
+#include "platform/instrumentation/tracing/TraceEvent.h"
+#include "platform/instrumentation/tracing/TracedValue.h"
 #include "wtf/PtrUtil.h"
 #include <memory>
 
@@ -43,7 +43,7 @@ class StyleResolverStats {
 
  public:
   static std::unique_ptr<StyleResolverStats> create() {
-    return wrapUnique(new StyleResolverStats);
+    return WTF::wrapUnique(new StyleResolverStats);
   }
 
   void reset();
@@ -71,6 +71,7 @@ class StyleResolverStats {
   unsigned pseudoElementsStyled;
   unsigned baseStylesUsed;
   unsigned independentInheritedStylesPropagated;
+  unsigned customPropertiesApplied;
 
  private:
   StyleResolverStats() { reset(); }

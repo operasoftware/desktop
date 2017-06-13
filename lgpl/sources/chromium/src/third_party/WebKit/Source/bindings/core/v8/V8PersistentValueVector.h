@@ -31,10 +31,10 @@
 #ifndef V8PersistentValueVector_h
 #define V8PersistentValueVector_h
 
+#include "v8/include/v8-util.h"
+#include "v8/include/v8.h"
 #include "wtf/Allocator.h"
 #include "wtf/Vector.h"
-#include <v8-util.h>
-#include <v8.h>
 
 namespace blink {
 
@@ -44,7 +44,7 @@ class WTFVectorPersistentValueVectorTraits {
  public:
   typedef Vector<v8::PersistentContainerValue> Impl;
   static void Append(Impl* impl, v8::PersistentContainerValue value) {
-    impl->append(value);
+    impl->push_back(value);
   }
   static bool IsEmpty(const Impl* impl) { return impl->isEmpty(); }
   static size_t Size(const Impl* impl) { return impl->size(); }

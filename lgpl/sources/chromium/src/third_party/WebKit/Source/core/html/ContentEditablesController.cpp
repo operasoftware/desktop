@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Opera Software ASA. All rights reserved.
+ * Copyright (C) 2013 Opera Software AS. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -30,6 +30,7 @@
 
 #include "core/html/ContentEditablesController.h"
 
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/html/HTMLElement.h"
 #include "platform/RuntimeEnabledFeatures.h"
 
@@ -42,7 +43,7 @@ const int kContentEditablesSavedContentsVersion = 1;
 
 void ContentEditablesState::registerContentEditableElement(Element* element)
 {
-    m_contenteditablesWithPaths.add(element, element->getPath());
+    m_contenteditablesWithPaths.insert(element, element->getPath());
 }
 
 void ContentEditablesState::unregisterContentEditableElement(Element* element)
@@ -64,10 +65,10 @@ void ContentEditablesState::restoreContentsIn(Element* element)
     ASSERT(htmlElement->contentEditable() == "true" || htmlElement->contentEditable() == "plaintext-only");
     String elementPath = htmlElement->getPath();
 
-    if (m_contenteditablesWithPaths.get(htmlElement) == elementPath) {
-        String content = m_savedContents.get(elementPath);
+    if (m_contenteditablesWithPaths.at(htmlElement) == elementPath) {
+        String content = m_savedContents.at(elementPath);
         if (!content.isEmpty())
-            htmlElement->setInnerHTML(content, IGNORE_EXCEPTION);
+            htmlElement->setInnerHTML(content, IGNORE_EXCEPTION_FOR_TESTING);
     }
 }
 
@@ -76,11 +77,11 @@ Vector<String> ContentEditablesState::toStateVector()
     Vector<String> result;
     if (m_contenteditablesWithPaths.size()) {
         result.reserveInitialCapacity(m_contenteditablesWithPaths.size() * 2 + 2);
-        result.append(kContentEditablesSavedContentsSignature);
-        result.append(String::number(kContentEditablesSavedContentsVersion, 0u));
+        result.push_back(kContentEditablesSavedContentsSignature);
+        result.push_back(String::number(kContentEditablesSavedContentsVersion, 0u));
         for (const auto& iter : m_contenteditablesWithPaths) {
-            result.append(iter.value);
-            result.append(toHTMLElement(iter.key)->innerHTML());
+            result.push_back(iter.value);
+            result.push_back(toHTMLElement(iter.key)->innerHTML());
         }
     }
     return result;
@@ -91,7 +92,7 @@ void ContentEditablesState::setContentEditablesContent(const Vector<String>& con
     if (contents.size() && contents[0] == kContentEditablesSavedContentsSignature) {
         // i == 1 is version - unused for now.
         for (size_t idx = 2; idx < contents.size(); idx += 2) {
-            m_savedContents.add(contents[idx], contents[idx + 1]);
+            m_savedContents.insert(contents[idx], contents[idx + 1]);
         }
     }
 }

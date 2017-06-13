@@ -4,6 +4,8 @@
 
 #include "modules/websockets/DOMWebSocket.h"
 
+#include <memory>
+
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8BindingForTesting.h"
@@ -18,12 +20,11 @@
 #include "public/platform/WebInsecureRequestPolicy.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "v8/include/v8.h"
 #include "wtf/Vector.h"
 #include "wtf/text/CString.h"
 #include "wtf/text/StringBuilder.h"
 #include "wtf/text/WTFString.h"
-#include <memory>
-#include <v8.h>
 
 using testing::_;
 using testing::AnyNumber;
@@ -189,7 +190,7 @@ TEST(DOMWebSocketTest, invalidSubprotocols) {
   V8TestingScope scope;
   DOMWebSocketTestScope webSocketScope(scope.getExecutionContext());
   Vector<String> subprotocols;
-  subprotocols.append("@subprotocol-|'\"x\x01\x02\x03x");
+  subprotocols.push_back("@subprotocol-|'\"x\x01\x02\x03x");
 
   webSocketScope.socket().connect("ws://example.com/", subprotocols,
                                   scope.getExceptionState());
@@ -246,8 +247,8 @@ TEST(DOMWebSocketTest, channelConnectSuccess) {
   V8TestingScope scope;
   DOMWebSocketTestScope webSocketScope(scope.getExecutionContext());
   Vector<String> subprotocols;
-  subprotocols.append("aa");
-  subprotocols.append("bb");
+  subprotocols.push_back("aa");
+  subprotocols.push_back("bb");
 
   {
     InSequence s;
@@ -271,8 +272,8 @@ TEST(DOMWebSocketTest, channelConnectFail) {
   V8TestingScope scope;
   DOMWebSocketTestScope webSocketScope(scope.getExecutionContext());
   Vector<String> subprotocols;
-  subprotocols.append("aa");
-  subprotocols.append("bb");
+  subprotocols.push_back("aa");
+  subprotocols.push_back("bb");
 
   {
     InSequence s;
@@ -325,8 +326,8 @@ TEST(DOMWebSocketTest, connectSuccess) {
   V8TestingScope scope;
   DOMWebSocketTestScope webSocketScope(scope.getExecutionContext());
   Vector<String> subprotocols;
-  subprotocols.append("aa");
-  subprotocols.append("bb");
+  subprotocols.push_back("aa");
+  subprotocols.push_back("bb");
   {
     InSequence s;
     EXPECT_CALL(webSocketScope.channel(),

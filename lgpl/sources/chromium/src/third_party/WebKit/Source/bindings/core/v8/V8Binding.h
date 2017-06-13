@@ -48,9 +48,9 @@
 #include "bindings/core/v8/V8ValueCache.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
+#include "v8/include/v8.h"
 #include "wtf/text/AtomicString.h"
 #include "wtf/text/StringView.h"
-#include <v8.h>
 
 namespace blink {
 
@@ -64,8 +64,6 @@ class Frame;
 class LocalDOMWindow;
 class LocalFrame;
 class NodeFilter;
-class WorkerGlobalScope;
-class WorkerOrWorkletGlobalScope;
 class XPathNSResolver;
 
 template <typename T>
@@ -204,28 +202,20 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, Node* impl) {
   v8SetReturnValue(callbackInfo, wrapper);
 }
 
-// Special versions for DOMWindow, WorkerGlobalScope and EventTarget
+// Special versions for DOMWindow and EventTarget
 
 template <typename CallbackInfo>
 inline void v8SetReturnValue(const CallbackInfo& callbackInfo,
                              DOMWindow* impl) {
-  v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(),
+  v8SetReturnValue(callbackInfo, ToV8(impl, callbackInfo.Holder(),
                                       callbackInfo.GetIsolate()));
 }
 
 template <typename CallbackInfo>
 inline void v8SetReturnValue(const CallbackInfo& callbackInfo,
                              EventTarget* impl) {
-  v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(),
+  v8SetReturnValue(callbackInfo, ToV8(impl, callbackInfo.Holder(),
                                       callbackInfo.GetIsolate()));
-}
-
-template <typename CallbackInfo>
-inline void v8SetReturnValue(const CallbackInfo& callbackInfo,
-                             WorkerGlobalScope* impl) {
-  v8SetReturnValue(callbackInfo,
-                   toV8((WorkerOrWorkletGlobalScope*)impl,
-                        callbackInfo.Holder(), callbackInfo.GetIsolate()));
 }
 
 template <typename CallbackInfo, typename T>
@@ -274,28 +264,20 @@ inline void v8SetReturnValueForMainWorld(const CallbackInfo& callbackInfo,
   v8SetReturnValueForMainWorld(callbackInfo, ScriptWrappable::fromNode(impl));
 }
 
-// Special versions for DOMWindow, WorkerGlobalScope and EventTarget
+// Special versions for DOMWindow and EventTarget
 
 template <typename CallbackInfo>
 inline void v8SetReturnValueForMainWorld(const CallbackInfo& callbackInfo,
                                          DOMWindow* impl) {
-  v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(),
+  v8SetReturnValue(callbackInfo, ToV8(impl, callbackInfo.Holder(),
                                       callbackInfo.GetIsolate()));
 }
 
 template <typename CallbackInfo>
 inline void v8SetReturnValueForMainWorld(const CallbackInfo& callbackInfo,
                                          EventTarget* impl) {
-  v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(),
+  v8SetReturnValue(callbackInfo, ToV8(impl, callbackInfo.Holder(),
                                       callbackInfo.GetIsolate()));
-}
-
-template <typename CallbackInfo>
-inline void v8SetReturnValueForMainWorld(const CallbackInfo& callbackInfo,
-                                         WorkerGlobalScope* impl) {
-  v8SetReturnValue(callbackInfo,
-                   toV8((WorkerOrWorkletGlobalScope*)impl,
-                        callbackInfo.Holder(), callbackInfo.GetIsolate()));
 }
 
 template <typename CallbackInfo, typename T>
@@ -336,13 +318,13 @@ inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo,
   v8SetReturnValue(callbackInfo, wrapper);
 }
 
-// Special versions for DOMWindow, WorkerGlobalScope and EventTarget
+// Special versions for DOMWindow and EventTarget
 
 template <typename CallbackInfo>
 inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo,
                                  DOMWindow* impl,
                                  const ScriptWrappable*) {
-  v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(),
+  v8SetReturnValue(callbackInfo, ToV8(impl, callbackInfo.Holder(),
                                       callbackInfo.GetIsolate()));
 }
 
@@ -350,17 +332,8 @@ template <typename CallbackInfo>
 inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo,
                                  EventTarget* impl,
                                  const ScriptWrappable*) {
-  v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(),
+  v8SetReturnValue(callbackInfo, ToV8(impl, callbackInfo.Holder(),
                                       callbackInfo.GetIsolate()));
-}
-
-template <typename CallbackInfo>
-inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo,
-                                 WorkerGlobalScope* impl,
-                                 const ScriptWrappable*) {
-  v8SetReturnValue(callbackInfo,
-                   toV8((WorkerOrWorkletGlobalScope*)impl,
-                        callbackInfo.Holder(), callbackInfo.GetIsolate()));
 }
 
 template <typename CallbackInfo, typename T, typename Wrappable>
@@ -368,6 +341,13 @@ inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo,
                                  PassRefPtr<T> impl,
                                  const Wrappable* wrappable) {
   v8SetReturnValueFast(callbackInfo, impl.get(), wrappable);
+}
+
+template <typename CallbackInfo, typename T>
+inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo,
+                                 const v8::Local<T> handle,
+                                 const ScriptWrappable*) {
+  v8SetReturnValue(callbackInfo, handle);
 }
 
 // Convert v8::String to a WTF::String. If the V8 string is not already
@@ -425,6 +405,19 @@ inline v8::Local<v8::String> v8String(v8::Isolate* isolate,
       .ToLocalChecked();
 }
 
+// As above, for string literals. The compiler doesn't optimize away the is8Bit
+// and sharedImpl checks for string literals in the StringView version.
+inline v8::Local<v8::String> v8String(v8::Isolate* isolate,
+                                      const char* string) {
+  DCHECK(isolate);
+  if (!string || string[0] == '\0')
+    return v8::String::Empty(isolate);
+  return v8::String::NewFromOneByte(isolate,
+                                    reinterpret_cast<const uint8_t*>(string),
+                                    v8::NewStringType::kNormal, strlen(string))
+      .ToLocalChecked();
+}
+
 inline v8::Local<v8::Value> v8StringOrNull(v8::Isolate* isolate,
                                            const AtomicString& string) {
   if (string.isNull())
@@ -446,6 +439,19 @@ inline v8::Local<v8::String> v8AtomicString(v8::Isolate* isolate,
              isolate, reinterpret_cast<const uint16_t*>(string.characters16()),
              v8::NewStringType::kInternalized,
              static_cast<int>(string.length()))
+      .ToLocalChecked();
+}
+
+// As above, for string literals. The compiler doesn't optimize away the is8Bit
+// check for string literals in the StringView version.
+inline v8::Local<v8::String> v8AtomicString(v8::Isolate* isolate,
+                                            const char* string) {
+  DCHECK(isolate);
+  if (!string || string[0] == '\0')
+    return v8::String::Empty(isolate);
+  return v8::String::NewFromOneByte(
+             isolate, reinterpret_cast<const uint8_t*>(string),
+             v8::NewStringType::kInternalized, strlen(string))
       .ToLocalChecked();
 }
 
@@ -651,9 +657,7 @@ inline double toCoreDate(v8::Isolate* isolate,
 inline v8::MaybeLocal<v8::Value> v8DateOrNaN(v8::Isolate* isolate,
                                              double value) {
   ASSERT(isolate);
-  return v8::Date::New(
-      isolate->GetCurrentContext(),
-      std::isfinite(value) ? value : std::numeric_limits<double>::quiet_NaN());
+  return v8::Date::New(isolate->GetCurrentContext(), value);
 }
 
 // FIXME: Remove the special casing for NodeFilter and XPathNSResolver.
@@ -683,7 +687,13 @@ HeapVector<Member<T>> toMemberNativeArray(v8::Local<v8::Value> value,
     return HeapVector<Member<T>>();
   }
 
-  HeapVector<Member<T>> result;
+  using VectorType = HeapVector<Member<T>>;
+  if (length > VectorType::maxCapacity()) {
+    exceptionState.throwRangeError("Array length exceeds supported limit.");
+    return VectorType();
+  }
+
+  VectorType result;
   result.reserveInitialCapacity(length);
   v8::Local<v8::Object> object = v8::Local<v8::Object>::Cast(v8Value);
   v8::TryCatch block(isolate);
@@ -691,7 +701,7 @@ HeapVector<Member<T>> toMemberNativeArray(v8::Local<v8::Value> value,
     v8::Local<v8::Value> element;
     if (!v8Call(object->Get(isolate->GetCurrentContext(), i), element, block)) {
       exceptionState.rethrowV8Exception(block.Exception());
-      return HeapVector<Member<T>>();
+      return VectorType();
     }
     if (V8TypeOf<T>::Type::hasInstance(element, isolate)) {
       v8::Local<v8::Object> elementObject =
@@ -699,7 +709,7 @@ HeapVector<Member<T>> toMemberNativeArray(v8::Local<v8::Value> value,
       result.uncheckedAppend(V8TypeOf<T>::Type::toImpl(elementObject));
     } else {
       exceptionState.throwTypeError("Invalid Array element type");
-      return HeapVector<Member<T>>();
+      return VectorType();
     }
   }
   return result;
@@ -721,7 +731,13 @@ HeapVector<Member<T>> toMemberNativeArray(v8::Local<v8::Value> value,
     return HeapVector<Member<T>>();
   }
 
-  HeapVector<Member<T>> result;
+  using VectorType = HeapVector<Member<T>>;
+  if (length > VectorType::maxCapacity()) {
+    exceptionState.throwRangeError("Array length exceeds supported limit.");
+    return VectorType();
+  }
+
+  VectorType result;
   result.reserveInitialCapacity(length);
   v8::Local<v8::Object> object = v8::Local<v8::Object>::Cast(v8Value);
   v8::TryCatch block(isolate);
@@ -729,7 +745,7 @@ HeapVector<Member<T>> toMemberNativeArray(v8::Local<v8::Value> value,
     v8::Local<v8::Value> element;
     if (!v8Call(object->Get(isolate->GetCurrentContext(), i), element, block)) {
       exceptionState.rethrowV8Exception(block.Exception());
-      return HeapVector<Member<T>>();
+      return VectorType();
     }
     if (V8TypeOf<T>::Type::hasInstance(element, isolate)) {
       v8::Local<v8::Object> elementObject =
@@ -737,7 +753,7 @@ HeapVector<Member<T>> toMemberNativeArray(v8::Local<v8::Value> value,
       result.uncheckedAppend(V8TypeOf<T>::Type::toImpl(elementObject));
     } else {
       exceptionState.throwTypeError("Invalid Array element type");
-      return HeapVector<Member<T>>();
+      return VectorType();
     }
   }
   return result;
@@ -763,8 +779,8 @@ VectorType toImplArray(v8::Local<v8::Value> value,
     return VectorType();
   }
 
-  if (length > WTF::kGenericMaxDirectMapped / sizeof(ValueType)) {
-    exceptionState.throwTypeError("Array length exceeds supported limit.");
+  if (length > VectorType::maxCapacity()) {
+    exceptionState.throwRangeError("Array length exceeds supported limit.");
     return VectorType();
   }
 
@@ -790,9 +806,15 @@ template <typename VectorType>
 VectorType toImplArray(const Vector<ScriptValue>& value,
                        v8::Isolate* isolate,
                        ExceptionState& exceptionState) {
+  using ValueType = typename VectorType::ValueType;
+  using TraitsType = NativeValueTraits<ValueType>;
+
+  if (value.size() > VectorType::maxCapacity()) {
+    exceptionState.throwRangeError("Array length exceeds supported limit.");
+    return VectorType();
+  }
+
   VectorType result;
-  typedef typename VectorType::ValueType ValueType;
-  typedef NativeValueTraits<ValueType> TraitsType;
   result.reserveInitialCapacity(value.size());
   for (unsigned i = 0; i < value.size(); ++i) {
     result.uncheckedAppend(
@@ -807,11 +829,16 @@ template <typename VectorType>
 VectorType toImplArguments(const v8::FunctionCallbackInfo<v8::Value>& info,
                            int startIndex,
                            ExceptionState& exceptionState) {
-  VectorType result;
-  typedef typename VectorType::ValueType ValueType;
-  typedef NativeValueTraits<ValueType> TraitsType;
+  using ValueType = typename VectorType::ValueType;
+  using TraitsType = NativeValueTraits<ValueType>;
+
   int length = info.Length();
+  VectorType result;
   if (startIndex < length) {
+    if (static_cast<size_t>(length - startIndex) > VectorType::maxCapacity()) {
+      exceptionState.throwRangeError("Array length exceeds supported limit.");
+      return VectorType();
+    }
     result.reserveInitialCapacity(length - startIndex);
     for (int i = startIndex; i < length; ++i) {
       result.uncheckedAppend(
@@ -967,7 +994,7 @@ struct NativeValueTraits<Vector<T>> {
 CORE_EXPORT v8::Isolate* toIsolate(ExecutionContext*);
 CORE_EXPORT v8::Isolate* toIsolate(LocalFrame*);
 
-DOMWindow* toDOMWindow(v8::Isolate*, v8::Local<v8::Value>);
+CORE_EXPORT DOMWindow* toDOMWindow(v8::Isolate*, v8::Local<v8::Value>);
 DOMWindow* toDOMWindow(v8::Local<v8::Context>);
 LocalDOMWindow* enteredDOMWindow(v8::Isolate*);
 CORE_EXPORT LocalDOMWindow* currentDOMWindow(v8::Isolate*);
@@ -975,7 +1002,6 @@ CORE_EXPORT ExecutionContext* toExecutionContext(v8::Local<v8::Context>);
 CORE_EXPORT void registerToExecutionContextForModules(
     ExecutionContext* (*toExecutionContextForModules)(v8::Local<v8::Context>));
 CORE_EXPORT ExecutionContext* currentExecutionContext(v8::Isolate*);
-CORE_EXPORT ExecutionContext* enteredExecutionContext(v8::Isolate*);
 
 // Returns a V8 context associated with a ExecutionContext and a
 // DOMWrapperWorld.  This method returns an empty context if there is no frame
@@ -993,8 +1019,6 @@ CORE_EXPORT v8::Local<v8::Context> toV8ContextEvenIfDetached(Frame*,
 // Returns the frame object of the window object associated with
 // a context, if the window is currently being displayed in a Frame.
 CORE_EXPORT Frame* toFrameIfNotDetached(v8::Local<v8::Context>);
-
-CORE_EXPORT EventTarget* toEventTarget(v8::Isolate*, v8::Local<v8::Value>);
 
 // If 'storage' is non-null, it must be large enough to copy all bytes in the
 // array buffer view into it.  Use allocateFlexibleArrayBufferStorage(v8Value)
@@ -1068,8 +1092,8 @@ VectorType toImplSequence(v8::Isolate* isolate,
     }
     if (doneBoolean->Value())
       break;
-    result.append(NativeValueTraits<ValueType>::nativeValue(isolate, element,
-                                                            exceptionState));
+    result.push_back(NativeValueTraits<ValueType>::nativeValue(isolate, element,
+                                                               exceptionState));
   }
   return result;
 }
@@ -1077,7 +1101,6 @@ VectorType toImplSequence(v8::Isolate* isolate,
 // If the current context causes out of memory, JavaScript setting
 // is disabled and it returns true.
 bool handleOutOfMemory();
-void crashIfIsolateIsDead(v8::Isolate*);
 
 inline bool isUndefinedOrNull(v8::Local<v8::Value> value) {
   return value.IsEmpty() || value->IsNull() || value->IsUndefined();
@@ -1132,31 +1155,8 @@ CORE_EXPORT void moveEventListenerToNewWrapper(v8::Isolate*,
 // http://www.w3.org/TR/WebIDL/#delete
 enum DeleteResult { DeleteSuccess, DeleteReject, DeleteUnknownProperty };
 
-class V8IsolateInterruptor final : public BlinkGCInterruptor {
- public:
-  explicit V8IsolateInterruptor(v8::Isolate* isolate) : m_isolate(isolate) {}
-
-  static void onInterruptCallback(v8::Isolate* isolate, void* data) {
-    V8IsolateInterruptor* interruptor =
-        reinterpret_cast<V8IsolateInterruptor*>(data);
-    interruptor->onInterrupted();
-  }
-
-  void requestInterrupt() override {
-    m_isolate->RequestInterrupt(&onInterruptCallback, this);
-  }
-
- private:
-  v8::Isolate* m_isolate;
-};
-
-typedef void (*InstallTemplateFunction)(
-    v8::Isolate*,
-    const DOMWrapperWorld&,
-    v8::Local<v8::FunctionTemplate> interfaceTemplate);
-
 // Freeze a V8 object. The type of the first parameter and the return value is
-// intentionally v8::Value so that this function can wrap toV8().
+// intentionally v8::Value so that this function can wrap ToV8().
 // If the argument isn't an object, this will crash.
 CORE_EXPORT v8::Local<v8::Value> freezeV8Object(v8::Local<v8::Value>,
                                                 v8::Isolate*);

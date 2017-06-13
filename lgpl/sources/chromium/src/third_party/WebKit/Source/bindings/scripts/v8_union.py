@@ -121,7 +121,7 @@ def _update_includes_and_forward_decls(member, interface_info):
         cpp_includes.update(interface_info.get(
             'dependencies_include_paths', []))
         # We need complete types for IDL dictionaries in union containers.
-        if member.is_dictionary:
+        if member.is_dictionary or member.is_typed_array:
             header_includes.update(member.includes_for_type())
         else:
             cpp_includes.update(member.includes_for_type())
@@ -150,5 +150,5 @@ def member_context(member, interfaces_info):
         'type_name': member.name,
         'v8_value_to_local_cpp_value': member.v8_value_to_local_cpp_value(
             {}, 'v8Value', 'cppValue', isolate='isolate',
-            use_exception_state=True, restricted_float=True),
+            use_exception_state=True)
     }

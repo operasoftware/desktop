@@ -31,7 +31,7 @@
 
 #include "core/html/forms/TextFieldInputType.h"
 
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/HTMLNames.h"
 #include "core/dom/NodeComputedStyle.h"
 #include "core/dom/shadow/ShadowRoot.h"
@@ -40,7 +40,6 @@
 #include "core/events/BeforeTextInsertedEvent.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/events/TextEvent.h"
-#include "core/frame/FrameHost.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/FormData.h"
 #include "core/html/HTMLInputElement.h"
@@ -50,6 +49,7 @@
 #include "core/layout/LayoutTextControlSingleLine.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/page/ChromeClient.h"
+#include "core/page/Page.h"
 #include "core/paint/PaintLayer.h"
 #include "platform/EventDispatchForbiddenScope.h"
 #include "wtf/text/WTFString.h"
@@ -86,7 +86,7 @@ class DataListIndicatorElement final : public HTMLDivElement {
       return;
     HTMLInputElement* host = hostInput();
     if (host && !host->isDisabledOrReadOnly()) {
-      document().frameHost()->chromeClient().openTextDataListChooser(*host);
+      document().page()->chromeClient().openTextDataListChooser(*host);
       event->setDefaultHandled();
     }
   }
@@ -504,6 +504,8 @@ void TextFieldInputType::subtreeHasChanged() {
   element().updatePlaceholderVisibility();
   element().pseudoStateChanged(CSSSelector::PseudoValid);
   element().pseudoStateChanged(CSSSelector::PseudoInvalid);
+  element().pseudoStateChanged(CSSSelector::PseudoInRange);
+  element().pseudoStateChanged(CSSSelector::PseudoOutOfRange);
 
   didSetValueByUserEdit(wasChanged ? ValueChangeStateChanged
                                    : ValueChangeStateNone);

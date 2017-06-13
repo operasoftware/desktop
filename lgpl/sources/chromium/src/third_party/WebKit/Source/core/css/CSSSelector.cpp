@@ -134,7 +134,7 @@ inline unsigned CSSSelector::specificityForOneSelector() const {
     case Unknown:
       return 0;
   }
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return 0;
 }
 
@@ -158,7 +158,7 @@ unsigned CSSSelector::specificityForPage() const {
             s += 1;
             break;
           default:
-            ASSERT_NOT_REACHED();
+            NOTREACHED();
         }
         break;
       default:
@@ -223,6 +223,7 @@ PseudoId CSSSelector::pseudoId(PseudoType type) {
     case PseudoDefault:
     case PseudoDisabled:
     case PseudoOptional:
+    case PseudoPlaceholder:
     case PseudoPlaceholderShown:
     case PseudoRequired:
     case PseudoReadOnly:
@@ -268,10 +269,12 @@ PseudoId CSSSelector::pseudoId(PseudoType type) {
     case PseudoListBox:
     case PseudoHostHasAppearance:
     case PseudoSlotted:
+    case PseudoVideoPersistent:
+    case PseudoVideoPersistentAncestor:
       return PseudoIdNone;
   }
 
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return PseudoIdNone;
 }
 
@@ -290,8 +293,6 @@ const static NameToPseudoStruct pseudoTypeWithoutArgumentsMap[] = {
      CSSSelector::PseudoWebKitCustomElement},
     {"-internal-media-controls-overlay-cast-button",
      CSSSelector::PseudoWebKitCustomElement},
-    {"-internal-media-controls-overlay-detach-button",
-     CSSSelector::PseudoWebKitCustomElement},
     {"-internal-media-controls-text-track-list",
      CSSSelector::PseudoWebKitCustomElement},
     {"-internal-media-controls-text-track-list-item",
@@ -306,6 +307,9 @@ const static NameToPseudoStruct pseudoTypeWithoutArgumentsMap[] = {
      CSSSelector::PseudoHostHasAppearance},
     {"-internal-spatial-navigation-focus",
      CSSSelector::PseudoSpatialNavigationFocus},
+    {"-internal-video-persistent", CSSSelector::PseudoVideoPersistent},
+    {"-internal-video-persistent-ancestor",
+     CSSSelector::PseudoVideoPersistentAncestor},
     {"-webkit-any-link", CSSSelector::PseudoAnyLink},
     {"-webkit-autofill", CSSSelector::PseudoAutofill},
     {"-webkit-drag", CSSSelector::PseudoDrag},
@@ -359,6 +363,7 @@ const static NameToPseudoStruct pseudoTypeWithoutArgumentsMap[] = {
     {"optional", CSSSelector::PseudoOptional},
     {"out-of-range", CSSSelector::PseudoOutOfRange},
     {"past", CSSSelector::PseudoPastCue},
+    {"placeholder", CSSSelector::PseudoPlaceholder},
     {"placeholder-shown", CSSSelector::PseudoPlaceholderShown},
     {"read-only", CSSSelector::PseudoReadOnly},
     {"read-write", CSSSelector::PseudoReadWrite},
@@ -513,6 +518,7 @@ void CSSSelector::updatePseudoType(const AtomicString& value,
     // fallthrough
     case PseudoBackdrop:
     case PseudoCue:
+    case PseudoPlaceholder:
     case PseudoResizer:
     case PseudoScrollbar:
     case PseudoScrollbarCorner:
@@ -598,6 +604,8 @@ void CSSSelector::updatePseudoType(const AtomicString& value,
     case PseudoVertical:
     case PseudoVisited:
     case PseudoWindowInactive:
+    case PseudoVideoPersistent:
+    case PseudoVideoPersistentAncestor:
       if (m_match != PseudoClass)
         m_pseudoType = PseudoUnknown;
   }
@@ -629,17 +637,28 @@ bool CSSSelector::operator==(const CSSSelector& other) const {
   return true;
 }
 
+static void serializeIdentifierOrAny(const AtomicString& identifier,
+                                     StringBuilder& builder) {
+  if (identifier != starAtom)
+    serializeIdentifier(identifier, builder);
+  else
+    builder.append(identifier);
+}
+
+static void serializeNamespacePrefixIfNeeded(const AtomicString& prefix,
+                                             StringBuilder& builder) {
+  if (prefix.isNull())
+    return;
+  serializeIdentifierOrAny(prefix, builder);
+  builder.append('|');
+}
+
 String CSSSelector::selectorText(const String& rightSide) const {
   StringBuilder str;
 
   if (m_match == Tag && !m_tagIsImplicit) {
-    if (tagQName().prefix().isNull()) {
-      str.append(tagQName().localName());
-    } else {
-      str.append(tagQName().prefix().getString());
-      str.append('|');
-      str.append(tagQName().localName());
-    }
+    serializeNamespacePrefixIfNeeded(tagQName().prefix(), str);
+    serializeIdentifierOrAny(tagQName().localName(), str);
   }
 
   const CSSSelector* cs = this;
@@ -698,12 +717,8 @@ String CSSSelector::selectorText(const String& rightSide) const {
       str.append(cs->serializingValue());
     } else if (cs->isAttributeSelector()) {
       str.append('[');
-      const AtomicString& prefix = cs->attribute().prefix();
-      if (!prefix.isNull()) {
-        str.append(prefix);
-        str.append('|');
-      }
-      str.append(cs->attribute().localName());
+      serializeNamespacePrefixIfNeeded(cs->attribute().prefix(), str);
+      serializeIdentifier(cs->attribute().localName(), str);
       switch (cs->m_match) {
         case AttributeExact:
           str.append('=');

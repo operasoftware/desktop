@@ -5,26 +5,23 @@
 #ifndef DOMWindowStorage_h
 #define DOMWindowStorage_h
 
-#include "core/frame/DOMWindowProperty.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class DOMWindow;
 class ExceptionState;
 class LocalDOMWindow;
 class Storage;
 
 class DOMWindowStorage final : public GarbageCollected<DOMWindowStorage>,
-                               public Supplement<LocalDOMWindow>,
-                               public DOMWindowProperty {
+                               public Supplement<LocalDOMWindow> {
   USING_GARBAGE_COLLECTED_MIXIN(DOMWindowStorage);
 
  public:
   static DOMWindowStorage& from(LocalDOMWindow&);
-  static Storage* sessionStorage(DOMWindow&, ExceptionState&);
-  static Storage* localStorage(DOMWindow&, ExceptionState&);
+  static Storage* sessionStorage(LocalDOMWindow&, ExceptionState&);
+  static Storage* localStorage(LocalDOMWindow&, ExceptionState&);
 
   Storage* sessionStorage(ExceptionState&) const;
   Storage* localStorage(ExceptionState&) const;
@@ -37,7 +34,6 @@ class DOMWindowStorage final : public GarbageCollected<DOMWindowStorage>,
   explicit DOMWindowStorage(LocalDOMWindow&);
   static const char* supplementName();
 
-  Member<LocalDOMWindow> m_window;
   mutable Member<Storage> m_sessionStorage;
   mutable Member<Storage> m_localStorage;
 };

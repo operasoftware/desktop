@@ -36,7 +36,7 @@
 namespace blink {
 
 DOMWindowCrypto::DOMWindowCrypto(LocalDOMWindow& window)
-    : DOMWindowProperty(window.frame()) {}
+    : Supplement<LocalDOMWindow>(window) {}
 
 const char* DOMWindowCrypto::supplementName() {
   return "DOMWindowCrypto";
@@ -52,12 +52,12 @@ DOMWindowCrypto& DOMWindowCrypto::from(LocalDOMWindow& window) {
   return *supplement;
 }
 
-Crypto* DOMWindowCrypto::crypto(DOMWindow& window) {
-  return DOMWindowCrypto::from(toLocalDOMWindow(window)).crypto();
+Crypto* DOMWindowCrypto::crypto(LocalDOMWindow& window) {
+  return DOMWindowCrypto::from(window).crypto();
 }
 
 Crypto* DOMWindowCrypto::crypto() const {
-  if (!m_crypto && frame())
+  if (!m_crypto)
     m_crypto = Crypto::create();
   return m_crypto.get();
 }
@@ -65,7 +65,6 @@ Crypto* DOMWindowCrypto::crypto() const {
 DEFINE_TRACE(DOMWindowCrypto) {
   visitor->trace(m_crypto);
   Supplement<LocalDOMWindow>::trace(visitor);
-  DOMWindowProperty::trace(visitor);
 }
 
 }  // namespace blink

@@ -42,6 +42,7 @@
 #include "core/layout/LayoutObject.h"
 #include "core/layout/compositing/CompositedLayerMapping.h"
 #include "core/paint/FilterEffectBuilder.h"
+#include "core/paint/ObjectPaintProperties.h"
 #include "core/paint/PaintLayer.h"
 #include "platform/animation/AnimationTranslationUtil.h"
 #include "platform/animation/CompositorAnimation.h"
@@ -133,37 +134,6 @@ bool hasIncompatibleAnimations(const Element& targetElement,
   }
 
   return false;
-}
-
-void setBoxSizeForAnimationAndKeyFrames(const Element& element,
-                                        const Animation* player,
-                                        const EffectModel& effect) {
-  const KeyframeEffectModelBase& keyframeEffect =
-      toKeyframeEffectModelBase(effect);
-  PropertyHandleSet properties = keyframeEffect.properties();
-  if (properties.isEmpty() ||
-      !properties.contains(PropertyHandle(CSSPropertyTransform)))
-    return;
-  if (!element.layoutObject() || !element.layoutObject()->isBox())
-    return;
-
-  bool dependsOnBoxSize = false;
-  LayoutBox* layoutBox = toLayoutBox(element.layoutObject());
-  const IntSize boxSize = layoutBox->pixelSnappedSize();
-
-  const PropertySpecificKeyframeVector& keyframes =
-      keyframeEffect.getPropertySpecificKeyframes(
-          PropertyHandle(CSSPropertyTransform));
-  for (const auto& keyframe : keyframes) {
-    const TransformOperations& operations =
-        toAnimatableTransform(keyframe->getAnimatableValue().get())
-            ->transformOperations();
-    dependsOnBoxSize |= operations.updateBoxSize(FloatSize(boxSize));
-  }
-  if (dependsOnBoxSize)
-    player->updateBoxSize(FloatSize(boxSize));
-  else
-    player->updateBoxSize(FloatSize(0, 0));
 }
 
 }  // namespace
@@ -300,6 +270,10 @@ bool CompositorAnimations::isCandidateForAnimationOnCompositor(
         case CSSPropertyScale:
         case CSSPropertyTranslate:
         case CSSPropertyTransform:
+          if (toAnimatableTransform(keyframe->getAnimatableValue().get())
+                  ->transformOperations()
+                  .dependsOnBoxSize())
+            return false;
           break;
         case CSSPropertyFilter:
         case CSSPropertyBackdropFilter: {
@@ -371,6 +345,25 @@ bool CompositorAnimations::canStartAnimationOnCompositor(
     const Element& element) {
   if (!Platform::current()->isThreadedAnimationEnabled())
     return false;
+
+  if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
+    // We query paint property tree state below to determine whether the
+    // animation is compositable. There is a known lifecycle violation where an
+    // animation can be cancelled during style update. See
+    // CompositorAnimations::cancelAnimationOnCompositor and
+    // http://crbug.com/676456. When this is fixed we would like to enable
+    // the DCHECK below.
+    // DCHECK(document().lifecycle().state() >=
+    // DocumentLifecycle::PrePaintClean);
+    const ObjectPaintProperties* paintProperties =
+        element.layoutObject()->paintProperties();
+    const TransformPaintPropertyNode* transformNode =
+        paintProperties->transform();
+    const EffectPaintPropertyNode* effectNode = paintProperties->effect();
+    return (transformNode && transformNode->hasDirectCompositingReasons()) ||
+           (effectNode && effectNode->hasDirectCompositingReasons());
+  }
+
   return element.layoutObject() &&
          element.layoutObject()->compositingState() == PaintsIntoOwnBacking;
 }
@@ -394,9 +387,6 @@ void CompositorAnimations::startAnimationOnCompositor(
       toKeyframeEffectModelBase(effect);
 
   Vector<std::unique_ptr<CompositorAnimation>> animations;
-
-  setBoxSizeForAnimationAndKeyFrames(element, &animation, effect);
-
   getAnimationOnCompositor(timing, group, startTime, timeOffset, keyframeEffect,
                            animations, animationPlaybackRate);
   DCHECK(!animations.isEmpty());
@@ -405,7 +395,7 @@ void CompositorAnimations::startAnimationOnCompositor(
     CompositorAnimationPlayer* compositorPlayer = animation.compositorPlayer();
     DCHECK(compositorPlayer);
     compositorPlayer->addAnimation(std::move(compositorAnimation));
-    startedAnimationIds.append(id);
+    startedAnimationIds.push_back(id);
   }
   DCHECK(!startedAnimationIds.isEmpty());
 }
@@ -454,15 +444,18 @@ void CompositorAnimations::attachCompositedLayers(Element& element,
   if (!element.layoutObject() || !element.layoutObject()->isBoxModelObject())
     return;
 
-  PaintLayer* layer = toLayoutBoxModelObject(element.layoutObject())->layer();
+  // Composited animations do not depend on a composited layer mapping for SPv2.
+  if (!RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
+    PaintLayer* layer = toLayoutBoxModelObject(element.layoutObject())->layer();
 
-  if (!layer || !layer->isAllowedToQueryCompositingState() ||
-      !layer->compositedLayerMapping() ||
-      !layer->compositedLayerMapping()->mainGraphicsLayer())
-    return;
+    if (!layer || !layer->isAllowedToQueryCompositingState() ||
+        !layer->compositedLayerMapping() ||
+        !layer->compositedLayerMapping()->mainGraphicsLayer())
+      return;
 
-  if (!layer->compositedLayerMapping()->mainGraphicsLayer()->platformLayer())
-    return;
+    if (!layer->compositedLayerMapping()->mainGraphicsLayer()->platformLayer())
+      return;
+  }
 
   CompositorAnimationPlayer* compositorPlayer = animation.compositorPlayer();
   compositorPlayer->attachElement(createCompositorElementId(
@@ -545,10 +538,9 @@ void addKeyframeToCurve(CompositorTransformAnimationCurve& curve,
 }
 
 template <typename PlatformAnimationCurveType>
-void addKeyframesToCurve(
-    PlatformAnimationCurveType& curve,
-    const AnimatableValuePropertySpecificKeyframeVector& keyframes) {
-  auto* lastKeyframe = keyframes.last().get();
+void addKeyframesToCurve(PlatformAnimationCurveType& curve,
+                         const PropertySpecificKeyframeVector& keyframes) {
+  auto* lastKeyframe = keyframes.back().get();
   for (const auto& keyframe : keyframes) {
     const TimingFunction* keyframeTimingFunction = 0;
     // Ignore timing function of last frame.
@@ -647,7 +639,7 @@ void CompositorAnimations::getAnimationOnCompositor(
     animation->setDirection(compositorTiming.direction);
     animation->setPlaybackRate(compositorTiming.playbackRate);
     animation->setFillMode(compositorTiming.fillMode);
-    animations.append(std::move(animation));
+    animations.push_back(std::move(animation));
   }
   DCHECK(!animations.isEmpty());
 }

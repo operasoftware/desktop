@@ -25,12 +25,13 @@
 
 #include "modules/webgl/WebGLRenderingContext.h"
 
+#include <memory>
 #include "bindings/modules/v8/OffscreenCanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContext.h"
 #include "bindings/modules/v8/RenderingContext.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/frame/Settings.h"
 #include "core/loader/FrameLoader.h"
-#include "core/loader/FrameLoaderClient.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "modules/webgl/ANGLEInstancedArrays.h"
 #include "modules/webgl/EXTBlendMinMax.h"
@@ -63,7 +64,6 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebGraphicsContext3DProvider.h"
 #include "wtf/CheckedNumeric.h"
-#include <memory>
 
 namespace blink {
 
@@ -151,8 +151,6 @@ WebGLRenderingContext::WebGLRenderingContext(
                                 requestedAttributes,
                                 1) {}
 
-WebGLRenderingContext::~WebGLRenderingContext() {}
-
 void WebGLRenderingContext::setCanvasGetContextResult(
     RenderingContext& result) {
   result.setWebGLRenderingContext(this);
@@ -189,8 +187,7 @@ void WebGLRenderingContext::registerContextExtensions() {
   registerExtension<OESTextureHalfFloat>(m_oesTextureHalfFloat);
   registerExtension<OESTextureHalfFloatLinear>(m_oesTextureHalfFloatLinear);
   registerExtension<OESVertexArrayObject>(m_oesVertexArrayObject);
-  registerExtension<WebGLCompressedTextureASTC>(m_webglCompressedTextureASTC,
-                                                DraftExtension);
+  registerExtension<WebGLCompressedTextureASTC>(m_webglCompressedTextureASTC);
   registerExtension<WebGLCompressedTextureATC>(m_webglCompressedTextureATC,
                                                ApprovedExtension, bothPrefixes);
   registerExtension<WebGLCompressedTextureETC>(m_webglCompressedTextureETC,

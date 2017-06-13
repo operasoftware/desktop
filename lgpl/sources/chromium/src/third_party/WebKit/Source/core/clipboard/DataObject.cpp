@@ -43,7 +43,7 @@ namespace blink {
 
 DataObject* DataObject::createFromPasteboard(PasteMode pasteMode) {
   DataObject* dataObject = create();
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   HashSet<String> typesSeen;
 #endif
   WebClipboard::Buffer buffer = Pasteboard::generalPasteboard()->buffer();
@@ -55,10 +55,16 @@ DataObject* DataObject::createFromPasteboard(PasteMode pasteMode) {
   for (const WebString& type : webTypes) {
     if (pasteMode == PlainTextOnly && type != mimeTypeTextPlain)
       continue;
-    dataObject->m_itemList.append(
+    dataObject->m_itemList.push_back(
         DataObjectItem::createFromPasteboard(type, sequenceNumber));
-    ASSERT(typesSeen.add(type).isNewEntry);
+    ASSERT(typesSeen.insert(type).isNewEntry);
   }
+  return dataObject;
+}
+
+DataObject* DataObject::createFromString(const String& data) {
+  DataObject* dataObject = create();
+  dataObject->add(data, mimeTypeTextPlain);
   return dataObject;
 }
 
@@ -127,7 +133,7 @@ void DataObject::clearData(const String& type) {
 
 Vector<String> DataObject::types() const {
   Vector<String> results;
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   HashSet<String> typesSeen;
 #endif
   bool containsFiles = false;
@@ -135,8 +141,8 @@ Vector<String> DataObject::types() const {
     switch (item->kind()) {
       case DataObjectItem::StringKind:
         // Per the spec, type must be unique among all items of kind 'string'.
-        results.append(item->type());
-        ASSERT(typesSeen.add(item->type()).isNewEntry);
+        results.push_back(item->type());
+        ASSERT(typesSeen.insert(item->type()).isNewEntry);
         break;
       case DataObjectItem::FileKind:
         containsFiles = true;
@@ -144,8 +150,8 @@ Vector<String> DataObject::types() const {
     }
   }
   if (containsFiles) {
-    results.append(mimeTypeFiles);
-    ASSERT(typesSeen.add(mimeTypeFiles).isNewEntry);
+    results.push_back(mimeTypeFiles);
+    ASSERT(typesSeen.insert(mimeTypeFiles).isNewEntry);
   }
   return results;
 }
@@ -204,7 +210,7 @@ Vector<String> DataObject::filenames() const {
   Vector<String> results;
   for (size_t i = 0; i < m_itemList.size(); ++i) {
     if (m_itemList[i]->isFilename())
-      results.append(toFile(m_itemList[i]->getAsFile())->path());
+      results.push_back(m_itemList[i]->getAsFile()->path());
   }
   return results;
 }
@@ -216,10 +222,12 @@ void DataObject::addFilename(const String& filename,
       File::createForUserProvidedFile(filename, displayName), fileSystemId));
 }
 
-void DataObject::addSharedBuffer(const String& name,
-                                 PassRefPtr<SharedBuffer> buffer) {
-  internalAddFileItem(
-      DataObjectItem::createFromSharedBuffer(name, std::move(buffer)));
+void DataObject::addSharedBuffer(PassRefPtr<SharedBuffer> buffer,
+                                 const KURL& sourceURL,
+                                 const String& filenameExtension,
+                                 const AtomicString& contentDisposition) {
+  internalAddFileItem(DataObjectItem::createFromSharedBuffer(
+      std::move(buffer), sourceURL, filenameExtension, contentDisposition));
 }
 
 DataObject::DataObject() : m_modifiers(0) {}
@@ -241,13 +249,13 @@ bool DataObject::internalAddStringItem(DataObjectItem* item) {
       return false;
   }
 
-  m_itemList.append(item);
+  m_itemList.push_back(item);
   return true;
 }
 
 void DataObject::internalAddFileItem(DataObjectItem* item) {
   ASSERT(item->kind() == DataObjectItem::FileKind);
-  m_itemList.append(item);
+  m_itemList.push_back(item);
 }
 
 DEFINE_TRACE(DataObject) {
@@ -316,10 +324,15 @@ WebDragData DataObject::toWebDragData() {
       item.storageType = WebDragData::Item::StorageTypeString;
       item.stringType = originalItem->type();
       item.stringData = originalItem->getAsString();
+      item.title = originalItem->title();
+      item.baseURL = originalItem->baseURL();
     } else if (originalItem->kind() == DataObjectItem::FileKind) {
       if (originalItem->sharedBuffer()) {
         item.storageType = WebDragData::Item::StorageTypeBinaryData;
         item.binaryData = originalItem->sharedBuffer();
+        item.binaryDataSourceURL = originalItem->baseURL();
+        item.binaryDataFilenameExtension = originalItem->filenameExtension();
+        item.binaryDataContentDisposition = originalItem->title();
       } else if (originalItem->isFilename()) {
         Blob* blob = originalItem->getAsFile();
         if (blob->isFile()) {
@@ -349,8 +362,6 @@ WebDragData DataObject::toWebDragData() {
     } else {
       ASSERT_NOT_REACHED();
     }
-    item.title = originalItem->title();
-    item.baseURL = originalItem->baseURL();
     itemList[i] = item;
   }
   data.swapItems(itemList);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Opera Software ASA. All rights reserved.
+ * Copyright (C) 2013 Opera Software AS. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -31,6 +31,7 @@
 #ifndef ContentEditablesController_h
 #define ContentEditablesController_h
 
+#include "bindings/core/v8/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "wtf/HashFunctions.h"
 #include "wtf/HashMap.h"
@@ -68,7 +69,8 @@ private:
     HashMap<String, String> m_savedContents;
 };
 
-class ContentEditablesController final : public GarbageCollected<ContentEditablesController> {
+class ContentEditablesController final : public GarbageCollected<ContentEditablesController>,
+                                         public TraceWrapperBase {
 public:
     static ContentEditablesController* create()
     {

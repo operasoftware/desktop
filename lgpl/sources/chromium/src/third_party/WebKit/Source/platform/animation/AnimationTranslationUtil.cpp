@@ -63,10 +63,9 @@ void toCompositorTransformOperations(
       case TransformOperation::Translate: {
         auto transform =
             static_cast<const TranslateTransformOperation*>(operation.get());
-        // DCHECK(transform->x().isFixed() && transform->y().isFixed());
-        // disabled by CHR-3995
+        DCHECK(transform->x().isFixed() && transform->y().isFixed());
         outTransformOperations->appendTranslate(
-            transform->resolveX(), transform->resolveY(), transform->z());
+            transform->x().value(), transform->y().value(), transform->z());
         break;
       }
       case TransformOperation::RotateX:
@@ -110,6 +109,7 @@ void toCompositorTransformOperations(
         outTransformOperations->appendPerspective(transform->perspective());
         break;
       }
+      case TransformOperation::RotateAroundOrigin:
       case TransformOperation::Interpolated: {
         TransformationMatrix m;
         operation->apply(m, FloatSize());
@@ -120,8 +120,8 @@ void toCompositorTransformOperations(
       case TransformOperation::Identity:
         outTransformOperations->appendIdentity();
         break;
-      case TransformOperation::None:
-        // Do nothing.
+      default:
+        NOTREACHED();
         break;
     }  // switch
   }    // for each operation

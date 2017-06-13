@@ -35,6 +35,7 @@
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/frame/Settings.h"
 #include "core/frame/VisualViewport.h"
 #include "core/input/EventHandler.h"
@@ -51,8 +52,9 @@
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/LayoutTestSupport.h"
 #include "platform/ScriptForbiddenScope.h"
+#include "platform/animation/CompositorAnimationHost.h"
 #include "platform/heap/Handle.h"
-#include "platform/tracing/TraceEvent.h"
+#include "platform/instrumentation/tracing/TraceEvent.h"
 #include "public/platform/WebCompositeAndReadbackAsyncCallback.h"
 #include "public/platform/WebCursorInfo.h"
 #include "public/platform/WebFloatRect.h"
@@ -88,7 +90,7 @@ class PagePopupChromeClient final : public EmptyChromeClient {
   IntRect rootWindowRect() override { return m_popup->windowRectInScreen(); }
 
   IntRect viewportToScreen(const IntRect& rect,
-                           const Widget* widget) const override {
+                           const FrameViewBase* frameViewBase) const override {
     WebRect rectInScreen(rect);
     WebRect windowRect = m_popup->windowRectInScreen();
     m_popup->widgetClient()->convertViewportToWindow(&rectInScreen);
@@ -121,7 +123,7 @@ class PagePopupChromeClient final : public EmptyChromeClient {
       m_popup->widgetClient()->didInvalidateRect(paintRect);
   }
 
-  void scheduleAnimation(Widget*) override {
+  void scheduleAnimation(FrameViewBase*) override {
     // Calling scheduleAnimation on m_webView so WebViewTestProxy will call
     // beginFrame.
     if (LayoutTestSupport::isRunningLayoutTest())
@@ -137,16 +139,14 @@ class PagePopupChromeClient final : public EmptyChromeClient {
 
   void attachCompositorAnimationTimeline(CompositorAnimationTimeline* timeline,
                                          LocalFrame*) override {
-    if (m_popup->m_layerTreeView)
-      m_popup->m_layerTreeView->attachCompositorAnimationTimeline(
-          timeline->animationTimeline());
+    if (m_popup->m_animationHost)
+      m_popup->m_animationHost->addTimeline(*timeline);
   }
 
   void detachCompositorAnimationTimeline(CompositorAnimationTimeline* timeline,
                                          LocalFrame*) override {
-    if (m_popup->m_layerTreeView)
-      m_popup->m_layerTreeView->detachCompositorAnimationTimeline(
-          timeline->animationTimeline());
+    if (m_popup->m_animationHost)
+      m_popup->m_animationHost->removeTimeline(*timeline);
   }
 
   WebScreenInfo screenInfo() const override {
@@ -164,42 +164,44 @@ class PagePopupChromeClient final : public EmptyChromeClient {
   }
 
   void setEventListenerProperties(
+      LocalFrame* frame,
       WebEventListenerClass eventClass,
       WebEventListenerProperties properties) override {
-    if (m_popup->m_layerTreeView) {
-      m_popup->m_layerTreeView->setEventListenerProperties(eventClass,
-                                                           properties);
+    DCHECK(frame->isMainFrame());
+    WebWidgetClient* client = m_popup->widgetClient();
+    if (WebLayerTreeView* layerTreeView = m_popup->m_layerTreeView) {
+      layerTreeView->setEventListenerProperties(eventClass, properties);
       if (eventClass == WebEventListenerClass::TouchStartOrMove) {
-        m_popup->widgetClient()->hasTouchEventHandlers(
+        client->hasTouchEventHandlers(
             properties != WebEventListenerProperties::Nothing ||
-            eventListenerProperties(WebEventListenerClass::TouchEndOrCancel) !=
+            eventListenerProperties(frame,
+                                    WebEventListenerClass::TouchEndOrCancel) !=
                 WebEventListenerProperties::Nothing);
       } else if (eventClass == WebEventListenerClass::TouchEndOrCancel) {
-        m_popup->widgetClient()->hasTouchEventHandlers(
+        client->hasTouchEventHandlers(
             properties != WebEventListenerProperties::Nothing ||
-            eventListenerProperties(WebEventListenerClass::TouchStartOrMove) !=
+            eventListenerProperties(frame,
+                                    WebEventListenerClass::TouchStartOrMove) !=
                 WebEventListenerProperties::Nothing);
       }
     } else {
-      m_popup->widgetClient()->hasTouchEventHandlers(true);
+      client->hasTouchEventHandlers(true);
     }
   }
   WebEventListenerProperties eventListenerProperties(
+      LocalFrame*,
       WebEventListenerClass eventClass) const override {
-    if (m_popup->m_layerTreeView)
+    if (m_popup->m_layerTreeView) {
       return m_popup->m_layerTreeView->eventListenerProperties(eventClass);
+    }
     return WebEventListenerProperties::Nothing;
   }
 
-  void setHasScrollEventHandlers(bool hasEventHandlers) override {
+  void setHasScrollEventHandlers(LocalFrame* frame,
+                                 bool hasEventHandlers) override {
+    DCHECK(frame->isMainFrame());
     if (m_popup->m_layerTreeView)
       m_popup->m_layerTreeView->setHaveScrollEventHandlers(hasEventHandlers);
-  }
-
-  bool hasScrollEventHandlers() const override {
-    if (m_popup->m_layerTreeView)
-      return m_popup->m_layerTreeView->haveScrollEventHandlers();
-    return false;
   }
 
   void setTouchAction(LocalFrame* frame, TouchAction touchAction) override {
@@ -292,21 +294,22 @@ bool WebPagePopupImpl::initializePage() {
   m_page = Page::create(pageClients);
   m_page->settings().setScriptEnabled(true);
   m_page->settings().setAllowScriptsToCloseWindows(true);
-  m_page->settings().setDeviceSupportsTouch(mainSettings.deviceSupportsTouch());
-  m_page->settings().setMinimumFontSize(mainSettings.minimumFontSize());
+  m_page->settings().setDeviceSupportsTouch(
+      mainSettings.getDeviceSupportsTouch());
+  m_page->settings().setMinimumFontSize(mainSettings.getMinimumFontSize());
   m_page->settings().setMinimumLogicalFontSize(
-      mainSettings.minimumLogicalFontSize());
+      mainSettings.getMinimumLogicalFontSize());
   // FIXME: Should we support enabling a11y while a popup is shown?
   m_page->settings().setAccessibilityEnabled(
-      mainSettings.accessibilityEnabled());
+      mainSettings.getAccessibilityEnabled());
   m_page->settings().setScrollAnimatorEnabled(
-      mainSettings.scrollAnimatorEnabled());
+      mainSettings.getScrollAnimatorEnabled());
 
-  provideContextFeaturesTo(*m_page, makeUnique<PagePopupFeaturesClient>());
-  DEFINE_STATIC_LOCAL(FrameLoaderClient, emptyFrameLoaderClient,
-                      (EmptyFrameLoaderClient::create()));
+  provideContextFeaturesTo(*m_page, WTF::makeUnique<PagePopupFeaturesClient>());
+  DEFINE_STATIC_LOCAL(LocalFrameClient, emptyLocalFrameClient,
+                      (EmptyLocalFrameClient::create()));
   LocalFrame* frame =
-      LocalFrame::create(&emptyFrameLoaderClient, &m_page->frameHost(), 0);
+      LocalFrame::create(&emptyLocalFrameClient, &m_page->frameHost(), 0);
   frame->setPagePopupOwner(m_popupClient->ownerElement());
   frame->setView(FrameView::create(*frame));
   frame->init();
@@ -317,17 +320,17 @@ bool WebPagePopupImpl::initializePage() {
           m_popupClient->ownerElement().document().existingAXObjectCache())
     cache->childrenChanged(&m_popupClient->ownerElement());
 
-  DCHECK(frame->localDOMWindow());
+  DCHECK(frame->domWindow());
   PagePopupSupplement::install(*frame, *this, m_popupClient);
   DCHECK_EQ(m_popupClient->ownerElement().document().existingAXObjectCache(),
             frame->document()->existingAXObjectCache());
 
   RefPtr<SharedBuffer> data = SharedBuffer::create();
   m_popupClient->writeDocument(data.get());
+  frame->setPageZoomFactor(m_popupClient->zoomFactor());
   frame->loader().load(FrameLoadRequest(
       0, blankURL(), SubstituteData(data, "text/html", "UTF-8", KURL(),
                                     ForceSynchronousLoad)));
-  frame->setPageZoomFactor(m_popupClient->zoomFactor());
   return true;
 }
 
@@ -335,8 +338,7 @@ void WebPagePopupImpl::postMessage(const String& message) {
   if (!m_page)
     return;
   ScriptForbiddenScope::AllowUserAgentScript allowScript;
-  if (LocalDOMWindow* window =
-          toLocalFrame(m_page->mainFrame())->localDOMWindow())
+  if (LocalDOMWindow* window = toLocalFrame(m_page->mainFrame())->domWindow())
     window->dispatchEvent(MessageEvent::create(message));
 }
 
@@ -390,18 +392,27 @@ void WebPagePopupImpl::setIsAcceleratedCompositingActive(bool enter) {
     TRACE_EVENT0("blink",
                  "WebPagePopupImpl::setIsAcceleratedCompositingActive(true)");
 
-    m_widgetClient->initializeLayerTreeView();
-    m_layerTreeView = m_widgetClient->layerTreeView();
+    m_layerTreeView = m_widgetClient->initializeLayerTreeView();
     if (m_layerTreeView) {
       m_layerTreeView->setVisible(true);
       m_isAcceleratedCompositingActive = true;
-      m_page->layerTreeViewInitialized(*m_layerTreeView);
+      m_animationHost = WTF::makeUnique<CompositorAnimationHost>(
+          m_layerTreeView->compositorAnimationHost());
+      m_page->layerTreeViewInitialized(*m_layerTreeView, nullptr);
     } else {
       m_isAcceleratedCompositingActive = false;
+      m_animationHost = nullptr;
     }
   }
 }
 
+void WebPagePopupImpl::setSuppressFrameRequestsWorkaroundFor704763Only(
+    bool suppressFrameRequests) {
+  if (!m_page)
+    return;
+  m_page->animator().setSuppressFrameRequestsWorkaroundFor704763Only(
+      suppressFrameRequests);
+}
 void WebPagePopupImpl::beginFrame(double lastFrameTimeMonotonic) {
   if (!m_page)
     return;
@@ -412,10 +423,11 @@ void WebPagePopupImpl::beginFrame(double lastFrameTimeMonotonic) {
 
 void WebPagePopupImpl::willCloseLayerTreeView() {
   if (m_page && m_layerTreeView)
-    m_page->willCloseLayerTreeView(*m_layerTreeView);
+    m_page->willCloseLayerTreeView(*m_layerTreeView, nullptr);
 
   setIsAcceleratedCompositingActive(false);
-  m_layerTreeView = 0;
+  m_layerTreeView = nullptr;
+  m_animationHost = nullptr;
 }
 
 void WebPagePopupImpl::updateAllLifecyclePhases() {
@@ -470,14 +482,15 @@ WebInputEventResult WebPagePopupImpl::handleGestureEvent(
   if (m_closing || !m_page || !m_page->mainFrame() ||
       !toLocalFrame(m_page->mainFrame())->view())
     return WebInputEventResult::NotHandled;
-  if (event.type == WebInputEvent::GestureTap &&
+  if ((event.type() == WebInputEvent::GestureTap ||
+       event.type() == WebInputEvent::GestureTapDown) &&
       !isViewportPointInWindow(event.x, event.y)) {
     cancel();
     return WebInputEventResult::NotHandled;
   }
   LocalFrame& frame = *toLocalFrame(m_page->mainFrame());
-  return frame.eventHandler().handleGestureEvent(
-      PlatformGestureEventBuilder(frame.view(), event));
+  WebGestureEvent scaledEvent = TransformWebGestureEvent(frame.view(), event);
+  return frame.eventHandler().handleGestureEvent(scaledEvent);
 }
 
 void WebPagePopupImpl::handleMouseDown(LocalFrame& mainFrame,
@@ -506,7 +519,7 @@ bool WebPagePopupImpl::isViewportPointInWindow(int x, int y) {
 }
 
 WebInputEventResult WebPagePopupImpl::handleInputEvent(
-    const WebInputEvent& event) {
+    const WebCoalescedInputEvent& event) {
   if (m_closing)
     return WebInputEventResult::NotHandled;
   return PageWidgetDelegate::handleInputEvent(
@@ -557,7 +570,7 @@ void WebPagePopupImpl::closePopup() {
 }
 
 LocalDOMWindow* WebPagePopupImpl::window() {
-  return m_page->deprecatedLocalMainFrame()->localDOMWindow();
+  return m_page->deprecatedLocalMainFrame()->domWindow();
 }
 
 void WebPagePopupImpl::layoutAndPaintAsync(

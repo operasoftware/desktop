@@ -27,7 +27,7 @@ class CachingWordShaperTest : public ::testing::Test {
     font.update(nullptr);
     ASSERT_TRUE(font.canShapeWordByWord());
     fallbackFonts = nullptr;
-    cache = makeUnique<ShapeCache>();
+    cache = WTF::makeUnique<ShapeCache>();
   }
 
   FontCachePurgePreventer fontCachePurgePreventer;
@@ -116,16 +116,16 @@ TEST_F(CachingWordShaperTest, CommonAccentLeftToRightFillGlyphBuffer) {
   const UChar str[] = {0x2F, 0x301, 0x2E, 0x20, 0x2E, 0x0};
   TextRun textRun(str, 5);
 
-  CachingWordShaper shaper(cache.get());
+  CachingWordShaper shaper(font);
   GlyphBuffer glyphBuffer;
-  shaper.fillGlyphBuffer(&font, textRun, fallbackFonts, &glyphBuffer, 0, 3);
+  shaper.fillGlyphBuffer(textRun, &glyphBuffer, 0, 3);
 
-  std::unique_ptr<ShapeCache> referenceCache = makeUnique<ShapeCache>();
-  CachingWordShaper referenceShaper(referenceCache.get());
+  Font referenceFont(fontDescription);
+  referenceFont.update(nullptr);
+  CachingWordShaper referenceShaper(referenceFont);
   GlyphBuffer referenceGlyphBuffer;
-  font.setCanShapeWordByWordForTesting(false);
-  referenceShaper.fillGlyphBuffer(&font, textRun, fallbackFonts,
-                                  &referenceGlyphBuffer, 0, 3);
+  referenceFont.setCanShapeWordByWordForTesting(false);
+  referenceShaper.fillGlyphBuffer(textRun, &referenceGlyphBuffer, 0, 3);
 
   ASSERT_EQ(referenceGlyphBuffer.glyphAt(0), glyphBuffer.glyphAt(0));
   ASSERT_EQ(referenceGlyphBuffer.glyphAt(1), glyphBuffer.glyphAt(1));
@@ -138,18 +138,18 @@ TEST_F(CachingWordShaperTest, CommonAccentRightToLeftFillGlyphBuffer) {
   // "[] []" with an accent mark over the last square bracket.
   const UChar str[] = {0x5B, 0x5D, 0x20, 0x5B, 0x301, 0x5D, 0x0};
   TextRun textRun(str, 6);
-  textRun.setDirection(RTL);
+  textRun.setDirection(TextDirection::kRtl);
 
-  CachingWordShaper shaper(cache.get());
+  CachingWordShaper shaper(font);
   GlyphBuffer glyphBuffer;
-  shaper.fillGlyphBuffer(&font, textRun, fallbackFonts, &glyphBuffer, 1, 6);
+  shaper.fillGlyphBuffer(textRun, &glyphBuffer, 1, 6);
 
-  std::unique_ptr<ShapeCache> referenceCache = makeUnique<ShapeCache>();
-  CachingWordShaper referenceShaper(referenceCache.get());
+  Font referenceFont(fontDescription);
+  referenceFont.update(nullptr);
+  CachingWordShaper referenceShaper(referenceFont);
   GlyphBuffer referenceGlyphBuffer;
-  font.setCanShapeWordByWordForTesting(false);
-  referenceShaper.fillGlyphBuffer(&font, textRun, fallbackFonts,
-                                  &referenceGlyphBuffer, 1, 6);
+  referenceFont.setCanShapeWordByWordForTesting(false);
+  referenceShaper.fillGlyphBuffer(textRun, &referenceGlyphBuffer, 1, 6);
 
   ASSERT_EQ(5u, referenceGlyphBuffer.size());
   ASSERT_EQ(referenceGlyphBuffer.size(), glyphBuffer.size());
@@ -169,14 +169,14 @@ TEST_F(CachingWordShaperTest, SubRunWithZeroGlyphs) {
                        0x20, 0x62, 0x61, 0x71, 0x0};
   TextRun textRun(str, 9);
 
-  CachingWordShaper shaper(cache.get());
+  CachingWordShaper shaper(font);
   FloatRect glyphBounds;
-  ASSERT_GT(shaper.width(&font, textRun, nullptr, &glyphBounds), 0);
+  ASSERT_GT(shaper.width(textRun, nullptr, &glyphBounds), 0);
 
   GlyphBuffer glyphBuffer;
-  shaper.fillGlyphBuffer(&font, textRun, fallbackFonts, &glyphBuffer, 0, 8);
+  shaper.fillGlyphBuffer(textRun, &glyphBuffer, 0, 8);
 
-  shaper.getCharacterRange(&font, textRun, 0, 8);
+  shaper.getCharacterRange(textRun, 0, 8);
 }
 
 TEST_F(CachingWordShaperTest, SegmentCJKByCharacter) {
@@ -296,6 +296,22 @@ TEST_F(CachingWordShaperTest, SegmentEmojiZWJCommon) {
 
   ASSERT_TRUE(iterator.next(&wordResult));
   EXPECT_EQ(22u, wordResult->numCharacters());
+
+  ASSERT_FALSE(iterator.next(&wordResult));
+}
+
+TEST_F(CachingWordShaperTest, SegmentEmojiPilotJudgeSequence) {
+  // A family followed by a couple with heart emoji sequence,
+  // the latter including a variation selector.
+  const UChar str[] = {0xD83D, 0xDC68, 0xD83C, 0xDFFB, 0x200D, 0x2696, 0xFE0F,
+                       0xD83D, 0xDC68, 0xD83C, 0xDFFB, 0x200D, 0x2708, 0xFE0F};
+  TextRun textRun(str, ARRAY_SIZE(str));
+
+  RefPtr<const ShapeResult> wordResult;
+  CachingWordShapeIterator iterator(cache.get(), textRun, &font);
+
+  ASSERT_TRUE(iterator.next(&wordResult));
+  EXPECT_EQ(ARRAY_SIZE(str), wordResult->numCharacters());
 
   ASSERT_FALSE(iterator.next(&wordResult));
 }
@@ -426,27 +442,26 @@ TEST_F(CachingWordShaperTest, TextOrientationFallbackShouldNotInFallbackList) {
   verticalMixedFont.update(nullptr);
   ASSERT_TRUE(verticalMixedFont.canShapeWordByWord());
 
-  CachingWordShaper shaper(cache.get());
+  CachingWordShaper shaper(verticalMixedFont);
   FloatRect glyphBounds;
   HashSet<const SimpleFontData*> fallbackFonts;
   ASSERT_GT(
-      shaper.width(&verticalMixedFont, textRun, &fallbackFonts, &glyphBounds),
+      shaper.width(textRun, &fallbackFonts, &glyphBounds),
       0);
   EXPECT_EQ(0u, fallbackFonts.size());
 }
 
 TEST_F(CachingWordShaperTest, GlyphBoundsWithSpaces) {
-  CachingWordShaper shaper(cache.get());
+  CachingWordShaper shaper(font);
 
   TextRun periods(reinterpret_cast<const LChar*>(".........."), 10);
   FloatRect periodsGlyphBounds;
-  float periodsWidth =
-      shaper.width(&font, periods, nullptr, &periodsGlyphBounds);
+  float periodsWidth = shaper.width(periods, nullptr, &periodsGlyphBounds);
 
   TextRun periodsAndSpaces(
       reinterpret_cast<const LChar*>(". . . . . . . . . ."), 19);
   FloatRect periodsAndSpacesGlyphBounds;
-  float periodsAndSpacesWidth = shaper.width(&font, periodsAndSpaces, nullptr,
+  float periodsAndSpacesWidth = shaper.width(periodsAndSpaces, nullptr,
                                              &periodsAndSpacesGlyphBounds);
 
   // The total width of periods and spaces should be longer than the width of

@@ -34,10 +34,12 @@ namespace {
 class TestAudioWorkletReportingProxy : public WorkerReportingProxy {
  public:
   static std::unique_ptr<TestAudioWorkletReportingProxy> create() {
-    return wrapUnique(new TestAudioWorkletReportingProxy());
+    return WTF::wrapUnique(new TestAudioWorkletReportingProxy());
   }
 
   // (Empty) WorkerReportingProxy implementation:
+  void countFeature(UseCounter::Feature) override {}
+  void countDeprecation(UseCounter::Feature) override {}
   void reportException(const String& errorMessage,
                        std::unique_ptr<SourceLocation>,
                        int exceptionId) override {}
@@ -46,7 +48,6 @@ class TestAudioWorkletReportingProxy : public WorkerReportingProxy {
                             const String& message,
                             SourceLocation*) override {}
   void postMessageToPageInspector(const String&) override {}
-
   void didEvaluateWorkerScript(bool success) override {}
   void didCloseWorkerGlobalScope() override {}
   void willDestroyWorkerGlobalScope() override {}
@@ -72,11 +73,13 @@ class AudioWorkletThreadTest : public ::testing::Test {
   std::unique_ptr<AudioWorkletThread> createAudioWorkletThread() {
     std::unique_ptr<AudioWorkletThread> thread =
         AudioWorkletThread::create(nullptr, *m_reportingProxy);
-    thread->start(WorkerThreadStartupData::create(
-        KURL(ParsedURLString, "http://fake.url/"), "fake user agent", "",
-        nullptr, DontPauseWorkerGlobalScopeOnStart, nullptr, "",
-        m_securityOrigin.get(), nullptr, WebAddressSpaceLocal, nullptr, nullptr,
-        V8CacheOptionsDefault));
+    thread->start(
+        WorkerThreadStartupData::create(
+            KURL(ParsedURLString, "http://fake.url/"), "fake user agent", "",
+            nullptr, DontPauseWorkerGlobalScopeOnStart, nullptr, "",
+            m_securityOrigin.get(), nullptr, WebAddressSpaceLocal, nullptr,
+            nullptr, WorkerV8Settings::Default()),
+        ParentFrameTaskRunners::create(nullptr));
     return thread;
   }
 

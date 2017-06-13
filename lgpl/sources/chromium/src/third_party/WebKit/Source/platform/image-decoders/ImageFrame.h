@@ -78,6 +78,8 @@ class PLATFORM_EXPORT ImageFrame final {
 
   ImageFrame();
 
+  ImageFrame(SkBitmap bitmap);
+
   // The assignment operator reads m_hasAlpha (inside setStatus()) before it
   // sets it (in setHasAlpha()).  This doesn't cause any problems, since the
   // setHasAlpha() call ensures all state is set correctly, but it means we
@@ -108,10 +110,10 @@ class PLATFORM_EXPORT ImageFrame final {
   // same X-coordinates on each subsequent row up to but not including
   // endY.
   void copyRowNTimes(int startX, int endX, int startY, int endY) {
-    ASSERT(startX < width());
-    ASSERT(endX <= width());
-    ASSERT(startY < height());
-    ASSERT(endY <= height());
+    DCHECK_LT(startX, width());
+    DCHECK_LE(endX, width());
+    DCHECK_LT(startY, height());
+    DCHECK_LE(endY, height());
     const int rowBytes = (endX - startX) * sizeof(PixelData);
     const PixelData* const startAddr = getAddr(startX, startY);
     for (int destY = startY + 1; destY < endY; ++destY)
@@ -218,28 +220,41 @@ class PLATFORM_EXPORT ImageFrame final {
     *dest = SkPackARGB32NoCheck(a, r, g, b);
   }
 
-  // Blend the RGBA pixel provided by |r|, |g|, |b|, |a| over the pixel in
-  // |dest|, without premultiplication, and overwrite |dest| with the result.
-  static inline void blendRGBARaw(PixelData* dest,
-                                  unsigned r,
-                                  unsigned g,
-                                  unsigned b,
-                                  unsigned a) {
-    blendSrcOverDstRaw(dest, SkPackARGB32NoCheck(a, r, g, b));
-  }
+  // Blend the RGBA pixel provided by |red|, |green|, |blue| and |alpha| over
+  // the pixel in |dest|, without premultiplication, and overwrite |dest| with
+  // the result.
+  static void blendRGBARaw(PixelData* dest,
+                           unsigned red,
+                           unsigned green,
+                           unsigned blue,
+                           unsigned alpha);
 
   // Blend the pixel, without premultiplication, in |src| over |dst| and
   // overwrite |src| with the result.
   static void blendSrcOverDstRaw(PixelData* src, PixelData dst);
 
   // Blend the RGBA pixel provided by |r|, |g|, |b|, |a| over the pixel in
-  // |dest| and overwrite |dest| with the result.
+  // |dest| and overwrite |dest| with the result. Premultiply the pixel values
+  // before blending.
   static inline void blendRGBAPremultiplied(PixelData* dest,
                                             unsigned r,
                                             unsigned g,
                                             unsigned b,
                                             unsigned a) {
-    blendSrcOverDstPremultiplied(dest, SkPackARGB32NoCheck(a, r, g, b));
+    // If the new pixel is completely transparent, no operation is necessary
+    // since |dest| contains the background pixel.
+    if (a == 0x0)
+      return;
+
+    // If the new pixel is opaque, no need for blending - just write the pixel.
+    if (a == 0xFF) {
+      setRGBAPremultiply(dest, r, g, b, a);
+      return;
+    }
+
+    PixelData src;
+    setRGBAPremultiply(&src, r, g, b, a);
+    *dest = SkPMSrcOver(src, *dest);
   }
 
   // Blend the pixel in |src| over |dst| and overwrite |src| with the result.
@@ -275,10 +290,6 @@ class PLATFORM_EXPORT ImageFrame final {
   bool m_premultiplyAlpha;
   // True if the pixels changed, but the bitmap has not yet been notified.
   bool m_pixelsChanged;
-
-  // The color space of the image. This will never be null. If a color profile
-  // was not embedded in the image, this will be set to sRGB.
-  sk_sp<SkColorSpace> m_colorSpace;
 
   // The frame that must be decoded before this frame can be decoded.
   // WTF::kNotFound if this frame doesn't require any previous frame.

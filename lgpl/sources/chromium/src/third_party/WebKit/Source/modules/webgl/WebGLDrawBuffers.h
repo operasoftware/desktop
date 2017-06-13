@@ -39,15 +39,12 @@ class WebGLDrawBuffers final : public WebGLExtension {
   static bool supported(WebGLRenderingContextBase*);
   static const char* extensionName();
 
-  ~WebGLDrawBuffers() override;
   WebGLExtensionName name() const override;
 
   void drawBuffersWEBGL(const Vector<GLenum>& buffers);
 
  private:
   explicit WebGLDrawBuffers(WebGLRenderingContextBase*);
-
-  static bool satisfiesWebGLRequirements(WebGLRenderingContextBase*);
 };
 
 }  // namespace blink

@@ -31,7 +31,6 @@
 #include "core/dom/Document.h"
 #include "core/dom/DocumentLifecycle.h"
 #include "core/editing/PositionWithAffinity.h"
-#include "core/fetch/ImageResourceObserver.h"
 #include "core/layout/LayoutObjectChildList.h"
 #include "core/layout/MapCoordinatesFlags.h"
 #include "core/layout/PaintInvalidationState.h"
@@ -40,11 +39,13 @@
 #include "core/layout/api/HitTestAction.h"
 #include "core/layout/api/SelectionState.h"
 #include "core/layout/compositing/CompositingState.h"
+#include "core/loader/resource/ImageResourceObserver.h"
 #include "core/paint/LayerHitTestRects.h"
 #include "core/paint/PaintPhase.h"
 #include "core/style/ComputedStyle.h"
 #include "platform/geometry/FloatQuad.h"
 #include "platform/geometry/LayoutRect.h"
+#include "platform/geometry/TransformState.h"
 #include "platform/graphics/CompositingReasons.h"
 #include "platform/graphics/PaintInvalidationReason.h"
 #include "platform/graphics/paint/DisplayItemClient.h"
@@ -68,7 +69,6 @@ class LayoutView;
 class ObjectPaintProperties;
 class PaintLayer;
 class PseudoStyleRequest;
-class TransformState;
 
 struct PaintInfo;
 struct PaintInvalidatorContext;
@@ -83,8 +83,6 @@ enum MarkingBehavior {
 };
 
 enum ScheduleRelayoutBehavior { ScheduleRelayout, DontScheduleRelayout };
-
-const LayoutUnit& caretWidth();
 
 struct AnnotatedRegionValue {
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
@@ -196,6 +194,7 @@ const int showTreeCharacterOffset = 39;
 class CORE_EXPORT LayoutObject : public ImageResourceObserver,
                                  public DisplayItemClient {
   friend class LayoutObjectChildList;
+  FRIEND_TEST_ALL_PREFIXES(LayoutObjectTest, MutableForPaintingClearPaintFlags);
   friend class VisualRectMappingTest;
   WTF_MAKE_NONCOPYABLE(LayoutObject);
 
@@ -214,7 +213,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   String decoratedName() const;
 
   // DisplayItemClient methods.
-  LayoutRect visualRect() const override;
+  LayoutRect visualRect() const final { return m_visualRect; }
   String debugName() const final;
 
   LayoutObject* parent() const { return m_parent; }
@@ -292,7 +291,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     return locateFlowThreadContainingBlock();
   }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   void setHasAXObject(bool flag) { m_hasAXObject = flag; }
   bool hasAXObject() const { return m_hasAXObject; }
 
@@ -391,10 +390,11 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // Sets the parent of this object but doesn't add it as a child of the parent.
   void setDangerousOneWayParent(LayoutObject*);
 
-  // For SPv2 only. The ObjectPaintProperties structure holds references to the
-  // property tree nodes that are created by the layout object for painting.
-  // The property nodes are only updated during InUpdatePaintProperties phase
-  // of the document lifecycle and shall remain immutable during other phases.
+  // For SlimmingPaintInvalidation/SPv2 only.
+  // The ObjectPaintProperties structure holds references to the property tree
+  // nodes that are created by the layout object for painting. The property
+  // nodes are only updated during InPrePaint phase of the document lifecycle
+  // and shall remain immutable during other phases.
   const ObjectPaintProperties* paintProperties() const;
 
  private:
@@ -419,7 +419,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
   //////////////////////////////////////////
  private:
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   bool isSetNeedsLayoutForbidden() const { return m_setNeedsLayoutForbidden; }
   void setNeedsLayoutIsForbidden(bool flag) {
     m_setNeedsLayoutForbidden = flag;
@@ -512,6 +512,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   bool isLayoutMultiColumnSpannerPlaceholder() const {
     return isOfType(LayoutObjectLayoutMultiColumnSpannerPlaceholder);
   }
+  bool isLayoutReplaced() const { return isOfType(LayoutObjectLayoutReplaced); }
   bool isLayoutScrollbarPart() const {
     return isOfType(LayoutObjectLayoutScrollbarPart);
   }
@@ -575,11 +576,11 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   void setChildrenInline(bool b) { m_bitfields.setChildrenInline(b); }
 
   bool alwaysCreateLineBoxesForLayoutInline() const {
-    ASSERT(isLayoutInline());
+    DCHECK(isLayoutInline());
     return m_bitfields.alwaysCreateLineBoxesForLayoutInline();
   }
   void setAlwaysCreateLineBoxesForLayoutInline(bool alwaysCreateLineBoxes) {
-    ASSERT(isLayoutInline());
+    DCHECK(isLayoutInline());
     m_bitfields.setAlwaysCreateLineBoxesForLayoutInline(alwaysCreateLineBoxes);
   }
 
@@ -605,6 +606,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // LayoutObject with an ASSERT_NOT_REACHED() default implementation.
   bool isSVG() const { return isOfType(LayoutObjectSVG); }
   bool isSVGRoot() const { return isOfType(LayoutObjectSVGRoot); }
+  bool isSVGChild() const { return isSVG() && !isSVGRoot(); }
   bool isSVGContainer() const { return isOfType(LayoutObjectSVGContainer); }
   bool isSVGTransformableContainer() const {
     return isOfType(LayoutObjectSVGTransformableContainer);
@@ -648,7 +650,12 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     return !isSVG() || (isSVGContainer() && !isSVGHiddenContainer()) ||
            isSVGShape() || isSVGImage() || isSVGText();
   }
-  virtual bool hasNonIsolatedBlendingDescendants() const { return false; }
+  virtual bool hasNonIsolatedBlendingDescendants() const {
+    // This is only implemented for layout objects that containt SVG flow.
+    // For HTML/CSS layout objects, use the PaintLayer version instead.
+    DCHECK(isSVG());
+    return false;
+  }
   enum DescendantIsolationState {
     DescendantIsolationRequired,
     DescendantIsolationNeedsUpdate,
@@ -659,7 +666,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // Per SVG 1.1 objectBoundingBox ignores clipping, masking, filter effects,
   // opacity and stroke-width.
   // This is used for all computation of objectBoundingBox relative units and by
-  // SVGLocatable::getBBox().
+  // SVGGraphicsElement::getBBox().
   // NOTE: Markers are not specifically ignored here by SVG 1.1 spec, but we
   // ignore them since stroke-width is ignored (and marker size can depend on
   // stroke-width). objectBoundingBox is returned local coordinates.
@@ -668,18 +675,28 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   virtual FloatRect strokeBoundingBox() const;
 
   // Returns the smallest rectangle enclosing all of the painted content
-  // respecting clipping, masking, filters, opacity, stroke-width and markers
+  // respecting clipping, masking, filters, opacity, stroke-width and markers.
+  // For most SVG objects, the local SVG coordinate space is the space where
+  // localSVGTransform applies. For SVG objects defining viewports (e.g.
+  // LayoutSVGForeignObject, LayoutSVGViewportContainer,
+  // LayoutSVGResourceMarker), the local SVG coordinate space is the viewport
+  // space.
   virtual FloatRect visualRectInLocalSVGCoordinates() const;
 
-  // This only returns the transform="" value from the SVG element.
-  // Most callsites want localToParentTransform() instead.
+  // This returns the transform applying to the local SVG coordinate space,
+  // which combines the CSS transform properties and animation motion transform.
+  // See SVGElement::calculateTransform().
+  // Most callsites want localToSVGParentTransform() instead.
   virtual AffineTransform localSVGTransform() const;
 
-  // Returns the full transform mapping from local coordinates to local coords
-  // for the parent SVG layoutObject
-  // This includes any viewport transforms and x/y offsets as well as the
-  // transform="" value off the element.
-  virtual const AffineTransform& localToSVGParentTransform() const;
+  // Returns the full transform mapping from local coordinates to parent's local
+  // coordinates. For most SVG objects, this is the same as localSVGTransform.
+  // For SVG objects defining viewports (see visualRectInLocalSVGCoordinates),
+  // this includes any viewport transforms and x/y offsets as well as
+  // localSVGTransform.
+  virtual AffineTransform localToSVGParentTransform() const {
+    return localSVGTransform();
+  }
 
   // SVG uses FloatPoint precise hit testing, and passes the point in parent
   // coordinates instead of in paint invalidation container coordinates.
@@ -698,7 +715,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     // LayoutTextFragment are not LayoutBlocks and will return false.
     // See https://bugs.webkit.org/show_bug.cgi?id=56709.
     return isAnonymous() && (style()->display() == EDisplay::Block ||
-                             style()->display() == EDisplay::Box) &&
+                             style()->display() == EDisplay::WebkitBox) &&
            style()->styleType() == PseudoIdNone && isLayoutBlock() &&
            !isListMarker() && !isLayoutFlowThread() &&
            !isLayoutMultiColumnSet() && !isLayoutFullScreen() &&
@@ -714,21 +731,31 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
   bool isFloating() const { return m_bitfields.floating(); }
 
+  bool isFloatingWithNonContainingBlockParent() const {
+    return isFloating() && parent() && !parent()->isLayoutBlockFlow();
+  }
+
+  // absolute or fixed positioning
   bool isOutOfFlowPositioned() const {
     return m_bitfields.isOutOfFlowPositioned();
-  }  // absolute or fixed positioning
+  }
+  // relative or sticky positioning
   bool isInFlowPositioned() const {
     return m_bitfields.isInFlowPositioned();
-  }  // relative or sticky positioning
+  }
   bool isRelPositioned() const {
     return m_bitfields.isRelPositioned();
-  }  // relative positioning
+  }
   bool isStickyPositioned() const {
     return m_bitfields.isStickyPositioned();
-  }  // sticky positioning
+  }
   bool isFixedPositioned() const {
-    return isOutOfFlowPositioned() && style()->position() == FixedPosition;
-  }  // fixed positioning
+    return isOutOfFlowPositioned() && style()->position() == EPosition::kFixed;
+  }
+  bool isAbsolutePositioned() const {
+    return isOutOfFlowPositioned() &&
+           style()->position() == EPosition::kAbsolute;
+  }
   bool isPositioned() const { return m_bitfields.isPositioned(); }
 
   bool isText() const { return m_bitfields.isText(); }
@@ -795,9 +822,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     return isOutOfFlowPositioned() && !style()->hasAutoClip();
   }
   bool hasOverflowClip() const { return m_bitfields.hasOverflowClip(); }
-  bool hasClipRelatedProperty() const {
-    return hasClip() || hasOverflowClip() || style()->containsPaint();
-  }
+  bool hasClipRelatedProperty() const;
 
   bool hasTransformRelatedProperty() const {
     return m_bitfields.hasTransformRelatedProperty();
@@ -854,7 +879,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   }
 
   Document& document() const {
-    ASSERT(m_node || parent());  // crbug.com/402056
+    DCHECK(m_node || parent());  // crbug.com/402056
     return m_node ? m_node->document() : parent()->document();
   }
   LocalFrame* frame() const { return document().frame(); }
@@ -871,11 +896,60 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // first-line, first-letter and text-overflow.
   // The flex box and grid specs require that flex box and grid do not
   // support first-line|first-letter, though.
+  // When LayoutObject and display do not agree, allow first-line|first-letter
+  // only when both indicate it's a block container.
   // TODO(cbiesinger): Remove when buttons are implemented with align-items
   // instead of flex box. crbug.com/226252.
   bool behavesLikeBlockContainer() const {
-    return isLayoutBlockFlow() || isLayoutButton();
+    return (isLayoutBlockFlow() && style()->isDisplayBlockContainer()) ||
+           isLayoutButton();
   }
+
+  // May be optionally passed to container() and various other similar methods
+  // that search the ancestry for some sort of containing block. Used to
+  // determine if we skipped certain objects while walking the ancestry.
+  class AncestorSkipInfo {
+   public:
+    AncestorSkipInfo(const LayoutObject* ancestor, bool checkForFilters = false)
+        : m_ancestor(ancestor), m_checkForFilters(checkForFilters) {}
+
+    // Update skip info output based on the layout object passed.
+    void update(const LayoutObject& object) {
+      if (&object == m_ancestor)
+        m_ancestorSkipped = true;
+      if (m_checkForFilters && object.hasFilterInducingProperty())
+        m_filterSkipped = true;
+    }
+
+    // TODO(mstensho): Get rid of this. It's just a temporary thing to retain
+    // old behavior in LayoutObject::container().
+    void resetOutput() {
+      m_ancestorSkipped = false;
+      m_filterSkipped = false;
+    }
+
+    bool ancestorSkipped() const { return m_ancestorSkipped; }
+    bool filterSkipped() const {
+      DCHECK(m_checkForFilters);
+      return m_filterSkipped;
+    }
+
+   private:
+    // Input: A potential ancestor to look for. If we walk past this one while
+    // walking the ancestry in search of some containing block, ancestorSkipped
+    // will be set to true.
+    const LayoutObject* m_ancestor;
+    // Input: When set, we'll check if we skip objects with filter inducing
+    // properties.
+    bool m_checkForFilters;
+
+    // Output: Set to true if |ancestor| was walked past while walking the
+    // ancestry.
+    bool m_ancestorSkipped = false;
+    // Output: Set to true if we walked past a filter object. This will be set
+    // regardless of the value of |ancestor|.
+    bool m_filterSkipped = false;
+  };
 
   // This function returns the containing block of the object.
   // Due to CSS being inconsistent, a containing block can be a relatively
@@ -883,33 +957,25 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   //
   // This method is extremely similar to containingBlock(), but with a few
   // notable exceptions.
-  // (1) It can be used on orphaned subtrees, i.e., it can be called safely
-  //     even when the object is not part of the primary document subtree yet.
-  // (2) For normal flow elements, it just returns the parent.
-  // (3) For absolute positioned elements, it will return a relative
+  // (1) For normal flow elements, it just returns the parent.
+  // (2) For absolute positioned elements, it will return a relative
   //     positioned inline. containingBlock() simply skips relpositioned inlines
   //     and lets an enclosing block handle the layout of the positioned object.
   //     This does mean that computePositionedLogicalWidth and
   //     computePositionedLogicalHeight have to use container().
   //
+  // Note that floating objects don't belong to either of the above exceptions.
+  //
   // This function should be used for any invalidation as it would correctly
   // walk the containing block chain. See e.g. markContainerChainForLayout.
   // It is also used for correctly sizing absolutely positioned elements
   // (point 3 above).
-  //
-  // If |ancestor| and |ancestorSkipped| are not null, on return
-  // *ancestorSkipped is true if the layoutObject returned is an ancestor of
-  // |ancestor|.
-  LayoutObject* container(const LayoutBoxModelObject* ancestor = nullptr,
-                          bool* ancestorSkipped = nullptr,
-                          bool* filterSkipped = nullptr) const;
+  LayoutObject* container(AncestorSkipInfo* = nullptr) const;
   // Finds the container as if this object is fixed-position.
-  LayoutBlock* containerForFixedPosition(
-      const LayoutBoxModelObject* ancestor = nullptr,
-      bool* ancestorSkipped = nullptr,
-      bool* filterSkipped = nullptr) const;
+  LayoutBlock* containerForFixedPosition(AncestorSkipInfo* = nullptr) const;
   // Finds the containing block as if this object is absolute-position.
-  LayoutBlock* containingBlockForAbsolutePosition() const;
+  LayoutBlock* containingBlockForAbsolutePosition(
+      AncestorSkipInfo* = nullptr) const;
 
   virtual LayoutObject* hoverAncestor() const { return parent(); }
 
@@ -943,8 +1009,9 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   }
 
   void setPositionState(EPosition position) {
-    ASSERT((position != AbsolutePosition && position != FixedPosition) ||
-           isBox());
+    DCHECK(
+        (position != EPosition::kAbsolute && position != EPosition::kFixed) ||
+        isBox());
     m_bitfields.setPositionedState(position);
   }
   void clearPositionedState() { m_bitfields.clearPositionedState(); }
@@ -979,6 +1046,9 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   }
   void setHasReflection(bool hasReflection) {
     m_bitfields.setHasReflection(hasReflection);
+  }
+  void setCanContainFixedPositionObjects(bool canContainFixedPosition) {
+    m_bitfields.setCanContainFixedPositionObjects(canContainFixedPosition);
   }
 
   // paintOffset is the offset from the origin of the GraphicsContext at which
@@ -1098,15 +1168,14 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   //
   // See container() for the function that returns the containing block.
   // See LayoutBlock.h for some extra explanations on containing blocks.
-  LayoutBlock* containingBlock() const;
+  LayoutBlock* containingBlock(AncestorSkipInfo* = nullptr) const;
 
   bool canContainAbsolutePositionObjects() const {
     return m_style->canContainAbsolutePositionObjects() ||
            canContainFixedPositionObjects();
   }
   bool canContainFixedPositionObjects() const {
-    return isLayoutView() || isSVGForeignObject() ||
-           (isLayoutBlock() && m_style->canContainFixedPositionObjects());
+    return m_bitfields.canContainFixedPositionObjects();
   }
 
   // Convert the given local point to absolute coordinates
@@ -1170,6 +1239,13 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
                             const LayoutPoint& preOffset,
                             const LayoutPoint& postOffset) const;
 
+  // Convert a local quad into the coordinate system of container, not
+  // include transforms. See localToAncestorQuad for details.
+  FloatQuad localToAncestorQuadWithoutTransforms(
+      const FloatQuad&,
+      const LayoutBoxModelObject* ancestor,
+      MapCoordinatesFlags = 0) const;
+
   // Return the transformation matrix to map points from local to the coordinate
   // system of a container, taking transforms into account.
   // Passing null for |ancestor| behaves the same as localToAncestorQuad.
@@ -1180,12 +1256,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
       MapCoordinatesFlags mode = 0) const {
     return localToAncestorTransform(nullptr, mode);
   }
-
-  // Convert a local point into the coordinate system of backing coordinates.
-  // Also returns the backing layer if needed.
-  FloatPoint localToInvalidationBackingPoint(
-      const LayoutPoint&,
-      PaintLayer** backingLayer = nullptr);
 
   // Return the offset from the container() layoutObject (excluding transforms
   // and multicol).
@@ -1200,12 +1270,13 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // This returns an IntRect enclosing this object. If this object has an
   // integral size and the position has fractional values, the resultant
   // IntRect can be larger than the integral size.
-  IntRect absoluteBoundingBoxRect() const;
+  IntRect absoluteBoundingBoxRect(MapCoordinatesFlags = 0) const;
   // FIXME: This function should go away eventually
   IntRect absoluteBoundingBoxRectIgnoringTransforms() const;
 
   // Build an array of quads in absolute coords for line boxes
-  virtual void absoluteQuads(Vector<FloatQuad>&) const {}
+  virtual void absoluteQuads(Vector<FloatQuad>&,
+                             MapCoordinatesFlags mode = 0) const {}
 
   static FloatRect absoluteBoundingBoxRectForRange(const Range*);
 
@@ -1249,7 +1320,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // FIXME: It would be better if style() returned a const reference.
   const ComputedStyle& styleRef() const { return mutableStyleRef(); }
   ComputedStyle& mutableStyleRef() const {
-    ASSERT(m_style);
+    DCHECK(m_style);
     return *m_style;
   }
 
@@ -1273,21 +1344,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   PassRefPtr<ComputedStyle> uncachedFirstLineStyle(ComputedStyle*) const;
 
   virtual CursorDirective getCursor(const LayoutPoint&, Cursor&) const;
-
-  struct AppliedTextDecoration {
-    STACK_ALLOCATED();
-    Color color;
-    TextDecorationStyle style;
-    AppliedTextDecoration()
-        : color(Color::transparent), style(TextDecorationStyleSolid) {}
-  };
-
-  void getTextDecorations(unsigned decorations,
-                          AppliedTextDecoration& underline,
-                          AppliedTextDecoration& overline,
-                          AppliedTextDecoration& linethrough,
-                          bool quirksMode = false,
-                          bool firstlineStyle = false);
 
   // Return the LayoutBoxModelObject in the container chain which is responsible
   // for painting this object. The function crosses frames boundaries so the
@@ -1314,18 +1370,6 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   virtual void invalidateTreeIfNeeded(const PaintInvalidationState&);
 
   void setShouldDoFullPaintInvalidationIncludingNonCompositingDescendants();
-
-  // Returns true if the object itself will not generate any effective painted
-  // output no matter what size the object is. For example, this function can
-  // return false for an object whose size is currently 0x0 but would have
-  // effective painted output if it was set a non-empty size.
-  // It's used to skip unforced paint invalidation (which is when
-  // shouldDoFullPaintInvalidation is false, but mayNeedPaintInvalidation or
-  // childShouldCheckForPaintInvalidation is true) to avoid unnecessary paint
-  // invalidations of empty areas covered by such objects.
-  virtual bool paintedOutputOfObjectHasNoEffectRegardlessOfSize() const {
-    return false;
-  }
 
   // Returns the rect that should have paint invalidated whenever this object
   // changes. The rect is in the view's coordinate space. This method deals with
@@ -1357,9 +1401,16 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // return value will be true only if the clipped rect has non-zero area.
   // See the documentation for LayoutRect::inclusiveIntersect for more
   // information.
-  virtual bool mapToVisualRectInAncestorSpace(
+  bool mapToVisualRectInAncestorSpace(
       const LayoutBoxModelObject* ancestor,
       LayoutRect&,
+      VisualRectFlags = DefaultVisualRectFlags) const;
+
+  // Do not call this method directly. Call mapToVisualRectInAncestorSpace
+  // instead.
+  virtual bool mapToVisualRectInAncestorSpaceInternal(
+      const LayoutBoxModelObject* ancestor,
+      TransformState&,
       VisualRectFlags = DefaultVisualRectFlags) const;
 
   // Allows objects to adjust |visualEffect|, which is in the space of the
@@ -1463,7 +1514,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   virtual int caretMaxOffset() const;
 
   // ImageResourceClient override.
-  void imageChanged(ImageResource*, const IntRect* = nullptr) final;
+  void imageChanged(ImageResourceContent*, const IntRect* = nullptr) final;
   bool willRenderImage() final;
   bool getImageAnimationPolicy(ImageAnimationPolicy&) final;
 
@@ -1479,9 +1530,9 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   }
 
   bool visibleToHitTestRequest(const HitTestRequest& request) const {
-    return style()->visibility() == EVisibility::Visible &&
+    return style()->visibility() == EVisibility::kVisible &&
            (request.ignorePointerEventsNone() ||
-            style()->pointerEvents() != PE_NONE) &&
+            style()->pointerEvents() != EPointerEvents::kNone) &&
            !isInert();
   }
 
@@ -1573,25 +1624,15 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
   bool isRelayoutBoundaryForInspector() const;
 
-  // The previous visual rect, in the the space of the paint invalidation
-  // container (*not* the graphics layer that paints this object).
-  LayoutRect previousVisualRectIncludingCompositedScrolling(
+  // The visual rect, in the the space of the paint invalidation container
+  // (*not* the graphics layer that paints this object).
+  LayoutRect visualRectIncludingCompositedScrolling(
       const LayoutBoxModelObject& paintInvalidationContainer) const;
-
-  // The returned rect does *not* account for composited scrolling.
-  const LayoutRect& previousVisualRect() const { return m_previousVisualRect; }
 
   // Called when the previous visual rect(s) is no longer valid.
   virtual void clearPreviousVisualRects();
 
-  const LayoutPoint& previousPaintOffset() const {
-    return m_previousPaintOffset;
-  }
-
-  // Only adjusts if the paint invalidation container is not a composited
-  // scroller.
-  void adjustPreviousPaintInvalidationForScrollIfNeeded(
-      const DoubleSize& scrollDelta);
+  const LayoutPoint& paintOffset() const { return m_paintOffset; }
 
   PaintInvalidationReason fullPaintInvalidationReason() const {
     return m_bitfields.fullPaintInvalidationReason();
@@ -1605,7 +1646,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     m_bitfields.setFullPaintInvalidationReason(PaintInvalidationNone);
   }
 
-  virtual void clearPaintInvalidationFlags();
+  void clearPaintInvalidationFlags();
 
   bool mayNeedPaintInvalidation() const {
     return m_bitfields.mayNeedPaintInvalidation();
@@ -1670,8 +1711,15 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // methods.
   class MutableForPainting {
    public:
-    void clearPaintInvalidationFlags() {
+    // Convenience mutator that clears paint invalidation flags and this object
+    // and its descendants' needs-paint-property-update flags.
+    void clearPaintFlags() {
+      DCHECK_EQ(m_layoutObject.document().lifecycle().state(),
+                DocumentLifecycle::InPrePaint);
       m_layoutObject.clearPaintInvalidationFlags();
+      m_layoutObject.m_bitfields.setNeedsPaintPropertyUpdate(false);
+      m_layoutObject.m_bitfields.setSubtreeNeedsPaintPropertyUpdate(false);
+      m_layoutObject.m_bitfields.setDescendantNeedsPaintPropertyUpdate(false);
     }
     void setShouldDoFullPaintInvalidation(PaintInvalidationReason reason) {
       m_layoutObject.setShouldDoFullPaintInvalidation(reason);
@@ -1683,12 +1731,14 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
       m_layoutObject.ensureIsReadyForPaintInvalidation();
     }
 
-    void setPreviousVisualRect(const LayoutRect& r) {
-      m_layoutObject.setPreviousVisualRect(r);
-    }
-    void setPreviousPaintOffset(const LayoutPoint& p) {
+    // The following setters store the current values as calculated during the
+    // pre-paint tree walk. TODO(wangxianzhu): Add check of lifecycle states.
+    void setVisualRect(const LayoutRect& r) { m_layoutObject.setVisualRect(r); }
+    void setPaintOffset(const LayoutPoint& p) {
       DCHECK(RuntimeEnabledFeatures::slimmingPaintInvalidationEnabled());
-      m_layoutObject.m_previousPaintOffset = p;
+      DCHECK_EQ(m_layoutObject.document().lifecycle().state(),
+                DocumentLifecycle::InPrePaint);
+      m_layoutObject.m_paintOffset = p;
     }
     void setHasPreviousLocationInBacking(bool b) {
       m_layoutObject.m_bitfields.setHasPreviousLocationInBacking(b);
@@ -1696,24 +1746,39 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     void setHasPreviousSelectionVisualRect(bool b) {
       m_layoutObject.m_bitfields.setHasPreviousSelectionVisualRect(b);
     }
-    void setHasPreviousBoxGeometries(bool b) {
-      m_layoutObject.m_bitfields.setHasPreviousBoxGeometries(b);
-    }
     void setPreviousBackgroundObscured(bool b) {
       m_layoutObject.setPreviousBackgroundObscured(b);
     }
+    void updatePreviousOutlineMayBeAffectedByDescendants() {
+      m_layoutObject.setPreviousOutlineMayBeAffectedByDescendants(
+          m_layoutObject.outlineMayBeAffectedByDescendants());
+    }
+
     void clearPreviousVisualRects() {
       m_layoutObject.clearPreviousVisualRects();
     }
     void setNeedsPaintPropertyUpdate() {
       m_layoutObject.setNeedsPaintPropertyUpdate();
     }
-    void clearNeedsPaintPropertyUpdate() {
-      m_layoutObject.clearNeedsPaintPropertyUpdate();
+
+#if DCHECK_IS_ON()
+    // Same as setNeedsPaintPropertyUpdate() but does not mark ancestors as
+    // having a descendant needing a paint property update.
+    void setOnlyThisNeedsPaintPropertyUpdateForTesting() {
+      m_layoutObject.m_bitfields.setNeedsPaintPropertyUpdate(true);
     }
+    void clearNeedsPaintPropertyUpdateForTesting() {
+      m_layoutObject.m_bitfields.setNeedsPaintPropertyUpdate(false);
+    }
+#endif
 
    protected:
     friend class PaintPropertyTreeBuilder;
+    FRIEND_TEST_ALL_PREFIXES(AnimationCompositorAnimationsTest,
+                             canStartAnimationOnCompositorTransformSPv2);
+    FRIEND_TEST_ALL_PREFIXES(AnimationCompositorAnimationsTest,
+                             canStartAnimationOnCompositorEffectSPv2);
+
     // The following two functions can be called from PaintPropertyTreeBuilder
     // only.
     ObjectPaintProperties& ensurePaintProperties() {
@@ -1738,18 +1803,27 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // state (location, transform, etc) as well as properties from ancestors.
   // When these inputs change, setNeedsPaintPropertyUpdate will cause a property
   // tree update during the next document lifecycle update.
-  // TODO(pdr): Add additional granularity such as the ability to signal that
-  // only a local paint property update is needed.
-  void setNeedsPaintPropertyUpdate() {
-    m_bitfields.setNeedsPaintPropertyUpdate(true);
-  }
-  void clearNeedsPaintPropertyUpdate() {
-    DCHECK_EQ(document().lifecycle().state(), DocumentLifecycle::InPrePaint);
-    m_bitfields.setNeedsPaintPropertyUpdate(false);
-  }
+  //
+  // In addition to tracking if an object needs its own paint properties
+  // updated, setNeedsPaintPropertyUpdate marks all ancestors as having a
+  // descendant needing a paint property update too.
+  void setNeedsPaintPropertyUpdate();
   bool needsPaintPropertyUpdate() const {
     return m_bitfields.needsPaintPropertyUpdate();
   }
+  void setSubtreeNeedsPaintPropertyUpdate() {
+    m_bitfields.setSubtreeNeedsPaintPropertyUpdate(true);
+    m_bitfields.setNeedsPaintPropertyUpdate(true);
+  }
+  bool subtreeNeedsPaintPropertyUpdate() const {
+    return m_bitfields.subtreeNeedsPaintPropertyUpdate();
+  }
+  bool descendantNeedsPaintPropertyUpdate() const {
+    return m_bitfields.descendantNeedsPaintPropertyUpdate();
+  }
+  // Main thread scrolling reasons require fully updating paint propeties of all
+  // ancestors (see: ScrollPaintPropertyNode.h).
+  void setAncestorsNeedPaintPropertyUpdateForMainThreadScrolling();
 
   void setIsScrollAnchorObject() { m_bitfields.setIsScrollAnchorObject(true); }
   // Clears the IsScrollAnchorObject bit if and only if no ScrollAnchors still
@@ -1785,14 +1859,11 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
 
   // Paint invalidators will access the internal global map storing the data
   // only when the flag is set, to avoid unnecessary map lookups.
-  bool hasPreviousLocationInBacking() const {
+  bool hasLocationInBacking() const {
     return m_bitfields.hasPreviousLocationInBacking();
   }
-  bool hasPreviousSelectionVisualRect() const {
+  bool hasSelectionVisualRect() const {
     return m_bitfields.hasPreviousSelectionVisualRect();
-  }
-  bool hasPreviousBoxGeometries() const {
-    return m_bitfields.hasPreviousBoxGeometries();
   }
 
   bool backgroundChangedSinceLastPaintInvalidation() const {
@@ -1800,6 +1871,13 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   }
   void setBackgroundChangedSinceLastPaintInvalidation() {
     m_bitfields.setBackgroundChangedSinceLastPaintInvalidation(true);
+  }
+
+  bool outlineMayBeAffectedByDescendants() const {
+    return m_bitfields.outlineMayBeAffectedByDescendants();
+  }
+  bool previousOutlineMayBeAffectedByDescendants() const {
+    return m_bitfields.previousOutlineMayBeAffectedByDescendants();
   }
 
  protected:
@@ -1833,6 +1911,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     LayoutObjectLayoutMultiColumnSet,
     LayoutObjectLayoutMultiColumnSpannerPlaceholder,
     LayoutObjectLayoutPart,
+    LayoutObjectLayoutReplaced,
     LayoutObjectLayoutScrollbarPart,
     LayoutObjectLayoutView,
     LayoutObjectRuby,
@@ -1907,7 +1986,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   virtual void willBeRemovedFromTree();
 
   void setDocumentForAnonymous(Document* document) {
-    ASSERT(isAnonymous());
+    DCHECK(isAnonymous());
     m_node = document;
   }
 
@@ -1931,9 +2010,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   virtual void computeSelfHitTestRects(Vector<LayoutRect>&,
                                        const LayoutPoint& layerOffset) const {}
 
-  void setPreviousVisualRect(const LayoutRect& rect) {
-    m_previousVisualRect = rect;
-  }
+  void setVisualRect(const LayoutRect& rect) { m_visualRect = rect; }
 
 #if DCHECK_IS_ON()
   virtual bool paintInvalidationStateIsDirty() const {
@@ -1980,13 +2057,24 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
     m_bitfields.setContainsInlineWithOutlineAndContinuation(b);
   }
 
+  void setOutlineMayBeAffectedByDescendants(bool b) {
+    m_bitfields.setOutlineMayBeAffectedByDescendants(b);
+  }
+  void setPreviousOutlineMayBeAffectedByDescendants(bool b) {
+    m_bitfields.setPreviousOutlineMayBeAffectedByDescendants(b);
+  }
+
  private:
-  // Adjusts a visual rect in the space of |m_previousVisualRect| to be in the
+  // Adjusts a visual rect in the space of |m_visualRect| to be in the
   // space of the |paintInvalidationContainer|, if needed. They can be different
   // only if |paintInvalidationContainer| is a composited scroller.
   void adjustVisualRectForCompositedScrolling(
       LayoutRect&,
       const LayoutBoxModelObject& paintInvalidationContainer) const;
+
+  FloatQuad localToAncestorQuadInternal(const FloatQuad&,
+                                        const LayoutBoxModelObject* ancestor,
+                                        MapCoordinatesFlags = 0) const;
 
   void clearLayoutRootIfNeeded() const;
 
@@ -2018,10 +2106,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   void invalidatePaintIncludingNonSelfPaintingLayerDescendantsInternal(
       const LayoutBoxModelObject& paintInvalidationContainer);
 
-  LayoutObject* containerForAbsolutePosition(
-      const LayoutBoxModelObject* ancestor = nullptr,
-      bool* ancestorSkipped = nullptr,
-      bool* filterSkipped = nullptr) const;
+  LayoutObject* containerForAbsolutePosition(AncestorSkipInfo* = nullptr) const;
 
   const LayoutBoxModelObject* enclosingCompositedContainer() const;
 
@@ -2036,22 +2121,20 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   void removeShapeImageClient(ShapeValue*);
   void removeCursorImageClient(const CursorList*);
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   void checkBlockPositionedObjectsNeedLayout();
 #endif
 
-  bool isTextOrSVGChild() const {
-    return isText() || (isSVG() && !isSVGRoot());
-  }
+  bool isTextOrSVGChild() const { return isText() || isSVGChild(); }
 
   static bool isAllowedToModifyLayoutTreeStructure(Document&);
 
-  // Returns the parent for paint invalidation.
-  // - For LayoutView, returns the owner layout object in the containing frame
-  //   if any or nullptr;
-  // - For multi-column spanner, returns the spanner placeholder;
-  // - Otherwise returns parent().
-  LayoutObject* paintInvalidationParent() const;
+  // Returns the parent for paint invalidation. For LayoutView, returns the
+  // owner layout object in the containing frame if any, or nullptr.
+  inline LayoutObject* paintInvalidationParent() const;
+  LayoutObject* slowPaintInvalidationParentForTesting() const;
+
+  void invalidatePaintForSelection();
 
   RefPtr<ComputedStyle> m_style;
 
@@ -2062,7 +2145,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   LayoutObject* m_previous;
   LayoutObject* m_next;
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   unsigned m_hasAXObject : 1;
   unsigned m_setNeedsLayoutForbidden : 1;
 #endif
@@ -2127,6 +2210,7 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
           m_hasOverflowClip(false),
           m_hasTransformRelatedProperty(false),
           m_hasReflection(false),
+          m_canContainFixedPositionObjects(false),
           m_hasCounterNodeMap(false),
           m_everHadLayout(false),
           m_ancestorLineBoxDirty(false),
@@ -2144,9 +2228,12 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
           m_hasBoxDecorationBackground(false),
           m_hasPreviousLocationInBacking(false),
           m_hasPreviousSelectionVisualRect(false),
-          m_hasPreviousBoxGeometries(false),
           m_needsPaintPropertyUpdate(true),
+          m_subtreeNeedsPaintPropertyUpdate(true),
+          m_descendantNeedsPaintPropertyUpdate(true),
           m_backgroundChangedSinceLastPaintInvalidation(false),
+          m_outlineMayBeAffectedByDescendants(false),
+          m_previousOutlineMayBeAffectedByDescendants(false),
           m_positionedState(IsStaticallyPositioned),
           m_selectionState(SelectionNone),
           m_backgroundObscurationState(BackgroundObscurationStatusInvalid),
@@ -2263,6 +2350,11 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
                          HasTransformRelatedProperty);
     ADD_BOOLEAN_BITFIELD(hasReflection, HasReflection);
 
+    // This boolean is used to know if this LayoutObject is a container for
+    // fixed position descendants.
+    ADD_BOOLEAN_BITFIELD(canContainFixedPositionObjects,
+                         CanContainFixedPositionObjects);
+
     // This boolean is used to know if this LayoutObject has one (or more)
     // associated CounterNode(s).
     // See class comment in LayoutCounter.h for more detail.
@@ -2313,18 +2405,33 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
                          HasPreviousLocationInBacking);
     ADD_BOOLEAN_BITFIELD(hasPreviousSelectionVisualRect,
                          HasPreviousSelectionVisualRect);
-    ADD_BOOLEAN_BITFIELD(hasPreviousBoxGeometries, HasPreviousBoxGeometries);
 
     // Whether the paint properties need to be updated. For more details, see
     // LayoutObject::needsPaintPropertyUpdate().
     ADD_BOOLEAN_BITFIELD(needsPaintPropertyUpdate, NeedsPaintPropertyUpdate);
+    // Whether paint properties of the whole subtree need to be updated.
+    ADD_BOOLEAN_BITFIELD(subtreeNeedsPaintPropertyUpdate,
+                         SubtreeNeedsPaintPropertyUpdate)
+    // Whether the paint properties of a descendant need to be updated. For more
+    // details, see LayoutObject::descendantNeedsPaintPropertyUpdate().
+    ADD_BOOLEAN_BITFIELD(descendantNeedsPaintPropertyUpdate,
+                         DescendantNeedsPaintPropertyUpdate);
 
     ADD_BOOLEAN_BITFIELD(backgroundChangedSinceLastPaintInvalidation,
                          BackgroundChangedSinceLastPaintInvalidation);
 
+    // Whether shape of outline may be affected by any descendants. This is
+    // updated before paint invalidation, checked during paint invalidation.
+    ADD_BOOLEAN_BITFIELD(outlineMayBeAffectedByDescendants,
+                         OutlineMayBeAffectedByDescendants);
+    // The outlineMayBeAffectedByDescendants status of the last paint
+    // invalidation.
+    ADD_BOOLEAN_BITFIELD(previousOutlineMayBeAffectedByDescendants,
+                         PreviousOutlineMayBeAffectedByDescendants);
+
    protected:
     // Use protected to avoid warning about unused variable.
-    unsigned m_unusedBits : 8;
+    unsigned m_unusedBits : 4;
 
    private:
     // This is the cached 'position' value of this object
@@ -2354,12 +2461,31 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
       return m_positionedState != IsStaticallyPositioned;
     }
 
-    void setPositionedState(int positionState) {
-      // This mask maps FixedPosition and AbsolutePosition to
+    void setPositionedState(EPosition positionState) {
+      // This maps FixedPosition and AbsolutePosition to
       // IsOutOfFlowPositioned, saving one bit.
-      m_positionedState = static_cast<PositionedState>(positionState & 0x3);
+      switch (positionState) {
+        case EPosition::kStatic:
+          m_positionedState = IsStaticallyPositioned;
+          break;
+        case EPosition::kRelative:
+          m_positionedState = IsRelativelyPositioned;
+          break;
+        case EPosition::kAbsolute:
+        case EPosition::kFixed:
+          m_positionedState = IsOutOfFlowPositioned;
+          break;
+        case EPosition::kSticky:
+          m_positionedState = IsStickyPositioned;
+          break;
+        default:
+          NOTREACHED();
+          break;
+      }
     }
-    void clearPositionedState() { m_positionedState = StaticPosition; }
+    void clearPositionedState() {
+      m_positionedState = static_cast<unsigned>(EPosition::kStatic);
+    }
 
     ALWAYS_INLINE SelectionState getSelectionState() const {
       return static_cast<SelectionState>(m_selectionState);
@@ -2416,14 +2542,14 @@ class CORE_EXPORT LayoutObject : public ImageResourceObserver,
   // This stores the visual rect computed by the latest paint invalidation.
   // This rect does *not* account for composited scrolling. See
   // adjustVisualRectForCompositedScrolling().
-  LayoutRect m_previousVisualRect;
+  LayoutRect m_visualRect;
 
   // This stores the paint offset computed by the latest paint property tree
   // building. It is relative to the containing transform space. It is the same
   // offset that will be used to paint the object on SPv2. It's used to detect
   // paint offset change for paint invalidation on SPv2, and partial paint
   // property tree update for SlimmingPaintInvalidation on SPv1 and SPv2.
-  LayoutPoint m_previousPaintOffset;
+  LayoutPoint m_paintOffset;
 
   // For SPv2 only. The ObjectPaintProperties structure holds references to the
   // property tree nodes that are created by the layout object for painting.
@@ -2482,7 +2608,9 @@ inline void LayoutObject::setNeedsLayout(
     LayoutInvalidationReasonForTracing reason,
     MarkingBehavior markParents,
     SubtreeLayoutScope* layouter) {
-  ASSERT(!isSetNeedsLayoutForbidden());
+#if DCHECK_IS_ON()
+  DCHECK(!isSetNeedsLayoutForbidden());
+#endif
   bool alreadyNeededLayout = m_bitfields.selfNeedsLayout();
   setSelfNeedsLayout(true);
   if (!alreadyNeededLayout) {
@@ -2517,7 +2645,7 @@ inline void LayoutObject::clearNeedsLayout() {
   setNeedsPositionedMovementLayout(false);
   setAncestorLineBoxDirty(false);
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   checkBlockPositionedObjectsNeedLayout();
 #endif
 
@@ -2526,7 +2654,9 @@ inline void LayoutObject::clearNeedsLayout() {
 
 inline void LayoutObject::setChildNeedsLayout(MarkingBehavior markParents,
                                               SubtreeLayoutScope* layouter) {
-  ASSERT(!isSetNeedsLayoutForbidden());
+#if DCHECK_IS_ON()
+  DCHECK(!isSetNeedsLayoutForbidden());
+#endif
   bool alreadyNeededLayout = normalChildNeedsLayout();
   setNormalChildNeedsLayout(true);
   // FIXME: Replace MarkOnlyThis with the SubtreeLayoutScope code path and
@@ -2539,7 +2669,9 @@ inline void LayoutObject::setChildNeedsLayout(MarkingBehavior markParents,
 inline void LayoutObject::setNeedsPositionedMovementLayout() {
   bool alreadyNeededLayout = needsPositionedMovementLayout();
   setNeedsPositionedMovementLayout(true);
-  ASSERT(!isSetNeedsLayoutForbidden());
+#if DCHECK_IS_ON()
+  DCHECK(!isSetNeedsLayoutForbidden());
+#endif
   if (!alreadyNeededLayout)
     markContainerChainForLayout();
 }
@@ -2606,7 +2738,7 @@ inline int adjustForAbsoluteZoom(int value, LayoutObject* layoutObject) {
 
 inline LayoutUnit adjustLayoutUnitForAbsoluteZoom(LayoutUnit value,
                                                   LayoutObject& layoutObject) {
-  ASSERT(layoutObject.style());
+  DCHECK(layoutObject.style());
   return adjustLayoutUnitForAbsoluteZoom(value, *layoutObject.style());
 }
 
@@ -2626,7 +2758,7 @@ inline void adjustFloatRectForAbsoluteZoom(FloatRect& rect,
 
 inline double adjustScrollForAbsoluteZoom(double value,
                                           LayoutObject& layoutObject) {
-  ASSERT(layoutObject.style());
+  DCHECK(layoutObject.style());
   return adjustScrollForAbsoluteZoom(value, *layoutObject.style());
 }
 

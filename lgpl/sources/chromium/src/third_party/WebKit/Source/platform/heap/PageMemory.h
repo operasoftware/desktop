@@ -8,12 +8,8 @@
 #include "platform/heap/HeapPage.h"
 #include "wtf/Allocator.h"
 #include "wtf/Assertions.h"
-#include "wtf/allocator/PageAllocator.h"
-
-#if OS(POSIX)
-#include <sys/mman.h>
-#include <unistd.h>
-#endif
+#include "wtf/Compiler.h"
+#include "wtf/allocator/Partitions.h"
 
 namespace blink {
 
@@ -37,7 +33,7 @@ class MemoryRegion {
   }
 
   void release();
-  WARN_UNUSED_RETURN bool commit();
+  WARN_UNUSED_RESULT bool commit();
   void decommit();
 
   Address base() const { return m_base; }
@@ -121,7 +117,6 @@ class RegionTree {
   PageMemoryRegion* lookup(Address);
 
  private:
-  Mutex m_mutex;
   RegionTreeNode* m_root;
 };
 
@@ -171,8 +166,17 @@ class PageMemory {
     m_reserved->pageDeleted(writableStart());
   }
 
-  WARN_UNUSED_RETURN bool commit() {
+  WARN_UNUSED_RESULT bool commit() {
     m_reserved->markPageUsed(writableStart());
+    // Check that in-use page isn't also marked as being a non-heap page
+    // by the current heap's negative cache. That cache is invalidated
+    // when allocating new pages, but crbug.com/649485 suggests that
+    // we do get out of sync somehow.
+    //
+    // TODO(sof): consider removing check once bug has been diagnosed
+    // and addressed.
+    CHECK(!ThreadState::current()->isAddressInHeapDoesNotContainCache(
+        writableStart()));
     return m_writable.commit();
   }
 

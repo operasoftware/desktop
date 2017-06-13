@@ -157,10 +157,11 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
     // add in the border and padding.
     // Call computedCSSPadding* directly to avoid including implicitPadding.
     if (!document().inQuirksMode() &&
-        style()->boxSizing() != BoxSizingBorderBox)
+        style()->boxSizing() != EBoxSizing::kBorderBox) {
       styleLogicalHeight +=
           (computedCSSPaddingBefore() + computedCSSPaddingAfter()).floor() +
-          borderBefore() + borderAfter();
+          (borderBefore() + borderAfter()).floor();
+    }
     return styleLogicalHeight;
   }
 
@@ -176,14 +177,14 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
 
   void setCellLogicalWidth(int constrainedLogicalWidth, SubtreeLayoutScope&);
 
-  int borderLeft() const override;
-  int borderRight() const override;
-  int borderTop() const override;
-  int borderBottom() const override;
-  int borderStart() const override;
-  int borderEnd() const override;
-  int borderBefore() const override;
-  int borderAfter() const override;
+  LayoutUnit borderLeft() const override;
+  LayoutUnit borderRight() const override;
+  LayoutUnit borderTop() const override;
+  LayoutUnit borderBottom() const override;
+  LayoutUnit borderStart() const override;
+  LayoutUnit borderEnd() const override;
+  LayoutUnit borderBefore() const override;
+  LayoutUnit borderAfter() const override;
 
   void collectBorderValues(LayoutTable::CollapsedBorderValues&);
   static void sortBorderValues(LayoutTable::CollapsedBorderValues&);
@@ -195,9 +196,10 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
   int cellBaselinePosition() const;
   bool isBaselineAligned() const {
     EVerticalAlign va = style()->verticalAlign();
-    return va == VerticalAlignBaseline || va == VerticalAlignTextBottom ||
-           va == VerticalAlignTextTop || va == VerticalAlignSuper ||
-           va == VerticalAlignSub || va == VerticalAlignLength;
+    return va == EVerticalAlign::kBaseline ||
+           va == EVerticalAlign::kTextBottom ||
+           va == EVerticalAlign::kTextTop || va == EVerticalAlign::kSuper ||
+           va == EVerticalAlign::kSub || va == EVerticalAlign::kLength;
   }
 
   // Align the cell in the block direction. This is done by calculating an
@@ -227,7 +229,8 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
   void setOverrideLogicalContentHeightFromRowHeight(LayoutUnit);
 
   void scrollbarsChanged(bool horizontalScrollbarChanged,
-                         bool verticalScrollbarChanged) override;
+                         bool verticalScrollbarChanged,
+                         ScrollbarChangeContext = Layout) override;
 
   bool cellWidthChanged() const { return m_cellWidthChanged; }
   void setCellWidthChanged(bool b = true) { m_cellWidthChanged = b; }
@@ -277,7 +280,7 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
     return style()->borderEnd();
   }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   bool isFirstOrLastCellInRow() const {
     return !table()->cellAfter(this) || !table()->cellBefore(this);
   }
@@ -349,6 +352,8 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
 
   void ensureIsReadyForPaintInvalidation() override;
 
+  bool hasLineIfEmpty() const override;
+
  protected:
   void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
   void computePreferredLogicalWidths() override;
@@ -374,15 +379,15 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
   LayoutSize offsetFromContainer(const LayoutObject*) const override;
   LayoutRect localVisualRect() const override;
 
-  int borderHalfLeft(bool outer) const;
-  int borderHalfRight(bool outer) const;
-  int borderHalfTop(bool outer) const;
-  int borderHalfBottom(bool outer) const;
+  LayoutUnit borderHalfLeft(bool outer) const;
+  LayoutUnit borderHalfRight(bool outer) const;
+  LayoutUnit borderHalfTop(bool outer) const;
+  LayoutUnit borderHalfBottom(bool outer) const;
 
-  int borderHalfStart(bool outer) const;
-  int borderHalfEnd(bool outer) const;
-  int borderHalfBefore(bool outer) const;
-  int borderHalfAfter(bool outer) const;
+  LayoutUnit borderHalfStart(bool outer) const;
+  LayoutUnit borderHalfEnd(bool outer) const;
+  LayoutUnit borderHalfBefore(bool outer) const;
+  LayoutUnit borderHalfAfter(bool outer) const;
 
   void setIntrinsicPaddingBefore(int p) { m_intrinsicPaddingBefore = p; }
   void setIntrinsicPaddingAfter(int p) { m_intrinsicPaddingAfter = p; }

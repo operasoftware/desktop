@@ -54,6 +54,7 @@ static HashSet<AtomicString>& supportedTokens() {
         "manifest",
         "apple-touch-icon",
         "apple-touch-icon-precomposed",
+        "mask-icon",
     };
   }
 

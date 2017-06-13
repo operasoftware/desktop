@@ -46,16 +46,20 @@ class WebIconURL {
     TypeInvalid = 0,
     TypeFavicon = 1 << 0,
     TypeTouch = 1 << 1,
-    TypeTouchPrecomposed = 1 << 2
+    TypeTouchPrecomposed = 1 << 2,
+    TypePinned = 1 << 3
   };
 
-  WebIconURL() : m_iconType(TypeInvalid) {}
+  WebIconURL() : m_iconType(TypeInvalid), m_color(0) {}
 
-  WebIconURL(const WebURL& url, Type type) : m_iconType(type), m_iconURL(url) {}
+  WebIconURL(const WebURL& url, Type type)
+      : m_iconType(type), m_iconURL(url), m_color(0) {}
 
   Type iconType() const { return m_iconType; }
 
   const WebURL& iconURL() const { return m_iconURL; }
+
+  uint32_t color() const { return m_color; }
 
   const WebVector<WebSize>& sizes() const { return m_sizes; }
 
@@ -63,13 +67,15 @@ class WebIconURL {
   WebIconURL(const IconURL& iconURL)
       : m_iconType(static_cast<Type>(iconURL.m_iconType)),
         m_iconURL(iconURL.m_iconURL),
-        m_sizes(iconURL.m_sizes) {}
+        m_sizes(iconURL.m_sizes),
+        m_color(iconURL.m_color.rgb()) {}
 #endif
 
  private:
   Type m_iconType;
   WebURL m_iconURL;
   WebVector<WebSize> m_sizes;
+  uint32_t m_color;
 };
 }
 

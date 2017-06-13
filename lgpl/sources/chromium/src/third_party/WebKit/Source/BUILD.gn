@@ -25,6 +25,11 @@ declare_args() {
   # a class has an empty destructor which would be unnecessarily invoked
   # when finalized.
   blink_gc_plugin_option_warn_unneeded_finalizer = false
+
+  # Set to true to have the clang Blink GC plugin use Chromium-style naming
+  # rather than legacy Blink name.
+  # TODO(https://crbug.com/675879): Remove this option after the Blink rename.
+  blink_gc_plugin_option_use_chromium_style_naming = false
 }
 
 # features ---------------------------------------------------------------------
@@ -50,9 +55,8 @@ config("inside_blink") {
 import("//build/config/pch.gni")
 
 config("blink_pch") {
-  if (!is_official_build && !disable_precompiled_headers) {
-    # TODO(rchlodnicki): Using this config breaks clang-win. Figure out why.
-    if (is_win && !is_clang) {
+  if (enable_precompiled_headers) {
+    if (is_win) {
       # This is a string rather than a file GN knows about. It has to match
       # exactly what's in the /FI flag below, and what might appear in the
       # source code in quotes for an #include directive.
@@ -61,20 +65,11 @@ config("blink_pch") {
       # This is a file that GN will compile with the above header. It will be
       # implicitly added to the sources (potentially multiple times, with one
       # variant for each language used in the target).
-      precompiled_source = "//third_party/WebKit/Source/build/win/Precompile.cpp"
+      precompiled_source =
+          "//third_party/WebKit/Source/build/win/Precompile.cpp"
+
       # Force include the header.
       cflags = [ "/FI$precompiled_header" ]
-
-      # Disable warning for "this file was empty after preprocessing". This
-      # error is generated only in C mode for ANSI compatibility. It conflicts
-      # with precompiled headers since the source file that's "compiled" for
-      # making the precompiled header is empty.
-      #
-      # This error doesn't happen every time. In VS2013, it seems if the .pch
-      # file doesn't exist, no error will be generated (probably MS tested this
-      # case but forgot the other one?). To reproduce this error, do a build,
-      # then delete the precompile.c.obj file, then build again.
-      cflags_c = [ "/wd4206" ]
     }
   }
 }
@@ -149,6 +144,23 @@ config("config") {
         "warn-unneeded-finalizer",
       ]
     }
+    if (blink_gc_plugin_option_use_chromium_style_naming) {
+      cflags += [
+        "-Xclang",
+        "-plugin-arg-blink-gc-plugin",
+        "-Xclang",
+        "use-chromium-style-naming",
+      ]
+    }
+
+    # TODO(https://crbug.com/689864): remove once the GC plugin has been rolled
+    # with this warning default enabled.
+    cflags += [
+      "-Xclang",
+      "-plugin-arg-blink-gc-plugin",
+      "-Xclang",
+      "warn-stack-allocated-trace-method",
+    ]
   }
 }
 
@@ -165,7 +177,7 @@ config("non_test_config") {
 if (is_mac) {
   # This sets up precompiled headers for Mac.
   config("mac_precompiled_headers") {
-    if (!disable_precompiled_headers) {
+    if (enable_precompiled_headers) {
       precompiled_header = rebase_path("build/mac/Prefix.h", root_build_dir)
       precompiled_source = "//third_party/WebKit/Source/build/mac/Prefix.h"
     }

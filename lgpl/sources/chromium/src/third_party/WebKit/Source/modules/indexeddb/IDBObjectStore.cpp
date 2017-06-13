@@ -25,8 +25,9 @@
 
 #include "modules/indexeddb/IDBObjectStore.h"
 
+#include <memory>
+
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/SerializedScriptValueFactory.h"
 #include "bindings/modules/v8/ToV8ForModules.h"
@@ -39,14 +40,14 @@
 #include "modules/indexeddb/IDBDatabase.h"
 #include "modules/indexeddb/IDBKeyPath.h"
 #include "modules/indexeddb/IDBTracing.h"
+#include "platform/Histogram.h"
 #include "platform/SharedBuffer.h"
 #include "public/platform/WebBlobInfo.h"
 #include "public/platform/WebData.h"
 #include "public/platform/WebVector.h"
 #include "public/platform/modules/indexeddb/WebIDBKey.h"
 #include "public/platform/modules/indexeddb/WebIDBKeyRange.h"
-#include <memory>
-#include <v8.h>
+#include "v8/include/v8.h"
 
 using blink::WebBlobInfo;
 using blink::WebIDBCallbacks;
@@ -123,7 +124,7 @@ ScriptValue IDBObjectStore::keyPath(ScriptState* scriptState) const {
 
 DOMStringList* IDBObjectStore::indexNames() const {
   IDB_TRACE("IDBObjectStore::indexNames");
-  DOMStringList* indexNames = DOMStringList::create(DOMStringList::IndexedDB);
+  DOMStringList* indexNames = DOMStringList::create();
   for (const auto& it : metadata().indexes)
     indexNames->append(it.value->name);
   indexNames->sort();
@@ -322,18 +323,25 @@ static void generateIndexKeysForValue(v8::Isolate* isolate,
   if (!indexKey)
     return;
 
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(
+      EnumerationHistogram, keyTypeHistogram,
+      new EnumerationHistogram(
+          "WebCore.IndexedDB.ObjectStore.IndexEntry.KeyType",
+          static_cast<int>(IDBKey::TypeEnumMax)));
+
   if (!indexMetadata.multiEntry || indexKey->getType() != IDBKey::ArrayType) {
     if (!indexKey->isValid())
       return;
 
-    indexKeys->append(indexKey);
+    indexKeys->push_back(indexKey);
+    keyTypeHistogram.count(static_cast<int>(indexKey->getType()));
   } else {
     DCHECK(indexMetadata.multiEntry);
     DCHECK_EQ(indexKey->getType(), IDBKey::ArrayType);
-    indexKey = IDBKey::createMultiEntryArray(indexKey->array());
-
-    for (size_t i = 0; i < indexKey->array().size(); ++i)
-      indexKeys->append(indexKey->array()[i]);
+    IDBKey::KeyArray array = indexKey->toMultiEntryArray();
+    for (const IDBKey* key : array)
+      keyTypeHistogram.count(static_cast<int>(key->getType()));
+    indexKeys->appendVector(array);
   }
 }
 
@@ -451,9 +459,10 @@ IDBRequest* IDBObjectStore::put(ScriptState* scriptState,
     return nullptr;
   }
   if (usesInLineKeys) {
-    if (clone.isEmpty())
+    if (clone.isEmpty()) {
       clone =
           deserializeScriptValue(scriptState, serializedValue.get(), &blobInfo);
+    }
     IDBKey* keyPathKey = ScriptValue::to<IDBKey*>(scriptState->isolate(), clone,
                                                   exceptionState, keyPath);
     if (exceptionState.hadException())
@@ -494,16 +503,25 @@ IDBRequest* IDBObjectStore::put(ScriptState* scriptState,
     return nullptr;
   }
 
+  if (key && usesInLineKeys) {
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(
+        EnumerationHistogram, keyTypeHistogram,
+        new EnumerationHistogram("WebCore.IndexedDB.ObjectStore.Record.KeyType",
+                                 static_cast<int>(IDBKey::TypeEnumMax)));
+    keyTypeHistogram.count(static_cast<int>(key->getType()));
+  }
+
   Vector<int64_t> indexIds;
   HeapVector<IndexKeys> indexKeys;
   for (const auto& it : metadata().indexes) {
-    if (clone.isEmpty())
+    if (clone.isEmpty()) {
       clone =
           deserializeScriptValue(scriptState, serializedValue.get(), &blobInfo);
+    }
     IndexKeys keys;
     generateIndexKeysForValue(scriptState->isolate(), *it.value, clone, &keys);
-    indexIds.append(it.key);
-    indexKeys.append(keys);
+    indexIds.push_back(it.key);
+    indexKeys.push_back(keys);
   }
 
   IDBRequest* request =
@@ -665,7 +683,7 @@ class IndexPopulator final : public EventListener {
       cursor = cursorAny->idbCursorWithValue();
 
     Vector<int64_t> indexIds;
-    indexIds.append(indexMetadata().id);
+    indexIds.push_back(indexMetadata().id);
     if (cursor && !cursor->isDeleted()) {
       cursor->continueFunction(nullptr, nullptr, ASSERT_NO_EXCEPTION);
 
@@ -677,7 +695,7 @@ class IndexPopulator final : public EventListener {
                                 value, &indexKeys);
 
       HeapVector<IndexKeys> indexKeysList;
-      indexKeysList.append(indexKeys);
+      indexKeysList.push_back(indexKeys);
 
       m_database->backend()->setIndexKeys(m_transactionId, m_objectStoreId,
                                           primaryKey, indexIds, indexKeysList);
@@ -804,7 +822,7 @@ IDBIndex* IDBObjectStore::index(const String& name,
   }
 
   DCHECK(metadata().indexes.contains(indexId));
-  RefPtr<IDBIndexMetadata> indexMetadata = metadata().indexes.get(indexId);
+  RefPtr<IDBIndexMetadata> indexMetadata = metadata().indexes.at(indexId);
   DCHECK(indexMetadata.get());
   IDBIndex* index =
       IDBIndex::create(std::move(indexMetadata), this, m_transaction.get());
@@ -850,12 +868,12 @@ void IDBObjectStore::deleteIndex(const String& name,
 
   backendDB()->deleteIndex(m_transaction->id(), id(), indexId);
 
-  m_metadata->indexes.remove(indexId);
+  m_metadata->indexes.erase(indexId);
   IDBIndexMap::iterator it = m_indexMap.find(name);
   if (it != m_indexMap.end()) {
     m_transaction->indexDeleted(it->value);
     it->value->markDeleted();
-    m_indexMap.remove(name);
+    m_indexMap.erase(name);
   }
 }
 
@@ -1043,7 +1061,7 @@ void IDBObjectStore::revertMetadata(
     // unconditionally reset the deletion marker.
     DCHECK(oldMetadata->indexes.contains(indexId));
     RefPtr<IDBIndexMetadata> oldIndexMetadata =
-        oldMetadata->indexes.get(indexId);
+        oldMetadata->indexes.at(indexId);
     index->revertMetadata(std::move(oldIndexMetadata));
   }
   m_metadata = std::move(oldMetadata);
@@ -1062,7 +1080,7 @@ void IDBObjectStore::revertDeletedIndexMetadata(IDBIndex& deletedIndex) {
   const int64_t indexId = deletedIndex.id();
   DCHECK(m_metadata->indexes.contains(indexId))
       << "The object store's metadata was not correctly reverted";
-  RefPtr<IDBIndexMetadata> oldIndexMetadata = m_metadata->indexes.get(indexId);
+  RefPtr<IDBIndexMetadata> oldIndexMetadata = m_metadata->indexes.at(indexId);
   deletedIndex.revertMetadata(std::move(oldIndexMetadata));
 }
 

@@ -70,10 +70,6 @@ enum MediaControlElementType {
   MediaOverflowButton,
   MediaOverflowList,
   MediaDownloadButton,
-  MediaOverlayDetachButtonNormal,
-  MediaOverlayDetachButtonHovered,
-  MediaOverlayAttachButtonNormal,
-  MediaOverlayAttachButtonHovered,
 };
 
 CORE_EXPORT const HTMLMediaElement* toParentMediaElement(const Node*);
@@ -83,11 +79,13 @@ CORE_EXPORT MediaControlElementType mediaControlElementType(const Node*);
 
 // ----------------------------
 
+// TODO(mustaq): The Media control elements that use MouseEvents should be
+// ported to use PointerEvents instead.
 class MediaControlElement : public GarbageCollectedMixin {
  public:
   // These hold the state about whether this control should be shown if
   // space permits.  These will also show / hide as needed.
-  void setIsWanted(bool);
+  virtual void setIsWanted(bool);
   bool isWanted();
 
   // Tell us whether we fit or not.  This will hide / show the control as

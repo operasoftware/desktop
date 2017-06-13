@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 /**
- * @implements {SDK.TargetManager.Observer}
+ * @implements {SDK.SDKModelObserver<!SDK.ServiceWorkerManager>}
  * @unrestricted
  */
 Resources.ServiceWorkersView = class extends UI.VBox {
@@ -13,46 +13,47 @@ Resources.ServiceWorkersView = class extends UI.VBox {
     this._reportView.show(this.contentElement);
 
     this._toolbar = this._reportView.createToolbar();
+    this._toolbar.makeWrappable(false, true);
 
     /** @type {!Map<!SDK.ServiceWorkerRegistration, !Resources.ServiceWorkersView.Section>} */
     this._sections = new Map();
 
-    this._toolbar.appendToolbarItem(Components.NetworkConditionsSelector.createOfflineToolbarCheckbox());
-    var forceUpdate = new UI.ToolbarCheckbox(
-        Common.UIString('Update on reload'), Common.UIString('Force update Service Worker on page reload'),
-        Common.settings.createSetting('serviceWorkerUpdateOnReload', false));
+    this._toolbar.appendToolbarItem(NetworkConditions.NetworkConditionsSelector.createOfflineToolbarCheckbox());
+    var updateOnReloadSetting = Common.settings.createSetting('serviceWorkerUpdateOnReload', false);
+    updateOnReloadSetting.setTitle(Common.UIString('Update on reload'));
+    var forceUpdate = new UI.ToolbarSettingCheckbox(
+        updateOnReloadSetting, Common.UIString('Force update Service Worker on page reload'));
     this._toolbar.appendToolbarItem(forceUpdate);
-    var fallbackToNetwork = new UI.ToolbarCheckbox(
-        Common.UIString('Bypass for network'),
-        Common.UIString('Bypass Service Worker and load resources from the network'),
-        Common.settings.createSetting('bypassServiceWorker', false));
+    var bypassServiceWorkerSetting = Common.settings.createSetting('bypassServiceWorker', false);
+    bypassServiceWorkerSetting.setTitle(Common.UIString('Bypass for network'));
+    var fallbackToNetwork = new UI.ToolbarSettingCheckbox(
+        bypassServiceWorkerSetting, Common.UIString('Bypass Service Worker and load resources from the network'));
     this._toolbar.appendToolbarItem(fallbackToNetwork);
-    this._toolbar.appendSpacer();
     this._showAllCheckbox = new UI.ToolbarCheckbox(
         Common.UIString('Show all'), Common.UIString('Show all Service Workers regardless of the origin'));
+    this._showAllCheckbox.setRightAligned(true);
     this._showAllCheckbox.inputElement.addEventListener('change', this._updateSectionVisibility.bind(this), false);
     this._toolbar.appendToolbarItem(this._showAllCheckbox);
 
-    /** @type {!Map<!SDK.Target, !Array<!Common.EventTarget.EventDescriptor>>}*/
+    /** @type {!Map<!SDK.ServiceWorkerManager, !Array<!Common.EventTarget.EventDescriptor>>}*/
     this._eventListeners = new Map();
-    SDK.targetManager.observeTargets(this);
+    SDK.targetManager.observeModels(SDK.ServiceWorkerManager, this);
   }
 
   /**
    * @override
-   * @param {!SDK.Target} target
+   * @param {!SDK.ServiceWorkerManager} serviceWorkerManager
    */
-  targetAdded(target) {
-    if (this._manager || !target.serviceWorkerManager)
+  modelAdded(serviceWorkerManager) {
+    if (this._manager)
       return;
-    this._manager = target.serviceWorkerManager;
-    this._subTargetsManager = target.subTargetsManager;
-    this._securityOriginManager = SDK.SecurityOriginManager.fromTarget(target);
+    this._manager = serviceWorkerManager;
+    this._securityOriginManager = SDK.SecurityOriginManager.fromTarget(serviceWorkerManager.target());
 
     for (var registration of this._manager.registrations().values())
       this._updateRegistration(registration);
 
-    this._eventListeners.set(target, [
+    this._eventListeners.set(serviceWorkerManager, [
       this._manager.addEventListener(
           SDK.ServiceWorkerManager.Events.RegistrationUpdated, this._registrationUpdated, this),
       this._manager.addEventListener(
@@ -68,16 +69,15 @@ Resources.ServiceWorkersView = class extends UI.VBox {
 
   /**
    * @override
-   * @param {!SDK.Target} target
+   * @param {!SDK.ServiceWorkerManager} serviceWorkerManager
    */
-  targetRemoved(target) {
-    if (!this._manager || this._manager !== target.serviceWorkerManager)
+  modelRemoved(serviceWorkerManager) {
+    if (!this._manager || this._manager !== serviceWorkerManager)
       return;
 
-    Common.EventTarget.removeEventListeners(this._eventListeners.get(target));
-    this._eventListeners.delete(target);
+    Common.EventTarget.removeEventListeners(this._eventListeners.get(serviceWorkerManager));
+    this._eventListeners.delete(serviceWorkerManager);
     this._manager = null;
-    this._subTargetsManager = null;
     this._securityOriginManager = null;
   }
 
@@ -95,6 +95,30 @@ Resources.ServiceWorkersView = class extends UI.VBox {
   _registrationUpdated(event) {
     var registration = /** @type {!SDK.ServiceWorkerRegistration} */ (event.data);
     this._updateRegistration(registration);
+    this._gcRegistrations();
+  }
+
+  _gcRegistrations() {
+    var hasNonDeletedRegistrations = false;
+    var securityOrigins = new Set(this._securityOriginManager.securityOrigins());
+    for (var registration of this._manager.registrations().values()) {
+      var visible = this._showAllCheckbox.checked() || securityOrigins.has(registration.securityOrigin);
+      if (!visible)
+        continue;
+      if (!registration.canBeRemoved()) {
+        hasNonDeletedRegistrations = true;
+        break;
+      }
+    }
+
+    if (!hasNonDeletedRegistrations)
+      return;
+
+    for (var registration of this._manager.registrations().values()) {
+      var visible = this._showAllCheckbox.checked() || securityOrigins.has(registration.securityOrigin);
+      if (visible && registration.canBeRemoved())
+        this._removeRegistrationFromList(registration);
+    }
   }
 
   /**
@@ -115,8 +139,8 @@ Resources.ServiceWorkersView = class extends UI.VBox {
   _updateRegistration(registration) {
     var section = this._sections.get(registration);
     if (!section) {
-      section = new Resources.ServiceWorkersView.Section(
-          this._manager, this._subTargetsManager, this._reportView.appendSection(''), registration);
+      section =
+          new Resources.ServiceWorkersView.Section(this._manager, this._reportView.appendSection(''), registration);
       this._sections.set(registration, section);
     }
     this._updateSectionVisibility();
@@ -128,6 +152,13 @@ Resources.ServiceWorkersView = class extends UI.VBox {
    */
   _registrationDeleted(event) {
     var registration = /** @type {!SDK.ServiceWorkerRegistration} */ (event.data);
+    this._removeRegistrationFromList(registration);
+  }
+
+  /**
+   * @param {!SDK.ServiceWorkerRegistration} registration
+   */
+  _removeRegistrationFromList(registration) {
     var section = this._sections.get(registration);
     if (section)
       section._section.remove();
@@ -141,31 +172,29 @@ Resources.ServiceWorkersView = class extends UI.VBox {
 Resources.ServiceWorkersView.Section = class {
   /**
    * @param {!SDK.ServiceWorkerManager} manager
-   * @param {!SDK.SubTargetsManager} subTargetsManager
    * @param {!UI.ReportView.Section} section
    * @param {!SDK.ServiceWorkerRegistration} registration
    */
-  constructor(manager, subTargetsManager, section, registration) {
+  constructor(manager, section, registration) {
     this._manager = manager;
-    this._subTargetsManager = subTargetsManager;
     this._section = section;
     this._registration = registration;
 
     this._toolbar = section.createToolbar();
     this._toolbar.renderAsLinks();
     this._updateButton = new UI.ToolbarButton(Common.UIString('Update'), undefined, Common.UIString('Update'));
-    this._updateButton.addEventListener('click', this._updateButtonClicked.bind(this));
+    this._updateButton.addEventListener(UI.ToolbarButton.Events.Click, this._updateButtonClicked, this);
     this._toolbar.appendToolbarItem(this._updateButton);
     this._pushButton = new UI.ToolbarButton(Common.UIString('Emulate push event'), undefined, Common.UIString('Push'));
-    this._pushButton.addEventListener('click', this._pushButtonClicked.bind(this));
+    this._pushButton.addEventListener(UI.ToolbarButton.Events.Click, this._pushButtonClicked, this);
     this._toolbar.appendToolbarItem(this._pushButton);
     this._syncButton =
         new UI.ToolbarButton(Common.UIString('Emulate background sync event'), undefined, Common.UIString('Sync'));
-    this._syncButton.addEventListener('click', this._syncButtonClicked.bind(this));
+    this._syncButton.addEventListener(UI.ToolbarButton.Events.Click, this._syncButtonClicked, this);
     this._toolbar.appendToolbarItem(this._syncButton);
     this._deleteButton =
         new UI.ToolbarButton(Common.UIString('Unregister service worker'), undefined, Common.UIString('Unregister'));
-    this._deleteButton.addEventListener('click', this._unregisterButtonClicked.bind(this));
+    this._deleteButton.addEventListener(UI.ToolbarButton.Events.Click, this._unregisterButtonClicked, this);
     this._toolbar.appendToolbarItem(this._deleteButton);
 
     // Preserve the order.
@@ -177,7 +206,7 @@ Resources.ServiceWorkersView.Section = class {
     this._errorsList.classList.add('service-worker-error-stack', 'monospace', 'hidden');
 
     this._linkifier = new Components.Linkifier();
-    /** @type {!Map<string, !SDK.TargetInfo>} */
+    /** @type {!Map<string, !Protocol.Target.TargetInfo>} */
     this._clientInfoCache = new Map();
     for (var error of registration.errors)
       this._addError(error);
@@ -200,7 +229,7 @@ Resources.ServiceWorkersView.Section = class {
     var version = this._manager.findVersion(versionId);
     if (!version || !version.targetId)
       return null;
-    return this._subTargetsManager.targetForId(version.targetId);
+    return SDK.targetManager.targetById(version.targetId);
   }
 
   /**
@@ -232,7 +261,7 @@ Resources.ServiceWorkersView.Section = class {
       var scriptElement = this._section.appendField(Common.UIString('Source'));
       scriptElement.removeChildren();
       var fileName = Common.ParsedURL.extractName(active.scriptURL);
-      scriptElement.appendChild(Components.Linkifier.linkifyURLAsNode(active.scriptURL, fileName));
+      scriptElement.appendChild(Components.Linkifier.linkifyURL(active.scriptURL, fileName));
       scriptElement.createChild('div', 'report-field-value-subtitle').textContent =
           Common.UIString('Received %s', new Date(active.scriptResponseTime * 1000).toLocaleString());
 
@@ -254,9 +283,11 @@ Resources.ServiceWorkersView.Section = class {
       this._section.setFieldVisible(Common.UIString('Clients'), active.controlledClients.length);
       for (var client of active.controlledClients) {
         var clientLabelText = clientsList.createChild('div', 'service-worker-client');
-        if (this._clientInfoCache.has(client))
-          this._updateClientInfo(clientLabelText, /** @type {!SDK.TargetInfo} */ (this._clientInfoCache.get(client)));
-        this._subTargetsManager.getTargetInfo(client, this._onClientInfo.bind(this, clientLabelText));
+        if (this._clientInfoCache.has(client)) {
+          this._updateClientInfo(
+              clientLabelText, /** @type {!Protocol.Target.TargetInfo} */ (this._clientInfoCache.get(client)));
+        }
+        this._manager.target().targetAgent().getTargetInfo(client, this._onClientInfo.bind(this, clientLabelText));
       }
     }
 
@@ -282,7 +313,7 @@ Resources.ServiceWorkersView.Section = class {
 
     this._section.setFieldVisible(Common.UIString('Errors'), !!this._registration.errors.length);
     var errorsValue = this._wrapWidget(this._section.appendField(Common.UIString('Errors')));
-    var errorsLabel = createLabel(String(this._registration.errors.length), 'smallicon-error');
+    var errorsLabel = UI.createLabel(String(this._registration.errors.length), 'smallicon-error');
     errorsLabel.classList.add('service-worker-errors-label');
     errorsValue.appendChild(errorsLabel);
     this._moreButton = createLink(
@@ -315,23 +346,35 @@ Resources.ServiceWorkersView.Section = class {
     if (this._errorsList.childElementCount > 100)
       this._errorsList.firstElementChild.remove();
     message.appendChild(this._linkifier.linkifyScriptLocation(target, null, error.sourceURL, error.lineNumber));
-    message.appendChild(createLabel('#' + error.versionId + ': ' + error.errorMessage, 'smallicon-error'));
+    message.appendChild(UI.createLabel('#' + error.versionId + ': ' + error.errorMessage, 'smallicon-error'));
   }
 
-  _unregisterButtonClicked() {
+  /**
+   * @param {!Common.Event} event
+   */
+  _unregisterButtonClicked(event) {
     this._manager.deleteRegistration(this._registration.id);
   }
 
-  _updateButtonClicked() {
+  /**
+   * @param {!Common.Event} event
+   */
+  _updateButtonClicked(event) {
     this._manager.updateRegistration(this._registration.id);
   }
 
-  _pushButtonClicked() {
+  /**
+   * @param {!Common.Event} event
+   */
+  _pushButtonClicked(event) {
     var data = 'Test push message from DevTools.';
     this._manager.deliverPushMessage(this._registration.id, data);
   }
 
-  _syncButtonClicked() {
+  /**
+   * @param {!Common.Event} event
+   */
+  _syncButtonClicked(event) {
     var tag = 'test-tag-from-devtools';
     var lastChance = true;
     this._manager.dispatchSyncEvent(this._registration.id, tag, lastChance);
@@ -339,36 +382,37 @@ Resources.ServiceWorkersView.Section = class {
 
   /**
    * @param {!Element} element
-   * @param {?SDK.TargetInfo} targetInfo
+   * @param {?Protocol.Error} error
+   * @param {?Protocol.Target.TargetInfo} targetInfo
    */
-  _onClientInfo(element, targetInfo) {
-    if (!targetInfo)
+  _onClientInfo(element, error, targetInfo) {
+    if (error || !targetInfo)
       return;
-    this._clientInfoCache.set(targetInfo.id, targetInfo);
+    this._clientInfoCache.set(targetInfo.targetId, targetInfo);
     this._updateClientInfo(element, targetInfo);
   }
 
   /**
    * @param {!Element} element
-   * @param {!SDK.TargetInfo} targetInfo
+   * @param {!Protocol.Target.TargetInfo} targetInfo
    */
   _updateClientInfo(element, targetInfo) {
-    if (!targetInfo.canActivate) {
-      element.createTextChild(targetInfo.title);
+    if (targetInfo.type !== 'page' && targetInfo.type === 'iframe') {
+      element.createTextChild(Common.UIString('Worker: %s', targetInfo.url));
       return;
     }
     element.removeChildren();
     element.createTextChild(targetInfo.url);
     var focusLabel = element.createChild('label', 'link');
     focusLabel.createTextChild('focus');
-    focusLabel.addEventListener('click', this._activateTarget.bind(this, targetInfo.id), true);
+    focusLabel.addEventListener('click', this._activateTarget.bind(this, targetInfo.targetId), true);
   }
 
   /**
    * @param {string} targetId
    */
   _activateTarget(targetId) {
-    this._subTargetsManager.activateTarget(targetId);
+    this._manager.target().targetAgent().activateTarget(targetId);
   }
 
   _startButtonClicked() {
@@ -417,11 +461,5 @@ Resources.ServiceWorkersView.Section = class {
     var contentElement = createElement('div');
     shadowRoot.appendChild(contentElement);
     return contentElement;
-  }
-
-  _dispose() {
-    this._linkifier.dispose();
-    if (this._pendingUpdate)
-      clearTimeout(this._pendingUpdate);
   }
 };

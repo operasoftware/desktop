@@ -61,7 +61,7 @@ class InputDeviceCapabilities;
 class Locale;
 class MutableStylePropertySet;
 class NamedNodeMap;
-class NodeIntersectionObserverData;
+class ElementIntersectionObserverData;
 class PseudoElement;
 class ResizeObservation;
 class ResizeObserver;
@@ -88,9 +88,9 @@ enum ElementFlags {
   IsInTopLayer = 1 << 4,
   HasPendingResources = 1 << 5,
   AlreadySpellChecked = 1 << 6,
+  ContainsPersistentVideo = 1 << 7,
 
-  NumberOfElementFlags =
-      7,  // Required size of bitfield used to store the flags.
+  NumberOfElementFlags = 8,  // Size of bitfield used to store the flags.
 };
 
 enum class ShadowRootType;
@@ -356,16 +356,35 @@ class CORE_EXPORT Element : public ContainerNode {
   // For exposing to DOM only.
   NamedNodeMap* attributesForBindings() const;
 
-  enum AttributeModificationReason { ModifiedDirectly, ModifiedByCloning };
-
-  // This method is called whenever an attribute is added, changed or removed.
-  virtual void attributeChanged(const QualifiedName&,
+  enum class AttributeModificationReason { kDirectly, kByParser, kByCloning };
+  struct AttributeModificationParams {
+    STACK_ALLOCATED();
+    AttributeModificationParams(const QualifiedName& qname,
                                 const AtomicString& oldValue,
                                 const AtomicString& newValue,
-                                AttributeModificationReason = ModifiedDirectly);
-  virtual void parseAttribute(const QualifiedName&,
-                              const AtomicString& oldValue,
-                              const AtomicString& newValue);
+                                AttributeModificationReason reason)
+        : name(qname), oldValue(oldValue), newValue(newValue), reason(reason) {}
+
+    const QualifiedName& name;
+    const AtomicString& oldValue;
+    const AtomicString& newValue;
+    const AttributeModificationReason reason;
+  };
+
+  // |attributeChanged| is called whenever an attribute is added, changed or
+  // removed. It handles very common attributes such as id, class, name, style,
+  // and slot.
+  //
+  // While the owner document is parsed, this function is called after all
+  // attributes in a start tag were added to the element.
+  virtual void attributeChanged(const AttributeModificationParams&);
+
+  // |parseAttribute| is called by |attributeChanged|. If an element
+  // implementation needs to check an attribute update, override this function.
+  //
+  // While the owner document is parsed, this function is called after all
+  // attributes in a start tag were added to the element.
+  virtual void parseAttribute(const AttributeModificationParams&);
 
   virtual bool hasLegalLinkAttribute(const QualifiedName&) const;
   virtual const QualifiedName& subResourceAttributeName() const;
@@ -439,6 +458,17 @@ class CORE_EXPORT Element : public ContainerNode {
   // display none.
   const ComputedStyle* ensureComputedStyle(PseudoId = PseudoIdNone);
 
+  const ComputedStyle* nonLayoutObjectComputedStyle() const;
+
+  bool hasDisplayContentsStyle() const;
+
+  ComputedStyle* mutableNonLayoutObjectComputedStyle() const {
+    return const_cast<ComputedStyle*>(nonLayoutObjectComputedStyle());
+  }
+
+  bool shouldStoreNonLayoutObjectComputedStyle(const ComputedStyle&) const;
+  void storeNonLayoutObjectComputedStyle(PassRefPtr<ComputedStyle>);
+
   // Methods for indicating the style is affected by dynamic updates (e.g.,
   // children changing, our position changing in our sibling list, etc.)
   bool styleAffectedByEmpty() const {
@@ -474,6 +504,7 @@ class CORE_EXPORT Element : public ContainerNode {
       const Attribute&) const {
     return false;
   }
+  bool isScriptingAttribute(const Attribute&) const;
 
   virtual bool isLiveLink() const { return false; }
   KURL hrefURL() const;
@@ -579,9 +610,6 @@ class CORE_EXPORT Element : public ContainerNode {
   LayoutSize minimumSizeForResizing() const;
   void setMinimumSizeForResizing(const LayoutSize&);
 
-  virtual void didBecomeFullscreenElement() {}
-  virtual void willStopBeingFullscreenElement() {}
-
   // Called by the parser when this element's close tag is reached, signaling
   // that all child tags have been parsed and added.  This is needed for
   // <applet> and <object> elements, which can't lay themselves out until they
@@ -656,6 +684,11 @@ class CORE_EXPORT Element : public ContainerNode {
   void setContainsFullScreenElement(bool);
   void setContainsFullScreenElementOnAncestorsCrossingFrameBoundaries(bool);
 
+  bool containsPersistentVideo() const {
+    return hasElementFlag(ContainsPersistentVideo);
+  }
+  void setContainsPersistentVideo(bool);
+
   bool isInTopLayer() const { return hasElementFlag(IsInTopLayer); }
   void setIsInTopLayer(bool);
 
@@ -709,9 +742,7 @@ class CORE_EXPORT Element : public ContainerNode {
                                                  const QualifiedName& attr3);
   void logUpdateAttributeIfIsolatedWorldAndInDocument(
       const char element[],
-      const QualifiedName& attributeName,
-      const AtomicString& oldValue,
-      const AtomicString& newValue);
+      const AttributeModificationParams&);
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -719,8 +750,8 @@ class CORE_EXPORT Element : public ContainerNode {
 
   SpellcheckAttributeState spellcheckAttributeState() const;
 
-  NodeIntersectionObserverData* intersectionObserverData() const;
-  NodeIntersectionObserverData& ensureIntersectionObserverData();
+  ElementIntersectionObserverData* intersectionObserverData() const;
+  ElementIntersectionObserverData& ensureIntersectionObserverData();
 
   virtual void requestDetachedView(bool trustedRequest) {}
   virtual void releaseDetachedView() {}
@@ -760,7 +791,7 @@ class CORE_EXPORT Element : public ContainerNode {
   void childrenChanged(const ChildrenChange&) override;
 
   virtual void willRecalcStyle(StyleRecalcChange);
-  virtual void didRecalcStyle(StyleRecalcChange);
+  virtual void didRecalcStyle();
   virtual PassRefPtr<ComputedStyle> customStyleForLayoutObject();
 
   virtual bool shouldRegisterAsNamedItem() const { return false; }
@@ -898,7 +929,7 @@ class CORE_EXPORT Element : public ContainerNode {
 
   // cloneNode is private so that non-virtual cloneElementWithChildren and
   // cloneElementWithoutChildren are used instead.
-  Node* cloneNode(bool deep) override;
+  Node* cloneNode(bool deep, ExceptionState&) override;
   virtual Element* cloneElementWithoutAttributesAndChildren();
 
   QualifiedName m_tagName;

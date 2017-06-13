@@ -45,14 +45,14 @@ namespace blink {
 
 enum class WebCachePolicy;
 
-enum ResourceRequestBlockedReason {
-  ResourceRequestBlockedReasonCSP,
-  ResourceRequestBlockedReasonMixedContent,
-  ResourceRequestBlockedReasonOrigin,
-  ResourceRequestBlockedReasonInspector,
-  ResourceRequestBlockedReasonSubresourceFilter,
-  ResourceRequestBlockedReasonOther,
-  ResourceRequestBlockedReasonNone
+enum class ResourceRequestBlockedReason {
+  CSP,
+  MixedContent,
+  Origin,
+  Inspector,
+  SubresourceFilter,
+  Other,
+  None
 };
 
 enum InputToLoadPerfMetricReportPolicy {
@@ -90,7 +90,7 @@ class PLATFORM_EXPORT ResourceRequest final {
   const KURL& url() const;
   void setURL(const KURL& url);
 
-  void removeCredentials();
+  void removeUserAndPassFromURL();
 
   WebCachePolicy getCachePolicy() const;
   void setCachePolicy(WebCachePolicy);
@@ -217,13 +217,14 @@ class PLATFORM_EXPORT ResourceRequest final {
     m_useStreamOnResponse = useStreamOnResponse;
   }
 
-  // Indicates which types of ServiceWorkers should skip handling this request.
-  WebURLRequest::SkipServiceWorker skipServiceWorker() const {
-    return m_skipServiceWorker;
+  // The service worker mode indicating which service workers should get events
+  // for this request.
+  WebURLRequest::ServiceWorkerMode getServiceWorkerMode() const {
+    return m_serviceWorkerMode;
   }
-  void setSkipServiceWorker(
-      WebURLRequest::SkipServiceWorker skipServiceWorker) {
-    m_skipServiceWorker = skipServiceWorker;
+  void setServiceWorkerMode(
+      WebURLRequest::ServiceWorkerMode serviceWorkerMode) {
+    m_serviceWorkerMode = serviceWorkerMode;
   }
 
   // True if corresponding AppCache group should be resetted.
@@ -271,9 +272,9 @@ class PLATFORM_EXPORT ResourceRequest final {
     m_fetchRedirectMode = redirect;
   }
 
-  WebURLRequest::LoFiState loFiState() const { return m_loFiState; }
-  void setLoFiState(WebURLRequest::LoFiState loFiState) {
-    m_loFiState = loFiState;
+  WebURLRequest::PreviewsState previewsState() const { return m_previewsState; }
+  void setPreviewsState(WebURLRequest::PreviewsState previewsState) {
+    m_previewsState = previewsState;
   }
 
   bool cacheControlContainsNoCache() const;
@@ -310,9 +311,12 @@ class PLATFORM_EXPORT ResourceRequest final {
   void setNavigationStartTime(double);
   double navigationStartTime() const { return m_navigationStart; }
 
- private:
-  void initialize(const KURL&);
+  void setIsSameDocumentNavigation(bool isSameDocument) {
+    m_isSameDocumentNavigation = isSameDocument;
+  }
+  bool isSameDocumentNavigation() const { return m_isSameDocumentNavigation; }
 
+ private:
   const CacheControlHeader& cacheControlHeader() const;
 
   bool needsHTTPOrigin() const;
@@ -334,7 +338,7 @@ class PLATFORM_EXPORT ResourceRequest final {
   bool m_downloadToFile : 1;
   bool m_useStreamOnResponse : 1;
   bool m_shouldResetAppCache : 1;
-  WebURLRequest::SkipServiceWorker m_skipServiceWorker;
+  WebURLRequest::ServiceWorkerMode m_serviceWorkerMode;
   ResourceLoadPriority m_priority;
   int m_intraPriorityValue;
   int m_requestorID;
@@ -346,12 +350,13 @@ class PLATFORM_EXPORT ResourceRequest final {
   WebURLRequest::FetchRequestMode m_fetchRequestMode;
   WebURLRequest::FetchCredentialsMode m_fetchCredentialsMode;
   WebURLRequest::FetchRedirectMode m_fetchRedirectMode;
-  WebURLRequest::LoFiState m_loFiState;
+  WebURLRequest::PreviewsState m_previewsState;
   ReferrerPolicy m_referrerPolicy;
   bool m_didSetHTTPReferrer;
   bool m_checkForBrowserSideNavigation;
   double m_uiStartTime;
   bool m_isExternalRequest;
+  bool m_isSameDocumentNavigation;
   InputToLoadPerfMetricReportPolicy m_inputPerfMetricReportPolicy;
 
   mutable CacheControlHeader m_cacheControlHeaderCache;
@@ -384,7 +389,7 @@ struct CrossThreadResourceRequestData {
   bool m_reportUploadProgress;
   bool m_hasUserGesture;
   bool m_downloadToFile;
-  WebURLRequest::SkipServiceWorker m_skipServiceWorker;
+  WebURLRequest::ServiceWorkerMode m_serviceWorkerMode;
   bool m_useStreamOnResponse;
   bool m_shouldResetAppCache;
   ResourceLoadPriority m_priority;
@@ -397,7 +402,7 @@ struct CrossThreadResourceRequestData {
   WebURLRequest::FetchRequestMode m_fetchRequestMode;
   WebURLRequest::FetchCredentialsMode m_fetchCredentialsMode;
   WebURLRequest::FetchRedirectMode m_fetchRedirectMode;
-  WebURLRequest::LoFiState m_loFiState;
+  WebURLRequest::PreviewsState m_previewsState;
   ReferrerPolicy m_referrerPolicy;
   bool m_didSetHTTPReferrer;
   bool m_checkForBrowserSideNavigation;

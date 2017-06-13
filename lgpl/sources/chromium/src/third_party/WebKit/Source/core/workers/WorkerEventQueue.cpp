@@ -26,26 +26,28 @@
 
 #include "core/workers/WorkerEventQueue.h"
 
-#include "core/dom/ExecutionContext.h"
 #include "core/dom/ExecutionContextTask.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/events/Event.h"
 #include "core/inspector/InspectorInstrumentation.h"
+#include "core/workers/WorkerGlobalScope.h"
 
 namespace blink {
 
-WorkerEventQueue* WorkerEventQueue::create(ExecutionContext* context) {
-  return new WorkerEventQueue(context);
+WorkerEventQueue* WorkerEventQueue::create(
+    WorkerGlobalScope* workerGlobalScope) {
+  return new WorkerEventQueue(workerGlobalScope);
 }
 
-WorkerEventQueue::WorkerEventQueue(ExecutionContext* context)
-    : m_executionContext(context), m_isClosed(false) {}
+WorkerEventQueue::WorkerEventQueue(WorkerGlobalScope* workerGlobalScope)
+    : m_workerGlobalScope(workerGlobalScope), m_isClosed(false) {}
 
 WorkerEventQueue::~WorkerEventQueue() {
   DCHECK(m_pendingEvents.isEmpty());
 }
 
 DEFINE_TRACE(WorkerEventQueue) {
-  visitor->trace(m_executionContext);
+  visitor->trace(m_workerGlobalScope);
   visitor->trace(m_pendingEvents);
   EventQueue::trace(visitor);
 }
@@ -53,11 +55,11 @@ DEFINE_TRACE(WorkerEventQueue) {
 bool WorkerEventQueue::enqueueEvent(Event* event) {
   if (m_isClosed)
     return false;
-  InspectorInstrumentation::asyncTaskScheduled(
-      event->target()->getExecutionContext(), event->type(), event);
-  m_pendingEvents.add(event);
-  m_executionContext->postTask(
-      BLINK_FROM_HERE,
+  probe::asyncTaskScheduled(event->target()->getExecutionContext(),
+                            event->type(), event);
+  m_pendingEvents.insert(event);
+  m_workerGlobalScope->postTask(
+      TaskType::UnspecedTimer, BLINK_FROM_HERE,
       createSameThreadTask(&WorkerEventQueue::dispatchEvent,
                            wrapPersistent(this), wrapWeakPersistent(event)));
   return true;
@@ -66,16 +68,14 @@ bool WorkerEventQueue::enqueueEvent(Event* event) {
 bool WorkerEventQueue::cancelEvent(Event* event) {
   if (!removeEvent(event))
     return false;
-  InspectorInstrumentation::asyncTaskCanceled(
-      event->target()->getExecutionContext(), event);
+  probe::asyncTaskCanceled(event->target()->getExecutionContext(), event);
   return true;
 }
 
 void WorkerEventQueue::close() {
   m_isClosed = true;
   for (const auto& event : m_pendingEvents)
-    InspectorInstrumentation::asyncTaskCanceled(
-        event->target()->getExecutionContext(), event);
+    probe::asyncTaskCanceled(event->target()->getExecutionContext(), event);
   m_pendingEvents.clear();
 }
 
@@ -83,16 +83,15 @@ bool WorkerEventQueue::removeEvent(Event* event) {
   auto found = m_pendingEvents.find(event);
   if (found == m_pendingEvents.end())
     return false;
-  m_pendingEvents.remove(found);
+  m_pendingEvents.erase(found);
   return true;
 }
 
-void WorkerEventQueue::dispatchEvent(Event* event,
-                                     ExecutionContext* executionContext) {
+void WorkerEventQueue::dispatchEvent(Event* event) {
   if (!event || !removeEvent(event))
     return;
 
-  InspectorInstrumentation::AsyncTask asyncTask(executionContext, event);
+  probe::AsyncTask asyncTask(m_workerGlobalScope, event);
   event->target()->dispatchEvent(event);
 }
 

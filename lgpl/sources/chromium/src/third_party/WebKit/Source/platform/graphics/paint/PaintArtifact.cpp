@@ -7,7 +7,7 @@
 #include "platform/geometry/IntRect.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/paint/DrawingDisplayItem.h"
-#include "platform/tracing/TraceEvent.h"
+#include "platform/instrumentation/tracing/TraceEvent.h"
 #include "public/platform/WebDisplayItemList.h"
 #include "third_party/skia/include/core/SkRegion.h"
 
@@ -25,14 +25,14 @@ void computeChunkBoundsAndOpaqueness(const DisplayItemList& displayItems,
       if (!item.isDrawing())
         continue;
       const auto& drawing = static_cast<const DrawingDisplayItem&>(item);
-      if (const SkPicture* picture = drawing.picture()) {
+      if (const PaintRecord* record = drawing.GetPaintRecord()) {
         if (drawing.knownToBeOpaque()) {
           // TODO(pdr): It may be too conservative to round in to the
           // enclosedIntRect.
-          SkIRect conservativelyRoundedPictureRect;
-          const SkRect& pictureRect = picture->cullRect();
-          pictureRect.roundIn(&conservativelyRoundedPictureRect);
-          knownToBeOpaqueRegion.op(conservativelyRoundedPictureRect,
+          SkIRect conservativeRoundedRect;
+          const SkRect& cullRect = record->cullRect();
+          cullRect.roundIn(&conservativeRoundedRect);
+          knownToBeOpaqueRegion.op(conservativeRoundedRect,
                                    SkRegion::kUnion_Op);
         }
       }
@@ -87,6 +87,7 @@ void PaintArtifact::replay(GraphicsContext& graphicsContext) const {
     displayItem.replay(graphicsContext);
 }
 
+DISABLE_CFI_PERF
 void PaintArtifact::appendToWebDisplayItemList(WebDisplayItemList* list) const {
   TRACE_EVENT0("blink,benchmark", "PaintArtifact::appendToWebDisplayItemList");
   size_t visualRectIndex = 0;

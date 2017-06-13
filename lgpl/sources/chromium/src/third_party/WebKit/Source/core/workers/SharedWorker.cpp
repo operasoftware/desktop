@@ -36,10 +36,10 @@
 #include "core/dom/MessageChannel.h"
 #include "core/dom/MessagePort.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/frame/UseCounter.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/loader/FrameLoader.h"
-#include "core/loader/FrameLoaderClient.h"
 #include "core/workers/SharedWorkerRepositoryClient.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
@@ -48,7 +48,6 @@ namespace blink {
 
 inline SharedWorker::SharedWorker(ExecutionContext* context)
     : AbstractWorker(context),
-      ActiveScriptWrappable(this),
       m_isBeingConnected(false) {}
 
 SharedWorker* SharedWorker::create(ExecutionContext* context,
@@ -67,8 +66,6 @@ SharedWorker* SharedWorker::create(ExecutionContext* context,
   WebMessagePortChannelUniquePtr remotePort = channel->port2()->disentangle();
   DCHECK(remotePort);
 
-  worker->suspendIfNeeded();
-
   // We don't currently support nested workers, so workers can only be created
   // from documents.
   Document* document = toDocument(context);
@@ -84,13 +81,13 @@ SharedWorker* SharedWorker::create(ExecutionContext* context,
   if (scriptURL.isEmpty())
     return nullptr;
 
-  if (document->frame()->loader().client()->sharedWorkerRepositoryClient())
+  if (document->frame()->loader().client()->sharedWorkerRepositoryClient()) {
     document->frame()
         ->loader()
         .client()
         ->sharedWorkerRepositoryClient()
-        ->connect(worker, std::move(remotePort), scriptURL, name,
-                  exceptionState);
+        ->connect(worker, std::move(remotePort), scriptURL, name);
+  }
 
   return worker;
 }

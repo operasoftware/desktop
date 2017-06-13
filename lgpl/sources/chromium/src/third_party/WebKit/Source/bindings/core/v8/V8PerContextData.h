@@ -31,6 +31,8 @@
 #ifndef V8PerContextData_h
 #define V8PerContextData_h
 
+#include <memory>
+
 #include "bindings/core/v8/ScopedPersistent.h"
 #include "bindings/core/v8/V0CustomElementBinding.h"
 #include "bindings/core/v8/V8GlobalValueMap.h"
@@ -38,16 +40,16 @@
 #include "core/CoreExport.h"
 #include "gin/public/context_holder.h"
 #include "gin/public/gin_embedders.h"
+#include "v8/include/v8.h"
 #include "wtf/Allocator.h"
 #include "wtf/HashMap.h"
 #include "wtf/Vector.h"
 #include "wtf/text/AtomicString.h"
 #include "wtf/text/AtomicStringHash.h"
-#include <memory>
-#include <v8.h>
 
 namespace blink {
 
+class Modulator;
 class V8DOMActivityLogger;
 class V8PerContextData;
 
@@ -86,6 +88,15 @@ class CORE_EXPORT V8PerContextData final {
 
   v8::Local<v8::Object> prototypeForType(const WrapperTypeInfo*);
 
+  // Gets the constructor and prototype for a type, if they have already been
+  // created. Returns true if they exist, and sets the existing values in
+  // |prototypeObject| and |interfaceObject|. Otherwise, returns false, and the
+  // values are set to empty objects (non-null).
+  bool getExistingConstructorAndPrototypeForType(
+      const WrapperTypeInfo*,
+      v8::Local<v8::Object>* prototypeObject,
+      v8::Local<v8::Function>* interfaceObject);
+
   void addCustomElementBinding(std::unique_ptr<V0CustomElementBinding>);
 
   V8DOMActivityLogger* activityLogger() const { return m_activityLogger; }
@@ -93,8 +104,9 @@ class CORE_EXPORT V8PerContextData final {
     m_activityLogger = activityLogger;
   }
 
-  v8::Local<v8::Value> compiledPrivateScript(String);
-  void setCompiledPrivateScript(String, v8::Local<v8::Value>);
+  Modulator* modulator() const { return m_modulator.get(); }
+  void setModulator(Modulator*);
+  void clearModulator();
 
  private:
   V8PerContextData(v8::Local<v8::Context>);
@@ -126,7 +138,7 @@ class CORE_EXPORT V8PerContextData final {
   // This is owned by a static hash map in V8DOMActivityLogger.
   V8DOMActivityLogger* m_activityLogger;
 
-  V8GlobalValueMap<String, v8::Value, v8::kNotWeak> m_compiledPrivateScript;
+  Persistent<Modulator> m_modulator;
 };
 
 }  // namespace blink

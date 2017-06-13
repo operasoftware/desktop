@@ -116,6 +116,7 @@ bool supportsInvalidation(CSSSelector::PseudoType type) {
     case CSSSelector::PseudoBackdrop:
     case CSSSelector::PseudoLang:
     case CSSSelector::PseudoNot:
+    case CSSSelector::PseudoPlaceholder:
     case CSSSelector::PseudoResizer:
     case CSSSelector::PseudoRoot:
     case CSSSelector::PseudoScope:
@@ -155,6 +156,8 @@ bool supportsInvalidation(CSSSelector::PseudoType type) {
     case CSSSelector::PseudoListBox:
     case CSSSelector::PseudoHostHasAppearance:
     case CSSSelector::PseudoSlotted:
+    case CSSSelector::PseudoVideoPersistent:
+    case CSSSelector::PseudoVideoPersistentAncestor:
       return true;
     case CSSSelector::PseudoUnknown:
     case CSSSelector::PseudoLeftPage:
@@ -228,7 +231,7 @@ InvalidationSet& ensureInvalidationSet(
     const AtomicString& key,
     InvalidationType type) {
   RefPtr<InvalidationSet>& invalidationSet =
-      map.add(key, nullptr).storedValue->value;
+      map.insert(key, nullptr).storedValue->value;
   return storedInvalidationSet(invalidationSet, type);
 }
 
@@ -240,7 +243,7 @@ InvalidationSet& ensureInvalidationSet(
     CSSSelector::PseudoType key,
     InvalidationType type) {
   RefPtr<InvalidationSet>& invalidationSet =
-      map.add(key, nullptr).storedValue->value;
+      map.insert(key, nullptr).storedValue->value;
   return storedInvalidationSet(invalidationSet, type);
 }
 
@@ -362,19 +365,19 @@ void RuleFeatureSet::extractInvalidationSetFeaturesFromSimpleSelector(
     InvalidationSetFeatures& features) {
   if (selector.match() == CSSSelector::Tag &&
       selector.tagQName().localName() != starAtom) {
-    features.tagNames.append(selector.tagQName().localName());
+    features.tagNames.push_back(selector.tagQName().localName());
     return;
   }
   if (selector.match() == CSSSelector::Id) {
-    features.ids.append(selector.value());
+    features.ids.push_back(selector.value());
     return;
   }
   if (selector.match() == CSSSelector::Class) {
-    features.classes.append(selector.value());
+    features.classes.push_back(selector.value());
     return;
   }
   if (selector.isAttributeSelector()) {
-    features.attributes.append(selector.attribute().localName());
+    features.attributes.push_back(selector.attribute().localName());
     return;
   }
   switch (selector.getPseudoType()) {
@@ -438,6 +441,8 @@ InvalidationSet* RuleFeatureSet::invalidationSetForSimpleSelector(
       case CSSSelector::PseudoOutOfRange:
       case CSSSelector::PseudoUnresolved:
       case CSSSelector::PseudoDefined:
+      case CSSSelector::PseudoVideoPersistent:
+      case CSSSelector::PseudoVideoPersistentAncestor:
         return &ensurePseudoInvalidationSet(selector.getPseudoType(), type);
       case CSSSelector::PseudoFirstOfType:
       case CSSSelector::PseudoLastOfType:
@@ -483,8 +488,7 @@ void RuleFeatureSet::updateInvalidationSets(const RuleData& ruleData) {
   const CSSSelector* nextCompound =
       lastInCompound ? lastInCompound->tagHistory() : &ruleData.selector();
   if (!nextCompound) {
-    if (!features.hasFeaturesForRuleSetInvalidation)
-      m_metadata.needsFullRecalcForRuleSetInvalidation = true;
+    updateRuleSetInvalidation(features);
     return;
   }
   if (lastInCompound)
@@ -492,9 +496,28 @@ void RuleFeatureSet::updateInvalidationSets(const RuleData& ruleData) {
                                  siblingFeatures, features);
 
   addFeaturesToInvalidationSets(*nextCompound, siblingFeatures, features);
+  updateRuleSetInvalidation(features);
+}
 
-  if (!features.hasFeaturesForRuleSetInvalidation)
+void RuleFeatureSet::updateRuleSetInvalidation(
+    const InvalidationSetFeatures& features) {
+  if (features.hasFeaturesForRuleSetInvalidation)
+    return;
+  if (features.forceSubtree ||
+      (!features.customPseudoElement && features.tagNames.isEmpty())) {
     m_metadata.needsFullRecalcForRuleSetInvalidation = true;
+    return;
+  }
+
+  ensureTypeRuleInvalidationSet();
+
+  if (features.customPseudoElement) {
+    m_typeRuleInvalidationSet->setCustomPseudoInvalid();
+    m_typeRuleInvalidationSet->setTreeBoundaryCrossing();
+  }
+
+  for (auto tagName : features.tagNames)
+    m_typeRuleInvalidationSet->addTagName(tagName);
 }
 
 void RuleFeatureSet::updateInvalidationSetsForContentAttribute(
@@ -624,7 +647,7 @@ const CSSSelector* RuleFeatureSet::extractInvalidationSetFeaturesFromCompound(
     if (!simpleSelector->tagHistory() ||
         simpleSelector->relation() != CSSSelector::SubSelector) {
       features.hasFeaturesForRuleSetInvalidation =
-          features.hasTagIdClassOrAttribute();
+          features.hasIdClassOrAttribute();
       return simpleSelector;
     }
   }
@@ -792,11 +815,12 @@ RuleFeatureSet::SelectorPreMatch RuleFeatureSet::collectFeaturesFromRuleData(
   m_metadata.add(metadata);
 
   if (metadata.foundSiblingSelector) {
-    m_siblingRules.append(RuleFeature(ruleData.rule(), ruleData.selectorIndex(),
-                                      ruleData.hasDocumentSecurityOrigin()));
+    m_siblingRules.push_back(RuleFeature(ruleData.rule(),
+                                         ruleData.selectorIndex(),
+                                         ruleData.hasDocumentSecurityOrigin()));
   }
   if (ruleData.containsUncommonAttributeSelector()) {
-    m_uncommonAttributeRules.append(
+    m_uncommonAttributeRules.push_back(
         RuleFeature(ruleData.rule(), ruleData.selectorIndex(),
                     ruleData.hasDocumentSecurityOrigin()));
   }
@@ -928,6 +952,10 @@ void RuleFeatureSet::add(const RuleFeatureSet& other) {
 
   m_siblingRules.appendVector(other.m_siblingRules);
   m_uncommonAttributeRules.appendVector(other.m_uncommonAttributeRules);
+  m_viewportDependentMediaQueryResults.appendVector(
+      other.m_viewportDependentMediaQueryResults);
+  m_deviceDependentMediaQueryResults.appendVector(
+      other.m_deviceDependentMediaQueryResults);
 }
 
 void RuleFeatureSet::clear() {
@@ -941,6 +969,8 @@ void RuleFeatureSet::clear() {
   m_pseudoInvalidationSets.clear();
   m_universalSiblingInvalidationSet.clear();
   m_nthInvalidationSet.clear();
+  m_viewportDependentMediaQueryResults.clear();
+  m_deviceDependentMediaQueryResults.clear();
 }
 
 void RuleFeatureSet::collectInvalidationSetsForClass(
@@ -959,13 +989,13 @@ void RuleFeatureSet::collectInvalidationSetsForClass(
   if (descendants) {
     TRACE_SCHEDULE_STYLE_INVALIDATION(element, *descendants, classChange,
                                       className);
-    invalidationLists.descendants.append(descendants);
+    invalidationLists.descendants.push_back(descendants);
   }
 
   if (siblings) {
     TRACE_SCHEDULE_STYLE_INVALIDATION(element, *siblings, classChange,
                                       className);
-    invalidationLists.siblings.append(siblings);
+    invalidationLists.siblings.push_back(siblings);
   }
 }
 
@@ -990,7 +1020,7 @@ void RuleFeatureSet::collectSiblingInvalidationSetForClass(
 
   TRACE_SCHEDULE_STYLE_INVALIDATION(element, *siblingSet, classChange,
                                     className);
-  invalidationLists.siblings.append(siblingSet);
+  invalidationLists.siblings.push_back(siblingSet);
 }
 
 void RuleFeatureSet::collectInvalidationSetsForId(
@@ -1007,12 +1037,12 @@ void RuleFeatureSet::collectInvalidationSetsForId(
 
   if (descendants) {
     TRACE_SCHEDULE_STYLE_INVALIDATION(element, *descendants, idChange, id);
-    invalidationLists.descendants.append(descendants);
+    invalidationLists.descendants.push_back(descendants);
   }
 
   if (siblings) {
     TRACE_SCHEDULE_STYLE_INVALIDATION(element, *siblings, idChange, id);
-    invalidationLists.siblings.append(siblings);
+    invalidationLists.siblings.push_back(siblings);
   }
 }
 
@@ -1035,7 +1065,7 @@ void RuleFeatureSet::collectSiblingInvalidationSetForId(
     return;
 
   TRACE_SCHEDULE_STYLE_INVALIDATION(element, *siblingSet, idChange, id);
-  invalidationLists.siblings.append(siblingSet);
+  invalidationLists.siblings.push_back(siblingSet);
 }
 
 void RuleFeatureSet::collectInvalidationSetsForAttribute(
@@ -1054,13 +1084,13 @@ void RuleFeatureSet::collectInvalidationSetsForAttribute(
   if (descendants) {
     TRACE_SCHEDULE_STYLE_INVALIDATION(element, *descendants, attributeChange,
                                       attributeName);
-    invalidationLists.descendants.append(descendants);
+    invalidationLists.descendants.push_back(descendants);
   }
 
   if (siblings) {
     TRACE_SCHEDULE_STYLE_INVALIDATION(element, *siblings, attributeChange,
                                       attributeName);
-    invalidationLists.siblings.append(siblings);
+    invalidationLists.siblings.push_back(siblings);
   }
 }
 
@@ -1085,7 +1115,7 @@ void RuleFeatureSet::collectSiblingInvalidationSetForAttribute(
 
   TRACE_SCHEDULE_STYLE_INVALIDATION(element, *siblingSet, attributeChange,
                                     attributeName);
-  invalidationLists.siblings.append(siblingSet);
+  invalidationLists.siblings.push_back(siblingSet);
 }
 
 void RuleFeatureSet::collectInvalidationSetsForPseudoClass(
@@ -1104,12 +1134,12 @@ void RuleFeatureSet::collectInvalidationSetsForPseudoClass(
   if (descendants) {
     TRACE_SCHEDULE_STYLE_INVALIDATION(element, *descendants, pseudoChange,
                                       pseudo);
-    invalidationLists.descendants.append(descendants);
+    invalidationLists.descendants.push_back(descendants);
   }
 
   if (siblings) {
     TRACE_SCHEDULE_STYLE_INVALIDATION(element, *siblings, pseudoChange, pseudo);
-    invalidationLists.siblings.append(siblings);
+    invalidationLists.siblings.push_back(siblings);
   }
 }
 
@@ -1119,7 +1149,7 @@ void RuleFeatureSet::collectUniversalSiblingInvalidationSet(
   if (m_universalSiblingInvalidationSet &&
       m_universalSiblingInvalidationSet->maxDirectAdjacentSelectors() >=
           minDirectAdjacent)
-    invalidationLists.siblings.append(m_universalSiblingInvalidationSet);
+    invalidationLists.siblings.push_back(m_universalSiblingInvalidationSet);
 }
 
 SiblingInvalidationSet&
@@ -1132,13 +1162,29 @@ RuleFeatureSet::ensureUniversalSiblingInvalidationSet() {
 void RuleFeatureSet::collectNthInvalidationSet(
     InvalidationLists& invalidationLists) const {
   if (m_nthInvalidationSet)
-    invalidationLists.descendants.append(m_nthInvalidationSet);
+    invalidationLists.descendants.push_back(m_nthInvalidationSet);
 }
 
 DescendantInvalidationSet& RuleFeatureSet::ensureNthInvalidationSet() {
   if (!m_nthInvalidationSet)
     m_nthInvalidationSet = DescendantInvalidationSet::create();
   return *m_nthInvalidationSet;
+}
+
+void RuleFeatureSet::collectTypeRuleInvalidationSet(
+    InvalidationLists& invalidationLists,
+    ContainerNode& rootNode) const {
+  if (m_typeRuleInvalidationSet) {
+    invalidationLists.descendants.push_back(m_typeRuleInvalidationSet);
+    TRACE_SCHEDULE_STYLE_INVALIDATION(rootNode, *m_typeRuleInvalidationSet,
+                                      ruleSetInvalidation);
+  }
+}
+
+DescendantInvalidationSet& RuleFeatureSet::ensureTypeRuleInvalidationSet() {
+  if (!m_typeRuleInvalidationSet)
+    m_typeRuleInvalidationSet = DescendantInvalidationSet::create();
+  return *m_typeRuleInvalidationSet;
 }
 
 void RuleFeatureSet::addFeaturesToUniversalSiblingInvalidationSet(
@@ -1185,9 +1231,8 @@ bool RuleFeatureSet::InvalidationSetFeatures::hasFeatures() const {
          !tagNames.isEmpty() || customPseudoElement;
 }
 
-bool RuleFeatureSet::InvalidationSetFeatures::hasTagIdClassOrAttribute() const {
-  return !classes.isEmpty() || !attributes.isEmpty() || !ids.isEmpty() ||
-         !tagNames.isEmpty();
+bool RuleFeatureSet::InvalidationSetFeatures::hasIdClassOrAttribute() const {
+  return !classes.isEmpty() || !attributes.isEmpty() || !ids.isEmpty();
 }
 
 }  // namespace blink

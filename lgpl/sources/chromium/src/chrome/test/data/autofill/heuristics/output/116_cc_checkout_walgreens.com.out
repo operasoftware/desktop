@@ -12,5 +12,5 @@ NAME_LAST | addlastName |  |  | paymentMethodType_1-default
 ADDRESS_HOME_LINE1 | addstreet1 |  |  | paymentMethodType_1-default
 ADDRESS_HOME_CITY | addcity |  |  | paymentMethodType_1-default
 ADDRESS_HOME_STATE | addstate |  |  | paymentMethodType_1-default
-ADDRESS_HOME_ZIP | addzipcode |  |  | paymentMethodType_1-default
-UNKNOWN_TYPE | addzipcodeExt | Optional |  | paymentMethodType_1-default
+ADDRESS_HOME_ZIP_PART1 | addzipcode |  |  | paymentMethodType_1-default
+ADDRESS_HOME_ZIP_PART2 | addzipcodeExt | Optional |  | paymentMethodType_1-default

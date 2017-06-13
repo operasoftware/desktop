@@ -68,15 +68,14 @@ class IntSize;
 class LayoutView;
 class LayoutViewItem;
 class LocalDOMWindow;
+class LocalFrameClient;
 class NavigationScheduler;
 class Node;
 class NodeTraversal;
-class Performance;
 class PerformanceMonitor;
 template <typename Strategy>
 class PositionWithAffinityTemplate;
 class PluginData;
-class Range;
 class ScriptController;
 class SpellChecker;
 class WebFrameScheduler;
@@ -90,7 +89,7 @@ class CORE_EXPORT LocalFrame final : public Frame,
   friend class LocalFrameTest;
 
  public:
-  static LocalFrame* create(FrameLoaderClient*,
+  static LocalFrame* create(LocalFrameClient*,
                             FrameHost*,
                             FrameOwner*,
                             InterfaceProvider* = nullptr,
@@ -109,7 +108,6 @@ class CORE_EXPORT LocalFrame final : public Frame,
   // Frame overrides:
   ~LocalFrame() override;
   DECLARE_VIRTUAL_TRACE();
-  DOMWindow* domWindow() const override;
   WindowProxy* windowProxy(DOMWrapperWorld&) override;
   void navigate(Document& originDocument,
                 const KURL&,
@@ -124,12 +122,11 @@ class CORE_EXPORT LocalFrame final : public Frame,
   void printNavigationWarning(const String&) override;
   bool prepareForCommit() override;
   void didChangeVisibilityState() override;
-  void setDocumentHasReceivedUserGesture() override;
 
   void detachChildren();
   void documentAttached();
 
-  LocalDOMWindow* localDOMWindow() const;
+  LocalDOMWindow* domWindow() const;
   void setDOMWindow(LocalDOMWindow*);
   FrameView* view() const;
   Document* document() const;
@@ -209,7 +206,6 @@ class CORE_EXPORT LocalFrame final : public Frame,
   EphemeralRangeTemplate<EditingAlgorithm<NodeTraversal>> rangeForPoint(
       const IntPoint& framePoint);
 
-  bool isURLAllowed(const KURL&) const;
   bool shouldReuseDefaultView(const KURL&) const;
   void removeSpellingMarkersUnderWords(const Vector<String>& words);
 
@@ -228,7 +224,7 @@ class CORE_EXPORT LocalFrame final : public Frame,
   InterfaceProvider* interfaceProvider() { return m_interfaceProvider; }
   InterfaceRegistry* interfaceRegistry() { return m_interfaceRegistry; }
 
-  FrameLoaderClient* client() const;
+  LocalFrameClient* client() const;
 
   PluginData* pluginData() const;
 
@@ -237,14 +233,14 @@ class CORE_EXPORT LocalFrame final : public Frame,
  private:
   friend class FrameNavigationDisabler;
 
-  LocalFrame(FrameLoaderClient*,
+  LocalFrame(LocalFrameClient*,
              FrameHost*,
              FrameOwner*,
              InterfaceProvider*,
              InterfaceRegistry*);
 
   // Internal Frame helper overrides:
-  WindowProxyManager* getWindowProxyManager() const override;
+  WindowProxyManagerBase* getWindowProxyManager() const override;
   // Intentionally private to prevent redundant checks when the type is
   // already LocalFrame.
   bool isLocalFrame() const override { return true; }
@@ -258,8 +254,9 @@ class CORE_EXPORT LocalFrame final : public Frame,
   mutable FrameLoader m_loader;
   Member<NavigationScheduler> m_navigationScheduler;
 
+  // Cleared by LocalFrame::detach(), so as to keep the observable lifespan
+  // of LocalFrame::view().
   Member<FrameView> m_view;
-  Member<LocalDOMWindow> m_domWindow;
   // Usually 0. Non-null if this is the top frame of PagePopup.
   Member<Element> m_pagePopupOwner;
 
@@ -289,10 +286,6 @@ class CORE_EXPORT LocalFrame final : public Frame,
 
 inline void LocalFrame::init() {
   m_loader.init();
-}
-
-inline LocalDOMWindow* LocalFrame::localDOMWindow() const {
-  return m_domWindow.get();
 }
 
 inline FrameLoader& LocalFrame::loader() const {

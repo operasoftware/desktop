@@ -22,11 +22,12 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 /**
  * @implements {Common.ContentProvider}
  * @unrestricted
  */
-SDK.Script = class extends SDK.SDKObject {
+SDK.Script = class {
   /**
    * @param {!SDK.DebuggerModel} debuggerModel
    * @param {string} scriptId
@@ -56,7 +57,6 @@ SDK.Script = class extends SDK.SDKObject {
       isLiveEdit,
       sourceMapURL,
       hasSourceURL) {
-    super(debuggerModel.target());
     this.debuggerModel = debuggerModel;
     this.scriptId = scriptId;
     this.sourceURL = sourceURL;
@@ -64,12 +64,15 @@ SDK.Script = class extends SDK.SDKObject {
     this.columnOffset = startColumn;
     this.endLine = endLine;
     this.endColumn = endColumn;
+
     this._executionContextId = executionContextId;
     this.hash = hash;
     this._isContentScript = isContentScript;
     this._isLiveEdit = isLiveEdit;
     this.sourceMapURL = sourceMapURL;
     this.hasSourceURL = hasSourceURL;
+    this._originalContentProvider = null;
+    this._originalSource = null;
   }
 
   /**
@@ -97,7 +100,7 @@ SDK.Script = class extends SDK.SDKObject {
    * @param {string} source
    */
   static _reportDeprecatedCommentIfNeeded(script, source) {
-    var consoleModel = script.target().consoleModel;
+    var consoleModel = script.debuggerModel.target().consoleModel;
     if (!consoleModel)
       return;
     var linesToCheck = 5;
@@ -115,8 +118,9 @@ SDK.Script = class extends SDK.SDKObject {
     var text = Common.UIString(
         '\'//@ sourceURL\' and \'//@ sourceMappingURL\' are deprecated, please use \'//# sourceURL=\' and \'//# sourceMappingURL=\' instead.');
     var msg = new SDK.ConsoleMessage(
-        script.target(), SDK.ConsoleMessage.MessageSource.JS, SDK.ConsoleMessage.MessageLevel.Warning, text, undefined,
-        undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, script.scriptId);
+        script.debuggerModel.target(), SDK.ConsoleMessage.MessageSource.JS, SDK.ConsoleMessage.MessageLevel.Warning,
+        text, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+        script.scriptId);
     consoleModel.addMessage(msg);
   }
 
@@ -131,7 +135,7 @@ SDK.Script = class extends SDK.SDKObject {
    * @return {?SDK.ExecutionContext}
    */
   executionContext() {
-    return this.target().runtimeModel.executionContext(this._executionContextId);
+    return this.debuggerModel.target().runtimeModel.executionContext(this._executionContextId);
   }
 
   /**
@@ -169,7 +173,7 @@ SDK.Script = class extends SDK.SDKObject {
 
     var callback;
     var promise = new Promise(fulfill => callback = fulfill);
-    this.target().debuggerAgent().getScriptSource(this.scriptId, didGetScriptSource.bind(this));
+    this.debuggerModel.target().debuggerAgent().getScriptSource(this.scriptId, didGetScriptSource.bind(this));
     return promise;
 
     /**
@@ -184,8 +188,22 @@ SDK.Script = class extends SDK.SDKObject {
       } else {
         this._source = '';
       }
+      if (this._originalSource === null)
+        this._originalSource = this._source;
       callback(this._source);
     }
+  }
+
+  /**
+   * @return {!Common.ContentProvider}
+   */
+  originalContentProvider() {
+    if (!this._originalContentProvider) {
+      var lazyContent = () => this.requestContent().then(() => this._originalSource);
+      this._originalContentProvider =
+          new Common.StaticContentProvider(this.contentURL(), this.contentType(), lazyContent);
+    }
+    return this._originalContentProvider;
   }
 
   /**
@@ -217,7 +235,8 @@ SDK.Script = class extends SDK.SDKObject {
 
     if (this.scriptId) {
       // Script failed to parse.
-      this.target().debuggerAgent().searchInContent(this.scriptId, query, caseSensitive, isRegex, innerCallback);
+      this.debuggerModel.target().debuggerAgent().searchInContent(
+          this.scriptId, query, caseSensitive, isRegex, innerCallback);
     } else {
       callback([]);
     }
@@ -258,8 +277,9 @@ SDK.Script = class extends SDK.SDKObject {
     newSource = this._appendSourceURLCommentIfNeeded(newSource);
 
     if (this.scriptId) {
-      this.target().debuggerAgent().setScriptSource(
-          this.scriptId, newSource, undefined, didEditScriptSource.bind(this));
+      this.requestContent().then(
+          () => this.debuggerModel.target().debuggerAgent().setScriptSource(
+              this.scriptId, newSource, undefined, didEditScriptSource.bind(this)));
     } else {
       callback('Script failed to parse');
     }
@@ -289,7 +309,7 @@ SDK.Script = class extends SDK.SDKObject {
     if (this.sourceMapURL)
       return;
     this.sourceMapURL = sourceMapURL;
-    this.dispatchEventToListeners(SDK.Script.Events.SourceMapURLAdded, this.sourceMapURL);
+    this.debuggerModel.dispatchEventToListeners(SDK.DebuggerModel.Events.SourceMapURLAdded, this);
   }
 
   /**
@@ -319,7 +339,7 @@ SDK.Script = class extends SDK.SDKObject {
      * @this {SDK.Script}
      */
     function setBlackboxedRanges(fulfill, reject) {
-      this.target().debuggerAgent().setBlackboxedRanges(this.scriptId, positions, callback);
+      this.debuggerModel.target().debuggerAgent().setBlackboxedRanges(this.scriptId, positions, callback);
       /**
        * @param {?Protocol.Error} error
        */
@@ -330,12 +350,6 @@ SDK.Script = class extends SDK.SDKObject {
       }
     }
   }
-};
-
-/** @enum {symbol} */
-SDK.Script.Events = {
-  ScriptEdited: Symbol('ScriptEdited'),
-  SourceMapURLAdded: Symbol('SourceMapURLAdded')
 };
 
 SDK.Script.sourceURLRegex = /^[\040\t]*\/\/[@#] sourceURL=\s*(\S*?)\s*$/m;

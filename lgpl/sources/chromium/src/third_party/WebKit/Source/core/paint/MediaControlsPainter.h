@@ -72,9 +72,6 @@ class MediaControlsPainter {
   static bool paintMediaCastButton(const LayoutObject&,
                                    const PaintInfo&,
                                    const IntRect&);
-  static bool paintMediaDetachButton(const LayoutObject&,
-                                     const PaintInfo&,
-                                     const IntRect&);
   static bool paintMediaTrackSelectionCheckmark(const LayoutObject&,
                                                 const PaintInfo&,
                                                 const IntRect&);

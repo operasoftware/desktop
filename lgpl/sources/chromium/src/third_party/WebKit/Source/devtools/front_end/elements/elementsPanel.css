@@ -224,9 +224,10 @@
     text-overflow: ellipsis;
     overflow: hidden;
     white-space: nowrap;
+    height: 14px;
 }
 
-.styles-section .styles-section-subtitle a {
+.styles-section .styles-section-subtitle .devtools-link {
     color: inherit;
 }
 
@@ -238,7 +239,7 @@
     color: #222;
 }
 
-.styles-section .webkit-html-resource-link {
+.styles-section .devtools-link {
     user-select: none;
 }
 
@@ -319,6 +320,8 @@
 
 .styles-element-classes-pane .new-class-input {
     padding-left: 3px;
+    padding-right: 3px;
+    overflow: hidden;
     border: 1px solid #ddd;
     line-height: 15px;
     margin-left: 3px;
@@ -326,11 +329,6 @@
     -webkit-user-modify: read-write-plaintext-only;
     background-color: #fff;
     cursor: text;
-}
-
-.styles-element-classes-pane .new-class-input:empty:before {
-    content: attr(placeholder);
-    color: darkgray;
 }
 
 .styles-element-state-pane > div {
@@ -379,20 +377,6 @@
 
 .styles-selector {
     cursor: text;
-}
-
-.image-preview-container {
-    background: transparent;
-    text-align: center;
-}
-
-.image-preview-container img {
-    margin: 2px auto;
-    max-width: 100px;
-    max-height: 100px;
-    background-image: url(Images/checker.png);
-    -webkit-user-select: text;
-    -webkit-user-drag: auto;
 }
 
 .metrics {
@@ -535,4 +519,19 @@
 
 .styles-pane:not(.is-editing-style) .styles-section.matched-styles:not(.read-only):hover .sidebar-pane-section-toolbar {
     visibility: visible;
+}
+
+.elements-tree-header {
+    height: 24px;
+    border-top: 1px solid #eee;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.elements-tree-header-frame {
+    margin-left: 6px;
+    margin-right: 6px;
+    flex: none;
 }

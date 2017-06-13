@@ -59,6 +59,8 @@ enum ExrCompr {
     EXR_PXR24,
     EXR_B44,
     EXR_B44A,
+    EXR_DWA,
+    EXR_DWB,
     EXR_UNKN,
 };
 
@@ -882,6 +884,22 @@ static int pxr24_uncompress(EXRContext *s, const uint8_t *src,
                     bytestream_put_le16(&out, pixel);
                 }
                 break;
+            case EXR_UINT:
+                ptr[0] = in;
+                ptr[1] = ptr[0] + s->xdelta;
+                ptr[2] = ptr[1] + s->xdelta;
+                ptr[3] = ptr[2] + s->xdelta;
+                in     = ptr[3] + s->xdelta;
+
+                for (j = 0; j < s->xdelta; ++j) {
+                    uint32_t diff = (*(ptr[0]++) << 24) |
+                    (*(ptr[1]++) << 16) |
+                    (*(ptr[2]++) << 8 ) |
+                    (*(ptr[3]++));
+                    pixel += diff;
+                    bytestream_put_le32(&out, pixel);
+                }
+                break;
             default:
                 return AVERROR_INVALIDDATA;
             }
@@ -1285,8 +1303,9 @@ static int check_header_variable(EXRContext *s,
     return var_size;
 }
 
-static int decode_header(EXRContext *s)
+static int decode_header(EXRContext *s, AVFrame *frame)
 {
+    AVDictionary *metadata = NULL;
     int magic_number, version, i, flags, sar = 0;
     int layer_match = 0;
 
@@ -1428,17 +1447,15 @@ static int decode_header(EXRContext *s)
                     return AVERROR_PATCHWELCOME;
                 }
 
-                if (s->channel_offsets[channel_index] == -1){/* channel have not been previously assign */
-                    if (channel_index >= 0) {
-                        if (s->pixel_type != EXR_UNKNOWN &&
-                            s->pixel_type != current_pixel_type) {
-                            av_log(s->avctx, AV_LOG_ERROR,
-                                   "RGB channels not of the same depth.\n");
-                            return AVERROR_INVALIDDATA;
-                        }
-                        s->pixel_type                     = current_pixel_type;
-                        s->channel_offsets[channel_index] = s->current_channel_offset;
+                if (channel_index >= 0 && s->channel_offsets[channel_index] == -1) { /* channel has not been previously assigned */
+                    if (s->pixel_type != EXR_UNKNOWN &&
+                        s->pixel_type != current_pixel_type) {
+                        av_log(s->avctx, AV_LOG_ERROR,
+                               "RGB channels not of the same depth.\n");
+                        return AVERROR_INVALIDDATA;
                     }
+                    s->pixel_type                     = current_pixel_type;
+                    s->channel_offsets[channel_index] = s->current_channel_offset;
                 }
 
                 s->channels = av_realloc(s->channels,
@@ -1450,7 +1467,11 @@ static int decode_header(EXRContext *s)
                 channel->xsub       = xsub;
                 channel->ysub       = ysub;
 
-                s->current_channel_offset += 1 << current_pixel_type;
+                if (current_pixel_type == EXR_HALF) {
+                    s->current_channel_offset += 2;
+                } else {/* Float or UINT32 */
+                    s->current_channel_offset += 4;
+                }
             }
 
             /* Check if all channels are set with an offset or if the channels
@@ -1557,6 +1578,14 @@ static int decode_header(EXRContext *s)
             }
 
             continue;
+        } else if ((var_size = check_header_variable(s, "writer",
+                                                     "string", 1)) >= 0) {
+            uint8_t key[256] = { 0 };
+
+            bytestream2_get_buffer(&s->gb, key, FFMIN(sizeof(key) - 1, var_size));
+            av_dict_set(&metadata, "writer", key, 0);
+
+            continue;
         }
 
         // Check if there are enough bytes for a header
@@ -1592,6 +1621,8 @@ static int decode_header(EXRContext *s)
         return AVERROR_INVALIDDATA;
     }
 
+    av_frame_set_metadata(frame, metadata);
+
     // aaand we are done
     bytestream2_skip(&s->gb, 1);
     return 0;
@@ -1611,7 +1642,7 @@ static int decode_frame(AVCodecContext *avctx, void *data,
 
     bytestream2_init(&s->gb, avpkt->data, avpkt->size);
 
-    if ((ret = decode_header(s)) < 0)
+    if ((ret = decode_header(s, picture)) < 0)
         return ret;
 
     switch (s->pixel_type) {
@@ -1711,6 +1742,7 @@ static int decode_frame(AVCodecContext *avctx, void *data,
     avctx->execute2(avctx, decode_block, s->thread_data, NULL, nb_blocks);
 
     // Zero out the end if ymax+1 is not h
+    ptr = picture->data[0] + ((s->ymax+1) * picture->linesize[0]);
     for (y = s->ymax + 1; y < avctx->height; y++) {
         memset(ptr, 0, out_line_size);
         ptr += picture->linesize[0];

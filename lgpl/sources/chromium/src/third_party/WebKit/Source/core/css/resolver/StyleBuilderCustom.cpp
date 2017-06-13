@@ -38,6 +38,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <memory>
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
 #include "core/StyleBuilderFunctions.h"
@@ -53,6 +54,7 @@
 #include "core/css/CSSPendingSubstitutionValue.h"
 #include "core/css/CSSPrimitiveValueMappings.h"
 #include "core/css/CSSPropertyMetadata.h"
+#include "core/css/CSSValueIDMappings.h"
 #include "core/css/CSSVariableReferenceValue.h"
 #include "core/css/PropertyRegistration.h"
 #include "core/css/PropertyRegistry.h"
@@ -79,7 +81,6 @@
 #include "wtf/PtrUtil.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/Vector.h"
-#include <memory>
 
 namespace blink {
 
@@ -92,6 +93,7 @@ static inline bool isValidVisitedLinkProperty(CSSPropertyID id) {
     case CSSPropertyBorderRightColor:
     case CSSPropertyBorderTopColor:
     case CSSPropertyBorderBottomColor:
+    case CSSPropertyCaretColor:
     case CSSPropertyColor:
     case CSSPropertyFill:
     case CSSPropertyOutlineColor:
@@ -212,51 +214,16 @@ void StyleBuilderFunctions::applyValueCSSPropertyCursor(
     const CSSValue& value) {
   state.style()->clearCursorList();
   if (value.isValueList()) {
-    const CSSValueList& list = toCSSValueList(value);
-    int len = list.length();
-    state.style()->setCursor(ECursor::Auto);
-    for (int i = 0; i < len; i++) {
-      const CSSValue& item = list.item(i);
-      if (item.isCursorImageValue()) {
-        const CSSCursorImageValue& image = toCSSCursorImageValue(item);
-        IntPoint hotSpot = image.hotSpot();
-        bool hotSpotSpecified = image.hotSpotSpecified();
-
-        Element* element = state.element();
-        if (SVGCursorElement* cursorElement =
-                image.getSVGCursorElement(element)) {
-          if (image.cachedImageURL() !=
-              element->document().completeURL(
-                  cursorElement->href()->currentValue()->value()))
-            image.clearImageResource();
-
-          // Set the hot spot if it wasn't specified in the CSS but is specified
-          // in the SVG.
-          if (!hotSpotSpecified) {
-            hotSpotSpecified = true;
-            SVGLengthContext lengthContext(0);
-            // x() and y() return 0 if they're not specified in cursorElement.
-            float svgX = roundf(
-                cursorElement->x()->currentValue()->value(lengthContext));
-            hotSpot.setX(static_cast<int>(svgX));
-            float svgY = roundf(
-                cursorElement->y()->currentValue()->value(lengthContext));
-            hotSpot.setY(static_cast<int>(svgY));
-          }
-
-          SVGElement* svgElement = toSVGElement(element);
-          svgElement->setCursorImageValue(&image);
-          cursorElement->addClient(svgElement);
-
-          // Elements with SVG cursors are not allowed to share style.
-          state.style()->setUnique();
-        }
-
+    state.style()->setCursor(ECursor::kAuto);
+    for (const auto& item : toCSSValueList(value)) {
+      if (item->isCursorImageValue()) {
+        const CSSCursorImageValue& cursor = toCSSCursorImageValue(*item);
+        const CSSValue& image = cursor.imageValue();
         state.style()->addCursor(state.styleImage(CSSPropertyCursor, image),
-                                 hotSpotSpecified, hotSpot);
+                                 cursor.hotSpotSpecified(), cursor.hotSpot());
       } else {
         state.style()->setCursor(
-            toCSSIdentifierValue(item).convertTo<ECursor>());
+            toCSSIdentifierValue(*item).convertTo<ECursor>());
       }
     }
   } else {
@@ -360,7 +327,7 @@ void StyleBuilderFunctions::applyValueCSSPropertyResize(
   EResize r = RESIZE_NONE;
   if (identifierValue.getValueID() == CSSValueAuto) {
     if (Settings* settings = state.document().settings())
-      r = settings->textAreasAreResizable() ? RESIZE_BOTH : RESIZE_NONE;
+      r = settings->getTextAreasAreResizable() ? RESIZE_BOTH : RESIZE_NONE;
   } else {
     r = identifierValue.convertTo<EResize>();
   }
@@ -509,17 +476,18 @@ void StyleBuilderFunctions::applyValueCSSPropertyTextAlign(
       state.style()->setTextAlign(state.parentStyle()->textAlign());
     else
       state.style()->setTextAlign(identValue.convertTo<ETextAlign>());
-  } else if (state.parentStyle()->textAlign() == ETextAlign::Start) {
+  } else if (state.parentStyle()->textAlign() == ETextAlign::kStart) {
     state.style()->setTextAlign(state.parentStyle()->isLeftToRightDirection()
-                                    ? ETextAlign::Left
-                                    : ETextAlign::Right);
-  } else if (state.parentStyle()->textAlign() == ETextAlign::End) {
+                                    ? ETextAlign::kLeft
+                                    : ETextAlign::kRight);
+  } else if (state.parentStyle()->textAlign() == ETextAlign::kEnd) {
     state.style()->setTextAlign(state.parentStyle()->isLeftToRightDirection()
-                                    ? ETextAlign::Right
-                                    : ETextAlign::Left);
+                                    ? ETextAlign::kRight
+                                    : ETextAlign::kLeft);
   } else {
     state.style()->setTextAlign(state.parentStyle()->textAlign());
   }
+  state.style()->setTextAlignIsInherited(false);
 }
 
 void StyleBuilderFunctions::applyInheritCSSPropertyTextIndent(
@@ -568,7 +536,7 @@ void StyleBuilderFunctions::applyInheritCSSPropertyVerticalAlign(
     StyleResolverState& state) {
   EVerticalAlign verticalAlign = state.parentStyle()->verticalAlign();
   state.style()->setVerticalAlign(verticalAlign);
-  if (verticalAlign == VerticalAlignLength)
+  if (verticalAlign == EVerticalAlign::kLength)
     state.style()->setVerticalAlignLength(
         state.parentStyle()->getVerticalAlignLength());
 }
@@ -742,7 +710,7 @@ void StyleBuilderFunctions::applyValueCSSPropertyWillChange(
     DCHECK(value.isValueList());
     for (auto& willChangeValue : toCSSValueList(value)) {
       if (willChangeValue->isCustomIdentValue())
-        willChangeProperties.append(
+        willChangeProperties.push_back(
             toCSSCustomIdentValue(*willChangeValue).valueAsPropertyID());
       else if (toCSSIdentifierValue(*willChangeValue).getValueID() ==
                CSSValueContents)
@@ -792,14 +760,12 @@ void StyleBuilderFunctions::applyValueCSSPropertyContent(
           ContentData::create(state.styleImage(CSSPropertyContent, *item));
     } else if (item->isCounterValue()) {
       const CSSCounterValue* counterValue = toCSSCounterValue(item.get());
-      EListStyleType listStyleType = EListStyleType::NoneListStyle;
-      CSSValueID listStyleIdent = counterValue->listStyle();
-      if (listStyleIdent != CSSValueNone)
-        listStyleType =
-            static_cast<EListStyleType>(listStyleIdent - CSSValueDisc);
-      std::unique_ptr<CounterContent> counter = wrapUnique(new CounterContent(
-          AtomicString(counterValue->identifier()), listStyleType,
-          AtomicString(counterValue->separator())));
+      const auto listStyleType =
+          cssValueIDToPlatformEnum<EListStyleType>(counterValue->listStyle());
+      std::unique_ptr<CounterContent> counter =
+          WTF::wrapUnique(new CounterContent(
+              AtomicString(counterValue->identifier()), listStyleType,
+              AtomicString(counterValue->separator())));
       nextContent = ContentData::create(std::move(counter));
     } else if (item->isIdentifierValue()) {
       QuoteType quoteType;
@@ -834,7 +800,7 @@ void StyleBuilderFunctions::applyValueCSSPropertyContent(
             nullAtom, toCSSCustomIdentValue(functionValue->item(0)).value(),
             nullAtom);
         const AtomicString& value = state.element()->getAttribute(attr);
-        string = value.isNull() ? emptyString() : value.getString();
+        string = value.isNull() ? emptyString : value.getString();
       } else {
         string = toCSSStringValue(*item).value();
       }
@@ -917,7 +883,7 @@ void StyleBuilderFunctions::applyValueCSSPropertyVariable(
   const CSSCustomPropertyDeclaration& declaration =
       toCSSCustomPropertyDeclaration(value);
   const AtomicString& name = declaration.name();
-  const PropertyRegistry::Registration* registration = nullptr;
+  const PropertyRegistration* registration = nullptr;
   const PropertyRegistry* registry = state.document().propertyRegistry();
   if (registry)
     registration = registry->registration(name);
@@ -960,43 +926,39 @@ void StyleBuilderFunctions::applyValueCSSPropertyVariable(
     else
       initial = true;
   }
-
   DCHECK(initial ^ inherit);
 
+  state.style()->removeVariable(name, isInheritedProperty);
   if (initial) {
-    if (isInheritedProperty)
-      state.style()->removeInheritedVariable(name);
-    else
-      state.style()->removeNonInheritedVariable(name);
     return;
   }
 
-  if (isInheritedProperty) {
-    state.style()->removeInheritedVariable(name);
-    StyleInheritedVariables* parentVariables =
-        state.parentStyle()->inheritedVariables();
-    if (!parentVariables)
-      return;
-    CSSVariableData* parentValue = parentVariables->getVariable(name);
+  DCHECK(inherit);
+  CSSVariableData* parentValue =
+      state.parentStyle()->getVariable(name, isInheritedProperty);
+  const CSSValue* parentCSSValue =
+      registration && parentValue
+          ? state.parentStyle()->getRegisteredVariable(name,
+                                                       isInheritedProperty)
+          : nullptr;
+
+  if (!isInheritedProperty) {
+    DCHECK(registration);
     if (parentValue) {
-      if (!registration)
-        state.style()->setResolvedUnregisteredVariable(name, parentValue);
-      else
-        state.style()->setResolvedInheritedVariable(
-            name, parentValue, parentVariables->registeredVariable(name));
+      state.style()->setResolvedNonInheritedVariable(name, parentValue,
+                                                     parentCSSValue);
     }
     return;
   }
 
-  state.style()->removeNonInheritedVariable(name);
-  StyleNonInheritedVariables* parentVariables =
-      state.parentStyle()->nonInheritedVariables();
-  if (!parentVariables)
-    return;
-  CSSVariableData* parentValue = parentVariables->getVariable(name);
-  if (parentValue)
-    state.style()->setResolvedNonInheritedVariable(
-        name, parentValue, parentVariables->registeredVariable(name));
+  if (parentValue) {
+    if (!registration) {
+      state.style()->setResolvedUnregisteredVariable(name, parentValue);
+    } else {
+      state.style()->setResolvedInheritedVariable(name, parentValue,
+                                                  parentCSSValue);
+    }
+  }
 }
 
 void StyleBuilderFunctions::applyInheritCSSPropertyBaselineShift(
@@ -1039,6 +1001,37 @@ void StyleBuilderFunctions::applyInheritCSSPropertyPosition(
     StyleResolverState& state) {
   if (!state.parentNode()->isDocumentNode())
     state.style()->setPosition(state.parentStyle()->position());
+}
+
+void StyleBuilderFunctions::applyInitialCSSPropertyCaretColor(
+    StyleResolverState& state) {
+  StyleAutoColor color = StyleAutoColor::autoColor();
+  if (state.applyPropertyToRegularStyle())
+    state.style()->setCaretColor(color);
+  if (state.applyPropertyToVisitedLinkStyle())
+    state.style()->setVisitedLinkCaretColor(color);
+}
+
+void StyleBuilderFunctions::applyInheritCSSPropertyCaretColor(
+    StyleResolverState& state) {
+  StyleAutoColor color = state.parentStyle()->caretColor();
+  if (state.applyPropertyToRegularStyle())
+    state.style()->setCaretColor(color);
+  if (state.applyPropertyToVisitedLinkStyle())
+    state.style()->setVisitedLinkCaretColor(color);
+}
+
+void StyleBuilderFunctions::applyValueCSSPropertyCaretColor(
+    StyleResolverState& state,
+    const CSSValue& value) {
+  if (state.applyPropertyToRegularStyle()) {
+    state.style()->setCaretColor(
+        StyleBuilderConverter::convertStyleAutoColor(state, value));
+  }
+  if (state.applyPropertyToVisitedLinkStyle()) {
+    state.style()->setVisitedLinkCaretColor(
+        StyleBuilderConverter::convertStyleAutoColor(state, value, true));
+  }
 }
 
 }  // namespace blink

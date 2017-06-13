@@ -17,7 +17,7 @@ namespace blink {
 class CompositingReasonFinderTest : public RenderingTest {
  public:
   CompositingReasonFinderTest()
-      : RenderingTest(EmptyFrameLoaderClient::create()) {}
+      : RenderingTest(EmptyLocalFrameClient::create()) {}
 
  private:
   void SetUp() override {
@@ -159,4 +159,148 @@ TEST_F(CompositingReasonFinderTest, OnlyOpaqueFixedLayersPromoted) {
   ASSERT_TRUE(paintLayer);
   EXPECT_EQ(NotComposited, paintLayer->compositingState());
 }
+
+TEST_F(CompositingReasonFinderTest, RequiresCompositingForTransformAnimation) {
+  RefPtr<ComputedStyle> style = ComputedStyle::create();
+  style->setSubtreeWillChangeContents(false);
+
+  style->setHasCurrentTransformAnimation(false);
+  style->setIsRunningTransformAnimationOnCompositor(false);
+  EXPECT_FALSE(
+      CompositingReasonFinder::requiresCompositingForTransformAnimation(
+          *style));
+
+  style->setHasCurrentTransformAnimation(false);
+  style->setIsRunningTransformAnimationOnCompositor(true);
+  EXPECT_FALSE(
+      CompositingReasonFinder::requiresCompositingForTransformAnimation(
+          *style));
+
+  style->setHasCurrentTransformAnimation(true);
+  style->setIsRunningTransformAnimationOnCompositor(false);
+  EXPECT_TRUE(CompositingReasonFinder::requiresCompositingForTransformAnimation(
+      *style));
+
+  style->setHasCurrentTransformAnimation(true);
+  style->setIsRunningTransformAnimationOnCompositor(true);
+  EXPECT_TRUE(CompositingReasonFinder::requiresCompositingForTransformAnimation(
+      *style));
+
+  style->setSubtreeWillChangeContents(true);
+
+  style->setHasCurrentTransformAnimation(false);
+  style->setIsRunningTransformAnimationOnCompositor(false);
+  EXPECT_FALSE(
+      CompositingReasonFinder::requiresCompositingForTransformAnimation(
+          *style));
+
+  style->setHasCurrentTransformAnimation(false);
+  style->setIsRunningTransformAnimationOnCompositor(true);
+  EXPECT_TRUE(CompositingReasonFinder::requiresCompositingForTransformAnimation(
+      *style));
+
+  style->setHasCurrentTransformAnimation(true);
+  style->setIsRunningTransformAnimationOnCompositor(false);
+  EXPECT_FALSE(
+      CompositingReasonFinder::requiresCompositingForTransformAnimation(
+          *style));
+
+  style->setHasCurrentTransformAnimation(true);
+  style->setIsRunningTransformAnimationOnCompositor(true);
+  EXPECT_TRUE(CompositingReasonFinder::requiresCompositingForTransformAnimation(
+      *style));
 }
+
+TEST_F(CompositingReasonFinderTest, RequiresCompositingForEffectAnimation) {
+  RefPtr<ComputedStyle> style = ComputedStyle::create();
+
+  style->setSubtreeWillChangeContents(false);
+
+  // In the interest of brevity, for each side of subtreeWillChangeContents()
+  // code path we only check that any one of the effect related animation flags
+  // being set produces true, rather than every permutation.
+
+  style->setHasCurrentOpacityAnimation(false);
+  style->setHasCurrentFilterAnimation(false);
+  style->setHasCurrentBackdropFilterAnimation(false);
+  EXPECT_FALSE(
+      CompositingReasonFinder::requiresCompositingForEffectAnimation(*style));
+
+  style->setHasCurrentOpacityAnimation(true);
+  style->setHasCurrentFilterAnimation(false);
+  style->setHasCurrentBackdropFilterAnimation(false);
+  EXPECT_TRUE(
+      CompositingReasonFinder::requiresCompositingForEffectAnimation(*style));
+
+  style->setHasCurrentOpacityAnimation(false);
+  style->setHasCurrentFilterAnimation(true);
+  style->setHasCurrentBackdropFilterAnimation(false);
+  EXPECT_TRUE(
+      CompositingReasonFinder::requiresCompositingForEffectAnimation(*style));
+
+  style->setHasCurrentOpacityAnimation(false);
+  style->setHasCurrentFilterAnimation(false);
+  style->setHasCurrentBackdropFilterAnimation(true);
+  EXPECT_TRUE(
+      CompositingReasonFinder::requiresCompositingForEffectAnimation(*style));
+
+  // Check the other side of subtreeWillChangeContents.
+  style->setSubtreeWillChangeContents(true);
+  style->setHasCurrentOpacityAnimation(false);
+  style->setHasCurrentFilterAnimation(false);
+  style->setHasCurrentBackdropFilterAnimation(false);
+  EXPECT_FALSE(
+      CompositingReasonFinder::requiresCompositingForEffectAnimation(*style));
+
+  style->setIsRunningOpacityAnimationOnCompositor(true);
+  style->setIsRunningFilterAnimationOnCompositor(false);
+  style->setIsRunningBackdropFilterAnimationOnCompositor(false);
+  EXPECT_TRUE(
+      CompositingReasonFinder::requiresCompositingForEffectAnimation(*style));
+
+  style->setIsRunningOpacityAnimationOnCompositor(false);
+  style->setIsRunningFilterAnimationOnCompositor(true);
+  style->setIsRunningBackdropFilterAnimationOnCompositor(false);
+  EXPECT_TRUE(
+      CompositingReasonFinder::requiresCompositingForEffectAnimation(*style));
+
+  style->setIsRunningOpacityAnimationOnCompositor(false);
+  style->setIsRunningFilterAnimationOnCompositor(false);
+  style->setIsRunningBackdropFilterAnimationOnCompositor(true);
+  EXPECT_TRUE(
+      CompositingReasonFinder::requiresCompositingForEffectAnimation(*style));
+}
+
+TEST_F(CompositingReasonFinderTest, DoNotCompositeNestedSticky) {
+  ScopedCompositeFixedPositionForTest compositeFixedPosition(true);
+
+  setBodyInnerHTML(
+      "<style>.scroller { overflow: scroll; height: 200px; width: 100px; }"
+      ".container { height: 500px; }"
+      ".opaque { background-color: white; contain: paint; }"
+      "#outerSticky { height: 50px; position: sticky; top: 0px; }"
+      "#innerSticky { height: 20px; position: sticky; top: 25px; }</style>"
+      "<div class='scroller'>"
+      "  <div class='container'>"
+      "    <div id='outerSticky' class='opaque'>"
+      "      <div id='innerSticky' class='opaque'></div>"
+      "    </div>"
+      "  </div>"
+      "</div>");
+  document().view()->updateAllLifecyclePhases();
+
+  Element* outerSticky = document().getElementById("outerSticky");
+  PaintLayer* outerStickyLayer =
+      toLayoutBoxModelObject(outerSticky->layoutObject())->layer();
+  ASSERT_TRUE(outerStickyLayer);
+
+  Element* innerSticky = document().getElementById("innerSticky");
+  PaintLayer* innerStickyLayer =
+      toLayoutBoxModelObject(innerSticky->layoutObject())->layer();
+  ASSERT_TRUE(innerStickyLayer);
+
+  EXPECT_EQ(PaintsIntoOwnBacking, outerStickyLayer->compositingState());
+  EXPECT_EQ(NotComposited, innerStickyLayer->compositingState());
+}
+
+}  // namespace blink

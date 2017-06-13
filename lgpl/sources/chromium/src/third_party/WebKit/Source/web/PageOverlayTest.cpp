@@ -85,8 +85,9 @@ class PageOverlayTest : public ::testing::Test {
   WebViewImpl* webViewImpl() const { return m_helper.webView(); }
 
   std::unique_ptr<PageOverlay> createSolidYellowOverlay() {
-    return PageOverlay::create(webViewImpl()->mainFrameImpl(),
-                               makeUnique<SolidColorOverlay>(SK_ColorYELLOW));
+    return PageOverlay::create(
+        webViewImpl()->mainFrameImpl(),
+        WTF::makeUnique<SolidColorOverlay>(SK_ColorYELLOW));
   }
 
   template <typename OverlayType>
@@ -129,8 +130,9 @@ TEST_F(PageOverlayTest, PageOverlay_AcceleratedCompositing) {
 
   MockCanvas canvas(viewportWidth, viewportHeight);
   EXPECT_CALL(canvas, onDrawRect(_, _)).Times(AtLeast(0));
-  EXPECT_CALL(canvas, onDrawRect(SkRect::MakeWH(viewportWidth, viewportHeight),
-                                 Property(&SkPaint::getColor, SK_ColorYELLOW)));
+  EXPECT_CALL(canvas,
+              onDrawRect(SkRect::MakeWH(viewportWidth, viewportHeight),
+                         Property(&SkPaint::getColor, SK_ColorYELLOW)));
 
   GraphicsLayer* graphicsLayer = pageOverlay->graphicsLayer();
   WebRect rect(0, 0, viewportWidth, viewportHeight);

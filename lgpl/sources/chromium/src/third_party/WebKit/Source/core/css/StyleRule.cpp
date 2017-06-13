@@ -88,7 +88,7 @@ DEFINE_TRACE(StyleRuleBase) {
       toStyleRuleViewport(this)->traceAfterDispatch(visitor);
       return;
   }
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
 }
 
 void StyleRuleBase::finalizeGarbageCollectedObject() {
@@ -127,7 +127,7 @@ void StyleRuleBase::finalizeGarbageCollectedObject() {
       toStyleRuleViewport(this)->~StyleRuleViewport();
       return;
   }
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
 }
 
 StyleRuleBase* StyleRuleBase::copy() const {
@@ -144,7 +144,7 @@ StyleRuleBase* StyleRuleBase::copy() const {
       return toStyleRuleSupports(this)->copy();
     case Import:
       // FIXME: Copy import rules.
-      ASSERT_NOT_REACHED();
+      NOTREACHED();
       return nullptr;
     case Keyframes:
       return toStyleRuleKeyframes(this)->copy();
@@ -352,7 +352,7 @@ StyleRuleCondition::StyleRuleCondition(const StyleRuleCondition& conditionRule)
     : StyleRuleGroup(conditionRule),
       m_conditionText(conditionRule.m_conditionText) {}
 
-StyleRuleMedia::StyleRuleMedia(MediaQuerySet* media,
+StyleRuleMedia::StyleRuleMedia(RefPtr<MediaQuerySet> media,
                                HeapVector<Member<StyleRuleBase>>& adoptRules)
     : StyleRuleCondition(Media, adoptRules), m_mediaQueries(media) {}
 
@@ -363,7 +363,6 @@ StyleRuleMedia::StyleRuleMedia(const StyleRuleMedia& mediaRule)
 }
 
 DEFINE_TRACE_AFTER_DISPATCH(StyleRuleMedia) {
-  visitor->trace(m_mediaQueries);
   StyleRuleCondition::traceAfterDispatch(visitor);
 }
 

@@ -11,6 +11,7 @@
 #include "platform/Crypto.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/ResourceRequest.h"
+#include "public/platform/WebContentSecurityPolicy.h"
 #include "wtf/HashSet.h"
 #include "wtf/text/WTFString.h"
 
@@ -43,14 +44,32 @@ class CORE_EXPORT SourceListDirective final : public CSPDirective {
   bool allowNonce(const String& nonce) const;
   bool allowHash(const CSPHashValue&) const;
   bool allowHashedAttributes() const;
+  bool allowReportSample() const;
+  bool isNone() const;
   bool isHashOrNoncePresent() const;
   uint8_t hashAlgorithmsUsed() const;
+  bool allowAllInline() const;
+
   // The algorothm is described more extensively here:
   // https://w3c.github.io/webappsec-csp/embedded/#subsume-source-list
-  bool subsumes(HeapVector<Member<SourceListDirective>>);
+  bool subsumes(const HeapVector<Member<SourceListDirective>>&) const;
+
+  // Export a subset of the source list that affect navigation.
+  // It contains every source-expressions, '*', 'none' and 'self'.
+  // It doesn't contain 'unsafe-inline' or 'unsafe-eval' for instance.
+  WebContentSecurityPolicySourceList exposeForNavigationalChecks() const;
+  String directiveName() const { return m_directiveName; }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(SourceListDirectiveTest, GetIntersectCSPSources);
+  FRIEND_TEST_ALL_PREFIXES(SourceListDirectiveTest,
+                           GetIntersectCSPSourcesSchemes);
+  FRIEND_TEST_ALL_PREFIXES(SourceListDirectiveTest, GetIntersectNonces);
+  FRIEND_TEST_ALL_PREFIXES(SourceListDirectiveTest, GetIntersectHashes);
+  FRIEND_TEST_ALL_PREFIXES(SourceListDirectiveTest, GetSources);
+  FRIEND_TEST_ALL_PREFIXES(SourceListDirectiveTest, ParseHost);
+  FRIEND_TEST_ALL_PREFIXES(CSPDirectiveListTest, GetSourceVector);
+  FRIEND_TEST_ALL_PREFIXES(CSPDirectiveListTest, OperativeDirectiveGivenType);
 
   bool parseSource(const UChar* begin,
                    const UChar* end,
@@ -61,10 +80,10 @@ class CORE_EXPORT SourceListDirective final : public CSPDirective {
                    CSPSource::WildcardDisposition&,
                    CSPSource::WildcardDisposition&);
   bool parseScheme(const UChar* begin, const UChar* end, String& scheme);
-  bool parseHost(const UChar* begin,
-                 const UChar* end,
-                 String& host,
-                 CSPSource::WildcardDisposition&);
+  static bool parseHost(const UChar* begin,
+                        const UChar* end,
+                        String& host,
+                        CSPSource::WildcardDisposition&);
   bool parsePort(const UChar* begin,
                  const UChar* end,
                  int& port,
@@ -82,13 +101,25 @@ class CORE_EXPORT SourceListDirective final : public CSPDirective {
   void addSourceUnsafeEval();
   void addSourceStrictDynamic();
   void addSourceUnsafeHashedAttributes();
+  void addReportSample();
   void addSourceNonce(const String& nonce);
   void addSourceHash(const ContentSecurityPolicyHashAlgorithm&,
                      const DigestValue& hash);
 
+  static void addSourceToMap(HeapHashMap<String, Member<CSPSource>>&,
+                             CSPSource*);
+
   bool hasSourceMatchInList(const KURL&, ResourceRequest::RedirectStatus) const;
+  HashSet<String> getIntersectNonces(const HashSet<String>& other) const;
+  HashSet<CSPHashValue> getIntersectHashes(
+      const HashSet<CSPHashValue>& other) const;
   HeapVector<Member<CSPSource>> getIntersectCSPSources(
-      HeapVector<Member<CSPSource>> other);
+      const HeapVector<Member<CSPSource>>& other) const;
+  HeapHashMap<String, Member<CSPSource>> getIntersectSchemesOnly(
+      const HeapVector<Member<CSPSource>>& other) const;
+  bool subsumesNoncesAndHashes(const HashSet<String>& nonces,
+                               const HashSet<CSPHashValue> hashes) const;
+  HeapVector<Member<CSPSource>> getSources(Member<CSPSource>) const;
 
   Member<ContentSecurityPolicy> m_policy;
   HeapVector<Member<CSPSource>> m_list;
@@ -99,6 +130,7 @@ class CORE_EXPORT SourceListDirective final : public CSPDirective {
   bool m_allowEval;
   bool m_allowDynamic;
   bool m_allowHashedAttributes;
+  bool m_reportSample;
   HashSet<String> m_nonces;
   HashSet<CSPHashValue> m_hashes;
   uint8_t m_hashAlgorithmsUsed;

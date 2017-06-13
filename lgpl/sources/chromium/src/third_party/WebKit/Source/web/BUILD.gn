@@ -27,15 +27,17 @@ component("web") {
 
   configs += [
     "//build/config/compiler:wexit_time_destructors",
-    "//third_party/WebKit/Source:blink_pch",
     "//third_party/WebKit/Source:config",
     "//third_party/WebKit/Source:inside_blink",
     "//third_party/WebKit/Source:non_test_config",
+    "//third_party/WebKit/Source/core:blink_core_pch",
   ]
 
   defines = [ "BLINK_WEB_IMPLEMENTATION=1" ]
 
   sources = [
+    "AnimationWorkletProxyClientImpl.cpp",
+    "AnimationWorkletProxyClientImpl.h",
     "AssertMatchingEnums.cpp",
     "AudioOutputDeviceClientImpl.cpp",
     "AudioOutputDeviceClientImpl.h",
@@ -48,10 +50,11 @@ component("web") {
     "CompositionUnderlineBuilder.h",
     "CompositionUnderlineVectorBuilder.cpp",
     "CompositionUnderlineVectorBuilder.h",
+    "CompositorAnimator.h",
     "CompositorMutatorImpl.cpp",
     "CompositorMutatorImpl.h",
-    "CompositorProxyClientImpl.cpp",
-    "CompositorProxyClientImpl.h",
+    "CompositorWorkerProxyClientImpl.cpp",
+    "CompositorWorkerProxyClientImpl.h",
     "ContextFeaturesClientImpl.cpp",
     "ContextFeaturesClientImpl.h",
     "ContextMenuAllowedScope.cpp",
@@ -74,8 +77,6 @@ component("web") {
     "ExternalPopupMenu.h",
     "FindInPageCoordinates.cpp",
     "FindInPageCoordinates.h",
-    "FrameLoaderClientImpl.cpp",
-    "FrameLoaderClientImpl.h",
     "FullscreenController.cpp",
     "FullscreenController.h",
     "IndexedDBClientImpl.cpp",
@@ -90,6 +91,7 @@ component("web") {
     "LinkHighlightImpl.h",
     "LocalFileSystemClient.cpp",
     "LocalFileSystemClient.h",
+    "LocalFrameClientImpl.cpp",
     "MediaKeysClientImpl.cpp",
     "MediaKeysClientImpl.h",
     "NavigatorContentUtilsClientImpl.cpp",
@@ -142,7 +144,6 @@ component("web") {
     "WebAssociatedURLLoaderImpl.h",
     "WebBlob.cpp",
     "WebCSSParser.cpp",
-    "WebCache.cpp",
     "WebColorSuggestion.cpp",
     "WebCryptoNormalize.cpp",
     "WebCustomElement.cpp",
@@ -193,12 +194,14 @@ component("web") {
     "WebImageCache.cpp",
     "WebImageDecoder.cpp",
     "WebInputElement.cpp",
+    "WebInputEvent.cpp",
     "WebInputEventConversion.cpp",
     "WebInputEventConversion.h",
     "WebInputMethodControllerImpl.cpp",
     "WebInputMethodControllerImpl.h",
     "WebKit.cpp",
     "WebLabelElement.cpp",
+    "WebLanguageDetectionDetails.cpp",
     "WebLeakDetector.cpp",
     "WebLocalFrameImpl.cpp",
     "WebLocalFrameImpl.h",
@@ -241,6 +244,8 @@ component("web") {
     "WebSettingsImpl.h",
     "WebSharedWorkerImpl.cpp",
     "WebSharedWorkerImpl.h",
+    "WebSharedWorkerReportingProxyImpl.cpp",
+    "WebSharedWorkerReportingProxyImpl.h",
     "WebSpeechGrammar.cpp",
     "WebSpeechRecognitionHandle.cpp",
     "WebSpeechRecognitionResult.cpp",
@@ -297,8 +302,8 @@ static_library("test_support") {
   ]
 
   configs += [
-    "//third_party/WebKit/Source:blink_pch",
     "//third_party/WebKit/Source:config",
+    "//third_party/WebKit/Source/core:blink_core_pch",
   ]
 
   include_dirs = [ "$root_gen_dir/blink" ]
@@ -327,6 +332,7 @@ test("webkit_unit_tests") {
 
     # FIXME: Move the tests from web/tests/ to appropriate places.
     # crbug.com/353585
+    "tests/ActiveConnectionThrottlingTest.cpp",
     "tests/ActivityLoggerTest.cpp",
     "tests/BrowserControlsTest.cpp",
     "tests/ChromeClientImplTest.cpp",
@@ -336,11 +342,11 @@ test("webkit_unit_tests") {
     "tests/DocumentLoadingRenderingTest.cpp",
     "tests/FakeWebPlugin.cpp",
     "tests/FakeWebPlugin.h",
-    "tests/FrameLoaderClientImplTest.cpp",
     "tests/FrameSerializerTest.cpp",
     "tests/FrameTestHelpers.cpp",
     "tests/FrameTestHelpers.h",
     "tests/FrameThrottlingTest.cpp",
+    "tests/HTMLDocumentParserLoadingTest.cpp",
     "tests/ImeOnFocusTest.cpp",
     "tests/IntersectionObserverTest.cpp",
     "tests/KeyboardTest.cpp",
@@ -348,7 +354,9 @@ test("webkit_unit_tests") {
     "tests/LinkElementLoadingTest.cpp",
     "tests/LinkSelectionTest.cpp",
     "tests/ListenerLeakTest.cpp",
+    "tests/LocalFrameClientImplTest.cpp",
     "tests/MHTMLTest.cpp",
+    "tests/MediaElementFillingViewportTest.cpp",
     "tests/NGInlineLayoutTest.cpp",
     "tests/PrerenderingTest.cpp",
     "tests/ProgrammaticScrollTest.cpp",
@@ -356,9 +364,11 @@ test("webkit_unit_tests") {
     "tests/RootScrollerTest.cpp",
     "tests/RunAllTests.cpp",
     "tests/ScreenWakeLockTest.cpp",
+    "tests/ScrollbarsTest.cpp",
     "tests/ScrollingCoordinatorTest.cpp",
     "tests/SpinLockTest.cpp",
     "tests/TextFinderTest.cpp",
+    "tests/TextSelectionRepaintTest.cpp",
     "tests/TimerPerfTest.cpp",
     "tests/TouchActionTest.cpp",
     "tests/ViewportTest.cpp",
@@ -381,6 +391,7 @@ test("webkit_unit_tests") {
     "tests/WebURLResponseTest.cpp",
     "tests/WebUserGestureTokenTest.cpp",
     "tests/WebViewTest.cpp",
+    "tests/WindowProxyTest.cpp",
     "tests/sim/SimCanvas.cpp",
     "tests/sim/SimCanvas.h",
     "tests/sim/SimCompositor.cpp",
@@ -389,10 +400,14 @@ test("webkit_unit_tests") {
     "tests/sim/SimDisplayItemList.h",
     "tests/sim/SimNetwork.cpp",
     "tests/sim/SimNetwork.h",
+    "tests/sim/SimPage.cpp",
+    "tests/sim/SimPage.h",
     "tests/sim/SimRequest.cpp",
     "tests/sim/SimRequest.h",
     "tests/sim/SimTest.cpp",
     "tests/sim/SimTest.h",
+    "tests/sim/SimWebFrameClient.cpp",
+    "tests/sim/SimWebFrameClient.h",
     "tests/sim/SimWebViewClient.cpp",
     "tests/sim/SimWebViewClient.h",
   ]

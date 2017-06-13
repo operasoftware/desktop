@@ -34,13 +34,17 @@ namespace blink {
 StyleResolverState::StyleResolverState(
     Document& document,
     const ElementResolveContext& elementContext,
-    const ComputedStyle* parentStyle)
+    const ComputedStyle* parentStyle,
+    const ComputedStyle* layoutParentStyle)
     : m_elementContext(elementContext),
       m_document(document),
       m_style(nullptr),
       // TODO(jchaffraix): We should make m_parentStyle const
       // (https://crbug.com/468152)
       m_parentStyle(const_cast<ComputedStyle*>(parentStyle)),
+      m_layoutParentStyle(layoutParentStyle),
+      m_isAnimationInterpolationMapReady(false),
+      m_isAnimatingCustomProperties(false),
       m_applyPropertyToRegularStyle(true),
       m_applyPropertyToVisitedLinkStyle(false),
       m_hasDirAutoAttribute(false),
@@ -48,22 +52,32 @@ StyleResolverState::StyleResolverState(
       m_elementStyleResources(document,
                               max(document.frameHost()->altDeviceScaleFactor(),
                                   document.devicePixelRatio())) {
+  DCHECK(!!m_parentStyle == !!m_layoutParentStyle);
+
   if (!m_parentStyle) {
     // TODO(jchaffraix): We should make m_parentStyle const
     // (https://crbug.com/468152)
     m_parentStyle = const_cast<ComputedStyle*>(m_elementContext.parentStyle());
   }
 
+  if (!m_layoutParentStyle)
+    m_layoutParentStyle = m_elementContext.layoutParentStyle();
+
+  if (!m_layoutParentStyle)
+    m_layoutParentStyle = m_parentStyle;
+
   DCHECK(document.isActive());
 }
 
 StyleResolverState::StyleResolverState(Document& document,
                                        Element* element,
-                                       const ComputedStyle* parentStyle)
+                                       const ComputedStyle* parentStyle,
+                                       const ComputedStyle* layoutParentStyle)
     : StyleResolverState(document,
                          element ? ElementResolveContext(*element)
                                  : ElementResolveContext(document),
-                         parentStyle) {}
+                         parentStyle,
+                         layoutParentStyle) {}
 
 StyleResolverState::~StyleResolverState() {
   // For performance reasons, explicitly clear HeapVectors and
@@ -102,14 +116,14 @@ void StyleResolverState::setCustomPropertySetForApplyAtRule(
 
 StylePropertySet* StyleResolverState::customPropertySetForApplyAtRule(
     const String& string) {
-  return m_customPropertySetsForApplyAtRule.get(string);
+  return m_customPropertySetsForApplyAtRule.at(string);
 }
 
 HeapHashMap<CSSPropertyID, Member<const CSSValue>>&
 StyleResolverState::parsedPropertiesForPendingSubstitutionCache(
     const CSSPendingSubstitutionValue& value) const {
   HeapHashMap<CSSPropertyID, Member<const CSSValue>>* map =
-      m_parsedPropertiesForPendingSubstitutionCache.get(&value);
+      m_parsedPropertiesForPendingSubstitutionCache.at(&value);
   if (!map) {
     map = new HeapHashMap<CSSPropertyID, Member<const CSSValue>>;
     m_parsedPropertiesForPendingSubstitutionCache.set(&value, map);

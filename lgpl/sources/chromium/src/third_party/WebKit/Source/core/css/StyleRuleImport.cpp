@@ -24,19 +24,20 @@
 
 #include "core/css/StyleSheetContents.h"
 #include "core/dom/Document.h"
-#include "core/fetch/CSSStyleSheetResource.h"
-#include "core/fetch/FetchInitiatorTypeNames.h"
-#include "core/fetch/FetchRequest.h"
-#include "core/fetch/ResourceFetcher.h"
+#include "core/loader/resource/CSSStyleSheetResource.h"
+#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
+#include "platform/loader/fetch/FetchRequest.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
 
 namespace blink {
 
 StyleRuleImport* StyleRuleImport::create(const String& href,
-                                         MediaQuerySet* media) {
+                                         RefPtr<MediaQuerySet> media) {
   return new StyleRuleImport(href, media);
 }
 
-StyleRuleImport::StyleRuleImport(const String& href, MediaQuerySet* media)
+StyleRuleImport::StyleRuleImport(const String& href,
+                                 RefPtr<MediaQuerySet> media)
     : StyleRuleBase(Import),
       m_parentStyleSheet(nullptr),
       m_styleSheetClient(new ImportedStyleSheetClient(this)),
@@ -45,8 +46,6 @@ StyleRuleImport::StyleRuleImport(const String& href, MediaQuerySet* media)
       m_loading(false) {
   if (!m_mediaQueries)
     m_mediaQueries = MediaQuerySet::create(String());
-
-  ThreadState::current()->registerPreFinalizer(this);
 }
 
 StyleRuleImport::~StyleRuleImport() {}
@@ -60,7 +59,6 @@ void StyleRuleImport::dispose() {
 DEFINE_TRACE_AFTER_DISPATCH(StyleRuleImport) {
   visitor->trace(m_styleSheetClient);
   visitor->trace(m_parentStyleSheet);
-  visitor->trace(m_mediaQueries);
   visitor->trace(m_styleSheet);
   visitor->trace(m_resource);
   StyleRuleBase::traceAfterDispatch(visitor);
@@ -74,17 +72,19 @@ void StyleRuleImport::setCSSStyleSheet(
   if (m_styleSheet)
     m_styleSheet->clearOwnerRule();
 
-  CSSParserContext context = m_parentStyleSheet
-                                 ? m_parentStyleSheet->parserContext()
-                                 : strictCSSParserContext();
-  context.setCharset(charset);
+  CSSParserContext* context = CSSParserContext::create(
+      m_parentStyleSheet ? m_parentStyleSheet->parserContext()
+                         : strictCSSParserContext(),
+      nullptr);
+  context->setCharset(charset);
   Document* document =
       m_parentStyleSheet ? m_parentStyleSheet->singleOwnerDocument() : nullptr;
   if (!baseURL.isNull()) {
-    context.setBaseURL(baseURL);
-    if (document)
-      context.setReferrer(Referrer(baseURL.strippedForUseAsReferrer(),
-                                   document->getReferrerPolicy()));
+    context->setBaseURL(baseURL);
+    if (document) {
+      context->setReferrer(Referrer(baseURL.strippedForUseAsReferrer(),
+                                    document->getReferrerPolicy()));
+    }
   }
 
   m_styleSheet = StyleSheetContents::create(this, href, context);

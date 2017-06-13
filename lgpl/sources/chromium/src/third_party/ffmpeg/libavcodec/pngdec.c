@@ -437,13 +437,13 @@ static int decode_zbuf(AVBPrint *bp, const uint8_t *data,
     av_bprint_init(bp, 0, -1);
 
     while (zstream.avail_in > 0) {
-        av_bprint_get_buffer(bp, 1, &buf, &buf_size);
-        if (!buf_size) {
+        av_bprint_get_buffer(bp, 2, &buf, &buf_size);
+        if (buf_size < 2) {
             ret = AVERROR(ENOMEM);
             goto fail;
         }
         zstream.next_out  = buf;
-        zstream.avail_out = buf_size;
+        zstream.avail_out = buf_size - 1;
         ret = inflate(&zstream, Z_PARTIAL_FLUSH);
         if (ret != Z_OK && ret != Z_STREAM_END) {
             ret = AVERROR_EXTERNAL;
@@ -922,7 +922,8 @@ static int decode_fctl_chunk(AVCodecContext *avctx, PNGDecContext *s,
         return AVERROR_INVALIDDATA;
     }
 
-    if (sequence_number == 0 && dispose_op == APNG_DISPOSE_OP_PREVIOUS) {
+    if ((sequence_number == 0 || !s->previous_picture.f->data[0]) &&
+        dispose_op == APNG_DISPOSE_OP_PREVIOUS) {
         // No previous frame to revert to for the first frame
         // Spec says to just treat it as a APNG_DISPOSE_OP_BACKGROUND
         dispose_op = APNG_DISPOSE_OP_BACKGROUND;

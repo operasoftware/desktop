@@ -256,11 +256,13 @@ void avfilter_register_all(void)
     REGISTER_FILTER(PIXDESCTEST,    pixdesctest,    vf);
     REGISTER_FILTER(PP,             pp,             vf);
     REGISTER_FILTER(PP7,            pp7,            vf);
+    REGISTER_FILTER(PREMULTIPLY,    premultiply,    vf);
     REGISTER_FILTER(PREWITT,        prewitt,        vf);
     REGISTER_FILTER(PSNR,           psnr,           vf);
     REGISTER_FILTER(PULLUP,         pullup,         vf);
     REGISTER_FILTER(QP,             qp,             vf);
     REGISTER_FILTER(RANDOM,         random,         vf);
+    REGISTER_FILTER(READEIA608,     readeia608,     vf);
     REGISTER_FILTER(READVITC,       readvitc,       vf);
     REGISTER_FILTER(REALTIME,       realtime,       vf);
     REGISTER_FILTER(REMAP,          remap,          vf);

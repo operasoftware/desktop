@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
- * Copyright (C) 2014 Opera Software ASA. All rights reserved.
+ * Copyright (C) 2014 Opera Software AS. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -32,10 +32,8 @@
 #ifndef WebPluginContainer_h
 #define WebPluginContainer_h
 
-#include "../platform/WebCommon.h"
-#include <v8.h>
-
-struct NPObject;
+#include "public/platform/WebCommon.h"
+#include "v8/include/v8.h"
 
 namespace blink {
 

@@ -70,15 +70,6 @@ class PLATFORM_EXPORT TransformOperations {
     return false;
   }
 
-  bool updateBoxSize(const FloatSize& size) const {
-    bool boxSizeChanged = false;
-    for (auto& operation : m_operations) {
-      if (operation->dependsOnBoxSize())
-        boxSizeChanged |= operation->updateBoxSize(size);
-    }
-    return boxSizeChanged;
-  }
-
   bool operationsMatch(const TransformOperations&) const;
 
   void clear() { m_operations.clear(); }

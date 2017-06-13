@@ -25,6 +25,7 @@
 
 #include "core/CoreExport.h"
 #include "core/css/CSSSelector.h"
+#include "core/css/MediaQueryEvaluator.h"
 #include "core/css/invalidation/InvalidationSet.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
@@ -33,6 +34,7 @@
 
 namespace blink {
 
+class ContainerNode;
 struct InvalidationLists;
 class QualifiedName;
 class RuleData;
@@ -108,6 +110,19 @@ class CORE_EXPORT RuleFeatureSet {
     return m_uncommonAttributeRules;
   }
 
+  const MediaQueryResultList& viewportDependentMediaQueryResults() const {
+    return m_viewportDependentMediaQueryResults;
+  }
+  const MediaQueryResultList& deviceDependentMediaQueryResults() const {
+    return m_deviceDependentMediaQueryResults;
+  }
+  MediaQueryResultList& viewportDependentMediaQueryResults() {
+    return m_viewportDependentMediaQueryResults;
+  }
+  MediaQueryResultList& deviceDependentMediaQueryResults() {
+    return m_deviceDependentMediaQueryResults;
+  }
+
   // Collect descendant and sibling invalidation sets.
   void collectInvalidationSetsForClass(InvalidationLists&,
                                        Element&,
@@ -139,6 +154,7 @@ class CORE_EXPORT RuleFeatureSet {
   void collectUniversalSiblingInvalidationSet(InvalidationLists&,
                                               unsigned minDirectAdjacent) const;
   void collectNthInvalidationSet(InvalidationLists&) const;
+  void collectTypeRuleInvalidationSet(InvalidationLists&, ContainerNode&) const;
 
   bool hasIdsInSelectors() const { return m_idInvalidationSets.size() > 0; }
 
@@ -189,6 +205,7 @@ class CORE_EXPORT RuleFeatureSet {
                                                InvalidationType);
   SiblingInvalidationSet& ensureUniversalSiblingInvalidationSet();
   DescendantInvalidationSet& ensureNthInvalidationSet();
+  DescendantInvalidationSet& ensureTypeRuleInvalidationSet();
 
   void updateInvalidationSets(const RuleData&);
   void updateInvalidationSetsForContentAttribute(const RuleData&);
@@ -198,7 +215,7 @@ class CORE_EXPORT RuleFeatureSet {
 
     void add(const InvalidationSetFeatures& other);
     bool hasFeatures() const;
-    bool hasTagIdClassOrAttribute() const;
+    bool hasIdClassOrAttribute() const;
 
     Vector<AtomicString> classes;
     Vector<AtomicString> attributes;
@@ -266,7 +283,7 @@ class CORE_EXPORT RuleFeatureSet {
       const InvalidationSetFeatures& siblingFeatures,
       const InvalidationSetFeatures& descendantFeatures);
 
-  void addClassToInvalidationSet(const AtomicString& className, Element&);
+  void updateRuleSetInvalidation(const InvalidationSetFeatures&);
 
   FeatureMetadata m_metadata;
   InvalidationSetMap m_classInvalidationSets;
@@ -275,8 +292,11 @@ class CORE_EXPORT RuleFeatureSet {
   PseudoTypeInvalidationSetMap m_pseudoInvalidationSets;
   RefPtr<SiblingInvalidationSet> m_universalSiblingInvalidationSet;
   RefPtr<DescendantInvalidationSet> m_nthInvalidationSet;
+  RefPtr<DescendantInvalidationSet> m_typeRuleInvalidationSet;
   HeapVector<RuleFeature> m_siblingRules;
   HeapVector<RuleFeature> m_uncommonAttributeRules;
+  MediaQueryResultList m_viewportDependentMediaQueryResults;
+  MediaQueryResultList m_deviceDependentMediaQueryResults;
 
   // If true, the RuleFeatureSet is alive and can be used.
   unsigned m_isAlive : 1;

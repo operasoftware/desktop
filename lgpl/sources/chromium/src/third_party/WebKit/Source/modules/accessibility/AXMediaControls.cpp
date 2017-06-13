@@ -83,10 +83,6 @@ AXObject* AccessibilityMediaControl::create(LayoutObject* layoutObject,
     case MediaCastOnButton:
     case MediaOverlayCastOffButton:
     case MediaOverlayCastOnButton:
-    case MediaOverlayAttachButtonHovered:
-    case MediaOverlayAttachButtonNormal:
-    case MediaOverlayDetachButtonHovered:
-    case MediaOverlayDetachButtonNormal:
     case MediaOverflowButton:
     case MediaOverflowList:
     case MediaDownloadButton:
@@ -148,10 +144,6 @@ String AccessibilityMediaControl::textAlternative(
     case MediaTimelineContainer:
     case MediaTrackSelectionCheckmark:
     case MediaControlsPanel:
-    case MediaOverlayAttachButtonHovered:
-    case MediaOverlayAttachButtonNormal:
-    case MediaOverlayDetachButtonHovered:
-    case MediaOverlayDetachButtonNormal:
     case MediaVolumeSliderContainer:
     case MediaVolumeSlider:
     case MediaVolumeSliderThumb:
@@ -209,10 +201,6 @@ String AccessibilityMediaControl::description(
     case MediaTimelineContainer:
     case MediaTrackSelectionCheckmark:
     case MediaControlsPanel:
-    case MediaOverlayAttachButtonHovered:
-    case MediaOverlayAttachButtonNormal:
-    case MediaOverlayDetachButtonHovered:
-    case MediaOverlayDetachButtonNormal:
     case MediaVolumeSliderContainer:
     case MediaVolumeSlider:
     case MediaVolumeSliderThumb:
@@ -233,7 +221,7 @@ String AccessibilityMediaControl::description(
 bool AccessibilityMediaControl::computeAccessibilityIsIgnored(
     IgnoredReasons* ignoredReasons) const {
   if (!m_layoutObject || !m_layoutObject->style() ||
-      m_layoutObject->style()->visibility() != EVisibility::Visible ||
+      m_layoutObject->style()->visibility() != EVisibility::kVisible ||
       controlType() == MediaTimelineContainer)
     return true;
 
@@ -267,10 +255,6 @@ AccessibilityRole AccessibilityMediaControl::roleValue() const {
 
     case MediaControlsPanel:
     case MediaCurrentTimeDisplay:
-    case MediaOverlayAttachButtonHovered:
-    case MediaOverlayAttachButtonNormal:
-    case MediaOverlayDetachButtonHovered:
-    case MediaOverlayDetachButtonNormal:
     case MediaTimeRemainingDisplay:
     case MediaSliderThumb:
     case MediaTrackSelectionCheckmark:
@@ -383,7 +367,7 @@ AXObject* AccessibilityMediaTimeDisplay::create(
 bool AccessibilityMediaTimeDisplay::computeAccessibilityIsIgnored(
     IgnoredReasons* ignoredReasons) const {
   if (!m_layoutObject || !m_layoutObject->style() ||
-      m_layoutObject->style()->visibility() != EVisibility::Visible)
+      m_layoutObject->style()->visibility() != EVisibility::kVisible)
     return true;
 
   if (!m_layoutObject->style()->width().value())

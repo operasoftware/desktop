@@ -29,17 +29,14 @@ namespace blink {
 
 MediaQueryList* MediaQueryList::create(ExecutionContext* context,
                                        MediaQueryMatcher* matcher,
-                                       MediaQuerySet* media) {
-  MediaQueryList* list = new MediaQueryList(context, matcher, media);
-  list->suspendIfNeeded();
-  return list;
+                                       RefPtr<MediaQuerySet> media) {
+  return new MediaQueryList(context, matcher, RefPtr<MediaQuerySet>(media));
 }
 
 MediaQueryList::MediaQueryList(ExecutionContext* context,
                                MediaQueryMatcher* matcher,
-                               MediaQuerySet* media)
-    : ActiveScriptWrappable(this),
-      ActiveDOMObject(context),
+                               RefPtr<MediaQuerySet> media)
+    : ContextLifecycleObserver(context),
       m_matcher(matcher),
       m_media(media),
       m_matchesDirty(true),
@@ -72,7 +69,7 @@ void MediaQueryList::addListener(MediaQueryListListener* listener) {
   if (!listener)
     return;
 
-  m_listeners.add(listener);
+  m_listeners.insert(listener);
 }
 
 void MediaQueryList::removeListener(MediaQueryListListener* listener) {
@@ -83,10 +80,11 @@ void MediaQueryList::removeListener(MediaQueryListListener* listener) {
 }
 
 bool MediaQueryList::hasPendingActivity() const {
-  return m_listeners.size() || hasEventListeners(EventTypeNames::change);
+  return getExecutionContext() &&
+         (m_listeners.size() || hasEventListeners(EventTypeNames::change));
 }
 
-void MediaQueryList::contextDestroyed() {
+void MediaQueryList::contextDestroyed(ExecutionContext*) {
   m_listeners.clear();
   removeAllEventListeners();
 }
@@ -97,7 +95,7 @@ bool MediaQueryList::mediaFeaturesChanged(
   if (!updateMatches())
     return false;
   for (const auto& listener : m_listeners) {
-    listenersToNotify->append(listener);
+    listenersToNotify->push_back(listener);
   }
   return hasEventListeners(EventTypeNames::change);
 }
@@ -118,10 +116,9 @@ bool MediaQueryList::matches() {
 
 DEFINE_TRACE(MediaQueryList) {
   visitor->trace(m_matcher);
-  visitor->trace(m_media);
   visitor->trace(m_listeners);
   EventTargetWithInlineData::trace(visitor);
-  ActiveDOMObject::trace(visitor);
+  ContextLifecycleObserver::trace(visitor);
 }
 
 const AtomicString& MediaQueryList::interfaceName() const {
@@ -129,7 +126,7 @@ const AtomicString& MediaQueryList::interfaceName() const {
 }
 
 ExecutionContext* MediaQueryList::getExecutionContext() const {
-  return ActiveDOMObject::getExecutionContext();
+  return ContextLifecycleObserver::getExecutionContext();
 }
 
 }  // namespace blink

@@ -5,16 +5,17 @@
 #ifndef ScriptPromisePropertyBase_h
 #define ScriptPromisePropertyBase_h
 
+#include <memory>
+
 #include "bindings/core/v8/ScopedPersistent.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseProperties.h"
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
+#include "v8/include/v8.h"
 #include "wtf/Compiler.h"
 #include "wtf/RefCounted.h"
 #include "wtf/Vector.h"
-#include <memory>
-#include <v8.h>
 
 namespace blink {
 
@@ -25,7 +26,7 @@ class ScriptState;
 // TODO(yhirano): Remove NEVER_INLINE once we find the cause of crashes.
 class CORE_EXPORT ScriptPromisePropertyBase
     : public GarbageCollectedFinalized<ScriptPromisePropertyBase>,
-      public ContextLifecycleObserver {
+      public ContextClient {
   USING_GARBAGE_COLLECTED_MIXIN(ScriptPromisePropertyBase);
 
  public:

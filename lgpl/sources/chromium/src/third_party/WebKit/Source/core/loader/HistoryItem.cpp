@@ -49,7 +49,8 @@ static long long generateSequenceNumber() {
 }
 
 HistoryItem::HistoryItem()
-    : m_pageScaleFactor(0),
+    : m_didSaveScrollOrScaleState(false),
+      m_pageScaleFactor(0),
       m_itemSequenceNumber(generateSequenceNumber()),
       m_documentSequenceNumber(generateSequenceNumber()),
       m_scrollRestorationType(ScrollRestorationAuto) {}
@@ -97,14 +98,16 @@ const ScrollOffset& HistoryItem::visualViewportScrollOffset() const {
 
 void HistoryItem::setVisualViewportScrollOffset(const ScrollOffset& offset) {
   m_visualViewportScrollOffset = offset;
+  setDidSaveScrollOrScaleState(true);
 }
 
-const ScrollOffset& HistoryItem::scrollOffset() const {
+const ScrollOffset& HistoryItem::getScrollOffset() const {
   return m_scrollOffset;
 }
 
 void HistoryItem::setScrollOffset(const ScrollOffset& offset) {
   m_scrollOffset = offset;
+  setDidSaveScrollOrScaleState(true);
 }
 
 float HistoryItem::pageScaleFactor() const {
@@ -113,6 +116,7 @@ float HistoryItem::pageScaleFactor() const {
 
 void HistoryItem::setPageScaleFactor(float scaleFactor) {
   m_pageScaleFactor = scaleFactor;
+  setDidSaveScrollOrScaleState(true);
 }
 
 void HistoryItem::setFormState(const Vector<String>& state) {
@@ -180,11 +184,11 @@ void HistoryItem::getDocumentState(Vector<String>* state) {
   contentEditablesState();
 
   state->clear();
-  state->append(kDocumentStateVersionMarker);
-  state->append(kDocumentStateVersion);
-  state->append(String::number(m_formState.size()));
+  state->push_back(kDocumentStateVersionMarker);
+  state->push_back(kDocumentStateVersion);
+  state->push_back(String::number(m_formState.size()));
   state->appendVector(m_formState);
-  state->append(String::number(m_contentEditablesStateVector.size()));
+  state->push_back(String::number(m_contentEditablesStateVector.size()));
   state->appendVector(m_contentEditablesStateVector);
 }
 

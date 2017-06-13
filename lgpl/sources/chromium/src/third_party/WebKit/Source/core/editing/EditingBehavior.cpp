@@ -231,18 +231,18 @@ const char* EditingBehavior::interpretKeyEvent(
   }
 
   unsigned modifiers =
-      keyEvent->modifiers & (ShiftKey | AltKey | CtrlKey | MetaKey);
+      keyEvent->modifiers() & (ShiftKey | AltKey | CtrlKey | MetaKey);
 
-  if (keyEvent->type == WebInputEvent::RawKeyDown) {
+  if (keyEvent->type() == WebInputEvent::RawKeyDown) {
     int mapKey = modifiers << 16 | event.keyCode();
-    const char* name = mapKey ? keyDownCommandsMap->get(mapKey) : nullptr;
+    const char* name = mapKey ? keyDownCommandsMap->at(mapKey) : nullptr;
     if (!name)
       name = lookupCommandNameFromDomKeyKeyDown(event.key(), modifiers);
     return name;
   }
 
   int mapKey = modifiers << 16 | event.charCode();
-  return mapKey ? keyPressCommandsMap->get(mapKey) : 0;
+  return mapKey ? keyPressCommandsMap->at(mapKey) : 0;
 }
 
 bool EditingBehavior::shouldInsertCharacter(const KeyboardEvent& event) const {

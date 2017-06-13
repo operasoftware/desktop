@@ -34,24 +34,24 @@ PassRefPtr<QuotesData> QuotesData::create(UChar open1,
 }
 
 void QuotesData::addPair(std::pair<String, String> quotePair) {
-  m_quotePairs.append(quotePair);
+  m_quotePairs.push_back(quotePair);
 }
 
 const String QuotesData::getOpenQuote(int index) const {
   ASSERT(index >= 0);
   if (!m_quotePairs.size() || index < 0)
-    return emptyString();
+    return emptyString;
   if ((size_t)index >= m_quotePairs.size())
-    return m_quotePairs.last().first;
+    return m_quotePairs.back().first;
   return m_quotePairs.at(index).first;
 }
 
 const String QuotesData::getCloseQuote(int index) const {
   ASSERT(index >= -1);
   if (!m_quotePairs.size() || index < 0)
-    return emptyString();
+    return emptyString;
   if ((size_t)index >= m_quotePairs.size())
-    return m_quotePairs.last().second;
+    return m_quotePairs.back().second;
   return m_quotePairs.at(index).second;
 }
 

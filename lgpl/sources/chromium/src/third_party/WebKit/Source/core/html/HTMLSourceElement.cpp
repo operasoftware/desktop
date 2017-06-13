@@ -75,7 +75,7 @@ void HTMLSourceElement::createMediaQueryList(const AtomicString& media) {
     return;
   }
 
-  MediaQuerySet* set = MediaQuerySet::create(media);
+  RefPtr<MediaQuerySet> set = MediaQuerySet::create(media);
   m_mediaQueryList =
       MediaQueryList::create(&document(), &document().mediaQueryMatcher(), set);
   addMediaQueryListListener();
@@ -164,12 +164,12 @@ bool HTMLSourceElement::isURLAttribute(const Attribute& attribute) const {
   return attribute.name() == srcAttr || HTMLElement::isURLAttribute(attribute);
 }
 
-void HTMLSourceElement::parseAttribute(const QualifiedName& name,
-                                       const AtomicString& oldValue,
-                                       const AtomicString& value) {
-  HTMLElement::parseAttribute(name, oldValue, value);
+void HTMLSourceElement::parseAttribute(
+    const AttributeModificationParams& params) {
+  HTMLElement::parseAttribute(params);
+  const QualifiedName& name = params.name;
   if (name == mediaAttr)
-    createMediaQueryList(value);
+    createMediaQueryList(params.newValue);
   if (name == srcsetAttr || name == sizesAttr || name == mediaAttr ||
       name == typeAttr) {
     Element* parent = parentElement();

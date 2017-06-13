@@ -9,7 +9,6 @@
 #include "core/css/MediaValuesDynamic.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
-#include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
@@ -20,6 +19,7 @@
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/style/ComputedStyle.h"
+#include "platform/graphics/ColorSpace.h"
 #include "public/platform/WebScreenInfo.h"
 
 namespace blink {
@@ -32,32 +32,28 @@ MediaValues* MediaValues::createDynamicIfFrameExists(LocalFrame* frame) {
 
 double MediaValues::calculateViewportWidth(LocalFrame* frame) {
   ASSERT(frame && frame->view() && frame->document());
-  int viewportWidth = frame->view()->layoutSize(IncludeScrollbars).width();
-  return adjustDoubleForAbsoluteZoom(
-      viewportWidth, frame->document()->layoutViewItem().styleRef());
+  return frame->view()->viewportSizeForMediaQueries().width();
 }
 
 double MediaValues::calculateViewportHeight(LocalFrame* frame) {
   ASSERT(frame && frame->view() && frame->document());
-  int viewportHeight = frame->view()->layoutSize(IncludeScrollbars).height();
-  return adjustDoubleForAbsoluteZoom(
-      viewportHeight, frame->document()->layoutViewItem().styleRef());
+  return frame->view()->viewportSizeForMediaQueries().height();
 }
 
 int MediaValues::calculateDeviceWidth(LocalFrame* frame) {
-  ASSERT(frame && frame->view() && frame->settings() && frame->host());
-  blink::WebScreenInfo screenInfo = frame->host()->chromeClient().screenInfo();
+  DCHECK(frame && frame->view() && frame->settings() && frame->page());
+  blink::WebScreenInfo screenInfo = frame->page()->chromeClient().screenInfo();
   int deviceWidth = screenInfo.rect.width;
-  if (frame->settings()->reportScreenSizeInPhysicalPixelsQuirk())
+  if (frame->settings()->getReportScreenSizeInPhysicalPixelsQuirk())
     deviceWidth = lroundf(deviceWidth * screenInfo.deviceScaleFactor);
   return deviceWidth;
 }
 
 int MediaValues::calculateDeviceHeight(LocalFrame* frame) {
-  ASSERT(frame && frame->view() && frame->settings() && frame->host());
-  blink::WebScreenInfo screenInfo = frame->host()->chromeClient().screenInfo();
+  DCHECK(frame && frame->view() && frame->settings() && frame->page());
+  blink::WebScreenInfo screenInfo = frame->page()->chromeClient().screenInfo();
   int deviceHeight = screenInfo.rect.height;
-  if (frame->settings()->reportScreenSizeInPhysicalPixelsQuirk())
+  if (frame->settings()->getReportScreenSizeInPhysicalPixelsQuirk())
     deviceHeight = lroundf(deviceHeight * screenInfo.deviceScaleFactor);
   return deviceHeight;
 }
@@ -74,21 +70,21 @@ float MediaValues::calculateDevicePixelRatio(LocalFrame* frame) {
 int MediaValues::calculateColorBitsPerComponent(LocalFrame* frame) {
   ASSERT(frame && frame->page() && frame->page()->mainFrame());
   if (!frame->page()->mainFrame()->isLocalFrame() ||
-      frame->host()->chromeClient().screenInfo().isMonochrome)
+      frame->page()->chromeClient().screenInfo().isMonochrome)
     return 0;
-  return frame->host()->chromeClient().screenInfo().depthPerComponent;
+  return frame->page()->chromeClient().screenInfo().depthPerComponent;
 }
 
 int MediaValues::calculateMonochromeBitsPerComponent(LocalFrame* frame) {
   ASSERT(frame && frame->page() && frame->page()->mainFrame());
   if (!frame->page()->mainFrame()->isLocalFrame() ||
-      !frame->host()->chromeClient().screenInfo().isMonochrome)
+      !frame->page()->chromeClient().screenInfo().isMonochrome)
     return 0;
-  return frame->host()->chromeClient().screenInfo().depthPerComponent;
+  return frame->page()->chromeClient().screenInfo().depthPerComponent;
 }
 
 int MediaValues::calculateDefaultFontSize(LocalFrame* frame) {
-  return frame->host()->settings().defaultFontSize();
+  return frame->page()->settings().getDefaultFontSize();
 }
 
 const String MediaValues::calculateMediaType(LocalFrame* frame) {
@@ -100,7 +96,7 @@ const String MediaValues::calculateMediaType(LocalFrame* frame) {
 
 WebDisplayMode MediaValues::calculateDisplayMode(LocalFrame* frame) {
   ASSERT(frame);
-  WebDisplayMode mode = frame->host()->settings().displayModeOverride();
+  WebDisplayMode mode = frame->page()->settings().getDisplayModeOverride();
 
   if (mode != WebDisplayModeUndefined)
     return mode;
@@ -122,22 +118,33 @@ bool MediaValues::calculateThreeDEnabled(LocalFrame* frame) {
 
 PointerType MediaValues::calculatePrimaryPointerType(LocalFrame* frame) {
   ASSERT(frame && frame->settings());
-  return frame->settings()->primaryPointerType();
+  return frame->settings()->getPrimaryPointerType();
 }
 
 int MediaValues::calculateAvailablePointerTypes(LocalFrame* frame) {
   ASSERT(frame && frame->settings());
-  return frame->settings()->availablePointerTypes();
+  return frame->settings()->getAvailablePointerTypes();
 }
 
 HoverType MediaValues::calculatePrimaryHoverType(LocalFrame* frame) {
   ASSERT(frame && frame->settings());
-  return frame->settings()->primaryHoverType();
+  return frame->settings()->getPrimaryHoverType();
 }
 
 int MediaValues::calculateAvailableHoverTypes(LocalFrame* frame) {
   ASSERT(frame && frame->settings());
-  return frame->settings()->availableHoverTypes();
+  return frame->settings()->getAvailableHoverTypes();
+}
+
+DisplayShape MediaValues::calculateDisplayShape(LocalFrame* frame) {
+  DCHECK(frame && frame->page());
+  return frame->page()->chromeClient().screenInfo().displayShape;
+}
+
+ColorSpaceGamut MediaValues::calculateColorGamut(LocalFrame* frame) {
+  DCHECK(frame && frame->page());
+  return ColorSpaceUtilities::getColorSpaceGamut(
+      frame->page()->chromeClient().screenInfo());
 }
 
 bool MediaValues::computeLengthImpl(double value,

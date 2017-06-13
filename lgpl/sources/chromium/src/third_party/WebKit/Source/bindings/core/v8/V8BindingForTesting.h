@@ -7,9 +7,9 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptState.h"
+#include "v8/include/v8.h"
 #include "wtf/Allocator.h"
 #include "wtf/Forward.h"
-#include <v8.h>
 
 namespace blink {
 
@@ -53,7 +53,7 @@ class V8TestingScope {
   v8::Local<v8::Context> m_context;
   v8::Context::Scope m_contextScope;
   v8::TryCatch m_tryCatch;
-  TrackExceptionState m_exceptionState;
+  DummyExceptionStateForTesting m_exceptionState;
 };
 
 }  // namespace blink

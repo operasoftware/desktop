@@ -52,7 +52,7 @@ class AttributeCollectionGeneric {
 
   ValueType& operator[](unsigned index) const { return at(index); }
   ValueType& at(unsigned index) const {
-    RELEASE_ASSERT(index < size());
+    CHECK_LT(index, size());
     return begin()[index];
   }
 
@@ -118,7 +118,7 @@ class MutableAttributeCollection
 
 inline void MutableAttributeCollection::append(const QualifiedName& name,
                                                const AtomicString& value) {
-  m_attributes.append(Attribute(name, value));
+  m_attributes.push_back(Attribute(name, value));
 }
 
 inline void MutableAttributeCollection::remove(unsigned index) {

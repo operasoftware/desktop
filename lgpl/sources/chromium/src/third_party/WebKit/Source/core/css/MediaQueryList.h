@@ -23,7 +23,7 @@
 #include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
-#include "core/dom/ActiveDOMObject.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "core/events/EventTarget.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
@@ -41,9 +41,10 @@ class MediaQuerySet;
 // to retrieve the current value of the given media query and to add/remove
 // listeners that will be called whenever the value of the query changes.
 
-class CORE_EXPORT MediaQueryList final : public EventTargetWithInlineData,
-                                         public ActiveScriptWrappable,
-                                         public ActiveDOMObject {
+class CORE_EXPORT MediaQueryList final
+    : public EventTargetWithInlineData,
+      public ActiveScriptWrappable<MediaQueryList>,
+      public ContextLifecycleObserver {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(MediaQueryList);
   WTF_MAKE_NONCOPYABLE(MediaQueryList);
@@ -51,7 +52,7 @@ class CORE_EXPORT MediaQueryList final : public EventTargetWithInlineData,
  public:
   static MediaQueryList* create(ExecutionContext*,
                                 MediaQueryMatcher*,
-                                MediaQuerySet*);
+                                RefPtr<MediaQuerySet>);
   ~MediaQueryList() override;
 
   String media() const;
@@ -78,19 +79,19 @@ class CORE_EXPORT MediaQueryList final : public EventTargetWithInlineData,
   // From ScriptWrappable
   bool hasPendingActivity() const final;
 
-  // From ActiveDOMObject
-  void contextDestroyed() override;
+  // From ContextLifecycleObserver
+  void contextDestroyed(ExecutionContext*) override;
 
   const AtomicString& interfaceName() const override;
   ExecutionContext* getExecutionContext() const override;
 
  private:
-  MediaQueryList(ExecutionContext*, MediaQueryMatcher*, MediaQuerySet*);
+  MediaQueryList(ExecutionContext*, MediaQueryMatcher*, RefPtr<MediaQuerySet>);
 
   bool updateMatches();
 
   Member<MediaQueryMatcher> m_matcher;
-  Member<MediaQuerySet> m_media;
+  RefPtr<MediaQuerySet> m_media;
   using ListenerList = HeapListHashSet<Member<MediaQueryListListener>>;
   ListenerList m_listeners;
   bool m_matchesDirty;

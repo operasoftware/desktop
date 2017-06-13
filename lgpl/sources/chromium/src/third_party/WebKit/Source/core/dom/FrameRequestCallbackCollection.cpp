@@ -5,6 +5,7 @@
 #include "core/dom/FrameRequestCallbackCollection.h"
 
 #include "core/dom/FrameRequestCallback.h"
+#include "core/frame/PerformanceMonitor.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
 
@@ -20,24 +21,21 @@ FrameRequestCallbackCollection::registerCallback(
   FrameRequestCallbackCollection::CallbackId id = ++m_nextCallbackId;
   callback->m_cancelled = false;
   callback->m_id = id;
-  m_callbacks.append(callback);
+  m_callbacks.push_back(callback);
 
   TRACE_EVENT_INSTANT1("devtools.timeline", "RequestAnimationFrame",
                        TRACE_EVENT_SCOPE_THREAD, "data",
                        InspectorAnimationFrameEvent::data(m_context, id));
-  InspectorInstrumentation::asyncTaskScheduled(
-      m_context, "requestAnimationFrame", callback);
-  InspectorInstrumentation::NativeBreakpoint nativeBreakpoint(
-      m_context, "requestAnimationFrame", true);
+  probe::asyncTaskScheduledBreakable(m_context, "requestAnimationFrame",
+                                     callback);
   return id;
 }
 
 void FrameRequestCallbackCollection::cancelCallback(CallbackId id) {
   for (size_t i = 0; i < m_callbacks.size(); ++i) {
     if (m_callbacks[i]->m_id == id) {
-      InspectorInstrumentation::asyncTaskCanceled(m_context, m_callbacks[i]);
-      InspectorInstrumentation::NativeBreakpoint nativeBreakpoint(
-          m_context, "cancelAnimationFrame", true);
+      probe::asyncTaskCanceledBreakable(m_context, "cancelAnimationFrame",
+                                        m_callbacks[i]);
       m_callbacks.remove(i);
       TRACE_EVENT_INSTANT1("devtools.timeline", "CancelAnimationFrame",
                            TRACE_EVENT_SCOPE_THREAD, "data",
@@ -45,16 +43,14 @@ void FrameRequestCallbackCollection::cancelCallback(CallbackId id) {
       return;
     }
   }
-  for (size_t i = 0; i < m_callbacksToInvoke.size(); ++i) {
-    if (m_callbacksToInvoke[i]->m_id == id) {
-      InspectorInstrumentation::asyncTaskCanceled(m_context,
-                                                  m_callbacksToInvoke[i]);
-      InspectorInstrumentation::NativeBreakpoint nativeBreakpoint(
-          m_context, "cancelAnimationFrame", true);
+  for (const auto& callback : m_callbacksToInvoke) {
+    if (callback->m_id == id) {
+      probe::asyncTaskCanceledBreakable(m_context, "cancelAnimationFrame",
+                                        callback);
       TRACE_EVENT_INSTANT1("devtools.timeline", "CancelAnimationFrame",
                            TRACE_EVENT_SCOPE_THREAD, "data",
                            InspectorAnimationFrameEvent::data(m_context, id));
-      m_callbacksToInvoke[i]->m_cancelled = true;
+      callback->m_cancelled = true;
       // will be removed at the end of executeCallbacks()
       return;
     }
@@ -69,15 +65,15 @@ void FrameRequestCallbackCollection::executeCallbacks(
   DCHECK(m_callbacksToInvoke.isEmpty());
   m_callbacksToInvoke.swap(m_callbacks);
 
-  for (size_t i = 0; i < m_callbacksToInvoke.size(); ++i) {
-    FrameRequestCallback* callback = m_callbacksToInvoke[i].get();
+  for (const auto& callback : m_callbacksToInvoke) {
     if (!callback->m_cancelled) {
       TRACE_EVENT1(
           "devtools.timeline", "FireAnimationFrame", "data",
           InspectorAnimationFrameEvent::data(m_context, callback->m_id));
-      InspectorInstrumentation::NativeBreakpoint nativeBreakpoint(
-          m_context, "animationFrameFired", false);
-      InspectorInstrumentation::AsyncTask asyncTask(m_context, callback);
+      probe::AsyncTask asyncTask(m_context, callback,
+                                 "requestAnimationFrame.callback");
+      PerformanceMonitor::HandlerCall handlerCall(
+          m_context, "requestAnimationFrame", true);
       if (callback->m_useLegacyTimeBase)
         callback->handleEvent(highResNowMsLegacy);
       else

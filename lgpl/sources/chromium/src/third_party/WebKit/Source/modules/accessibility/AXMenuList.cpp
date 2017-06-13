@@ -48,7 +48,7 @@ AccessibilityRole AXMenuList::determineAccessibilityRole() {
   return PopUpButtonRole;
 }
 
-bool AXMenuList::press() const {
+bool AXMenuList::press() {
   if (!m_layoutObject)
     return false;
 
@@ -92,7 +92,7 @@ void AXMenuList::addChildren() {
     return;
   }
 
-  m_children.append(list);
+  m_children.push_back(list);
 
   list->addChildren();
 }

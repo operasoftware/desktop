@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// http://mozvr.github.io/webvr-spec/webvr.html#vrpose
+// https://w3c.github.io/webvr/#interface-vrpose
 [
     OriginTrialEnabled=WebVR,
 ] interface VRPose {
     readonly attribute Float32Array? position;
-    readonly attribute Float32Array? linearVelocity;
-    readonly attribute Float32Array? linearAcceleration;
+    [MeasureAs=VRPoseLinearVelocity] readonly attribute Float32Array? linearVelocity;
+    [MeasureAs=VRPoseLinearAcceleration] readonly attribute Float32Array? linearAcceleration;
     readonly attribute Float32Array? orientation;
-    readonly attribute Float32Array? angularVelocity;
-    readonly attribute Float32Array? angularAcceleration;
+    [MeasureAs=VRPoseAngularVelocity] readonly attribute Float32Array? angularVelocity;
+    [MeasureAs=VRPoseAngularAcceleration] readonly attribute Float32Array? angularAcceleration;
 };

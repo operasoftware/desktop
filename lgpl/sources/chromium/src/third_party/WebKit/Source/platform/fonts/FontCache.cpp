@@ -29,6 +29,7 @@
 
 #include "platform/fonts/FontCache.h"
 
+#include <memory>
 #include "base/trace_event/process_memory_dump.h"
 #include "platform/FontFamilyNames.h"
 #include "platform/Histogram.h"
@@ -45,8 +46,8 @@
 #include "platform/fonts/TextRenderingMode.h"
 #include "platform/fonts/opentype/OpenTypeVerticalData.h"
 #include "platform/fonts/shaping/ShapeCache.h"
-#include "platform/tracing/web_memory_allocator_dump.h"
-#include "platform/tracing/web_process_memory_dump.h"
+#include "platform/instrumentation/tracing/web_memory_allocator_dump.h"
+#include "platform/instrumentation/tracing/web_process_memory_dump.h"
 #include "public/platform/Platform.h"
 #include "ui/gfx/font_list.h"
 #include "wtf/HashMap.h"
@@ -54,9 +55,9 @@
 #include "wtf/PtrUtil.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/Vector.h"
+#include "wtf/debug/Alias.h"
 #include "wtf/text/AtomicStringHash.h"
 #include "wtf/text/StringHash.h"
-#include <memory>
 
 using namespace WTF;
 
@@ -110,14 +111,14 @@ FontPlatformData* FontCache::systemFontPlatformData(
   DCHECK(!family.isEmpty() && family != FontFamilyNames::system_ui);
 #endif
   return getFontPlatformData(fontDescription, FontFaceCreationParams(family),
-                             true);
+                             AlternateFontName::NoAlternate);
 }
 #endif
 
 FontPlatformData* FontCache::getFontPlatformData(
     const FontDescription& fontDescription,
     const FontFaceCreationParams& creationParams,
-    bool checkingAlternateName) {
+    AlternateFontName alternateFontName) {
   if (!gFontPlatformDataCache) {
     gFontPlatformDataCache = new FontPlatformDataCache;
     platformInit();
@@ -147,7 +148,7 @@ FontPlatformData* FontCache::getFontPlatformData(
     // addResult's scope must end before we recurse for alternate family names
     // below, to avoid trigering its dtor hash-changed asserts.
     SizedFontPlatformDataSet* sizedFonts =
-        &gFontPlatformDataCache->add(key, SizedFontPlatformDataSet())
+        &gFontPlatformDataCache->insert(key, SizedFontPlatformDataSet())
              .storedValue->value;
     bool wasEmpty = sizedFonts->isEmpty();
 
@@ -155,21 +156,23 @@ FontPlatformData* FontCache::getFontPlatformData(
     // |sizedFont|.
     FontPlatformData* anotherSize =
         wasEmpty ? nullptr : sizedFonts->begin()->value.get();
-    auto addResult = sizedFonts->add(roundedSize, nullptr);
+    auto addResult = sizedFonts->insert(roundedSize, nullptr);
     std::unique_ptr<FontPlatformData>* found = &addResult.storedValue->value;
     if (addResult.isNewEntry) {
-      if (wasEmpty)
-        *found = createFontPlatformData(fontDescription, creationParams, size);
-      else if (anotherSize)
+      if (wasEmpty) {
+        *found = createFontPlatformData(fontDescription, creationParams, size,
+                                        alternateFontName);
+      } else if (anotherSize) {
         *found = scaleFontPlatformData(*anotherSize, fontDescription,
                                        creationParams, size);
+      }
     }
 
     result = found->get();
     foundResult = result || !addResult.isNewEntry;
   }
 
-  if (!foundResult && !checkingAlternateName &&
+  if (!foundResult && alternateFontName == AlternateFontName::AllowAlternate &&
       creationParams.creationType() == CreateFontByFamily) {
     // We were unable to find a font. We have a small set of fonts that we alias
     // to other names, e.g., Arial/Helvetica, Courier/Courier New, etc. Try
@@ -178,15 +181,15 @@ FontPlatformData* FontCache::getFontPlatformData(
         alternateFamilyName(creationParams.family());
     if (!alternateName.isEmpty()) {
       FontFaceCreationParams createByAlternateFamily(alternateName);
-      result =
-          getFontPlatformData(fontDescription, createByAlternateFamily, true);
+      result = getFontPlatformData(fontDescription, createByAlternateFamily,
+                                   AlternateFontName::NoAlternate);
     }
     if (result) {
       // Cache the result under the old name.
       auto adding =
-          &gFontPlatformDataCache->add(key, SizedFontPlatformDataSet())
+          &gFontPlatformDataCache->insert(key, SizedFontPlatformDataSet())
                .storedValue->value;
-      adding->set(roundedSize, wrapUnique(new FontPlatformData(*result)));
+      adding->set(roundedSize, WTF::wrapUnique(new FontPlatformData(*result)));
     }
   }
 
@@ -201,7 +204,7 @@ std::unique_ptr<FontPlatformData> FontCache::scaleFontPlatformData(
 #if OS(MACOSX)
   return createFontPlatformData(fontDescription, creationParams, fontSize);
 #else
-  return makeUnique<FontPlatformData>(fontPlatformData, fontSize);
+  return WTF::makeUnique<FontPlatformData>(fontPlatformData, fontSize);
 #endif
 }
 
@@ -213,7 +216,7 @@ ShapeCache* FontCache::getShapeCache(const FallbackListCompositeKey& key) {
   ShapeCache* result = nullptr;
   if (it == gFallbackListShaperCache->end()) {
     result = new ShapeCache();
-    gFallbackListShaperCache->set(key, wrapUnique(result));
+    gFallbackListShaperCache->set(key, WTF::wrapUnique(result));
   } else {
     result = it->value.get();
   }
@@ -233,12 +236,9 @@ FontVerticalDataCache& fontVerticalDataCacheInstance() {
   return fontVerticalDataCache;
 }
 
-void FontCache::setFontManager(const sk_sp<SkFontMgr>& fontManager) {
+void FontCache::setFontManager(sk_sp<SkFontMgr> fontManager) {
   DCHECK(!s_staticFontManager);
-  s_staticFontManager = fontManager.get();
-  // Explicitly AddRef since we're going to hold on to the object for the life
-  // of the program.
-  s_staticFontManager->ref();
+  s_staticFontManager = fontManager.release();
 }
 
 PassRefPtr<OpenTypeVerticalData> FontCache::getVerticalData(
@@ -268,12 +268,12 @@ static FontDataCache* gFontDataCache = 0;
 PassRefPtr<SimpleFontData> FontCache::getFontData(
     const FontDescription& fontDescription,
     const AtomicString& family,
-    bool checkingAlternateName,
+    AlternateFontName alternameFontName,
     ShouldRetain shouldRetain) {
   if (FontPlatformData* platformData = getFontPlatformData(
           fontDescription, FontFaceCreationParams(
                                adjustFamilyNameToAvoidUnsupportedFonts(family)),
-          checkingAlternateName)) {
+          alternameFontName)) {
     return fontDataFromFontPlatformData(
         platformData, shouldRetain, fontDescription.subpixelAscentDescent());
   }
@@ -288,7 +288,7 @@ PassRefPtr<SimpleFontData> FontCache::fontDataFromFontPlatformData(
   if (!gFontDataCache)
     gFontDataCache = new FontDataCache;
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   if (shouldRetain == DoNotRetain)
     ASSERT(m_purgePreventCount);
 #endif
@@ -296,13 +296,21 @@ PassRefPtr<SimpleFontData> FontCache::fontDataFromFontPlatformData(
   return gFontDataCache->get(platformData, shouldRetain, subpixelAscentDescent);
 }
 
-bool FontCache::isPlatformFontAvailable(const FontDescription& fontDescription,
-                                        const AtomicString& family) {
-  bool checkingAlternateName = true;
+bool FontCache::isPlatformFamilyMatchAvailable(
+    const FontDescription& fontDescription,
+    const AtomicString& family) {
   return getFontPlatformData(
       fontDescription,
       FontFaceCreationParams(adjustFamilyNameToAvoidUnsupportedFonts(family)),
-      checkingAlternateName);
+      AlternateFontName::NoAlternate);
+}
+
+bool FontCache::isPlatformFontUniqueNameMatchAvailable(
+    const FontDescription& fontDescription,
+    const AtomicString& uniqueFontName) {
+  return getFontPlatformData(fontDescription,
+                             FontFaceCreationParams(uniqueFontName),
+                             AlternateFontName::LocalUniqueFace);
 }
 
 String FontCache::firstAvailableOrFirst(const String& families) {
@@ -337,11 +345,11 @@ static inline void purgePlatformFontDataCache() {
     for (const auto& platformData : sizedFonts.value) {
       if (platformData.value &&
           !gFontDataCache->contains(platformData.value.get()))
-        sizesToRemove.append(platformData.key);
+        sizesToRemove.push_back(platformData.key);
     }
     sizedFonts.value.removeAll(sizesToRemove);
     if (sizedFonts.value.isEmpty())
-      keysToRemove.append(sizedFonts.key);
+      keysToRemove.push_back(sizedFonts.key);
   }
   gFontPlatformDataCache->removeAll(keysToRemove);
 }
@@ -368,7 +376,7 @@ static inline void purgeFontVerticalDataCache() {
              fontVerticalDataCache.begin();
          verticalData != verticalDataEnd; ++verticalData) {
       if (!verticalData->value || !verticalData->value->inFontCache())
-        keysToRemove.append(verticalData->key);
+        keysToRemove.push_back(verticalData->key);
     }
     fontVerticalDataCache.removeAll(keysToRemove);
   }
@@ -394,9 +402,9 @@ void FontCache::invalidateShapeCache() {
 }
 
 void FontCache::purge(PurgeSeverity PurgeSeverity) {
-  // We should never be forcing the purge while the FontCachePurgePreventer is
-  // in scope.
-  ASSERT(!m_purgePreventCount || PurgeSeverity == PurgeIfNeeded);
+  // Ideally we should never be forcing the purge while the
+  // FontCachePurgePreventer is in scope, but we call purge() at any timing
+  // via MemoryCoordinator.
   if (m_purgePreventCount)
     return;
 
@@ -418,8 +426,9 @@ HeapHashSet<WeakMember<FontCacheClient>>& fontCacheClients() {
 }
 
 void FontCache::addClient(FontCacheClient* client) {
+  CHECK(client);
   ASSERT(!fontCacheClients().contains(client));
-  fontCacheClients().add(client);
+  fontCacheClients().insert(client);
 }
 
 static unsigned short gGeneration = 0;
@@ -442,20 +451,33 @@ void FontCache::invalidate() {
   gGeneration++;
 
   HeapVector<Member<FontCacheClient>> clients;
-  size_t numClients = fontCacheClients().size();
-  clients.reserveInitialCapacity(numClients);
-  HeapHashSet<WeakMember<FontCacheClient>>::iterator end =
-      fontCacheClients().end();
-  for (HeapHashSet<WeakMember<FontCacheClient>>::iterator it =
-           fontCacheClients().begin();
-       it != end; ++it)
-    clients.append(*it);
-
-  ASSERT(numClients == clients.size());
-  for (size_t i = 0; i < numClients; ++i)
-    clients[i]->fontCacheInvalidated();
+  copyToVector(fontCacheClients(), clients);
+  for (const auto& client : clients) {
+    // This should not be nullptr, but to see if checking nullptr can suppress
+    // crashes. crbug.com/581698
+    if (client)
+      client->fontCacheInvalidated();
+  }
 
   purge(ForcePurge);
+}
+
+void FontCache::crashWithFontInfo(const FontDescription* fontDescription) {
+  FontCache* fontCache = FontCache::fontCache();
+  SkFontMgr* fontMgr = nullptr;
+  int numFamilies = std::numeric_limits<int>::min();
+  if (fontCache) {
+    fontMgr = fontCache->m_fontManager.get();
+    if (fontMgr)
+      numFamilies = fontMgr->countFamilies();
+  }
+
+  debug::alias(&fontDescription);
+  debug::alias(&fontCache);
+  debug::alias(&fontMgr);
+  debug::alias(&numFamilies);
+
+  DCHECK(false);
 }
 
 void FontCache::dumpFontPlatformDataCache(

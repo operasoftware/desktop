@@ -10,7 +10,7 @@
 #include "core/animation/AnimationTestHelper.h"
 #include "core/testing/DummyPageHolder.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <v8.h>
+#include "v8/include/v8.h"
 
 namespace blink {
 
@@ -22,7 +22,7 @@ Timing applyTimingInputNumber(v8::Isolate* isolate,
   setV8ObjectPropertyAsNumber(isolate, timingInput, timingProperty,
                               timingPropertyValue);
   KeyframeEffectOptions timingInputDictionary;
-  TrackExceptionState exceptionState;
+  DummyExceptionStateForTesting exceptionState;
   V8KeyframeEffectOptions::toImpl(isolate, timingInput, timingInputDictionary,
                                   exceptionState);
   Timing result;
@@ -40,7 +40,7 @@ Timing applyTimingInputString(v8::Isolate* isolate,
   setV8ObjectPropertyAsString(isolate, timingInput, timingProperty,
                               timingPropertyValue);
   KeyframeEffectOptions timingInputDictionary;
-  TrackExceptionState exceptionState;
+  DummyExceptionStateForTesting exceptionState;
   V8KeyframeEffectOptions::toImpl(isolate, timingInput, timingInputDictionary,
                                   exceptionState);
   Timing result;
@@ -338,7 +338,7 @@ TEST(AnimationTimingInputTest, TimingInputTimingFunction) {
 }
 
 TEST(AnimationTimingInputTest, TimingInputEmpty) {
-  TrackExceptionState exceptionState;
+  DummyExceptionStateForTesting exceptionState;
   Timing controlTiming;
   Timing updatedTiming;
   bool success = TimingInput::convert(KeyframeEffectOptions(), updatedTiming,

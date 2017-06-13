@@ -56,6 +56,7 @@ class CORE_EXPORT DataObject : public GarbageCollectedFinalized<DataObject>,
 
  public:
   static DataObject* createFromPasteboard(PasteMode);
+  static DataObject* createFromString(const String&);
   static DataObject* create();
   static DataObject* create(WebDragData);
 
@@ -102,7 +103,10 @@ class CORE_EXPORT DataObject : public GarbageCollectedFinalized<DataObject>,
   }
 
   // Used to handle files (images) being dragged out.
-  void addSharedBuffer(const String& name, PassRefPtr<SharedBuffer>);
+  void addSharedBuffer(PassRefPtr<SharedBuffer>,
+                       const KURL&,
+                       const String& filenameExtension,
+                       const AtomicString& contentDisposition);
 
   int modifiers() const { return m_modifiers; }
   void setModifiers(int modifiers) { m_modifiers = modifiers; }

@@ -99,11 +99,26 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
   virtual void cancelledRemotePlaybackRequest() = 0;
   virtual void remotePlaybackStarted() = 0;
 
+  // Set the player as the persistent video. Persistent video should hide its
+  // controls and go fullscreen.
+  virtual void onBecamePersistentVideo(bool) = 0;
+
+  // After the monitoring is activated, the client will inform WebMediaPlayer
+  // when the element becomes/stops being the dominant visible content by
+  // calling WebMediaPlayer::becameDominantVisibleContent(bool).
+  virtual void activateViewportIntersectionMonitoring(bool) {}
+
   // Returns whether the media element is in an autoplay muted state.
   virtual bool isAutoplayingMuted() = 0;
 
   // Warning: This method will destruct the caller.
   virtual void requestReload(const WebURL& newUrl) = 0;
+
+  // Returns if there's a selected video track.
+  virtual bool hasSelectedVideoTrack() = 0;
+
+  // Returns the selected video track id (or an empty id if there's none).
+  virtual WebMediaPlayer::TrackId getSelectedVideoTrackId() = 0;
 
  protected:
   ~WebMediaPlayerClient() {}

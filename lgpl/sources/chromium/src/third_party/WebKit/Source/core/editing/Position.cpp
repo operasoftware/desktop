@@ -51,6 +51,11 @@ bool canBeAnchorNode<EditingInFlatTreeStrategy>(Node* node) {
 #endif
 
 template <typename Strategy>
+DEFINE_TRACE(PositionTemplate<Strategy>) {
+  visitor->trace(m_anchorNode);
+}
+
+template <typename Strategy>
 const TreeScope* PositionTemplate<Strategy>::commonAncestorTreeScope(
     const PositionTemplate<Strategy>& a,
     const PositionTemplate<Strategy>& b) {
@@ -586,7 +591,7 @@ String PositionTemplate<Strategy>::toAnchorTypeAndOffsetString() const {
     case PositionAnchorType::OffsetInAnchor: {
       StringBuilder builder;
       builder.append("offsetInAnchor[");
-      builder.append(m_offset);
+      builder.appendNumber(m_offset);
       builder.append("]");
       return builder.toString();
     }
@@ -600,7 +605,7 @@ String PositionTemplate<Strategy>::toAnchorTypeAndOffsetString() const {
       return "afterAnchor";
   }
   NOTREACHED();
-  return emptyString();
+  return emptyString;
 }
 
 #ifndef NDEBUG

@@ -10,8 +10,18 @@ Resources.AppManifestView = class extends UI.VBox {
     super(true);
     this.registerRequiredCSS('resources/appManifestView.css');
 
+    this._emptyView = new UI.EmptyWidget(Common.UIString('No manifest detected'));
+    var p = this._emptyView.appendParagraph();
+    var linkElement = UI.createExternalLink('https://developers.google.com/web/fundamentals/engage-and-retain/web-app-manifest/?utm_source=devtools',
+        Common.UIString('Read more about the web manifest'));
+    p.appendChild(UI.formatLocalized('A web manifest allows you to control how your app behaves when launched and displayed to the user. %s', [linkElement]));
+
+    this._emptyView.show(this.contentElement);
+    this._emptyView.hideWidget();
+
     this._reportView = new UI.ReportView(Common.UIString('App Manifest'));
     this._reportView.show(this.contentElement);
+    this._reportView.hideWidget();
 
     this._errorsSection = this._reportView.appendSection(Common.UIString('Errors and warnings'));
     this._identitySection = this._reportView.appendSection(Common.UIString('Identity'));
@@ -19,7 +29,7 @@ Resources.AppManifestView = class extends UI.VBox {
     toolbar.renderAsLinks();
     var addToHomeScreen =
         new UI.ToolbarButton(Common.UIString('Add to homescreen'), undefined, Common.UIString('Add to homescreen'));
-    addToHomeScreen.addEventListener('click', this._addToHomescreen.bind(this));
+    addToHomeScreen.addEventListener(UI.ToolbarButton.Events.Click, this._addToHomescreen, this);
     toolbar.appendToolbarItem(addToHomeScreen);
 
     this._presentationSection = this._reportView.appendSection(Common.UIString('Presentation'));
@@ -31,11 +41,11 @@ Resources.AppManifestView = class extends UI.VBox {
     this._startURLField = this._presentationSection.appendField(Common.UIString('Start URL'));
 
     var themeColorField = this._presentationSection.appendField(Common.UIString('Theme color'));
-    this._themeColorSwatch = UI.ColorSwatch.create();
+    this._themeColorSwatch = InlineEditor.ColorSwatch.create();
     themeColorField.appendChild(this._themeColorSwatch);
 
     var backgroundColorField = this._presentationSection.appendField(Common.UIString('Background color'));
-    this._backgroundColorSwatch = UI.ColorSwatch.create();
+    this._backgroundColorSwatch = InlineEditor.ColorSwatch.create();
     backgroundColorField.appendChild(this._backgroundColorSwatch);
 
     this._orientationField = this._presentationSection.appendField(Common.UIString('Orientation'));
@@ -81,16 +91,24 @@ Resources.AppManifestView = class extends UI.VBox {
    * @param {!Array<!Protocol.Page.AppManifestError>} errors
    */
   _renderManifest(url, data, errors) {
-    this._reportView.setURL(Components.Linkifier.linkifyURLAsNode(url));
+    if (!data && !errors.length) {
+      this._emptyView.showWidget();
+      this._reportView.hideWidget();
+      return;
+    }
+    this._emptyView.hideWidget();
+    this._reportView.showWidget();
+
+    this._reportView.setURL(Components.Linkifier.linkifyURL(url));
     this._errorsSection.clearContent();
     this._errorsSection.element.classList.toggle('hidden', !errors.length);
     for (var error of errors) {
       this._errorsSection.appendRow().appendChild(
-          createLabel(error.message, error.critical ? 'smallicon-error' : 'smallicon-warning'));
+          UI.createLabel(error.message, error.critical ? 'smallicon-error' : 'smallicon-warning'));
     }
 
     if (!data)
-      data = '{}';
+      return;
 
     var parsedManifest = JSON.parse(data);
     this._nameField.textContent = stringProperty('name');
@@ -98,9 +116,8 @@ Resources.AppManifestView = class extends UI.VBox {
     this._startURLField.removeChildren();
     var startURL = stringProperty('start_url');
     if (startURL) {
-      this._startURLField.appendChild(Components.linkifyResourceAsNode(
-          /** @type {string} */ (Common.ParsedURL.completeURL(url, startURL)), undefined, undefined, undefined,
-          undefined, startURL));
+      this._startURLField.appendChild(Components.Linkifier.linkifyURL(
+          /** @type {string} */ (Common.ParsedURL.completeURL(url, startURL)), startURL));
     }
 
     this._themeColorSwatch.classList.toggle('hidden', !stringProperty('theme_color'));
@@ -137,7 +154,10 @@ Resources.AppManifestView = class extends UI.VBox {
     }
   }
 
-  _addToHomescreen() {
+  /**
+   * @param {!Common.Event} event
+   */
+  _addToHomescreen(event) {
     var target = SDK.targetManager.mainTarget();
     if (target && target.hasBrowserCapability()) {
       target.pageAgent().requestAppBanner();

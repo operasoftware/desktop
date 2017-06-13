@@ -35,7 +35,7 @@ namespace blink {
 
 std::unique_ptr<WebScrollbarThemeGeometryNative>
 WebScrollbarThemeGeometryNative::create(ScrollbarTheme& theme) {
-  return wrapUnique(new WebScrollbarThemeGeometryNative(theme));
+  return WTF::wrapUnique(new WebScrollbarThemeGeometryNative(theme));
 }
 
 WebScrollbarThemeGeometryNative::WebScrollbarThemeGeometryNative(
@@ -80,6 +80,20 @@ WebRect WebScrollbarThemeGeometryNative::forwardButtonEndRect(
     WebScrollbar* scrollbar) {
   return m_theme.forwardButtonRect(WebScrollbarThemeClientImpl(*scrollbar),
                                    ForwardButtonEndPart, false);
+}
+
+WebSize WebScrollbarThemeGeometryNative::ninePatchThumbCanvasSize(
+    WebScrollbar* scrollbar) {
+  DCHECK(m_theme.usesNinePatchThumbResource());
+  return m_theme.ninePatchThumbCanvasSize(
+      WebScrollbarThemeClientImpl(*scrollbar));
+}
+
+WebRect WebScrollbarThemeGeometryNative::ninePatchThumbAperture(
+    WebScrollbar* scrollbar) {
+  DCHECK(m_theme.usesNinePatchThumbResource());
+  return m_theme.ninePatchThumbAperture(
+      WebScrollbarThemeClientImpl(*scrollbar));
 }
 
 }  // namespace blink

@@ -150,9 +150,7 @@ if (window.testRunner) {
             return;
         }
         currentTest = test;
-        // FIXME: We should be using multiple instances of test runner on Dromaeo as well but it's too slow now.
-        // FIXME: Don't hard code the number of in-process iterations to use inside a test runner.
-        iterationCount = test.dromaeoIterationCount || (window.testRunner ? 5 : 20);
+        iterationCount = test.iterationCount || (window.testRunner ? 5 : 20);
         if (test.warmUpCount && test.warmUpCount > 0)
             completedIterations = -test.warmUpCount;
         logLines = PerfTestRunner.bufferedLog || window.testRunner ? [] : null;
@@ -164,8 +162,12 @@ if (window.testRunner) {
     }
 
     function scheduleNextRun(scheduler, runner) {
-        PerfTestRunner.gc();
         scheduler(function () {
+            // This will be used by tools/perf/benchmarks/blink_perf.py to find
+            // traces during the measured runs.
+            if (completedIterations >= 0)
+                console.time("blink_perf");
+
             try {
                 if (currentTest.setup)
                     currentTest.setup();
@@ -207,6 +209,7 @@ if (window.testRunner) {
 
     function finish() {
         try {
+            console.timeEnd("blink_perf");
             if (currentTest.description)
                 PerfTestRunner.log("Description: " + currentTest.description);
             PerfTestRunner.logStatistics(results, PerfTestRunner.unit, "Time:");
@@ -248,6 +251,11 @@ if (window.testRunner) {
     PerfTestRunner.measureFrameTime = function (test) {
         PerfTestRunner.unit = "ms";
         PerfTestRunner.bufferedLog = true;
+        test.warmUpCount = test.warmUpCount || 5;
+        test.iterationCount = test.iterationCount || 10;
+        // Force gc before starting the test to avoid the measured time from
+        // being affected by gc performance. See crbug.com/667811#c16.
+        PerfTestRunner.gc();
         start(test, requestAnimationFrame, measureFrameTimeOnce);
     }
 
@@ -278,6 +286,9 @@ if (window.testRunner) {
     }
 
     function measureTimeOnce() {
+        // Force gc before measuring time to avoid interference between tests.
+        PerfTestRunner.gc();
+
         var start = PerfTestRunner.now();
         var returnValue = currentTest.run();
         var end = PerfTestRunner.now();
@@ -312,6 +323,9 @@ if (window.testRunner) {
     }
 
     function callRunAndMeasureTime(callsPerIteration) {
+        // Force gc before measuring time to avoid interference between tests.
+        PerfTestRunner.gc();
+
         var startTime = PerfTestRunner.now();
         for (var i = 0; i < callsPerIteration; i++)
             currentTest.run();

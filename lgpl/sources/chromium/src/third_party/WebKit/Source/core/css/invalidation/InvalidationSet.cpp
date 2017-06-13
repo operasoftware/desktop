@@ -33,7 +33,7 @@
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/Element.h"
 #include "core/inspector/InspectorTraceEvents.h"
-#include "platform/tracing/TracedValue.h"
+#include "platform/instrumentation/tracing/TracedValue.h"
 #include "wtf/Compiler.h"
 #include "wtf/PtrUtil.h"
 #include "wtf/text/StringBuilder.h"
@@ -182,25 +182,25 @@ void InvalidationSet::destroy() {
 
 HashSet<AtomicString>& InvalidationSet::ensureClassSet() {
   if (!m_classes)
-    m_classes = wrapUnique(new HashSet<AtomicString>);
+    m_classes = WTF::wrapUnique(new HashSet<AtomicString>);
   return *m_classes;
 }
 
 HashSet<AtomicString>& InvalidationSet::ensureIdSet() {
   if (!m_ids)
-    m_ids = wrapUnique(new HashSet<AtomicString>);
+    m_ids = WTF::wrapUnique(new HashSet<AtomicString>);
   return *m_ids;
 }
 
 HashSet<AtomicString>& InvalidationSet::ensureTagNameSet() {
   if (!m_tagNames)
-    m_tagNames = wrapUnique(new HashSet<AtomicString>);
+    m_tagNames = WTF::wrapUnique(new HashSet<AtomicString>);
   return *m_tagNames;
 }
 
 HashSet<AtomicString>& InvalidationSet::ensureAttributeSet() {
   if (!m_attributes)
-    m_attributes = wrapUnique(new HashSet<AtomicString>);
+    m_attributes = WTF::wrapUnique(new HashSet<AtomicString>);
   return *m_attributes;
 }
 
@@ -208,28 +208,28 @@ void InvalidationSet::addClass(const AtomicString& className) {
   if (wholeSubtreeInvalid())
     return;
   RELEASE_ASSERT(!className.isEmpty());
-  ensureClassSet().add(className);
+  ensureClassSet().insert(className);
 }
 
 void InvalidationSet::addId(const AtomicString& id) {
   if (wholeSubtreeInvalid())
     return;
   RELEASE_ASSERT(!id.isEmpty());
-  ensureIdSet().add(id);
+  ensureIdSet().insert(id);
 }
 
 void InvalidationSet::addTagName(const AtomicString& tagName) {
   if (wholeSubtreeInvalid())
     return;
   RELEASE_ASSERT(!tagName.isEmpty());
-  ensureTagNameSet().add(tagName);
+  ensureTagNameSet().insert(tagName);
 }
 
 void InvalidationSet::addAttribute(const AtomicString& attribute) {
   if (wholeSubtreeInvalid())
     return;
   RELEASE_ASSERT(!attribute.isEmpty());
-  ensureAttributeSet().add(attribute);
+  ensureAttributeSet().insert(attribute);
 }
 
 void InvalidationSet::setWholeSubtreeInvalid() {

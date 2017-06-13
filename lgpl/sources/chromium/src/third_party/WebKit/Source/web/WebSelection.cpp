@@ -41,16 +41,12 @@ WebSelection::WebSelection(const CompositedSelection& selection)
     : m_selectionType(static_cast<WebSelection::SelectionType>(selection.type)),
       m_start(getWebSelectionBound(selection, true)),
       m_end(getWebSelectionBound(selection, false)),
-      m_boundingRect(selection.boundingRect),
-      m_isEditable(selection.isEditable),
-      m_isEmptyTextControl(selection.isEmptyTextControl) {}
+      m_boundingRect(selection.boundingRect) {}
 
 WebSelection::WebSelection(const WebSelection& other)
     : m_selectionType(other.m_selectionType),
       m_start(other.m_start),
       m_end(other.m_end),
-      m_boundingRect(other.m_boundingRect),
-      m_isEditable(other.m_isEditable),
-      m_isEmptyTextControl(other.m_isEmptyTextControl) {}
+      m_boundingRect(other.m_boundingRect) {}
 
 }  // namespace blink

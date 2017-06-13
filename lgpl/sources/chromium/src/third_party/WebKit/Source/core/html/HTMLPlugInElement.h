@@ -27,15 +27,14 @@
 #include "bindings/core/v8/SharedPersistent.h"
 #include "core/CoreExport.h"
 #include "core/html/HTMLFrameOwnerElement.h"
-
-#include <v8.h>
+#include "v8/include/v8.h"
 
 namespace blink {
 
+class FrameViewBase;
 class HTMLImageLoader;
 class LayoutPart;
 class LayoutEmbeddedItem;
-class Widget;
 
 enum PreferPlugInsForImagesOption {
   ShouldPreferPlugInsForImages,
@@ -51,7 +50,7 @@ class CORE_EXPORT HTMLPlugInElement : public HTMLFrameOwnerElement {
   // TODO(dcheng): Consider removing this, since HTMLEmbedElementLegacyCall
   // and HTMLObjectElementLegacyCall usage is extremely low.
   SharedPersistent<v8::Object>* pluginWrapper();
-  Widget* pluginWidget() const;
+  FrameViewBase* pluginWidget() const;
   bool canProcessDrag() const;
   const String& url() const { return m_url; }
 
@@ -67,8 +66,6 @@ class CORE_EXPORT HTMLPlugInElement : public HTMLFrameOwnerElement {
   void requestPluginCreationWithoutLayoutObjectIfPossible();
   void createPluginWithoutLayoutObject();
 
-  void removedFrom(ContainerNode* insertionPoint) override;
-
  protected:
   HTMLPlugInElement(const QualifiedName& tagName,
                     Document&,
@@ -76,6 +73,7 @@ class CORE_EXPORT HTMLPlugInElement : public HTMLFrameOwnerElement {
                     PreferPlugInsForImagesOption);
 
   // Node functions:
+  void removedFrom(ContainerNode* insertionPoint) override;
   void didMoveToNewDocument(Document& oldDocument) override;
 
   // Element functions:
@@ -115,10 +113,10 @@ class CORE_EXPORT HTMLPlugInElement : public HTMLFrameOwnerElement {
   bool m_isDelayingLoadEvent;
 
  private:
-  // EventTarget functions:
+  // EventTarget overrides:
   void removeAllEventListeners() final;
 
-  // Node functions:
+  // Node overrides:
   bool canContainRangeEndPoint() const override { return false; }
   bool canStartSelection(SelectionStartPolicy) const override;
   bool willRespondToMouseClickEvents() final;
@@ -127,16 +125,19 @@ class CORE_EXPORT HTMLPlugInElement : public HTMLFrameOwnerElement {
   void detachLayoutTree(const AttachContext& = AttachContext()) final;
   void finishParsingChildren() final;
 
-  // Element functions:
+  // Element overrides:
   LayoutObject* createLayoutObject(const ComputedStyle&) override;
   bool supportsFocus() const final { return true; }
   bool layoutObjectIsFocusable() const final;
   bool isKeyboardFocusable() const final;
   void didAddUserAgentShadowRoot(ShadowRoot&) final;
 
-  // HTMLElement function:
+  // HTMLElement overrides:
   bool hasCustomFocusLogic() const override;
   bool isPluginElement() const final;
+
+  // HTMLFrameOwnerElement overrides:
+  void disconnectContentFrame() override;
 
   // Return any existing LayoutPart without triggering relayout, or 0 if it
   // doesn't yet exist.
@@ -156,7 +157,7 @@ class CORE_EXPORT HTMLPlugInElement : public HTMLFrameOwnerElement {
   bool allowedToLoadObject(const KURL&, const String& mimeType);
   bool wouldLoadAsNetscapePlugin(const String& url, const String& serviceType);
 
-  void setPersistedPluginWidget(Widget*);
+  void setPersistedPluginWidget(FrameViewBase*);
 
   bool requestObjectInternal(const String& url,
                              const String& mimeType,
@@ -176,7 +177,7 @@ class CORE_EXPORT HTMLPlugInElement : public HTMLFrameOwnerElement {
   // prevent confusing code which may assume that widget() != null
   // means the frame is active, we save off m_widget here while
   // the plugin is persisting but not being displayed.
-  Member<Widget> m_persistedPluginWidget;
+  Member<FrameViewBase> m_persistedPluginWidget;
 };
 
 inline bool isHTMLPlugInElement(const HTMLElement& element) {

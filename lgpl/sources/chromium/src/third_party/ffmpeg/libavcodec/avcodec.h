@@ -89,7 +89,7 @@
  * - Send valid input:
  *   - For decoding, call avcodec_send_packet() to give the decoder raw
  *     compressed data in an AVPacket.
- *   - For encoding, call avcodec_send_frame() to give the decoder an AVFrame
+ *   - For encoding, call avcodec_send_frame() to give the encoder an AVFrame
  *     containing uncompressed audio or video.
  *   In both cases, it is recommended that AVPackets and AVFrames are
  *   refcounted, or libavcodec might have to copy the input data. (libavformat
@@ -411,6 +411,9 @@ enum AVCodecID {
     AV_CODEC_ID_MAGICYUV,
     AV_CODEC_ID_SHEERVIDEO,
     AV_CODEC_ID_YLC,
+    AV_CODEC_ID_PSD,
+    AV_CODEC_ID_PIXLET,
+    AV_CODEC_ID_SPEEDHQ,
 
     /* various PCM "codecs" */
     AV_CODEC_ID_FIRST_AUDIO = 0x10000,     ///< A dummy id pointing at the start of audio codecs
@@ -448,6 +451,8 @@ enum AVCodecID {
 
     AV_CODEC_ID_PCM_S64LE = 0x10800,
     AV_CODEC_ID_PCM_S64BE,
+    AV_CODEC_ID_PCM_F16LE,
+    AV_CODEC_ID_PCM_F24LE,
 
     /* various ADPCM codecs */
     AV_CODEC_ID_ADPCM_IMA_QT = 0x11000,
@@ -1536,7 +1541,13 @@ enum AVPacketSideDataType {
      * should be associated with a video stream and containts data in the form
      * of the AVMasteringDisplayMetadata struct.
      */
-    AV_PKT_DATA_MASTERING_DISPLAY_METADATA
+    AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
+
+    /**
+     * This side data should be associated with a video stream and corresponds
+     * to the AVSphericalMapping structure.
+     */
+    AV_PKT_DATA_SPHERICAL,
 };
 
 #define AV_PKT_DATA_QUALITY_FACTOR AV_PKT_DATA_QUALITY_STATS //DEPRECATED
@@ -2878,6 +2889,7 @@ typedef struct AVCodecContext {
 #define FF_BUG_DC_CLIP          4096
 #define FF_BUG_MS               8192 ///< Work around various bugs in Microsoft's broken decoders.
 #define FF_BUG_TRUNCATED       16384
+#define FF_BUG_IEDGE           32768
 
     /**
      * strictly follow the standard (MPEG-4, ...).
@@ -3562,6 +3574,14 @@ typedef struct AVCodecContext {
      * - encoding: unused
      */
     int trailing_padding;
+
+    /**
+     * The number of pixels per image to maximally accept.
+     *
+     * - decoding: set by user
+     * - encoding: set by user
+     */
+    int64_t max_pixels;
 
 } AVCodecContext;
 
@@ -5568,15 +5588,8 @@ enum AVPixelFormat avcodec_find_best_pix_fmt_of_2(enum AVPixelFormat dst_pix_fmt
                                             enum AVPixelFormat src_pix_fmt, int has_alpha, int *loss_ptr);
 
 attribute_deprecated
-#if AV_HAVE_INCOMPATIBLE_LIBAV_ABI
-enum AVPixelFormat avcodec_find_best_pix_fmt2(const enum AVPixelFormat *pix_fmt_list,
-                                              enum AVPixelFormat src_pix_fmt,
-                                              int has_alpha, int *loss_ptr);
-#else
 enum AVPixelFormat avcodec_find_best_pix_fmt2(enum AVPixelFormat dst_pix_fmt1, enum AVPixelFormat dst_pix_fmt2,
                                             enum AVPixelFormat src_pix_fmt, int has_alpha, int *loss_ptr);
-#endif
-
 
 enum AVPixelFormat avcodec_default_get_format(struct AVCodecContext *s, const enum AVPixelFormat * fmt);
 

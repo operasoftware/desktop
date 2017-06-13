@@ -4,7 +4,6 @@
 
 import unittest
 
-from webkitpy.layout_tests.servers import server_base
 from webkitpy.layout_tests.servers import cli_wrapper
 
 
@@ -23,7 +22,10 @@ class MockServer(object):
         self.stop_called = True
 
 
-class TestCliWrapper(unittest.TestCase):
+class CliWrapperTest(unittest.TestCase):
+
+    def setUp(self):
+        self.server = None
 
     def test_main(self):
         def mock_server_constructor(*args, **kwargs):

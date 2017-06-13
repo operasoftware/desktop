@@ -6,7 +6,7 @@
 
 #include "core/workers/WorkerThreadStartupData.h"
 #include "modules/compositorworker/AnimationWorkletGlobalScope.h"
-#include "platform/tracing/TraceEvent.h"
+#include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "wtf/PtrUtil.h"
 
@@ -18,8 +18,8 @@ std::unique_ptr<AnimationWorkletThread> AnimationWorkletThread::create(
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("animation-worklet"),
                "AnimationWorkletThread::create");
   DCHECK(isMainThread());
-  return wrapUnique(new AnimationWorkletThread(std::move(workerLoaderProxy),
-                                               workerReportingProxy));
+  return WTF::wrapUnique(new AnimationWorkletThread(
+      std::move(workerLoaderProxy), workerReportingProxy));
 }
 
 AnimationWorkletThread::AnimationWorkletThread(
@@ -42,7 +42,7 @@ WorkerOrWorkletGlobalScope* AnimationWorkletThread::createWorkerGlobalScope(
         std::move(startupData->m_starterOriginPrivilegeData));
 
   // TODO(ikilpatrick): The AnimationWorkletGlobalScope will need to store a
-  // WorkerClients object for using a CompositorProxyClient object.
+  // WorkerClients object for using a CompositorWorkerProxyClient object.
   return AnimationWorkletGlobalScope::create(
       startupData->m_scriptURL, startupData->m_userAgent,
       securityOrigin.release(), this->isolate(), this);

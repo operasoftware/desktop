@@ -5,18 +5,21 @@
 #ifndef ShapeResultBuffer_h
 #define ShapeResultBuffer_h
 
+#include "platform/PlatformExport.h"
 #include "platform/fonts/shaping/ShapeResult.h"
 #include "wtf/Allocator.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Vector.h"
+#include <tuple>
 
 namespace blink {
 
 struct CharacterRange;
 class GlyphBuffer;
+struct GlyphData;
 class TextRun;
 
-class ShapeResultBuffer {
+class PLATFORM_EXPORT ShapeResultBuffer {
   WTF_MAKE_NONCOPYABLE(ShapeResultBuffer);
   STACK_ALLOCATED();
 
@@ -25,7 +28,7 @@ class ShapeResultBuffer {
 
   void appendResult(PassRefPtr<const ShapeResult> result) {
     m_hasVerticalOffsets |= result->hasVerticalOffsets();
-    m_results.append(result);
+    m_results.push_back(result);
   }
 
   bool hasVerticalOffsets() const { return m_hasVerticalOffsets; }
@@ -49,16 +52,36 @@ class ShapeResultBuffer {
   Vector<CharacterRange> individualCharacterRanges(TextDirection,
                                                    float totalWidth) const;
 
- private:
-  float fillFastHorizontalGlyphBuffer(GlyphBuffer*, TextDirection) const;
+  static CharacterRange getCharacterRange(RefPtr<const ShapeResult>,
+                                          TextDirection,
+                                          float totalWidth,
+                                          unsigned from,
+                                          unsigned to);
 
-  template <TextDirection>
-  static float fillGlyphBufferForRun(GlyphBuffer*,
-                                     const ShapeResult::RunInfo*,
-                                     float initialAdvance,
-                                     unsigned from,
-                                     unsigned to,
-                                     unsigned runOffset);
+  struct RunFontData {
+      SimpleFontData* m_fontData;
+      size_t m_glyphCount;
+  };
+
+  Vector<RunFontData> runFontData() const;
+
+ private:
+  static CharacterRange getCharacterRangeInternal(
+      const Vector<RefPtr<const ShapeResult>, 64>&,
+      TextDirection,
+      float totalWidth,
+      unsigned from,
+      unsigned to);
+
+  float fillFastHorizontalGlyphBuffer(GlyphBuffer*, const TextRun&) const;
+
+  static float fillGlyphBufferForResult(GlyphBuffer*,
+                                        const ShapeResult&,
+                                        const TextRun&,
+                                        float initialAdvance,
+                                        unsigned from,
+                                        unsigned to,
+                                        unsigned runOffset);
   static float fillGlyphBufferForTextEmphasisRun(GlyphBuffer*,
                                                  const ShapeResult::RunInfo*,
                                                  const TextRun&,

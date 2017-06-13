@@ -286,7 +286,7 @@ void MultipleFieldsTemporalInputTypeView::pickerIndicatorChooseValue(
     double value) {
   DCHECK(std::isfinite(value) || std::isnan(value));
   if (std::isnan(value))
-    element().setValue(emptyString(), DispatchInputAndChangeEvent);
+    element().setValue(emptyString, DispatchInputAndChangeEvent);
   else
     element().setValueAsNumber(value, ASSERT_NO_EXCEPTION,
                                DispatchInputAndChangeEvent);
@@ -624,7 +624,7 @@ void MultipleFieldsTemporalInputTypeView::updateClearButtonVisibility() {
 }
 
 TextDirection MultipleFieldsTemporalInputTypeView::computedTextDirection() {
-  return element().locale().isRTL() ? RTL : LTR;
+  return element().locale().isRTL() ? TextDirection::kRtl : TextDirection::kLtr;
 }
 
 AXObject* MultipleFieldsTemporalInputTypeView::popupRootAXObject() {

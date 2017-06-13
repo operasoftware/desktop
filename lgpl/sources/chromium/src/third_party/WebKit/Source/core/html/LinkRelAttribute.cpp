@@ -88,6 +88,8 @@ LinkRelAttribute::LinkRelAttribute(const String& rel)
       m_isManifest = true;
     } else if (equalIgnoringCase(linkType, "serviceworker")) {
       m_isServiceWorker = true;
+    } else if (equalIgnoringCase(linkType, "mask-icon")) {
+      m_iconType = PinnedIcon;
     }
     // Adding or removing a value here requires you to update
     // RelList::supportedTokens()

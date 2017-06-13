@@ -11,13 +11,11 @@
 namespace blink {
 
 DOMWindowPerformance::DOMWindowPerformance(LocalDOMWindow& window)
-    : DOMWindowProperty(window.frame()), m_window(&window) {}
+    : Supplement<LocalDOMWindow>(window) {}
 
 DEFINE_TRACE(DOMWindowPerformance) {
-  visitor->trace(m_window);
   visitor->trace(m_performance);
   Supplement<LocalDOMWindow>::trace(visitor);
-  DOMWindowProperty::trace(visitor);
 }
 
 // static
@@ -37,13 +35,13 @@ DOMWindowPerformance& DOMWindowPerformance::from(LocalDOMWindow& window) {
 }
 
 // static
-Performance* DOMWindowPerformance::performance(DOMWindow& window) {
-  return from(toLocalDOMWindow(window)).performance();
+Performance* DOMWindowPerformance::performance(LocalDOMWindow& window) {
+  return from(window).performance();
 }
 
 Performance* DOMWindowPerformance::performance() {
   if (!m_performance)
-    m_performance = Performance::create(m_window->frame());
+    m_performance = Performance::create(supplementable()->frame());
   return m_performance.get();
 }
 

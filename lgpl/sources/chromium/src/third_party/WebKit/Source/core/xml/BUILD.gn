@@ -8,6 +8,8 @@ blink_core_sources("xml") {
   sources = [
     "DOMParser.cpp",
     "DOMParser.h",
+    "DocumentXMLTreeViewer.cpp",
+    "DocumentXMLTreeViewer.h",
     "DocumentXPathEvaluator.cpp",
     "DocumentXPathEvaluator.h",
     "DocumentXSLT.cpp",
@@ -54,7 +56,6 @@ blink_core_sources("xml") {
     "XSLTProcessorLibxslt.cpp",
     "XSLTUnicodeSort.cpp",
     "XSLTUnicodeSort.h",
-    "parser/MarkupTokenizerInlines.h",
     "parser/SharedBufferReader.cpp",
     "parser/SharedBufferReader.h",
     "parser/XMLDocumentParser.cpp",

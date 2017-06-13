@@ -47,10 +47,9 @@
 namespace blink {
 
 class WebCompositeAndReadbackAsyncCallback;
-class WebInputEvent;
+class WebCoalescedInputEvent;
 class WebLayoutAndPaintAsyncCallback;
 class WebPagePopup;
-class WebString;
 struct WebPoint;
 template <typename T>
 class WebVector;
@@ -76,6 +75,9 @@ class WebWidget {
   // Called to notify the WebWidget of entering/exiting fullscreen mode.
   virtual void didEnterFullscreen() {}
   virtual void didExitFullscreen() {}
+
+  // TODO(crbug.com/704763): Remove the need for this.
+  virtual void setSuppressFrameRequestsWorkaroundFor704763Only(bool) {}
 
   // Called to update imperative animation state. This should be called before
   // paint, although the client can rate-limit these calls.
@@ -117,7 +119,7 @@ class WebWidget {
   virtual void themeChanged() {}
 
   // Called to inform the WebWidget of an input event.
-  virtual WebInputEventResult handleInputEvent(const WebInputEvent&) {
+  virtual WebInputEventResult handleInputEvent(const WebCoalescedInputEvent&) {
     return WebInputEventResult::NotHandled;
   }
 
@@ -144,15 +146,6 @@ class WebWidget {
   // Fetches the character range of the current composition, also called the
   // "marked range."
   virtual WebRange compositionRange() { return WebRange(); }
-
-  // Returns information about the current text input of this WebWidget.
-  // Note that this query can be expensive for long fields, as it returns the
-  // plain-text representation of the current editable element. Consider using
-  // the lighter-weight textInputType() when appropriate.
-  virtual WebTextInputInfo textInputInfo() { return WebTextInputInfo(); }
-
-  // Returns the type of current text input of this WebWidget.
-  virtual WebTextInputType textInputType() { return WebTextInputTypeNone; }
 
   // Returns the anchor and focus bounds of the current selection.
   // If the selection range is empty, it returns the caret bounds.
@@ -227,10 +220,6 @@ class WebWidget {
   virtual bool getCompositionCharacterBounds(WebVector<WebRect>& bounds) {
     return false;
   }
-
-  // Applies the range on the focused frame so that the text will later be
-  // replaced.
-  virtual void applyReplacementRange(const WebRange&) {}
 
  protected:
   ~WebWidget() {}

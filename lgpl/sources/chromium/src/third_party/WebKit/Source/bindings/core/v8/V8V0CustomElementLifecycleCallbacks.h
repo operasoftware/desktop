@@ -31,13 +31,13 @@
 #ifndef V8V0CustomElementLifecycleCallbacks_h
 #define V8V0CustomElementLifecycleCallbacks_h
 
+#include <memory>
+
 #include "bindings/core/v8/ScopedPersistent.h"
 #include "bindings/core/v8/ScriptState.h"
-#include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/custom/V0CustomElementLifecycleCallbacks.h"
+#include "v8/include/v8.h"
 #include "wtf/PassRefPtr.h"
-#include <memory>
-#include <v8.h>
 
 namespace blink {
 
@@ -46,10 +46,7 @@ class Element;
 class V8PerContextData;
 
 class V8V0CustomElementLifecycleCallbacks final
-    : public V0CustomElementLifecycleCallbacks,
-      public ContextLifecycleObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(V8V0CustomElementLifecycleCallbacks);
-
+    : public V0CustomElementLifecycleCallbacks {
  public:
   static V8V0CustomElementLifecycleCallbacks* create(
       ScriptState*,

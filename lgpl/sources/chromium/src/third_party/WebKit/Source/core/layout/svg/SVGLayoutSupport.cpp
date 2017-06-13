@@ -38,6 +38,7 @@
 #include "core/layout/svg/LayoutSVGViewportContainer.h"
 #include "core/layout/svg/SVGResources.h"
 #include "core/layout/svg/SVGResourcesCache.h"
+#include "core/page/Page.h"
 #include "core/paint/PaintLayer.h"
 #include "core/svg/SVGElement.h"
 #include "platform/geometry/TransformState.h"
@@ -61,7 +62,7 @@ FloatRect SVGLayoutSupport::localVisualRect(const LayoutObject& object) {
   DCHECK(!object.isSVGRoot());
 
   // Return early for any cases where we don't actually paint
-  if (object.styleRef().visibility() != EVisibility::Visible &&
+  if (object.styleRef().visibility() != EVisibility::kVisible &&
       !object.enclosingLayer()->hasVisibleContent())
     return FloatRect();
 
@@ -98,7 +99,7 @@ LayoutRect SVGLayoutSupport::transformVisualRect(
 static const LayoutSVGRoot& computeTransformToSVGRoot(
     const LayoutObject& object,
     AffineTransform& rootBorderBoxTransform) {
-  ASSERT(object.isSVG() && !object.isSVGRoot());
+  DCHECK(object.isSVGChild());
 
   const LayoutObject* parent;
   for (parent = &object; !parent->isSVGRoot(); parent = parent->parent())
@@ -374,8 +375,8 @@ bool SVGLayoutSupport::isOverflowHidden(const LayoutObject* object) {
   // itself to the initial viewport size.
   ASSERT(!object->isDocumentElement());
 
-  return object->style()->overflowX() == OverflowHidden ||
-         object->style()->overflowX() == OverflowScroll;
+  return object->style()->overflowX() == EOverflow::kHidden ||
+         object->style()->overflowX() == EOverflow::kScroll;
 }
 
 void SVGLayoutSupport::adjustVisualRectWithResources(
@@ -441,7 +442,7 @@ DashArray SVGLayoutSupport::resolveSVGDashArray(
     const SVGLengthContext& lengthContext) {
   DashArray dashArray;
   for (const Length& dashLength : svgDashArray.vector())
-    dashArray.append(lengthContext.valueForLength(dashLength, style));
+    dashArray.push_back(lengthContext.valueForLength(dashLength, style));
   return dashArray;
 }
 
@@ -555,7 +556,7 @@ AffineTransform SVGLayoutSupport::deprecatedCalculateTransformToLayer(
 
 float SVGLayoutSupport::calculateScreenFontSizeScalingFactor(
     const LayoutObject* layoutObject) {
-  ASSERT(layoutObject);
+  DCHECK(layoutObject);
 
   // FIXME: trying to compute a device space transform at record time is wrong.
   // All clients should be updated to avoid relying on this information, and the
@@ -563,8 +564,7 @@ float SVGLayoutSupport::calculateScreenFontSizeScalingFactor(
   AffineTransform ctm =
       deprecatedCalculateTransformToLayer(layoutObject) *
       SubtreeContentTransformScope::currentContentTransformation();
-  ctm.scale(
-      layoutObject->document().frameHost()->deviceScaleFactorDeprecated());
+  ctm.scale(layoutObject->document().page()->deviceScaleFactorDeprecated());
 
   return clampTo<float>(sqrt((ctm.xScaleSquared() + ctm.yScaleSquared()) / 2));
 }
@@ -609,7 +609,7 @@ static SearchCandidate searchTreeForFindClosestLayoutSVGText(
       float distance = distanceToChildLayoutObject(child, point);
       if (distance > closestText.candidateDistance)
         continue;
-      candidates.append(SearchCandidate(child, distance));
+      candidates.push_back(SearchCandidate(child, distance));
     }
   }
 

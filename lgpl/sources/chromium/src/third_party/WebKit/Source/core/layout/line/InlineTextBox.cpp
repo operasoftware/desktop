@@ -56,21 +56,16 @@ void InlineTextBox::destroy() {
   AbstractInlineTextBox::willDestroy(this);
 
   if (!knownToHaveNoOverflow() && gTextBoxesWithOverflow)
-    gTextBoxesWithOverflow->remove(this);
-  InlineTextBoxPainter::removeFromTextBlobCache(*this);
+    gTextBoxesWithOverflow->erase(this);
   InlineBox::destroy();
 }
 
 void InlineTextBox::offsetRun(int delta) {
   ASSERT(!isDirty());
-  InlineTextBoxPainter::removeFromTextBlobCache(*this);
   m_start += delta;
 }
 
 void InlineTextBox::markDirty() {
-  // FIXME: Is it actually possible to try and paint a dirty InlineTextBox?
-  InlineTextBoxPainter::removeFromTextBlobCache(*this);
-
   m_len = 0;
   m_start = 0;
   InlineBox::markDirty();
@@ -305,7 +300,6 @@ void InlineTextBox::setTruncation(unsigned truncation) {
     return;
 
   m_truncation = truncation;
-  InlineTextBoxPainter::removeFromTextBlobCache(*this);
 }
 
 void InlineTextBox::clearTruncation() {
@@ -317,23 +311,31 @@ LayoutUnit InlineTextBox::placeEllipsisBox(bool flowIsLTR,
                                            LayoutUnit visibleRightEdge,
                                            LayoutUnit ellipsisWidth,
                                            LayoutUnit& truncatedWidth,
-                                           bool& foundBox) {
+                                           bool& foundBox,
+                                           LayoutUnit logicalLeftOffset) {
   if (foundBox) {
     setTruncation(cFullTruncation);
     return LayoutUnit(-1);
   }
+
+  // Criteria for full truncation:
+  // LTR: the left edge of the ellipsis is to the left of our text run.
+  // RTL: the right edge of the ellipsis is to the right of our text run.
+  LayoutUnit adjustedLogicalLeft = logicalLeftOffset + logicalLeft();
 
   // For LTR this is the left edge of the box, for RTL, the right edge in parent
   // coordinates.
   LayoutUnit ellipsisX = flowIsLTR ? visibleRightEdge - ellipsisWidth
                                    : visibleLeftEdge + ellipsisWidth;
 
-  // Criteria for full truncation:
-  // LTR: the left edge of the ellipsis is to the left of our text run.
-  // RTL: the right edge of the ellipsis is to the right of our text run.
-  bool ltrFullTruncation = flowIsLTR && ellipsisX <= logicalLeft();
+  if (isLeftToRightDirection() == flowIsLTR && !flowIsLTR &&
+      logicalLeftOffset < 0)
+    ellipsisX -= logicalLeftOffset;
+
+  bool ltrFullTruncation = flowIsLTR && ellipsisX <= adjustedLogicalLeft;
   bool rtlFullTruncation =
-      !flowIsLTR && ellipsisX >= logicalLeft() + logicalWidth();
+      !flowIsLTR &&
+      ellipsisX > adjustedLogicalLeft + logicalWidth() + ellipsisWidth;
   if (ltrFullTruncation || rtlFullTruncation) {
     // Too far.  Just set full truncation, but return -1 and let the ellipsis
     // just be placed at the edge of the box.
@@ -342,8 +344,9 @@ LayoutUnit InlineTextBox::placeEllipsisBox(bool flowIsLTR,
     return LayoutUnit(-1);
   }
 
-  bool ltrEllipsisWithinBox = flowIsLTR && (ellipsisX < logicalRight());
-  bool rtlEllipsisWithinBox = !flowIsLTR && (ellipsisX > logicalLeft());
+  bool ltrEllipsisWithinBox =
+      flowIsLTR && ellipsisX < adjustedLogicalLeft + logicalWidth();
+  bool rtlEllipsisWithinBox = !flowIsLTR && ellipsisX > adjustedLogicalLeft;
   if (ltrEllipsisWithinBox || rtlEllipsisWithinBox) {
     foundBox = true;
 
@@ -354,16 +357,17 @@ LayoutUnit InlineTextBox::placeEllipsisBox(bool flowIsLTR,
     if (ltr != flowIsLTR) {
       // Width in pixels of the visible portion of the box, excluding the
       // ellipsis.
-      int visibleBoxWidth =
-          (visibleRightEdge - visibleLeftEdge - ellipsisWidth).toInt();
-      ellipsisX = flowIsLTR ? logicalLeft() + visibleBoxWidth
+      LayoutUnit visibleBoxWidth =
+          visibleRightEdge - visibleLeftEdge - ellipsisWidth;
+      ellipsisX = flowIsLTR ? adjustedLogicalLeft + visibleBoxWidth
                             : logicalRight() - visibleBoxWidth;
     }
 
     // The box's width includes partial glyphs, so respect that when placing
     // the ellipsis.
     int offset = offsetForPosition(ellipsisX);
-    if (offset == 0 && ltr == flowIsLTR) {
+    // Full truncation is only necessary when we're flowing left-to-right.
+    if (flowIsLTR && offset == 0 && ltr == flowIsLTR) {
       // No characters should be laid out.  Set ourselves to full truncation and
       // place the ellipsis at the min of our start and the ellipsis edge.
       setTruncation(cFullTruncation);
@@ -379,9 +383,10 @@ LayoutUnit InlineTextBox::placeEllipsisBox(bool flowIsLTR,
     // text and its flow have opposite directions then our offset into the text
     // is at the start of the part that will be visible.
     LayoutUnit widthOfVisibleText(getLineLayoutItem().width(
-        ltr == flowIsLTR ? m_start : offset,
+        ltr == flowIsLTR ? m_start : m_start + offset,
         ltr == flowIsLTR ? offset : m_len - offset, textPos(),
-        flowIsLTR ? LTR : RTL, isFirstLineStyle()));
+        flowIsLTR ? TextDirection::kLtr : TextDirection::kRtl,
+        isFirstLineStyle()));
 
     // The ellipsis needs to be placed just after the last visible character.
     // Where "after" is defined by the flow directionality, not the inline
@@ -391,7 +396,8 @@ LayoutUnit InlineTextBox::placeEllipsisBox(bool flowIsLTR,
     truncatedWidth += widthOfVisibleText + ellipsisWidth;
     if (flowIsLTR)
       return logicalLeft() + widthOfVisibleText;
-    return logicalRight() - widthOfVisibleText - ellipsisWidth;
+    LayoutUnit result = logicalRight() - widthOfVisibleText - ellipsisWidth;
+    return result;
   }
   truncatedWidth += logicalWidth();
   return LayoutUnit(-1);
@@ -411,7 +417,7 @@ bool InlineTextBox::nodeAtPoint(HitTestResult& result,
   if (isLineBreak() || m_truncation == cFullTruncation)
     return false;
 
-  LayoutPoint boxOrigin = locationIncludingFlipping();
+  LayoutPoint boxOrigin = physicalLocation();
   boxOrigin.moveBy(accumulatedOffset);
   LayoutRect rect(boxOrigin, size());
   if (visibleToHitTestRequest(result.hitTestRequest()) &&
@@ -483,7 +489,7 @@ void InlineTextBox::selectionStartEnd(int& sPos, int& ePos) const {
 
 void InlineTextBox::paintDocumentMarker(GraphicsContext& pt,
                                         const LayoutPoint& boxOrigin,
-                                        DocumentMarker* marker,
+                                        const DocumentMarker& marker,
                                         const ComputedStyle& style,
                                         const Font& font,
                                         bool grammar) const {
@@ -493,7 +499,7 @@ void InlineTextBox::paintDocumentMarker(GraphicsContext& pt,
 
 void InlineTextBox::paintTextMatchMarkerForeground(const PaintInfo& paintInfo,
                                                    const LayoutPoint& boxOrigin,
-                                                   DocumentMarker* marker,
+                                                   const DocumentMarker& marker,
                                                    const ComputedStyle& style,
                                                    const Font& font) const {
   InlineTextBoxPainter(*this).paintTextMatchMarkerForeground(
@@ -502,7 +508,7 @@ void InlineTextBox::paintTextMatchMarkerForeground(const PaintInfo& paintInfo,
 
 void InlineTextBox::paintTextMatchMarkerBackground(const PaintInfo& paintInfo,
                                                    const LayoutPoint& boxOrigin,
-                                                   DocumentMarker* marker,
+                                                   const DocumentMarker& marker,
                                                    const ComputedStyle& style,
                                                    const Font& font) const {
   InlineTextBoxPainter(*this).paintTextMatchMarkerBackground(
@@ -643,7 +649,8 @@ TextRun InlineTextBox::constructTextRun(
   ASSERT(maximumLength >= static_cast<int>(string.length()));
 
   TextRun run(string, textPos().toFloat(), expansion(), expansionBehavior(),
-              direction(), dirOverride() || style.rtlOrdering() == VisualOrder);
+              direction(),
+              dirOverride() || style.rtlOrdering() == EOrder::kVisual);
   run.setTabSize(!style.collapseWhiteSpace(), style.getTabSize());
   run.setTextJustify(style.getTextJustify());
 
