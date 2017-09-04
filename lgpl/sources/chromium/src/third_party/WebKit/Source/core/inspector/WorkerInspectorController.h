@@ -33,15 +33,15 @@
 
 #include "core/inspector/InspectorSession.h"
 #include "core/inspector/InspectorTaskRunner.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Forward.h"
+#include "platform/wtf/Noncopyable.h"
+#include "platform/wtf/RefPtr.h"
 #include "public/platform/WebThread.h"
-#include "wtf/Allocator.h"
-#include "wtf/Forward.h"
-#include "wtf/Noncopyable.h"
-#include "wtf/RefPtr.h"
 
 namespace blink {
 
-class InstrumentingAgents;
+class CoreProbeSink;
 class WorkerThread;
 class WorkerThreadDebugger;
 
@@ -52,37 +52,35 @@ class WorkerInspectorController final
   WTF_MAKE_NONCOPYABLE(WorkerInspectorController);
 
  public:
-  static WorkerInspectorController* create(WorkerThread*);
+  static WorkerInspectorController* Create(WorkerThread*);
   ~WorkerInspectorController() override;
   DECLARE_TRACE();
 
-  InstrumentingAgents* instrumentingAgents() const {
-    return m_instrumentingAgents.get();
-  }
+  CoreProbeSink* GetProbeSink() const { return probe_sink_.Get(); }
 
-  void connectFrontend();
-  void disconnectFrontend();
-  void dispatchMessageFromFrontend(const String&);
-  void dispose();
-  void flushProtocolNotifications();
+  void ConnectFrontend();
+  void DisconnectFrontend();
+  void DispatchMessageFromFrontend(const String&);
+  void Dispose();
+  void FlushProtocolNotifications();
 
  private:
   WorkerInspectorController(WorkerThread*, WorkerThreadDebugger*);
 
   // InspectorSession::Client implementation.
-  void sendProtocolMessage(int sessionId,
-                           int callId,
+  void SendProtocolMessage(int session_id,
+                           int call_id,
                            const String& response,
                            const String& state) override;
 
   // WebThread::TaskObserver implementation.
-  void willProcessTask() override;
-  void didProcessTask() override;
+  void WillProcessTask() override;
+  void DidProcessTask() override;
 
-  WorkerThreadDebugger* m_debugger;
-  WorkerThread* m_thread;
-  Member<InstrumentingAgents> m_instrumentingAgents;
-  Member<InspectorSession> m_session;
+  WorkerThreadDebugger* debugger_;
+  WorkerThread* thread_;
+  Member<CoreProbeSink> probe_sink_;
+  Member<InspectorSession> session_;
 };
 
 }  // namespace blink

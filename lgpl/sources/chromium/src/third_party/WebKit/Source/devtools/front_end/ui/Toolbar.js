@@ -124,7 +124,7 @@ UI.Toolbar = class {
       document.documentElement.addEventListener('mouseup', mouseUp, false);
 
       var optionsGlassPane = new UI.GlassPane();
-      optionsGlassPane.setBlockPointerEvents(true);
+      optionsGlassPane.setPointerEventsBehavior(UI.GlassPane.PointerEventsBehavior.BlockedByGlassPane);
       optionsGlassPane.show(document);
       var optionsBar = new UI.Toolbar('fill', optionsGlassPane.contentElement);
       optionsBar._contentElement.classList.add('floating');
@@ -190,6 +190,13 @@ UI.Toolbar = class {
   static createActionButtonForId(actionId) {
     const action = UI.actionRegistry.action(actionId);
     return UI.Toolbar.createActionButton(/** @type {!UI.Action} */ (action));
+  }
+
+  /**
+   * @return {!Element}
+   */
+  gripElementForResize() {
+    return this._contentElement;
   }
 
   /**
@@ -452,6 +459,13 @@ UI.ToolbarText = class extends UI.ToolbarItem {
   }
 
   /**
+   * @return {string}
+   */
+  text() {
+    return this.element.textContent;
+  }
+
+  /**
    * @param {string} text
    */
   setText(text) {
@@ -520,7 +534,7 @@ UI.ToolbarButton = class extends UI.ToolbarItem {
    */
   turnIntoSelect(width) {
     this.element.classList.add('toolbar-has-dropdown');
-    var dropdownArrowIcon = UI.Icon.create('smallicon-dropdown-arrow', 'toolbar-dropdown-arrow');
+    var dropdownArrowIcon = UI.Icon.create('smallicon-triangle-down', 'toolbar-dropdown-arrow');
     this.element.appendChild(dropdownArrowIcon);
     if (width)
       this.element.style.width = width + 'px';
@@ -583,9 +597,17 @@ UI.ToolbarInput = class extends UI.ToolbarItem {
     this._updateEmptyStyles();
   }
 
+  /**
+   * @override
+   * @param {boolean} enabled
+   */
+  _applyEnabledState(enabled) {
+    this.input.disabled = !enabled;
+  }
+
   _setupSearchControls() {
     var clearButton = this.element.createChild('div', 'toolbar-input-clear-button');
-    clearButton.appendChild(UI.Icon.create('smallicon-clear-input', 'search-cancel-button'));
+    clearButton.appendChild(UI.Icon.create('mediumicon-gray-cross-hover', 'search-cancel-button'));
     clearButton.addEventListener('click', () => this._internalSetValue('', true));
     this.input.addEventListener('keydown', event => this._onKeydownCallback(event));
   }
@@ -745,9 +767,8 @@ UI.ToolbarMenuButton = class extends UI.ToolbarButton {
    * @param {!Event} event
    */
   _clicked(event) {
-    if (!this._triggerTimeout)
-      return;
-    clearTimeout(this._triggerTimeout);
+    if (this._triggerTimeout)
+      clearTimeout(this._triggerTimeout);
     this._trigger(event);
   }
 };
@@ -835,7 +856,7 @@ UI.ToolbarComboBox = class extends UI.ToolbarItem {
     super(createElementWithClass('span', 'toolbar-select-container'));
 
     this._selectElement = this.element.createChild('select', 'toolbar-item');
-    var dropdownArrowIcon = UI.Icon.create('smallicon-dropdown-arrow', 'toolbar-dropdown-arrow');
+    var dropdownArrowIcon = UI.Icon.create('smallicon-triangle-down', 'toolbar-dropdown-arrow');
     this.element.appendChild(dropdownArrowIcon);
     if (changeHandler)
       this._selectElement.addEventListener('change', changeHandler, false);
@@ -1017,7 +1038,7 @@ UI.ToolbarCheckbox = class extends UI.ToolbarItem {
    * @param {function()=} listener
    */
   constructor(text, tooltip, listener) {
-    super(UI.createCheckboxLabel(text));
+    super(UI.CheckboxLabel.create(text));
     this.element.classList.add('checkbox');
     this.inputElement = this.element.checkboxElement;
     if (tooltip)

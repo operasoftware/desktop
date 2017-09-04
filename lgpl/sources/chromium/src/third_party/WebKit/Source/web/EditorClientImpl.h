@@ -32,26 +32,26 @@
 #define EditorClientImpl_h
 
 #include "core/page/EditorClient.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
 class LocalFrame;
-class WebViewImpl;
+class WebViewBase;
 
 class EditorClientImpl final : public EditorClient {
  public:
-  explicit EditorClientImpl(WebViewImpl*);
+  explicit EditorClientImpl(WebViewBase*);
   ~EditorClientImpl() override;
 
-  void respondToChangedContents() override;
-  void respondToChangedSelection(LocalFrame*, SelectionType) override;
-  bool canCopyCut(LocalFrame*, bool defaultValue) const override;
-  bool canPaste(LocalFrame*, bool defaultValue) const override;
-  bool handleKeyboardEvent(LocalFrame*) override;
+  void RespondToChangedContents() override;
+  void RespondToChangedSelection(LocalFrame*, SelectionType) override;
+  bool CanCopyCut(LocalFrame*, bool default_value) const override;
+  bool CanPaste(LocalFrame*, bool default_value) const override;
+  bool HandleKeyboardEvent(LocalFrame*) override;
 
  private:
-  WebViewImpl* m_webView;
+  WebViewBase* web_view_;
 };
 
 }  // namespace blink

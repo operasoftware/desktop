@@ -14,39 +14,39 @@ void Decode(ImageFrame* frame, int size, SkData* data) {
   SkBitmap bitmap =
       s_decodeFunction(data->bytes(), data->size(), IntSize(size, size));
   ImageFrame tmpFrame(bitmap);
-  frame->copyBitmapData(tmpFrame);
-  frame->setStatus(ImageFrame::FrameComplete);
+  frame->CopyBitmapData(tmpFrame);
+  frame->SetStatus(ImageFrame::kFrameComplete);
 }
 
 SVGImageDecoder::SVGImageDecoder(AlphaOption alphaOption,
                                  const ColorBehavior& colorBehavior,
                                  size_t maxDecodedBytes)
     : ImageDecoder(alphaOption, colorBehavior, maxDecodedBytes) {
-  setSize(imageSizes[0], imageSizes[0]);
+  SetSize(imageSizes[0], imageSizes[0]);
 }
 
-void SVGImageDecoder::setDecodeFunction(SVGDecodeFunction function) {
+void SVGImageDecoder::SetDecodeFunction(SVGDecodeFunction function) {
   s_decodeFunction = function;
 }
 
-void SVGImageDecoder::decodeSize() {
-  DCHECK(isSizeAvailable());
+void SVGImageDecoder::DecodeSize() {
+  DCHECK(IsSizeAvailable());
 }
 
-void SVGImageDecoder::decode(size_t idx) {
-  DCHECK(isSizeAvailable());
-  DCHECK(m_frameBufferCache.size() == 4);
+void SVGImageDecoder::Decode(size_t idx) {
+  DCHECK(IsSizeAvailable());
+  DCHECK(frame_buffer_cache_.size() == 4);
   DCHECK(s_decodeFunction);
 
-  sk_sp<SkData> image_data = m_data->getAsSkData();
-  Decode(&m_frameBufferCache[idx], imageSizes[idx], image_data.get());
+  sk_sp<SkData> image_data = data_->GetAsSkData();
+  blink::Decode(&frame_buffer_cache_[idx], imageSizes[idx], image_data.get());
 }
 
-size_t SVGImageDecoder::decodeFrameCount() {
+size_t SVGImageDecoder::DecodeFrameCount() {
   return arraysize(imageSizes);
 }
 
-IntSize SVGImageDecoder::frameSizeAtIndex(size_t idx) const {
+IntSize SVGImageDecoder::FrameSizeAtIndex(size_t idx) const {
   return IntSize(imageSizes[idx], imageSizes[idx]);
 }
 

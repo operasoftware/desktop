@@ -7,6 +7,8 @@
 
 namespace blink {
 
+enum class WebPresentationConnectionState;
+
 // The implementation the embedder has to provide for the Presentation API to
 // work. This class is used to send messages to a PresentationConnection hosted
 // in a different frame.
@@ -15,7 +17,10 @@ class WebPresentationConnectionProxy {
   virtual ~WebPresentationConnectionProxy() = default;
 
   // Close target connection.
-  virtual void close() const = 0;
+  virtual void Close() const = 0;
+
+  // Notify target connection about connection state change.
+  virtual void NotifyTargetConnection(WebPresentationConnectionState) = 0;
 };
 
 }  // namespace blink

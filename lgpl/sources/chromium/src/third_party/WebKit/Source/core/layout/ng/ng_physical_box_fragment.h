@@ -6,14 +6,13 @@
 #define NGPhysicalBoxFragment_h
 
 #include "core/CoreExport.h"
+#include "core/layout/ng/geometry/ng_logical_offset.h"
+#include "core/layout/ng/geometry/ng_margin_strut.h"
 #include "core/layout/ng/ng_physical_fragment.h"
-#include "core/layout/ng/ng_units.h"
-#include "platform/heap/Handle.h"
-#include "wtf/Optional.h"
+#include "core/layout/ng/ng_positioned_float.h"
+#include "platform/wtf/Optional.h"
 
 namespace blink {
-
-struct NGFloatingObject;
 
 class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
  public:
@@ -22,19 +21,22 @@ class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
                         NGPhysicalSize size,
                         NGPhysicalSize overflow,
                         Vector<RefPtr<NGPhysicalFragment>>& children,
-                        Vector<Persistent<NGFloatingObject>>& positioned_floats,
+                        Vector<NGPositionedFloat>& positioned_floats,
                         const WTF::Optional<NGLogicalOffset>& bfc_offset,
                         const NGMarginStrut& end_margin_strut,
                         RefPtr<NGBreakToken> break_token = nullptr);
+
+  // Returns the total size, including the contents outside of the border-box.
+  NGPhysicalSize OverflowSize() const { return overflow_; }
 
   const Vector<RefPtr<NGPhysicalFragment>>& Children() const {
     return children_;
   }
 
-  // List of positioned float that need to be copied to the old layout tree.
+  // List of positioned floats that need to be copied to the old layout tree.
   // TODO(layout-ng): remove this once we change painting code to handle floats
   // differently.
-  const Vector<Persistent<NGFloatingObject>>& PositionedFloats() const {
+  const Vector<NGPositionedFloat>& PositionedFloats() const {
     return positioned_floats_;
   }
 
@@ -45,8 +47,9 @@ class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
   const NGMarginStrut& EndMarginStrut() const { return end_margin_strut_; }
 
  private:
+  NGPhysicalSize overflow_;
   Vector<RefPtr<NGPhysicalFragment>> children_;
-  Vector<Persistent<NGFloatingObject>> positioned_floats_;
+  Vector<NGPositionedFloat> positioned_floats_;
   const WTF::Optional<NGLogicalOffset> bfc_offset_;
   const NGMarginStrut end_margin_strut_;
 };

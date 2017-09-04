@@ -30,42 +30,48 @@
 #define AXInlineTextBox_h
 
 #include "core/layout/line/AbstractInlineTextBox.h"
-#include "modules/accessibility/AXObject.h"
+#include "modules/accessibility/AXObjectImpl.h"
 
 namespace blink {
 
+class Node;
 class AXObjectCacheImpl;
 
-class AXInlineTextBox final : public AXObject {
+class AXInlineTextBox final : public AXObjectImpl {
   WTF_MAKE_NONCOPYABLE(AXInlineTextBox);
 
  private:
   AXInlineTextBox(PassRefPtr<AbstractInlineTextBox>, AXObjectCacheImpl&);
 
  public:
-  static AXInlineTextBox* create(PassRefPtr<AbstractInlineTextBox>,
+  static AXInlineTextBox* Create(PassRefPtr<AbstractInlineTextBox>,
                                  AXObjectCacheImpl&);
 
-  void init() override;
-  void detach() override;
+ protected:
+  void Init() override;
+  void Detach() override;
+  bool IsDetached() const override { return !inline_text_box_; }
+  bool IsAXInlineTextBox() const override { return true; }
 
-  AccessibilityRole roleValue() const override { return InlineTextBoxRole; }
-  String name(AXNameFrom&,
-              AXObject::AXObjectVector* nameObjects) const override;
-  void textCharacterOffsets(Vector<int>&) const override;
-  void wordBoundaries(Vector<AXRange>&) const override;
-  void getRelativeBounds(AXObject** outContainer,
-                         FloatRect& outBoundsInContainer,
-                         SkMatrix44& outContainerTransform) const override;
-  AXObject* computeParent() const override;
-  AccessibilityTextDirection textDirection() const override;
-  AXObject* nextOnLine() const override;
-  AXObject* previousOnLine() const override;
+ public:
+  AccessibilityRole RoleValue() const override { return kInlineTextBoxRole; }
+  String GetName(AXNameFrom&,
+                 AXObjectImpl::AXObjectVector* name_objects) const override;
+  void TextCharacterOffsets(Vector<int>&) const override;
+  void GetWordBoundaries(Vector<AXRange>&) const override;
+  void GetRelativeBounds(AXObjectImpl** out_container,
+                         FloatRect& out_bounds_in_container,
+                         SkMatrix44& out_container_transform) const override;
+  AXObjectImpl* ComputeParent() const override;
+  AccessibilityTextDirection GetTextDirection() const override;
+  Node* GetNode() const override { return inline_text_box_->GetNode(); }
+  AXObjectImpl* NextOnLine() const override;
+  AXObjectImpl* PreviousOnLine() const override;
 
  private:
-  RefPtr<AbstractInlineTextBox> m_inlineTextBox;
+  RefPtr<AbstractInlineTextBox> inline_text_box_;
 
-  bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
+  bool ComputeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
 };
 
 }  // namespace blink

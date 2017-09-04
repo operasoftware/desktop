@@ -4,10 +4,10 @@
 
 #include "modules/payments/PaymentAppRequestConversion.h"
 
-#include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptValue.h"
-#include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "bindings/core/v8/V8BindingForTesting.h"
+#include "platform/bindings/ScriptState.h"
 #include "public/platform/modules/payments/WebPaymentAppRequest.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -15,38 +15,49 @@
 namespace blink {
 namespace {
 
-static WebPaymentItem createWebPaymentItemForTest() {
-  WebPaymentItem webItem;
-  webItem.label = WebString::fromUTF8("Label");
-  webItem.amount.currency = WebString::fromUTF8("USD");
-  webItem.amount.value = WebString::fromUTF8("9.99");
-  return webItem;
+static WebPaymentItem CreateWebPaymentItemForTest() {
+  WebPaymentItem web_item;
+  web_item.label = WebString::FromUTF8("Label");
+  web_item.amount.currency = WebString::FromUTF8("USD");
+  web_item.amount.value = WebString::FromUTF8("9.99");
+  return web_item;
 }
 
-static WebPaymentMethodData createWebPaymentMethodDataForTest() {
-  WebPaymentMethodData webMethodData;
-  WebString method = WebString::fromUTF8("foo");
-  webMethodData.supportedMethods = WebVector<WebString>(&method, 1);
-  webMethodData.stringifiedData = "{\"merchantId\":\"12345\"}";
-  return webMethodData;
+static WebPaymentMethodData CreateWebPaymentMethodDataForTest() {
+  WebPaymentMethodData web_method_data;
+  WebString method = WebString::FromUTF8("foo");
+  web_method_data.supported_methods = WebVector<WebString>(&method, 1);
+  web_method_data.stringified_data = "{\"merchantId\":\"12345\"}";
+  return web_method_data;
 }
 
-static WebPaymentAppRequest createWebPaymentAppRequestForTest() {
-  WebPaymentAppRequest webData;
-  webData.origin = WebString::fromUTF8("https://example.com");
-  Vector<WebPaymentMethodData> methodData;
-  methodData.push_back(createWebPaymentMethodDataForTest());
-  webData.methodData = WebVector<WebPaymentMethodData>(methodData);
-  webData.total = createWebPaymentItemForTest();
-  webData.optionId = WebString::fromUTF8("payment-app-id");
-  return webData;
+static WebPaymentAppRequest CreateWebPaymentAppRequestForTest() {
+  WebPaymentAppRequest web_data;
+  web_data.top_level_origin = WebString::FromUTF8("https://example.com");
+  web_data.payment_request_origin = WebString::FromUTF8("https://example.com");
+  web_data.payment_request_id = WebString::FromUTF8("payment-request-id");
+  Vector<WebPaymentMethodData> method_data;
+  method_data.push_back(CreateWebPaymentMethodDataForTest());
+  web_data.method_data = WebVector<WebPaymentMethodData>(method_data);
+  web_data.total = CreateWebPaymentItemForTest();
+  web_data.instrument_key = WebString::FromUTF8("payment-instrument-key");
+  return web_data;
 }
 
 TEST(PaymentAppRequestConversionTest, ToPaymentAppRequest) {
   V8TestingScope scope;
-  WebPaymentAppRequest webData = createWebPaymentAppRequestForTest();
-  PaymentAppRequest data = PaymentAppRequestConversion::toPaymentAppRequest(
-      scope.getScriptState(), webData);
+  WebPaymentAppRequest web_data = CreateWebPaymentAppRequestForTest();
+  PaymentAppRequest data = PaymentAppRequestConversion::ToPaymentAppRequest(
+      scope.GetScriptState(), web_data);
+
+  ASSERT_TRUE(data.hasTopLevelOrigin());
+  EXPECT_EQ("https://example.com", data.topLevelOrigin());
+
+  ASSERT_TRUE(data.hasPaymentRequestOrigin());
+  EXPECT_EQ("https://example.com", data.paymentRequestOrigin());
+
+  ASSERT_TRUE(data.hasPaymentRequestId());
+  EXPECT_EQ("payment-request-id", data.paymentRequestId());
 
   ASSERT_TRUE(data.hasMethodData());
   ASSERT_EQ(1UL, data.methodData().size());
@@ -54,14 +65,14 @@ TEST(PaymentAppRequestConversionTest, ToPaymentAppRequest) {
   ASSERT_EQ(1UL, data.methodData().front().supportedMethods().size());
   ASSERT_EQ("foo", data.methodData().front().supportedMethods().front());
   ASSERT_TRUE(data.methodData().front().hasData());
-  ASSERT_TRUE(data.methodData().front().data().isObject());
-  String stringifiedData = v8StringToWebCoreString<String>(
+  ASSERT_TRUE(data.methodData().front().data().IsObject());
+  String stringified_data = V8StringToWebCoreString<String>(
       v8::JSON::Stringify(
-          scope.context(),
-          data.methodData().front().data().v8Value().As<v8::Object>())
+          scope.GetContext(),
+          data.methodData().front().data().V8Value().As<v8::Object>())
           .ToLocalChecked(),
-      DoNotExternalize);
-  EXPECT_EQ("{\"merchantId\":\"12345\"}", stringifiedData);
+      kDoNotExternalize);
+  EXPECT_EQ("{\"merchantId\":\"12345\"}", stringified_data);
 
   ASSERT_TRUE(data.hasTotal());
   ASSERT_TRUE(data.total().hasLabel());
@@ -72,11 +83,8 @@ TEST(PaymentAppRequestConversionTest, ToPaymentAppRequest) {
   ASSERT_TRUE(data.total().amount().hasValue());
   EXPECT_EQ("9.99", data.total().amount().value());
 
-  ASSERT_TRUE(data.hasOptionId());
-  EXPECT_EQ("payment-app-id", data.optionId());
-
-  ASSERT_TRUE(data.hasOrigin());
-  EXPECT_EQ("https://example.com", data.origin());
+  ASSERT_TRUE(data.hasInstrumentKey());
+  EXPECT_EQ("payment-instrument-key", data.instrumentKey());
 }
 
 }  // namespace

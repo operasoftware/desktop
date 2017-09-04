@@ -38,149 +38,158 @@
 #include "core/editing/EditingUtilities.h"
 #include "core/html/TextControlElement.h"
 #include "platform/graphics/Image.h"
+#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/text/AtomicString.h"
+#include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebRect.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/text/AtomicString.h"
-#include "wtf/text/WTFString.h"
 #include <v8.h>
 
 namespace blink {
 
 using namespace HTMLNames;
 
-WebElement WebElement::fromV8Value(v8::Isolate* isolate,
+WebElement WebElement::FromV8Value(v8::Isolate* isolate,
                                    v8::Local<v8::Value> value) {
   Element* element = V8Element::toImplWithTypeCheck(isolate, value);
   return WebElement(element);
 }
 
-bool WebElement::isFormControlElement() const {
-  return constUnwrap<Element>()->isFormControlElement();
+bool WebElement::IsFormControlElement() const {
+  return ConstUnwrap<Element>()->IsFormControlElement();
 }
 
 // TODO(dglazkov): Remove. Consumers of this code should use
 // Node:hasEditableStyle.  http://crbug.com/612560
-bool WebElement::isEditable() const {
-  const Element* element = constUnwrap<Element>();
+bool WebElement::IsEditable() const {
+  const Element* element = ConstUnwrap<Element>();
 
-  element->document().updateStyleAndLayoutTree();
-  if (hasEditableStyle(*element))
+  element->GetDocument().UpdateStyleAndLayoutTree();
+  if (HasEditableStyle(*element))
     return true;
 
-  if (element->isTextControl()) {
-    if (!toTextControlElement(element)->isDisabledOrReadOnly())
+  if (element->IsTextControl()) {
+    if (!ToTextControlElement(element)->IsDisabledOrReadOnly())
       return true;
   }
 
-  return equalIgnoringASCIICase(element->getAttribute(roleAttr), "textbox");
+  return EqualIgnoringASCIICase(element->getAttribute(roleAttr), "textbox");
 }
 
-WebString WebElement::tagName() const {
-  return constUnwrap<Element>()->tagName();
+WebString WebElement::TagName() const {
+  return ConstUnwrap<Element>()->tagName();
 }
 
-bool WebElement::hasHTMLTagName(const WebString& tagName) const {
+bool WebElement::HasHTMLTagName(const WebString& tag_name) const {
   // How to create                     class              nodeName localName
   // createElement('input')            HTMLInputElement   INPUT    input
   // createElement('INPUT')            HTMLInputElement   INPUT    input
   // createElementNS(xhtmlNS, 'input') HTMLInputElement   INPUT    input
   // createElementNS(xhtmlNS, 'INPUT') HTMLUnknownElement INPUT    INPUT
-  const Element* element = constUnwrap<Element>();
+  const Element* element = ConstUnwrap<Element>();
   return HTMLNames::xhtmlNamespaceURI == element->namespaceURI() &&
-         element->localName() == String(tagName).lower();
+         element->localName() == String(tag_name).DeprecatedLower();
 }
 
-bool WebElement::hasAttribute(const WebString& attrName) const {
-  return constUnwrap<Element>()->hasAttribute(attrName);
+bool WebElement::HasAttribute(const WebString& attr_name) const {
+  return ConstUnwrap<Element>()->hasAttribute(attr_name);
 }
 
-WebString WebElement::getAttribute(const WebString& attrName) const {
-  return constUnwrap<Element>()->getAttribute(attrName);
+WebString WebElement::GetAttribute(const WebString& attr_name) const {
+  return ConstUnwrap<Element>()->getAttribute(attr_name);
 }
 
-void WebElement::setAttribute(const WebString& attrName,
-                              const WebString& attrValue) {
+void WebElement::SetAttribute(const WebString& attr_name,
+                              const WebString& attr_value) {
   // TODO: Custom element callbacks need to be called on WebKit API methods that
   // mutate the DOM in any way.
   V0CustomElementProcessingStack::CallbackDeliveryScope
-      deliverCustomElementCallbacks;
-  unwrap<Element>()->setAttribute(attrName, attrValue,
+      deliver_custom_element_callbacks;
+  Unwrap<Element>()->setAttribute(attr_name, attr_value,
                                   IGNORE_EXCEPTION_FOR_TESTING);
 }
 
-unsigned WebElement::attributeCount() const {
-  if (!constUnwrap<Element>()->hasAttributes())
+unsigned WebElement::AttributeCount() const {
+  if (!ConstUnwrap<Element>()->hasAttributes())
     return 0;
-  return constUnwrap<Element>()->attributes().size();
+  return ConstUnwrap<Element>()->Attributes().size();
 }
 
-WebString WebElement::attributeLocalName(unsigned index) const {
-  if (index >= attributeCount())
+WebString WebElement::AttributeLocalName(unsigned index) const {
+  if (index >= AttributeCount())
     return WebString();
-  return constUnwrap<Element>()->attributes().at(index).localName();
+  return ConstUnwrap<Element>()->Attributes().at(index).LocalName();
 }
 
-WebString WebElement::attributeValue(unsigned index) const {
-  if (index >= attributeCount())
+WebString WebElement::AttributeValue(unsigned index) const {
+  if (index >= AttributeCount())
     return WebString();
-  return constUnwrap<Element>()->attributes().at(index).value();
+  return ConstUnwrap<Element>()->Attributes().at(index).Value();
 }
 
-WebString WebElement::textContent() const {
-  return constUnwrap<Element>()->textContent();
+WebString WebElement::TextContent() const {
+  return ConstUnwrap<Element>()->textContent();
 }
 
-void WebElement::requestDetachedView(bool trustedRequest) {
-  Element* element = unwrap<Element>();
-  element->requestDetachedView(trustedRequest);
+void WebElement::RequestDetachedView() {
+  Element* element = Unwrap<Element>();
+  element->RequestDetachedView();
 }
 
-void WebElement::releaseDetachedView() {
-  Element* element = unwrap<Element>();
-  element->releaseDetachedView();
+void WebElement::ReleaseDetachedView() {
+  Element* element = Unwrap<Element>();
+  element->ReleaseDetachedView();
 }
 
-bool WebElement::hasDetachedView() {
-  Element* element = unwrap<Element>();
-  return element->hasDetachedView();
+bool WebElement::HasDetachedView() {
+  Element* element = Unwrap<Element>();
+  return element->HasDetachedView();
 }
 
-void WebElement::invokeDetachedViewAction(const WebString& action) {
-  Element* element = unwrap<Element>();
-  return element->invokeDetachedViewAction(action);
+bool WebElement::IsVideoDetachAllowed() {
+  Element* element = Unwrap<Element>();
+  return element->IsVideoDetachAllowed();
 }
 
-void WebElement::updateDetachedViewSubtitle(const WebString& text) {
-  Element* element = unwrap<Element>();
-  return element->updateDetachedViewSubtitle(text);
+void WebElement::InvokeDetachedViewAction(const WebString& action) {
+  Element* element = Unwrap<Element>();
+  return element->InvokeDetachedViewAction(action);
 }
 
-bool WebElement::hasNonEmptyLayoutSize() const {
-  return constUnwrap<Element>()->hasNonEmptyLayoutSize();
+void WebElement::UpdateDetachedViewSubtitle(const WebString& text) {
+  Element* element = Unwrap<Element>();
+  return element->UpdateDetachedViewSubtitle(text);
 }
 
-WebRect WebElement::boundsInViewport() const {
-  return constUnwrap<Element>()->boundsInViewport();
+WebString WebElement::InnerHTML() const {
+  return ConstUnwrap<Element>()->innerHTML();
 }
 
-WebImage WebElement::imageContents() {
-  if (isNull())
+bool WebElement::HasNonEmptyLayoutSize() const {
+  return ConstUnwrap<Element>()->HasNonEmptyLayoutSize();
+}
+
+WebRect WebElement::BoundsInViewport() const {
+  return ConstUnwrap<Element>()->BoundsInViewport();
+}
+
+WebImage WebElement::ImageContents() {
+  if (IsNull())
     return WebImage();
 
-  return WebImage(unwrap<Element>()->imageContents());
+  return WebImage(Unwrap<Element>()->ImageContents());
 }
 
 WebElement::WebElement(Element* elem) : WebNode(elem) {}
 
-DEFINE_WEB_NODE_TYPE_CASTS(WebElement, isElementNode());
+DEFINE_WEB_NODE_TYPE_CASTS(WebElement, IsElementNode());
 
 WebElement& WebElement::operator=(Element* elem) {
-  m_private = elem;
+  private_ = elem;
   return *this;
 }
 
 WebElement::operator Element*() const {
-  return toElement(m_private.get());
+  return ToElement(private_.Get());
 }
 
 }  // namespace blink

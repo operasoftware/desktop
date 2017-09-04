@@ -7,10 +7,10 @@
 
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/ModulesExport.h"
 #include "modules/canvas2d/CanvasRenderingContext2D.h"
 #include "modules/shapedetection/ShapeDetector.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "services/shape_detection/public/interfaces/facedetection.mojom-blink.h"
 
 namespace blink {
@@ -22,7 +22,7 @@ class MODULES_EXPORT FaceDetector final : public ShapeDetector,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static FaceDetector* create(const FaceDetectorOptions&);
+  static FaceDetector* Create(const FaceDetectorOptions&);
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -30,17 +30,18 @@ class MODULES_EXPORT FaceDetector final : public ShapeDetector,
   explicit FaceDetector(const FaceDetectorOptions&);
   ~FaceDetector() override = default;
 
-  ScriptPromise doDetect(ScriptPromiseResolver*,
+  ScriptPromise DoDetect(ScriptPromiseResolver*,
                          mojo::ScopedSharedBufferHandle,
-                         int imageWidth,
-                         int imageHeight) override;
-  void onDetectFaces(ScriptPromiseResolver*,
-                     shape_detection::mojom::blink::FaceDetectionResultPtr);
-  void onFaceServiceConnectionError();
+                         int image_width,
+                         int image_height) override;
+  void OnDetectFaces(
+      ScriptPromiseResolver*,
+      Vector<shape_detection::mojom::blink::FaceDetectionResultPtr>);
+  void OnFaceServiceConnectionError();
 
-  shape_detection::mojom::blink::FaceDetectionPtr m_faceService;
+  shape_detection::mojom::blink::FaceDetectionPtr face_service_;
 
-  HeapHashSet<Member<ScriptPromiseResolver>> m_faceServiceRequests;
+  HeapHashSet<Member<ScriptPromiseResolver>> face_service_requests_;
 };
 
 }  // namespace blink

@@ -5,28 +5,38 @@
 #include "web/tests/sim/SimWebViewClient.h"
 
 #include "public/platform/WebLayerTreeView.h"
+#include "public/web/WebLocalFrame.h"
 
 namespace blink {
 
-SimWebViewClient::SimWebViewClient(WebLayerTreeView& layerTreeView)
-    : m_visuallyNonEmptyLayoutCount(0),
-      m_finishedParsingLayoutCount(0),
-      m_finishedLoadingLayoutCount(0),
-      m_layerTreeView(&layerTreeView) {}
+SimWebViewClient::SimWebViewClient(WebLayerTreeView& layer_tree_view)
+    : visually_non_empty_layout_count_(0),
+      finished_parsing_layout_count_(0),
+      finished_loading_layout_count_(0),
+      layer_tree_view_(&layer_tree_view) {}
 
-void SimWebViewClient::didMeaningfulLayout(
-    WebMeaningfulLayout meaningfulLayout) {
-  switch (meaningfulLayout) {
-    case WebMeaningfulLayout::VisuallyNonEmpty:
-      m_visuallyNonEmptyLayoutCount++;
+void SimWebViewClient::DidMeaningfulLayout(
+    WebMeaningfulLayout meaningful_layout) {
+  switch (meaningful_layout) {
+    case WebMeaningfulLayout::kVisuallyNonEmpty:
+      visually_non_empty_layout_count_++;
       break;
-    case WebMeaningfulLayout::FinishedParsing:
-      m_finishedParsingLayoutCount++;
+    case WebMeaningfulLayout::kFinishedParsing:
+      finished_parsing_layout_count_++;
       break;
-    case WebMeaningfulLayout::FinishedLoading:
-      m_finishedLoadingLayoutCount++;
+    case WebMeaningfulLayout::kFinishedLoading:
+      finished_loading_layout_count_++;
       break;
   }
+}
+
+WebView* SimWebViewClient::CreateView(WebLocalFrame* opener,
+                                      const WebURLRequest&,
+                                      const WebWindowFeatures&,
+                                      const WebString& name,
+                                      WebNavigationPolicy,
+                                      bool) {
+  return web_view_helper_.InitializeWithOpener(opener, true);
 }
 
 }  // namespace blink

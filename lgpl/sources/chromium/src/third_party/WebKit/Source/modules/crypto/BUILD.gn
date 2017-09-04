@@ -23,4 +23,9 @@ blink_modules_sources("crypto") {
     "WorkerGlobalScopeCrypto.cpp",
     "WorkerGlobalScopeCrypto.h",
   ]
+
+  jumbo_excluded_sources = [
+    # Collides with SubtleCrypto.cpp (copyBytes patch incoming)
+    "NormalizeAlgorithm.cpp",
+  ]
 }

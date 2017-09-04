@@ -32,6 +32,8 @@
 
 #include "core/loader/FrameLoader.h"
 #include "platform/weborigin/KURL.h"
+#include "platform/wtf/text/CString.h"
+#include "platform/wtf/text/WTFString.h"
 #include "public/web/WebFrameClient.h"
 #include "public/web/WebSettings.h"
 #include "public/web/WebView.h"
@@ -39,8 +41,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/tests/FrameTestHelpers.h"
-#include "wtf/text/CString.h"
-#include "wtf/text/WTFString.h"
 
 using testing::_;
 using testing::Mock;
@@ -53,69 +53,70 @@ class MockWebFrameClient : public FrameTestHelpers::TestWebFrameClient {
  public:
   ~MockWebFrameClient() override {}
 
-  MOCK_METHOD1(userAgentOverride, WebString(const WebURL&));
+  MOCK_METHOD1(UserAgentOverride, WebString(const WebURL&));
 };
 
 class LocalFrameClientImplTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    ON_CALL(m_webFrameClient, userAgentOverride(_))
+    ON_CALL(web_frame_client_, UserAgentOverride(_))
         .WillByDefault(Return(WebString()));
 
-    FrameTestHelpers::TestWebViewClient webViewClient;
-    m_webView = WebView::create(&webViewClient, WebPageVisibilityStateVisible);
+    FrameTestHelpers::TestWebViewClient web_view_client;
+    web_view_ =
+        WebView::Create(&web_view_client, kWebPageVisibilityStateVisible);
     // FIXME: http://crbug.com/363843. This needs to find a better way to
     // not create graphics layers.
-    m_webView->settings()->setAcceleratedCompositingEnabled(false);
-    m_mainFrame = WebLocalFrame::create(WebTreeScopeType::Document,
-                                        &m_webFrameClient, nullptr, nullptr);
-    m_webView->setMainFrame(m_mainFrame);
+    web_view_->GetSettings()->SetAcceleratedCompositingEnabled(false);
+    main_frame_ = WebLocalFrame::Create(WebTreeScopeType::kDocument,
+                                        &web_frame_client_, nullptr, nullptr);
+    web_view_->SetMainFrame(main_frame_);
   }
 
-  void TearDown() override { m_webView->close(); }
+  void TearDown() override { web_view_->Close(); }
 
-  WebString userAgent() {
+  WebString UserAgent() {
     // The test always returns the same user agent, regardless of the URL passed
     // in.
-    KURL dummyURL(ParsedURLString, "about:blank");
-    WTF::CString userAgent = localFrameClient().userAgent(dummyURL).utf8();
-    return WebString::fromUTF8(userAgent.data(), userAgent.length());
+    KURL dummy_url(kParsedURLString, "about:blank");
+    WTF::CString user_agent = GetLocalFrameClient().UserAgent(dummy_url).Utf8();
+    return WebString::FromUTF8(user_agent.data(), user_agent.length());
   }
 
-  WebLocalFrameImpl* mainFrame() {
-    return toWebLocalFrameImpl(m_webView->mainFrame());
+  WebLocalFrameImpl* MainFrame() {
+    return ToWebLocalFrameImpl(web_view_->MainFrame());
   }
-  Document& document() {
-    return *toWebLocalFrameImpl(m_mainFrame)->frame()->document();
+  Document& GetDocument() {
+    return *ToWebLocalFrameImpl(main_frame_)->GetFrame()->GetDocument();
   }
-  MockWebFrameClient& webFrameClient() { return m_webFrameClient; }
-  LocalFrameClient& localFrameClient() {
-    return *toLocalFrameClientImpl(toWebLocalFrameImpl(m_webView->mainFrame())
-                                       ->frame()
-                                       ->loader()
-                                       .client());
+  MockWebFrameClient& WebFrameClient() { return web_frame_client_; }
+  LocalFrameClient& GetLocalFrameClient() {
+    return *ToLocalFrameClientImpl(ToWebLocalFrameImpl(web_view_->MainFrame())
+                                       ->GetFrame()
+                                       ->Loader()
+                                       .Client());
   }
 
  private:
-  MockWebFrameClient m_webFrameClient;
-  WebView* m_webView;
-  WebLocalFrame* m_mainFrame;
+  MockWebFrameClient web_frame_client_;
+  WebView* web_view_;
+  WebLocalFrame* main_frame_;
 };
 
 TEST_F(LocalFrameClientImplTest, UserAgentOverride) {
-  const WebString defaultUserAgent = userAgent();
-  const WebString overrideUserAgent = WebString::fromUTF8("dummy override");
+  const WebString default_user_agent = UserAgent();
+  const WebString override_user_agent = WebString::FromUTF8("dummy override");
 
   // Override the user agent and make sure we get it back.
-  EXPECT_CALL(webFrameClient(), userAgentOverride(_))
-      .WillOnce(Return(overrideUserAgent));
-  EXPECT_TRUE(overrideUserAgent.equals(userAgent()));
-  Mock::VerifyAndClearExpectations(&webFrameClient());
+  EXPECT_CALL(WebFrameClient(), UserAgentOverride(_))
+      .WillOnce(Return(override_user_agent));
+  EXPECT_TRUE(override_user_agent.Equals(UserAgent()));
+  Mock::VerifyAndClearExpectations(&WebFrameClient());
 
   // Remove the override and make sure we get the original back.
-  EXPECT_CALL(webFrameClient(), userAgentOverride(_))
+  EXPECT_CALL(WebFrameClient(), UserAgentOverride(_))
       .WillOnce(Return(WebString()));
-  EXPECT_TRUE(defaultUserAgent.equals(userAgent()));
+  EXPECT_TRUE(default_user_agent.Equals(UserAgent()));
 }
 
 }  // namespace

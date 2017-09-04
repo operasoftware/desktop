@@ -31,19 +31,23 @@
 #include "web/DedicatedWorkerMessagingProxyProviderImpl.h"
 
 #include "core/dom/Document.h"
+#include "core/frame/Settings.h"
+#include "core/frame/WebLocalFrameBase.h"
+#include "core/loader/WorkerFetchContext.h"
 #include "core/workers/DedicatedWorkerMessagingProxy.h"
 #include "core/workers/Worker.h"
 #include "core/workers/WorkerClients.h"
+#include "core/workers/WorkerContentSettingsClient.h"
+#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/wtf/PtrUtil.h"
+#include "public/platform/Platform.h"
+#include "public/platform/WebContentSettingsClient.h"
 #include "public/platform/WebString.h"
-#include "public/web/WebContentSettingsClient.h"
+#include "public/platform/WebWorkerFetchContext.h"
 #include "public/web/WebFrameClient.h"
 #include "public/web/WebWorkerContentSettingsClientProxy.h"
 #include "web/IndexedDBClientImpl.h"
 #include "web/LocalFileSystemClient.h"
-#include "web/WebLocalFrameImpl.h"
-#include "web/WebViewImpl.h"
-#include "web/WorkerContentSettingsClient.h"
-#include "wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -52,24 +56,35 @@ DedicatedWorkerMessagingProxyProviderImpl::
     : DedicatedWorkerMessagingProxyProvider(page) {}
 
 InProcessWorkerMessagingProxy*
-DedicatedWorkerMessagingProxyProviderImpl::createWorkerMessagingProxy(
+DedicatedWorkerMessagingProxyProviderImpl::CreateWorkerMessagingProxy(
     Worker* worker) {
-  if (worker->getExecutionContext()->isDocument()) {
-    Document* document = toDocument(worker->getExecutionContext());
-    WebLocalFrameImpl* webFrame =
-        WebLocalFrameImpl::fromFrame(document->frame());
-    WorkerClients* workerClients = WorkerClients::create();
-    provideIndexedDBClientToWorker(workerClients,
-                                   IndexedDBClientImpl::create(*workerClients));
-    provideLocalFileSystemToWorker(workerClients,
-                                   LocalFileSystemClient::create());
-    provideContentSettingsClientToWorker(
-        workerClients,
-        WTF::wrapUnique(
-            webFrame->client()->createWorkerContentSettingsClientProxy()));
+  if (worker->GetExecutionContext()->IsDocument()) {
+    Document* document = ToDocument(worker->GetExecutionContext());
+    WebLocalFrameBase* web_frame =
+        WebLocalFrameBase::FromFrame(document->GetFrame());
+    WorkerClients* worker_clients = WorkerClients::Create();
+    ProvideIndexedDBClientToWorker(
+        worker_clients, IndexedDBClientImpl::Create(*worker_clients));
+    ProvideLocalFileSystemToWorker(worker_clients,
+                                   LocalFileSystemClient::Create());
+    ProvideContentSettingsClientToWorker(
+        worker_clients,
+        WTF::WrapUnique(
+            web_frame->Client()->CreateWorkerContentSettingsClientProxy()));
+    if (RuntimeEnabledFeatures::offMainThreadFetchEnabled()) {
+      std::unique_ptr<WebWorkerFetchContext> web_worker_fetch_context =
+          web_frame->Client()->CreateWorkerFetchContext();
+      DCHECK(web_worker_fetch_context);
+      // TODO(horo): Set more information about the context (ex:
+      // AppCacheHostID) to |web_worker_fetch_context|.
+      web_worker_fetch_context->SetDataSaverEnabled(
+          document->GetFrame()->GetSettings()->GetDataSaverEnabled());
+      ProvideWorkerFetchContextToWorker(worker_clients,
+                                        std::move(web_worker_fetch_context));
+    }
     // FIXME: call provideServiceWorkerContainerClientToWorker here when we
     // support ServiceWorker in dedicated workers (http://crbug.com/371690)
-    return new DedicatedWorkerMessagingProxy(worker, workerClients);
+    return new DedicatedWorkerMessagingProxy(worker, worker_clients);
   }
   NOTREACHED();
   return 0;

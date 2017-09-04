@@ -31,9 +31,9 @@
 #ifndef DocumentTimeline_h
 #define DocumentTimeline_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
 #include "core/animation/AnimationTimeline.h"
+#include "platform/bindings/ScriptWrappable.h"
 
 namespace blink {
 
@@ -43,7 +43,7 @@ class CORE_EXPORT DocumentTimeline final : public AnimationTimeline {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static DocumentTimeline* create(Document* document) {
+  static DocumentTimeline* Create(Document* document) {
     return new DocumentTimeline(document);
   }
 

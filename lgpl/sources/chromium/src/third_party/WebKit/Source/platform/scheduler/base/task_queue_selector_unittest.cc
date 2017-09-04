@@ -120,12 +120,11 @@ class TaskQueueSelectorTest : public testing::Test {
  protected:
   void SetUp() final {
     virtual_time_domain_ = base::WrapUnique<VirtualTimeDomain>(
-        new VirtualTimeDomain(nullptr, base::TimeTicks()));
+        new VirtualTimeDomain(base::TimeTicks()));
     for (size_t i = 0; i < kTaskQueueCount; i++) {
-      scoped_refptr<TaskQueueImpl> task_queue =
-          make_scoped_refptr(new TaskQueueImpl(
-              nullptr, virtual_time_domain_.get(),
-              TaskQueue::Spec(TaskQueue::QueueType::TEST), "test", "test"));
+      scoped_refptr<TaskQueueImpl> task_queue = make_scoped_refptr(
+          new TaskQueueImpl(nullptr, virtual_time_domain_.get(),
+                            TaskQueue::Spec(TaskQueue::QueueType::TEST)));
       selector_.AddQueue(task_queue.get());
       task_queues_.push_back(task_queue);
     }
@@ -150,8 +149,7 @@ class TaskQueueSelectorTest : public testing::Test {
     return make_scoped_refptr(
         new TaskQueueImpl(nullptr, virtual_time_domain_.get(),
                           TaskQueue::Spec(TaskQueue::QueueType::TEST)
-                              .SetShouldReportWhenExecutionBlocked(true),
-                          "test", "test"));
+                              .SetShouldReportWhenExecutionBlocked(true)));
   }
 
   const size_t kTaskQueueCount = 5;
@@ -527,7 +525,8 @@ TEST_P(ChooseOldestWithPriorityTest, RoundRobinTest) {
       TaskQueue::NORMAL_PRIORITY, &chose_delayed_over_immediate,
       &chosen_work_queue));
   EXPECT_EQ(chosen_work_queue->task_queue(), task_queues_[0].get());
-  EXPECT_STREQ(chosen_work_queue->name(), GetParam().expected_work_queue_name);
+  EXPECT_STREQ(chosen_work_queue->GetName(),
+               GetParam().expected_work_queue_name);
   EXPECT_EQ(chose_delayed_over_immediate,
             GetParam().expected_did_starve_immediate_queue);
 }

@@ -5,27 +5,35 @@
 #ifndef LayoutNGBlockFlow_h
 #define LayoutNGBlockFlow_h
 
+#include "core/CoreExport.h"
 #include "core/layout/LayoutBlockFlow.h"
+#include "core/layout/ng/inline/ng_inline_node_data.h"
 #include "core/layout/ng/ng_block_node.h"
 
 namespace blink {
 
 // This overrides the default layout block algorithm to use Layout NG.
-class LayoutNGBlockFlow final : public LayoutBlockFlow {
+class CORE_EXPORT LayoutNGBlockFlow final : public LayoutBlockFlow {
  public:
   explicit LayoutNGBlockFlow(Element*);
   ~LayoutNGBlockFlow() override = default;
 
-  void layoutBlock(bool relayoutChildren) override;
-  NGBlockNode* boxForTesting() const { return m_box.get(); }
+  void UpdateBlockLayout(bool relayout_children) override;
+  NGBlockNode* BoxForTesting() const { return box_.Get(); }
+
+  const char* GetName() const override { return "LayoutNGBlockFlow"; }
+
+  NGInlineNodeData& GetNGInlineNodeData() const;
+  void ResetNGInlineNodeData();
 
  private:
-  bool isOfType(LayoutObjectType) const override;
+  bool IsOfType(LayoutObjectType) const override;
 
-  Persistent<NGBlockNode> m_box;
+  std::unique_ptr<NGInlineNodeData> ng_inline_node_data_;
+  Persistent<NGBlockNode> box_;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutNGBlockFlow, isLayoutNGBlockFlow());
+DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutNGBlockFlow, IsLayoutNGBlockFlow());
 
 }  // namespace blink
 

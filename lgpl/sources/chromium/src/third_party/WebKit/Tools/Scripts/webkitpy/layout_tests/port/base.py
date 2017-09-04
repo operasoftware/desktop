@@ -38,15 +38,17 @@ import functools
 import json
 import logging
 import optparse
+import os
 import re
 import sys
 
+from webkitpy.common import exit_codes
 from webkitpy.common import find_files
 from webkitpy.common import read_checksum_from_png
 from webkitpy.common.memoized import memoized
+from webkitpy.common.path_finder import PathFinder
 from webkitpy.common.system.executive import ScriptError
-from webkitpy.common.system.path import cygpath, abspath_to_uri
-from webkitpy.common.webkit_finder import WebKitFinder
+from webkitpy.common.system.path import abspath_to_uri
 from webkitpy.layout_tests.layout_package.bot_test_expectations import BotTestExpectationsFactory
 from webkitpy.layout_tests.models import test_run_results
 from webkitpy.layout_tests.models.test_configuration import TestConfiguration
@@ -87,6 +89,7 @@ class Port(object):
         ('mac10.9', 'x86'),
         ('mac10.10', 'x86'),
         ('mac10.11', 'x86'),
+        ('mac10.12', 'x86'),
         ('win7', 'x86'),
         ('win10', 'x86'),
         ('trusty', 'x86_64'),
@@ -95,14 +98,14 @@ class Port(object):
         # architecture type breaks TestConfigurationConverter.
         # If we need this to be 'arm' in the future, then we first have to
         # fix TestConfigurationConverter.
-        ('icecreamsandwich', 'x86'),
+        ('kitkat', 'x86'),
     )
 
     CONFIGURATION_SPECIFIER_MACROS = {
-        'mac': ['retina', 'mac10.9', 'mac10.10', 'mac10.11'],
+        'mac': ['retina', 'mac10.9', 'mac10.10', 'mac10.11', 'mac10.12'],
         'win': ['win7', 'win10'],
         'linux': ['trusty'],
-        'android': ['icecreamsandwich'],
+        'android': ['kitkat'],
     }
 
     DEFAULT_BUILD_DIRECTORIES = ('out',)
@@ -164,7 +167,7 @@ class Port(object):
         self.host = host
         self._executive = host.executive
         self._filesystem = host.filesystem
-        self._webkit_finder = WebKitFinder(host.filesystem)
+        self._path_finder = PathFinder(host.filesystem)
 
         self._http_server = None
         self._websocket_server = None
@@ -175,7 +178,7 @@ class Port(object):
         self._dump_reader = None
 
         # FIXME: prettypatch.py knows this path; it should not be copied here.
-        self._pretty_patch_path = self.path_from_webkit_base("Tools", "Scripts", "webkitruby", "PrettyPatch", "prettify.rb")
+        self._pretty_patch_path = self._path_finder.path_from_tools_scripts('webkitruby', 'PrettyPatch', 'prettify.rb')
         self._pretty_patch_available = None
 
         if not hasattr(options, 'configuration') or not options.configuration:
@@ -188,11 +191,8 @@ class Port(object):
         self._virtual_test_suites = None
 
     def __str__(self):
-        return "Port{name=%s, version=%s, architecture=%s, test_configuration=%s}" % (
+        return 'Port{name=%s, version=%s, architecture=%s, test_configuration=%s}' % (
             self._name, self._version, self._architecture, self._test_configuration)
-
-    def buildbot_archives_baselines(self):
-        return True
 
     def additional_driver_flag(self):
         if self.driver_name() == self.CONTENT_SHELL_NAME:
@@ -201,9 +201,6 @@ class Port(object):
 
     def supports_per_test_timeout(self):
         return False
-
-    def default_pixel_tests(self):
-        return True
 
     def default_smoke_test_only(self):
         return False
@@ -334,12 +331,12 @@ class Port(object):
         if needs_http:
             result = self.check_httpd() and result
 
-        return test_run_results.OK_EXIT_STATUS if result else test_run_results.UNEXPECTED_ERROR_EXIT_STATUS
+        return exit_codes.OK_EXIT_STATUS if result else exit_codes.UNEXPECTED_ERROR_EXIT_STATUS
 
     def _check_driver(self):
         driver_path = self._path_to_driver()
         if not self._filesystem.exists(driver_path):
-            _log.error("%s was not found at %s", self.driver_name(), driver_path)
+            _log.error('%s was not found at %s', self.driver_name(), driver_path)
             return False
         return True
 
@@ -360,6 +357,8 @@ class Port(object):
         def error_handler(script_error):
             local_error.exit_code = script_error.exit_code
 
+        if self.host.platform.is_linux():
+            _log.debug('DISPLAY = %s', self.host.environ.get('DISPLAY', ''))
         output = self._executive.run_command(cmd, error_handler=error_handler)
         if local_error.exit_code:
             _log.error('System dependencies check failed.')
@@ -370,14 +369,14 @@ class Port(object):
                 _log.error('')
                 _log.error('For complete build requirements, please see:')
                 _log.error(self.BUILD_REQUIREMENTS_URL)
-            return test_run_results.SYS_DEPS_EXIT_STATUS
-        return test_run_results.OK_EXIT_STATUS
+            return exit_codes.SYS_DEPS_EXIT_STATUS
+        return exit_codes.OK_EXIT_STATUS
 
     def check_image_diff(self):
         """Checks whether image_diff binary exists."""
         image_diff_path = self._path_to_image_diff()
         if not self._filesystem.exists(image_diff_path):
-            _log.error("image_diff was not found at %s", image_diff_path)
+            _log.error('image_diff was not found at %s', image_diff_path)
             return False
         return True
 
@@ -405,13 +404,13 @@ class Port(object):
         if httpd_path:
             try:
                 env = self.setup_environ_for_server()
-                if self._executive.run_command([httpd_path, "-v"], env=env, return_exit_code=True) != 0:
-                    _log.error("httpd seems broken. Cannot run http tests.")
+                if self._executive.run_command([httpd_path, '-v'], env=env, return_exit_code=True) != 0:
+                    _log.error('httpd seems broken. Cannot run http tests.')
                     return False
                 return True
             except OSError:
                 pass
-        _log.error("No httpd found. Cannot run http tests.")
+        _log.error('No httpd found. Cannot run http tests.')
         return False
 
     def do_text_results_differ(self, expected_text, actual_text):
@@ -436,22 +435,17 @@ class Port(object):
 
         tempdir = self._filesystem.mkdtemp()
 
-        expected_filename = self._filesystem.join(str(tempdir), "expected.png")
+        expected_filename = self._filesystem.join(str(tempdir), 'expected.png')
         self._filesystem.write_binary_file(expected_filename, expected_contents)
 
-        actual_filename = self._filesystem.join(str(tempdir), "actual.png")
+        actual_filename = self._filesystem.join(str(tempdir), 'actual.png')
         self._filesystem.write_binary_file(actual_filename, actual_contents)
 
-        diff_filename = self._filesystem.join(str(tempdir), "diff.png")
-
-        # image_diff needs native win paths as arguments, so we need to convert them if running under cygwin.
-        native_expected_filename = self._convert_path(expected_filename)
-        native_actual_filename = self._convert_path(actual_filename)
-        native_diff_filename = self._convert_path(diff_filename)
+        diff_filename = self._filesystem.join(str(tempdir), 'diff.png')
 
         executable = self._path_to_image_diff()
         # Although we are handed 'old', 'new', image_diff wants 'new', 'old'.
-        command = [executable, '--diff', native_actual_filename, native_expected_filename, native_diff_filename]
+        command = [executable, '--diff', actual_filename, expected_filename, diff_filename]
 
         result = None
         err_str = None
@@ -461,9 +455,9 @@ class Port(object):
                 # The images are the same.
                 result = None
             elif exit_code == 1:
-                result = self._filesystem.read_binary_file(native_diff_filename)
+                result = self._filesystem.read_binary_file(diff_filename)
             else:
-                err_str = "Image diff returned an exit code of %s. See http://crbug.com/278596" % exit_code
+                err_str = 'Image diff returned an exit code of %s. See http://crbug.com/278596' % exit_code
         except OSError as error:
             err_str = 'error running image diff: %s' % error
         finally:
@@ -622,7 +616,7 @@ class Port(object):
         if not self._filesystem.exists(baseline_path):
             return None
         text = self._filesystem.read_binary_file(baseline_path)
-        return text.replace("\r\n", "\n")
+        return text.replace('\r\n', '\n')
 
     def _get_reftest_list(self, test_name):
         dirname = self._filesystem.join(self.layout_tests_dir(), self._filesystem.dirname(test_name))
@@ -664,7 +658,7 @@ class Port(object):
         # Try to find -expected.* or -expected-mismatch.* in the same directory.
         reftest_list = []
         for expectation, prefix in (('==', ''), ('!=', '-mismatch')):
-            for extension in Port._supported_file_extensions:
+            for extension in Port.supported_file_extensions:
                 path = self.expected_filename(test_name, prefix + extension)
                 if self._filesystem.exists(path):
                     reftest_list.append((expectation, path))
@@ -672,6 +666,9 @@ class Port(object):
             return reftest_list
 
         # Try to extract information from MANIFEST.json.
+        match = re.match(r'virtual/[^/]+/', test_name)
+        if match:
+            test_name = test_name[match.end(0):]
         match = re.match(r'external/wpt/(.*)', test_name)
         if not match:
             return []
@@ -694,14 +691,10 @@ class Port(object):
 
     def real_tests(self, paths):
         # When collecting test cases, skip these directories.
-        skipped_directories = set(['.svn', '_svn', 'platform', 'resources', 'support', 'script-tests', 'reference', 'reftest'])
+        skipped_directories = set(['platform', 'resources', 'support', 'script-tests', 'reference', 'reftest'])
         files = find_files.find(self._filesystem, self.layout_tests_dir(), paths,
                                 skipped_directories, functools.partial(Port.is_test_file, self), self.test_key)
         return self._convert_wpt_file_paths_to_url_paths([self.relative_test_filename(f) for f in files])
-
-    # When collecting test cases, we include any file with these extensions.
-    _supported_file_extensions = set(['.html', '.xml', '.xhtml', '.xht', '.pl',
-                                      '.htm', '.php', '.svg', '.mht', '.pdf'])
 
     @staticmethod
     # If any changes are made here be sure to update the isUsedInReftest method in old-run-webkit-tests as well.
@@ -714,11 +707,17 @@ class Port(object):
                 return True
         return False
 
+    # When collecting test cases, we include any file with these extensions.
+    supported_file_extensions = set([
+        '.html', '.xml', '.xhtml', '.xht', '.pl',
+        '.htm', '.php', '.svg', '.mht', '.pdf',
+    ])
+
     @staticmethod
     def _has_supported_extension(filesystem, filename):
         """Returns True if filename is one of the file extensions we want to run a test on."""
         extension = filesystem.splitext(filename)[1]
-        return extension in Port._supported_file_extensions
+        return extension in Port.supported_file_extensions
 
     def is_test_file(self, filesystem, dirname, filename):
         match = re.search(r'[/\\]external[/\\]wpt([/\\].*)?$', dirname)
@@ -749,6 +748,9 @@ class Port(object):
     @memoized
     def _wpt_manifest(self):
         manifest_path = self._filesystem.join(self.layout_tests_dir(), 'external', 'wpt', 'MANIFEST.json')
+        if not self._filesystem.exists(manifest_path):
+            _log.error('Manifest not found at %s. See http://crbug.com/698294', manifest_path)
+            return WPTManifest('{}')
         return WPTManifest(self._filesystem.read_text_file(manifest_path))
 
     def is_slow_wpt_test(self, test_file):
@@ -869,27 +871,18 @@ class Port(object):
         self._filesystem.write_binary_file(baseline_path, data)
 
     # TODO(qyearsley): Update callers to create a finder and call it instead
-    # of these next five routines (which should be protected).
-    def webkit_base(self):
-        return self._webkit_finder.webkit_base()
-
-    def path_from_webkit_base(self, *comps):
-        return self._webkit_finder.path_from_webkit_base(*comps)
-
+    # of these next two routines (which should be protected).
     def path_from_chromium_base(self, *comps):
-        return self._webkit_finder.path_from_chromium_base(*comps)
+        return self._path_finder.path_from_chromium_base(*comps)
 
-    def path_to_script(self, script_name):
-        return self._webkit_finder.path_to_script(script_name)
+    def perf_tests_dir(self):
+        return self._path_finder.perf_tests_dir()
 
     def layout_tests_dir(self):
         custom_layout_tests_dir = self.get_option('layout_tests_directory')
         if custom_layout_tests_dir:
             return custom_layout_tests_dir
-        return self._webkit_finder.layout_tests_dir()
-
-    def perf_tests_dir(self):
-        return self._webkit_finder.perf_tests_dir()
+        return self._path_finder.layout_tests_dir()
 
     def skipped_layout_tests(self, _):
         # TODO(qyearsley): Remove this method.
@@ -934,11 +927,11 @@ class Port(object):
         # TODO(qyearsley): Remove this if there are no more "Skipped" files.
         tests_to_skip = []
         for search_path in skipped_file_paths:
-            filename = self._filesystem.join(self._absolute_baseline_path(search_path), "Skipped")
+            filename = self._filesystem.join(self._absolute_baseline_path(search_path), 'Skipped')
             if not self._filesystem.exists(filename):
-                _log.debug("Skipped does not exist: %s", filename)
+                _log.debug('Skipped does not exist: %s', filename)
                 continue
-            _log.debug("Using Skipped file: %s", filename)
+            _log.debug('Using Skipped file: %s', filename)
             skipped_file_contents = self._filesystem.read_text_file(filename)
             tests_to_skip.extend(self._tests_from_skipped_file_contents(skipped_file_contents))
         return tests_to_skip
@@ -995,7 +988,7 @@ class Port(object):
 
         Ports may legitimately return absolute paths here if no relative path
         makes sense.
-        TODO(qyearsley): De-duplicate this and WebKitFinder.layout_test_name.
+        TODO(qyearsley): De-duplicate this and PathFinder.layout_test_name.
         """
         # Ports that run on windows need to override this method to deal with
         # filenames with backslashes in them.
@@ -1029,7 +1022,7 @@ class Port(object):
         return self._build_path('resources', 'inspector')
 
     def apache_config_directory(self):
-        return self.path_from_webkit_base('Tools', 'Scripts', 'apache_config')
+        return self._path_finder.path_from_tools_scripts('apache_config')
 
     def default_results_directory(self):
         """Returns the absolute path to the default place to store the test results."""
@@ -1040,7 +1033,7 @@ class Port(object):
         # Delete the disk cache if any to ensure a clean test run.
         dump_render_tree_binary_path = self._path_to_driver()
         cachedir = self._filesystem.dirname(dump_render_tree_binary_path)
-        cachedir = self._filesystem.join(cachedir, "cache")
+        cachedir = self._filesystem.join(cachedir, 'cache')
         if self._filesystem.exists(cachedir):
             self._filesystem.rmtree(cachedir)
 
@@ -1091,12 +1084,6 @@ class Port(object):
             variables_to_copy += [
                 'PATH',
                 'GYP_DEFINES',  # Required to locate win sdk.
-            ]
-        if self.host.platform.is_cygwin():
-            variables_to_copy += [
-                'HOMEDRIVE',
-                'HOMEPATH',
-                '_NT_SYMBOL_PATH',
             ]
 
         for variable in variables_to_copy:
@@ -1149,12 +1136,12 @@ class Port(object):
         self._websocket_server = server
 
     @staticmethod
-    def is_wptserve_test(test):
-        """Whether wptserve should be used for a given test if enabled."""
-        return test.startswith("external/wpt/")
+    def is_wpt_test(test):
+        """Whether a test is considered a web-platform-tests test."""
+        return re.match(r'(virtual/[^/]+/)?external/wpt/', test)
 
     def should_use_wptserve(self, test):
-        return self.is_wptserve_test(test)
+        return self.is_wpt_test(test)
 
     def start_wptserve(self):
         """Starts a WPT web server.
@@ -1174,11 +1161,25 @@ class Port(object):
             self._wpt_server.stop()
             self._wpt_server = None
 
+    def http_server_requires_http_protocol_options_unsafe(self):
+        httpd_path = self.path_to_apache()
+        intentional_syntax_error = 'INTENTIONAL_SYNTAX_ERROR'
+        cmd = [httpd_path,
+               '-C', 'HttpProtocolOptions Unsafe',
+               '-C', intentional_syntax_error]
+        env = self.setup_environ_for_server()
+
+        def error_handler(err):
+            pass
+        output = self._executive.run_command(cmd, env=env,
+                                             error_handler=error_handler)
+        # If apache complains about the intentional error, it apparently
+        # accepted the HttpProtocolOptions directive, and we should add it.
+        return intentional_syntax_error in output
+
     def http_server_supports_ipv6(self):
-        # Apache < 2.4 on win32 does not support IPv6, nor does cygwin apache.
-        if self.host.platform.is_cygwin() or self.host.platform.is_win():
-            return False
-        return True
+        # Apache < 2.4 on win32 does not support IPv6.
+        return not self.host.platform.is_win()
 
     def stop_http_server(self):
         """Shuts down the http server if it is running."""
@@ -1328,14 +1329,14 @@ class Port(object):
         return self.path_from_chromium_base('build')
 
     # This is a class variable so we can test error output easily.
-    _pretty_patch_error_html = "Failed to run PrettyPatch, see error log."
+    _pretty_patch_error_html = 'Failed to run PrettyPatch, see error log.'
 
     def pretty_patch_text(self, diff_path):
         if self._pretty_patch_available is None:
             self._pretty_patch_available = self.check_pretty_patch(more_logging=False)
         if not self._pretty_patch_available:
             return self._pretty_patch_error_html
-        command = ("ruby", "-I", self._filesystem.dirname(self._pretty_patch_path),
+        command = ('ruby', '-I', self._filesystem.dirname(self._pretty_patch_path),
                    self._pretty_patch_path, diff_path)
         try:
             # Diffs are treated as binary (we pass decode_output=False) as they
@@ -1344,13 +1345,13 @@ class Port(object):
         except OSError as error:
             # If the system is missing ruby log the error and stop trying.
             self._pretty_patch_available = False
-            _log.error("Failed to run PrettyPatch (%s): %s", command, error)
+            _log.error('Failed to run PrettyPatch (%s): %s', command, error)
             return self._pretty_patch_error_html
         except ScriptError as error:
             # If ruby failed to run for some reason, log the command
             # output and stop trying.
             self._pretty_patch_available = False
-            _log.error("Failed to run PrettyPatch (%s):\n%s", command, error.message_with_output())
+            _log.error('Failed to run PrettyPatch (%s):\n%s', command, error.message_with_output())
             return self._pretty_patch_error_html
 
     def default_configuration(self):
@@ -1387,17 +1388,21 @@ class Port(object):
 
     def _apache_version(self):
         config = self._executive.run_command([self.path_to_apache(), '-v'])
-        return re.sub(r'(?:.|\n)*Server version: Apache/(\d+\.\d+)(?:.|\n)*', r'\1', config)
+        # Log version including patch level.
+        _log.debug('Found apache version %s', re.sub(
+            r'(?:.|\n)*Server version: Apache/(\d+\.\d+(?:\.\d+)?)(?:.|\n)*',
+            r'\1', config))
+        return re.sub(
+            r'(?:.|\n)*Server version: Apache/(\d+\.\d+)(?:.|\n)*',
+            r'\1', config)
 
     def _apache_config_file_name_for_platform(self):
-        if self.host.platform.is_cygwin():
-            return 'cygwin-httpd.conf'  # CYGWIN is the only platform to still use Apache 1.3.
         if self.host.platform.is_linux():
             distribution = self.host.platform.linux_distribution()
 
             custom_configuration_distributions = ['arch', 'debian', 'redhat']
             if distribution in custom_configuration_distributions:
-                return "%s-httpd-%s.conf" % (distribution, self._apache_version())
+                return '%s-httpd-%s.conf' % (distribution, self._apache_version())
 
         return 'apache2-httpd-' + self._apache_version() + '.conf'
 
@@ -1482,7 +1487,7 @@ class Port(object):
         return [
             # For example, to turn on force-compositing-mode in the svg/ directory:
             # PhysicalTestSuite('svg', ['--force-compositing-mode']),
-            PhysicalTestSuite('fast/text', ["--enable-direct-write", "--enable-font-antialiasing"]),
+            PhysicalTestSuite('fast/text', ['--enable-direct-write', '--enable-font-antialiasing']),
         ]
 
     def virtual_test_suites(self):
@@ -1491,9 +1496,14 @@ class Port(object):
             assert self._filesystem.exists(path_to_virtual_test_suites), 'LayoutTests/VirtualTestSuites not found'
             try:
                 test_suite_json = json.loads(self._filesystem.read_text_file(path_to_virtual_test_suites))
-                self._virtual_test_suites = [VirtualTestSuite(**d) for d in test_suite_json]
+                self._virtual_test_suites = []
+                for json_config in test_suite_json:
+                    vts = VirtualTestSuite(**json_config)
+                    if vts in self._virtual_test_suites:
+                        raise ValueError('LayoutTests/VirtualTestSuites contains duplicate definition: %r' % json_config)
+                    self._virtual_test_suites.append(vts)
             except ValueError as error:
-                raise ValueError("LayoutTests/VirtualTestSuites is not a valid JSON file: %s" % error)
+                raise ValueError('LayoutTests/VirtualTestSuites is not a valid JSON file: %s' % error)
         return self._virtual_test_suites
 
     def _all_virtual_tests(self, suites):
@@ -1506,7 +1516,7 @@ class Port(object):
     def _virtual_tests_matching_paths(self, paths, suites):
         tests = []
         for suite in suites:
-            if any(p.startswith(suite.name) for p in paths):
+            if any(p.startswith(suite.name) for p in paths) or any(suite.name.startswith(os.path.join(p, '')) for p in paths):
                 self._populate_virtual_suite(suite)
             for test in suite.tests:
                 if any(test.startswith(p) for p in paths):
@@ -1569,12 +1579,9 @@ class Port(object):
             return False
         return True
 
-    def _convert_path(self, path):
-        """Handles filename conversion for subprocess command line args."""
-        # See note above in diff_image() for why we need this.
-        if sys.platform == 'cygwin':
-            return cygpath(path)
-        return path
+    def should_run_pixel_test_first(self, test_input):
+        return any(test_input.test_name.startswith(
+            directory) for directory in self._options.image_first_tests)
 
     def _build_path(self, *comps):
         return self._build_path_with_target(self._options.target, *comps)
@@ -1629,6 +1636,13 @@ class VirtualTestSuite(object):
 
     def __repr__(self):
         return "VirtualTestSuite('%s', '%s', %s, %s)" % (self.name, self.base, self.args, self.reference_args)
+
+    def __eq__(self, other):
+        return (
+            self.name == other.name and
+            self.base == other.base and
+            self.args == other.args and
+            self.reference_args == other.reference_args)
 
 
 class PhysicalTestSuite(object):

@@ -42,17 +42,17 @@ class AXSVGRoot final : public AXLayoutObject {
   AXSVGRoot(LayoutObject*, AXObjectCacheImpl&);
 
  public:
-  static AXSVGRoot* create(LayoutObject*, AXObjectCacheImpl&);
+  static AXSVGRoot* Create(LayoutObject*, AXObjectCacheImpl&);
   ~AXSVGRoot() override;
 
-  void setParent(AXObject*) override;
+  void SetParent(AXObjectImpl*) override;
 
-  AccessibilityRole determineAccessibilityRole() override;
-  bool computeAccessibilityIsIgnored(IgnoredReasons*) const override;
+  AccessibilityRole DetermineAccessibilityRole() override;
+  bool ComputeAccessibilityIsIgnored(IgnoredReasons*) const override;
 
  private:
-  AXObject* computeParent() const override;
-  bool isAXSVGRoot() const override { return true; }
+  AXObjectImpl* ComputeParent() const override;
+  bool IsAXSVGRoot() const override { return true; }
 };
 
 }  // namespace blink

@@ -187,12 +187,10 @@ input[type="text"]:focus {
 }
 
 .editing {
-    -webkit-user-select: text;
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2),
                 0 2px 4px rgba(0, 0, 0, 0.2),
                 0 2px 6px rgba(0, 0, 0, 0.1);
     background-color: white;
-    -webkit-user-modify: read-write-plaintext-only;
     text-overflow: clip !important;
     padding-left: 2px;
     margin-left: -2px;
@@ -294,6 +292,7 @@ body.inactive select.chrome-select,
     font-style: italic;
     padding: 6px;
     color: #888;
+    white-space: nowrap;
 }
 
 label[is=dt-icon-label] {
@@ -327,63 +326,88 @@ label[is=dt-icon-label] {
     flex-shrink: 0;
 }
 
-.icon-mask {
+[is=ui-icon].icon-mask {
     background-color: rgb(110, 110, 110);
+    -webkit-mask-position: var(--spritesheet-position);
+}
+
+[is=ui-icon]:not(.icon-mask) {
+    background-position: var(--spritesheet-position);
 }
 
 .spritesheet-smallicons:not(.icon-mask) {
     background-image: -webkit-image-set(url(Images/smallIcons.png) 1x, url(Images/smallIcons_2x.png) 2x);
-    background-size: 190px 30px;
 }
 
 .spritesheet-smallicons.icon-mask {
     -webkit-mask-image: -webkit-image-set(url(Images/smallIcons.png) 1x, url(Images/smallIcons_2x.png) 2x);
-    -webkit-mask-size: 190px 30px;
 }
 
 .spritesheet-largeicons:not(.icon-mask) {
-    background-image: -webkit-image-set(url(Images/toolbarButtonGlyphs.png) 1x, url(Images/toolbarButtonGlyphs_2x.png) 2x);
-    background-size: 352px 168px;
+    background-image: -webkit-image-set(url(Images/largeIcons.png) 1x, url(Images/largeIcons_2x.png) 2x);
 }
 
 .spritesheet-largeicons.icon-mask {
-    -webkit-mask-image: -webkit-image-set(url(Images/toolbarButtonGlyphs.png) 1x, url(Images/toolbarButtonGlyphs_2x.png) 2x);
-    -webkit-mask-size: 352px 168px;
+    -webkit-mask-image: -webkit-image-set(url(Images/largeIcons.png) 1x, url(Images/largeIcons_2x.png) 2x);
 }
 
-.spritesheet-resourceicons:not(.icon-mask) {
-    background-image: -webkit-image-set(url(Images/resourceGlyphs.png) 1x, url(Images/resourceGlyphs_2x.png) 2x);
-    background-size: 140px 20px;
+.spritesheet-mediumicons:not(.icon-mask) {
+    background-image: -webkit-image-set(url(Images/mediumIcons.png) 1x, url(Images/mediumIcons_2x.png) 2x);
 }
 
-.spritesheet-resourceicons.icon-mask {
-    -webkit-mask-image: -webkit-image-set(url(Images/resourceGlyphs.png) 1x, url(Images/resourceGlyphs_2x.png) 2x);
-    -webkit-mask-size: 140px 20px;
+.spritesheet-mediumicons.icon-mask {
+    -webkit-mask-image: -webkit-image-set(url(Images/mediumIcons.png) 1x, url(Images/mediumIcons_2x.png) 2x);
+}
+
+.spritesheet-arrowicons {
+    background-image: url(Images/popoverArrows.png);
 }
 
 .force-white-icons [is=ui-icon].spritesheet-smallicons, [is=ui-icon].force-white-icons.spritesheet-smallicons {
     -webkit-mask-image: -webkit-image-set(url(Images/smallIcons.png) 1x, url(Images/smallIcons_2x.png) 2x);
-    -webkit-mask-size: 190px 30px;
-    background-image: unset;
-    background-size: unset;
-    background: unset;
-    background-color: white;
+    -webkit-mask-position: var(--spritesheet-position);
+    background: white !important;
 }
 
 .force-white-icons [is=ui-icon].spritesheet-largeicons, [is=ui-icon].force-white-icons.spritesheet-largeicons {
-    -webkit-mask-image: -webkit-image-set(url(Images/toolbarButtonGlyphs.png) 1x, url(Images/toolbarButtonGlyphs_2x.png) 2x);
-    -webkit-mask-size: 352px 168px;
-    background-image: unset;
-    background-size: unset;
-    background: unset;
-    background-color: white;
+    -webkit-mask-image: -webkit-image-set(url(Images/largeIcons.png) 1x, url(Images/largeIcons_2x.png) 2x);
+    -webkit-mask-position: var(--spritesheet-position);
+    background: white !important;
 }
 
-.force-white-icons [is=ui-icon].spritesheet-resourceicons, [is=ui-icon].force-white-icons.spritesheet-resourceicons {
-    -webkit-mask-image: -webkit-image-set(url(Images/resourceGlyphs.png) 1x, url(Images/resourceGlyphs_2x.png) 2x);
-    -webkit-mask-size: 140px 20px;
-    background-image: unset;
-    background-size: unset;
-    background: unset;
-    background-color: white;
+.force-white-icons [is=ui-icon].spritesheet-mediumicons, [is=ui-icon].force-white-icons.spritesheet-mediumicons {
+    -webkit-mask-image: -webkit-image-set(url(Images/mediumIcons.png) 1x, url(Images/mediumIcons_2x.png) 2x);
+    -webkit-mask-position: var(--spritesheet-position);
+    background: white !important;
+}
+
+button.material-button {
+    display: inline-block;
+    text-shadow: none;
+    padding: 6px 10px;
+    background-color: #ffffff !important;
+    color: gray;
+    background-image: unset !important;
+    box-shadow: none !important;
+    cursor: pointer;
+}
+
+button.material-button.default {
+    color: white;
+    background-color: #4285f4 !important;
+}
+
+button.material-button.default:disabled {
+    background-color: #ffffff !important;
+    color: gray;
+}
+
+button.material-button.default:not(:disabled):hover {
+    background-color: hsla(217, 89%, 58%, 1) !important;
+    color: white !important;
+}
+
+button.material-button:not(:disabled):hover {
+    background-color: #eee !important;
+    color: gray !important;
 }

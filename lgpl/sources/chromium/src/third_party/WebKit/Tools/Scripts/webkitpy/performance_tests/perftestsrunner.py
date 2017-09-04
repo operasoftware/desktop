@@ -63,7 +63,6 @@ class PerfTestsRunner(object):
         else:
             self._host = Host()
             self._port = self._host.port_factory.get(self._options.platform, self._options)
-        self._webkit_base_dir_len = len(self._port.webkit_base())
         self._base_path = self._port.perf_tests_dir()
         self._timestamp = time.time()
         self._utc_timestamp = datetime.datetime.utcnow()
@@ -151,7 +150,7 @@ class PerfTestsRunner(object):
                 else:
                     _log.warning('Path was not found:' + arg)
 
-        skipped_directories = set(['.svn', 'resources'])
+        skipped_directories = set(['resources'])
         test_files = find_files.find(filesystem, self._base_path, paths, skipped_directories, _is_test_file)
         tests = []
         for path in test_files:

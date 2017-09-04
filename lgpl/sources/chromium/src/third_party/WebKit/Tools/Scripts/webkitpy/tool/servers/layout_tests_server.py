@@ -33,7 +33,7 @@ import BaseHTTPServer
 import subprocess
 from subprocess import STDOUT
 
-from webkitpy.common.webkit_finder import WebKitFinder
+from webkitpy.common.path_finder import PathFinder
 from webkitpy.common.system.filesystem import FileSystem
 from webkitpy.tool.servers.reflection_handler import ReflectionHandler
 
@@ -41,7 +41,7 @@ from webkitpy.tool.servers.reflection_handler import ReflectionHandler
 class LayoutTestsHTTPServer(BaseHTTPServer.HTTPServer):
 
     def __init__(self, httpd_port, _):
-        server_address = ("", httpd_port)
+        server_address = ('', httpd_port)
         BaseHTTPServer.HTTPServer.__init__(self, server_address, LayoutTestsServerHTTPRequestHandler)
 
 
@@ -54,15 +54,15 @@ class LayoutTestsServerHTTPRequestHandler(ReflectionHandler):
         for each in json_data['tests']:
             test_list += each + ' '
         filesystem = FileSystem()
-        webkit_finder = WebKitFinder(filesystem)
-        script_dir = webkit_finder.path_from_webkit_base('Tools', 'Scripts')
-        executable_path = script_dir + "/run-webkit-tests"
-        cmd = "python " + executable_path + " --no-show-results "
+        path_finder = PathFinder(filesystem)
+        script_dir = path_finder.path_from_tools_scripts()
+        executable_path = script_dir + '/run-webkit-tests'
+        cmd = 'python ' + executable_path + ' --no-show-results '
         cmd += test_list
         process = subprocess.Popen(cmd, shell=True, cwd=script_dir, env=None, stdout=subprocess.PIPE, stderr=STDOUT)
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header("Content-type", "text/html")
+        self.send_header('Content-type', 'text/html')
         self.end_headers()
         while process.poll() is None:
             html_output = '<br>' + str(process.stdout.readline())
@@ -72,7 +72,7 @@ class LayoutTestsServerHTTPRequestHandler(ReflectionHandler):
         process.wait()
 
     def do_OPTIONS(self):
-        self.send_response(200, "ok")
+        self.send_response(200, 'ok')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header("Access-Control-Allow-Headers", "Content-type")
+        self.send_header('Access-Control-Allow-Headers', 'Content-type')

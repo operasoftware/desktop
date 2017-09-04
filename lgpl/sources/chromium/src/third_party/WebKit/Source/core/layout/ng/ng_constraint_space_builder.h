@@ -6,9 +6,9 @@
 #define NGConstraintSpaceBuilder_h
 
 #include "core/layout/ng/ng_constraint_space.h"
-#include "core/layout/ng/ng_units.h"
-#include "wtf/Allocator.h"
-#include "wtf/Optional.h"
+#include "core/layout/ng/ng_unpositioned_float.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Optional.h"
 
 namespace blink {
 
@@ -48,6 +48,9 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
   NGConstraintSpaceBuilder& SetIsNewFormattingContext(bool is_new_fc);
   NGConstraintSpaceBuilder& SetIsAnonymous(bool is_anonymous);
 
+  NGConstraintSpaceBuilder& SetUnpositionedFloats(
+      Vector<RefPtr<NGUnpositionedFloat>>& unpositioned_floats);
+
   NGConstraintSpaceBuilder& SetMarginStrut(const NGMarginStrut& margin_strut);
 
   NGConstraintSpaceBuilder& SetBfcOffset(const NGLogicalOffset& offset);
@@ -73,7 +76,7 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
   NGPhysicalSize initial_containing_block_size_;
   LayoutUnit fragmentainer_space_available_;
 
-  unsigned parent_writing_mode_ : 2;
+  unsigned parent_writing_mode_ : 3;
   unsigned is_fixed_size_inline_ : 1;
   unsigned is_fixed_size_block_ : 1;
   unsigned is_shrink_to_fit_ : 1;
@@ -88,6 +91,7 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
   NGLogicalOffset bfc_offset_;
   std::shared_ptr<NGExclusions> exclusions_;
   WTF::Optional<LayoutUnit> clearance_offset_;
+  Vector<RefPtr<NGUnpositionedFloat>> unpositioned_floats_;
 };
 
 }  // namespace blink

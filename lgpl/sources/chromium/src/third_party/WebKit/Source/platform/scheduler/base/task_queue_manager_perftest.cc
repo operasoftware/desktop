@@ -8,7 +8,9 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -29,7 +31,7 @@ namespace scheduler {
 // fast forward the timers.
 class PerfTestTimeDomain : public VirtualTimeDomain {
  public:
-  PerfTestTimeDomain() : VirtualTimeDomain(nullptr, base::TimeTicks::Now()) {}
+  PerfTestTimeDomain() : VirtualTimeDomain(base::TimeTicks::Now()) {}
   ~PerfTestTimeDomain() override {}
 
   base::Optional<base::TimeDelta> DelayTillNextTask(
@@ -42,14 +44,14 @@ class PerfTestTimeDomain : public VirtualTimeDomain {
     return base::TimeDelta();  // Makes DoWork post an immediate continuation.
   }
 
-  void RequestWakeupAt(base::TimeTicks now, base::TimeTicks run_time) override {
+  void RequestWakeUpAt(base::TimeTicks now, base::TimeTicks run_time) override {
     // De-dupe DoWorks.
-    if (NumberOfScheduledWakeups() == 1u)
+    if (NumberOfScheduledWakeUps() == 1u)
       RequestDoWork();
   }
 
-  void CancelWakeupAt(base::TimeTicks run_time) override {
-    // We didn't post a delayed task in RequestWakeupAt so there's no need to do
+  void CancelWakeUpAt(base::TimeTicks run_time) override {
+    // We didn't post a delayed task in RequestWakeUpAt so there's no need to do
     // anything here.
   }
 
@@ -84,8 +86,7 @@ class TaskQueueManagerPerfTest : public testing::Test {
     manager_ = base::MakeUnique<TaskQueueManager>(
         TaskQueueManagerDelegateForTest::Create(
             message_loop_->task_runner(),
-            base::WrapUnique(new base::DefaultTickClock())),
-        "fake.category", "fake.category", "fake.category.debug");
+            base::WrapUnique(new base::DefaultTickClock())));
     manager_->AddTaskTimeObserver(&test_task_time_observer_);
 
     virtual_time_domain_.reset(new PerfTestTimeDomain());

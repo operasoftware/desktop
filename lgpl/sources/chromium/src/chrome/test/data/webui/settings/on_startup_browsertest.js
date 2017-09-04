@@ -28,19 +28,13 @@ OnStartupSettingsBrowserTest.prototype = {
 
   /** @return {Element} */
   getPageElement: function(selector) {
-    var section = this.getSection(this.getPage('basic'), 'onStartup');
+    var section = this.getSection(this.basicPage, 'onStartup');
     assertTrue(!!section);
     var module = section.querySelector('settings-on-startup-page');
     assertTrue(!!module);
     var result = module.$$(selector);
     assertTrue(!!result);
     return result;
-  },
-
-  /** @override */
-  preLoad: function() {
-    SettingsPageBrowserTest.prototype.preLoad.call(this);
-    settingsHidePagesByDefaultForTest = true;
   },
 };
 
@@ -54,12 +48,12 @@ TEST_F('OnStartupSettingsBrowserTest', 'uiTests', function() {
 
   var restoreOnStartup = function() {
     return self.getPageElement('#onStartupRadioGroup').querySelector(
-        '.iron-selected').textContent.trim();
+        '.iron-selected').label;
   };
 
   suite('OnStartupHandler', function() {
     suiteSetup(function() {
-      self.getPage('basic').set('pageVisibility.onStartup', true);
+      self.basicPage.set('pageVisibility.onStartup', true);
       Polymer.dom.flush();
 
       settingsPrefs = document.querySelector('settings-ui').$$(

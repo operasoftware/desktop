@@ -17,12 +17,12 @@ typedef SkBitmap (*SVGDecodeFunction)(const unsigned char* data,
 class PLATFORM_EXPORT SVGImageDecoder final : public ImageDecoder {
  public:
   SVGImageDecoder(AlphaOption, const ColorBehavior&, size_t maxDecodedBytes);
-  static void setDecodeFunction(SVGDecodeFunction function);
-  String filenameExtension() const override { return "svg"; }
-  void decodeSize() override;
-  void decode(size_t) override;
-  size_t decodeFrameCount() override;
-  IntSize frameSizeAtIndex(size_t) const override;
+  static void SetDecodeFunction(SVGDecodeFunction function);
+  String FilenameExtension() const override { return "svg"; }
+  void DecodeSize() override;
+  void Decode(size_t) override;
+  size_t DecodeFrameCount() override;
+  IntSize FrameSizeAtIndex(size_t) const override;
 };
 
 }  // namespace blink

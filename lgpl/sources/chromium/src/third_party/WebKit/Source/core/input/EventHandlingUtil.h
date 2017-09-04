@@ -18,25 +18,27 @@ class PaintLayer;
 
 namespace EventHandlingUtil {
 
-HitTestResult hitTestResultInFrame(
+HitTestResult HitTestResultInFrame(
     LocalFrame*,
     const LayoutPoint&,
-    HitTestRequest::HitTestRequestType hitType = HitTestRequest::ReadOnly |
-                                                 HitTestRequest::Active);
+    HitTestRequest::HitTestRequestType hit_type = HitTestRequest::kReadOnly |
+                                                  HitTestRequest::kActive);
 
-WebInputEventResult mergeEventResult(WebInputEventResult resultA,
-                                     WebInputEventResult resultB);
-WebInputEventResult toWebInputEventResult(DispatchEventResult);
+WebInputEventResult MergeEventResult(WebInputEventResult result_a,
+                                     WebInputEventResult result_b);
+WebInputEventResult ToWebInputEventResult(DispatchEventResult);
 
-PaintLayer* layerForNode(Node*);
-ScrollableArea* associatedScrollableArea(const PaintLayer*);
+PaintLayer* LayerForNode(Node*);
+ScrollableArea* AssociatedScrollableArea(const PaintLayer*);
 
-ContainerNode* parentForClickEvent(const Node&);
+bool IsInDocument(EventTarget*);
 
-LayoutPoint contentPointFromRootFrame(LocalFrame*,
-                                      const IntPoint& pointInRootFrame);
+ContainerNode* ParentForClickEvent(const Node&);
 
-MouseEventWithHitTestResults performMouseEventHitTest(LocalFrame*,
+LayoutPoint ContentPointFromRootFrame(LocalFrame*,
+                                      const IntPoint& point_in_root_frame);
+
+MouseEventWithHitTestResults PerformMouseEventHitTest(LocalFrame*,
                                                       const HitTestRequest&,
                                                       const WebMouseEvent&);
 

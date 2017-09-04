@@ -16,28 +16,48 @@ class AtomicString;
 
 namespace blink {
 
+class RespondWithObserver;
+
 class MODULES_EXPORT PaymentRequestEvent final : public ExtendableEvent {
   DEFINE_WRAPPERTYPEINFO();
   WTF_MAKE_NONCOPYABLE(PaymentRequestEvent);
 
  public:
-  static PaymentRequestEvent* create(const AtomicString& type,
+  static PaymentRequestEvent* Create(const AtomicString& type,
                                      const PaymentAppRequest&,
+                                     RespondWithObserver*,
                                      WaitUntilObserver*);
   ~PaymentRequestEvent() override;
 
-  const AtomicString& interfaceName() const override;
+  const AtomicString& InterfaceName() const override;
 
-  void appRequest(PaymentAppRequest&) const;
-  void respondWith(ScriptPromise);
+  const String& topLevelOrigin() const;
+  const String& paymentRequestOrigin() const;
+  const String& paymentRequestId() const;
+  const HeapVector<PaymentMethodData>& methodData() const;
+  void total(PaymentItem& value) const;
+  const HeapVector<PaymentDetailsModifier>& modifiers() const;
+  const String& instrumentKey() const;
+
+  void respondWith(ScriptState*, ScriptPromise, ExceptionState&);
 
   DECLARE_VIRTUAL_TRACE();
 
  private:
   PaymentRequestEvent(const AtomicString& type,
                       const PaymentAppRequest&,
+                      RespondWithObserver*,
                       WaitUntilObserver*);
-  PaymentAppRequest m_appRequest;
+
+  String top_level_origin_;
+  String payment_request_origin_;
+  String payment_request_id_;
+  HeapVector<PaymentMethodData> method_data_;
+  PaymentItem total_;
+  HeapVector<PaymentDetailsModifier> modifiers_;
+  String instrument_key_;
+
+  Member<RespondWithObserver> observer_;
 };
 
 }  // namespace blink

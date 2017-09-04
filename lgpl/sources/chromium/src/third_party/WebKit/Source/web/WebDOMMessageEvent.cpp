@@ -30,7 +30,7 @@
 
 #include "public/web/WebDOMMessageEvent.h"
 
-#include "bindings/core/v8/SerializedScriptValue.h"
+#include "bindings/core/v8/serialization/SerializedScriptValue.h"
 #include "core/dom/Document.h"
 #include "core/dom/MessagePort.h"
 #include "core/events/MessageEvent.h"
@@ -39,24 +39,23 @@
 #include "public/web/WebDocument.h"
 #include "public/web/WebFrame.h"
 #include "public/web/WebSerializedScriptValue.h"
-#include "web/WebLocalFrameImpl.h"
 
 namespace blink {
 
 WebDOMMessageEvent::WebDOMMessageEvent(
-    const WebSerializedScriptValue& messageData,
+    const WebSerializedScriptValue& message_data,
     const WebString& origin,
-    const WebFrame* sourceFrame,
-    const WebDocument& targetDocument,
+    const WebFrame* source_frame,
+    const WebDocument& target_document,
     WebMessagePortChannelArray channels)
-    : WebDOMMessageEvent(MessageEvent::create()) {
+    : WebDOMMessageEvent(MessageEvent::Create()) {
   DOMWindow* window = nullptr;
-  if (sourceFrame)
-    window = sourceFrame->toImplBase()->frame()->domWindow();
+  if (source_frame)
+    window = WebFrame::ToCoreFrame(*source_frame)->DomWindow();
   MessagePortArray* ports = nullptr;
-  if (!targetDocument.isNull()) {
-    Document* coreDocument = targetDocument;
-    ports = MessagePort::toMessagePortArray(coreDocument, std::move(channels));
+  if (!target_document.IsNull()) {
+    Document* core_document = target_document;
+    ports = MessagePort::ToMessagePortArray(core_document, std::move(channels));
   }
   // Use an empty array for |ports| when it is null because this function
   // is used to implement postMessage().
@@ -64,26 +63,26 @@ WebDOMMessageEvent::WebDOMMessageEvent(
     ports = new MessagePortArray;
   // TODO(esprehn): Chromium always passes empty string for lastEventId, is that
   // right?
-  unwrap<MessageEvent>()->initMessageEvent("message", false, false, messageData,
-                                           origin, "" /*lastEventId*/, window,
-                                           ports);
+  Unwrap<MessageEvent>()->initMessageEvent("message", false, false,
+                                           message_data, origin,
+                                           "" /*lastEventId*/, window, ports);
 }
 
-WebSerializedScriptValue WebDOMMessageEvent::data() const {
+WebSerializedScriptValue WebDOMMessageEvent::Data() const {
   return WebSerializedScriptValue(
-      constUnwrap<MessageEvent>()->dataAsSerializedScriptValue());
+      ConstUnwrap<MessageEvent>()->DataAsSerializedScriptValue());
 }
 
-WebString WebDOMMessageEvent::origin() const {
-  return WebString(constUnwrap<MessageEvent>()->origin());
+WebString WebDOMMessageEvent::Origin() const {
+  return WebString(ConstUnwrap<MessageEvent>()->origin());
 }
 
-WebMessagePortChannelArray WebDOMMessageEvent::releaseChannels() {
-  MessagePortChannelArray channels = unwrap<MessageEvent>()->releaseChannels();
-  WebMessagePortChannelArray webChannels(channels.size());
+WebMessagePortChannelArray WebDOMMessageEvent::ReleaseChannels() {
+  MessagePortChannelArray channels = Unwrap<MessageEvent>()->ReleaseChannels();
+  WebMessagePortChannelArray web_channels(channels.size());
   for (size_t i = 0; i < channels.size(); ++i)
-    webChannels[i] = std::move(channels[i]);
-  return webChannels;
+    web_channels[i] = std::move(channels[i]);
+  return web_channels;
 }
 
 }  // namespace blink

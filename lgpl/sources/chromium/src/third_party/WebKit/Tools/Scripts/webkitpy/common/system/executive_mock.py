@@ -26,6 +26,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import collections
 import logging
 import os
 import StringIO
@@ -56,18 +57,24 @@ class MockProcess(object):
     def communicate(self, *_):
         return (self.stdout.getvalue(), self.stderr.getvalue())
 
+    def kill(self):
+        return
+
+
+MockCall = collections.namedtuple('MockCall', ('args', 'env'))
+
 
 class MockExecutive(object):
-    PIPE = "MOCK PIPE"
-    STDOUT = "MOCK STDOUT"
-    DEVNULL = "MOCK_DEVNULL"
+    PIPE = 'MOCK PIPE'
+    STDOUT = 'MOCK STDOUT'
+    DEVNULL = 'MOCK_DEVNULL'
 
     @staticmethod
     def ignore_error(error):
         pass
 
     def __init__(self, should_log=False, should_throw=False,
-                 output="MOCK output of child process", stderr='',
+                 output='MOCK output of child process', stderr='',
                  exit_code=0, exception=None, run_command_fn=None):
         self._should_log = should_log
         self._should_throw = should_throw
@@ -79,7 +86,15 @@ class MockExecutive(object):
         self._exception = exception
         self._run_command_fn = run_command_fn
         self._proc = None
-        self.calls = []
+        self.full_calls = []
+
+    def _append_call(self, args, env=None):
+        if env:
+            env = env.copy()
+        self.full_calls.append(MockCall(
+            args=args,
+            env=env.copy() if env is not None else None,
+        ))
 
     def check_running_pid(self, pid):
         return pid in self._running_pids.values()
@@ -90,12 +105,12 @@ class MockExecutive(object):
             if process_name_filter(process_name):
                 running_pids.append(process_pid)
 
-        _log.info("MOCK running_pids: %s", running_pids)
+        _log.info('MOCK running_pids: %s', running_pids)
         return running_pids
 
     def command_for_printing(self, args):
         string_args = map(unicode, args)
-        return " ".join(string_args)
+        return ' '.join(string_args)
 
     # The argument list should match Executive.run_command, even if
     # some arguments are not used. pylint: disable=unused-argument
@@ -110,23 +125,23 @@ class MockExecutive(object):
                     decode_output=False,
                     env=None,
                     debug_logging=False):
-        self.calls.append(args)
+        self._append_call(args, env=env)
 
         assert isinstance(args, list) or isinstance(args, tuple)
 
         if self._should_log:
-            env_string = ""
+            env_string = ''
             if env:
-                env_string = ", env=%s" % env
-            input_string = ""
+                env_string = ', env=%s' % env
+            input_string = ''
             if input:
-                input_string = ", input=%s" % input
-            _log.info("MOCK run_command: %s, cwd=%s%s%s", args, cwd, env_string, input_string)
+                input_string = ', input=%s' % input
+            _log.info('MOCK run_command: %s, cwd=%s%s%s', args, cwd, env_string, input_string)
 
         if self._exception:
             raise self._exception  # pylint: disable=raising-bad-type
         if self._should_throw:
-            raise ScriptError("MOCK ScriptError", output=self._output)
+            raise ScriptError('MOCK ScriptError', output=self._output)
 
         if self._run_command_fn:
             return self._run_command_fn(args)
@@ -157,36 +172,36 @@ class MockExecutive(object):
 
     def popen(self, args, cwd=None, env=None, **_):
         assert all(isinstance(arg, basestring) for arg in args)
-        self.calls.append(args)
+        self._append_call(args, env=env)
         if self._should_log:
-            cwd_string = ""
+            cwd_string = ''
             if cwd:
-                cwd_string = ", cwd=%s" % cwd
-            env_string = ""
+                cwd_string = ', cwd=%s' % cwd
+            env_string = ''
             if env:
-                env_string = ", env=%s" % env
-            _log.info("MOCK popen: %s%s%s", args, cwd_string, env_string)
+                env_string = ', env=%s' % env
+            _log.info('MOCK popen: %s%s%s', args, cwd_string, env_string)
         if not self._proc:
             self._proc = MockProcess(self._output)
         return self._proc
 
     def call(self, args, **_):
         assert all(isinstance(arg, basestring) for arg in args)
-        self.calls.append(args)
+        self._append_call(args)
         _log.info('Mock call: %s', args)
 
     def run_in_parallel(self, commands):
         assert len(commands)
 
-        num_previous_calls = len(self.calls)
+        num_previous_calls = len(self.full_calls)
         command_outputs = []
         for cmd_line, cwd in commands:
             assert all(isinstance(arg, basestring) for arg in cmd_line)
             command_outputs.append([0, self.run_command(cmd_line, cwd=cwd), ''])
 
-        new_calls = self.calls[num_previous_calls:]
-        self.calls = self.calls[:num_previous_calls]
-        self.calls.append(new_calls)
+        new_calls = self.full_calls[num_previous_calls:]
+        self.full_calls = self.full_calls[:num_previous_calls]
+        self.full_calls.append(new_calls)
         return command_outputs
 
     def map(self, thunk, arglist, processes=None):
@@ -194,6 +209,20 @@ class MockExecutive(object):
 
     def process_dump(self):
         return []
+
+    @property
+    def calls(self):
+        # TODO(crbug.com/718456): Make self.full_calls always be an array of
+        # arrays of MockCalls, rather than a union type, and possibly remove
+        # this property in favor of direct "full_calls" access in unit tests.
+        def get_args(v):
+            if isinstance(v, list):
+                return [get_args(e) for e in v]
+            elif isinstance(v, MockCall):
+                return v.args
+            else:
+                return TypeError('Unknown full_calls type: %s' % (type(v).__name__,))
+        return get_args(self.full_calls)
 
 
 def mock_git_commands(vals, strict=False):

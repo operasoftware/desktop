@@ -2,15 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 /**
- * @implements {SDK.TargetManager.Observer}
+ * @implements {SDK.SDKModelObserver<!SDK.EmulationModel>}
+ * @extends {Common.Object}
  * @unrestricted
  */
-Emulation.DeviceModeModel = class {
-  /**
-   * @param {function()} updateCallback
-   */
-  constructor(updateCallback) {
-    this._updateCallback = updateCallback;
+Emulation.DeviceModeModel = class extends Common.Object {
+  constructor() {
+    super();
     this._screenRect = new UI.Rect(0, 0, 1, 1);
     this._visiblePageRect = new UI.Rect(0, 0, 1, 1);
     this._availableSize = new UI.Size(1, 1);
@@ -49,6 +47,9 @@ Emulation.DeviceModeModel = class {
     this._deviceOutlineSetting = Common.settings.moduleSetting('emulation.showDeviceOutline');
     this._deviceOutlineSetting.addChangeListener(this._deviceOutlineSettingChanged, this);
 
+    this._toolbarControlsEnabledSetting =
+        Common.settings.createSetting('emulation.toolbarControlsEnabled', true, Common.SettingStorageType.Session);
+
     /** @type {!Emulation.DeviceModeModel.Type} */
     this._type = Emulation.DeviceModeModel.Type.None;
     /** @type {?Emulation.EmulatedDevice} */
@@ -58,11 +59,11 @@ Emulation.DeviceModeModel = class {
     /** @type {number} */
     this._fitScale = 1;
 
-    /** @type {?SDK.Target} */
-    this._target = null;
+    /** @type {?SDK.EmulationModel} */
+    this._emulationModel = null;
     /** @type {?function()} */
-    this._onTargetAvailable = null;
-    SDK.targetManager.observeTargets(this, SDK.Target.Capability.Browser);
+    this._onModelAvailable = null;
+    SDK.targetManager.observeModels(SDK.EmulationModel, this);
   }
 
   /**
@@ -291,6 +292,13 @@ Emulation.DeviceModeModel = class {
   /**
    * @return {!Common.Setting}
    */
+  enabledSetting() {
+    return Common.settings.createSetting('emulation.showDeviceMode', false);
+  }
+
+  /**
+   * @return {!Common.Setting}
+   */
   scaleSetting() {
     return this._scaleSetting;
   }
@@ -316,6 +324,13 @@ Emulation.DeviceModeModel = class {
     return this._deviceOutlineSetting;
   }
 
+  /**
+   * @return {!Common.Setting}
+   */
+  toolbarControlsEnabledSetting() {
+    return this._toolbarControlsEnabledSetting;
+  }
+
   reset() {
     this._deviceScaleFactorSetting.set(0);
     this._scaleSetting.set(1);
@@ -326,14 +341,14 @@ Emulation.DeviceModeModel = class {
 
   /**
    * @override
-   * @param {!SDK.Target} target
+   * @param {!SDK.EmulationModel} emulationModel
    */
-  targetAdded(target) {
-    if (!this._target) {
-      this._target = target;
-      if (this._onTargetAvailable) {
-        var callback = this._onTargetAvailable;
-        this._onTargetAvailable = null;
+  modelAdded(emulationModel) {
+    if (!this._emulationModel && emulationModel.supportsDeviceEmulation()) {
+      this._emulationModel = emulationModel;
+      if (this._onModelAvailable) {
+        var callback = this._onModelAvailable;
+        this._onModelAvailable = null;
         callback();
       }
     }
@@ -341,18 +356,18 @@ Emulation.DeviceModeModel = class {
 
   /**
    * @override
-   * @param {!SDK.Target} target
+   * @param {!SDK.EmulationModel} emulationModel
    */
-  targetRemoved(target) {
-    if (this._target === target)
-      this._target = null;
+  modelRemoved(emulationModel) {
+    if (this._emulationModel === emulationModel)
+      this._emulationModel = null;
   }
 
   /**
-   * @return {?SDK.Target}
+   * @return {?string}
    */
-  target() {
-    return this._target;
+  inspectedURL() {
+    return this._emulationModel ? this._emulationModel.target().inspectedURL() : null;
   }
 
   _scaleSettingChanged() {
@@ -419,8 +434,8 @@ Emulation.DeviceModeModel = class {
    * @param {boolean} resetPageScaleFactor
    */
   _calculateAndEmulate(resetPageScaleFactor) {
-    if (!this._target)
-      this._onTargetAvailable = this._calculateAndEmulate.bind(this, resetPageScaleFactor);
+    if (!this._emulationModel)
+      this._onModelAvailable = this._calculateAndEmulate.bind(this, resetPageScaleFactor);
     var mobile = this._isMobile();
     if (this._type === Emulation.DeviceModeModel.Type.Device) {
       var orientation = this._device.orientationByName(this._mode.orientation);
@@ -472,9 +487,10 @@ Emulation.DeviceModeModel = class {
               this._uaSetting.get() === Emulation.DeviceModeModel.UA.Mobile,
           this._uaSetting.get() === Emulation.DeviceModeModel.UA.Mobile);
     }
-    if (this._target)
-      this._target.renderingAgent().setShowViewportSizeOnResize(this._type === Emulation.DeviceModeModel.Type.None);
-    this._updateCallback.call(null);
+    var overlayModel = this._emulationModel ? this._emulationModel.overlayModel() : null;
+    if (overlayModel)
+      overlayModel.setShowViewportSizeOnResize(this._type === Emulation.DeviceModeModel.Type.None);
+    this.dispatchEventToListeners(Emulation.DeviceModeModel.Events.Updated);
   }
 
   /**
@@ -548,7 +564,7 @@ Emulation.DeviceModeModel = class {
 
     var pageWidth = screenSize.width - insets.left - insets.right;
     var pageHeight = screenSize.height - insets.top - insets.bottom;
-    this._emulatedPageSize = new UI.Size(Math.floor(pageWidth * scale), Math.floor(pageHeight * scale));
+    this._emulatedPageSize = new UI.Size(pageWidth, pageHeight);
 
     var positionX = insets.left;
     var positionY = insets.top;
@@ -589,19 +605,16 @@ Emulation.DeviceModeModel = class {
      * @return {!Promise.<?>}
      */
     function setDeviceMetricsOverride() {
-      if (!this._target)
+      if (!this._emulationModel)
         return Promise.resolve();
 
       var clear = !pageWidth && !pageHeight && !mobile && !deviceScaleFactor && scale === 1 && !screenOrientation;
       var allPromises = [];
       if (resetPageScaleFactor)
-        allPromises.push(this._target.emulationAgent().resetPageScaleFactor());
-      var setDevicePromise;
-      if (clear) {
-        setDevicePromise = this._target.emulationAgent().clearDeviceMetricsOverride(
-            this._deviceMetricsOverrideAppliedForTest.bind(this));
-      } else {
-        var params = {
+        allPromises.push(this._emulationModel.resetPageScaleFactor());
+      var metrics = null;
+      if (!clear) {
+        metrics = {
           width: pageWidth,
           height: pageHeight,
           deviceScaleFactor: deviceScaleFactor,
@@ -614,54 +627,58 @@ Emulation.DeviceModeModel = class {
           positionY: positionY
         };
         if (screenOrientation)
-          params.screenOrientation = {type: screenOrientation, angle: screenOrientationAngle};
-        setDevicePromise = this._target.emulationAgent().invoke_setDeviceMetricsOverride(
-            params, this._deviceMetricsOverrideAppliedForTest.bind(this));
+          metrics.screenOrientation = {type: screenOrientation, angle: screenOrientationAngle};
       }
-      allPromises.push(setDevicePromise);
+      allPromises.push(this._emulationModel.emulateDevice(metrics));
       return Promise.all(allPromises);
     }
   }
 
   /**
-   * @param {function(?string)} callback
+   * @param {boolean} fullSize
+   * @return {!Promise<?string>}
    */
-  captureFullSizeScreenshot(callback) {
-    var screenCaptureModel = this._target ? this._target.model(SDK.ScreenCaptureModel) : null;
-    if (!screenCaptureModel) {
-      callback(null);
-      return;
+  async captureScreenshot(fullSize) {
+    var screenCaptureModel = this._emulationModel ? this._emulationModel.target().model(SDK.ScreenCaptureModel) : null;
+    if (!screenCaptureModel)
+      return null;
+
+    var metrics = await screenCaptureModel.fetchLayoutMetrics();
+    if (!metrics)
+      return null;
+
+    if (!this._emulatedPageSize)
+      this._calculateAndEmulate(false);
+    var overlayModel = this._emulationModel ? this._emulationModel.overlayModel() : null;
+    if (overlayModel)
+      overlayModel.setShowViewportSizeOnResize(false);
+
+    var pageSize = fullSize ? new UI.Size(metrics.contentWidth, metrics.contentHeight) : this._emulatedPageSize;
+    var promises = [];
+    promises.push(this._emulationModel.setVisibleSize(Math.floor(pageSize.width), Math.floor(pageSize.height)));
+    if (fullSize) {
+      promises.push(this._emulationModel.forceViewport({x: 0, y: 0, scale: 1}));
+    } else {
+      promises.push(this._emulationModel.forceViewport(
+          {x: Math.floor(metrics.viewportX), y: Math.floor(metrics.viewportY), scale: metrics.viewportScale}));
     }
+    promises.push(this._emulationModel.emulateDevice({
+      width: 0,
+      height: 0,
+      deviceScaleFactor: this._appliedDeviceScaleFactor,
+      mobile: this._isMobile(),
+      fitWindow: false,
+      scale: 1,
+    }));
+    await Promise.all(promises);
 
-    screenCaptureModel.fetchContentSize().then(contentSize => {
-      if (!contentSize) {
-        callback(null);
-        return;
-      }
-
-      var scaledPageSize = new UI.Rect(0, 0, contentSize.width, contentSize.height).scale(this._scale);
-      var promises = [];
-      promises.push(this._target.emulationAgent().forceViewport(0, 0, 1));
-      promises.push(this._target.emulationAgent().invoke_setDeviceMetricsOverride({
-        width: 0,
-        height: 0,
-        deviceScaleFactor: this._appliedDeviceScaleFactor,
-        mobile: this._isMobile(),
-        fitWindow: false,
-        scale: this._scale,
-      }));
-      promises.push(this._target.emulationAgent().setVisibleSize(
-          Math.floor(scaledPageSize.width), Math.floor(scaledPageSize.height)));
-      Promise.all(promises).then(() => screenCaptureModel.captureScreenshot('png', 100)).then(content => {
-        this._target.emulationAgent().setVisibleSize(this._emulatedPageSize.width, this._emulatedPageSize.height);
-        this._target.emulationAgent().resetViewport();
-        callback(content);
-      });
-    });
-  }
-
-  _deviceMetricsOverrideAppliedForTest() {
-    // Used for sniffing in tests.
+    var screenshot = await screenCaptureModel.captureScreenshot('png', 100);
+    this._emulationModel.setVisibleSize(
+        Math.floor(this._emulatedPageSize.width * this._scale),
+        Math.floor(this._emulatedPageSize.height * this._scale));
+    this._emulationModel.forceViewport(null);
+    this._calculateAndEmulate(false);
+    return screenshot;
   }
 
   /**
@@ -669,8 +686,14 @@ Emulation.DeviceModeModel = class {
    * @param {boolean} mobile
    */
   _applyTouch(touchEnabled, mobile) {
-    Emulation.MultitargetTouchModel.instance().setTouchEnabled(touchEnabled, mobile);
+    for (var emulationModel of SDK.targetManager.models(SDK.EmulationModel))
+      emulationModel.emulateTouch(touchEnabled, mobile);
   }
+};
+
+/** @enum {string} */
+Emulation.DeviceModeModel.Events = {
+  Updated: 'Updated'
 };
 
 /** @enum {string} */

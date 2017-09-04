@@ -36,4 +36,10 @@ blink_modules_sources("presentation") {
     "PresentationRequest.cpp",
     "PresentationRequest.h",
   ]
+
+  jumbo_excluded_sources = [
+    # Collides with PresentationConnection.cpp (patch incoming)
+    "PresentationAvailability.cpp",
+    "PresentationRequest.cpp",
+  ]
 }

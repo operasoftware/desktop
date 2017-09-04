@@ -164,7 +164,7 @@ def SetupAndroidToolchain(target_arch):
   sysroot_arch = target_arch
   toolchain_dir_prefix = target_arch
   toolchain_bin_prefix = target_arch
-  if target_arch == 'arm-neon':
+  if target_arch == 'arm-neon' or target_arch == 'arm':
     toolchain_bin_prefix = toolchain_dir_prefix = 'arm-linux-androideabi'
     sysroot_arch = 'arm'
   elif target_arch == 'arm64':
@@ -383,9 +383,7 @@ def main(argv):
             '--arch=x86_64',
         ])
       if target_os != 'android':
-        # TODO(krasin): move this to Common, when https://crbug.com/537368
-        # is fixed and CFI is unblocked from launching on ChromeOS.
-        configure_flags['EnableLTO'].extend(['--enable-lto'])
+        configure_flags['Common'].extend(['--enable-lto'])
       pass
     elif target_arch == 'ia32':
       configure_flags['Common'].extend([
@@ -632,12 +630,10 @@ def main(argv):
     do_build_ffmpeg('Chromium',
                     configure_flags['Common'] +
                     configure_flags['Chromium'] +
-                    configure_flags['EnableLTO'] +
                     configure_args)
     do_build_ffmpeg('Chrome',
                     configure_flags['Common'] +
                     configure_flags['Chrome'] +
-                    configure_flags['EnableLTO'] +
                     configure_args)
   else:
     do_build_ffmpeg('Chromium',

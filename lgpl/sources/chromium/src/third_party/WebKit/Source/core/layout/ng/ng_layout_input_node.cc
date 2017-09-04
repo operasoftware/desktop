@@ -1,34 +1,66 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "core/layout/ng/ng_layout_input_node.h"
-
-#include "core/layout/ng/ng_block_layout_algorithm.h"
-#include "core/layout/ng/ng_box.h"
-#include "core/layout/ng/ng_constraint_space.h"
-#include "core/layout/ng/ng_inline_box.h"
-#include "core/layout/ng/ng_inline_layout_algorithm.h"
-#include "core/layout/ng/ng_layout_algorithm.h"
-#include "core/style/ComputedStyle.h"
+#include "core/layout/ng/inline/ng_inline_node.h"
+#include "core/layout/ng/ng_block_node.h"
+#include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
+namespace {
 
-NGLayoutAlgorithm* NGLayoutInputNode::AlgorithmForInputNode(
-    NGLayoutInputNode* input_node,
-    const NGConstraintSpace* constraint_space) {
-  // At least for now, this should never be called on LegacyInline
-  // children. However, there will be other kinds of input_node so
-  // it makes sense to do this here.
-  DCHECK(input_node->Type() == LegacyBlock);
-  NGBox* block = toNGBox(input_node);
+#ifndef NDEBUG
+void AppendNodeToString(const NGLayoutInputNode* node,
+                        StringBuilder* string_builder,
+                        unsigned indent = 2) {
+  if (!node)
+    return;
+  DCHECK(string_builder);
 
-  if (block->HasInlineChildren())
-    return new NGInlineLayoutAlgorithm(
-        block->Style(), toNGInlineBox(block->FirstChild()),
-        constraint_space->ChildSpace(block->Style()));
-  return new NGBlockLayoutAlgorithm(
-      block->Style(), toNGBox(block->FirstChild()),
-      constraint_space->ChildSpace(block->Style()));
+  string_builder->Append(node->ToString());
+  string_builder->Append("\n");
+
+  StringBuilder indent_builder;
+  for (unsigned i = 0; i < indent; i++)
+    indent_builder.Append(" ");
+
+  if (node->IsBlock()) {
+    auto* first_child =
+        ToNGBlockNode(const_cast<NGLayoutInputNode*>(node))->FirstChild();
+    for (NGLayoutInputNode* node_runner = first_child; node_runner;
+         node_runner = node_runner->NextSibling()) {
+      string_builder->Append(indent_builder.ToString());
+      AppendNodeToString(node_runner, string_builder, indent + 2);
+    }
+  }
+
+  if (node->IsInline()) {
+    for (const NGInlineItem& inline_item : ToNGInlineNode(node)->Items()) {
+      string_builder->Append(indent_builder.ToString());
+      string_builder->Append(inline_item.ToString());
+      string_builder->Append("\n");
+    }
+    auto* next_sibling =
+        ToNGInlineNode(const_cast<NGLayoutInputNode*>(node))->NextSibling();
+    for (NGLayoutInputNode* node_runner = next_sibling; node_runner;
+         node_runner = node_runner->NextSibling()) {
+      string_builder->Append(indent_builder.ToString());
+      AppendNodeToString(node_runner, string_builder, indent + 2);
+    }
+  }
 }
+#endif
+
+}  // namespace
+
+#ifndef NDEBUG
+void NGLayoutInputNode::ShowNodeTree() const {
+  StringBuilder string_builder;
+  string_builder.Append("\n.:: LayoutNG Node Tree ::.\n\n");
+  AppendNodeToString(this, &string_builder);
+  fprintf(stderr, "%s\n", string_builder.ToString().Utf8().data());
 }
+#endif
+
+}  // namespace blink

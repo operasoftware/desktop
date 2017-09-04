@@ -46,6 +46,7 @@ Timeline.TimelinePanel = class extends UI.Panel {
     /** @type {!Array<!UI.ToolbarItem>} */
     this._recordingOptionUIControls = [];
     this._state = Timeline.TimelinePanel.State.Idle;
+    this._recordingPageReload = false;
     this._windowStartTime = 0;
     this._windowEndTime = Infinity;
     this._millisecondsToRecordAfterLoadEvent = 3000;
@@ -58,6 +59,8 @@ Timeline.TimelinePanel = class extends UI.Panel {
       this._filters.push(Timeline.TimelineUIUtils.visibleEventsFilter());
       this._filters.push(new TimelineModel.ExcludeTopLevelFilter());
     }
+    if (!Runtime.experiments.isEnabled('timelinePaintTimingMarkers'))
+      this._filters.push(Timeline.TimelineUIUtils.paintEventsFilter());
 
     /** @type {?Timeline.PerformanceModel} */
     this._performanceModel = null;
@@ -102,8 +105,8 @@ Timeline.TimelinePanel = class extends UI.Panel {
 
     this._createFileSelector();
 
-    SDK.targetManager.addEventListener(SDK.TargetManager.Events.PageReloadRequested, this._pageReloadRequested, this);
-    SDK.targetManager.addEventListener(SDK.TargetManager.Events.Load, this._loadEventFired, this);
+    SDK.targetManager.addModelListener(
+        SDK.ResourceTreeModel, SDK.ResourceTreeModel.Events.Load, this._loadEventFired, this);
 
     if (Runtime.experiments.isEnabled('timelineMultipleMainViews')) {
       var viewMode = Timeline.TimelinePanel.ViewMode;
@@ -213,7 +216,7 @@ Timeline.TimelinePanel = class extends UI.Panel {
   _populateToolbar() {
     // Record
     this._panelToolbar.appendToolbarItem(UI.Toolbar.createActionButton(this._toggleRecordAction));
-    this._panelToolbar.appendToolbarItem(UI.Toolbar.createActionButtonForId('main.reload'));
+    this._panelToolbar.appendToolbarItem(UI.Toolbar.createActionButtonForId('timeline.record-reload'));
     this._clearButton = new UI.ToolbarButton(Common.UIString('Clear'), 'largeicon-clear');
     this._clearButton.addEventListener(UI.ToolbarButton.Events.Click, () => this._clear());
     this._panelToolbar.appendToolbarItem(this._clearButton);
@@ -501,18 +504,17 @@ Timeline.TimelinePanel = class extends UI.Panel {
   }
 
   /**
-   * @param {boolean} userInitiated
    * @return {!Promise}
    */
-  _startRecording(userInitiated) {
-    console.assert(!this._statusPane, 'Status pane is already opened.');
+  _startRecording() {
     var tracingManagers = SDK.targetManager.models(SDK.TracingManager);
     if (!tracingManagers.length)
       return Promise.resolve();
+
+    console.assert(!this._statusPane, 'Status pane is already opened.');
     this._setState(Timeline.TimelinePanel.State.StartPending);
     this._showRecordingStarted();
 
-    this._autoRecordGeneration = userInitiated ? null : Symbol('Generation');
     var enabledTraceProviders = Extensions.extensionServer.traceProviders().filter(
         provider => Timeline.TimelinePanel._settingForTraceProvider(provider).get());
 
@@ -524,8 +526,7 @@ Timeline.TimelinePanel = class extends UI.Panel {
 
     this._pendingPerformanceModel = new Timeline.PerformanceModel();
     this._controller = new Timeline.TimelineController(tracingManagers[0], this._pendingPerformanceModel, this);
-    Host.userMetrics.actionTaken(
-        userInitiated ? Host.UserMetrics.Action.TimelineStarted : Host.UserMetrics.Action.TimelinePageReloadStarted);
+    Host.userMetrics.actionTaken(Host.UserMetrics.Action.TimelineStarted);
     this._setUIControlsEnabled(false);
     this._hideLandingPage();
     return this._controller.startRecording(recordingOptions, enabledTraceProviders)
@@ -539,7 +540,6 @@ Timeline.TimelinePanel = class extends UI.Panel {
       this._statusPane.updateProgressBar(Common.UIString('Received'), 0);
     }
     this._setState(Timeline.TimelinePanel.State.StopPending);
-    this._autoRecordGeneration = null;
     this._controller.stopRecording();
     this._controller = null;
     this._setUIControlsEnabled(true);
@@ -559,10 +559,19 @@ Timeline.TimelinePanel = class extends UI.Panel {
   }
 
   _toggleRecording() {
-    if (this._state === Timeline.TimelinePanel.State.Idle)
-      this._startRecording(true);
-    else if (this._state === Timeline.TimelinePanel.State.Recording)
+    if (this._state === Timeline.TimelinePanel.State.Idle) {
+      this._recordingPageReload = false;
+      this._startRecording();
+    } else if (this._state === Timeline.TimelinePanel.State.Recording) {
       this._stopRecording();
+    }
+  }
+
+  _recordReload() {
+    if (this._state !== Timeline.TimelinePanel.State.Idle)
+      return;
+    this._recordingPageReload = true;
+    this._startRecording();
   }
 
   _clear() {
@@ -610,6 +619,12 @@ Timeline.TimelinePanel = class extends UI.Panel {
   }
 
   _recordingStarted() {
+    if (this._recordingPageReload) {
+      var target = this._controller.mainTarget();
+      var resourceModel = target.model(SDK.ResourceTreeModel);
+      if (resourceModel)
+        resourceModel.reloadPage();
+    }
     this._reset();
     this._setState(Timeline.TimelinePanel.State.Recording);
     this._showRecordingStarted();
@@ -646,26 +661,31 @@ Timeline.TimelinePanel = class extends UI.Panel {
     var learnMoreNode = UI.createExternalLink(
         'https://developers.google.com/web/tools/chrome-devtools/evaluate-performance/',
         Common.UIString('Learn\xa0more'));
+    var learnMoreMigrationNode = UI.createExternalLink(
+        'https://developers.google.com/web/updates/2016/12/devtools-javascript-cpu-profile-migration',
+        Common.UIString('Learn\xa0more'));
+
     var recordKey =
         encloseWithTag('b', UI.shortcutRegistry.shortcutDescriptorsForAction('timeline.toggle-recording')[0].name);
-    var reloadKey = encloseWithTag('b', UI.shortcutRegistry.shortcutDescriptorsForAction('main.reload')[0].name);
+    var reloadKey =
+        encloseWithTag('b', UI.shortcutRegistry.shortcutDescriptorsForAction('timeline.record-reload')[0].name);
     var navigateNode = encloseWithTag('b', Common.UIString('WASD'));
 
     this._landingPage = new UI.VBox();
     this._landingPage.contentElement.classList.add('timeline-landing-page', 'fill');
     var centered = this._landingPage.contentElement.createChild('div');
 
-    var recordButton = UI.Toolbar.createActionButton(this._toggleRecordAction).element;
-    var reloadButton = UI.Toolbar.createActionButtonForId('main.reload').element;
+    var recordButton = UI.createInlineButton(UI.Toolbar.createActionButton(this._toggleRecordAction));
+    var reloadButton = UI.createInlineButton(UI.Toolbar.createActionButtonForId('timeline.record-reload'));
 
     centered.createChild('p').appendChild(UI.formatLocalized(
-        'Click the record button %s or hit %s to capture a new recording.\n' +
-            'Click the reload button %s or hit %s to record and evaluate the page load.',
+        'Click the record button %s or hit %s to start a new recording.\n' +
+            'Click the reload button %s or hit %s to record the page load.',
         [recordButton, recordKey, reloadButton, reloadKey]));
 
     centered.createChild('p').appendChild(UI.formatLocalized(
         'After recording, select an area of interest in the overview by dragging.\n' +
-            'Then, zoom and pan the timeline with the mousewheel or %s keys.\n%s',
+        'Then, zoom and pan the timeline with the mousewheel or %s keys.\n%s',
         [navigateNode, learnMoreNode]));
 
     var cpuProfilerHintSetting = Common.settings.createSetting('timelineShowProfilerHint', true);
@@ -678,10 +698,10 @@ Timeline.TimelinePanel = class extends UI.Panel {
       }, false);
       var performanceSpan = encloseWithTag('b', Common.UIString('Performance'));
       warning.createChild('div').appendChild(UI.formatLocalized(
-          'The %s panel provides the combined functionality of Timeline and CPU profiler.%s' +
-              'The JavaScript CPU profiler will be removed shortly. Meanwhile, it\'s available under ' +
-              '%s \u2192 More Tools \u2192 JavaScript Profiler.',
-          [performanceSpan, createElement('p'), UI.Icon.create('largeicon-menu')]));
+          `The %s panel provides the combined functionality of Timeline and JavaScript CPU profiler. %s%s` +
+          `The JavaScript CPU profiler will be removed shortly. Meanwhile, it's available under ` +
+          `%s \u2192 More Tools \u2192 JavaScript Profiler.`,
+          [performanceSpan, learnMoreMigrationNode, createElement('p'), UI.Icon.create('largeicon-menu')]));
     }
 
     this._landingPage.show(this._statusPaneContainer);
@@ -782,30 +802,21 @@ Timeline.TimelinePanel = class extends UI.Panel {
   /**
    * @param {!Common.Event} event
    */
-  _pageReloadRequested(event) {
-    if (this._state !== Timeline.TimelinePanel.State.Idle || !this.isShowing())
-      return;
-    var resourceTreeModel = /** @type {!SDK.ResourceTreeModel} */ (event.data);
-    resourceTreeModel.suspendReload();
-    this._startRecording(false).then(() => resourceTreeModel.resumeReload());
-  }
-
-  /**
-   * @param {!Common.Event} event
-   */
   _loadEventFired(event) {
-    if (this._state !== Timeline.TimelinePanel.State.Recording || !this._autoRecordGeneration)
+    if (this._state !== Timeline.TimelinePanel.State.Recording || !this._recordingPageReload ||
+        this._controller.mainTarget() !== event.data.resourceTreeModel.target())
       return;
-    setTimeout(stopRecordingOnReload.bind(this, this._autoRecordGeneration), this._millisecondsToRecordAfterLoadEvent);
+    setTimeout(stopRecordingOnReload.bind(this, this._controller), this._millisecondsToRecordAfterLoadEvent);
 
     /**
+     * @param {!Timeline.TimelineController} controller
      * @this {Timeline.TimelinePanel}
-     * @param {!Object} recordGeneration
      */
-    function stopRecordingOnReload(recordGeneration) {
+    function stopRecordingOnReload(controller) {
       // Check if we're still in the same recording session.
-      if (this._state !== Timeline.TimelinePanel.State.Recording || this._autoRecordGeneration !== recordGeneration)
+      if (controller !== this._controller)
         return;
+      this._recordingPageReload = false;
       this._stopRecording();
     }
   }
@@ -1239,7 +1250,7 @@ Timeline.TimelinePanel.StatusPane = class extends UI.VBox {
     if (!this._timeUpdateTimer)
       return;
     var elapsed = (Date.now() - this._startTime) / 1000;
-    this._time.textContent = Common.UIString('%s\u2009sec', elapsed.toFixed(precise ? 1 : 0));
+    this._time.textContent = Common.UIString('%s\xa0sec', elapsed.toFixed(precise ? 1 : 0));
   }
 };
 
@@ -1277,6 +1288,9 @@ Timeline.TimelinePanel.ActionDelegate = class {
     switch (actionId) {
       case 'timeline.toggle-recording':
         panel._toggleRecording();
+        return true;
+      case 'timeline.record-reload':
+        panel._recordReload();
         return true;
       case 'timeline.save-to-file':
         panel._saveToFile();

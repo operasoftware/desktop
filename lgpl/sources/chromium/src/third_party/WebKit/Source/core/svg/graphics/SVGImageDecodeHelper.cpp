@@ -12,18 +12,17 @@
 
 namespace blink {
 
-SkBitmap decodeSVGImage(const unsigned char* data,
+SkBitmap DecodeSVGImage(const unsigned char* data,
                         size_t length,
                         const IntSize& size) {
-  RefPtr<SVGImage> svgImage = SVGImage::create(nullptr);
-  RefPtr<SharedBuffer> buffer = SharedBuffer::create(data, length);
-  svgImage->setData(buffer, true);
-  RefPtr<Image> svgContainer =
-      SVGImageForContainer::create(svgImage.get(), size, 1, KURL());
-  sk_sp<SkImage> skImage =
-      svgContainer->imageForCurrentFrame(ColorBehavior::ignore());
+  RefPtr<SVGImage> svg_image = SVGImage::Create(nullptr);
+  RefPtr<SharedBuffer> buffer = SharedBuffer::Create(data, length);
+  svg_image->SetData(buffer, true);
+  RefPtr<Image> svg_container =
+      SVGImageForContainer::Create(svg_image.Get(), size, 1, KURL());
+  sk_sp<SkImage> sk_image = svg_container->ImageForCurrentFrame();
   SkBitmap bitmap;
-  skImage->asLegacyBitmap(&bitmap, SkImage::kRO_LegacyBitmapMode);
+  sk_image->asLegacyBitmap(&bitmap, SkImage::kRO_LegacyBitmapMode);
   return bitmap;
 }
 

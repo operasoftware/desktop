@@ -166,11 +166,6 @@ Profiler.HeapSnapshotSortableDataGrid = class extends DataGrid.DataGrid {
     UI.runCSSAnimationOnce(this._highlightedNode.element(), 'highlighted-row');
   }
 
-  nodeWasDetached(node) {
-    if (this._highlightedNode === node)
-      this._clearCurrentHighlight();
-  }
-
   _clearCurrentHighlight() {
     if (!this._highlightedNode)
       return;
@@ -931,10 +926,10 @@ Profiler.HeapSnapshotDiffDataGrid = class extends Profiler.HeapSnapshotViewportD
  */
 Profiler.AllocationDataGrid = class extends Profiler.HeapSnapshotViewportDataGrid {
   /**
-   * @param {?SDK.Target} target
+   * @param {?SDK.HeapProfilerModel} heapProfilerModel
    * @param {!Profiler.ProfileType.DataDisplayDelegate} dataDisplayDelegate
    */
-  constructor(target, dataDisplayDelegate) {
+  constructor(heapProfilerModel, dataDisplayDelegate) {
     var columns = /** @type {!Array<!DataGrid.DataGrid.ColumnDescriptor>} */ ([
       {id: 'liveCount', title: Common.UIString('Live Count'), width: '75px', sortable: true, fixedWidth: true},
       {id: 'count', title: Common.UIString('Count'), width: '65px', sortable: true, fixedWidth: true},
@@ -950,15 +945,15 @@ Profiler.AllocationDataGrid = class extends Profiler.HeapSnapshotViewportDataGri
       {id: 'name', title: Common.UIString('Function'), disclosure: true, sortable: true},
     ]);
     super(dataDisplayDelegate, columns);
-    this._target = target;
+    this._heapProfilerModel = heapProfilerModel;
     this._linkifier = new Components.Linkifier();
   }
 
   /**
-   * @return {?SDK.Target}
+   * @return {?SDK.HeapProfilerModel}
    */
-  target() {
-    return this._target;
+  heapProfilerModel() {
+    return this._heapProfilerModel;
   }
 
   dispose() {

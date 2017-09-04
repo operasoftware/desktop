@@ -4,16 +4,22 @@
 
 #include "core/layout/ng/ng_box_fragment.h"
 
+#include "core/layout/ng/geometry/ng_logical_size.h"
 #include "core/layout/ng/ng_macros.h"
 #include "core/layout/ng/ng_physical_box_fragment.h"
 
 namespace blink {
 
+NGLogicalSize NGBoxFragment::OverflowSize() const {
+  auto* physical_fragment = ToNGPhysicalBoxFragment(physical_fragment_);
+  return physical_fragment->OverflowSize().ConvertToLogical(WritingMode());
+}
+
 const WTF::Optional<NGLogicalOffset>& NGBoxFragment::BfcOffset() const {
   WRITING_MODE_IGNORED(
       "Accessing BFC offset is allowed here because writing"
       "modes are irrelevant in this case.");
-  return toNGPhysicalBoxFragment(physical_fragment_)->BfcOffset();
+  return ToNGPhysicalBoxFragment(physical_fragment_)->BfcOffset();
 }
 
 const NGMarginStrut& NGBoxFragment::EndMarginStrut() const {
@@ -21,7 +27,7 @@ const NGMarginStrut& NGBoxFragment::EndMarginStrut() const {
       "Accessing the margin strut is fine here. Changing the writing mode"
       "establishes a new formatting context, for which a margin strut is"
       "never set for a fragment.");
-  return toNGPhysicalBoxFragment(physical_fragment_)->EndMarginStrut();
+  return ToNGPhysicalBoxFragment(physical_fragment_)->EndMarginStrut();
 }
 
 }  // namespace blink

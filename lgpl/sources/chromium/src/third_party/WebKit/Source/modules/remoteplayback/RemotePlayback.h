@@ -5,22 +5,23 @@
 #ifndef RemotePlayback_h
 #define RemotePlayback_h
 
-#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/TraceWrapperMember.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/events/EventTarget.h"
 #include "modules/ModulesExport.h"
+#include "platform/bindings/ActiveScriptWrappable.h"
+#include "platform/bindings/TraceWrapperMember.h"
 #include "platform/heap/Handle.h"
+#include "platform/wtf/Compiler.h"
+#include "platform/wtf/text/AtomicString.h"
+#include "platform/wtf/text/WTFString.h"
 #include "public/platform/modules/remoteplayback/WebRemotePlaybackAvailability.h"
 #include "public/platform/modules/remoteplayback/WebRemotePlaybackClient.h"
 #include "public/platform/modules/remoteplayback/WebRemotePlaybackState.h"
-#include "wtf/Compiler.h"
-#include "wtf/text/AtomicString.h"
-#include "wtf/text/WTFString.h"
 
 namespace blink {
 
+class AvailabilityCallbackWrapper;
 class HTMLMediaElement;
 class RemotePlaybackAvailabilityCallback;
 class ScriptPromiseResolver;
@@ -34,15 +35,15 @@ class MODULES_EXPORT RemotePlayback final
   USING_GARBAGE_COLLECTED_MIXIN(RemotePlayback);
 
  public:
-  static RemotePlayback* create(HTMLMediaElement&);
+  static RemotePlayback* Create(HTMLMediaElement&);
 
   // Notifies this object that disableRemotePlayback attribute was set on the
   // corresponding media element.
-  void remotePlaybackDisabled();
+  void RemotePlaybackDisabled();
 
   // EventTarget implementation.
-  const WTF::AtomicString& interfaceName() const override;
-  ExecutionContext* getExecutionContext() const override;
+  const WTF::AtomicString& InterfaceName() const override;
+  ExecutionContext* GetExecutionContext() const override;
 
   // Starts notifying the page about the changes to the remote playback devices
   // availability via the provided callback. May start the monitoring of remote
@@ -63,8 +64,23 @@ class MODULES_EXPORT RemotePlayback final
 
   String state() const;
 
+  // The implementation of prompt(). Used by the native remote playback button.
+  void PromptInternal();
+
+  // The implementation of watchAvailability() and cancelWatchAvailability().
+  int WatchAvailabilityInternal(AvailabilityCallbackWrapper*);
+  bool CancelWatchAvailabilityInternal(int id);
+
+  WebRemotePlaybackState GetState() const { return state_; }
+
+  // WebRemotePlaybackClient implementation.
+  void StateChanged(WebRemotePlaybackState) override;
+  void AvailabilityChanged(WebRemotePlaybackAvailability) override;
+  void PromptCancelled() override;
+  bool RemotePlaybackAvailable() const override;
+
   // ScriptWrappable implementation.
-  bool hasPendingActivity() const final;
+  bool HasPendingActivity() const final;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(connecting);
   DEFINE_ATTRIBUTE_EVENT_LISTENER(connect);
@@ -76,25 +92,20 @@ class MODULES_EXPORT RemotePlayback final
  private:
   friend class V8RemotePlayback;
   friend class RemotePlaybackTest;
+  friend class MediaControlsImplTest;
 
   explicit RemotePlayback(HTMLMediaElement&);
 
   // Calls the specified availability callback with the current availability.
   // Need a void() method to post it as a task.
-  void notifyInitialAvailability(int callbackId);
+  void NotifyInitialAvailability(int callback_id);
 
-  // WebRemotePlaybackClient implementation.
-  void stateChanged(WebRemotePlaybackState) override;
-  void availabilityChanged(WebRemotePlaybackAvailability) override;
-  void promptCancelled() override;
-  bool remotePlaybackAvailable() const override;
-
-  WebRemotePlaybackState m_state;
-  WebRemotePlaybackAvailability m_availability;
-  HeapHashMap<int, TraceWrapperMember<RemotePlaybackAvailabilityCallback>>
-      m_availabilityCallbacks;
-  Member<HTMLMediaElement> m_mediaElement;
-  Member<ScriptPromiseResolver> m_promptPromiseResolver;
+  WebRemotePlaybackState state_;
+  WebRemotePlaybackAvailability availability_;
+  HeapHashMap<int, TraceWrapperMember<AvailabilityCallbackWrapper>>
+      availability_callbacks_;
+  Member<HTMLMediaElement> media_element_;
+  Member<ScriptPromiseResolver> prompt_promise_resolver_;
 };
 
 }  // namespace blink

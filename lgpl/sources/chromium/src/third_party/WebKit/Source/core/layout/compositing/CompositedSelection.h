@@ -36,7 +36,7 @@
 #include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/graphics/GraphicsLayer.h"
-#include "wtf/Allocator.h"
+#include "platform/wtf/Allocator.h"
 
 namespace blink {
 
@@ -45,12 +45,12 @@ namespace blink {
 // See |WebSelection|.
 struct CompositedSelection {
   STACK_ALLOCATED();
-  CompositedSelection() : type(NoSelection) {}
+  CompositedSelection() : type(kNoSelection) {}
 
   SelectionType type;
   CompositedSelectionBound start;
   CompositedSelectionBound end;
-  FloatRect boundingRect;
+  FloatRect bounding_rect;
 };
 
 }  // namespace blink

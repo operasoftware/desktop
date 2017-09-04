@@ -33,6 +33,7 @@ from collections import defaultdict
 import logging
 import re
 
+from webkitpy.common.path_finder import PathFinder
 from webkitpy.layout_tests.models.test_configuration import TestConfigurationConverter
 
 _log = logging.getLogger(__name__)
@@ -279,7 +280,7 @@ class TestExpectationLine(object):
 
     # FIXME: Update the original specifiers and remove this once the old syntax is gone.
     _configuration_tokens_list = [
-        'Mac', 'Mac10.9', 'Mac10.10', 'Mac10.11', 'Retina',
+        'Mac', 'Mac10.9', 'Mac10.10', 'Mac10.11', 'Retina', 'Mac10.12',
         'Win', 'Win7', 'Win10',
         'Linux', 'Trusty',
         'Android',
@@ -1095,8 +1096,9 @@ class TestExpectations(object):
         return REBASELINE in self._model.get_expectations(test)
 
     def _shorten_filename(self, filename):
-        if filename.startswith(self._port.path_from_webkit_base()):
-            return self._port.host.filesystem.relpath(filename, self._port.path_from_webkit_base())
+        finder = PathFinder(self._port.host.filesystem)
+        if filename.startswith(finder.path_from_chromium_base()):
+            return self._port.host.filesystem.relpath(filename, finder.path_from_chromium_base())
         return filename
 
     def _report_warnings(self):

@@ -29,6 +29,13 @@ Timeline.TimelineController = class {
   }
 
   /**
+   * @return {!SDK.Target}
+   */
+  mainTarget() {
+    return this._tracingManager.target();
+  }
+
+  /**
    * @param {!Timeline.TimelineController.RecordingOptions} options
    * @param {!Array<!Extensions.ExtensionTraceProvider>} providers
    * @return {!Promise}
@@ -49,6 +56,9 @@ Timeline.TimelineController = class {
       TimelineModel.TimelineModel.Category.Console, TimelineModel.TimelineModel.Category.UserTiming
     ];
     categoriesArray.push(TimelineModel.TimelineModel.Category.LatencyInfo);
+
+    if (Runtime.experiments.isEnabled('timelineFlowEvents'))
+      categoriesArray.push('devtools.timeline.async');
 
     if (Runtime.experiments.isEnabled('timelineV8RuntimeCallStats') && options.enableJSSampling)
       categoriesArray.push(disabledByDefault('v8.runtime_stats_sampling'));

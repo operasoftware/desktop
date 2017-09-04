@@ -440,14 +440,13 @@ cr.define('certificate_manager_page', function() {
         var passwordInputElement =
             Polymer.dom(dialog.$.dialog).querySelector('paper-input');
         assertTrue(dialog.$.dialog.open);
-        assertTrue(dialog.$.ok.disabled);
 
-        // Test that the 'OK' button is disabled when the password field is
+        // Test that the 'OK' button is enabled even when the password field is
         // empty.
-        triggerInputEvent(passwordInputElement);
-        assertTrue(dialog.$.ok.disabled);
+        assertEquals('', passwordInputElement.value);
+        assertFalse(dialog.$.ok.disabled);
+
         passwordInputElement.value = 'foopassword';
-        triggerInputEvent(passwordInputElement);
         assertFalse(dialog.$.ok.disabled);
 
         // Simulate clicking 'OK'.
@@ -718,7 +717,7 @@ cr.define('certificate_manager_page', function() {
         // Some dialogs are opened after some async operation to fetch initial
         // data. Ensure that the underlying cr-dialog is actually opened before
         // returning.
-        return test_util.whenAttributeIs(dialog.$.dialog, 'open', true);
+        return test_util.whenAttributeIs(dialog.$.dialog, 'open', '');
       }
 
       test('OpensDialog_DeleteConfirmation', function() {

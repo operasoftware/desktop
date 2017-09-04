@@ -44,11 +44,43 @@
             ]
         },
         {
-            "type": "@UI.ActionDelegate",
-            "actionId": "network.blocked-urls.show",
-            "className": "Network.BlockedURLsPane.ActionDelegate",
-            "iconClass": "largeicon-block",
-            "title": "Block network requests"
+            "type": "setting",
+            "category": "Network",
+            "title": "Group network log by frame",
+            "settingName": "network.group-by-frame",
+            "settingType": "boolean",
+            "defaultValue": false,
+            "tags": "network, frame, group",
+            "options": [
+                {
+                    "value": true,
+                    "title": "Group network log items by frame"
+                },
+                {
+                    "value": false,
+                    "title": "Don't group network log items by frame"
+                }
+            ]
+        },
+        {
+            "type": "setting",
+            "category": "Network",
+            "storageType": "session",
+            "title": "Preserve log",
+            "settingName": "network.preserve-log",
+            "settingType": "boolean",
+            "defaultValue": false,
+            "tags": "preserve, clear, reset",
+            "options": [
+                {
+                    "value": true,
+                    "title": "Do not preserve log on page reload / navigation"
+                },
+                {
+                    "value": false,
+                    "title": "Preserve log on page reload / navigation"
+                }
+            ]
         },
         {
             "type": "@UI.ActionDelegate",
@@ -88,8 +120,7 @@
             "title": "Request blocking",
             "persistence": "closeable",
             "order": 60,
-            "className": "Network.BlockedURLsPane",
-            "experiment": "requestBlocking"
+            "className": "Network.BlockedURLsPane"
         },
         {
             "type": "view",
@@ -109,7 +140,9 @@
         "cookie_table",
         "data_grid",
         "network_conditions",
-        "object_ui"
+        "object_ui",
+        "network_log",
+        "product_registry"
     ],
     "scripts": [
         "BlockedURLsPane.js",
@@ -124,6 +157,7 @@
         "NetworkTimeCalculator.js",
         "NetworkLogView.js",
         "NetworkLogViewColumns.js",
+        "NetworkFrameGrouper.js",
         "NetworkManageCustomHeadersView.js",
         "NetworkOverview.js",
         "NetworkWaterfallColumn.js",

@@ -11,7 +11,7 @@ namespace blink {
 
 class IntSize;
 
-SkBitmap decodeSVGImage(const unsigned char* data,
+SkBitmap DecodeSVGImage(const unsigned char* data,
                         size_t length,
                         const IntSize& size);
 

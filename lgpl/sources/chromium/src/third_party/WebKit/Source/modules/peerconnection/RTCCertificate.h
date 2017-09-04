@@ -31,12 +31,12 @@
 #ifndef RTCCertificate_h
 #define RTCCertificate_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include <memory>
 #include "core/dom/DOMTimeStamp.h"
 #include "modules/ModulesExport.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/GarbageCollected.h"
 #include "public/platform/WebRTCCertificate.h"
-#include <memory>
 
 namespace blink {
 
@@ -50,8 +50,8 @@ class MODULES_EXPORT RTCCertificate final
   RTCCertificate(std::unique_ptr<WebRTCCertificate>);
 
   // Returns a new WebRTCCertificate shallow copy.
-  std::unique_ptr<WebRTCCertificate> certificateShallowCopy() const;
-  const WebRTCCertificate& certificate() const { return *m_certificate; }
+  std::unique_ptr<WebRTCCertificate> CertificateShallowCopy() const;
+  const WebRTCCertificate& Certificate() const { return *certificate_; }
 
   DEFINE_INLINE_TRACE() {}
 
@@ -59,7 +59,7 @@ class MODULES_EXPORT RTCCertificate final
   DOMTimeStamp expires() const;
 
  private:
-  std::unique_ptr<WebRTCCertificate> m_certificate;
+  std::unique_ptr<WebRTCCertificate> certificate_;
 };
 
 }  // namespace blink

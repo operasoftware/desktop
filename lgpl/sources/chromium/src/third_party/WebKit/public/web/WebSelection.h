@@ -5,9 +5,9 @@
 #ifndef WebSelection_h
 #define WebSelection_h
 
-#include "../platform/WebCommon.h"
-#include "../platform/WebSelectionBound.h"
-#include "../platform/WebFloatRect.h"
+#include "public/platform/WebCommon.h"
+#include "public/platform/WebSelectionBound.h"
+#include "public/platform/WebFloatRect.h"
 
 namespace blink {
 
@@ -17,31 +17,31 @@ struct CompositedSelection;
 // end points as well as metadata for the selection region.
 class BLINK_EXPORT WebSelection {
  public:
-  enum SelectionType { NoSelection, CaretSelection, RangeSelection };
+  enum SelectionType { kNoSelection, kCaretSelection, kRangeSelection };
 
 #if INSIDE_BLINK
   explicit WebSelection(const CompositedSelection&);
 #endif
   WebSelection(const WebSelection&);
 
-  const WebSelectionBound& start() const { return m_start; }
-  const WebSelectionBound& end() const { return m_end; }
-  const WebFloatRect& boundingRect() const { return m_boundingRect; }
+  const WebSelectionBound& Start() const { return start_; }
+  const WebSelectionBound& end() const { return end_; }
+  const WebFloatRect& GetBoundingRect() const { return bounding_rect_; }
 
-  bool isNone() const { return selectionType() == NoSelection; }
-  bool isCaret() const { return selectionType() == CaretSelection; }
-  bool isRange() const { return selectionType() == RangeSelection; }
+  bool IsNone() const { return GetSelectionType() == kNoSelection; }
+  bool IsCaret() const { return GetSelectionType() == kCaretSelection; }
+  bool IsRange() const { return GetSelectionType() == kRangeSelection; }
 
  private:
-  SelectionType selectionType() const { return m_selectionType; }
+  SelectionType GetSelectionType() const { return selection_type_; }
 
-  SelectionType m_selectionType;
+  SelectionType selection_type_;
 
-  WebSelectionBound m_start;
-  WebSelectionBound m_end;
+  WebSelectionBound start_;
+  WebSelectionBound end_;
 
   // A bounding rect of the whole selection region.
-  WebFloatRect m_boundingRect;
+  WebFloatRect bounding_rect_;
 };
 
 }  // namespace blink

@@ -880,7 +880,7 @@ Audits.AuditRules.ImageDimensionsRule = class extends Audits.AuditRule {
     }
 
     /**
-     * @param {!Array.<!Protocol.DOM.NodeId>=} nodeIds
+     * @param {?Array<!Protocol.DOM.NodeId>} nodeIds
      */
     function getStyles(nodeIds) {
       if (progress.isCanceled()) {
@@ -953,7 +953,7 @@ Audits.AuditRules.CssInHeadRule = class extends Audits.AuditRule {
    * @param {!Common.Progress} progress
    */
   doRun(target, requests, result, callback, progress) {
-    var domModel = SDK.DOMModel.fromTarget(target);
+    var domModel = target.model(SDK.DOMModel);
     if (!domModel) {
       callback(null);
       return;
@@ -987,8 +987,8 @@ Audits.AuditRules.CssInHeadRule = class extends Audits.AuditRule {
 
     /**
      * @param {!SDK.DOMNode} root
-     * @param {!Array.<!Protocol.DOM.NodeId>=} inlineStyleNodeIds
-     * @param {!Array.<!Protocol.DOM.NodeId>=} nodeIds
+     * @param {!Array<!Protocol.DOM.NodeId>} inlineStyleNodeIds
+     * @param {?Array<!Protocol.DOM.NodeId>} nodeIds
      */
     function externalStylesheetsReceived(root, inlineStyleNodeIds, nodeIds) {
       if (progress.isCanceled()) {
@@ -1017,7 +1017,7 @@ Audits.AuditRules.CssInHeadRule = class extends Audits.AuditRule {
 
     /**
      * @param {!SDK.DOMNode} root
-     * @param {!Array.<!Protocol.DOM.NodeId>=} nodeIds
+     * @param {?Array<!Protocol.DOM.NodeId>} nodeIds
      */
     function inlineStylesReceived(root, nodeIds) {
       if (progress.isCanceled()) {
@@ -1064,7 +1064,7 @@ Audits.AuditRules.StylesScriptsOrderRule = class extends Audits.AuditRule {
    * @param {!Common.Progress} progress
    */
   doRun(target, requests, result, callback, progress) {
-    var domModel = SDK.DOMModel.fromTarget(target);
+    var domModel = target.model(SDK.DOMModel);
     if (!domModel) {
       callback(null);
       return;
@@ -1102,7 +1102,7 @@ Audits.AuditRules.StylesScriptsOrderRule = class extends Audits.AuditRule {
 
     /**
      * @param {!Array.<!Protocol.DOM.NodeId>} lateStyleIds
-     * @param {!Array.<!Protocol.DOM.NodeId>=} nodeIds
+     * @param {?Array.<!Protocol.DOM.NodeId>} nodeIds
      */
     function cssBeforeInlineReceived(lateStyleIds, nodeIds) {
       if (progress.isCanceled()) {
@@ -1131,7 +1131,7 @@ Audits.AuditRules.StylesScriptsOrderRule = class extends Audits.AuditRule {
 
     /**
      * @param {!SDK.DOMDocument} root
-     * @param {!Array.<!Protocol.DOM.NodeId>=} nodeIds
+     * @param {?Array<!Protocol.DOM.NodeId>} nodeIds
      */
     function lateStylesReceived(root, nodeIds) {
       if (progress.isCanceled()) {
@@ -1315,7 +1315,11 @@ Audits.AuditRules.CookieRuleBase = class extends Audits.AuditRule {
     }
 
     const nonDataUrls = requests.map(r => r.url()).filter(url => url && url.asParsedURL());
-    SDK.CookieModel.fromTarget(target).getCookiesAsync(nonDataUrls, resultCallback);
+    var cookieModel = target.model(SDK.CookieModel);
+    if (cookieModel)
+      cookieModel.getCookiesAsync(nonDataUrls, resultCallback);
+    else
+      callback(result);
   }
 
   mapResourceCookies(requestsByDomain, allCookies, callback) {

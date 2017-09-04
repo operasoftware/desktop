@@ -7,6 +7,7 @@ import unittest
 from webkitpy.common.host_mock import MockHost
 from webkitpy.common.net.buildbot import Build
 from webkitpy.common.net.git_cl import GitCL
+from webkitpy.common.net.git_cl import TryJobStatus
 from webkitpy.common.system.executive_mock import MockExecutive
 
 
@@ -48,17 +49,15 @@ class GitCLTest(unittest.TestCase):
         git_cl = GitCL(host)
         self.assertEqual(git_cl.get_issue_number(), 'None')
 
-    def test_all_jobs_finished_empty(self):
-        self.assertTrue(GitCL.all_jobs_finished([]))
-
     def test_wait_for_try_jobs_time_out(self):
         host = MockHost()
         git_cl = GitCL(host)
-        git_cl.fetch_try_results = lambda: [
+        git_cl.fetch_raw_try_job_results = lambda: [
             {
                 'builder_name': 'some-builder',
                 'status': 'STARTED',
                 'result': None,
+                'url': None,
             },
         ]
         git_cl.wait_for_try_jobs()
@@ -76,11 +75,12 @@ class GitCLTest(unittest.TestCase):
     def test_wait_for_try_jobs_done(self):
         host = MockHost()
         git_cl = GitCL(host)
-        git_cl.fetch_try_results = lambda: [
+        git_cl.fetch_raw_try_job_results = lambda: [
             {
                 'builder_name': 'some-builder',
                 'status': 'COMPLETED',
                 'result': 'FAILURE',
+                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/100',
             },
         ]
         git_cl.wait_for_try_jobs()
@@ -89,80 +89,34 @@ class GitCLTest(unittest.TestCase):
             'Waiting for try jobs (timeout: 7200 seconds).\n'
             'All jobs finished.\n')
 
-    def test_all_jobs_finished_with_started_jobs(self):
-        self.assertFalse(GitCL.all_jobs_finished([
-            {
-                'builder_name': 'some-builder',
-                'status': 'COMPLETED',
-                'result': 'FAILURE',
-                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/90',
-            },
-            {
-                'builder_name': 'some-builder',
-                'status': 'STARTED',
-                'result': None,
-                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/100',
-            },
-        ]))
-
-    def test_all_jobs_finished_only_completed_jobs(self):
-        self.assertTrue(GitCL.all_jobs_finished([
-            {
-                'builder_name': 'some-builder',
-                'status': 'COMPLETED',
-                'result': 'FAILURE',
-                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/90',
-            },
-            {
-                'builder_name': 'some-builder',
-                'status': 'COMPLETED',
-                'result': 'SUCCESS',
-                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/100',
-            },
-        ]))
-
     def test_has_failing_try_results_empty(self):
-        self.assertFalse(GitCL.has_failing_try_results([]))
+        self.assertFalse(GitCL.has_failing_try_results({}))
 
     def test_has_failing_try_results_only_success_and_started(self):
-        self.assertFalse(GitCL.has_failing_try_results([
-            {
-                'builder_name': 'some-builder',
-                'status': 'COMPLETED',
-                'result': 'SUCCESS',
-                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/90',
-            },
-            {
-                'builder_name': 'some-builder',
-                'status': 'STARTED',
-                'result': None,
-                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/100',
-            },
-        ]))
+        self.assertFalse(GitCL.has_failing_try_results({
+            Build('some-builder', 90): TryJobStatus('COMPLETED', 'SUCCESS'),
+            Build('some-builder', 100): TryJobStatus('STARTED'),
+        }))
 
     def test_has_failing_try_results_with_failing_results(self):
-        self.assertTrue(GitCL.has_failing_try_results([
-            {
-                'builder_name': 'some-builder',
-                'status': 'COMPLETED',
-                'result': 'FAILURE',
-            },
-        ]))
+        self.assertTrue(GitCL.has_failing_try_results({
+            Build('some-builder', 1): TryJobStatus('COMPLETED', 'FAILURE'),
+        }))
 
     def test_latest_try_builds(self):
         git_cl = GitCL(MockHost())
-        git_cl.fetch_try_results = lambda: [
+        git_cl.fetch_raw_try_job_results = lambda: [
             {
                 'builder_name': 'builder-b',
                 'status': 'COMPLETED',
                 'result': 'SUCCESS',
-                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/100',
+                'url': 'http://build.chromium.org/p/master/builders/builder-b/builds/100',
             },
             {
                 'builder_name': 'builder-b',
                 'status': 'COMPLETED',
                 'result': 'SUCCESS',
-                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/90',
+                'url': 'http://build.chromium.org/p/master/builders/builder-b/builds/90',
             },
             {
                 'builder_name': 'builder-a',
@@ -174,9 +128,51 @@ class GitCLTest(unittest.TestCase):
                 'builder_name': 'builder-c',
                 'status': 'COMPLETED',
                 'result': 'SUCCESS',
-                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/123',
+                'url': 'http://build.chromium.org/p/master/builders/builder-c/builds/123',
             },
         ]
         self.assertEqual(
             git_cl.latest_try_jobs(['builder-a', 'builder-b']),
-            [Build('builder-a'), Build('builder-b', 100)])
+            {
+                Build('builder-a'): TryJobStatus('SCHEDULED'),
+                Build('builder-b', 100): TryJobStatus('COMPLETED', 'SUCCESS'),
+            })
+
+    def test_latest_try_builds_started_builds(self):
+        git_cl = GitCL(MockHost())
+        git_cl.fetch_raw_try_job_results = lambda: [
+            {
+                'builder_name': 'builder-a',
+                'status': 'STARTED',
+                'result': None,
+                'url': 'http://build.chromium.org/p/master/builders/some-builder/builds/100',
+            },
+        ]
+        self.assertEqual(
+            git_cl.latest_try_jobs(['builder-a']),
+            {Build('builder-a', 100): TryJobStatus('STARTED')})
+
+    def test_latest_try_builds_failures(self):
+        git_cl = GitCL(MockHost())
+        git_cl.fetch_raw_try_job_results = lambda: [
+            {
+                'builder_name': 'builder-a',
+                'status': 'COMPLETED',
+                'result': 'FAILURE',
+                'failure_reason': 'BUILD_FAILURE',
+                'url': 'http://build.chromium.org/p/master/builders/builder-a/builds/100',
+            },
+            {
+                'builder_name': 'builder-b',
+                'status': 'COMPLETED',
+                'result': 'FAILURE',
+                'failure_reason': 'INFRA_FAILURE',
+                'url': 'http://build.chromium.org/p/master/builders/builder-b/builds/200',
+            },
+        ]
+        self.assertEqual(
+            git_cl.latest_try_jobs(['builder-a', 'builder-b']),
+            {
+                Build('builder-a', 100): TryJobStatus('COMPLETED', 'FAILURE'),
+                Build('builder-b', 200): TryJobStatus('COMPLETED', 'FAILURE'),
+            })

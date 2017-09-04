@@ -29,7 +29,6 @@
 import functools
 import json
 import optparse
-import tempfile
 import unittest
 
 from webkitpy.common.system.executive import ScriptError
@@ -56,22 +55,22 @@ class PortTest(unittest.TestCase):
 
     def test_pretty_patch_os_error(self):
         port = self.make_port(executive=MockExecutive(exception=OSError))
-        self.assertEqual(port.pretty_patch_text("patch.txt"),
+        self.assertEqual(port.pretty_patch_text('patch.txt'),
                          port._pretty_patch_error_html)
 
         # This tests repeated calls to make sure we cache the result.
-        self.assertEqual(port.pretty_patch_text("patch.txt"),
+        self.assertEqual(port.pretty_patch_text('patch.txt'),
                          port._pretty_patch_error_html)
 
     def test_pretty_patch_script_error(self):
         # FIXME: This is some ugly white-box test hacking ...
         port = self.make_port(executive=MockExecutive(exception=ScriptError))
         port._pretty_patch_available = True
-        self.assertEqual(port.pretty_patch_text("patch.txt"),
+        self.assertEqual(port.pretty_patch_text('patch.txt'),
                          port._pretty_patch_error_html)
 
         # This tests repeated calls to make sure we cache the result.
-        self.assertEqual(port.pretty_patch_text("patch.txt"),
+        self.assertEqual(port.pretty_patch_text('patch.txt'),
                          port._pretty_patch_error_html)
 
     def test_setup_test_run(self):
@@ -340,14 +339,14 @@ class PortTest(unittest.TestCase):
 
     def test_parse_reftest_list(self):
         port = self.make_port(with_tests=True)
-        port.host.filesystem.files['bar/reftest.list'] = "\n".join(["== test.html test-ref.html",
-                                                                    "",
-                                                                    "# some comment",
-                                                                    "!= test-2.html test-notref.html # more comments",
-                                                                    "== test-3.html test-ref.html",
-                                                                    "== test-3.html test-ref2.html",
-                                                                    "!= test-3.html test-notref.html",
-                                                                    "fuzzy(80,500) == test-3 test-ref.html"])
+        port.host.filesystem.files['bar/reftest.list'] = '\n'.join(['== test.html test-ref.html',
+                                                                    '',
+                                                                    '# some comment',
+                                                                    '!= test-2.html test-notref.html # more comments',
+                                                                    '== test-3.html test-ref.html',
+                                                                    '== test-3.html test-ref2.html',
+                                                                    '!= test-3.html test-notref.html',
+                                                                    'fuzzy(80,500) == test-3 test-ref.html'])
 
         # Note that we don't support the syntax in the last line; the code should ignore it, rather than crashing.
 
@@ -373,6 +372,10 @@ class PortTest(unittest.TestCase):
         self.assertEqual(port.reference_files('external/wpt/html/dom/elements/global-attributes/dir_auto-EN-L.html'),
                          [('==', port.layout_tests_dir() +
                            '/external/wpt/html/dom/elements/global-attributes/dir_auto-EN-L-ref.html')])
+        self.assertEqual(port.reference_files('virtual/layout_ng/' +
+                                              'external/wpt/html/dom/elements/global-attributes/dir_auto-EN-L.html'),
+                         [('==', port.layout_tests_dir() +
+                           '/external/wpt/html/dom/elements/global-attributes/dir_auto-EN-L-ref.html')])
 
     def test_operating_system(self):
         self.assertEqual('mac', self.make_port().operating_system())
@@ -380,10 +383,24 @@ class PortTest(unittest.TestCase):
     def test_http_server_supports_ipv6(self):
         port = self.make_port()
         self.assertTrue(port.http_server_supports_ipv6())
-        port.host.platform.os_name = 'cygwin'
-        self.assertFalse(port.http_server_supports_ipv6())
         port.host.platform.os_name = 'win'
         self.assertFalse(port.http_server_supports_ipv6())
+
+    def test_http_server_requires_http_protocol_options_unsafe(self):
+        port = self.make_port(executive=MockExecutive(stderr=(
+            "Invalid command 'INTENTIONAL_SYNTAX_ERROR', perhaps misspelled or"
+            " defined by a module not included in the server configuration\n")))
+        port.path_to_apache = lambda: '/usr/sbin/httpd'
+        self.assertTrue(
+            port.http_server_requires_http_protocol_options_unsafe())
+
+    def test_http_server_doesnt_require_http_protocol_options_unsafe(self):
+        port = self.make_port(executive=MockExecutive(stderr=(
+            "Invalid command 'HttpProtocolOptions', perhaps misspelled or"
+            " defined by a module not included in the server configuration\n")))
+        port.path_to_apache = lambda: '/usr/sbin/httpd'
+        self.assertFalse(
+            port.http_server_requires_http_protocol_options_unsafe())
 
     def test_check_httpd_success(self):
         port = self.make_port(executive=MockExecutive())
@@ -446,9 +463,15 @@ class PortTest(unittest.TestCase):
         self.assertIn('passes/virtual_passes/test-virtual-passes.html', tests)
         self.assertNotIn('virtual/virtual_passes/passes/text.html', tests)
 
+        tests = port.tests(['virtual/virtual_passes/'])
+        self.assertIn('virtual/virtual_passes/passes/test-virtual-passes.html', tests)
+        self.assertIn('virtual/virtual_passes/passes_two/test-virtual-passes.html', tests)
+
         tests = port.tests(['virtual/virtual_passes/passes'])
         self.assertNotIn('passes/text.html', tests)
         self.assertIn('virtual/virtual_passes/passes/test-virtual-passes.html', tests)
+        self.assertNotIn('virtual/virtual_passes/passes_two/test-virtual-passes.html', tests)
+
         self.assertNotIn('passes/test-virtual-passes.html', tests)
         self.assertNotIn('virtual/virtual_passes/passes/test-virtual-virtual/passes.html', tests)
         self.assertNotIn('virtual/virtual_passes/passes/virtual_passes/passes/test-virtual-passes.html', tests)
@@ -476,6 +499,17 @@ class PortTest(unittest.TestCase):
         # If this call returns successfully, we found and loaded the LayoutTests/VirtualTestSuites.
         _ = port.virtual_test_suites()
 
+    def test_duplicate_virtual_test_suite_in_file(self):
+        port = self.make_port()
+        port.host.filesystem.write_text_file(
+            port.host.filesystem.join(port.layout_tests_dir(), 'VirtualTestSuites'),
+            '['
+            '{"prefix": "bar", "base": "fast/bar", "args": ["--bar"]},'
+            '{"prefix": "bar", "base": "fast/bar", "args": ["--bar"]}'
+            ']')
+
+        self.assertRaises(ValueError, port.virtual_test_suites)
+
     def test_virtual_test_suite_file_is_not_json(self):
         port = self.make_port()
         port.host.filesystem.write_text_file(
@@ -487,10 +521,13 @@ class PortTest(unittest.TestCase):
         port = self.make_port()
         self.assertRaises(AssertionError, port.virtual_test_suites)
 
-    def test_is_wptserve_test(self):
+    def test_is_wpt_test(self):
         port = self.make_port()
-        self.assertTrue(port.is_wptserve_test('external/wpt/foo/bar.html'))
-        self.assertFalse(port.is_wptserve_test('http/wpt/foo.html'))
+        self.assertTrue(port.is_wpt_test('external/wpt/foo/bar.html'))
+        self.assertTrue(port.is_wpt_test('virtual/a-name/external/wpt/baz/qux.htm'))
+        self.assertFalse(port.is_wpt_test('http/wpt/foo.html'))
+        self.assertFalse(port.is_wpt_test('virtual/external/wpt/baz/qux.htm'))
+        self.assertFalse(port.is_wpt_test('not-virtual/a-name/external/wpt/baz/qux.htm'))
 
     def test_default_results_directory(self):
         port = self.make_port(options=optparse.Values({'target': 'Default', 'configuration': 'Release'}))
@@ -513,9 +550,7 @@ class PortTest(unittest.TestCase):
 
     def test_apache_config_file_name_for_platform(self):
         port = self.make_port()
-        # pylint: disable=protected-access
-        port._apache_version = lambda: '2.2'
-        self._assert_config_file_for_platform(port, 'cygwin', 'cygwin-httpd.conf')
+        port._apache_version = lambda: '2.2'  # pylint: disable=protected-access
         self._assert_config_file_for_platform(port, 'linux', 'apache2-httpd-2.2.conf')
         self._assert_config_file_for_linux_distribution(port, 'arch', 'arch-httpd-2.2.conf')
         self._assert_config_file_for_linux_distribution(port, 'debian', 'debian-httpd-2.2.conf')
@@ -523,7 +558,6 @@ class PortTest(unittest.TestCase):
         self._assert_config_file_for_linux_distribution(port, 'redhat', 'redhat-httpd-2.2.conf')
 
         self._assert_config_file_for_platform(port, 'mac', 'apache2-httpd-2.2.conf')
-        # win32 isn't a supported sys.platform.  AppleWin/WinCairo/WinCE ports all use cygwin.
         self._assert_config_file_for_platform(port, 'win32', 'apache2-httpd-2.2.conf')
         self._assert_config_file_for_platform(port, 'barf', 'apache2-httpd-2.2.conf')
 

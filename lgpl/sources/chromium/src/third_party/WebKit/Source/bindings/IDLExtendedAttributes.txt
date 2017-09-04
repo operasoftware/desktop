@@ -32,6 +32,7 @@
 #
 
 ActiveScriptWrappable
+AllowShared
 CEReactions
 CachedAccessor
 CachedAttribute=*
@@ -60,7 +61,6 @@ Global=|*
 HTMLConstructor
 ImmutablePrototype
 ImplementedAs=*
-Iterable
 LegacyInterfaceTypeChecking
 LegacyTreatAsPartialInterface
 LenientThis

@@ -42,12 +42,15 @@ CrExtensionsBrowserTest.prototype = {
     'extension_error_page_test.js',
     'extension_item_test.js',
     'extension_item_list_test.js',
+    'extension_load_error_test.js',
     'extension_keyboard_shortcuts_test.js',
     'extension_options_dialog_test.js',
     'extension_pack_dialog_test.js',
+    'extension_navigation_helper_test.js',
     'extension_service_test.js',
     'extension_shortcut_input_test.js',
     'extension_sidebar_test.js',
+    'extension_toolbar_test.js',
     'extension_manager_test.js',
     '../mock_controller.js',
     '../../../../../ui/webui/resources/js/promise_resolver.js',
@@ -111,14 +114,25 @@ CrExtensionsBrowserTestWithMultipleExtensionTypesInstalled.prototype = {
 ////////////////////////////////////////////////////////////////////////////////
 // Extension Sidebar Tests
 
-TEST_F('CrExtensionsBrowserTest', 'ExtensionSidebarLayoutTest', function() {
+TEST_F('CrExtensionsBrowserTest',
+       'ExtensionSidebarLayoutAndClickHandlersTest', function() {
   extension_sidebar_tests.registerTests();
-  mocha.grep(assert(extension_sidebar_tests.TestNames.Layout)).run();
+  mocha.grep(
+      assert(extension_sidebar_tests.TestNames.LayoutAndClickHandlers)).run();
 });
-TEST_F('CrExtensionsBrowserTest', 'ExtensionSidebarClickHandlerTest',
-       function() {
-  extension_sidebar_tests.registerTests();
-  mocha.grep(assert(extension_sidebar_tests.TestNames.ClickHandlers)).run();
+
+////////////////////////////////////////////////////////////////////////////////
+// Extension Sidebar Tests
+
+TEST_F('CrExtensionsBrowserTest', 'ExtensionToolbarLayoutTest', function() {
+  extension_toolbar_tests.registerTests();
+  mocha.grep(assert(extension_toolbar_tests.TestNames.Layout)).run();
+});
+
+TEST_F('CrExtensionsBrowserTest',
+       'ExtensionToolbarClickHandlersTest', function() {
+  extension_toolbar_tests.registerTests();
+  mocha.grep(assert(extension_toolbar_tests.TestNames.ClickHandlers)).run();
 });
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -178,6 +192,21 @@ TEST_F('CrExtensionsBrowserTest', 'ExtensionItemList', function() {
   extension_item_list_tests.registerTests();
   mocha.grep(
       assert(extension_item_list_tests.TestNames.ItemListFiltering)).run();
+});
+
+////////////////////////////////////////////////////////////////////////////////
+// Extension Load Error Tests
+
+TEST_F('CrExtensionsBrowserTest', 'ExtensionLoadErrorInteractionTest',
+       function() {
+  extension_load_error_tests.registerTests();
+  mocha.grep(assert(extension_load_error_tests.TestNames.Interaction)).run();
+});
+
+TEST_F('CrExtensionsBrowserTest', 'ExtensionLoadErrorCodeSectionTest',
+       function() {
+  extension_load_error_tests.registerTests();
+  mocha.grep(assert(extension_load_error_tests.TestNames.CodeSection)).run();
 });
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -312,4 +341,40 @@ TEST_F('CrExtensionsBrowserTest', 'ExtensionCodeSectionLayoutTest',
        function() {
   extension_code_section_tests.registerTests();
   mocha.grep(assert(extension_code_section_tests.TestNames.Layout)).run();
+});
+
+////////////////////////////////////////////////////////////////////////////////
+// Extension Navigation Helper Tests
+
+function CrExtensionsNavigationHelperBrowserTest() {}
+
+// extensions.NavigationHelper observes window.location. In order to test this
+// without the "real" NavigationHelper joining the party, we navigate to
+// navigation_helper.html directly.
+CrExtensionsNavigationHelperBrowserTest.prototype = {
+  __proto__: CrExtensionsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://extensions/navigation_helper.html',
+};
+
+TEST_F('CrExtensionsNavigationHelperBrowserTest',
+       'ExtensionNavigationHelperBasicTest', function() {
+  extension_navigation_helper_tests.registerTests();
+  mocha.grep(assert(extension_navigation_helper_tests.TestNames.Basic)).run();
+});
+
+TEST_F('CrExtensionsNavigationHelperBrowserTest',
+       'ExtensionNavigationHelperConversionTest', function() {
+  extension_navigation_helper_tests.registerTests();
+  mocha.grep(
+      assert(extension_navigation_helper_tests.TestNames.Conversions)).run();
+});
+
+TEST_F('CrExtensionsNavigationHelperBrowserTest',
+       'ExtensionNavigationHelperPushAndReplaceStateTest', function() {
+  extension_navigation_helper_tests.registerTests();
+  mocha.grep(
+      assert(extension_navigation_helper_tests.TestNames.PushAndReplaceState))
+          .run();
 });

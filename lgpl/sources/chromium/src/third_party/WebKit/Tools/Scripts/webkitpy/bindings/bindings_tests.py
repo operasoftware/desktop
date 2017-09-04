@@ -31,8 +31,8 @@ import tempfile
 
 from webkitpy.common.system.executive import Executive
 
-from webkitpy.common import webkit_finder
-webkit_finder.add_bindings_scripts_dir_to_sys_path()
+from webkitpy.common import path_finder
+path_finder.add_bindings_scripts_dir_to_sys_path()
 
 from code_generator_v8 import CodeGeneratorDictionaryImpl
 from code_generator_v8 import CodeGeneratorV8
@@ -75,14 +75,9 @@ DEPENDENCY_IDL_FILES = frozenset([
     'TestInterface2Partial2.idl',
 ])
 
-# core/inspector/InspectorInstrumentation.idl is not a valid Blink IDL.
-NON_BLINK_IDL_FILES = frozenset([
-    'InspectorInstrumentation.idl',
-])
-
 COMPONENT_DIRECTORY = frozenset(['core', 'modules'])
 
-SOURCE_PATH = webkit_finder.get_source_dir()
+SOURCE_PATH = path_finder.get_source_dir()
 TEST_INPUT_DIRECTORY = os.path.join(SOURCE_PATH, 'bindings', 'tests', 'idls')
 REFERENCE_DIRECTORY = os.path.join(SOURCE_PATH, 'bindings', 'tests', 'results')
 
@@ -129,8 +124,6 @@ def generate_interface_dependencies():
     def collect_interfaces_info(idl_path_list):
         info_collector = InterfaceInfoCollector()
         for idl_path in idl_path_list:
-            if os.path.basename(idl_path) in NON_BLINK_IDL_FILES:
-                continue
             info_collector.collect_info(idl_path)
         info = info_collector.get_info_as_dict()
         # TestDictionary.{h,cpp} are placed under
@@ -195,6 +188,7 @@ class IdlCompilerOptions(object):
         self.cache_directory = cache_directory
         self.impl_output_directory = impl_output_directory
         self.target_component = target_component
+
 
 def bindings_tests(output_directory, verbose):
     executive = Executive()
@@ -262,10 +256,6 @@ def bindings_tests(output_directory, verbose):
     def no_excess_files(output_files):
         generated_files = set([os.path.relpath(path, output_directory)
                                for path in output_files])
-        # Add subversion working copy directories in core and modules.
-        for component in COMPONENT_DIRECTORY:
-            generated_files.add(os.path.join(component, '.svn'))
-
         excess_files = []
         for path in list_files(REFERENCE_DIRECTORY):
             relpath = os.path.relpath(path, REFERENCE_DIRECTORY)

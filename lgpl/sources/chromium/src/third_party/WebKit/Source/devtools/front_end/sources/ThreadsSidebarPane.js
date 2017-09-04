@@ -14,14 +14,7 @@ Sources.ThreadsSidebarPane = class extends UI.VBox {
     this._list = new UI.ListControl(this, UI.ListMode.NonViewport);
     this.contentElement.appendChild(this._list.element);
 
-    this._availableNodeTargetsElement = this.contentElement.createChild('div', 'hidden available-node-targets');
-
     UI.context.addFlavorChangeListener(SDK.Target, this._targetFlavorChanged, this);
-
-    SDK.targetManager.addEventListener(
-        SDK.TargetManager.Events.AvailableNodeTargetsChanged, this._availableNodeTargetsChanged, this);
-    this._availableNodeTargetsChanged();
-
     SDK.targetManager.observeModels(SDK.DebuggerModel, this);
   }
 
@@ -30,27 +23,7 @@ Sources.ThreadsSidebarPane = class extends UI.VBox {
    */
   static shouldBeShown() {
     var minJSTargets = Runtime.queryParam('nodeFrontend') ? 1 : 2;
-    if (SDK.targetManager.models(SDK.DebuggerModel).length >= minJSTargets)
-      return true;
-    return !!SDK.targetManager.availableNodeTargetsCount();
-  }
-
-  _availableNodeTargetsChanged() {
-    var count = SDK.targetManager.availableNodeTargetsCount();
-    if (!count) {
-      this._availableNodeTargetsElement.classList.add('hidden');
-      return;
-    }
-    this._availableNodeTargetsElement.removeChildren();
-    this._availableNodeTargetsElement.createTextChild(
-        count === 1 ? Common.UIString('Node instance available.') :
-                      Common.UIString('%d Node instances available.', count));
-    var link = this._availableNodeTargetsElement.createChild('span', 'link');
-    link.textContent = Common.UIString('Connect');
-    link.addEventListener('click', () => {
-      InspectorFrontendHost.openNodeFrontend();
-    }, false);
-    this._availableNodeTargetsElement.classList.remove('hidden');
+    return SDK.targetManager.models(SDK.DebuggerModel).length >= minJSTargets;
   }
 
   /**
@@ -65,7 +38,7 @@ Sources.ThreadsSidebarPane = class extends UI.VBox {
     element.appendChild(UI.Icon.create('smallicon-thick-right-arrow', 'selected-thread-icon'));
 
     function updateTitle() {
-      var executionContext = debuggerModel.target().runtimeModel.defaultExecutionContext();
+      var executionContext = debuggerModel.runtimeModel().defaultExecutionContext();
       title.textContent =
           executionContext && executionContext.label() ? executionContext.label() : debuggerModel.target().name();
     }
@@ -85,7 +58,7 @@ Sources.ThreadsSidebarPane = class extends UI.VBox {
 
     debuggerModel.addEventListener(SDK.DebuggerModel.Events.DebuggerPaused, updatePausedState);
     debuggerModel.addEventListener(SDK.DebuggerModel.Events.DebuggerResumed, updatePausedState);
-    debuggerModel.target().runtimeModel.addEventListener(SDK.RuntimeModel.Events.ExecutionContextChanged, updateTitle);
+    debuggerModel.runtimeModel().addEventListener(SDK.RuntimeModel.Events.ExecutionContextChanged, updateTitle);
     SDK.targetManager.addEventListener(SDK.TargetManager.Events.NameChanged, targetNameChanged);
 
     updatePausedState();

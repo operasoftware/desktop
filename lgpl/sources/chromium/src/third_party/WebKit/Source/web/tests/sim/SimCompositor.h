@@ -10,7 +10,7 @@
 namespace blink {
 
 class SimDisplayItemList;
-class WebViewImpl;
+class WebViewBase;
 
 // Simulated very basic compositor that's capable of running the BeginMainFrame
 // processing steps on WebView: beginFrame, layout, paint.
@@ -26,29 +26,36 @@ class SimCompositor final : public WebLayerTreeView {
   explicit SimCompositor();
   ~SimCompositor();
 
-  void setWebViewImpl(WebViewImpl&);
+  void SetWebView(WebViewBase&);
 
   // Execute the BeginMainFrame processing steps, an approximation of what
   // cc::ThreadProxy::BeginMainFrame would do.
-  SimDisplayItemList beginFrame();
+  // If time is not specified a 60Hz frame rate time progression is used.
+  SimDisplayItemList BeginFrame(double time_delta_in_seconds = 0.016);
 
-  bool needsBeginFrame() const { return m_needsBeginFrame; }
-  bool deferCommits() const { return m_deferCommits; }
+  bool NeedsBeginFrame() const { return needs_begin_frame_; }
+  bool DeferCommits() const { return defer_commits_; }
 
-  bool hasSelection() const { return m_hasSelection; }
+  bool HasSelection() const { return has_selection_; }
+
+  void SetBackgroundColor(WebColor background_color) override {
+    background_color_ = background_color;
+  }
+
+  WebColor background_color() { return background_color_; }
 
  private:
-  void setNeedsBeginFrame() override;
-  void setNeedsCompositorUpdate() override;
-  void setDeferCommits(bool) override;
-  void registerSelection(const WebSelection&) override;
-  void clearSelection() override;
+  void SetNeedsBeginFrame() override;
+  void SetDeferCommits(bool) override;
+  void RegisterSelection(const WebSelection&) override;
+  void ClearSelection() override;
 
-  bool m_needsBeginFrame;
-  bool m_deferCommits;
-  bool m_hasSelection;
-  WebViewImpl* m_webViewImpl;
-  double m_lastFrameTimeMonotonic;
+  bool needs_begin_frame_;
+  bool defer_commits_;
+  bool has_selection_;
+  WebViewBase* web_view_;
+  double last_frame_time_monotonic_;
+  WebColor background_color_;
 };
 
 }  // namespace blink

@@ -7,10 +7,10 @@
 
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/ModulesExport.h"
 #include "modules/canvas2d/CanvasRenderingContext2D.h"
 #include "modules/shapedetection/ShapeDetector.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "services/shape_detection/public/interfaces/textdetection.mojom-blink.h"
 
 namespace blink {
@@ -20,7 +20,7 @@ class MODULES_EXPORT TextDetector final : public ShapeDetector,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static TextDetector* create();
+  static TextDetector* Create();
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -28,18 +28,18 @@ class MODULES_EXPORT TextDetector final : public ShapeDetector,
   TextDetector();
   ~TextDetector() override = default;
 
-  ScriptPromise doDetect(ScriptPromiseResolver*,
+  ScriptPromise DoDetect(ScriptPromiseResolver*,
                          mojo::ScopedSharedBufferHandle,
-                         int imageWidth,
-                         int imageHeight) override;
-  void onDetectText(
+                         int image_width,
+                         int image_height) override;
+  void OnDetectText(
       ScriptPromiseResolver*,
       Vector<shape_detection::mojom::blink::TextDetectionResultPtr>);
-  void onTextServiceConnectionError();
+  void OnTextServiceConnectionError();
 
-  shape_detection::mojom::blink::TextDetectionPtr m_textService;
+  shape_detection::mojom::blink::TextDetectionPtr text_service_;
 
-  HeapHashSet<Member<ScriptPromiseResolver>> m_textServiceRequests;
+  HeapHashSet<Member<ScriptPromiseResolver>> text_service_requests_;
 };
 
 }  // namespace blink

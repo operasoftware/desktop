@@ -6,16 +6,23 @@
 #define NGConstraintSpace_h
 
 #include "core/CoreExport.h"
-#include "core/layout/ng/ng_units.h"
+#include "core/layout/ng/geometry/ng_logical_offset.h"
+#include "core/layout/ng/geometry/ng_logical_size.h"
+#include "core/layout/ng/geometry/ng_margin_strut.h"
+#include "core/layout/ng/geometry/ng_physical_size.h"
+#include "core/layout/ng/ng_exclusion.h"
+#include "core/layout/ng/ng_layout_opportunity_iterator.h"
+#include "core/layout/ng/ng_unpositioned_float.h"
 #include "core/layout/ng/ng_writing_mode.h"
-#include "wtf/Optional.h"
-#include "wtf/RefCounted.h"
-#include "wtf/text/WTFString.h"
+#include "platform/heap/Handle.h"
+#include "platform/text/TextDirection.h"
+#include "platform/wtf/Optional.h"
+#include "platform/wtf/RefCounted.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
 class LayoutBox;
-class NGBoxFragment;
 
 enum NGFragmentationType {
   kFragmentNone,
@@ -89,7 +96,7 @@ class CORE_EXPORT NGConstraintSpace final
   // fragment that satisfies a fixed constraint in the inline and block
   // direction respectively.
   // If these flags are true, the AvailableSize() is interpreted as the fixed
-  // border-box size of this box in the resepective dimension.
+  // border-box size of this box in the respective dimension.
   bool IsFixedSizeInline() const { return is_fixed_size_inline_; }
 
   bool IsFixedSizeBlock() const { return is_fixed_size_block_; }
@@ -102,20 +109,25 @@ class CORE_EXPORT NGConstraintSpace final
   // blockSize if possible.
   NGFragmentationType BlockFragmentationType() const;
 
+  // Returns a pointer to already existing Layout Opportunity iterator
+  // associated with this constraint space and {@code iter_offset} or creates a
+  // new one.
+  NGLayoutOpportunityIterator* LayoutOpportunityIterator(
+      const NGLogicalOffset& iter_offset);
+
   // Return true if this contraint space participates in a fragmentation
   // context.
   bool HasBlockFragmentation() const {
     return BlockFragmentationType() != kFragmentNone;
   }
 
-  // Modifies constraint space to account for a placed fragment. Depending on
-  // the shape of the fragment this will either modify the inline or block
-  // size, or add an exclusion.
-  void Subtract(const NGBoxFragment*);
-
   NGMarginStrut MarginStrut() const { return margin_strut_; }
 
   NGLogicalOffset BfcOffset() const { return bfc_offset_; }
+
+  Vector<RefPtr<NGUnpositionedFloat>>& UnpositionedFloats() {
+    return unpositioned_floats_;
+  }
 
   WTF::Optional<LayoutUnit> ClearanceOffset() const {
     return clearance_offset_;
@@ -143,6 +155,7 @@ class CORE_EXPORT NGConstraintSpace final
                     const NGMarginStrut& margin_strut,
                     const NGLogicalOffset& bfc_offset,
                     const std::shared_ptr<NGExclusions>& exclusions,
+                    Vector<RefPtr<NGUnpositionedFloat>>& unpositioned_floats,
                     const WTF::Optional<LayoutUnit>& clearance_offset);
 
   NGPhysicalSize InitialContainingBlockSize() const {
@@ -178,6 +191,8 @@ class CORE_EXPORT NGConstraintSpace final
   NGLogicalOffset bfc_offset_;
   const std::shared_ptr<NGExclusions> exclusions_;
   WTF::Optional<LayoutUnit> clearance_offset_;
+  std::unique_ptr<NGLayoutOpportunityIterator> layout_opp_iter_;
+  Vector<RefPtr<NGUnpositionedFloat>> unpositioned_floats_;
 };
 
 inline std::ostream& operator<<(std::ostream& stream,

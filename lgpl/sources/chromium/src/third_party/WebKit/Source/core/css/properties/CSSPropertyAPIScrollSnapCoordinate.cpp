@@ -9,27 +9,32 @@
 #include "core/css/parser/CSSParserContext.h"
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 
+// TODO(crbug.com/724912): Retire scroll-snap-coordinate
+
 namespace blink {
 
-static CSSValueList* consumePositionList(CSSParserTokenRange& range,
-                                         CSSParserMode cssParserMode) {
-  CSSValueList* positions = CSSValueList::createCommaSeparated();
+using namespace CSSPropertyParserHelpers;
+
+static CSSValueList* ConsumePositionList(CSSParserTokenRange& range,
+                                         const CSSParserContext& context) {
+  CSSValueList* positions = CSSValueList::CreateCommaSeparated();
   do {
-    CSSValue* position = consumePosition(
-        range, cssParserMode, CSSPropertyParserHelpers::UnitlessQuirk::Forbid);
+    CSSValue* position = ConsumePosition(range, context, UnitlessQuirk::kForbid,
+                                         Optional<UseCounter::Feature>());
     if (!position)
       return nullptr;
-    positions->append(*position);
-  } while (CSSPropertyParserHelpers::consumeCommaIncludingWhitespace(range));
+    positions->Append(*position);
+  } while (ConsumeCommaIncludingWhitespace(range));
   return positions;
 }
 
 const CSSValue* CSSPropertyAPIScrollSnapCoordinate::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  if (range.peek().id() == CSSValueNone)
-    return CSSPropertyParserHelpers::consumeIdent(range);
-  return consumePositionList(range, context->mode());
+    const CSSParserContext& context,
+    CSSPropertyID) {
+  if (range.Peek().Id() == CSSValueNone)
+    return ConsumeIdent(range);
+  return ConsumePositionList(range, context);
 }
 
 }  // namespace blink

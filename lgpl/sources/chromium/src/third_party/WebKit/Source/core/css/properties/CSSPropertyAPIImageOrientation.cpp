@@ -13,13 +13,15 @@ namespace blink {
 
 const CSSValue* CSSPropertyAPIImageOrientation::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
+    const CSSParserContext& context,
+    CSSPropertyID) {
   DCHECK(RuntimeEnabledFeatures::imageOrientationEnabled());
-  if (range.peek().id() == CSSValueFromImage)
-    return CSSPropertyParserHelpers::consumeIdent(range);
-  if (range.peek().type() != NumberToken) {
-    CSSPrimitiveValue* angle = CSSPropertyParserHelpers::consumeAngle(range);
-    if (angle && angle->getDoubleValue() == 0)
+  if (range.Peek().Id() == CSSValueFromImage)
+    return CSSPropertyParserHelpers::ConsumeIdent(range);
+  if (range.Peek().GetType() != kNumberToken) {
+    CSSPrimitiveValue* angle = CSSPropertyParserHelpers::ConsumeAngle(
+        range, context, WTF::Optional<UseCounter::Feature>());
+    if (angle && angle->GetDoubleValue() == 0)
       return angle;
   }
   return nullptr;

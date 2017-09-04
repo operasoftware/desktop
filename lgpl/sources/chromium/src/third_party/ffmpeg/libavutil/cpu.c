@@ -17,12 +17,11 @@
  */
 
 #include <stdint.h>
-// Chromium: Windows doesn't provide stdatomic.h, so use the compat version.
-#if defined(_MSC_VER)
-#include <compat/atomics/win32/stdatomic.h>
-#else
+#if defined(__linux__)
 #include <compat/atomics/gcc/stdatomic.h>
-#endif
+#else
+#include <stdatomic.h>
+#endif  // __linux__
 
 #include "cpu.h"
 #include "cpu_internal.h"

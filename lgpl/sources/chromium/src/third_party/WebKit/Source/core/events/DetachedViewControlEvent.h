@@ -14,27 +14,27 @@ class DetachedViewControlEvent final : public Event {
 public:
     ~DetachedViewControlEvent() override;
 
-    static DetachedViewControlEvent* create()
+    static DetachedViewControlEvent* Create()
     {
         return new DetachedViewControlEvent();
     }
 
-    static DetachedViewControlEvent* create(const String& controlName)
+    static DetachedViewControlEvent* Create(const String& control_name)
     {
-        return new DetachedViewControlEvent(controlName);
+        return new DetachedViewControlEvent(control_name);
     }
 
-    const String& controlName() const { return m_controlName; }
+    const String& controlName() const { return control_name_; }
 
     DECLARE_VIRTUAL_TRACE();
 
 private:
     DetachedViewControlEvent();
-    DetachedViewControlEvent(const String& controlName);
+    DetachedViewControlEvent(const String& control_name);
 
-    const AtomicString& interfaceName() const override;
+    const AtomicString& InterfaceName() const override;
 
-    String m_controlName;
+    String control_name_;
 };
 
 } // namespace blink

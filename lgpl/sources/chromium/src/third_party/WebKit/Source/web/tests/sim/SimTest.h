@@ -15,8 +15,8 @@
 
 namespace blink {
 
-class WebViewImpl;
-class WebLocalFrameImpl;
+class WebViewBase;
+class WebLocalFrameBase;
 class Document;
 class LocalDOMWindow;
 
@@ -25,31 +25,36 @@ class SimTest : public ::testing::Test {
   SimTest();
   ~SimTest() override;
 
-  void loadURL(const String& url);
+  void SetUp() override;
 
-  LocalDOMWindow& window();
-  SimPage& page();
-  Document& document();
-  WebViewImpl& webView();
-  WebLocalFrameImpl& mainFrame();
-  const SimWebViewClient& webViewClient() const;
-  SimCompositor& compositor();
+  void LoadURL(const String& url);
 
-  Vector<String>& consoleMessages() { return m_consoleMessages; }
+  // WebView is created after SetUp to allow test to customize
+  // web runtime features.
+  // These methods should be accessed inside test body after a call to SetUp.
+  LocalDOMWindow& Window();
+  SimPage& Page();
+  Document& GetDocument();
+  WebViewBase& WebView();
+  WebLocalFrameBase& MainFrame();
+  const SimWebViewClient& WebViewClient() const;
+  SimCompositor& Compositor();
+
+  Vector<String>& ConsoleMessages() { return console_messages_; }
 
  private:
   friend class SimWebFrameClient;
 
-  void addConsoleMessage(const String&);
+  void AddConsoleMessage(const String&);
 
-  SimNetwork m_network;
-  SimCompositor m_compositor;
-  SimWebViewClient m_webViewClient;
-  SimWebFrameClient m_webFrameClient;
-  SimPage m_page;
-  FrameTestHelpers::WebViewHelper m_webViewHelper;
+  SimNetwork network_;
+  SimCompositor compositor_;
+  SimWebViewClient web_view_client_;
+  SimWebFrameClient web_frame_client_;
+  SimPage page_;
+  FrameTestHelpers::WebViewHelper web_view_helper_;
 
-  Vector<String> m_consoleMessages;
+  Vector<String> console_messages_;
 };
 
 }  // namespace blink

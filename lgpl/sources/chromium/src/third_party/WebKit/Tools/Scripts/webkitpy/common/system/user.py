@@ -26,13 +26,9 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import getpass
 import logging
-import os
 import platform
 import re
-import shlex
-import subprocess
 import sys
 import webbrowser
 
@@ -63,29 +59,12 @@ class User(object):
         return response
 
     @classmethod
-    def prompt_password(cls, message, repeat=1):
-        return cls.prompt(message, repeat=repeat, raw_input=getpass.getpass)
-
-    @classmethod
-    def prompt_with_multiple_lists(cls, list_title, subtitles, lists, can_choose_multiple=False, raw_input=raw_input):
-        item_index = 0
-        cumulated_list = []
-        print list_title
-        for i in range(len(subtitles)):
-            print "\n" + subtitles[i]
-            for item in lists[i]:
-                item_index += 1
-                print "%2d. %s" % (item_index, item)
-            cumulated_list += lists[i]
-        return cls._wait_on_list_response(cumulated_list, can_choose_multiple, raw_input)
-
-    @classmethod
     def _wait_on_list_response(cls, list_items, can_choose_multiple, raw_input):
         while True:
             if can_choose_multiple:
                 response = cls.prompt(
-                    "Enter one or more numbers (comma-separated) or ranges (e.g. 3-7), or \"all\": ", raw_input=raw_input)
-                if not response.strip() or response == "all":
+                    'Enter one or more numbers (comma-separated) or ranges (e.g. 3-7), or \'all\': ', raw_input=raw_input)
+                if not response.strip() or response == 'all':
                     return list_items
 
                 try:
@@ -102,7 +81,7 @@ class User(object):
                 return [list_items[i] for i in indices]
             else:
                 try:
-                    result = int(cls.prompt("Enter a number: ", raw_input=raw_input)) - 1
+                    result = int(cls.prompt('Enter a number: ', raw_input=raw_input)) - 1
                 except ValueError:
                     continue
                 return list_items[result]
@@ -113,29 +92,14 @@ class User(object):
         i = 0
         for item in list_items:
             i += 1
-            print "%2d. %s" % (i, item)
+            print '%2d. %s' % (i, item)
         return cls._wait_on_list_response(list_items, can_choose_multiple, raw_input)
-
-    def edit(self, files):
-        editor = os.environ.get("EDITOR") or "vi"
-        args = shlex.split(editor)
-        # Note: Not thread safe: http://bugs.python.org/issue2320
-        subprocess.call(args + files)
-
-    def page(self, message):
-        pager = os.environ.get("PAGER") or "less"
-        try:
-            # Note: Not thread safe: http://bugs.python.org/issue2320
-            child_process = subprocess.Popen([pager], stdin=subprocess.PIPE)
-            child_process.communicate(input=message)
-        except IOError:
-            pass
 
     def confirm(self, message=None, default=DEFAULT_YES, raw_input=raw_input):
         if not message:
-            message = "Continue?"
+            message = 'Continue?'
         choice = {'y': 'Y/n', 'n': 'y/N'}[default]
-        response = raw_input("%s [%s]: " % (message, choice))
+        response = raw_input('%s [%s]: ' % (message, choice))
         if not response:
             response = default
         return response.lower() == 'y'
@@ -149,5 +113,5 @@ class User(object):
 
     def open_url(self, url):
         if not self.can_open_url():
-            _log.warning("Failed to open %s", url)
+            _log.warning('Failed to open %s', url)
         webbrowser.open(url)

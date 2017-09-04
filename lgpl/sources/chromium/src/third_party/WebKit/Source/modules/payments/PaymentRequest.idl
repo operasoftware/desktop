@@ -7,7 +7,7 @@
 
 [
     RuntimeEnabled=PaymentRequest,
-    Constructor(sequence<PaymentMethodData> methodData, PaymentDetails details, optional PaymentOptions options),
+    Constructor(sequence<PaymentMethodData> methodData, PaymentDetailsInit details, optional PaymentOptions options),
     ConstructorCallWith=ExecutionContext,
     RaisesException=Constructor,
     ActiveScriptWrappable,
@@ -17,6 +17,7 @@
     [CallWith=ScriptState] Promise<void> abort();
     [CallWith=ScriptState, RuntimeEnabled=CanMakePayment] Promise<boolean> canMakePayment();
 
+    readonly attribute DOMString id;
     [ImplementedAs=getShippingAddress] readonly attribute PaymentAddress? shippingAddress;
     readonly attribute DOMString? shippingOption;
     readonly attribute PaymentShippingType? shippingType;

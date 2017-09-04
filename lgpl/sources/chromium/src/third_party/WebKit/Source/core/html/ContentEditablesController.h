@@ -31,67 +31,65 @@
 #ifndef ContentEditablesController_h
 #define ContentEditablesController_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/HashFunctions.h"
-#include "wtf/HashMap.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefPtr.h"
-#include "wtf/Vector.h"
-#include "wtf/text/StringHash.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/HashFunctions.h"
+#include "platform/wtf/HashMap.h"
+#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/Vector.h"
+#include "platform/wtf/text/StringHash.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 class Element;
 
-class ContentEditablesState final : public GarbageCollectedFinalized<ContentEditablesState> {
-public:
-    static ContentEditablesState* create()
-    {
-        return new ContentEditablesState;
-    }
+class ContentEditablesState final
+    : public GarbageCollectedFinalized<ContentEditablesState> {
+ public:
+  static ContentEditablesState* Create() { return new ContentEditablesState; }
 
-    ~ContentEditablesState();
+  ~ContentEditablesState();
 
-    Vector<String> toStateVector();
-    void registerContentEditableElement(Element*);
-    void restoreContentsIn(Element*);
-    void unregisterContentEditableElement(Element*);
-    void setContentEditablesContent(const Vector<String>&);
-    bool isRegistered(Element*);
+  Vector<String> ToStateVector();
+  void RegisterContentEditableElement(Element*);
+  void RestoreContentsIn(Element*);
+  void UnregisterContentEditableElement(Element*);
+  void SetContentEditablesContent(const Vector<String>&);
+  bool IsRegistered(Element*);
 
-    DECLARE_TRACE();
+  DECLARE_TRACE();
 
-private:
-    ContentEditablesState();
+ private:
+  ContentEditablesState();
 
-    HeapHashMap<Member<Element>, String> m_contenteditablesWithPaths;
-    HashMap<String, String> m_savedContents;
+  HeapHashMap<Member<Element>, String> content_editables_with_paths_;
+  HashMap<String, String> saved_contents_;
 };
 
-class ContentEditablesController final : public GarbageCollected<ContentEditablesController>,
-                                         public TraceWrapperBase {
-public:
-    static ContentEditablesController* create()
-    {
-        return new ContentEditablesController;
-    }
+class ContentEditablesController final
+    : public GarbageCollected<ContentEditablesController>,
+      public TraceWrapperBase {
+ public:
+  static ContentEditablesController* Create() {
+    return new ContentEditablesController;
+  }
 
-    void registerContentEditableElement(Element*);
-    void restoreContentsIn(Element*);
-    void unregisterContentEditableElement(Element*);
-    ContentEditablesState* getContentEditablesState();
-    void setContentEditablesContent(const Vector<String>&);
-    bool isRegistered(Element*);
+  void RegisterContentEditableElement(Element*);
+  void RestoreContentsIn(Element*);
+  void UnregisterContentEditableElement(Element*);
+  ContentEditablesState* GetContentEditablesState();
+  void SetContentEditablesContent(const Vector<String>&);
+  bool IsRegistered(Element*);
 
-    DECLARE_TRACE();
+  DECLARE_TRACE();
 
-private:
-    ContentEditablesController();
+ private:
+  ContentEditablesController();
 
-    Member<ContentEditablesState> m_state;
+  Member<ContentEditablesState> state_;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ContentEditablesController_h
+#endif  // ContentEditablesController_h

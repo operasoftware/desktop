@@ -10,6 +10,7 @@ var tests = [
   },
   function testCurrentWindow() {
     var currentWindow = chrome.app.window.current();
+    chrome.test.assertTrue(currentWindow.contentWindow == window);
     // Current window is pretty funny and has a ton of custom JS bindings, also
     // utilizing an internal API (currentWindowInternal). Test a bunch of stuff.
     chrome.test.assertTrue(!!currentWindow, 'currentWindow');
@@ -27,11 +28,8 @@ var tests = [
     var webview = document.createElement('webview');
     webview.src = 'data:text/html,<html><body>hello world</body></html>';
     document.body.appendChild(webview);
-    // TODO(devlin): This is a pretty lame test currently, since we don't wait
-    // for the webview to finish loading. We can't do that yet, since webview
-    // events are all implemented as custom extension events (?!) under the
-    // hood, and we haven't wired up custom events in binding hooks.
-    chrome.test.succeed();
+    webview.addEventListener('loadabort', chrome.test.fail);
+    webview.addEventListener('loadstop', chrome.test.succeed);
   },
 ];
 

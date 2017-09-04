@@ -4,7 +4,7 @@
 
 #include "modules/csspaint/PaintWorklet.h"
 
-#include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
 #include "modules/csspaint/PaintWorkletGlobalScope.h"
@@ -12,37 +12,32 @@
 namespace blink {
 
 // static
-PaintWorklet* PaintWorklet::create(LocalFrame* frame) {
+PaintWorklet* PaintWorklet::Create(LocalFrame* frame) {
   return new PaintWorklet(frame);
 }
 
 PaintWorklet::PaintWorklet(LocalFrame* frame)
-    : Worklet(frame),
-      m_paintWorkletGlobalScope(PaintWorkletGlobalScope::create(
-          frame,
-          frame->document()->url(),
-          frame->document()->userAgent(frame->document()->url()),
-          frame->document()->getSecurityOrigin(),
-          toIsolate(frame->document()))) {}
+    : MainThreadWorklet(frame),
+      global_scope_proxy_(
+          WTF::MakeUnique<PaintWorkletGlobalScopeProxy>(frame)) {}
 
-PaintWorklet::~PaintWorklet() {}
+PaintWorklet::~PaintWorklet() = default;
 
-PaintWorkletGlobalScope* PaintWorklet::workletGlobalScopeProxy() const {
-  return m_paintWorkletGlobalScope.get();
+WorkletGlobalScopeProxy* PaintWorklet::GetWorkletGlobalScopeProxy() const {
+  return global_scope_proxy_.get();
 }
 
-CSSPaintDefinition* PaintWorklet::findDefinition(const String& name) {
-  return m_paintWorkletGlobalScope->findDefinition(name);
+CSSPaintDefinition* PaintWorklet::FindDefinition(const String& name) {
+  return global_scope_proxy_->FindDefinition(name);
 }
 
-void PaintWorklet::addPendingGenerator(const String& name,
+void PaintWorklet::AddPendingGenerator(const String& name,
                                        CSSPaintImageGeneratorImpl* generator) {
-  return m_paintWorkletGlobalScope->addPendingGenerator(name, generator);
+  return global_scope_proxy_->AddPendingGenerator(name, generator);
 }
 
 DEFINE_TRACE(PaintWorklet) {
-  visitor->trace(m_paintWorkletGlobalScope);
-  Worklet::trace(visitor);
+  MainThreadWorklet::Trace(visitor);
 }
 
 }  // namespace blink

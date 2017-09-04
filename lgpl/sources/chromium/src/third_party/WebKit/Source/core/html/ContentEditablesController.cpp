@@ -37,122 +37,108 @@
 namespace blink {
 
 namespace {
-const char kContentEditablesSavedContentsSignature[] = "Blink's contentEditables saved content";
+const char kContentEditablesSavedContentsSignature[] =
+    "Blink's contentEditables saved content";
 const int kContentEditablesSavedContentsVersion = 1;
-} // namespace
+}  // namespace
 
-void ContentEditablesState::registerContentEditableElement(Element* element)
-{
-    m_contenteditablesWithPaths.insert(element, element->getPath());
+void ContentEditablesState::RegisterContentEditableElement(Element* element) {
+  content_editables_with_paths_.insert(element, element->GetPath());
 }
 
-void ContentEditablesState::unregisterContentEditableElement(Element* element)
-{
-    m_contenteditablesWithPaths.remove(element);
+void ContentEditablesState::UnregisterContentEditableElement(Element* element) {
+  content_editables_with_paths_.erase(
+      content_editables_with_paths_.find(element));
 }
 
-bool ContentEditablesState::isRegistered(Element* element)
-{
-    return m_contenteditablesWithPaths.contains(element);
+bool ContentEditablesState::IsRegistered(Element* element) {
+  return content_editables_with_paths_.Contains(element);
 }
 
-void ContentEditablesState::restoreContentsIn(Element* element)
-{
-    if (!m_contenteditablesWithPaths.contains(element))
-        return;
+void ContentEditablesState::RestoreContentsIn(Element* element) {
+  if (!content_editables_with_paths_.Contains(element))
+    return;
 
-    HTMLElement* htmlElement = toHTMLElement(element);
-    ASSERT(htmlElement->contentEditable() == "true" || htmlElement->contentEditable() == "plaintext-only");
-    String elementPath = htmlElement->getPath();
+  HTMLElement* htmlElement = ToHTMLElement(element);
+  DCHECK(htmlElement->contentEditable() == "true" ||
+         htmlElement->contentEditable() == "plaintext-only");
+  String elementPath = htmlElement->GetPath();
 
-    if (m_contenteditablesWithPaths.at(htmlElement) == elementPath) {
-        String content = m_savedContents.at(elementPath);
-        if (!content.isEmpty())
-            htmlElement->setInnerHTML(content, IGNORE_EXCEPTION_FOR_TESTING);
+  if (content_editables_with_paths_.at(htmlElement) == elementPath) {
+    String content = saved_contents_.at(elementPath);
+    if (!content.IsEmpty())
+      htmlElement->setInnerHTML(content, IGNORE_EXCEPTION_FOR_TESTING);
+  }
+}
+
+Vector<String> ContentEditablesState::ToStateVector() {
+  Vector<String> result;
+  if (content_editables_with_paths_.size()) {
+    result.ReserveInitialCapacity(content_editables_with_paths_.size() * 2 + 2);
+    result.push_back(kContentEditablesSavedContentsSignature);
+    result.push_back(String::Number(kContentEditablesSavedContentsVersion, 0u));
+    for (const auto& iter : content_editables_with_paths_) {
+      result.push_back(iter.value);
+      result.push_back(ToHTMLElement(iter.key)->innerHTML());
     }
+  }
+  return result;
 }
 
-Vector<String> ContentEditablesState::toStateVector()
-{
-    Vector<String> result;
-    if (m_contenteditablesWithPaths.size()) {
-        result.reserveInitialCapacity(m_contenteditablesWithPaths.size() * 2 + 2);
-        result.push_back(kContentEditablesSavedContentsSignature);
-        result.push_back(String::number(kContentEditablesSavedContentsVersion, 0u));
-        for (const auto& iter : m_contenteditablesWithPaths) {
-            result.push_back(iter.value);
-            result.push_back(toHTMLElement(iter.key)->innerHTML());
-        }
+void ContentEditablesState::SetContentEditablesContent(
+    const Vector<String>& contents) {
+  if (contents.size() &&
+      contents[0] == kContentEditablesSavedContentsSignature) {
+    // i == 1 is version - unused for now.
+    for (size_t idx = 2; idx < contents.size(); idx += 2) {
+      saved_contents_.insert(contents[idx], contents[idx + 1]);
     }
-    return result;
+  }
 }
 
-void ContentEditablesState::setContentEditablesContent(const Vector<String>& contents)
-{
-    if (contents.size() && contents[0] == kContentEditablesSavedContentsSignature) {
-        // i == 1 is version - unused for now.
-        for (size_t idx = 2; idx < contents.size(); idx += 2) {
-            m_savedContents.insert(contents[idx], contents[idx + 1]);
-        }
-    }
-}
+ContentEditablesState::ContentEditablesState() {}
 
-ContentEditablesState::ContentEditablesState()
-{
-}
+ContentEditablesState::~ContentEditablesState() {}
 
-ContentEditablesState::~ContentEditablesState()
-{
-}
-
-DEFINE_TRACE(ContentEditablesState)
-{
-#if ENABLE(OILPAN)
-    visitor->trace(m_contenteditablesWithPaths);
-#endif
+DEFINE_TRACE(ContentEditablesState) {
+  visitor->Trace(content_editables_with_paths_);
 }
 
 ContentEditablesController::ContentEditablesController()
-    : m_state(ContentEditablesState::create())
-{
+    : state_(ContentEditablesState::Create()) {}
+
+void ContentEditablesController::RegisterContentEditableElement(
+    Element* element) {
+  if (!RuntimeEnabledFeatures::restoreContenteditablesStateEnabled())
+    return;
+
+  state_->RegisterContentEditableElement(element);
 }
 
-void ContentEditablesController::registerContentEditableElement(Element* element)
-{
-    if (!RuntimeEnabledFeatures::restoreContenteditablesStateEnabled())
-        return;
-
-    m_state->registerContentEditableElement(element);
+void ContentEditablesController::UnregisterContentEditableElement(
+    Element* element) {
+  state_->UnregisterContentEditableElement(element);
 }
 
-void ContentEditablesController::unregisterContentEditableElement(Element* element)
-{
-    m_state->unregisterContentEditableElement(element);
+bool ContentEditablesController::IsRegistered(Element* element) {
+  return state_->IsRegistered(element);
 }
 
-bool ContentEditablesController::isRegistered(Element* element)
-{
-    return m_state->isRegistered(element);
+void ContentEditablesController::RestoreContentsIn(Element* element) {
+  state_->RestoreContentsIn(element);
 }
 
-void ContentEditablesController::restoreContentsIn(Element* element)
-{
-    m_state->restoreContentsIn(element);
+ContentEditablesState* ContentEditablesController::GetContentEditablesState() {
+  return state_.Get();
 }
 
-ContentEditablesState* ContentEditablesController::getContentEditablesState()
-{
-    return m_state.get();
+void ContentEditablesController::SetContentEditablesContent(
+    const Vector<String>& contents) {
+  state_->SetContentEditablesContent(contents);
 }
 
-void ContentEditablesController::setContentEditablesContent(const Vector<String>& contents)
-{
-    m_state->setContentEditablesContent(contents);
+DEFINE_TRACE(ContentEditablesController) {
+  visitor->Trace(state_);
 }
 
-DEFINE_TRACE(ContentEditablesController)
-{
-    visitor->trace(m_state);
-}
-
-} // namespace blink
+}  // namespace blink

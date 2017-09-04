@@ -36,20 +36,25 @@
 #include "core/InputTypeNames.h"
 #include "core/css/CSSStyleDeclaration.h"
 #include "core/dom/Document.h"
+#include "core/dom/ElementTraversal.h"
 #include "core/editing/Editor.h"
 #include "core/editing/markers/DocumentMarkerController.h"
 #include "core/editing/spellcheck/SpellChecker.h"
-#include "core/frame/FrameHost.h"
+#include "core/exported/WebDataSourceImpl.h"
+#include "core/exported/WebPluginContainerBase.h"
+#include "core/exported/WebViewBase.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/Settings.h"
 #include "core/frame/VisualViewport.h"
+#include "core/frame/WebLocalFrameBase.h"
 #include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLFormElement.h"
+#include "core/html/HTMLFrameElementBase.h"
 #include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/HTMLPlugInElement.h"
-#include "core/html/MediaError.h"
+#include "core/input/ContextMenuAllowedScope.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutPart.h"
@@ -59,10 +64,10 @@
 #include "core/page/ContextMenuController.h"
 #include "core/page/Page.h"
 #include "platform/ContextMenu.h"
-#include "platform/FrameViewBase.h"
 #include "platform/exported/WrappedResourceResponse.h"
 #include "platform/text/TextBreakIterator.h"
 #include "platform/weborigin/KURL.h"
+#include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebPoint.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
@@ -74,28 +79,22 @@
 #include "public/web/WebMenuItemInfo.h"
 #include "public/web/WebPlugin.h"
 #include "public/web/WebSearchableFormData.h"
-#include "public/web/WebSpellCheckClient.h"
+#include "public/web/WebTextCheckClient.h"
 #include "public/web/WebViewClient.h"
-#include "web/ContextMenuAllowedScope.h"
-#include "web/WebDataSourceImpl.h"
-#include "web/WebLocalFrameImpl.h"
-#include "web/WebPluginContainerImpl.h"
-#include "web/WebViewImpl.h"
-#include "wtf/text/WTFString.h"
 
 namespace blink {
 
 // Figure out the URL of a page or subframe. Returns |page_type| as the type,
 // which indicates page or subframe, or ContextNodeType::kNone if the URL could
 // not be determined for some reason.
-static WebURL urlFromFrame(LocalFrame* frame) {
+static WebURL UrlFromFrame(LocalFrame* frame) {
   if (frame) {
-    DocumentLoader* dl = frame->loader().documentLoader();
+    DocumentLoader* dl = frame->Loader().GetDocumentLoader();
     if (dl) {
-      WebDataSource* ds = WebDataSourceImpl::fromDocumentLoader(dl);
+      WebDataSource* ds = WebDataSourceImpl::FromDocumentLoader(dl);
       if (ds) {
-        return ds->hasUnreachableURL() ? ds->unreachableURL()
-                                       : ds->getRequest().url();
+        return ds->HasUnreachableURL() ? ds->UnreachableURL()
+                                       : ds->GetRequest().Url();
       }
     }
   }
@@ -103,357 +102,469 @@ static WebURL urlFromFrame(LocalFrame* frame) {
 }
 
 static bool IsWhiteSpaceOrPunctuation(UChar c) {
-  return isSpaceOrNewline(c) || WTF::Unicode::isPunct(c);
+  return IsSpaceOrNewline(c) || WTF::Unicode::IsPunct(c);
 }
 
-static String selectMisspellingAsync(LocalFrame* selectedFrame,
+static String SelectMisspellingAsync(LocalFrame* selected_frame,
                                      String& description) {
   VisibleSelection selection =
-      selectedFrame->selection().computeVisibleSelectionInDOMTreeDeprecated();
-  if (selection.isNone())
+      selected_frame->Selection().ComputeVisibleSelectionInDOMTree();
+  if (selection.IsNone())
     return String();
 
   // Caret and range selections always return valid normalized ranges.
-  Range* selectionRange = createRange(selection.toNormalizedEphemeralRange());
-  DocumentMarkerVector markers =
-      selectedFrame->document()->markers().markersInRange(
-          EphemeralRange(selectionRange), DocumentMarker::MisspellingMarkers());
-  if (markers.size() != 1)
-    return String();
-  description = markers[0]->description();
+  const EphemeralRange& selection_range =
+      selection.ToNormalizedEphemeralRange();
 
-  // Cloning a range fails only for invalid ranges.
-  Range* markerRange = selectionRange->cloneRange();
-  markerRange->setStart(markerRange->startContainer(),
-                        markers[0]->startOffset());
-  markerRange->setEnd(markerRange->endContainer(), markers[0]->endOffset());
+  Node* const selection_start_container =
+      selection_range.StartPosition().ComputeContainerNode();
+  Node* const selection_end_container =
+      selection_range.EndPosition().ComputeContainerNode();
 
-  if (markerRange->text().stripWhiteSpace(&IsWhiteSpaceOrPunctuation) !=
-      selectionRange->text().stripWhiteSpace(&IsWhiteSpaceOrPunctuation))
+  // We don't currently support the case where a misspelling spans multiple
+  // nodes
+  if (selection_start_container != selection_end_container)
     return String();
 
-  return markerRange->text();
+  const unsigned selection_start_offset =
+      selection_range.StartPosition().ComputeOffsetInContainerNode();
+  const unsigned selection_end_offset =
+      selection_range.EndPosition().ComputeOffsetInContainerNode();
+
+  const DocumentMarkerVector& markers_in_node =
+      selected_frame->GetDocument()->Markers().MarkersFor(
+          selection_start_container, DocumentMarker::MisspellingMarkers());
+
+  const auto marker_it =
+      std::find_if(markers_in_node.begin(), markers_in_node.end(),
+                   [=](const DocumentMarker* marker) {
+                     return marker->StartOffset() < selection_end_offset &&
+                            marker->EndOffset() > selection_start_offset;
+                   });
+  if (marker_it == markers_in_node.end())
+    return String();
+
+  const DocumentMarker* const found_marker = *marker_it;
+  description = found_marker->Description();
+
+  Range* const marker_range =
+      Range::Create(*selected_frame->GetDocument(), selection_start_container,
+                    found_marker->StartOffset(), selection_start_container,
+                    found_marker->EndOffset());
+
+  if (marker_range->GetText().StripWhiteSpace(&IsWhiteSpaceOrPunctuation) !=
+      CreateRange(selection_range)
+          ->GetText()
+          .StripWhiteSpace(&IsWhiteSpaceOrPunctuation))
+    return String();
+
+  return marker_range->GetText();
 }
 
-bool ContextMenuClientImpl::shouldShowContextMenuFromTouch(
+// static
+int ContextMenuClientImpl::ComputeEditFlags(Document& selected_document,
+                                            Editor& editor) {
+  int edit_flags = WebContextMenuData::kCanDoNone;
+  if (!selected_document.IsHTMLDocument() &&
+      !selected_document.IsXHTMLDocument())
+    return edit_flags;
+
+  edit_flags |= WebContextMenuData::kCanTranslate;
+  if (editor.CanUndo())
+    edit_flags |= WebContextMenuData::kCanUndo;
+  if (editor.CanRedo())
+    edit_flags |= WebContextMenuData::kCanRedo;
+  if (editor.CanCut())
+    edit_flags |= WebContextMenuData::kCanCut;
+  if (editor.CanCopy())
+    edit_flags |= WebContextMenuData::kCanCopy;
+  if (editor.CanPaste())
+    edit_flags |= WebContextMenuData::kCanPaste;
+  if (editor.CanDelete())
+    edit_flags |= WebContextMenuData::kCanDelete;
+  if (editor.CanEditRichly())
+    edit_flags |= WebContextMenuData::kCanEditRichly;
+  if (selected_document.queryCommandEnabled("selectAll", ASSERT_NO_EXCEPTION))
+    edit_flags |= WebContextMenuData::kCanSelectAll;
+  return edit_flags;
+}
+
+bool ContextMenuClientImpl::ShouldShowContextMenuFromTouch(
     const WebContextMenuData& data) {
-  return m_webView->page()->settings().getAlwaysShowContextMenuOnTouch() ||
-         !data.linkURL.isEmpty() ||
-         data.mediaType == WebContextMenuData::MediaTypeImage ||
-         data.mediaType == WebContextMenuData::MediaTypeVideo ||
-         data.isEditable;
+  return web_view_->GetPage()
+             ->GetSettings()
+             .GetAlwaysShowContextMenuOnTouch() ||
+         !data.link_url.IsEmpty() ||
+         data.media_type == WebContextMenuData::kMediaTypeImage ||
+         data.media_type == WebContextMenuData::kMediaTypeVideo ||
+         data.is_editable;
 }
 
-bool ContextMenuClientImpl::showContextMenu(const ContextMenu* defaultMenu,
-                                            bool fromTouch) {
+static HTMLFormElement* AssociatedFormElement(HTMLElement& element) {
+  if (isHTMLFormElement(element))
+    return &toHTMLFormElement(element);
+  return element.formOwner();
+}
+
+// Scans logically forward from "start", including any child frames.
+static HTMLFormElement* ScanForForm(const Node* start) {
+  if (!start)
+    return nullptr;
+
+  for (HTMLElement& element : Traversal<HTMLElement>::StartsAt(
+           start->IsHTMLElement() ? ToHTMLElement(start)
+                                  : Traversal<HTMLElement>::Next(*start))) {
+    if (HTMLFormElement* form = AssociatedFormElement(element))
+      return form;
+
+    if (IsHTMLFrameElementBase(element)) {
+      Node* child_document = ToHTMLFrameElementBase(element).contentDocument();
+      if (HTMLFormElement* frame_result = ScanForForm(child_document))
+        return frame_result;
+    }
+  }
+  return nullptr;
+}
+
+// We look for either the form containing the current focus, or for one
+// immediately after it
+static HTMLFormElement* CurrentForm(const FrameSelection& current_selection) {
+  // Start looking either at the active (first responder) node, or where the
+  // selection is.
+  const Node* start = current_selection.GetDocument().FocusedElement();
+  if (!start) {
+    start = current_selection.ComputeVisibleSelectionInDOMTree()
+                .Start()
+                .AnchorNode();
+  }
+  if (!start)
+    return nullptr;
+
+  // Try walking up the node tree to find a form element.
+  for (Node& node : NodeTraversal::InclusiveAncestorsOf(*start)) {
+    if (!node.IsHTMLElement())
+      break;
+    HTMLElement& element = ToHTMLElement(node);
+    if (HTMLFormElement* form = AssociatedFormElement(element))
+      return form;
+  }
+
+  // Try walking forward in the node tree to find a form element.
+  return ScanForForm(start);
+}
+
+bool ContextMenuClientImpl::ShowContextMenu(const ContextMenu* default_menu,
+                                            bool from_touch) {
   // Displaying the context menu in this function is a big hack as we don't
   // have context, i.e. whether this is being invoked via a script or in
   // response to user input (Mouse event WM_RBUTTONDOWN,
   // Keyboard events KeyVK_APPS, Shift+F10). Check if this is being invoked
   // in response to the above input events before popping up the context menu.
-  if (!ContextMenuAllowedScope::isContextMenuAllowed())
+  if (!ContextMenuAllowedScope::IsContextMenuAllowed())
     return false;
 
-  HitTestResult r = m_webView->page()->contextMenuController().hitTestResult();
+  HitTestResult r =
+      web_view_->GetPage()->GetContextMenuController().GetHitTestResult();
 
-  r.setToShadowHostIfInUserAgentShadowRoot();
+  r.SetToShadowHostIfInRestrictedShadowRoot();
 
-  LocalFrame* selectedFrame = r.innerNodeFrame();
+  LocalFrame* selected_frame = r.InnerNodeFrame();
+  WebLocalFrameBase* selected_web_frame =
+      WebLocalFrameBase::FromFrame(selected_frame);
 
   WebContextMenuData data;
-  data.mousePosition = selectedFrame->view()->contentsToViewport(
-      r.roundedPointInInnerNodeFrame());
+  data.mouse_position = selected_frame->View()->ContentsToViewport(
+      r.RoundedPointInInnerNodeFrame());
 
-  // Compute edit flags.
-  data.editFlags = WebContextMenuData::CanDoNone;
-  if (toLocalFrame(m_webView->focusedCoreFrame())->editor().canUndo())
-    data.editFlags |= WebContextMenuData::CanUndo;
-  if (toLocalFrame(m_webView->focusedCoreFrame())->editor().canRedo())
-    data.editFlags |= WebContextMenuData::CanRedo;
-  if (toLocalFrame(m_webView->focusedCoreFrame())->editor().canCut())
-    data.editFlags |= WebContextMenuData::CanCut;
-  if (toLocalFrame(m_webView->focusedCoreFrame())->editor().canCopy())
-    data.editFlags |= WebContextMenuData::CanCopy;
-  if (toLocalFrame(m_webView->focusedCoreFrame())->editor().canPaste())
-    data.editFlags |= WebContextMenuData::CanPaste;
-  if (toLocalFrame(m_webView->focusedCoreFrame())->editor().canDelete())
-    data.editFlags |= WebContextMenuData::CanDelete;
-  // We can always select all...
-  data.editFlags |= WebContextMenuData::CanSelectAll;
-  data.editFlags |= WebContextMenuData::CanTranslate;
+  data.edit_flags = ComputeEditFlags(
+      *selected_frame->GetDocument(),
+      ToLocalFrame(web_view_->FocusedCoreFrame())->GetEditor());
 
   // Links, Images, Media tags, and Image/Media-Links take preference over
   // all else.
-  data.linkURL = r.absoluteLinkURL();
+  data.link_url = r.AbsoluteLinkURL();
 
-  if (r.innerNode()->isHTMLElement()) {
-    HTMLElement* htmlElement = toHTMLElement(r.innerNode());
-    if (!htmlElement->title().isEmpty()) {
-      data.titleText = htmlElement->title();
+  if (r.InnerNode()->IsHTMLElement()) {
+    HTMLElement* html_element = ToHTMLElement(r.InnerNode());
+    if (!html_element->title().IsEmpty()) {
+      data.title_text = html_element->title();
     } else {
-      data.titleText = htmlElement->altText();
+      data.title_text = html_element->AltText();
     }
   }
 
-  if (isHTMLCanvasElement(r.innerNode())) {
-    data.mediaType = WebContextMenuData::MediaTypeCanvas;
-    data.hasImageContents = true;
-  } else if (!r.absoluteImageURL().isEmpty()) {
-    data.srcURL = r.absoluteImageURL();
-    data.mediaType = WebContextMenuData::MediaTypeImage;
-    data.mediaFlags |= WebContextMenuData::MediaCanPrint;
+  if (isHTMLCanvasElement(r.InnerNode())) {
+    data.media_type = WebContextMenuData::kMediaTypeCanvas;
+    data.has_image_contents = true;
+  } else if (!r.AbsoluteImageURL().IsEmpty()) {
+    data.src_url = r.AbsoluteImageURL();
+    data.media_type = WebContextMenuData::kMediaTypeImage;
+    data.media_flags |= WebContextMenuData::kMediaCanPrint;
 
     // An image can be null for many reasons, like being blocked, no image
     // data received from server yet.
-    data.hasImageContents = r.image() && !r.image()->isNull();
-    if (data.hasImageContents &&
-        isHTMLImageElement(r.innerNodeOrImageMapImage())) {
-      HTMLImageElement* imageElement =
-          toHTMLImageElement(r.innerNodeOrImageMapImage());
-      if (imageElement && imageElement->cachedImage())
-        data.imageResponse =
-            WrappedResourceResponse(imageElement->cachedImage()->response());
+    data.has_image_contents = r.GetImage() && !r.GetImage()->IsNull();
+    if (data.has_image_contents &&
+        isHTMLImageElement(r.InnerNodeOrImageMapImage())) {
+      HTMLImageElement* image_element =
+          toHTMLImageElement(r.InnerNodeOrImageMapImage());
+      if (image_element && image_element->CachedImage())
+        data.image_response = WrappedResourceResponse(
+            image_element->CachedImage()->GetResponse());
     }
-  } else if (!r.absoluteMediaURL().isEmpty()) {
-    data.srcURL = r.absoluteMediaURL();
+  } else if (!r.AbsoluteMediaURL().IsEmpty()) {
+    data.src_url = r.AbsoluteMediaURL();
 
     // We know that if absoluteMediaURL() is not empty, then this
     // is a media element.
-    HTMLMediaElement* mediaElement = toHTMLMediaElement(r.innerNode());
-    if (isHTMLVideoElement(*mediaElement))
-      data.mediaType = WebContextMenuData::MediaTypeVideo;
-    else if (isHTMLAudioElement(*mediaElement))
-      data.mediaType = WebContextMenuData::MediaTypeAudio;
+    HTMLMediaElement* media_element = ToHTMLMediaElement(r.InnerNode());
+    if (isHTMLVideoElement(*media_element))
+      data.media_type = WebContextMenuData::kMediaTypeVideo;
+    else if (isHTMLAudioElement(*media_element))
+      data.media_type = WebContextMenuData::kMediaTypeAudio;
 
-    if (mediaElement->error())
-      data.mediaFlags |= WebContextMenuData::MediaInError;
-    if (mediaElement->paused())
-      data.mediaFlags |= WebContextMenuData::MediaPaused;
-    if (mediaElement->muted())
-      data.mediaFlags |= WebContextMenuData::MediaMuted;
-    if (mediaElement->loop())
-      data.mediaFlags |= WebContextMenuData::MediaLoop;
-    if (mediaElement->supportsSave())
-      data.mediaFlags |= WebContextMenuData::MediaCanSave;
-    if (mediaElement->hasAudio())
-      data.mediaFlags |= WebContextMenuData::MediaHasAudio;
+    if (media_element->error())
+      data.media_flags |= WebContextMenuData::kMediaInError;
+    if (media_element->paused())
+      data.media_flags |= WebContextMenuData::kMediaPaused;
+    if (media_element->muted())
+      data.media_flags |= WebContextMenuData::kMediaMuted;
+    if (media_element->Loop())
+      data.media_flags |= WebContextMenuData::kMediaLoop;
+    if (media_element->SupportsSave())
+      data.media_flags |= WebContextMenuData::kMediaCanSave;
+    if (media_element->HasAudio())
+      data.media_flags |= WebContextMenuData::kMediaHasAudio;
     // Media controls can be toggled only for video player. If we toggle
     // controls for audio then the player disappears, and there is no way to
     // return it back. Don't set this bit for fullscreen video, since
     // toggling is ignored in that case.
-    if (mediaElement->isHTMLVideoElement() && mediaElement->hasVideo() &&
-        !mediaElement->isFullscreen())
-      data.mediaFlags |= WebContextMenuData::MediaCanToggleControls;
-    if (mediaElement->shouldShowControls())
-      data.mediaFlags |= WebContextMenuData::MediaControls;
-  } else if (isHTMLObjectElement(*r.innerNode()) ||
-             isHTMLEmbedElement(*r.innerNode())) {
-    LayoutObject* object = r.innerNode()->layoutObject();
-    if (object && object->isLayoutPart()) {
-      FrameViewBase* frameViewBase = toLayoutPart(object)->widget();
-      if (frameViewBase && frameViewBase->isPluginContainer()) {
-        data.mediaType = WebContextMenuData::MediaTypePlugin;
-        WebPluginContainerImpl* plugin =
-            toWebPluginContainerImpl(frameViewBase);
-        WebString text = plugin->plugin()->selectionAsText();
-        if (!text.isEmpty()) {
-          data.selectedText = text;
-          data.editFlags |= WebContextMenuData::CanCopy;
+    if (media_element->IsHTMLVideoElement() && media_element->HasVideo() &&
+        !media_element->IsFullscreen())
+      data.media_flags |= WebContextMenuData::kMediaCanToggleControls;
+    if (media_element->ShouldShowControls())
+      data.media_flags |= WebContextMenuData::kMediaControls;
+  } else if (isHTMLObjectElement(*r.InnerNode()) ||
+             isHTMLEmbedElement(*r.InnerNode())) {
+    LayoutObject* object = r.InnerNode()->GetLayoutObject();
+    if (object && object->IsLayoutPart()) {
+      PluginView* plugin_view = ToLayoutPart(object)->Plugin();
+      if (plugin_view && plugin_view->IsPluginContainer()) {
+        data.media_type = WebContextMenuData::kMediaTypePlugin;
+        WebPluginContainerBase* plugin = ToWebPluginContainerBase(plugin_view);
+        WebString text = plugin->Plugin()->SelectionAsText();
+        if (!text.IsEmpty()) {
+          data.selected_text = text;
+          data.edit_flags |= WebContextMenuData::kCanCopy;
         }
-        data.editFlags &= ~WebContextMenuData::CanTranslate;
-        data.linkURL = plugin->plugin()->linkAtPosition(data.mousePosition);
-        if (plugin->plugin()->supportsPaginatedPrint())
-          data.mediaFlags |= WebContextMenuData::MediaCanPrint;
+        data.edit_flags &= ~WebContextMenuData::kCanTranslate;
+        data.link_url = plugin->Plugin()->LinkAtPosition(data.mouse_position);
+        if (plugin->Plugin()->SupportsPaginatedPrint())
+          data.media_flags |= WebContextMenuData::kMediaCanPrint;
 
-        HTMLPlugInElement* pluginElement = toHTMLPlugInElement(r.innerNode());
-        data.srcURL =
-            pluginElement->document().completeURL(pluginElement->url());
-        data.mediaFlags |= WebContextMenuData::MediaCanSave;
+        HTMLPlugInElement* plugin_element = ToHTMLPlugInElement(r.InnerNode());
+        data.src_url =
+            plugin_element->GetDocument().CompleteURL(plugin_element->Url());
+        data.media_flags |= WebContextMenuData::kMediaCanSave;
 
         // Add context menu commands that are supported by the plugin.
-        if (plugin->plugin()->canRotateView())
-          data.mediaFlags |= WebContextMenuData::MediaCanRotate;
+        if (plugin->Plugin()->CanRotateView())
+          data.media_flags |= WebContextMenuData::kMediaCanRotate;
       }
     }
   }
 
   // If it's not a link, an image, a media element, or an image/media link,
   // show a selection menu or a more generic page menu.
-  if (selectedFrame->document()->loader())
-    data.frameEncoding = selectedFrame->document()->encodingName();
+  if (selected_frame->GetDocument()->Loader())
+    data.frame_encoding = selected_frame->GetDocument()->EncodingName();
 
   // Send the frame and page URLs in any case.
-  if (!m_webView->page()->mainFrame()->isLocalFrame()) {
+  if (!web_view_->GetPage()->MainFrame()->IsLocalFrame()) {
     // TODO(kenrb): This works around the problem of URLs not being
     // available for top-level frames that are in a different process.
     // It mostly works to convert the security origin to a URL, but
     // extensions accessing that property will not get the correct value
     // in that case. See https://crbug.com/534561
-    WebSecurityOrigin origin = m_webView->mainFrame()->getSecurityOrigin();
-    if (!origin.isNull())
-      data.pageURL = KURL(ParsedURLString, origin.toString());
+    WebSecurityOrigin origin = web_view_->MainFrame()->GetSecurityOrigin();
+    if (!origin.IsNull())
+      data.page_url = KURL(kParsedURLString, origin.ToString());
   } else {
-    data.pageURL = urlFromFrame(toLocalFrame(m_webView->page()->mainFrame()));
+    data.page_url =
+        UrlFromFrame(ToLocalFrame(web_view_->GetPage()->MainFrame()));
   }
 
-  if (selectedFrame != m_webView->page()->mainFrame()) {
-    data.frameURL = urlFromFrame(selectedFrame);
-    HistoryItem* historyItem = selectedFrame->loader().currentItem();
-    if (historyItem)
-      data.frameHistoryItem = WebHistoryItem(historyItem);
+  if (selected_frame != web_view_->GetPage()->MainFrame()) {
+    data.frame_url = UrlFromFrame(selected_frame);
+    HistoryItem* history_item =
+        selected_frame->Loader().GetDocumentLoader()->GetHistoryItem();
+    if (history_item)
+      data.frame_history_item = WebHistoryItem(history_item);
   }
 
   // HitTestResult::isSelected() ensures clean layout by performing a hit test.
-  if (r.isSelected()) {
-    if (!isHTMLInputElement(*r.innerNode()) ||
-        toHTMLInputElement(r.innerNode())->type() != InputTypeNames::password) {
-      data.selectedText = selectedFrame->selectedText().stripWhiteSpace();
+  if (r.IsSelected()) {
+    if (!isHTMLInputElement(*r.InnerNode()) ||
+        toHTMLInputElement(r.InnerNode())->type() != InputTypeNames::password) {
+      data.selected_text = selected_frame->SelectedText();
     }
   }
 
-  if (r.isContentEditable()) {
-    data.isEditable = true;
+  if (r.IsContentEditable()) {
+    data.is_editable = true;
 
     // Spellchecker adds spelling markers to misspelled words and attaches
     // suggestions to these markers in the background. Therefore, when a
     // user right-clicks a mouse on a word, Chrome just needs to find a
     // spelling marker on the word instead of spellchecking it.
     String description;
-    data.misspelledWord = selectMisspellingAsync(selectedFrame, description);
+    data.misspelled_word = SelectMisspellingAsync(selected_frame, description);
     if (description.length()) {
       Vector<String> suggestions;
-      description.split('\n', suggestions);
-      data.dictionarySuggestions = suggestions;
-    } else if (m_webView->spellCheckClient()) {
-      int misspelledOffset, misspelledLength;
-      m_webView->spellCheckClient()->checkSpelling(
-          data.misspelledWord, misspelledOffset, misspelledLength,
-          &data.dictionarySuggestions);
+      description.Split('\n', suggestions);
+      data.dictionary_suggestions = suggestions;
+    } else if (selected_web_frame->TextCheckClient()) {
+      int misspelled_offset, misspelled_length;
+      selected_web_frame->TextCheckClient()->CheckSpelling(
+          data.misspelled_word, misspelled_offset, misspelled_length,
+          &data.dictionary_suggestions);
     }
 
-    HTMLFormElement* form = selectedFrame->selection().currentForm();
-    if (form && isHTMLInputElement(*r.innerNode())) {
-      HTMLInputElement& selectedElement = toHTMLInputElement(*r.innerNode());
+    HTMLFormElement* form = CurrentForm(selected_frame->Selection());
+    if (form && isHTMLInputElement(*r.InnerNode())) {
+      HTMLInputElement& selected_element = toHTMLInputElement(*r.InnerNode());
       WebSearchableFormData ws = WebSearchableFormData(
-          WebFormElement(form), WebInputElement(&selectedElement));
-      if (ws.url().isValid()) {
-        data.keywordURL = ws.url();
-        data.postData = ws.postData();
+          WebFormElement(form), WebInputElement(&selected_element));
+      if (ws.Url().IsValid()) {
+        data.keyword_url = ws.Url();
+        data.post_data = ws.PostData();
       }
     }
   }
 
-  if (selectedFrame->editor().selectionHasStyle(CSSPropertyDirection, "ltr") !=
-      FalseTriState)
-    data.writingDirectionLeftToRight |=
-        WebContextMenuData::CheckableMenuItemChecked;
-  if (selectedFrame->editor().selectionHasStyle(CSSPropertyDirection, "rtl") !=
-      FalseTriState)
-    data.writingDirectionRightToLeft |=
-        WebContextMenuData::CheckableMenuItemChecked;
+  if (selected_frame->GetEditor().SelectionHasStyle(CSSPropertyDirection,
+                                                    "ltr") != kFalseTriState)
+    data.writing_direction_left_to_right |=
+        WebContextMenuData::kCheckableMenuItemChecked;
+  if (selected_frame->GetEditor().SelectionHasStyle(CSSPropertyDirection,
+                                                    "rtl") != kFalseTriState)
+    data.writing_direction_right_to_left |=
+        WebContextMenuData::kCheckableMenuItemChecked;
 
-  data.referrerPolicy = static_cast<WebReferrerPolicy>(
-      selectedFrame->document()->getReferrerPolicy());
+  data.referrer_policy = static_cast<WebReferrerPolicy>(
+      selected_frame->GetDocument()->GetReferrerPolicy());
 
   // Filter out custom menu elements and add them into the data.
-  populateCustomMenuItems(defaultMenu, &data);
+  PopulateCustomMenuItems(default_menu, &data);
 
   if (isHTMLAnchorElement(r.URLElement())) {
     HTMLAnchorElement* anchor = toHTMLAnchorElement(r.URLElement());
 
     // Extract suggested filename for saving file.
-    data.suggestedFilename = anchor->fastGetAttribute(HTMLNames::downloadAttr);
+    data.suggested_filename = anchor->FastGetAttribute(HTMLNames::downloadAttr);
 
     // If the anchor wants to suppress the referrer, update the referrerPolicy
     // accordingly.
-    if (anchor->hasRel(RelationNoReferrer))
-      data.referrerPolicy = WebReferrerPolicyNever;
+    if (anchor->HasRel(kRelationNoReferrer))
+      data.referrer_policy = kWebReferrerPolicyNever;
 
-    data.linkText = anchor->innerText();
+    data.link_text = anchor->innerText();
   }
 
   // Find the input field type.
-  if (isHTMLInputElement(r.innerNode())) {
-    HTMLInputElement* element = toHTMLInputElement(r.innerNode());
+  if (isHTMLInputElement(r.InnerNode())) {
+    HTMLInputElement* element = toHTMLInputElement(r.InnerNode());
     if (element->type() == InputTypeNames::password)
-      data.inputFieldType = WebContextMenuData::InputFieldTypePassword;
-    else if (element->isTextField())
-      data.inputFieldType = WebContextMenuData::InputFieldTypePlainText;
+      data.input_field_type = WebContextMenuData::kInputFieldTypePassword;
+    else if (element->IsTextField())
+      data.input_field_type = WebContextMenuData::kInputFieldTypePlainText;
     else
-      data.inputFieldType = WebContextMenuData::InputFieldTypeOther;
+      data.input_field_type = WebContextMenuData::kInputFieldTypeOther;
   } else {
-    data.inputFieldType = WebContextMenuData::InputFieldTypeNone;
+    data.input_field_type = WebContextMenuData::kInputFieldTypeNone;
   }
 
-  if (fromTouch && !shouldShowContextMenuFromTouch(data))
+  WebRect focus_webrect;
+  WebRect anchor_webrect;
+  web_view_->SelectionBounds(focus_webrect, anchor_webrect);
+
+  int left = std::min(focus_webrect.x, anchor_webrect.x);
+  int top = std::min(focus_webrect.y, anchor_webrect.y);
+  int right = std::max(focus_webrect.x + focus_webrect.width,
+                       anchor_webrect.x + anchor_webrect.width);
+  int bottom = std::max(focus_webrect.y + focus_webrect.height,
+                        anchor_webrect.y + anchor_webrect.height);
+
+  data.selection_rect = WebRect(left, top, right - left, bottom - top);
+
+  if (from_touch && !ShouldShowContextMenuFromTouch(data))
     return false;
 
-  WebLocalFrameImpl* selectedWebFrame =
-      WebLocalFrameImpl::fromFrame(selectedFrame);
-  selectedWebFrame->setContextMenuNode(r.innerNodeOrImageMapImage());
-  if (!selectedWebFrame->client())
+  selected_web_frame->SetContextMenuNode(r.InnerNodeOrImageMapImage());
+  if (!selected_web_frame->Client())
     return false;
 
-  selectedWebFrame->client()->showContextMenu(data);
+  selected_web_frame->Client()->ShowContextMenu(data);
   return true;
 }
 
-void ContextMenuClientImpl::clearContextMenu() {
-  HitTestResult r = m_webView->page()->contextMenuController().hitTestResult();
-  LocalFrame* selectedFrame = r.innerNodeFrame();
-  if (!selectedFrame)
+void ContextMenuClientImpl::ClearContextMenu() {
+  HitTestResult r =
+      web_view_->GetPage()->GetContextMenuController().GetHitTestResult();
+  LocalFrame* selected_frame = r.InnerNodeFrame();
+  if (!selected_frame)
     return;
 
-  WebLocalFrameImpl* selectedWebFrame =
-      WebLocalFrameImpl::fromFrame(selectedFrame);
-  selectedWebFrame->clearContextMenuNode();
+  WebLocalFrameBase* selected_web_frame =
+      WebLocalFrameBase::FromFrame(selected_frame);
+  selected_web_frame->ClearContextMenuNode();
 }
 
-static void populateSubMenuItems(const Vector<ContextMenuItem>& inputMenu,
-                                 WebVector<WebMenuItemInfo>& subMenuItems) {
-  Vector<WebMenuItemInfo> subItems;
-  for (size_t i = 0; i < inputMenu.size(); ++i) {
-    const ContextMenuItem* inputItem = &inputMenu.at(i);
-    if (inputItem->action() < ContextMenuItemBaseCustomTag ||
-        inputItem->action() > ContextMenuItemLastCustomTag)
+static void PopulateSubMenuItems(const Vector<ContextMenuItem>& input_menu,
+                                 WebVector<WebMenuItemInfo>& sub_menu_items) {
+  Vector<WebMenuItemInfo> sub_items;
+  for (size_t i = 0; i < input_menu.size(); ++i) {
+    const ContextMenuItem* input_item = &input_menu.at(i);
+    if (input_item->Action() < kContextMenuItemBaseCustomTag ||
+        input_item->Action() > kContextMenuItemLastCustomTag)
       continue;
 
-    WebMenuItemInfo outputItem;
-    outputItem.label = inputItem->title();
-    outputItem.icon = inputItem->icon();
-    outputItem.enabled = inputItem->enabled();
-    outputItem.checked = inputItem->checked();
-    outputItem.action = static_cast<unsigned>(inputItem->action() -
-                                              ContextMenuItemBaseCustomTag);
-    switch (inputItem->type()) {
-      case ActionType:
-        outputItem.type = WebMenuItemInfo::Option;
+    WebMenuItemInfo output_item;
+    output_item.label = input_item->Title();
+    output_item.icon = input_item->Icon();
+    output_item.enabled = input_item->Enabled();
+    output_item.checked = input_item->Checked();
+    output_item.action = static_cast<unsigned>(input_item->Action() -
+                                               kContextMenuItemBaseCustomTag);
+    switch (input_item->GetType()) {
+      case kActionType:
+        output_item.type = WebMenuItemInfo::kOption;
         break;
-      case CheckableActionType:
-        outputItem.type = WebMenuItemInfo::CheckableOption;
+      case kCheckableActionType:
+        output_item.type = WebMenuItemInfo::kCheckableOption;
         break;
-      case SeparatorType:
-        outputItem.type = WebMenuItemInfo::Separator;
+      case kSeparatorType:
+        output_item.type = WebMenuItemInfo::kSeparator;
         break;
-      case SubmenuType:
-        outputItem.type = WebMenuItemInfo::SubMenu;
-        populateSubMenuItems(inputItem->subMenuItems(),
-                             outputItem.subMenuItems);
+      case kSubmenuType:
+        output_item.type = WebMenuItemInfo::kSubMenu;
+        PopulateSubMenuItems(input_item->SubMenuItems(),
+                             output_item.sub_menu_items);
         break;
     }
-    subItems.push_back(outputItem);
+    sub_items.push_back(output_item);
   }
 
-  WebVector<WebMenuItemInfo> outputItems(subItems.size());
-  for (size_t i = 0; i < subItems.size(); ++i)
-    outputItems[i] = subItems[i];
-  subMenuItems.swap(outputItems);
+  WebVector<WebMenuItemInfo> output_items(sub_items.size());
+  for (size_t i = 0; i < sub_items.size(); ++i)
+    output_items[i] = sub_items[i];
+  sub_menu_items.Swap(output_items);
 }
 
-void ContextMenuClientImpl::populateCustomMenuItems(
-    const ContextMenu* defaultMenu,
+void ContextMenuClientImpl::PopulateCustomMenuItems(
+    const ContextMenu* default_menu,
     WebContextMenuData* data) {
-  populateSubMenuItems(defaultMenu->items(), data->customItems);
+  PopulateSubMenuItems(default_menu->Items(), data->custom_items);
 }
 
 }  // namespace blink

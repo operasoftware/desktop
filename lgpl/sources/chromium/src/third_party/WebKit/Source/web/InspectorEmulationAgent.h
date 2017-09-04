@@ -7,12 +7,11 @@
 
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/protocol/Emulation.h"
-#include "platform/WebTaskRunner.h"
 
 namespace blink {
 
-class WebLocalFrameImpl;
-class WebViewImpl;
+class WebLocalFrameBase;
+class WebViewBase;
 
 namespace protocol {
 namespace DOM {
@@ -29,41 +28,42 @@ class InspectorEmulationAgent final
    public:
     virtual ~Client() {}
 
-    virtual void setCPUThrottlingRate(double rate) {}
+    virtual void SetCPUThrottlingRate(double rate) {}
   };
 
-  static InspectorEmulationAgent* create(WebLocalFrameImpl*, Client*);
+  static InspectorEmulationAgent* Create(WebLocalFrameBase*, Client*);
   ~InspectorEmulationAgent() override;
 
   // protocol::Dispatcher::EmulationCommandHandler implementation.
-  Response forceViewport(double x, double y, double scale) override;
-  Response resetViewport() override;
-  Response resetPageScaleFactor() override;
-  Response setPageScaleFactor(double) override;
-  Response setScriptExecutionDisabled(bool value) override;
-  Response setTouchEmulationEnabled(bool enabled,
-                                    Maybe<String> configuration) override;
-  Response setEmulatedMedia(const String&) override;
-  Response setCPUThrottlingRate(double) override;
-  Response setVirtualTimePolicy(const String& policy,
-                                Maybe<int> virtualTimeBudgetMs) override;
-  Response setDefaultBackgroundColorOverride(
-      Maybe<protocol::DOM::RGBA>) override;
+  protocol::Response forceViewport(double x, double y, double scale) override;
+  protocol::Response resetViewport() override;
+  protocol::Response resetPageScaleFactor() override;
+  protocol::Response setPageScaleFactor(double) override;
+  protocol::Response setScriptExecutionDisabled(bool value) override;
+  protocol::Response setTouchEmulationEnabled(
+      bool enabled,
+      protocol::Maybe<String> configuration) override;
+  protocol::Response setEmulatedMedia(const String&) override;
+  protocol::Response setCPUThrottlingRate(double) override;
+  protocol::Response setVirtualTimePolicy(
+      const String& policy,
+      protocol::Maybe<int> virtual_time_budget_ms) override;
+  protocol::Response setDefaultBackgroundColorOverride(
+      protocol::Maybe<protocol::DOM::RGBA>) override;
 
   // InspectorBaseAgent overrides.
-  Response disable() override;
-  void restore() override;
+  protocol::Response disable() override;
+  void Restore() override;
 
   DECLARE_VIRTUAL_TRACE();
 
  private:
-  InspectorEmulationAgent(WebLocalFrameImpl*, Client*);
-  WebViewImpl* webViewImpl();
-  void virtualTimeBudgetExpired();
+  InspectorEmulationAgent(WebLocalFrameBase*, Client*);
+  WebViewBase* GetWebViewBase();
+  void VirtualTimeBudgetExpired();
 
-  Member<WebLocalFrameImpl> m_webLocalFrameImpl;
-  Client* m_client;
-  TaskHandle m_virtualTimeBudgetExpiredTaskHandle;
+  Member<WebLocalFrameBase> web_local_frame_;
+  Client* client_;
 };
 
 }  // namespace blink

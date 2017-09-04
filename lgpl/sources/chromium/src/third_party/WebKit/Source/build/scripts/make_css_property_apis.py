@@ -35,12 +35,12 @@ def get_classname(property):
 
 class CSSPropertyAPIWriter(StyleBuilderWriter):
     def __init__(self, json5_file_paths):
-        super(CSSPropertyAPIWriter, self).__init__(json5_file_paths[0])
+        super(CSSPropertyAPIWriter, self).__init__([json5_file_paths[0]])
         # TODO(aazzam): Move the logic for loading CSSPropertyAPIMethods.json5 into a new class APIMethodsWriter().
         assert len(json5_file_paths) == 2,\
             'CSSPropertyAPIWriter requires 2 input json5 files files, got {}.'.format(len(json5_file_paths))
 
-        self.css_property_api_methods = Json5File.load_from_files([json5_file_paths[1]], {}, {})
+        self.css_property_api_methods = Json5File.load_from_files([json5_file_paths[1]])
 
         self._outputs = {
             'CSSPropertyDescriptor.cpp': self.generate_property_descriptor_cpp,
@@ -62,8 +62,10 @@ class CSSPropertyAPIWriter(StyleBuilderWriter):
                 description=api_method['description'],
             )
 
-        # Temporary map of API classname to list of propertyIDs that the API class is for.
+        # Temporary maps of API classname to list of propertyIDs and corresponding
+        # enum values that the API class is for.
         properties_for_class = defaultdict(list)
+        property_enums_for_class = defaultdict(list)
         # Map of API classname to list of methods implemented by that class.
         self.methods_for_classes = defaultdict(list)
         for property_ in self.properties().values():
@@ -71,11 +73,12 @@ class CSSPropertyAPIWriter(StyleBuilderWriter):
                 continue
             classname = get_classname(property_)
             properties_for_class[classname].append(property_['property_id'])
+            property_enums_for_class[classname].append(property_['enum_value'])
             # For api_classes that contain multiple properties, combine all implemented properties.
             # This list contains duplicate entries, but is only used to check if a method is
             # implemented for an api_class.
             self.methods_for_classes[classname] += property_['api_methods']
-            self._outputs[classname + '.h'] = self.generate_property_api_h_builder(classname)
+            self._outputs[classname + '.h'] = self.generate_property_api_h_builder(classname, property_['name'])
 
         # Stores a list of classes with elements (index, classname, [propertyIDs, ..], [api_methods, ...]).
         self._api_classes = []
@@ -87,11 +90,23 @@ class CSSPropertyAPIWriter(StyleBuilderWriter):
                 methods_for_class=self.methods_for_classes[classname]
             ))
 
+        # Build a table converting id (including aliases) to api class descriptors
+        self._invalid_descriptor_index = 0
+        # Initialize the whole thing to the invalid descriptor to handle gaps
+        num_indices = self.last_unresolved_property_id + 1
+        self._descriptor_indices = dict.fromkeys(xrange(num_indices), {'id': self._invalid_descriptor_index, 'api': None})
+        # Now populate all entries for which there exists a class, i.e. that aren't gaps
+        for api_class in self._api_classes:
+            for property_enum in property_enums_for_class[api_class.classname]:
+                self._descriptor_indices[property_enum] = {'id': api_class.index, 'api': api_class.classname}
+
     @template_expander.use_jinja('CSSPropertyDescriptor.cpp.tmpl')
     def generate_property_descriptor_cpp(self):
         return {
             'api_classes': self._api_classes,
             'ordered_api_method_names': self.ordered_api_method_names,
+            'descriptor_indices': self._descriptor_indices,
+            'invalid_descriptor_index': self._invalid_descriptor_index
         }
 
     @template_expander.use_jinja('CSSPropertyDescriptor.h.tmpl')
@@ -109,11 +124,12 @@ class CSSPropertyAPIWriter(StyleBuilderWriter):
         }
 
     # Provides a function object given the classname of the property.
-    def generate_property_api_h_builder(self, api_classname):
+    def generate_property_api_h_builder(self, api_classname, property_name):
         @template_expander.use_jinja('CSSPropertyAPIFiles.h.tmpl')
         def generate_property_api_h():
             return {
                 'api_classname': api_classname,
+                'property_name': property_name,
                 'methods_for_class': self.methods_for_classes[api_classname],
                 'all_api_methods': self.all_api_methods,
             }

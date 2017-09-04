@@ -6,18 +6,16 @@
 #define NGLayoutResult_h
 
 #include "core/CoreExport.h"
+#include "core/layout/ng/geometry/ng_static_position.h"
+#include "core/layout/ng/ng_block_node.h"
 #include "core/layout/ng/ng_physical_fragment.h"
-#include "core/layout/ng/ng_units.h"
+#include "core/layout/ng/ng_unpositioned_float.h"
 #include "platform/LayoutUnit.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Vector.h"
+#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
-
-class LayoutObject;
-class NGPhysicalFragment;
-class NGBlockNode;
-struct NGFloatingObject;
 
 // The NGLayoutResult stores the resulting data from layout. This includes
 // geometry information in form of a NGPhysicalFragment, which is kept around
@@ -48,7 +46,7 @@ class CORE_EXPORT NGLayoutResult : public RefCounted<NGLayoutResult> {
   // The float cannot be positioned right away inside of the 1st div because
   // the vertical position is not known at that moment. It will be known only
   // after the 2nd div collapses its margin with its parent.
-  const Vector<Persistent<NGFloatingObject>>& UnpositionedFloats() const {
+  const Vector<RefPtr<NGUnpositionedFloat>>& UnpositionedFloats() const {
     return unpositioned_floats_;
   }
 
@@ -59,13 +57,12 @@ class CORE_EXPORT NGLayoutResult : public RefCounted<NGLayoutResult> {
                  PersistentHeapLinkedHashSet<WeakMember<NGBlockNode>>&
                      out_of_flow_descendants,
                  Vector<NGStaticPosition> out_of_flow_positions,
-                 Vector<Persistent<NGFloatingObject>>& unpositioned_floats);
+                 Vector<RefPtr<NGUnpositionedFloat>>& unpositioned_floats);
 
   RefPtr<NGPhysicalFragment> physical_fragment_;
-  LayoutObject* layout_object_;
   PersistentHeapLinkedHashSet<WeakMember<NGBlockNode>> out_of_flow_descendants_;
   Vector<NGStaticPosition> out_of_flow_positions_;
-  Vector<Persistent<NGFloatingObject>> unpositioned_floats_;
+  Vector<RefPtr<NGUnpositionedFloat>> unpositioned_floats_;
 };
 
 }  // namespace blink

@@ -32,14 +32,6 @@ SDK.CookieModel = class extends SDK.SDKModel {
   }
 
   /**
-   * @param {!SDK.Target} target
-   * @return {!SDK.CookieModel}
-   */
-  static fromTarget(target) {
-    return /** @type {!SDK.CookieModel} */ (target.model(SDK.CookieModel));
-  }
-
-  /**
    * @param {!SDK.Cookie} cookie
    * @param {string} resourceURL
    * @return {boolean}
@@ -98,7 +90,7 @@ SDK.CookieModel = class extends SDK.SDKModel {
 
   /**
    * @param {!SDK.Cookie} cookie
-   * @param {function(?Protocol.Error, ?)=} callback
+   * @param {function(?Protocol.Error, boolean)} callback
    */
   saveCookie(cookie, callback) {
     var domain = cookie.domain();
@@ -126,7 +118,9 @@ SDK.CookieModel = class extends SDK.SDKModel {
       if (url && (!domain || url.securityOrigin() === domain))
         resourceURLs.push(resource.url);
     }
-    SDK.ResourceTreeModel.fromTarget(this.target()).forAllResources(populateResourceURLs);
+    var resourceTreeModel = this.target().model(SDK.ResourceTreeModel);
+    if (resourceTreeModel)
+      resourceTreeModel.forAllResources(populateResourceURLs);
     this.getCookiesAsync(resourceURLs, callback);
   }
 
@@ -143,4 +137,4 @@ SDK.CookieModel = class extends SDK.SDKModel {
   }
 };
 
-SDK.SDKModel.register(SDK.CookieModel, SDK.Target.Capability.Network);
+SDK.SDKModel.register(SDK.CookieModel, SDK.Target.Capability.Network, false);

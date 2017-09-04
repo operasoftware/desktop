@@ -24,6 +24,13 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+enum EffectiveConnectionType {
+    "slow-2g",
+    "2g",
+    "3g",
+    "4g"
+};
+
 [
     DoNotCheckConstants,
 ] interface Internals {
@@ -56,9 +63,6 @@
     [RaisesException] boolean isValidContentSelect(Element contentElement);
     Node treeScopeRootNode(Node node);
     Node parentTreeScope(Node node);
-    [RaisesException] boolean hasSelectorForIdInShadow(Element host, DOMString id);
-    [RaisesException] boolean hasSelectorForClassInShadow(Element host, DOMString className);
-    [RaisesException] boolean hasSelectorForAttributeInShadow(Element host, DOMString attributeName);
     [RaisesException] unsigned short compareTreeScopePosition(Node treeScope1, Node treeScope2);
     [RaisesException] unsigned long updateStyleAndReturnAffectedElementCount();
     [RaisesException] unsigned long needsLayoutCount();
@@ -108,9 +112,9 @@
     unsigned long activeMarkerCountForNode(Node node);
     [RaisesException] Range markerRangeForNode(Node node, DOMString markerType, unsigned long index);
     [RaisesException] DOMString markerDescriptionForNode(Node node, DOMString markerType, unsigned long index);
-    void addTextMatchMarker(Range range, boolean isActive);
+    [RaisesException] void addTextMatchMarker(Range range, DOMString matchStatus);
     [RaisesException] void addCompositionMarker(Range range, DOMString underlineColorValue, boolean thick, DOMString backgroundColorValue);
-    void setMarkersActive(Node node, unsigned long startOffset, unsigned long endOffset, boolean active);
+    void setTextMatchMarkersActive(Node node, unsigned long startOffset, unsigned long endOffset, boolean active);
     void setMarkedTextMatchesAreHighlighted(Document document, boolean highlight);
 
     [RaisesException] void setFrameViewPosition(Document document, long x, long y);
@@ -139,6 +143,8 @@
 
     [RaisesException] long lastSpellCheckRequestSequence(Document document);
     [RaisesException] long lastSpellCheckProcessedSequence(Document document);
+    [RuntimeEnabled=IdleTimeSpellChecking, RaisesException] DOMString idleTimeSpellCheckerState(Document document);
+    [RuntimeEnabled=IdleTimeSpellChecking, RaisesException] void runIdleTimeSpellChecker(Document document);
 
     sequence<DOMString> userPreferredLanguages();
     void setUserPreferredLanguages(sequence<DOMString> languages);
@@ -205,7 +211,6 @@
 
     unsigned long numberOfLiveNodes();
     unsigned long numberOfLiveDocuments();
-    DOMString dumpRefCountedInstanceCounts();
 
     DOMString counterValue(Element element);
     [RaisesException] long pageNumber(Element element, optional float pageWidth = 800, optional float pageHeight = 600);
@@ -265,9 +270,14 @@
     SerializedScriptValue deserializeBuffer(ArrayBuffer buffer);
     ArrayBuffer serializeObject(SerializedScriptValue obj);
 
+    [CallWith=ScriptState] any deserializeBufferContainingWasm(ArrayBuffer buffer);
+    ArrayBuffer serializeWithInlineWasm(any obj);
+
+
     void forceReload(boolean endToEnd);
 
     DOMString getImageSourceURL(Element element);
+    [RaisesException] void forceImageReload(Element element);
 
     DOMString selectMenuListText(HTMLSelectElement select);
     boolean isSelectPopupVisible(Node node);
@@ -311,6 +321,7 @@
 
     // These functions are for testing NetInfo. You must call clearNetworkConnectionInfoOverride() at the end.
     [RaisesException] void setNetworkConnectionInfoOverride(boolean onLine, DOMString type, double downlinkMaxMbps);
+    [RaisesException] void setNetworkQualityInfoOverride(EffectiveConnectionType effective_type, unsigned long transport_rtt_msec, double downlink_throughput_mbps);
     void clearNetworkConnectionInfoOverride();
 
     // This function is for testing HitRegions on Canvas2D.
@@ -320,6 +331,8 @@
     unsigned long canvasFontCacheMaxFonts();
 
     DictionaryTest dictionaryTest();
+    RecordTest recordTest();
+    SequenceTest sequenceTest();
     UnionTypesTest unionTypesTest();
     CallbackFunctionTest callbackFunctionTest();
     [RaisesException] void setScrollChain(ScrollState scrollState, sequence<Element> elements);
@@ -338,6 +351,7 @@
 
     boolean isUseCounted(Document document, unsigned long feature);
     boolean isCSSPropertyUseCounted(Document document, DOMString propertyName);
+    boolean isAnimatedCSSPropertyUseCounted(Document document, DOMString propertyName);
 
     // Returns a promise that is resolved when |feature| is counted on
     // |document|'s UseCounter. When |feature| was already counted, it's

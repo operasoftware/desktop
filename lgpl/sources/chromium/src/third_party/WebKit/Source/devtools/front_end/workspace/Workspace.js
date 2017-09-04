@@ -122,6 +122,12 @@ Workspace.Project.prototype = {
   fullDisplayName(uiSourceCode) {},
 
   /**
+   * @param {!Workspace.UISourceCode} uiSourceCode
+   * @return {string}
+   */
+  mimeType(uiSourceCode) {},
+
+  /**
    * @return {boolean}
    */
   canRename() {},
@@ -453,6 +459,7 @@ Workspace.Workspace = class extends Common.Object {
 Workspace.Workspace.Events = {
   UISourceCodeAdded: Symbol('UISourceCodeAdded'),
   UISourceCodeRemoved: Symbol('UISourceCodeRemoved'),
+  UISourceCodeRenamed: Symbol('UISourceCodeRenamed'),
   WorkingCopyChanged: Symbol('WorkingCopyChanged'),
   WorkingCopyCommitted: Symbol('WorkingCopyCommitted'),
   WorkingCopyCommittedByUser: Symbol('WorkingCopyCommittedByUser'),

@@ -11,21 +11,13 @@ class MockGit(object):
     # Arguments are listed below, even if they're unused, in order to match
     # the Git class. pylint: disable=unused-argument
 
-    executable_name = 'mock-git'
-
-    def __init__(self, cwd=None, filesystem=None, executive=None):
+    def __init__(self, cwd=None, filesystem=None, executive=None, platform=None):
         self.checkout_root = '/mock-checkout'
         self.cwd = cwd or self.checkout_root
         self.added_paths = set()
         self._filesystem = filesystem or MockFileSystem()
         self._executive = executive or MockExecutive()
         self._local_commits = []
-
-    def add_all(self, pathspec=None):
-        if not pathspec:
-            pathspec = self.checkout_root
-        for path in self._filesystem.glob(pathspec):
-            self.add_list(self._filesystem.files_under(path))
 
     def add(self, destination_path, return_exit_code=False):
         self.add_list([destination_path], return_exit_code)
@@ -42,10 +34,10 @@ class MockGit(object):
         pass
 
     def current_branch(self):
-        return "mock-branch-name"
+        return 'mock-branch-name'
 
     def current_branch_or_ref(self):
-        return "mock-branch-name"
+        return 'mock-branch-name'
 
     def checkout_branch(self, name):
         pass

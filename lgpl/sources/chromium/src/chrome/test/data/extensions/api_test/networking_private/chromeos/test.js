@@ -81,6 +81,19 @@ var privateHelpers = {
     };
     chrome.networkingPrivate.onPortalDetectionCompleted.addListener(
         self.onPortalDetectionCompleted);
+  },
+  verifyTetherNetwork: function(
+      properties, expectedGuid, expectedName, expectedBatteryPercentage,
+      expectedCarrier, expectedSignalStrength, expectedHasConnectedToHost) {
+    //assertEq(NetworkType.Tether, properties.Type);
+    assertEq(expectedGuid, properties.GUID);
+    assertEq(expectedName,
+             properties.Name.hasOwnProperty('Active') ? properties.Name.Active
+                                                      : properties.Name);
+    assertEq(expectedBatteryPercentage, properties.Tether.BatteryPercentage);
+    assertEq(expectedCarrier, properties.Tether.Carrier);
+    assertEq(expectedHasConnectedToHost, properties.Tether.HasConnectedToHost);
+    assertEq(expectedSignalStrength, properties.Tether.SignalStrength);
   }
 };
 
@@ -178,6 +191,26 @@ var availableTests = [
             }));
       }));
   },
+  function createNetworkForPolicyControlledNetwork() {
+    chrome.networkingPrivate.getProperties('stub_wifi2', callbackPass(function(
+        properties) {
+      // Sanity check to verify there is a policy defined config for the network
+      // config that will be set up in this test.
+      chrome.test.assertEq('UserPolicy', properties.Source);
+      chrome.test.assertEq('WiFi', properties.Type);
+      chrome.test.assertEq('WPA-PSK', properties.WiFi.Security);
+      chrome.test.assertEq('wifi2_PSK', properties.WiFi.SSID);
+
+      chrome.networkingPrivate.createNetwork(false /* shared */, {
+        Type: 'WiFi',
+        WiFi: {
+          SSID: 'wifi2_PSK',
+          Passphrase: 'Fake password',
+          Security: 'WPA-PSK'
+        }
+      }, callbackFail('NetworkAlreadyConfigured'));
+    }));
+  },
   function forgetNetwork() {
     var kNumNetworks = 2;
     var kTestNetworkGuid = 'stub_wifi1_guid';
@@ -206,6 +239,20 @@ var availableTests = [
                     }));
               }));
         }));
+  },
+  function forgetPolicyControlledNetwork() {
+    chrome.networkingPrivate.getProperties('stub_wifi2', callbackPass(function(
+        properties) {
+      // Sanity check to verify there is a policy defined config for the network
+      // config that will be set up in this test.
+      chrome.test.assertEq('UserPolicy', properties.Source);
+      chrome.test.assertEq('WiFi', properties.Type);
+      chrome.test.assertEq('WPA-PSK', properties.WiFi.Security);
+      chrome.test.assertEq('wifi2_PSK', properties.WiFi.SSID);
+
+      chrome.networkingPrivate.forgetNetwork(
+          'stub_wifi2', callbackFail('Error.PolicyControlled'));
+    }));
   },
   function getNetworks() {
     // Test 'type' and 'configured'.
@@ -502,6 +549,13 @@ var availableTests = [
               Country: 'us',
               Name: 'Cellular1_Provider'
             },
+            ESN: "test_esn",
+            ICCID: "test_iccid",
+            IMEI: "test_imei",
+            MDN: "test_mdn",
+            MEID: "test_meid",
+            MIN: "test_min",
+            ModelID:"test_model_id",
             NetworkTechnology: 'GSM',
             RoamingState: 'Home',
             SIMLockStatus: {LockEnabled: true, LockType: '', RetriesLeft: 3}
@@ -745,6 +799,11 @@ var availableTests = [
     chrome.networkingPrivate.onDeviceStateListChanged.addListener(listener);
     chrome.networkingPrivate.disableNetworkType('WiFi');
   },
+  function onCertificateListsChangedEvent() {
+    chrome.test.listenOnce(
+        chrome.networkingPrivate.onCertificateListsChanged, function() {});
+    chrome.test.sendMessage('eventListenerReady');
+  },
   function verifyDestination() {
     chrome.networkingPrivate.verifyDestination(
       verificationProperties,
@@ -881,6 +940,48 @@ var availableTests = [
         AllowOnlyPolicyNetworksToConnect: false,
       }, result);
     }));
+  },
+  function getTetherNetworks() {
+    chrome.networkingPrivate.getNetworks(
+        {networkType: 'Tether'},
+        callbackPass(function(tetherNetworks) {
+          assertEq(2, tetherNetworks.length);
+          privateHelpers.verifyTetherNetwork(tetherNetworks[0], 'tetherGuid1',
+              'tetherName1', 50, 'tetherCarrier1', 75, true);
+          privateHelpers.verifyTetherNetwork(tetherNetworks[1], 'tetherGuid2',
+              'tetherName2', 75, 'tetherCarrier2', 100, false);
+        }));
+  },
+  function getTetherNetworkProperties() {
+    chrome.networkingPrivate.getProperties(
+        'tetherGuid1',
+        callbackPass(function(tetherNetwork) {
+          privateHelpers.verifyTetherNetwork(tetherNetwork, 'tetherGuid1',
+              'tetherName1', 50, 'tetherCarrier1', 75, true);
+        }));
+  },
+  function getTetherNetworkManagedProperties() {
+    chrome.networkingPrivate.getManagedProperties(
+        'tetherGuid1',
+        callbackPass(function(tetherNetwork) {
+          privateHelpers.verifyTetherNetwork(tetherNetwork, 'tetherGuid1',
+              'tetherName1', 50, 'tetherCarrier1', 75, true);
+        }));
+  },
+  function getTetherNetworkState() {
+    chrome.networkingPrivate.getState(
+        'tetherGuid1',
+        callbackPass(function(tetherNetwork) {
+          privateHelpers.verifyTetherNetwork(tetherNetwork, 'tetherGuid1',
+              'tetherName1', 50, 'tetherCarrier1', 75, true);
+        }));
+  },
+  function getCertificateLists() {
+    chrome.networkingPrivate.getCertificateLists(
+        callbackPass(function(certificateLists) {
+          assertEq(1, certificateLists.serverCaCertificates.length);
+          assertEq(0, certificateLists.userCertificates.length);
+        }));
   },
 ];
 

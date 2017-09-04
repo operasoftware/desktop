@@ -37,7 +37,7 @@ UI.SettingsUI = {};
  * @return {!Element}
  */
 UI.SettingsUI.createSettingCheckbox = function(name, setting, omitParagraphElement, tooltip) {
-  var label = UI.createCheckboxLabel(name);
+  var label = UI.CheckboxLabel.create(name);
   if (tooltip)
     label.title = tooltip;
 
@@ -83,21 +83,6 @@ UI.SettingsUI.createCustomSetting = function(name, element) {
   fieldsetElement.createChild('label').textContent = name;
   fieldsetElement.appendChild(element);
   return p;
-};
-
-/**
- * @param {!Common.Setting} setting
- * @return {!Element}
- */
-UI.SettingsUI.createSettingFieldset = function(setting) {
-  var fieldset = createElement('fieldset');
-  fieldset.disabled = !setting.get();
-  setting.addChangeListener(settingChanged);
-  return fieldset;
-
-  function settingChanged() {
-    fieldset.disabled = !setting.get();
-  }
 };
 
 /**

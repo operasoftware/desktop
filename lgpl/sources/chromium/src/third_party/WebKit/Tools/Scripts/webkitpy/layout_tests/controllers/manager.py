@@ -43,8 +43,9 @@ import random
 import sys
 import time
 
+from webkitpy.common import exit_codes
 from webkitpy.common.net.file_uploader import FileUploader
-from webkitpy.common.webkit_finder import WebKitFinder
+from webkitpy.common.path_finder import PathFinder
 from webkitpy.layout_tests.controllers.layout_test_finder import LayoutTestFinder
 from webkitpy.layout_tests.controllers.layout_test_runner import LayoutTestRunner
 from webkitpy.layout_tests.controllers.test_result_writer import TestResultWriter
@@ -90,23 +91,27 @@ class Manager(object):
 
         self._results_directory = self._port.results_directory()
         self._finder = LayoutTestFinder(self._port, self._options)
-        self._webkit_finder = WebKitFinder(port.host.filesystem)
+        self._path_finder = PathFinder(port.host.filesystem)
         self._runner = LayoutTestRunner(self._options, self._port, self._printer, self._results_directory, self._test_is_slow)
 
     def run(self, args):
         """Run the tests and return a RunDetails object with the results."""
         start_time = time.time()
-        self._printer.write_update("Collecting tests ...")
+        self._printer.write_update('Collecting tests ...')
         running_all_tests = False
 
-        # Regenerate MANIFEST.json from template, necessary for web-platform-tests metadata.
-        self._ensure_manifest()
+        try:
+            self._printer.write_update('Generating MANIFEST.json for web-platform-tests ...')
+            WPTManifest.ensure_manifest(self._port.host)
+        finally:
+            self._printer.write_update('Completed generating manifest.')
 
+        self._printer.write_update('Collecting tests ...')
         try:
             paths, all_test_names, running_all_tests = self._collect_tests(args)
         except IOError:
             # This is raised if --test-list doesn't exist
-            return test_run_results.RunDetails(exit_code=test_run_results.NO_TESTS_EXIT_STATUS)
+            return test_run_results.RunDetails(exit_code=exit_codes.NO_TESTS_EXIT_STATUS)
 
         # Create a sorted list of test files so the subset chunk,
         # if used, contains alphabetically consecutive tests.
@@ -132,7 +137,7 @@ class Manager(object):
         # Check to make sure we're not skipping every test.
         if not tests_to_run:
             _log.critical('No tests to run.')
-            return test_run_results.RunDetails(exit_code=test_run_results.NO_TESTS_EXIT_STATUS)
+            return test_run_results.RunDetails(exit_code=exit_codes.NO_TESTS_EXIT_STATUS)
 
         exit_code = self._set_up_run(tests_to_run)
         if exit_code:
@@ -190,12 +195,12 @@ class Manager(object):
 
         # Some crash logs can take a long time to be written out so look
         # for new logs after the test run finishes.
-        self._printer.write_update("looking for new crash logs")
+        self._printer.write_update('Looking for new crash logs ...')
         self._look_for_new_crash_logs(initial_results, start_time)
         for retry_attempt_results in all_retry_results:
             self._look_for_new_crash_logs(retry_attempt_results, start_time)
 
-        _log.debug("summarizing results")
+        self._printer.write_update('Summarizing results ...')
         summarized_full_results = test_run_results.summarize_results(
             self._port, self._expectations, initial_results, all_retry_results,
             enabled_pixel_tests_in_retry)
@@ -204,27 +209,23 @@ class Manager(object):
             enabled_pixel_tests_in_retry, only_include_failing=True)
 
         exit_code = summarized_failing_results['num_regressions']
-        if exit_code > test_run_results.MAX_FAILURES_EXIT_STATUS:
+        if exit_code > exit_codes.MAX_FAILURES_EXIT_STATUS:
             _log.warning('num regressions (%d) exceeds max exit status (%d)',
-                         exit_code, test_run_results.MAX_FAILURES_EXIT_STATUS)
-            exit_code = test_run_results.MAX_FAILURES_EXIT_STATUS
+                         exit_code, exit_codes.MAX_FAILURES_EXIT_STATUS)
+            exit_code = exit_codes.MAX_FAILURES_EXIT_STATUS
 
         if not self._options.dry_run:
             self._write_json_files(summarized_full_results, summarized_failing_results, initial_results, running_all_tests)
-
-            if self._options.write_full_results_to:
-                self._filesystem.copyfile(self._filesystem.join(self._results_directory, "full_results.json"),
-                                          self._options.write_full_results_to)
 
             self._upload_json_files()
 
             results_path = self._filesystem.join(self._results_directory, "results.html")
             self._copy_results_html_file(results_path)
             if initial_results.keyboard_interrupted:
-                exit_code = test_run_results.INTERRUPTED_EXIT_STATUS
+                exit_code = exit_codes.INTERRUPTED_EXIT_STATUS
             else:
                 if initial_results.interrupted:
-                    exit_code = test_run_results.EARLY_EXIT_STATUS
+                    exit_code = exit_codes.EARLY_EXIT_STATUS
                 if self._options.show_results and (
                         exit_code or (self._options.full_results_html and initial_results.total_failures)):
                     self._port.show_results_html_file(results_path)
@@ -335,13 +336,6 @@ class Manager(object):
                 _log.error("Build check failed")
                 return exit_code
 
-        # Check that the system dependencies (themes, fonts, ...) are correct.
-        if not self._options.nocheck_sys_deps:
-            self._printer.write_update("Checking system dependencies ...")
-            exit_code = self._port.check_sys_deps(self._needs_servers(test_names))
-            if exit_code:
-                return exit_code
-
         if self._options.clobber_old_results:
             self._clobber_old_results()
         elif self._filesystem.exists(self._results_directory):
@@ -353,7 +347,15 @@ class Manager(object):
         self._port.host.filesystem.maybe_make_directory(self._results_directory)
 
         self._port.setup_test_run()
-        return test_run_results.OK_EXIT_STATUS
+
+        # Check that the system dependencies (themes, fonts, ...) are correct.
+        if not self._options.nocheck_sys_deps:
+            self._printer.write_update("Checking system dependencies ...")
+            exit_code = self._port.check_sys_deps(self._needs_servers(test_names))
+            if exit_code:
+                return exit_code
+
+        return exit_codes.OK_EXIT_STATUS
 
     def _run_tests(self, tests_to_run, tests_to_skip, repeat_each, iterations,
                    num_workers, retry_attempt=0):
@@ -367,7 +369,7 @@ class Manager(object):
                                       tests_to_skip, num_workers, retry_attempt)
 
     def _start_servers(self, tests_to_run):
-        if any(self._port.is_wptserve_test(test) for test in tests_to_run):
+        if any(self._port.is_wpt_test(test) for test in tests_to_run):
             self._printer.write_update('Starting WPTServe ...')
             self._port.start_wptserve()
             self._wptserve_started = True
@@ -447,7 +449,7 @@ class Manager(object):
 
     def _clobber_old_results(self):
         dir_above_results_path = self._filesystem.dirname(self._results_directory)
-        self._printer.write_update("Clobbering old results in %s" % dir_above_results_path)
+        self._printer.write_update('Clobbering old results in %s.' % dir_above_results_path)
         if not self._filesystem.exists(dir_above_results_path):
             return
         file_list = self._filesystem.listdir(dir_above_results_path)
@@ -494,8 +496,15 @@ class Manager(object):
         # from a file url for results.html and Chromium doesn't allow that.
         json_results_generator.write_json(self._filesystem, summarized_failing_results, full_results_path, callback="ADD_RESULTS")
 
+        # Write out the JSON files suitable for other tools to process.
+        # As the output can be quite large (as there are 60k+ tests) we also
+        # support only outputting the failing results.
+        if self._options.json_failing_test_results:
+            # FIXME(tansell): Make sure this includes an *unexpected* results
+            # (IE Passing when expected to be failing.)
+            json_results_generator.write_json(self._filesystem, summarized_failing_results, self._options.json_failing_test_results)
         if self._options.json_test_results:
-            json_results_generator.write_json(self._filesystem, summarized_failing_results, self._options.json_test_results)
+            json_results_generator.write_json(self._filesystem, summarized_full_results, self._options.json_test_results)
 
         _log.debug("Finished writing JSON files.")
 
@@ -532,7 +541,7 @@ class Manager(object):
             _log.error("Upload failed: %s", err)
 
     def _copy_results_html_file(self, destination_path):
-        base_dir = self._port.path_from_webkit_base('LayoutTests', 'fast', 'harness')
+        base_dir = self._path_finder.path_from_layout_tests('fast', 'harness')
         results_file = self._filesystem.join(base_dir, 'results.html')
         # Note that the results.html template file won't exist when we're using a MockFileSystem during unit tests,
         # so make sure it exists before we try to copy it.
@@ -552,18 +561,3 @@ class Manager(object):
         for name, value in stats.iteritems():
             json_results_generator.add_path_to_trie(name, value, stats_trie)
         return stats_trie
-
-    def _ensure_manifest(self):
-        fs = self._filesystem
-        external_path = self._webkit_finder.path_from_webkit_base('LayoutTests', 'external')
-        wpt_path = fs.join(external_path, 'wpt')
-        manifest_path = fs.join(external_path, 'wpt', 'MANIFEST.json')
-        base_manifest_path = fs.join(external_path, 'WPT_BASE_MANIFEST.json')
-
-        if not self._filesystem.exists(manifest_path):
-            fs.copyfile(base_manifest_path, manifest_path)
-
-        self._printer.write_update('Generating MANIFEST.json for web-platform-tests ...')
-
-        # TODO(jeffcarp): handle errors
-        WPTManifest.generate_manifest(self._port.host, wpt_path)

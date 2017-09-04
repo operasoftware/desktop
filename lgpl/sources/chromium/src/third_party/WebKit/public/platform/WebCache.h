@@ -47,36 +47,36 @@ class WebCache {
   struct ResourceTypeStat {
     size_t count;
     size_t size;
-    size_t decodedSize;
+    size_t decoded_size;
   };
 
   // A struct mirroring blink::MemoryCache::Statistics.
   struct ResourceTypeStats {
     ResourceTypeStat images;
-    ResourceTypeStat cssStyleSheets;
+    ResourceTypeStat css_style_sheets;
     ResourceTypeStat scripts;
-    ResourceTypeStat xslStyleSheets;
+    ResourceTypeStat xsl_style_sheets;
     ResourceTypeStat fonts;
     ResourceTypeStat other;
   };
 
   // Sets the capacities of the resource cache, evicting objects as necessary.
-  BLINK_PLATFORM_EXPORT static void setCapacity(size_t);
+  BLINK_PLATFORM_EXPORT static void SetCapacity(size_t);
 
   // Clears the cache (as much as possible; some resources may not be
   // cleared if they are actively referenced). Note that this method
   // only removes resources from live list, w/o releasing cache memory.
-  BLINK_PLATFORM_EXPORT static void clear();
+  BLINK_PLATFORM_EXPORT static void Clear();
 
   // New image quailty. Removes images that were compressed with a
   // lower quality setting.
-  BLINK_PLATFORM_EXPORT static void newImageQuality(int image_quality);
+  BLINK_PLATFORM_EXPORT static void NewImageQuality(int image_quality);
 
   // Gets the usage statistics from the resource cache.
-  BLINK_PLATFORM_EXPORT static void getUsageStats(UsageStats*);
+  BLINK_PLATFORM_EXPORT static void GetUsageStats(UsageStats*);
 
   // Get usage stats about the resource cache.
-  BLINK_PLATFORM_EXPORT static void getResourceTypeStats(ResourceTypeStats*);
+  BLINK_PLATFORM_EXPORT static void GetResourceTypeStats(ResourceTypeStats*);
 
  private:
   WebCache();  // Not intended to be instanced.

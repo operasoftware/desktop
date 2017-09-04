@@ -5,7 +5,7 @@
 #ifndef AnimationWorklet_h
 #define AnimationWorklet_h
 
-#include "core/workers/Worklet.h"
+#include "core/workers/ThreadedWorklet.h"
 #include "modules/ModulesExport.h"
 #include "platform/heap/Handle.h"
 
@@ -15,17 +15,17 @@ class LocalFrame;
 class ThreadedWorkletMessagingProxy;
 class WorkletGlobalScopeProxy;
 
-class MODULES_EXPORT AnimationWorklet final : public Worklet {
+class MODULES_EXPORT AnimationWorklet final : public ThreadedWorklet {
   WTF_MAKE_NONCOPYABLE(AnimationWorklet);
 
  public:
-  static AnimationWorklet* create(LocalFrame*);
+  static AnimationWorklet* Create(LocalFrame*);
   ~AnimationWorklet() override;
 
-  void initialize() final;
-  bool isInitialized() const final;
+  void Initialize() final;
+  bool IsInitialized() const final;
 
-  WorkletGlobalScopeProxy* workletGlobalScopeProxy() const final;
+  WorkletGlobalScopeProxy* GetWorkletGlobalScopeProxy() const final;
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -34,7 +34,7 @@ class MODULES_EXPORT AnimationWorklet final : public Worklet {
 
   // The proxy outlives the worklet as it is used to perform thread shutdown,
   // it deletes itself once this has occured.
-  ThreadedWorkletMessagingProxy* m_workletMessagingProxy;
+  ThreadedWorkletMessagingProxy* worklet_messaging_proxy_;
 };
 
 }  // namespace blink

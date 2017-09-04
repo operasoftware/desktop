@@ -33,8 +33,8 @@
 #define PrerendererClientImpl_h
 
 #include "core/loader/PrerendererClient.h"
-#include "wtf/Noncopyable.h"
-#include "wtf/PassRefPtr.h"
+#include "platform/wtf/Noncopyable.h"
+#include "platform/wtf/PassRefPtr.h"
 
 namespace blink {
 
@@ -50,14 +50,14 @@ class PrerendererClientImpl final
  public:
   PrerendererClientImpl(Page&, WebPrerendererClient*);
 
-  bool canPrerender() override;
-  void willAddPrerender(Prerender*) override;
-  bool isPrefetchOnly() override;
+  bool CanPrerender() override;
+  void WillAddPrerender(Prerender*) override;
+  bool IsPrefetchOnly() override;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { PrerendererClient::trace(visitor); }
+  DEFINE_INLINE_VIRTUAL_TRACE() { PrerendererClient::Trace(visitor); }
 
  private:
-  WebPrerendererClient* m_client;
+  WebPrerendererClient* client_;
 };
 
 }  // namespace blink

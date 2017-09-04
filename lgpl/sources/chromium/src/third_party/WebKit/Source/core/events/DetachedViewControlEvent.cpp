@@ -8,9 +8,9 @@ DetachedViewControlEvent::DetachedViewControlEvent()
 {
 }
 
-DetachedViewControlEvent::DetachedViewControlEvent(const String& controlName)
+DetachedViewControlEvent::DetachedViewControlEvent(const String& control_name)
     : Event(EventTypeNames::operadetachedviewcontrol, false, false)
-    , m_controlName(controlName)
+    , control_name_(control_name)
 {
 }
 
@@ -18,14 +18,14 @@ DetachedViewControlEvent::~DetachedViewControlEvent()
 {
 }
 
-const AtomicString& DetachedViewControlEvent::interfaceName() const
+const AtomicString& DetachedViewControlEvent::InterfaceName() const
 {
     return EventNames::DetachedViewControlEvent;
 }
 
 DEFINE_TRACE(DetachedViewControlEvent)
 {
-    Event::trace(visitor);
+    Event::Trace(visitor);
 }
 
 } // namespace blink

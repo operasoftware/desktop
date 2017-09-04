@@ -11,27 +11,27 @@
 
 namespace blink {
 
-class WebLocalFrameImpl;
+class WebLocalFrameBase;
 
 class NavigatorContentUtilsClientImpl final
     : public NavigatorContentUtilsClient {
  public:
-  static NavigatorContentUtilsClientImpl* create(WebLocalFrameImpl*);
+  static NavigatorContentUtilsClientImpl* Create(WebLocalFrameBase*);
   ~NavigatorContentUtilsClientImpl() override {}
 
-  void registerProtocolHandler(const String& scheme,
+  void RegisterProtocolHandler(const String& scheme,
                                const KURL&,
                                const String& title) override;
-  CustomHandlersState isProtocolHandlerRegistered(const String& scheme,
+  CustomHandlersState IsProtocolHandlerRegistered(const String& scheme,
                                                   const KURL&) override;
-  void unregisterProtocolHandler(const String& scheme, const KURL&) override;
+  void UnregisterProtocolHandler(const String& scheme, const KURL&) override;
 
   DECLARE_VIRTUAL_TRACE();
 
  private:
-  explicit NavigatorContentUtilsClientImpl(WebLocalFrameImpl*);
+  explicit NavigatorContentUtilsClientImpl(WebLocalFrameBase*);
 
-  Member<WebLocalFrameImpl> m_webFrame;
+  Member<WebLocalFrameBase> web_frame_;
 };
 
 }  // namespace blink

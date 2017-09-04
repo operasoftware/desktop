@@ -5,14 +5,15 @@
 #ifndef RasterInvalidationTracking_h
 #define RasterInvalidationTracking_h
 
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/Region.h"
 #include "platform/graphics/PaintInvalidationReason.h"
 #include "platform/graphics/paint/PaintRecord.h"
 #include "platform/json/JSONValues.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/text/WTFString.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "wtf/Allocator.h"
-#include "wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -22,11 +23,10 @@ struct RasterInvalidationInfo {
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
   // This is for comparison only. Don't dereference because the client may have
   // died.
-  const DisplayItemClient* client;
-  String clientDebugName;
+  const DisplayItemClient* client = nullptr;
+  String client_debug_name;
   IntRect rect;
-  PaintInvalidationReason reason;
-  RasterInvalidationInfo() : reason(PaintInvalidationFull) {}
+  PaintInvalidationReason reason = PaintInvalidationReason::kFull;
 };
 
 inline bool operator==(const RasterInvalidationInfo& a,
@@ -34,48 +34,49 @@ inline bool operator==(const RasterInvalidationInfo& a,
   return a.rect == b.rect;
 }
 
-struct UnderPaintInvalidation {
+struct UnderRasterInvalidation {
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
   int x;
   int y;
-  SkColor oldPixel;
-  SkColor newPixel;
+  SkColor old_pixel;
+  SkColor new_pixel;
 };
 
 struct PLATFORM_EXPORT RasterInvalidationTracking {
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-  Vector<RasterInvalidationInfo> trackedRasterInvalidations;
-  sk_sp<PaintRecord> lastPaintedRecord;
-  IntRect lastInterestRect;
-  Region rasterInvalidationRegionSinceLastPaint;
-  Vector<UnderPaintInvalidation> underPaintInvalidations;
+  Vector<RasterInvalidationInfo> invalidations;
 
-  void asJSON(JSONObject*);
+  // The following fields are for under-raster-invalidation detection.
+  sk_sp<PaintRecord> last_painted_record;
+  IntRect last_interest_rect;
+  Region invalidation_region_since_last_paint;
+  Vector<UnderRasterInvalidation> under_invalidations;
+
+  void AsJSON(JSONObject*);
 };
 
 template <class TargetClass>
 class PLATFORM_EXPORT RasterInvalidationTrackingMap {
  public:
-  void asJSON(TargetClass* key, JSONObject* json) {
-    auto it = m_invalidationTrackingMap.find(key);
-    if (it != m_invalidationTrackingMap.end())
-      it->value.asJSON(json);
+  void AsJSON(TargetClass* key, JSONObject* json) {
+    auto it = map_.find(key);
+    if (it != map_.end())
+      it->value.AsJSON(json);
   }
 
-  void remove(TargetClass* key) {
-    auto it = m_invalidationTrackingMap.find(key);
-    if (it != m_invalidationTrackingMap.end())
-      m_invalidationTrackingMap.remove(it);
+  void Remove(TargetClass* key) {
+    auto it = map_.find(key);
+    if (it != map_.end())
+      map_.erase(it);
   }
 
-  RasterInvalidationTracking& add(TargetClass* key) {
-    return m_invalidationTrackingMap.insert(key, RasterInvalidationTracking())
-        .storedValue->value;
+  RasterInvalidationTracking& Add(TargetClass* key) {
+    return map_.insert(key, RasterInvalidationTracking()).stored_value->value;
   }
 
-  RasterInvalidationTracking* find(TargetClass* key) {
-    auto it = m_invalidationTrackingMap.find(key);
-    if (it == m_invalidationTrackingMap.end())
+  RasterInvalidationTracking* Find(TargetClass* key) {
+    auto it = map_.find(key);
+    if (it == map_.end())
       return nullptr;
     return &it->value;
   }
@@ -83,7 +84,7 @@ class PLATFORM_EXPORT RasterInvalidationTrackingMap {
  private:
   typedef HashMap<TargetClass*, RasterInvalidationTracking>
       InvalidationTrackingMap;
-  InvalidationTrackingMap m_invalidationTrackingMap;
+  InvalidationTrackingMap map_;
 };
 
 }  // namespace blink

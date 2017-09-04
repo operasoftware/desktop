@@ -25,14 +25,13 @@
 
 #include "core/loader/HistoryItem.h"
 
-#include "core/dom/Document.h"
 #include "core/html/ContentEditablesController.h"
 #include "core/html/forms/FormController.h"
-#include "platform/network/ResourceRequest.h"
+#include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/weborigin/SecurityPolicy.h"
-#include "wtf/Assertions.h"
-#include "wtf/CurrentTime.h"
-#include "wtf/text/CString.h"
+#include "platform/wtf/Assertions.h"
+#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/text/CString.h"
 
 namespace blink {
 
@@ -41,204 +40,205 @@ const char kDocumentStateVersionMarker[] = "Version";
 const char kDocumentStateVersion[] = "1";
 }  // namespace
 
-static long long generateSequenceNumber() {
+static long long GenerateSequenceNumber() {
   // Initialize to the current time to reduce the likelihood of generating
   // identifiers that overlap with those from past/future browser sessions.
-  static long long next = static_cast<long long>(currentTime() * 1000000.0);
+  static long long next = static_cast<long long>(CurrentTime() * 1000000.0);
   return ++next;
 }
 
 HistoryItem::HistoryItem()
-    : m_didSaveScrollOrScaleState(false),
-      m_pageScaleFactor(0),
-      m_itemSequenceNumber(generateSequenceNumber()),
-      m_documentSequenceNumber(generateSequenceNumber()),
-      m_scrollRestorationType(ScrollRestorationAuto) {}
+    : did_save_scroll_or_scale_state_(false),
+      page_scale_factor_(0),
+      item_sequence_number_(GenerateSequenceNumber()),
+      document_sequence_number_(GenerateSequenceNumber()),
+      scroll_restoration_type_(kScrollRestorationAuto) {}
 
 HistoryItem::~HistoryItem() {}
 
-const String& HistoryItem::urlString() const {
-  return m_urlString;
+const String& HistoryItem::UrlString() const {
+  return url_string_;
 }
 
-KURL HistoryItem::url() const {
-  return KURL(ParsedURLString, m_urlString);
+KURL HistoryItem::Url() const {
+  return KURL(kParsedURLString, url_string_);
 }
 
-const Referrer& HistoryItem::referrer() const {
-  return m_referrer;
+const Referrer& HistoryItem::GetReferrer() const {
+  return referrer_;
 }
 
-const String& HistoryItem::target() const {
-  return m_target;
+void HistoryItem::SetURLString(const String& url_string) {
+  if (url_string_ != url_string)
+    url_string_ = url_string;
 }
 
-void HistoryItem::setURLString(const String& urlString) {
-  if (m_urlString != urlString)
-    m_urlString = urlString;
+void HistoryItem::SetURL(const KURL& url) {
+  SetURLString(url.GetString());
 }
 
-void HistoryItem::setURL(const KURL& url) {
-  setURLString(url.getString());
+void HistoryItem::SetReferrer(const Referrer& referrer) {
+  // This should be a CHECK.
+  referrer_ = SecurityPolicy::GenerateReferrer(referrer.referrer_policy, Url(),
+                                               referrer.referrer);
 }
 
-void HistoryItem::setReferrer(const Referrer& referrer) {
-  // This should be a RELEASE_ASSERT.
-  m_referrer = SecurityPolicy::generateReferrer(referrer.referrerPolicy, url(),
-                                                referrer.referrer);
+const ScrollOffset& HistoryItem::VisualViewportScrollOffset() const {
+  return visual_viewport_scroll_offset_;
 }
 
-void HistoryItem::setTarget(const String& target) {
-  m_target = target;
+void HistoryItem::SetVisualViewportScrollOffset(const ScrollOffset& offset) {
+  visual_viewport_scroll_offset_ = offset;
+  SetDidSaveScrollOrScaleState(true);
 }
 
-const ScrollOffset& HistoryItem::visualViewportScrollOffset() const {
-  return m_visualViewportScrollOffset;
+const ScrollOffset& HistoryItem::GetScrollOffset() const {
+  return scroll_offset_;
 }
 
-void HistoryItem::setVisualViewportScrollOffset(const ScrollOffset& offset) {
-  m_visualViewportScrollOffset = offset;
-  setDidSaveScrollOrScaleState(true);
+void HistoryItem::SetScrollOffset(const ScrollOffset& offset) {
+  scroll_offset_ = offset;
+  SetDidSaveScrollOrScaleState(true);
 }
 
-const ScrollOffset& HistoryItem::getScrollOffset() const {
-  return m_scrollOffset;
+float HistoryItem::PageScaleFactor() const {
+  return page_scale_factor_;
 }
 
-void HistoryItem::setScrollOffset(const ScrollOffset& offset) {
-  m_scrollOffset = offset;
-  setDidSaveScrollOrScaleState(true);
+void HistoryItem::SetPageScaleFactor(float scale_factor) {
+  page_scale_factor_ = scale_factor;
+  SetDidSaveScrollOrScaleState(true);
 }
 
-float HistoryItem::pageScaleFactor() const {
-  return m_pageScaleFactor;
+void HistoryItem::SetFormState(const Vector<String>& state) {
+  form_state_ = state;
 }
 
-void HistoryItem::setPageScaleFactor(float scaleFactor) {
-  m_pageScaleFactor = scaleFactor;
-  setDidSaveScrollOrScaleState(true);
+const Vector<String>& HistoryItem::FormState() {
+  if (document_forms_state_)
+    form_state_ = document_forms_state_->ToStateVector();
+  return form_state_;
 }
 
-void HistoryItem::setFormState(const Vector<String>& state) {
-  m_formState = state;
+void HistoryItem::ClearFormState() {
+  form_state_.clear();
+  document_forms_state_.Clear();
 }
 
-const Vector<String>& HistoryItem::formState() {
-  if (m_documentFormsState)
-    m_formState = m_documentFormsState->toStateVector();
-  return m_formState;
+void HistoryItem::SetContentEditablesState(ContentEditablesState* state) {
+  content_editables_state_ = state;
 }
 
-void HistoryItem::clearFormState() {
-  m_formState.clear();
-  m_documentFormsState.clear();
+const Vector<String>& HistoryItem::GetContentEditablesState() {
+  if (content_editables_state_)
+    content_editables_state_vector_ = content_editables_state_->ToStateVector();
+
+  return content_editables_state_vector_;
 }
 
-void HistoryItem::setContentEditablesState(ContentEditablesState* state) {
-  m_contentEditablesState = state;
+void HistoryItem::ClearContentEditablesState() {
+  content_editables_state_.Clear();
+  content_editables_state_vector_.clear();
 }
 
-const Vector<String>& HistoryItem::contentEditablesState() {
-  if (m_contentEditablesState)
-    m_contentEditablesStateVector = m_contentEditablesState->toStateVector();
-
-  return m_contentEditablesStateVector;
-}
-
-void HistoryItem::clearContentEditablesState() {
-  m_contentEditablesState.clear();
-  m_contentEditablesStateVector.clear();
-}
-
-void HistoryItem::setDocumentState(const Vector<String>& state) {
+void HistoryItem::SetDocumentState(const Vector<String>& state) {
   if (state.size() > 1 && state[0] == kDocumentStateVersionMarker &&
-      state[1].toUInt() > 0) {
-    size_t formStateSize = state[2].toUInt();
-    ASSERT(formStateSize < state.size());
-    size_t endFormStateIdx = 2 + formStateSize;
-    size_t contentEditablesStateSize = state[endFormStateIdx + 1].toUInt();
-    ASSERT(formStateSize + contentEditablesStateSize + 4 == state.size());
-    m_formState.clear();
-    if (formStateSize > 0)
-      m_formState.appendRange(&state[3], &state[endFormStateIdx + 1]);
-    m_contentEditablesState.clear();
-    if (contentEditablesStateSize)
-      m_contentEditablesStateVector.appendRange(&state[endFormStateIdx + 2],
-                                                state.end());
+      state[1].ToUInt() > 0) {
+    size_t form_state_size = state[2].ToUInt();
+    DCHECK_LT(form_state_size, state.size());
+    size_t end_form_state_idx = 2 + form_state_size;
+    size_t content_editables_state_size =
+        state[end_form_state_idx + 1].ToUInt();
+    DCHECK_EQ(form_state_size + content_editables_state_size + 4, state.size());
+    form_state_.clear();
+    if (form_state_size > 0)
+      form_state_.AppendRange(&state[3], &state[end_form_state_idx + 1]);
+    content_editables_state_.Clear();
+    if (content_editables_state_size)
+      content_editables_state_vector_.AppendRange(
+          &state[end_form_state_idx + 2], state.end());
   } else {
-    m_formState = state;
+    form_state_ = state;
   }
 }
 
-void HistoryItem::setFormState(DocumentFormsState* state) {
-  m_documentFormsState = state;
+void HistoryItem::SetFormState(DocumentFormsState* state) {
+  document_forms_state_ = state;
 }
 
-Vector<String> HistoryItem::getReferencedFilePaths() {
-  return FormController::getReferencedFilePaths(formState());
+Vector<String> HistoryItem::GetReferencedFilePaths() {
+  return FormController::GetReferencedFilePaths(FormState());
 }
 
-void HistoryItem::getDocumentState(Vector<String>* state) {
+void HistoryItem::GetDocumentState(Vector<String>* state) {
   // Update states.
-  formState();
-  contentEditablesState();
+  FormState();
+  GetContentEditablesState();
 
   state->clear();
   state->push_back(kDocumentStateVersionMarker);
   state->push_back(kDocumentStateVersion);
-  state->push_back(String::number(m_formState.size()));
-  state->appendVector(m_formState);
-  state->push_back(String::number(m_contentEditablesStateVector.size()));
-  state->appendVector(m_contentEditablesStateVector);
+  state->push_back(String::Number(form_state_.size()));
+  state->AppendVector(form_state_);
+  state->push_back(String::Number(content_editables_state_vector_.size()));
+  state->AppendVector(content_editables_state_vector_);
 }
 
-void HistoryItem::clearDocumentState() {
-  clearFormState();
-  clearContentEditablesState();
+void HistoryItem::ClearDocumentState() {
+  form_state_.clear();
+  document_forms_state_.Clear();
 }
 
-void HistoryItem::setStateObject(PassRefPtr<SerializedScriptValue> object) {
-  m_stateObject = object;
+void HistoryItem::SetStateObject(PassRefPtr<SerializedScriptValue> object) {
+  state_object_ = std::move(object);
 }
 
-const AtomicString& HistoryItem::formContentType() const {
-  return m_formContentType;
+const AtomicString& HistoryItem::FormContentType() const {
+  return form_content_type_;
 }
 
-void HistoryItem::setFormInfoFromRequest(const ResourceRequest& request) {
-  if (equalIgnoringCase(request.httpMethod(), "POST")) {
+void HistoryItem::SetFormInfoFromRequest(const ResourceRequest& request) {
+  if (DeprecatedEqualIgnoringCase(request.HttpMethod(), "POST")) {
     // FIXME: Eventually we have to make this smart enough to handle the case
     // where we have a stream for the body to handle the "data interspersed with
     // files" feature.
-    m_formData = request.httpBody();
-    m_formContentType = request.httpContentType();
+    form_data_ = request.HttpBody();
+    form_content_type_ = request.HttpContentType();
   } else {
-    m_formData = nullptr;
-    m_formContentType = nullAtom;
+    form_data_ = nullptr;
+    form_content_type_ = g_null_atom;
   }
 }
 
-void HistoryItem::setFormData(PassRefPtr<EncodedFormData> formData) {
-  m_formData = formData;
+void HistoryItem::SetFormData(PassRefPtr<EncodedFormData> form_data) {
+  form_data_ = std::move(form_data);
 }
 
-void HistoryItem::setFormContentType(const AtomicString& formContentType) {
-  m_formContentType = formContentType;
+void HistoryItem::SetFormContentType(const AtomicString& form_content_type) {
+  form_content_type_ = form_content_type;
 }
 
-EncodedFormData* HistoryItem::formData() {
-  return m_formData.get();
+EncodedFormData* HistoryItem::FormData() {
+  return form_data_.Get();
 }
 
-bool HistoryItem::isCurrentDocument(Document* doc) const {
-  // FIXME: We should find a better way to check if this is the current
-  // document.
-  return equalIgnoringFragmentIdentifier(url(), doc->url());
+ResourceRequest HistoryItem::GenerateResourceRequest(
+    WebCachePolicy cache_policy) {
+  ResourceRequest request(url_string_);
+  request.SetHTTPReferrer(referrer_);
+  request.SetCachePolicy(cache_policy);
+  if (form_data_) {
+    request.SetHTTPMethod(HTTPNames::POST);
+    request.SetHTTPBody(form_data_);
+    request.SetHTTPContentType(form_content_type_);
+    request.AddHTTPOriginIfNeeded(referrer_.referrer);
+  }
+  return request;
 }
 
 DEFINE_TRACE(HistoryItem) {
-  visitor->trace(m_documentFormsState);
-  visitor->trace(m_contentEditablesState);
+  visitor->Trace(document_forms_state_);
+  visitor->Trace(content_editables_state_);
 }
 
 }  // namespace blink

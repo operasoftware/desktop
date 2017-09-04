@@ -43,18 +43,18 @@ class Prerender;
 
 class CORE_EXPORT PrerendererClient : public Supplement<Page> {
  public:
-  virtual bool canPrerender() = 0;
-  virtual void willAddPrerender(Prerender*) = 0;
-  virtual bool isPrefetchOnly() = 0;
+  virtual bool CanPrerender() = 0;
+  virtual void WillAddPrerender(Prerender*) = 0;
+  virtual bool IsPrefetchOnly() = 0;
 
-  static const char* supplementName();
-  static PrerendererClient* from(Page*);
+  static const char* SupplementName();
+  static PrerendererClient* From(Page*);
 
  protected:
   explicit PrerendererClient(Page&);
 };
 
-CORE_EXPORT void providePrerendererClientTo(Page&, PrerendererClient*);
+CORE_EXPORT void ProvidePrerendererClientTo(Page&, PrerendererClient*);
 
 }  // namespace blink
 

@@ -17,4 +17,9 @@ blink_modules_sources("cachestorage") {
     "InspectorCacheStorageAgent.cpp",
     "InspectorCacheStorageAgent.h",
   ]
+
+  jumbo_excluded_sources = [
+    # Using using statements in a colliding way (patch incoming)
+    "InspectorCacheStorageAgent.cpp",
+  ]
 }

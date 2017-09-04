@@ -32,12 +32,11 @@
 /**
  * @unrestricted
  */
-SDK.DOMNode = class extends SDK.SDKObject {
+SDK.DOMNode = class {
   /**
    * @param {!SDK.DOMModel} domModel
    */
   constructor(domModel) {
-    super(domModel.target());
     this._domModel = domModel;
   }
 
@@ -411,6 +410,15 @@ SDK.DOMNode = class extends SDK.SDKObject {
    */
   setAttributeValue(name, value, callback) {
     this._agent.setAttributeValue(this.id, name, value, this._domModel._markRevision(this, callback));
+  }
+
+  /**
+  * @param {string} name
+  * @param {string} value
+  * @return {!Promise<?Protocol.Error>}
+  */
+  setAttributeValuePromise(name, value) {
+    return new Promise(fulfill => this.setAttributeValue(name, value, fulfill));
   }
 
   /**
@@ -832,11 +840,11 @@ SDK.DOMNode = class extends SDK.SDKObject {
    * @param {!Protocol.Runtime.RemoteObjectId=} objectId
    */
   highlight(mode, objectId) {
-    this._domModel.highlightDOMNode(this.id, mode, undefined, objectId);
+    this._domModel.overlayModel().highlightDOMNode(this.id, mode, undefined, objectId);
   }
 
   highlightForTwoSeconds() {
-    this._domModel.highlightDOMNodeForTwoSeconds(this.id);
+    this._domModel.overlayModel().highlightDOMNodeForTwoSeconds(this.id);
   }
 
   /**
@@ -858,7 +866,7 @@ SDK.DOMNode = class extends SDK.SDKObject {
       if (error || !object)
         callback(null);
       else
-        callback(this.target().runtimeModel.createRemoteObject(object));
+        callback(this._domModel._runtimeModel.createRemoteObject(object));
     }
   }
 
@@ -949,7 +957,7 @@ SDK.DeferredDOMNode = class {
    * @param {number} backendNodeId
    */
   constructor(target, backendNodeId) {
-    this._domModel = SDK.DOMModel.fromTarget(target);
+    this._domModel = target.model(SDK.DOMModel);
     this._backendNodeId = backendNodeId;
   }
 
@@ -1003,7 +1011,7 @@ SDK.DeferredDOMNode = class {
 
   highlight() {
     if (this._domModel)
-      this._domModel.highlightDOMNode(undefined, undefined, this._backendNodeId);
+      this._domModel.overlayModel().highlightDOMNode(undefined, undefined, this._backendNodeId);
   }
 };
 
@@ -1060,61 +1068,35 @@ SDK.DOMModel = class extends SDK.SDKModel {
     this._attributeLoadNodeIds = {};
     target.registerDOMDispatcher(new SDK.DOMDispatcher(this));
 
-    this._inspectModeEnabled = false;
-
-    this._defaultHighlighter = new SDK.DefaultDOMNodeHighlighter(this._agent);
-    this._highlighter = this._defaultHighlighter;
+    this._runtimeModel = /** @type {!SDK.RuntimeModel} */ (target.model(SDK.RuntimeModel));
 
     this._agent.enable();
   }
 
   /**
-   * @param {!SDK.RemoteObject} object
+   * @return {!SDK.RuntimeModel}
    */
-  static highlightObjectAsDOMNode(object) {
-    var domModel = SDK.DOMModel.fromTarget(object.target());
-    if (domModel)
-      domModel.highlightDOMNode(undefined, undefined, undefined, object.objectId);
+  runtimeModel() {
+    return this._runtimeModel;
   }
 
   /**
-   * @return {!Array<!SDK.DOMModel>}
+   * @return {!SDK.CSSModel}
    */
-  static instances() {
-    var result = [];
-    for (var target of SDK.targetManager.targets()) {
-      var domModel = SDK.DOMModel.fromTarget(target);
-      if (domModel)
-        result.push(domModel);
-    }
-    return result;
+  cssModel() {
+    return /** @type {!SDK.CSSModel} */ (this.target().model(SDK.CSSModel));
   }
 
-  static hideDOMNodeHighlight() {
-    for (var domModel of SDK.DOMModel.instances())
-      domModel.highlightDOMNode(0);
-  }
-
-  static muteHighlight() {
-    SDK.DOMModel.hideDOMNodeHighlight();
-    SDK.DOMModel._highlightDisabled = true;
-  }
-
-  static unmuteHighlight() {
-    SDK.DOMModel._highlightDisabled = false;
+  /**
+   * @return {!SDK.OverlayModel}
+   */
+  overlayModel() {
+    return /** @type {!SDK.OverlayModel} */ (this.target().model(SDK.OverlayModel));
   }
 
   static cancelSearch() {
-    for (var domModel of SDK.DOMModel.instances())
+    for (var domModel of SDK.targetManager.models(SDK.DOMModel))
       domModel._cancelSearch();
-  }
-
-  /**
-   * @param {!SDK.Target} target
-   * @return {?SDK.DOMModel}
-   */
-  static fromTarget(target) {
-    return target.model(SDK.DOMModel);
   }
 
   /**
@@ -1201,7 +1183,7 @@ SDK.DOMModel = class extends SDK.SDKModel {
 
   /**
    * @param {string} path
-   * @param {function(?number)=} callback
+   * @param {function(?number)} callback
    */
   pushNodeByPathToFrontend(path, callback) {
     this._dispatchWhenDocumentAvailable(this._agent.pushNodeByPathToFrontend.bind(this._agent, path), callback);
@@ -1235,28 +1217,26 @@ SDK.DOMModel = class extends SDK.SDKModel {
   }
 
   /**
-   * @param {function(!T)=} callback
-   * @return {function(?Protocol.Error, !T=)|undefined}
+   * @param {function(?T)} callback
+   * @return {function(?Protocol.Error, !T=)}
    * @template T
    */
   _wrapClientCallback(callback) {
-    if (!callback)
-      return;
     /**
      * @param {?Protocol.Error} error
      * @param {!T=} result
      * @template T
      */
-    var wrapper = function(error, result) {
+    function wrapper(error, result) {
       // Caller is responsible for handling the actual error.
-      callback(error ? null : result);
-    };
+      callback(error ? null : result || null);
+    }
     return wrapper;
   }
 
   /**
-   * @param {function(function(?Protocol.Error, !T=)=)} func
-   * @param {function(!T)=} callback
+   * @param {function(function(?Protocol.Error, !T))} func
+   * @param {function(?T)} callback
    * @template T
    */
   _dispatchWhenDocumentAvailable(func, callback) {
@@ -1539,14 +1519,6 @@ SDK.DOMModel = class extends SDK.SDKModel {
   }
 
   /**
-   * @param {!Protocol.DOM.BackendNodeId} backendNodeId
-   */
-  _inspectNodeRequested(backendNodeId) {
-    var deferredNode = new SDK.DeferredDOMNode(this.target(), backendNodeId);
-    this.dispatchEventToListeners(SDK.DOMModel.Events.NodeInspected, deferredNode);
-  }
-
-  /**
    * @param {string} query
    * @param {boolean} includeUserAgentShadowDOM
    * @param {function(number)} searchCallback
@@ -1661,7 +1633,7 @@ SDK.DOMModel = class extends SDK.SDKModel {
   /**
    * @param {!Protocol.DOM.NodeId} nodeId
    * @param {string} selectors
-   * @param {function(?Protocol.DOM.NodeId)=} callback
+   * @param {function(?Protocol.DOM.NodeId)} callback
    */
   querySelector(nodeId, selectors, callback) {
     this._agent.querySelector(nodeId, selectors, this._wrapClientCallback(callback));
@@ -1670,111 +1642,10 @@ SDK.DOMModel = class extends SDK.SDKModel {
   /**
    * @param {!Protocol.DOM.NodeId} nodeId
    * @param {string} selectors
-   * @param {function(!Array.<!Protocol.DOM.NodeId>=)=} callback
+   * @param {function(?Array<!Protocol.DOM.NodeId>)} callback
    */
   querySelectorAll(nodeId, selectors, callback) {
     this._agent.querySelectorAll(nodeId, selectors, this._wrapClientCallback(callback));
-  }
-
-  /**
-   * @param {!Protocol.DOM.NodeId=} nodeId
-   * @param {string=} mode
-   * @param {!Protocol.DOM.BackendNodeId=} backendNodeId
-   * @param {!Protocol.Runtime.RemoteObjectId=} objectId
-   */
-  highlightDOMNode(nodeId, mode, backendNodeId, objectId) {
-    this.highlightDOMNodeWithConfig(nodeId, {mode: mode}, backendNodeId, objectId);
-  }
-
-  /**
-   * @param {!Protocol.DOM.NodeId=} nodeId
-   * @param {!{mode: (string|undefined), showInfo: (boolean|undefined), selectors: (string|undefined)}=} config
-   * @param {!Protocol.DOM.BackendNodeId=} backendNodeId
-   * @param {!Protocol.Runtime.RemoteObjectId=} objectId
-   */
-  highlightDOMNodeWithConfig(nodeId, config, backendNodeId, objectId) {
-    if (SDK.DOMModel._highlightDisabled)
-      return;
-    config = config || {mode: 'all', showInfo: undefined, selectors: undefined};
-    if (this._hideDOMNodeHighlightTimeout) {
-      clearTimeout(this._hideDOMNodeHighlightTimeout);
-      delete this._hideDOMNodeHighlightTimeout;
-    }
-    var highlightConfig = this._buildHighlightConfig(config.mode);
-    if (typeof config.showInfo !== 'undefined')
-      highlightConfig.showInfo = config.showInfo;
-    if (typeof config.selectors !== 'undefined')
-      highlightConfig.selectorList = config.selectors;
-    this._highlighter.highlightDOMNode(this.nodeForId(nodeId || 0), highlightConfig, backendNodeId, objectId);
-  }
-
-  /**
-   * @param {!Protocol.DOM.NodeId} nodeId
-   */
-  highlightDOMNodeForTwoSeconds(nodeId) {
-    this.highlightDOMNode(nodeId);
-    this._hideDOMNodeHighlightTimeout = setTimeout(SDK.DOMModel.hideDOMNodeHighlight.bind(SDK.DOMModel), 2000);
-  }
-
-  /**
-   * @param {!Protocol.Page.FrameId} frameId
-   */
-  highlightFrame(frameId) {
-    if (SDK.DOMModel._highlightDisabled)
-      return;
-    this._highlighter.highlightFrame(frameId);
-  }
-
-  /**
-   * @param {!Protocol.DOM.InspectMode} mode
-   * @param {function(?Protocol.Error)=} callback
-   */
-  setInspectMode(mode, callback) {
-    /**
-     * @this {SDK.DOMModel}
-     */
-    function onDocumentAvailable() {
-      this._inspectModeEnabled = mode !== Protocol.DOM.InspectMode.None;
-      this.dispatchEventToListeners(SDK.DOMModel.Events.InspectModeWillBeToggled, this);
-      this._highlighter.setInspectMode(mode, this._buildHighlightConfig(), callback);
-    }
-    this.requestDocument(onDocumentAvailable.bind(this));
-  }
-
-  /**
-   * @return {boolean}
-   */
-  inspectModeEnabled() {
-    return this._inspectModeEnabled;
-  }
-
-  /**
-   * @param {string=} mode
-   * @return {!Protocol.DOM.HighlightConfig}
-   */
-  _buildHighlightConfig(mode) {
-    mode = mode || 'all';
-    var showRulers = Common.moduleSetting('showMetricsRulers').get();
-    var highlightConfig = {showInfo: mode === 'all', showRulers: showRulers, showExtensionLines: showRulers};
-    if (mode === 'all' || mode === 'content')
-      highlightConfig.contentColor = Common.Color.PageHighlight.Content.toProtocolRGBA();
-
-    if (mode === 'all' || mode === 'padding')
-      highlightConfig.paddingColor = Common.Color.PageHighlight.Padding.toProtocolRGBA();
-
-    if (mode === 'all' || mode === 'border')
-      highlightConfig.borderColor = Common.Color.PageHighlight.Border.toProtocolRGBA();
-
-    if (mode === 'all' || mode === 'margin')
-      highlightConfig.marginColor = Common.Color.PageHighlight.Margin.toProtocolRGBA();
-
-    if (mode === 'all') {
-      highlightConfig.eventTargetColor = Common.Color.PageHighlight.EventTarget.toProtocolRGBA();
-      highlightConfig.shapeColor = Common.Color.PageHighlight.Shape.toProtocolRGBA();
-      highlightConfig.shapeMarginColor = Common.Color.PageHighlight.ShapeMargin.toProtocolRGBA();
-      highlightConfig.displayAsMaterial = true;
-    }
-    return highlightConfig;
   }
 
   /**
@@ -1817,19 +1688,13 @@ SDK.DOMModel = class extends SDK.SDKModel {
   }
 
   /**
-   * @param {?SDK.DOMNodeHighlighter} highlighter
-   */
-  setHighlighter(highlighter) {
-    this._highlighter = highlighter || this._defaultHighlighter;
-  }
-
-  /**
    * @param {number} x
    * @param {number} y
+   * @param {boolean} includeUserAgentShadowDOM
    * @param {function(?SDK.DOMNode)} callback
    */
-  nodeForLocation(x, y, callback) {
-    this._agent.getNodeForLocation(x, y, mycallback.bind(this));
+  nodeForLocation(x, y, includeUserAgentShadowDOM, callback) {
+    this._agent.getNodeForLocation(x, y, includeUserAgentShadowDOM, mycallback.bind(this));
 
     /**
      * @param {?Protocol.Error} error
@@ -1847,13 +1712,15 @@ SDK.DOMModel = class extends SDK.SDKModel {
 
   /**
    * @param {!SDK.RemoteObject} object
-   * @param {function(?SDK.DOMNode)} callback
+   * @return {!Promise<?SDK.DOMNode>}
    */
-  pushObjectAsNodeToFrontend(object, callback) {
-    if (object.isNode())
-      this.pushNodeToFrontend(object.objectId, callback);
-    else
-      callback(null);
+  pushObjectAsNodeToFrontend(object) {
+    return new Promise(fulfill => {
+      if (object.isNode())
+        this.pushNodeToFrontend(/** @type {string} */ (object.objectId), fulfill);
+      else
+        fulfill(null);
+    });
   }
 
   /**
@@ -1895,20 +1762,9 @@ SDK.DOMModel = class extends SDK.SDKModel {
       this._agent.enable(fulfill);
     }
   }
-
-  /**
-   * @param {!Protocol.DOM.NodeId} nodeId
-   */
-  nodeHighlightRequested(nodeId) {
-    var node = this.nodeForId(nodeId);
-    if (!node)
-      return;
-
-    this.dispatchEventToListeners(SDK.DOMModel.Events.NodeHighlightedInOverlay, node);
-  }
 };
 
-SDK.SDKModel.register(SDK.DOMModel, SDK.Target.Capability.DOM);
+SDK.SDKModel.register(SDK.DOMModel, SDK.Target.Capability.DOM, true);
 
 /** @enum {symbol} */
 SDK.DOMModel.Events = {
@@ -1917,13 +1773,10 @@ SDK.DOMModel.Events = {
   CharacterDataModified: Symbol('CharacterDataModified'),
   DOMMutated: Symbol('DOMMutated'),
   NodeInserted: Symbol('NodeInserted'),
-  NodeInspected: Symbol('NodeInspected'),
-  NodeHighlightedInOverlay: Symbol('NodeHighlightedInOverlay'),
   NodeRemoved: Symbol('NodeRemoved'),
   DocumentUpdated: Symbol('DocumentUpdated'),
   ChildNodeCountUpdated: Symbol('ChildNodeCountUpdated'),
   DistributedNodesChanged: Symbol('DistributedNodesChanged'),
-  InspectModeWillBeToggled: Symbol('InspectModeWillBeToggled'),
   MarkersChanged: Symbol('MarkersChanged')
 };
 
@@ -1945,14 +1798,6 @@ SDK.DOMDispatcher = class {
    */
   documentUpdated() {
     this._domModel._documentUpdated();
-  }
-
-  /**
-   * @override
-   * @param {!Protocol.DOM.NodeId} nodeId
-   */
-  inspectNodeRequested(nodeId) {
-    this._domModel._inspectNodeRequested(nodeId);
   }
 
   /**
@@ -2071,87 +1916,5 @@ SDK.DOMDispatcher = class {
    */
   distributedNodesUpdated(insertionPointId, distributedNodes) {
     this._domModel._distributedNodesUpdated(insertionPointId, distributedNodes);
-  }
-
-  /**
-   * @override
-   * @param {!Protocol.DOM.NodeId} nodeId
-   */
-  nodeHighlightRequested(nodeId) {
-    this._domModel.nodeHighlightRequested(nodeId);
-  }
-};
-
-/**
- * @interface
- */
-SDK.DOMNodeHighlighter = function() {};
-
-SDK.DOMNodeHighlighter.prototype = {
-  /**
-   * @param {?SDK.DOMNode} node
-   * @param {!Protocol.DOM.HighlightConfig} config
-   * @param {!Protocol.DOM.BackendNodeId=} backendNodeId
-   * @param {!Protocol.Runtime.RemoteObjectId=} objectId
-   */
-  highlightDOMNode(node, config, backendNodeId, objectId) {},
-
-  /**
-   * @param {!Protocol.DOM.InspectMode} mode
-   * @param {!Protocol.DOM.HighlightConfig} config
-   * @param {function(?Protocol.Error)=} callback
-   */
-  setInspectMode(mode, config, callback) {},
-
-  /**
-   * @param {!Protocol.Page.FrameId} frameId
-   */
-  highlightFrame(frameId) {}
-};
-
-/**
- * @implements {SDK.DOMNodeHighlighter}
- * @unrestricted
- */
-SDK.DefaultDOMNodeHighlighter = class {
-  /**
-   * @param {!Protocol.DOMAgent} agent
-   */
-  constructor(agent) {
-    this._agent = agent;
-  }
-
-  /**
-   * @override
-   * @param {?SDK.DOMNode} node
-   * @param {!Protocol.DOM.HighlightConfig} config
-   * @param {!Protocol.DOM.BackendNodeId=} backendNodeId
-   * @param {!Protocol.Runtime.RemoteObjectId=} objectId
-   */
-  highlightDOMNode(node, config, backendNodeId, objectId) {
-    if (objectId || node || backendNodeId)
-      this._agent.highlightNode(config, (objectId || backendNodeId) ? undefined : node.id, backendNodeId, objectId);
-    else
-      this._agent.hideHighlight();
-  }
-
-  /**
-   * @override
-   * @param {!Protocol.DOM.InspectMode} mode
-   * @param {!Protocol.DOM.HighlightConfig} config
-   * @param {function(?Protocol.Error)=} callback
-   */
-  setInspectMode(mode, config, callback) {
-    this._agent.setInspectMode(mode, config, callback);
-  }
-
-  /**
-   * @override
-   * @param {!Protocol.Page.FrameId} frameId
-   */
-  highlightFrame(frameId) {
-    this._agent.highlightFrame(
-        frameId, Common.Color.PageHighlight.Content.toProtocolRGBA(),
-        Common.Color.PageHighlight.ContentOutline.toProtocolRGBA());
   }
 };

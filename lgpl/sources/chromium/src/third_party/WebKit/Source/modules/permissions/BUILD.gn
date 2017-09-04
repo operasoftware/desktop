@@ -17,4 +17,9 @@ blink_modules_sources("permissions") {
     "WorkerNavigatorPermissions.cpp",
     "WorkerNavigatorPermissions.h",
   ]
+
+  jumbo_excluded_sources = [
+    # Using using statements in a colliding way.
+    "PermissionUtils.cpp",
+  ]
 }

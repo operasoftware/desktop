@@ -6,6 +6,8 @@
 
 #include "core/dom/Document.h"
 #include "core/dom/TaskRunnerHelper.h"
+#include "core/loader/WorkerFetchContext.h"
+#include "core/workers/WorkerGlobalScope.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 
 namespace blink {
@@ -13,64 +15,128 @@ namespace blink {
 class DocumentThreadableLoadingContext final : public ThreadableLoadingContext {
  public:
   explicit DocumentThreadableLoadingContext(Document& document)
-      : m_document(&document) {}
+      : document_(&document) {}
 
   ~DocumentThreadableLoadingContext() override = default;
 
-  bool isContextThread() const override {
-    return m_document->isContextThread();
+  bool IsContextThread() const override { return document_->IsContextThread(); }
+
+  ResourceFetcher* GetResourceFetcher() override {
+    DCHECK(IsContextThread());
+    return document_->Fetcher();
   }
 
-  ResourceFetcher* getResourceFetcher() override {
-    DCHECK(isContextThread());
-    return m_document->fetcher();
+  SecurityOrigin* GetSecurityOrigin() override {
+    DCHECK(IsContextThread());
+    return document_->GetSecurityOrigin();
   }
 
-  SecurityOrigin* getSecurityOrigin() override {
-    DCHECK(isContextThread());
-    return m_document->getSecurityOrigin();
+  bool IsSecureContext() const override {
+    DCHECK(IsContextThread());
+    return document_->IsSecureContext();
   }
 
-  bool isSecureContext() const override {
-    DCHECK(isContextThread());
-    return m_document->isSecureContext();
+  KURL FirstPartyForCookies() const override {
+    DCHECK(IsContextThread());
+    return document_->FirstPartyForCookies();
   }
 
-  KURL firstPartyForCookies() const override {
-    DCHECK(isContextThread());
-    return m_document->firstPartyForCookies();
+  String UserAgent(const KURL& url) const override {
+    DCHECK(IsContextThread());
+    return document_->UserAgent(url);
   }
 
-  String userAgent(const KURL& url) const override {
-    DCHECK(isContextThread());
-    return m_document->userAgent(url);
+  Document* GetLoadingDocument() override {
+    DCHECK(IsContextThread());
+    return document_.Get();
   }
 
-  Document* getLoadingDocument() override {
-    DCHECK(isContextThread());
-    return m_document.get();
+  RefPtr<WebTaskRunner> GetTaskRunner(TaskType type) override {
+    return TaskRunnerHelper::Get(type, document_.Get());
   }
 
-  RefPtr<WebTaskRunner> getTaskRunner(TaskType type) override {
-    return TaskRunnerHelper::get(type, m_document.get());
-  }
-
-  void recordUseCount(UseCounter::Feature feature) override {
-    UseCounter::count(m_document.get(), feature);
+  void RecordUseCount(UseCounter::Feature feature) override {
+    UseCounter::Count(document_.Get(), feature);
   }
 
   DEFINE_INLINE_VIRTUAL_TRACE() {
-    visitor->trace(m_document);
-    ThreadableLoadingContext::trace(visitor);
+    visitor->Trace(document_);
+    ThreadableLoadingContext::Trace(visitor);
   }
 
  private:
-  Member<Document> m_document;
+  Member<Document> document_;
 };
 
-ThreadableLoadingContext* ThreadableLoadingContext::create(Document& document) {
-  // For now this is the only default implementation.
+class WorkerThreadableLoadingContext : public ThreadableLoadingContext {
+ public:
+  explicit WorkerThreadableLoadingContext(
+      WorkerGlobalScope& worker_global_scope)
+      : worker_global_scope_(&worker_global_scope),
+        fetch_context_(worker_global_scope.GetFetchContext()) {}
+
+  ~WorkerThreadableLoadingContext() override = default;
+
+  bool IsContextThread() const override {
+    DCHECK(fetch_context_);
+    DCHECK(worker_global_scope_);
+    return worker_global_scope_->IsContextThread();
+  }
+
+  ResourceFetcher* GetResourceFetcher() override {
+    DCHECK(IsContextThread());
+    return fetch_context_->GetResourceFetcher();
+  }
+
+  SecurityOrigin* GetSecurityOrigin() override {
+    DCHECK(IsContextThread());
+    return worker_global_scope_->GetSecurityOrigin();
+  }
+
+  bool IsSecureContext() const override {
+    DCHECK(IsContextThread());
+    String error_message;
+    return worker_global_scope_->IsSecureContext(error_message);
+  }
+
+  KURL FirstPartyForCookies() const override {
+    DCHECK(IsContextThread());
+    return fetch_context_->FirstPartyForCookies();
+  }
+
+  String UserAgent(const KURL& url) const override {
+    DCHECK(IsContextThread());
+    return worker_global_scope_->UserAgent(url);
+  }
+
+  Document* GetLoadingDocument() override { return nullptr; }
+
+  RefPtr<WebTaskRunner> GetTaskRunner(TaskType type) override {
+    return fetch_context_->LoadingTaskRunner();
+  }
+
+  void RecordUseCount(UseCounter::Feature feature) override {
+    UseCounter::Count(worker_global_scope_, feature);
+  }
+
+  DEFINE_INLINE_VIRTUAL_TRACE() {
+    visitor->Trace(fetch_context_);
+    visitor->Trace(worker_global_scope_);
+    ThreadableLoadingContext::Trace(visitor);
+  }
+
+ private:
+  Member<WorkerGlobalScope> worker_global_scope_;
+  Member<WorkerFetchContext> fetch_context_;
+};
+
+ThreadableLoadingContext* ThreadableLoadingContext::Create(Document& document) {
   return new DocumentThreadableLoadingContext(document);
+}
+
+ThreadableLoadingContext* ThreadableLoadingContext::Create(
+    WorkerGlobalScope& worker_global_scope) {
+  return new WorkerThreadableLoadingContext(worker_global_scope);
 }
 
 }  // namespace blink

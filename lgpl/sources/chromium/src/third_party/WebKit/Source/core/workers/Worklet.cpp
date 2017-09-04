@@ -4,78 +4,66 @@
 
 #include "core/workers/Worklet.h"
 
-#include "bindings/core/v8/ScriptSourceCode.h"
-#include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/Document.h"
-#include "core/dom/ExceptionCode.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/frame/LocalFrame.h"
 #include "core/workers/WorkletGlobalScopeProxy.h"
-#include "wtf/WTF.h"
 
 namespace blink {
 
 Worklet::Worklet(LocalFrame* frame)
-    : ContextLifecycleObserver(frame->document()), m_frame(frame) {}
+    : ContextLifecycleObserver(frame->GetDocument()) {
+  DCHECK(IsMainThread());
+}
 
-ScriptPromise Worklet::import(ScriptState* scriptState, const String& url) {
-  DCHECK(isMainThread());
-  if (!getExecutionContext()) {
-    return ScriptPromise::rejectWithDOMException(
-        scriptState, DOMException::create(InvalidStateError,
-                                          "This frame is already detached"));
+// Implementation of the first half of the "addModule(moduleURL, options)"
+// algorithm:
+// https://drafts.css-houdini.org/worklets/#dom-worklet-addmodule
+ScriptPromise Worklet::addModule(ScriptState* script_state,
+                                 const String& module_url,
+                                 const WorkletOptions& options) {
+  DCHECK(IsMainThread());
+  if (!GetExecutionContext()) {
+    return ScriptPromise::RejectWithDOMException(
+        script_state, DOMException::Create(kInvalidStateError,
+                                           "This frame is already detached"));
   }
 
-  KURL scriptURL = getExecutionContext()->completeURL(url);
-  if (!scriptURL.isValid()) {
-    return ScriptPromise::rejectWithDOMException(
-        scriptState,
-        DOMException::create(SyntaxError, "'" + url + "' is not a valid URL."));
+  // Step 1: "Let promise be a new promise."
+  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  ScriptPromise promise = resolver->Promise();
+
+  // Step 2: "Let worklet be the current Worklet."
+  // |this| is the current Worklet.
+
+  // Step 3: "Let moduleURLRecord be the result of parsing the moduleURL
+  // argument relative to the relevant settings object of this."
+  KURL module_url_record = GetExecutionContext()->CompleteURL(module_url);
+
+  // Step 4: "If moduleURLRecord is failure, then reject promise with a
+  // "SyntaxError" DOMException and return promise."
+  if (!module_url_record.IsValid()) {
+    resolver->Reject(DOMException::Create(
+        kSyntaxError, "'" + module_url + "' is not a valid URL."));
+    return promise;
   }
 
-  if (!isInitialized())
-    initialize();
-
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
-  ScriptPromise promise = resolver->promise();
-
-  WorkletScriptLoader* scriptLoader =
-      WorkletScriptLoader::create(m_frame->document()->fetcher(), this);
-  m_loaderAndResolvers.set(scriptLoader, resolver);
-  scriptLoader->fetchScript(scriptURL);
+  // Step 5: "Return promise, and then continue running this algorithm in
+  // parallel."
+  // |kUnspecedLoading| is used here because this is a part of script module
+  // loading.
+  TaskRunnerHelper::Get(TaskType::kUnspecedLoading, script_state)
+      ->PostTask(
+          BLINK_FROM_HERE,
+          WTF::Bind(&Worklet::FetchAndInvokeScript, WrapPersistent(this),
+                    module_url_record, options, WrapPersistent(resolver)));
   return promise;
 }
 
-void Worklet::notifyWorkletScriptLoadingFinished(
-    WorkletScriptLoader* scriptLoader,
-    const ScriptSourceCode& sourceCode) {
-  DCHECK(isMainThread());
-  ScriptPromiseResolver* resolver = m_loaderAndResolvers.at(scriptLoader);
-  m_loaderAndResolvers.erase(scriptLoader);
-
-  if (!scriptLoader->wasScriptLoadSuccessful()) {
-    resolver->reject(DOMException::create(NetworkError));
-    return;
-  }
-
-  workletGlobalScopeProxy()->evaluateScript(sourceCode);
-  resolver->resolve();
-}
-
-void Worklet::contextDestroyed(ExecutionContext*) {
-  DCHECK(isMainThread());
-  if (isInitialized())
-    workletGlobalScopeProxy()->terminateWorkletGlobalScope();
-  for (const auto& scriptLoader : m_loaderAndResolvers.keys())
-    scriptLoader->cancel();
-  m_loaderAndResolvers.clear();
-  m_frame = nullptr;
-}
-
 DEFINE_TRACE(Worklet) {
-  visitor->trace(m_frame);
-  visitor->trace(m_loaderAndResolvers);
-  ContextLifecycleObserver::trace(visitor);
+  ContextLifecycleObserver::Trace(visitor);
 }
 
 }  // namespace blink

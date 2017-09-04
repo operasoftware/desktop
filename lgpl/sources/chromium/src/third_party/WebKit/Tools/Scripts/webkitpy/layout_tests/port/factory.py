@@ -32,7 +32,7 @@ import fnmatch
 import optparse
 import re
 
-from webkitpy.common.webkit_finder import WebKitFinder
+from webkitpy.common.path_finder import PathFinder
 
 
 class PortFactory(object):
@@ -143,8 +143,10 @@ def _check_configuration_and_target(host, options):
 
     gn_configuration = _read_configuration_from_gn(host, options)
     if gn_configuration:
-        if getattr(options, 'configuration') not in (None, gn_configuration):
-            raise ValueError('Configuration does not match the GN build args.')
+        expected_configuration = getattr(options, 'configuration')
+        if expected_configuration not in (None, gn_configuration):
+            raise ValueError('Configuration does not match the GN build args. '
+                             'Expected "%s" but got "%s".' % (gn_configuration, expected_configuration))
         options.configuration = gn_configuration
         return
 
@@ -166,7 +168,7 @@ def _read_configuration_from_gn(fs, options):
     build_directory = getattr(options, 'build_directory', None) or 'out'
 
     target = options.target
-    finder = WebKitFinder(fs)
+    finder = PathFinder(fs)
     path = fs.join(finder.chromium_base(), build_directory, target, 'args.gn')
     if not fs.exists(path):
         path = fs.join(finder.chromium_base(), build_directory, target, 'toolchain.ninja')

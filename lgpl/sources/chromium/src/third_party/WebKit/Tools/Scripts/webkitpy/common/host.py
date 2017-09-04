@@ -64,6 +64,7 @@ class Host(SystemHost):
 
     # We call this from the Host constructor, as it's one of the
     # earliest calls made for all webkitpy-based programs.
+    # TODO(qyearsley): Remove this in a separate clean-up CL.
     def _engage_awesome_locale_hacks(self):
         # To make life easier on our non-English users, we override
         # the locale environment variables inside webkitpy.
@@ -78,7 +79,7 @@ class Host(SystemHost):
 
     def git(self, path=None):
         if path:
-            return Git(cwd=path, executive=self.executive, filesystem=self.filesystem)
+            return Git(cwd=path, executive=self.executive, filesystem=self.filesystem, platform=self.platform)
         if not self._git:
-            self._git = Git(filesystem=self.filesystem, executive=self.executive)
+            self._git = Git(filesystem=self.filesystem, executive=self.executive, platform=self.platform)
         return self._git
