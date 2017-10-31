@@ -96,6 +96,8 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
   virtual void DetachedViewMuteStateChanged(bool) = 0;
   virtual void DetachedViewPlaybackStateToggled() = 0;
   virtual void DetachedViewActionTriggered(const WebString& action) = 0;
+  virtual void VRPlayerStateChanged(bool) = 0;
+  virtual void VRPlayerErrorOccured() = 0;
   virtual void CancelledRemotePlaybackRequest() = 0;
   virtual void RemotePlaybackStarted() = 0;
 
@@ -125,8 +127,11 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
   // that the controls are currently visible.
   virtual bool HasNativeControls() = 0;
 
+  // Returns the current display type of the media element.
+  virtual WebMediaPlayer::DisplayType DisplayType() const = 0;
+
  protected:
-  ~WebMediaPlayerClient() {}
+  ~WebMediaPlayerClient() = default;
 };
 
 }  // namespace blink

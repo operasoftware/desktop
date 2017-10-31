@@ -47,7 +47,7 @@ class Element;
 struct WebRect;
 
 // Provides access to some properties of a DOM element node.
-class WebElement : public WebNode {
+class BLINK_EXPORT WebElement : public WebNode {
  public:
   WebElement() : WebNode() {}
   WebElement(const WebElement& e) : WebNode(e) {}
@@ -58,49 +58,53 @@ class WebElement : public WebNode {
   }
   void Assign(const WebElement& e) { WebNode::Assign(e); }
 
-  static BLINK_EXPORT WebElement FromV8Value(v8::Isolate*,
-                                             v8::Local<v8::Value>);
+  static WebElement FromV8Value(v8::Isolate*,
+                                v8::Local<v8::Value>);
 
-  BLINK_EXPORT bool IsFormControlElement() const;
+  bool IsFormControlElement() const;
   // If the element is editable, for example by being contenteditable or being
   // an <input> that isn't readonly or disabled.
-  BLINK_EXPORT bool IsEditable() const;
+  bool IsEditable() const;
   // Returns the qualified name, which may contain a prefix and a colon.
-  BLINK_EXPORT WebString TagName() const;
+  WebString TagName() const;
   // Check if this element has the specified local tag name, and the HTML
   // namespace. Tag name matching is case-insensitive.
-  BLINK_EXPORT bool HasHTMLTagName(const WebString&) const;
-  BLINK_EXPORT bool HasAttribute(const WebString&) const;
-  BLINK_EXPORT WebString GetAttribute(const WebString&) const;
-  BLINK_EXPORT void SetAttribute(const WebString& name, const WebString& value);
-  BLINK_EXPORT WebString TextContent() const;
-  BLINK_EXPORT void RequestDetachedView();
-  BLINK_EXPORT void ReleaseDetachedView();
-  BLINK_EXPORT bool HasDetachedView();
-  BLINK_EXPORT bool IsVideoDetachAllowed();
-  BLINK_EXPORT void InvokeDetachedViewAction(const WebString&);
-  BLINK_EXPORT void UpdateDetachedViewSubtitle(const WebString&);
-  BLINK_EXPORT WebString InnerHTML() const;
-  BLINK_EXPORT WebString AttributeLocalName(unsigned index) const;
-  BLINK_EXPORT WebString AttributeValue(unsigned index) const;
-  BLINK_EXPORT unsigned AttributeCount() const;
+  bool HasHTMLTagName(const WebString&) const;
+  bool HasAttribute(const WebString&) const;
+  WebString GetAttribute(const WebString&) const;
+  void SetAttribute(const WebString& name, const WebString& value);
+  WebString TextContent() const;
+  void RequestDetachedView();
+  void ReleaseDetachedView();
+  bool HasDetachedView();
+  bool IsVideoDetachAllowed();
+  void InvokeDetachedViewAction(const WebString&);
+  void UpdateDetachedViewSubtitle(const WebString&);
+  void RequestVRPlayback();
+  void ExitVRPlayback();
+  bool HasVRPlayback();
+  bool IsVRPlaybackAllowed();
+  WebString InnerHTML() const;
+  WebString AttributeLocalName(unsigned index) const;
+  WebString AttributeValue(unsigned index) const;
+  unsigned AttributeCount() const;
 
   // If this element takes up space in the layout of the page.
-  BLINK_EXPORT bool HasNonEmptyLayoutSize() const;
+  bool HasNonEmptyLayoutSize() const;
 
   // Returns the bounds of the element in Visual Viewport. The bounds
   // have been adjusted to include any transformations, including page scale.
   // This function will update the layout if required.
-  BLINK_EXPORT WebRect BoundsInViewport() const;
+  WebRect BoundsInViewport() const;
 
   // Returns the image contents of this element or a null WebImage
   // if there isn't any.
-  BLINK_EXPORT WebImage ImageContents();
+  WebImage ImageContents();
 
 #if BLINK_IMPLEMENTATION
-  BLINK_EXPORT WebElement(Element*);
-  BLINK_EXPORT WebElement& operator=(Element*);
-  BLINK_EXPORT operator Element*() const;
+  WebElement(Element*);
+  WebElement& operator=(Element*);
+  operator Element*() const;
 #endif
 };
 

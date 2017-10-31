@@ -68,8 +68,6 @@ inline bool MatchesSVGSignature(const char* contents) {
   return !memcmp(contents, "<?xml", 5) || !memcmp(contents, "<svg", 4);
 }
 
-// This needs to be updated if we ever add a Matches*Signature() which requires
-// more characters.
 static constexpr size_t kLongestSignatureLength = sizeof("RIFF????WEBPVP") - 1;
 
 std::unique_ptr<ImageDecoder> ImageDecoder::Create(
@@ -78,8 +76,7 @@ std::unique_ptr<ImageDecoder> ImageDecoder::Create(
     AlphaOption alpha_option,
     const ColorBehavior& color_behavior,
     bool allow_svg) {
-  // We need at least kLongestSignatureLength bytes to run the signature
-  // matcher.
+  // At least kLongestSignatureLength bytes are needed to sniff the signature.
   if (data->size() < kLongestSignatureLength)
     return nullptr;
 
@@ -91,43 +88,32 @@ std::unique_ptr<ImageDecoder> ImageDecoder::Create(
   // (note: FastSharedBufferReader only makes a copy if the bytes are segmented)
   char buffer[kLongestSignatureLength];
   const FastSharedBufferReader fast_reader(data);
-  const ImageDecoder::SniffResult sniff_result = DetermineImageType(
-      fast_reader.GetConsecutiveData(0, kLongestSignatureLength, buffer),
-      kLongestSignatureLength);
+  const char* contents =
+      fast_reader.GetConsecutiveData(0, kLongestSignatureLength, buffer);
 
   std::unique_ptr<ImageDecoder> decoder;
-  switch (sniff_result) {
-    case SniffResult::JPEG:
-      decoder.reset(new JPEGImageDecoder(alpha_option, color_behavior,
-                                         max_decoded_bytes));
-      break;
-    case SniffResult::PNG:
-      decoder.reset(
-          new PNGImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
-      break;
-    case SniffResult::GIF:
-      decoder.reset(
-          new GIFImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
-      break;
-    case SniffResult::WEBP:
-      decoder.reset(new WEBPImageDecoder(alpha_option, color_behavior,
-                                         max_decoded_bytes));
-      break;
-    case SniffResult::ICO:
-      decoder.reset(
-          new ICOImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
-      break;
-    case SniffResult::BMP:
-      decoder.reset(
-          new BMPImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
-      break;
-    case SniffResult::SVG:
+  if (MatchesJPEGSignature(contents)) {
+    decoder.reset(
+        new JPEGImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
+  } else if (MatchesPNGSignature(contents)) {
+    decoder.reset(
+        new PNGImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
+  } else if (MatchesGIFSignature(contents)) {
+    decoder.reset(
+        new GIFImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
+  } else if (MatchesWebPSignature(contents)) {
+    decoder.reset(
+        new WEBPImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
+  } else if (MatchesICOSignature(contents) || MatchesCURSignature(contents)) {
+    decoder.reset(
+        new ICOImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
+  } else if (MatchesBMPSignature(contents)) {
+    decoder.reset(
+        new BMPImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
+  } else if (MatchesSVGSignature(contents)) {
       if (allow_svg)
         decoder.reset(
             new SVGImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
-      break;
-    case SniffResult::kInvalid:
-      break;
   }
 
   if (decoder)
@@ -138,27 +124,6 @@ std::unique_ptr<ImageDecoder> ImageDecoder::Create(
 
 bool ImageDecoder::HasSufficientDataToSniffImageType(const SharedBuffer& data) {
   return data.size() >= kLongestSignatureLength;
-}
-
-ImageDecoder::SniffResult ImageDecoder::DetermineImageType(const char* contents,
-                                                           size_t length) {
-  DCHECK_GE(length, kLongestSignatureLength);
-
-  if (MatchesJPEGSignature(contents))
-    return SniffResult::JPEG;
-  if (MatchesPNGSignature(contents))
-    return SniffResult::PNG;
-  if (MatchesGIFSignature(contents))
-    return SniffResult::GIF;
-  if (MatchesWebPSignature(contents))
-    return SniffResult::WEBP;
-  if (MatchesICOSignature(contents) || MatchesCURSignature(contents))
-    return SniffResult::ICO;
-  if (MatchesBMPSignature(contents))
-    return SniffResult::BMP;
-  if (MatchesSVGSignature(contents))
-    return SniffResult::SVG;
-  return SniffResult::kInvalid;
 }
 
 size_t ImageDecoder::FrameCount() {
@@ -195,11 +160,11 @@ ImageFrame* ImageDecoder::FrameBufferAtIndex(size_t index) {
 }
 
 bool ImageDecoder::FrameHasAlphaAtIndex(size_t index) const {
-  return !FrameIsCompleteAtIndex(index) ||
+  return !FrameIsReceivedAtIndex(index) ||
          frame_buffer_cache_[index].HasAlpha();
 }
 
-bool ImageDecoder::FrameIsCompleteAtIndex(size_t index) const {
+bool ImageDecoder::FrameIsReceivedAtIndex(size_t index) const {
   // Animated images override this method to return the status based on the data
   // received for the queried frame.
   return IsAllDataReceived();
@@ -426,12 +391,12 @@ void ImageDecoder::UpdateAggressivePurging(size_t index) {
   // As we decode we will learn the total number of frames, and thus total
   // possible image memory used.
 
-  const uint64_t frame_area = DecodedSize().Area();
-  const uint64_t frame_memory_usage = frame_area * 4;  // 4 bytes per pixel
-  if (frame_memory_usage / 4 != frame_area) {          // overflow occurred
-    purge_aggressively_ = true;
-    return;
-  }
+  const uint64_t frame_memory_usage =
+      DecodedSize().Area() * 4;  // 4 bytes per pixel
+
+  // This condition never fails in the current code. Our existing image decoders
+  // parse for the image size and SetFailed() if that size overflows
+  DCHECK_EQ(frame_memory_usage / 4, DecodedSize().Area());
 
   const uint64_t total_memory_usage = frame_memory_usage * index;
   if (total_memory_usage / frame_memory_usage != index) {  // overflow occurred

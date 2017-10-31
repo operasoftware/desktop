@@ -32,7 +32,7 @@ namespace blink {
 // 'drawing' items) and operations to be performed when rendering this content
 // (stored in 'clip', 'transform', 'filter', etc...). For more details see:
 // http://dev.chromium.org/blink/slimming-paint.
-class WebDisplayItemList {
+class BLINK_PLATFORM_EXPORT WebDisplayItemList {
  public:
   virtual ~WebDisplayItemList() {}
 
@@ -49,6 +49,8 @@ class WebDisplayItemList {
   virtual void AppendEndFloatClipItem() {}
   virtual void AppendTransformItem(const SkMatrix44&) {}
   virtual void AppendEndTransformItem() {}
+  // If bounds is provided, the content will be explicitly clipped to those
+  // bounds.
   virtual void AppendCompositingItem(float opacity,
                                      SkBlendMode,
                                      SkRect* bounds,
@@ -66,8 +68,6 @@ class WebDisplayItemList {
   virtual void AppendScrollItem(const WebSize& scroll_offset,
                                 ScrollContainerId) {}
   virtual void AppendEndScrollItem() {}
-
-  virtual void SetIsSuitableForGpuRasterization(bool is_suitable) {}
 };
 
 }  // namespace blink

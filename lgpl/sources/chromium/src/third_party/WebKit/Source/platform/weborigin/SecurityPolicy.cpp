@@ -93,7 +93,7 @@ Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
                                           const String& referrer) {
   ReferrerPolicy referrer_policy_no_default = referrer_policy;
   if (referrer_policy_no_default == kReferrerPolicyDefault) {
-    if (RuntimeEnabledFeatures::reducedReferrerGranularityEnabled()) {
+    if (RuntimeEnabledFeatures::ReducedReferrerGranularityEnabled()) {
       referrer_policy_no_default =
           kReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin;
     } else {
@@ -104,7 +104,7 @@ Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
     return Referrer(Referrer::NoReferrer(), referrer_policy_no_default);
   DCHECK(!referrer.IsEmpty());
 
-  KURL referrer_url = KURL(KURL(), referrer);
+  KURL referrer_url = KURL(NullURL(), referrer);
   String scheme = referrer_url.Protocol();
   if (!SchemeRegistry::ShouldTreatURLSchemeAsAllowedForReferrer(scheme))
     return Referrer(Referrer::NoReferrer(), referrer_policy_no_default);
@@ -133,9 +133,23 @@ Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
       }
       break;
     }
+    case kReferrerPolicySameOrigin: {
+      RefPtr<SecurityOrigin> referrer_origin =
+          SecurityOrigin::Create(referrer_url);
+      RefPtr<SecurityOrigin> url_origin = SecurityOrigin::Create(url);
+      if (!url_origin->IsSameSchemeHostPort(referrer_origin.Get())) {
+        return Referrer(Referrer::NoReferrer(), referrer_policy_no_default);
+      }
+      return Referrer(referrer, referrer_policy_no_default);
+    }
+    case kReferrerPolicyStrictOrigin: {
+      String origin = SecurityOrigin::Create(referrer_url)->ToString();
+      return Referrer(ShouldHideReferrer(url, referrer_url)
+                          ? Referrer::NoReferrer()
+                          : origin + "/",
+                      referrer_policy_no_default);
+    }
     case kReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin: {
-      // If the flag is enabled, and we're dealing with a cross-origin request,
-      // strip it.  Otherwise fall through to NoReferrerWhenDowngrade behavior.
       RefPtr<SecurityOrigin> referrer_origin =
           SecurityOrigin::Create(referrer_url);
       RefPtr<SecurityOrigin> url_origin = SecurityOrigin::Create(url);
@@ -161,14 +175,14 @@ Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
 }
 
 void SecurityPolicy::AddOriginTrustworthyWhiteList(
-    PassRefPtr<SecurityOrigin> origin) {
+    const SecurityOrigin& origin) {
 #if DCHECK_IS_ON()
   // Must be called before we start other threads.
   DCHECK(WTF::IsBeforeThreadCreated());
 #endif
-  if (origin->IsUnique())
+  if (origin.IsUnique())
     return;
-  TrustworthyOriginSet().insert(origin->ToRawString());
+  TrustworthyOriginSet().insert(origin.ToRawString());
 }
 
 bool SecurityPolicy::IsOriginWhiteListedTrustworthy(
@@ -296,6 +310,18 @@ bool SecurityPolicy::ReferrerPolicyFromString(
     *result = kReferrerPolicyOriginWhenCrossOrigin;
     return true;
   }
+  if (EqualIgnoringASCIICase(policy, "same-origin")) {
+    *result = kReferrerPolicySameOrigin;
+    return true;
+  }
+  if (EqualIgnoringASCIICase(policy, "strict-origin")) {
+    *result = kReferrerPolicyStrictOrigin;
+    return true;
+  }
+  if (EqualIgnoringASCIICase(policy, "strict-origin-when-cross-origin")) {
+    *result = kReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin;
+    return true;
+  }
   if (EqualIgnoringASCIICase(policy, "no-referrer-when-downgrade") ||
       (support_legacy_keywords && EqualIgnoringASCIICase(policy, "default"))) {
     *result = kReferrerPolicyNoReferrerWhenDowngrade;
@@ -330,7 +356,7 @@ bool SecurityPolicy::ReferrerPolicyFromHeaderValue(
 
 #if defined(OPERA_DESKTOP)
 void SecurityPolicy::AddOriginAsFirstPartyForSubframes(
-    PassRefPtr<SecurityOrigin> origin) {
+    RefPtr<SecurityOrigin> origin) {
 #if DCHECK_IS_ON()
   // Must be called before we start other threads.
   DCHECK(WTF::IsBeforeThreadCreated());

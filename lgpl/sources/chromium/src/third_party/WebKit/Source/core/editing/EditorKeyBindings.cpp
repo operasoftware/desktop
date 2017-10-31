@@ -41,13 +41,13 @@ bool Editor::HandleEditingKeyboardEvent(KeyboardEvent* evt) {
     return false;
   // do not treat this as text input if it's a system key event
   bool is_system_key = key_event->is_system_key;
-#if OS(WIN)
+#if defined(OS_WIN)
   // Do not treat Alt[+Shift]+Backspace as a system key to make it an Undo/Redo
   // command
   if ((key_event->GetModifiers() & WebInputEvent::kAltKey) &&
       key_event->windows_key_code == blink::VKEY_BACK)
     is_system_key = false;
-#endif  // OS(WIN)
+#endif  // OS_WIN
   if (is_system_key)
     return false;
 

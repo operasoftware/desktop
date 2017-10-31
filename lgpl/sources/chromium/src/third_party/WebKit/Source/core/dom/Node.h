@@ -33,7 +33,6 @@
 #include "core/dom/TreeScope.h"
 #include "core/editing/EditingBoundary.h"
 #include "core/events/EventTarget.h"
-#include "core/style/ComputedStyle.h"
 #include "core/style/ComputedStyleConstants.h"
 #include "platform/bindings/TraceWrapperMember.h"
 #include "platform/geometry/LayoutRect.h"
@@ -44,6 +43,7 @@
 
 namespace blink {
 
+class ComputedStyle;
 class ContainerNode;
 class Document;
 class Element;
@@ -58,7 +58,6 @@ class EventDispatchHandlingState;
 class NodeList;
 class NodeListsNodeData;
 class NodeOrString;
-class NodeRenderingData;
 class NodeRareData;
 class QualifiedName;
 class RegisteredEventListener;
@@ -72,9 +71,8 @@ template <typename NodeType>
 class StaticNodeTypeList;
 using StaticNodeList = StaticNodeTypeList<Node>;
 class StyleChangeReasonForTracing;
-class Text;
 class WebMouseEvent;
-class WebPluginContainerBase;
+class WebPluginContainerImpl;
 
 const int kNodeStyleChangeShift = 18;
 const int kNodeCustomElementShift = 20;
@@ -105,8 +103,8 @@ enum class SelectionStartPolicy {
 };
 
 enum class SlotChangeType {
-  kInitial,
-  kChained,
+  kSignalSlotChangeEvent,
+  kSuppressSlotChangeEvent,
 };
 
 class NodeRenderingData {
@@ -114,10 +112,8 @@ class NodeRenderingData {
 
  public:
   explicit NodeRenderingData(LayoutObject* layout_object,
-                             RefPtr<ComputedStyle> non_attached_style)
-      : layout_object_(layout_object),
-        non_attached_style_(non_attached_style) {}
-  ~NodeRenderingData() { CHECK(!layout_object_); }
+                             RefPtr<ComputedStyle> non_attached_style);
+  ~NodeRenderingData();
 
   LayoutObject* GetLayoutObject() const { return layout_object_; }
   void SetLayoutObject(LayoutObject* layout_object) {
@@ -128,16 +124,9 @@ class NodeRenderingData {
   ComputedStyle* GetNonAttachedStyle() const {
     return non_attached_style_.Get();
   }
-  void SetNonAttachedStyle(RefPtr<ComputedStyle> non_attached_style) {
-    DCHECK_NE(&SharedEmptyData(), this);
-    non_attached_style_ = non_attached_style;
-  }
+  void SetNonAttachedStyle(RefPtr<ComputedStyle> non_attached_style);
 
-  static NodeRenderingData& SharedEmptyData() {
-    DEFINE_STATIC_LOCAL(NodeRenderingData, shared_empty_data,
-                        (nullptr, nullptr));
-    return shared_empty_data;
-  }
+  static NodeRenderingData& SharedEmptyData();
   bool IsSharedEmptyData() { return this == &SharedEmptyData(); }
 
  private:
@@ -354,13 +343,13 @@ class CORE_EXPORT Node : public EventTarget {
   bool IsTreeScope() const;
   bool IsDocumentFragment() const { return GetFlag(kIsDocumentFragmentFlag); }
   bool IsShadowRoot() const { return IsDocumentFragment() && IsTreeScope(); }
-  bool IsInsertionPoint() const { return GetFlag(kIsInsertionPointFlag); }
+  bool IsV0InsertionPoint() const { return GetFlag(kIsV0InsertionPointFlag); }
 
   bool CanParticipateInFlatTree() const;
-  bool IsActiveSlotOrActiveInsertionPoint() const;
+  bool IsActiveSlotOrActiveV0InsertionPoint() const;
   // A re-distribution across v0 and v1 shadow trees is not supported.
   bool IsSlotable() const {
-    return IsTextNode() || (IsElementNode() && !IsInsertionPoint());
+    return IsTextNode() || (IsElementNode() && !IsV0InsertionPoint());
   }
   AtomicString SlotName() const;
 
@@ -643,8 +632,14 @@ class CORE_EXPORT Node : public EventTarget {
   struct AttachContext {
     STACK_ALLOCATED();
     ComputedStyle* resolved_style = nullptr;
+    // Keep track of previously attached in-flow box during attachment so that
+    // we don't need to backtrack past display:none/contents and out of flow
+    // objects when we need to do whitespace re-attachment.
+    LayoutObject* previous_in_flow = nullptr;
     bool performing_reattach = false;
     bool clear_invalidation = false;
+    // True if the previous_in_flow member is up-to-date, even if it is nullptr.
+    bool use_previous_in_flow = false;
 
     AttachContext() {}
   };
@@ -652,15 +647,19 @@ class CORE_EXPORT Node : public EventTarget {
   // Attaches this node to the layout tree. This calculates the style to be
   // applied to the node and creates an appropriate LayoutObject which will be
   // inserted into the tree (except when the style has display: none). This
-  // makes the node visible in the FrameView.
-  virtual void AttachLayoutTree(const AttachContext& = AttachContext());
+  // makes the node visible in the LocalFrameView.
+  virtual void AttachLayoutTree(AttachContext&);
 
   // Detaches the node from the layout tree, making it invisible in the rendered
   // view. This method will remove the node's layout object from the layout tree
   // and delete it.
   virtual void DetachLayoutTree(const AttachContext& = AttachContext());
 
-  void ReattachLayoutTree(const AttachContext& = AttachContext());
+  void ReattachLayoutTree() {
+    AttachContext context;
+    ReattachLayoutTree(context);
+  }
+  void ReattachLayoutTree(AttachContext&);
   void LazyReattachIfAttached();
 
   // Returns true if recalcStyle should be called on the object, if there is
@@ -798,6 +797,9 @@ class CORE_EXPORT Node : public EventTarget {
   // Perform the default action for an event.
   virtual void DefaultEventHandler(Event*);
   virtual void WillCallDefaultEventHandler(const Event&);
+  // Should return true if this Node has activation behavior.
+  // https://dom.spec.whatwg.org/#eventtarget-activation-behavior
+  virtual bool HasActivationBehavior() const;
 
   EventTargetData* GetEventTargetData() override;
   EventTargetData& EnsureEventTargetData() override;
@@ -829,14 +831,14 @@ class CORE_EXPORT Node : public EventTarget {
 
   void CheckSlotChange(SlotChangeType);
   void CheckSlotChangeAfterInserted() {
-    CheckSlotChange(SlotChangeType::kInitial);
+    CheckSlotChange(SlotChangeType::kSignalSlotChangeEvent);
   }
   void CheckSlotChangeBeforeRemoved() {
-    CheckSlotChange(SlotChangeType::kInitial);
+    CheckSlotChange(SlotChangeType::kSignalSlotChangeEvent);
   }
 
-  // If the node is a plugin, then this returns its WebPluginContainerBase.
-  WebPluginContainerBase* GetWebPluginContainerBase() const;
+  // If the node is a plugin, then this returns its WebPluginContainer.
+  WebPluginContainerImpl* GetWebPluginContainer() const;
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -853,7 +855,7 @@ class CORE_EXPORT Node : public EventTarget {
     kIsHTMLFlag = 1 << 4,
     kIsSVGFlag = 1 << 5,
     kIsDocumentFragmentFlag = 1 << 6,
-    kIsInsertionPointFlag = 1 << 7,
+    kIsV0InsertionPointFlag = 1 << 7,
 
     // Changes based on if the element should be treated like a link,
     // ex. When setting the href attribute on an <a>.
@@ -914,8 +916,8 @@ class CORE_EXPORT Node : public EventTarget {
   enum ConstructionType {
     kCreateOther = kDefaultNodeFlags,
     kCreateText = kDefaultNodeFlags | kIsTextFlag,
-    kCreateContainer = kDefaultNodeFlags | kChildNeedsStyleRecalcFlag |
-                       kIsContainerFlag,
+    kCreateContainer =
+        kDefaultNodeFlags | kChildNeedsStyleRecalcFlag | kIsContainerFlag,
     kCreateElement = kCreateContainer | kIsElementFlag,
     kCreateShadowRoot =
         kCreateContainer | kIsDocumentFragmentFlag | kIsInShadowTreeFlag,
@@ -923,7 +925,7 @@ class CORE_EXPORT Node : public EventTarget {
     kCreateHTMLElement = kCreateElement | kIsHTMLFlag,
     kCreateSVGElement = kCreateElement | kIsSVGFlag,
     kCreateDocument = kCreateContainer | kIsConnectedFlag,
-    kCreateInsertionPoint = kCreateHTMLElement | kIsInsertionPointFlag,
+    kCreateV0InsertionPoint = kCreateHTMLElement | kIsV0InsertionPointFlag,
     kCreateEditingText = kCreateText | kHasNameOrIsEditingTextFlag,
   };
 
@@ -938,8 +940,6 @@ class CORE_EXPORT Node : public EventTarget {
   void RemovedEventListener(const AtomicString& event_type,
                             const RegisteredEventListener&) override;
   DispatchEventResult DispatchEventInternal(Event*) override;
-
-  static void ReattachWhitespaceSiblingsIfNeeded(Text* start);
 
   bool HasRareData() const { return GetFlag(kHasRareDataFlag); }
 

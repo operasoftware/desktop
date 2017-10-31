@@ -36,15 +36,15 @@
 #include "core/css/CSSMarkup.h"
 #include "core/css/StylePropertySet.h"
 #include "core/dom/DocumentFragment.h"
+#include "core/dom/ElementShadow.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/dom/FlatTreeTraversal.h"
 #include "core/dom/NodeComputedStyle.h"
 #include "core/dom/NodeTraversal.h"
+#include "core/dom/ShadowRoot.h"
 #include "core/dom/StyleChangeReason.h"
 #include "core/dom/Text.h"
-#include "core/dom/shadow/ElementShadow.h"
-#include "core/dom/shadow/FlatTreeTraversal.h"
-#include "core/dom/shadow/ShadowRoot.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/editing/spellcheck/SpellChecker.h"
@@ -59,8 +59,8 @@
 #include "core/html/HTMLBRElement.h"
 #include "core/html/HTMLDimension.h"
 #include "core/html/HTMLFormElement.h"
+#include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/HTMLInputElement.h"
-#include "core/html/HTMLMenuElement.h"
 #include "core/html/HTMLTemplateElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/layout/LayoutBoxModelObject.h"
@@ -198,11 +198,11 @@ void HTMLElement::MapLanguageAttributeToLocale(const AtomicString& value,
 
     // FIXME: Remove the following UseCounter code when we collect enough
     // data.
-    UseCounter::Count(GetDocument(), UseCounter::kLangAttribute);
+    UseCounter::Count(GetDocument(), WebFeature::kLangAttribute);
     if (isHTMLHtmlElement(*this))
-      UseCounter::Count(GetDocument(), UseCounter::kLangAttributeOnHTML);
+      UseCounter::Count(GetDocument(), WebFeature::kLangAttributeOnHTML);
     else if (isHTMLBodyElement(*this))
-      UseCounter::Count(GetDocument(), UseCounter::kLangAttributeOnBody);
+      UseCounter::Count(GetDocument(), WebFeature::kLangAttributeOnBody);
     String html_language = value.GetString();
     size_t first_separator = html_language.find('-');
     if (first_separator != kNotFound)
@@ -214,9 +214,10 @@ void HTMLElement::MapLanguageAttributeToLocale(const AtomicString& value,
     first_separator = ui_language.find('_');
     if (first_separator != kNotFound)
       ui_language = ui_language.Left(first_separator);
-    if (!DeprecatedEqualIgnoringCase(html_language, ui_language))
+    if (!DeprecatedEqualIgnoringCase(html_language, ui_language)) {
       UseCounter::Count(GetDocument(),
-                        UseCounter::kLangAttributeDoesNotMatchToUILocale);
+                        WebFeature::kLangAttributeDoesNotMatchToUILocale);
+    }
   } else {
     // The empty string means the language is explicitly unknown.
     AddPropertyToPresentationAttributeStyle(style, CSSPropertyWebkitLocale,
@@ -257,10 +258,11 @@ void HTMLElement::CollectStyleForPresentationAttribute(
                                               CSSValueBreakWord);
       AddPropertyToPresentationAttributeStyle(style, CSSPropertyWebkitLineBreak,
                                               CSSValueAfterWhiteSpace);
-      UseCounter::Count(GetDocument(), UseCounter::kContentEditableTrue);
-      if (HasTagName(htmlTag))
+      UseCounter::Count(GetDocument(), WebFeature::kContentEditableTrue);
+      if (HasTagName(htmlTag)) {
         UseCounter::Count(GetDocument(),
-                          UseCounter::kContentEditableTrueOnHTML);
+                          WebFeature::kContentEditableTrueOnHTML);
+      }
     } else if (DeprecatedEqualIgnoringCase(value, "plaintext-only")) {
       AddPropertyToPresentationAttributeStyle(
           style, CSSPropertyWebkitUserModify, CSSValueReadWritePlaintextOnly);
@@ -269,7 +271,7 @@ void HTMLElement::CollectStyleForPresentationAttribute(
       AddPropertyToPresentationAttributeStyle(style, CSSPropertyWebkitLineBreak,
                                               CSSValueAfterWhiteSpace);
       UseCounter::Count(GetDocument(),
-                        UseCounter::kContentEditablePlainTextOnly);
+                        WebFeature::kContentEditablePlainTextOnly);
     } else if (DeprecatedEqualIgnoringCase(value, "false")) {
       AddPropertyToPresentationAttributeStyle(
           style, CSSPropertyWebkitUserModify, CSSValueReadOnly);
@@ -278,7 +280,7 @@ void HTMLElement::CollectStyleForPresentationAttribute(
     AddPropertyToPresentationAttributeStyle(style, CSSPropertyDisplay,
                                             CSSValueNone);
   } else if (name == draggableAttr) {
-    UseCounter::Count(GetDocument(), UseCounter::kDraggableAttribute);
+    UseCounter::Count(GetDocument(), WebFeature::kDraggableAttribute);
     if (DeprecatedEqualIgnoringCase(value, "true")) {
       AddPropertyToPresentationAttributeStyle(style, CSSPropertyWebkitUserDrag,
                                               CSSValueElement);
@@ -319,7 +321,7 @@ const AtomicString& HTMLElement::EventNameForAttributeName(
   if (!attr_name.NamespaceURI().IsNull())
     return g_null_atom;
 
-  if (!attr_name.LocalName().StartsWith("on", kTextCaseASCIIInsensitive))
+  if (!attr_name.LocalName().StartsWithIgnoringASCIICase("on"))
     return g_null_atom;
 
   typedef HashMap<AtomicString, AtomicString> StringToStringMap;
@@ -387,6 +389,8 @@ const AtomicString& HTMLElement::EventNameForAttributeName(
          EventTypeNames::operadetachedviewchange},
         {onoperadetachedviewcontrolAttr,
          EventTypeNames::operadetachedviewcontrol},
+        {onoperavrplayerchangeAttr, EventTypeNames::operavrplayerchange},
+        {onoperavrplayererrorAttr, EventTypeNames::operavrplayererror},
         {onpasteAttr, EventTypeNames::paste},
         {onpauseAttr, EventTypeNames::pause},
         {onplayAttr, EventTypeNames::play},
@@ -408,7 +412,6 @@ const AtomicString& HTMLElement::EventNameForAttributeName(
         {onseekingAttr, EventTypeNames::seeking},
         {onselectAttr, EventTypeNames::select},
         {onselectstartAttr, EventTypeNames::selectstart},
-        {onshowAttr, EventTypeNames::show},
         {onstalledAttr, EventTypeNames::stalled},
         {onsubmitAttr, EventTypeNames::submit},
         {onsuspendAttr, EventTypeNames::suspend},
@@ -477,7 +480,15 @@ void HTMLElement::ParseAttribute(const AttributeModificationParams& params) {
   } else if (params.name == langAttr) {
     PseudoStateChanged(CSSSelector::kPseudoLang);
   } else if (params.name == inertAttr) {
-    UseCounter::Count(GetDocument(), UseCounter::kInertAttribute);
+    UseCounter::Count(GetDocument(), WebFeature::kInertAttribute);
+    UpdateDistribution();
+    if (GetDocument().GetFrame()) {
+      GetDocument().GetFrame()->SetIsInert(
+          GetDocument().LocalOwner() && GetDocument().LocalOwner()->IsInert());
+    }
+  } else if (params.name == nonceAttr) {
+    if (params.new_value != g_empty_atom)
+      setNonce(params.new_value);
   } else {
     const AtomicString& event_name = EventNameForAttributeName(params.name);
     if (!event_name.IsNull()) {
@@ -932,13 +943,11 @@ Node::InsertionNotificationRequest HTMLElement::InsertedInto(
   // updated.
   Element::InsertedInto(insertion_point);
 
-  if (hasAttribute(nonceAttr) && getAttribute(nonceAttr) != g_empty_atom) {
-    setNonce(getAttribute(nonceAttr));
-    if (RuntimeEnabledFeatures::hideNonceContentAttributeEnabled() &&
-        InActiveDocument() &&
-        GetDocument().GetContentSecurityPolicy()->HasHeaderDeliveredPolicy()) {
-      setAttribute(nonceAttr, g_empty_atom);
-    }
+  if (RuntimeEnabledFeatures::HideNonceContentAttributeEnabled() &&
+      FastHasAttribute(nonceAttr) &&
+      GetDocument().GetContentSecurityPolicy()->HasHeaderDeliveredPolicy() &&
+      InActiveDocument()) {
+    setAttribute(nonceAttr, g_empty_atom);
   }
 
   if (IsContentEditableElement(this) && insertion_point->isConnected()) {
@@ -975,7 +984,7 @@ void HTMLElement::AddHTMLLengthToStyle(MutableStylePropertySet* style,
     return;
   if (property_id == CSSPropertyWidth &&
       (dimension.IsPercentage() || dimension.IsRelative())) {
-    UseCounter::Count(GetDocument(), UseCounter::kHTMLElementDeprecatedWidth);
+    UseCounter::Count(GetDocument(), WebFeature::kHTMLElementDeprecatedWidth);
   }
   if (dimension.IsRelative())
     return;
@@ -1102,49 +1111,6 @@ bool HTMLElement::IsInteractiveContent() const {
   return false;
 }
 
-HTMLMenuElement* HTMLElement::AssignedContextMenu() const {
-  if (HTMLMenuElement* menu = contextMenu())
-    return menu;
-
-  return parentElement() && parentElement()->IsHTMLElement()
-             ? ToHTMLElement(parentElement())->AssignedContextMenu()
-             : nullptr;
-}
-
-HTMLMenuElement* HTMLElement::contextMenu() const {
-  const AtomicString& context_menu_id(FastGetAttribute(contextmenuAttr));
-  if (context_menu_id.IsNull())
-    return nullptr;
-
-  Element* element = GetTreeScope().getElementById(context_menu_id);
-  // Not checking if the menu element is of type "popup".
-  // Ignoring menu element type attribute is intentional according to the
-  // standard.
-  return isHTMLMenuElement(element) ? toHTMLMenuElement(element) : nullptr;
-}
-
-void HTMLElement::setContextMenu(HTMLMenuElement* context_menu) {
-  if (!context_menu) {
-    setAttribute(contextmenuAttr, "");
-    return;
-  }
-
-  // http://www.whatwg.org/specs/web-apps/current-work/multipage/infrastructure.html#reflecting-content-attributes-in-idl-attributes
-  // On setting, if the given element has an id attribute, and has the same home
-  // subtree as the element of the attribute being set, and the given element is
-  // the first element in that home subtree whose ID is the value of that id
-  // attribute, then the content attribute must be set to the value of that id
-  // attribute.  Otherwise, the content attribute must be set to the empty
-  // string.
-  const AtomicString& context_menu_id(context_menu->FastGetAttribute(idAttr));
-
-  if (!context_menu_id.IsNull() &&
-      context_menu == GetTreeScope().getElementById(context_menu_id))
-    setAttribute(contextmenuAttr, context_menu_id);
-  else
-    setAttribute(contextmenuAttr, "");
-}
-
 void HTMLElement::DefaultEventHandler(Event* event) {
   if (event->type() == EventTypeNames::keypress && event->IsKeyboardEvent()) {
     HandleKeypressEvent(ToKeyboardEvent(event));
@@ -1158,7 +1124,7 @@ void HTMLElement::DefaultEventHandler(Event* event) {
     if (!frame)
       return;
 
-    frame->Loader().Client()->DidUpdateCurrentHistoryItem();
+    frame->Client()->DidUpdateCurrentHistoryItem();
   }
 
   Element::DefaultEventHandler(event);

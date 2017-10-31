@@ -56,7 +56,7 @@ class CORE_EXPORT DOMSelection final : public GarbageCollected<DOMSelection>,
   }
 
   void ClearTreeScope();
-  ClientRect* GetBoundingRect();
+  DOMRect* GetBoundingRect();
 
   // Safari Selection Object API
   // These methods return the valid equivalents of internal editing positions.

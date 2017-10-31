@@ -138,6 +138,12 @@ class WebMediaPlayer {
   virtual void UpdateDetachedViewSubtitle(const WebString&) {}
   virtual bool HasDetachedView() { return false; }
   virtual bool SupportsDetachedView() const { return false; }
+  virtual void RequestVRPlayback() {}
+  virtual void ExitVRPlayback(bool release_vr_player) {}
+  virtual bool HasVRPlayback() const { return false; }
+  virtual bool SupportsVRPlayback() const { return false; }
+  virtual void ChangingVRPlayerHostPlayer() {}
+  virtual void ChangedVRPlayerHostPlayer() {}
   virtual void DetachedViewControlsUpdated(const blink::WebString&) {}
   virtual void DetachedViewTitleUpdated(const blink::WebString&) {}
 
@@ -302,6 +308,16 @@ class WebMediaPlayer {
   // This method is not used to say express if the native controls are visible
   // but if the element is using them.
   virtual void OnHasNativeControlsChanged(bool) {}
+
+  enum class DisplayType {
+    kInline,
+    kFullscreen,
+    kPictureInPicture,
+  };
+
+  // Callback called whenever the media element display type changes. By
+  // default, the display type is `kInline`.
+  virtual void OnDisplayTypeChanged(DisplayType) {}
 };
 
 }  // namespace blink

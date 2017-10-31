@@ -106,8 +106,7 @@ ScrollResult ScrollAnimator::UserScroll(ScrollGranularity granularity,
 
   base::PowerSaveModeMonitor* monitor = base::PowerSaveModeMonitor::Get();
   if (monitor && monitor->IsOnPowerSaveMode() && granularity != kScrollByPage &&
-      base::IsFeatureEnabled(
-          base::kFeaturePowerSaveModeDisablesSmoothScrolling))
+      base::IsCustomizationEnabled(base::kCustomizationPowerSaveMode))
     return ScrollAnimatorBase::UserScroll(granularity, delta);
 
   TRACE_EVENT0("blink", "ScrollAnimator::scroll");
@@ -417,7 +416,7 @@ void ScrollAnimator::NotifyAnimationTakeover(
                             scroll_offset_animation_curve->target_value().y());
   if (WillAnimateToOffset(target_value)) {
     animation_curve_ = CompositorScrollOffsetAnimationCurve::Create(
-        std::move(scroll_offset_animation_curve));
+        scroll_offset_animation_curve);
     start_time_ = animation_start_time;
   }
 }

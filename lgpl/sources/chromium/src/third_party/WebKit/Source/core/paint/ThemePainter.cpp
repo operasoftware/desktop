@@ -22,7 +22,7 @@
 #include "core/paint/ThemePainter.h"
 
 #include "core/InputTypeNames.h"
-#include "core/frame/FrameView.h"
+#include "core/frame/LocalFrameView.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLDataListElement.h"
 #include "core/html/HTMLDataListOptionsCollection.h"
@@ -71,19 +71,19 @@ bool ThemePainter::Paint(const LayoutObject& o,
 
   if (part == kButtonPart && o.GetNode()) {
     UseCounter::Count(o.GetDocument(),
-                      UseCounter::kCSSValueAppearanceButtonRendered);
+                      WebFeature::kCSSValueAppearanceButtonRendered);
     if (isHTMLAnchorElement(o.GetNode())) {
       UseCounter::Count(o.GetDocument(),
-                        UseCounter::kCSSValueAppearanceButtonForAnchor);
+                        WebFeature::kCSSValueAppearanceButtonForAnchor);
     } else if (isHTMLButtonElement(o.GetNode())) {
       UseCounter::Count(o.GetDocument(),
-                        UseCounter::kCSSValueAppearanceButtonForButton);
+                        WebFeature::kCSSValueAppearanceButtonForButton);
     } else if (isHTMLInputElement(o.GetNode()) &&
                toHTMLInputElement(o.GetNode())->IsTextButton()) {
       // Text buttons (type=button, reset, submit) has
       // -webkit-appearance:push-button by default.
       UseCounter::Count(o.GetNode()->GetDocument(),
-                        UseCounter::kCSSValueAppearanceButtonForOtherButtons);
+                        WebFeature::kCSSValueAppearanceButtonForOtherButtons);
     }
   }
 
@@ -179,16 +179,17 @@ bool ThemePainter::PaintBorderOnly(const LayoutObject& o,
   switch (o.StyleRef().Appearance()) {
     case kTextFieldPart:
       UseCounter::Count(o.GetDocument(),
-                        UseCounter::kCSSValueAppearanceTextFieldRendered);
+                        WebFeature::kCSSValueAppearanceTextFieldRendered);
       if (isHTMLInputElement(o.GetNode())) {
         HTMLInputElement* input = toHTMLInputElement(o.GetNode());
-        if (input->type() == InputTypeNames::search)
+        if (input->type() == InputTypeNames::search) {
           UseCounter::Count(o.GetDocument(),
-                            UseCounter::kCSSValueAppearanceTextFieldForSearch);
-        else if (input->IsTextField())
+                            WebFeature::kCSSValueAppearanceTextFieldForSearch);
+        } else if (input->IsTextField()) {
           UseCounter::Count(
               o.GetDocument(),
-              UseCounter::kCSSValueAppearanceTextFieldForTextField);
+              WebFeature::kCSSValueAppearanceTextFieldForTextField);
+        }
       }
       return PaintTextField(o, paint_info, r);
     case kTextAreaPart:

@@ -24,7 +24,7 @@
 
 #include "core/paint/ThemePainterDefault.h"
 
-#include "core/frame/FrameView.h"
+#include "core/frame/LocalFrameView.h"
 #include "core/layout/LayoutObject.h"
 #include "core/layout/LayoutProgress.h"
 #include "core/layout/LayoutThemeDefault.h"
@@ -151,6 +151,7 @@ bool ThemePainterDefault::PaintCheckbox(const LayoutObject& o,
   extra_params.button.checked = LayoutTheme::IsChecked(o);
   extra_params.button.indeterminate = LayoutTheme::IsIndeterminate(o);
 
+#if !defined(OPERA_DESKTOP)
   float zoom_level = o.StyleRef().EffectiveZoom();
   GraphicsContextStateSaver state_saver(i.context, false);
   IntRect unzoomed_rect = rect;
@@ -166,6 +167,11 @@ bool ThemePainterDefault::PaintCheckbox(const LayoutObject& o,
   Platform::Current()->ThemeEngine()->Paint(
       canvas, WebThemeEngine::kPartCheckbox, GetWebThemeState(o),
       WebRect(unzoomed_rect), &extra_params);
+#else
+  Platform::Current()->ThemeEngine()->Paint(
+      canvas, WebThemeEngine::kPartCheckbox, GetWebThemeState(o), WebRect(rect),
+      &extra_params);
+#endif  // !defined(OPERA_DESKTOP)
   return false;
 }
 

@@ -32,6 +32,7 @@
 #define WebLocalFrameImpl_h
 
 #include "core/editing/VisiblePosition.h"
+#include "core/exported/WebInputMethodControllerImpl.h"
 #include "core/frame/ContentSettingsClient.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/WebFrameWidgetBase.h"
@@ -42,10 +43,7 @@
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebFileSystemType.h"
 #include "public/web/WebLocalFrame.h"
-#include "web/LocalFrameClientImpl.h"
-#include "web/UserMediaClientImpl.h"
 #include "web/WebExport.h"
-#include "web/WebInputMethodControllerImpl.h"
 
 #include <memory>
 
@@ -54,6 +52,7 @@ namespace blink {
 class ChromePrintContext;
 class IntSize;
 class KURL;
+class LocalFrameClient;
 class ScrollableArea;
 class SharedWorkerRepositoryClientImpl;
 class TextCheckerClient;
@@ -71,10 +70,10 @@ class WebNode;
 class WebPerformance;
 class WebPlugin;
 class WebScriptExecutionCallback;
+class WebSpellCheckPanelHostClient;
 class WebView;
 class WebViewBase;
 enum class WebFrameLoadType;
-struct FrameLoadRequest;
 struct WebContentSecurityPolicyViolation;
 struct WebPrintParams;
 
@@ -98,9 +97,7 @@ class WEB_EXPORT WebLocalFrameImpl final
   void SetScrollOffset(const WebSize&) override;
   WebSize ContentsSize() const override;
   bool HasVisibleContent() const override;
-  WebRect VisibleContentRect(bool includeScrollbars = false) const override;
-  bool HasHorizontalScrollbar() const override;
-  bool HasVerticalScrollbar() const override;
+  WebRect VisibleContentRect(bool include_scrollbars = false) const override;
   WebView* View() const override;
   WebDocument GetDocument() const override;
   WebPerformance Performance() const override;
@@ -146,6 +143,7 @@ class WEB_EXPORT WebLocalFrameImpl final
       int argc,
       v8::Local<v8::Value> argv[]) override;
   v8::Local<v8::Context> MainWorldScriptContext() const override;
+  v8::Local<v8::Object> GlobalProxy() const override;
   void Reload(WebFrameLoadType) override;
   void ReloadWithOverrideURL(const WebURL& override_url,
                              WebFrameLoadType) override;
@@ -164,7 +162,6 @@ class WEB_EXPORT WebLocalFrameImpl final
   void SetReferrerForRequest(WebURLRequest&, const WebURL& referrer) override;
   WebAssociatedURLLoader* CreateAssociatedURLLoader(
       const WebAssociatedURLLoaderOptions&) override;
-  unsigned UnloadListenerCount() const override;
   void SetMarkedText(const WebString&,
                      unsigned location,
                      unsigned length) override;
@@ -179,6 +176,7 @@ class WEB_EXPORT WebLocalFrameImpl final
   bool ExecuteCommand(const WebString&, const WebString& value) override;
   bool IsCommandEnabled(const WebString&) const override;
   void SetTextCheckClient(WebTextCheckClient*) override;
+  void SetSpellCheckPanelHostClient(WebSpellCheckPanelHostClient*) override;
   void EnableSpellChecking(bool) override;
   bool IsSpellCheckingEnabled() const override;
   void ReplaceMisspelledRange(const WebString&) override;
@@ -228,25 +226,30 @@ class WEB_EXPORT WebLocalFrameImpl final
                                   int& margin_left) override;
   WebString PageProperty(const WebString& property_name,
                          int page_index) override;
-  void PrintPagesWithBoundaries(WebCanvas*, const WebSize&) override;
+  void PrintPagesForTesting(WebCanvas*, const WebSize&) override;
 
   void DispatchMessageEventWithOriginCheck(
       const WebSecurityOrigin& intended_target_origin,
       const WebDOMEvent&) override;
 
-  WebRect SelectionBoundsRect() const override;
+  WebRect GetSelectionBoundsRectForTesting() const override;
 
   WebImage FrameImage(const WebRect& source_rect,
-                      float scale,
                       bool include_scrollbars) override;
-  WebString LayerTreeAsText(bool show_debug_info = false) const override;
+
+  WebString GetLayerTreeAsTextForTesting(
+      bool show_debug_info = false) const override;
 
   // WebLocalFrame methods:
+  WebLocalFrameImpl* CreateLocalChild(WebTreeScopeType,
+                                      WebFrameClient*,
+                                      blink::InterfaceRegistry*) override;
   void SetAutofillClient(WebAutofillClient*) override;
   WebAutofillClient* AutofillClient() override;
   void SetDevToolsAgentClient(WebDevToolsAgentClient*) override;
   WebDevToolsAgent* DevToolsAgent() override;
   WebLocalFrameImpl* LocalRoot() override;
+  WebFrame* FindFrameByName(const WebString& name) override;
   void SendPings(const WebURL& destination_url) override;
   bool DispatchBeforeUnloadEvent(bool) override;
   WebURLRequest RequestFromHistoryItem(const WebHistoryItem&,
@@ -283,9 +286,9 @@ class WEB_EXPORT WebLocalFrameImpl final
                          bool was_allowed,
                          bool had_redirect,
                          const WebSourceLocation&) override;
+  void ClientDroppedNavigation() override;
   void SendOrientationChangeEvent() override;
   WebSandboxFlags EffectiveSandboxFlags() const override;
-  void ForceSandboxFlags(WebSandboxFlags) override;
   void DidCallAddSearchProvider() override;
   void DidCallIsSearchProviderInstalled() override;
   void ReplaceSelection(const WebString&) override;
@@ -314,14 +317,19 @@ class WEB_EXPORT WebLocalFrameImpl final
   void UsageCountChromeLoadTimes(const WebString& metric) override;
   void SetHasDetachedView(bool has_detached_view) override;
   bool HasDetachedView() const override;
+  void SetVRPlaybackEnabled(bool) override;
+  bool VRPlaybackEnabled() const override;
+  WebFrameScheduler* Scheduler() const override;
   base::SingleThreadTaskRunner* TimerTaskRunner() override;
   base::SingleThreadTaskRunner* LoadingTaskRunner() override;
   base::SingleThreadTaskRunner* UnthrottledTaskRunner() override;
-  WebInputMethodControllerImpl* GetInputMethodController() override;
+  WebInputMethodController* GetInputMethodController() override;
 
   void ExtractSmartClipData(WebRect rect_in_viewport,
                             WebString& clip_text,
                             WebString& clip_html) override;
+
+  void AdvanceFocusInForm(WebFocusType) override;
 
   void InitializeCoreFrame(Page&,
                            FrameOwner*,
@@ -333,18 +341,23 @@ class WEB_EXPORT WebLocalFrameImpl final
 
   static WebLocalFrameImpl* Create(WebTreeScopeType,
                                    WebFrameClient*,
-                                   blink::InterfaceProvider*,
-                                   blink::InterfaceRegistry*,
+                                   InterfaceRegistry*,
                                    WebFrame* opener);
+  static WebLocalFrameImpl* CreateMainFrame(WebView*,
+                                            WebFrameClient*,
+                                            InterfaceRegistry*,
+                                            WebFrame* opener,
+                                            const WebString& name,
+                                            WebSandboxFlags);
   static WebLocalFrameImpl* CreateProvisional(WebFrameClient*,
-                                              blink::InterfaceProvider*,
-                                              blink::InterfaceRegistry*,
+                                              InterfaceRegistry*,
                                               WebRemoteFrame*,
-                                              WebSandboxFlags);
+                                              WebSandboxFlags,
+                                              WebParsedFeaturePolicy);
+
   ~WebLocalFrameImpl() override;
 
-  LocalFrame* CreateChildFrame(const FrameLoadRequest&,
-                               const AtomicString& name,
+  LocalFrame* CreateChildFrame(const AtomicString& name,
                                HTMLFrameOwnerElement*) override;
 
   void DidChangeContentsSize(const IntSize&);
@@ -357,7 +370,7 @@ class WEB_EXPORT WebLocalFrameImpl final
 
   WebViewBase* ViewImpl() const override;
 
-  FrameView* GetFrameView() const override {
+  LocalFrameView* GetFrameView() const override {
     return GetFrame() ? GetFrame()->View() : 0;
   }
 
@@ -400,13 +413,17 @@ class WEB_EXPORT WebLocalFrameImpl final
     return shared_worker_repository_client_.get();
   }
 
-  void SetInputEventsTransformForEmulation(const IntSize&, float) override;
+  void SetInputEventsScaleForEmulation(float) override;
 
   static void SelectWordAroundPosition(LocalFrame*, VisiblePosition);
 
   TextCheckerClient& GetTextCheckerClient() const override;
   WebTextCheckClient* TextCheckClient() const override {
     return text_check_client_;
+  }
+
+  WebSpellCheckPanelHostClient* SpellCheckPanelHostClient() const override {
+    return spell_check_panel_host_client_;
   }
 
   TextFinder* GetTextFinder() const override;
@@ -431,20 +448,21 @@ class WEB_EXPORT WebLocalFrameImpl final
   void SetContextMenuNode(Node* node) override { context_menu_node_ = node; }
   void ClearContextMenuNode() override { context_menu_node_.Clear(); }
 
-  std::unique_ptr<WebURLLoader> CreateURLLoader() override;
+  std::unique_ptr<WebURLLoader> CreateURLLoader(
+      const WebURLRequest&,
+      base::SingleThreadTaskRunner*) override;
+
+  WebFrameWidgetBase* LocalRootFrameWidget() override;
 
   DECLARE_VIRTUAL_TRACE();
 
  private:
-  friend class LocalFrameClientImpl;
 
   WebLocalFrameImpl(WebTreeScopeType,
                     WebFrameClient*,
-                    blink::InterfaceProvider*,
                     blink::InterfaceRegistry*);
   WebLocalFrameImpl(WebRemoteFrame*,
                     WebFrameClient*,
-                    blink::InterfaceProvider*,
                     blink::InterfaceRegistry*);
 
   // Inherited from WebFrame, but intentionally hidden: it never makes sense
@@ -467,7 +485,7 @@ class WEB_EXPORT WebLocalFrameImpl final
   // Returns true if the frame is focused.
   bool IsFocused() const;
 
-  Member<LocalFrameClientImpl> local_frame_client_impl_;
+  Member<LocalFrameClient> local_frame_client_;
 
   // The embedder retains a reference to the WebCore LocalFrame while it is
   // active in the DOM. This reference is released when the frame is removed
@@ -479,7 +497,7 @@ class WEB_EXPORT WebLocalFrameImpl final
 
   // This is set if the frame is the root of a local frame tree, and requires a
   // widget for layout.
-  WebFrameWidgetBase* frame_widget_;
+  Member<WebFrameWidgetBase> frame_widget_;
 
   WebFrameClient* client_;
   WebAutofillClient* autofill_client_;
@@ -494,13 +512,11 @@ class WEB_EXPORT WebLocalFrameImpl final
   // information. Is used by PrintPage().
   Member<ChromePrintContext> print_context_;
 
-  // Stores the additional input events offset and scale when device metrics
+  // Stores the additional input events scale when device metrics
   // emulation is enabled.
-  IntSize input_events_offset_for_emulation_;
   float input_events_scale_factor_for_emulation_;
 
   // Borrowed pointers to Mojo objects.
-  blink::InterfaceProvider* interface_provider_;
   blink::InterfaceRegistry* interface_registry_;
 
   WebDevToolsFrontendImpl* web_dev_tools_frontend_;
@@ -513,12 +529,15 @@ class WEB_EXPORT WebLocalFrameImpl final
   Member<TextCheckerClientImpl> text_checker_client_;
   WebTextCheckClient* text_check_client_;
 
+  WebSpellCheckPanelHostClient* spell_check_panel_host_client_;
+
   // Oilpan: WebLocalFrameImpl must remain alive until close() is called.
   // Accomplish that by keeping a self-referential Persistent<>. It is
   // cleared upon close().
   SelfKeepAlive<WebLocalFrameImpl> self_keep_alive_;
 
   bool has_detached_view_;
+  bool vr_playback_enabled_;
 };
 
 DEFINE_TYPE_CASTS(WebLocalFrameImpl,

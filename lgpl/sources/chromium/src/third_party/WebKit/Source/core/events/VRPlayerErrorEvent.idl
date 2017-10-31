@@ -1,0 +1,6 @@
+// Copyright (c) 2017 Opera Software AS. All rights reserved.
+
+[RuntimeEnabled=MediaVR] interface VRPlayerErrorEvent : Event {
+    const unsigned short UNKNOWN_ERROR = 1;
+    readonly attribute unsigned short errorType;
+};

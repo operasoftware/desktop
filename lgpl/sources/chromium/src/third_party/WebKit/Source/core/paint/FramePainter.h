@@ -12,9 +12,9 @@
 namespace blink {
 
 class CullRect;
-class FrameView;
 class GraphicsContext;
 class IntRect;
+class LocalFrameView;
 class Scrollbar;
 
 class CORE_EXPORT FramePainter {
@@ -22,7 +22,7 @@ class CORE_EXPORT FramePainter {
   WTF_MAKE_NONCOPYABLE(FramePainter);
 
  public:
-  explicit FramePainter(const FrameView& frame_view)
+  explicit FramePainter(const LocalFrameView& frame_view)
       : frame_view_(&frame_view) {}
 
   void Paint(GraphicsContext&, const GlobalPaintFlags, const CullRect&);
@@ -33,9 +33,9 @@ class CORE_EXPORT FramePainter {
  private:
   void PaintScrollbar(GraphicsContext&, Scrollbar&, const IntRect&);
 
-  const FrameView& GetFrameView();
+  const LocalFrameView& GetFrameView();
 
-  Member<const FrameView> frame_view_;
+  Member<const LocalFrameView> frame_view_;
   static bool in_paint_contents_;
 };
 

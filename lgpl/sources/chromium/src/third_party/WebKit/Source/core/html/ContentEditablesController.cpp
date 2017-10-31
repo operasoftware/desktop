@@ -109,7 +109,7 @@ ContentEditablesController::ContentEditablesController()
 
 void ContentEditablesController::RegisterContentEditableElement(
     Element* element) {
-  if (!RuntimeEnabledFeatures::restoreContenteditablesStateEnabled())
+  if (!RuntimeEnabledFeatures::RestoreContenteditablesStateEnabled())
     return;
 
   state_->RegisterContentEditableElement(element);

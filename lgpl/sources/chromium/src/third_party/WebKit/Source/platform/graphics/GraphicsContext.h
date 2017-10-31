@@ -34,6 +34,7 @@
 #include "platform/graphics/DashArray.h"
 #include "platform/graphics/DrawLooperBuilder.h"
 #include "platform/graphics/GraphicsContextState.h"
+#include "platform/graphics/HighContrastSettings.h"
 #include "platform/graphics/ImageOrientation.h"
 #include "platform/graphics/paint/PaintRecord.h"
 #include "platform/graphics/paint/PaintRecorder.h"
@@ -82,6 +83,10 @@ class PLATFORM_EXPORT GraphicsContext {
 
   bool ContextDisabled() const { return disabled_state_; }
 
+  const HighContrastSettings& high_contrast_settings() {
+    return high_contrast_settings_;
+  }
+
   // ---------- State management methods -----------------
   void Save();
   void Restore();
@@ -89,6 +94,8 @@ class PLATFORM_EXPORT GraphicsContext {
 #if DCHECK_IS_ON()
   unsigned SaveCount() const;
 #endif
+
+  void SetHighContrast(const HighContrastSettings&);
 
   float StrokeThickness() const {
     return ImmutableState()->GetStrokeData().Thickness();
@@ -148,6 +155,11 @@ class PLATFORM_EXPORT GraphicsContext {
   // possible quality.
   bool Printing() const { return printing_; }
   void SetPrinting(bool printing) { printing_ = printing; }
+
+  // Returns if the context is a capturing context instead of a display
+  // context.
+  bool Capturing() const { return capturing_; }
+  void SetCapturing(bool capturing) { capturing_ = capturing; }
 
   SkColorFilter* GetColorFilter() const;
   void SetColorFilter(ColorFilter);
@@ -431,6 +443,10 @@ class PLATFORM_EXPORT GraphicsContext {
 
   const SkMetaData& MetaData() const { return meta_data_; }
 
+  bool ShouldApplyHighContrastFilterToImage(const Image&) const;
+  Color ApplyHighContrastFilter(const Color& input) const;
+  PaintFlags ApplyHighContrastFilter(const PaintFlags* input) const;
+
   // null indicates painting is contextDisabled. Never delete this object.
   PaintCanvas* canvas_;
 
@@ -461,7 +477,11 @@ class PLATFORM_EXPORT GraphicsContext {
 
   float device_scale_factor_;
 
+  HighContrastSettings high_contrast_settings_;
+  sk_sp<SkColorFilter> high_contrast_filter_;
+
   unsigned printing_ : 1;
+  unsigned capturing_ : 1;
   unsigned has_meta_data_ : 1;
 };
 

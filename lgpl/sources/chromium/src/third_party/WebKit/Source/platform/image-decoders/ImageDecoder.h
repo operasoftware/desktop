@@ -28,8 +28,6 @@
 #define ImageDecoder_h
 
 #include <memory>
-#include "SkColorPriv.h"
-#include "SkColorSpaceXform.h"
 #include "platform/PlatformExport.h"
 #include "platform/SharedBuffer.h"
 #include "platform/graphics/ColorBehavior.h"
@@ -39,10 +37,10 @@
 #include "platform/image-decoders/SegmentReader.h"
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/RefPtr.h"
-#include "platform/wtf/Threading.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/Platform.h"
+#include "third_party/skia/include/core/SkColorSpaceXform.h"
 
 namespace blink {
 
@@ -99,13 +97,13 @@ class PLATFORM_EXPORT ImageDecoder {
                                               const ColorBehavior&,
                                               bool allow_svg = false);
   static std::unique_ptr<ImageDecoder> Create(
-      PassRefPtr<SharedBuffer> data,
+      RefPtr<SharedBuffer> data,
       bool data_complete,
-      AlphaOption alphaoption,
+      AlphaOption alpha_option,
       const ColorBehavior& color_behavior,
       bool allow_svg = false) {
     return Create(SegmentReader::CreateFromSharedBuffer(std::move(data)),
-                  data_complete, alphaoption, color_behavior, allow_svg);
+                  data_complete, alpha_option, color_behavior, allow_svg);
   }
 
   virtual String FilenameExtension() const = 0;
@@ -125,7 +123,7 @@ class PLATFORM_EXPORT ImageDecoder {
     OnSetData(data_.Get());
   }
 
-  void SetData(PassRefPtr<SharedBuffer> data, bool all_data_received) {
+  void SetData(RefPtr<SharedBuffer> data, bool all_data_received) {
     SetData(SegmentReader::CreateFromSharedBuffer(std::move(data)),
             all_data_received);
   }
@@ -195,7 +193,7 @@ class PLATFORM_EXPORT ImageDecoder {
   virtual bool FrameHasAlphaAtIndex(size_t) const;
 
   // Whether or not the frame is fully received.
-  virtual bool FrameIsCompleteAtIndex(size_t) const;
+  virtual bool FrameIsReceivedAtIndex(size_t) const;
 
   // Returns true if a cached complete decode is available.
   bool FrameIsDecodedAtIndex(size_t) const;
@@ -404,10 +402,6 @@ class PLATFORM_EXPORT ImageDecoder {
   }
 
  private:
-  enum class SniffResult { JPEG, PNG, GIF, WEBP, ICO, BMP, SVG, kInvalid };
-
-  static SniffResult DetermineImageType(const char* data, size_t length);
-
   // Some code paths compute the size of the image as "width * height * 4"
   // and return it as a (signed) int.  Avoid overflow.
   static bool SizeCalculationMayOverflow(unsigned width, unsigned height) {

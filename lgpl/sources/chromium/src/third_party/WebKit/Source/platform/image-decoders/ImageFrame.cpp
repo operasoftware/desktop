@@ -125,7 +125,7 @@ bool ImageFrame::AllocatePixelData(int new_width,
       new_width, new_height,
       premultiply_alpha_ ? kPremul_SkAlphaType : kUnpremul_SkAlphaType,
       std::move(color_space)));
-  return bitmap_.tryAllocPixels(allocator_, 0);
+  return bitmap_.tryAllocPixels(allocator_);
 }
 
 bool ImageFrame::HasAlpha() const {

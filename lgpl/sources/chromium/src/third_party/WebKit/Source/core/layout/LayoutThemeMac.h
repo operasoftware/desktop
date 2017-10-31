@@ -51,6 +51,8 @@ class LayoutThemeMac final : public LayoutTheme {
   Color PlatformActiveListBoxSelectionForegroundColor() const override;
   Color PlatformInactiveListBoxSelectionBackgroundColor() const override;
   Color PlatformInactiveListBoxSelectionForegroundColor() const override;
+  Color PlatformSpellingMarkerUnderlineColor() const override;
+  Color PlatformGrammarMarkerUnderlineColor() const override;
   Color PlatformFocusRingColor() const override;
 
   ScrollbarControlSize ScrollbarControlSizeForPart(ControlPart part) override {

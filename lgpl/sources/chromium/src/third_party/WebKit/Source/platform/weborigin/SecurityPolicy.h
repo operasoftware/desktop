@@ -81,7 +81,7 @@ class PLATFORM_EXPORT SecurityPolicy {
   static bool IsAccessToURLWhiteListed(const SecurityOrigin* active_origin,
                                        const KURL&);
 
-  static void AddOriginTrustworthyWhiteList(PassRefPtr<SecurityOrigin>);
+  static void AddOriginTrustworthyWhiteList(const SecurityOrigin&);
   static bool IsOriginWhiteListedTrustworthy(const SecurityOrigin&);
   static bool IsUrlWhiteListedTrustworthy(const KURL&);
 
@@ -90,7 +90,7 @@ class PLATFORM_EXPORT SecurityPolicy {
                                        ReferrerPolicy* result);
 
 #if defined(OPERA_DESKTOP)
-  static void AddOriginAsFirstPartyForSubframes(PassRefPtr<SecurityOrigin>);
+  static void AddOriginAsFirstPartyForSubframes(RefPtr<SecurityOrigin>);
   static bool IsOriginFirstPartyWhenTopLevel(const SecurityOrigin&);
 #endif  // OPERA_DESKTOP
 

@@ -206,6 +206,8 @@ class CORE_EXPORT HTMLMediaElement
   void DetachedViewMuteStateChanged(bool) override;
   void DetachedViewPlaybackStateToggled() override;
   void DetachedViewActionTriggered(const WebString& action) override;
+  void VRPlayerStateChanged(bool) override;
+  void VRPlayerErrorOccured() override;
 
   // statistics
   unsigned webkitAudioDecodedByteCount() const;
@@ -220,7 +222,6 @@ class CORE_EXPORT HTMLMediaElement
       const RecordMetricsBehavior = RecordMetricsBehavior::kDoNotRecord) const;
   DOMTokenList* controlsList() const;
   HTMLMediaElementControlsList* ControlsListInternal() const;
-  void ControlsListValueWasSet();
   double volume() const;
   void setVolume(double, ExceptionState& = ASSERT_NO_EXCEPTION);
   bool muted() const;
@@ -300,7 +301,7 @@ class CORE_EXPORT HTMLMediaElement
   void SourceWasAdded(HTMLSourceElement*);
 
   // ScriptWrappable functions.
-  bool HasPendingActivity() const final;
+  bool HasPendingActivity() const override;
 
   AudioSourceProviderClient* AudioSourceNode() { return audio_source_node_; }
   void SetAudioSourceNode(AudioSourceProviderClient*);
@@ -345,6 +346,10 @@ class CORE_EXPORT HTMLMediaElement
   bool HasDetachedView() override;
   void InvokeDetachedViewAction(const String& action) override;
   void UpdateDetachedViewSubtitle(const String& text) override;
+  void RequestVRPlayback() override;
+  void ExitVRPlayback() override;
+  bool HasVRPlayback() override;
+  bool IsVRPlaybackAllowed() override;
 
   const AutoplayPolicy& GetAutoplayPolicy() const { return *autoplay_policy_; }
 
@@ -358,7 +363,7 @@ class CORE_EXPORT HTMLMediaElement
   void ParseAttribute(const AttributeModificationParams&) override;
   void FinishParsingChildren() final;
   bool IsURLAttribute(const Attribute&) const override;
-  void AttachLayoutTree(const AttachContext& = AttachContext()) override;
+  void AttachLayoutTree(AttachContext&) override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;
   void RemovedFrom(ContainerNode*) override;
@@ -432,12 +437,13 @@ class CORE_EXPORT HTMLMediaElement
   void DisconnectedFromRemoteDevice() final;
   void CancelledRemotePlaybackRequest() final;
   void RemotePlaybackStarted() final;
-  void OnBecamePersistentVideo(bool) override{};
+  void OnBecamePersistentVideo(bool) override {}
   bool HasSelectedVideoTrack() final;
   WebMediaPlayer::TrackId GetSelectedVideoTrackId() final;
   bool IsAutoplayingMuted() final;
   void ActivateViewportIntersectionMonitoring(bool) final;
   bool HasNativeControls() final;
+  WebMediaPlayer::DisplayType DisplayType() const override;
 
   void LoadTimerFired(TimerBase*);
   void ProgressEventTimerFired(TimerBase*);
@@ -558,6 +564,7 @@ class CORE_EXPORT HTMLMediaElement
   void OperaRequestDetachedViewInternal();
   bool OperaGetDetachedViewControls(AtomicString* controls,
                                     AtomicString* title);
+  void VRPlayerStateChangeNeeded(TimerBase*);
 
   EnumerationHistogram& ShowControlsHistogram() const;
 
@@ -569,6 +576,7 @@ class CORE_EXPORT HTMLMediaElement
   TaskRunnerTimer<HTMLMediaElement> audio_tracks_timer_;
   TaskRunnerTimer<HTMLMediaElement> viewport_fill_debouncer_timer_;
   TaskRunnerTimer<HTMLMediaElement> check_viewport_intersection_timer_;
+  TaskRunnerTimer<HTMLMediaElement> vr_state_timer_;
 
   Member<TimeRanges> played_time_ranges_;
   Member<GenericEventQueue> async_event_queue_;
@@ -668,6 +676,7 @@ class CORE_EXPORT HTMLMediaElement
   // Whether this element is in overlay fullscreen mode.
   bool in_overlay_fullscreen_video_ : 1;
   bool previous_player_had_detached_view_ : 1;
+  bool previous_player_had_vr_player_ : 1;
 
   bool mostly_filling_viewport_ : 1;
 
@@ -748,6 +757,7 @@ class CORE_EXPORT HTMLMediaElement
   friend class HTMLMediaElementTest;
   friend class HTMLMediaElementEventListenersTest;
   friend class HTMLVideoElement;
+  friend class MediaControlInputElementTest;
   friend class MediaControlsOrientationLockDelegateTest;
   friend class MediaControlsRotateToFullscreenDelegateTest;
 

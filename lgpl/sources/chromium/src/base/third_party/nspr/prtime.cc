@@ -394,17 +394,22 @@ PR_GMTParameters(const PRExplodedTime *gmt)
  * We only recognize the abbreviations of a small subset of time zones
  * in North America, Europe, and Japan.
  *
- * PST/PDT: Pacific Standard/Daylight Time
- * MST/MDT: Mountain Standard/Daylight Time
- * CST/CDT: Central Standard/Daylight Time
- * EST/EDT: Eastern Standard/Daylight Time
- * AST: Atlantic Standard Time
- * NST: Newfoundland Standard Time
- * GMT: Greenwich Mean Time
- * BST: British Summer Time
- * MET: Middle Europe Time
- * EET: Eastern Europe Time
- * JST: Japan Standard Time
+ * PST / PDT : Pacific Standard / Daylight Time
+ * MST / MDT : Mountain Standard / Daylight Time
+ * CST / CDT : Central Standard / Daylight Time
+ * EST / EDT : Eastern Standard / Daylight Time
+ * AST / ADT : Atlantic Standard Time / Daylight Time
+ * NST / NDT : Newfoundland Standard Time / Daylight Time
+ * GMT : Greenwich Mean Time
+ * BST : British Summer Time
+ * MET : Middle Europe Time
+ * CET / CEST: Central Europe Time / Daylight (Summer) Time
+ * EET / EEST : Eastern Europe Time / Daylight (Summer) Time
+ * WET / WEST: Western Europe Time / Daylight (Summer) Time
+ * JST : Japan Standard Time
+ * KST : Korean Standard Time
+ * IST : Indian Standard Time
+ * MSK : Moscow Standard Time
  */
 
 typedef enum
@@ -417,7 +422,9 @@ typedef enum
   TT_JUL, TT_AUG, TT_SEP, TT_OCT, TT_NOV, TT_DEC,
 
   TT_PST, TT_PDT, TT_MST, TT_MDT, TT_CST, TT_CDT, TT_EST, TT_EDT,
-  TT_AST, TT_NST, TT_GMT, TT_BST, TT_MET, TT_EET, TT_JST
+  TT_AST, TT_NST, TT_GMT, TT_BST, TT_MET, TT_EET, TT_JST, TT_CET,
+  TT_CEST, TT_ADT, TT_NDT, TT_IST, TT_EEST, TT_WET, TT_WEST, TT_MSK,
+  TT_KST
 } TIME_TOKEN;
 
 /*
@@ -479,6 +486,9 @@ PR_ParseTimeString(
   PR_ASSERT(string && result);
   if (!string || !result) return PR_FAILURE;
 
+  PRBool ambiguous_sorting = PR_FALSE;
+  PRBool slash_as_date_separator = PR_FALSE;
+
   while (*rest)
         {
 
@@ -498,6 +508,10 @@ PR_ParseTimeString(
                                    (rest[1] == 's' || rest[1] == 'S') &&
                                    (rest[2] == 't' || rest[2] == 'T'))
                         zone = TT_AST;
+                  else if (zone == TT_UNKNOWN &&
+                                   (rest[1] == 'd' || rest[1] == 'D') &&
+                                   (rest[2] == 't' || rest[2] == 'T'))
+                        zone = TT_ADT;
                   else if (month == TT_UNKNOWN &&
                                    (rest[1] == 'u' || rest[1] == 'U') &&
                                    (rest[2] == 'g' || rest[2] == 'G'))
@@ -518,6 +532,15 @@ PR_ParseTimeString(
                                    (rest[1] == 's' || rest[1] == 'S') &&
                                    (rest[2] == 't' || rest[2] == 'T'))
                         zone = TT_CST;
+                  else if (zone == TT_UNKNOWN &&
+                                   (rest[1] == 'e' || rest[1] == 'E') &&
+                                   (rest[2] == 't' || rest[2] == 'T'))
+                        zone = TT_CET;
+                  else if (zone == TT_UNKNOWN &&
+                                   (rest[1] == 'e' || rest[1] == 'E') &&
+                                   (rest[2] == 's' || rest[2] == 'S') &&
+                                   (rest[3] == 't' || rest[3] == 'T'))
+                        zone = TT_CEST;
                   break;
                 case 'd': case 'D':
                   if (month == TT_UNKNOWN &&
@@ -534,6 +557,11 @@ PR_ParseTimeString(
                                    (rest[1] == 'e' || rest[1] == 'E') &&
                                    (rest[2] == 't' || rest[2] == 'T'))
                         zone = TT_EET;
+                  else if (zone == TT_UNKNOWN &&
+                                   (rest[1] == 'e' || rest[1] == 'E') &&
+                                   (rest[2] == 's' || rest[2] == 'S') &&
+                                   (rest[3] == 't' || rest[3] == 'T'))
+                        zone = TT_EEST;
                   else if (zone == TT_UNKNOWN &&
                                    (rest[1] == 's' || rest[1] == 'S') &&
                                    (rest[2] == 't' || rest[2] == 'T'))
@@ -555,6 +583,12 @@ PR_ParseTimeString(
                           (rest[2] == 't' || rest[2] == 'T'))
                         zone = TT_GMT;
                   break;
+                case 'i': case 'I':
+                  if (zone == TT_UNKNOWN &&
+                              (rest[1] == 's' || rest[1] == 'S') &&
+                              (rest[2] == 't' || rest[2] == 'T'))
+                        zone = TT_IST;
+                  break;
                 case 'j': case 'J':
                   if (month == TT_UNKNOWN &&
                           (rest[1] == 'a' || rest[1] == 'A') &&
@@ -572,6 +606,12 @@ PR_ParseTimeString(
                                    (rest[1] == 'u' || rest[1] == 'U') &&
                                    (rest[2] == 'n' || rest[2] == 'N'))
                         month = TT_JUN;
+                  break;
+                case 'k': case 'K':
+                  if (zone == TT_UNKNOWN &&
+                              (rest[1] == 's' || rest[1] == 'S') &&
+                              (rest[2] == 't' || rest[2] == 'T'))
+                        zone = TT_KST;
                   break;
                 case 'm': case 'M':
                   if (month == TT_UNKNOWN &&
@@ -598,6 +638,10 @@ PR_ParseTimeString(
                                    (rest[1] == 's' || rest[1] == 'S') &&
                                    (rest[2] == 't' || rest[2] == 'T'))
                         zone = TT_MST;
+                  else if (zone == TT_UNKNOWN &&
+                                   (rest[1] == 's' || rest[1] == 'S') &&
+                                   (rest[2] == 'k' || rest[2] == 'K'))
+                        zone = TT_MSK;
                   break;
                 case 'n': case 'N':
                   if (month == TT_UNKNOWN &&
@@ -608,6 +652,10 @@ PR_ParseTimeString(
                                    (rest[1] == 's' || rest[1] == 'S') &&
                                    (rest[2] == 't' || rest[2] == 'T'))
                         zone = TT_NST;
+                  else if (zone == TT_UNKNOWN &&
+                                   (rest[1] == 'd' || rest[1] == 'D') &&
+                                   (rest[2] == 't' || rest[2] == 'T'))
+                        zone = TT_NDT;
                   break;
                 case 'o': case 'O':
                   if (month == TT_UNKNOWN &&
@@ -662,6 +710,15 @@ PR_ParseTimeString(
                           (rest[1] == 'e' || rest[1] == 'E') &&
                           (rest[2] == 'd' || rest[2] == 'D'))
                         dotw = TT_WED;
+                  else if (zone == TT_UNKNOWN &&
+                                   (rest[1] == 'e' || rest[1] == 'E') &&
+                                   (rest[2] == 't' || rest[2] == 'T'))
+                        zone = TT_WET;
+                  else if (zone == TT_UNKNOWN &&
+                                   (rest[1] == 'e' || rest[1] == 'E') &&
+                                   (rest[2] == 's' || rest[2] == 'S') &&
+                                   (rest[3] == 't' || rest[3] == 'T'))
+                        zone = TT_WEST;
                   break;
 
                 case '+': case '-':
@@ -810,12 +867,14 @@ PR_ParseTimeString(
                                         while (*s && (*s == ' ' || *s == '\t'))
                                           s++;
                                         if ((s[0] == 'p' || s[0] == 'P') &&
-                                                (s[1] == 'm' || s[1] == 'M'))
+                                                ((s[1] == 'm' || s[1] == 'M') ||
+                                                 (s[1] == '.' && (s[2] == 'M' || s[2] == 'm'))))
                                           /* 10:05pm == 22:05, and 12:05pm == 12:05 */
                                           tmp_hour = (tmp_hour == 12 ? 12 : tmp_hour + 12);
                                         else if (tmp_hour == 12 &&
                                                          (s[0] == 'a' || s[0] == 'A') &&
-                                                         (s[1] == 'm' || s[1] == 'M'))
+                                                         ((s[1] == 'm' || s[1] == 'M') ||
+                                                          (s[1] == '.' && (s[2] == 'M' || s[2] == 'm'))))
                                           /* 12:05am == 00:05 */
                                           tmp_hour = 0;
                                   }
@@ -858,6 +917,9 @@ PR_ParseTimeString(
 
                                 if (*s != '/' && *s != '-')                /* slash */
                                   break;
+
+                                if (*s == '/') // First slash
+                                  slash_as_date_separator = PR_TRUE;
                                 s++;
 
                                 if (*s < '0' || *s > '9')                /* second 1 or 2 digits */
@@ -868,6 +930,9 @@ PR_ParseTimeString(
 
                                 if (*s != '/' && *s != '-')                /* slash */
                                   break;
+
+                                if (slash_as_date_separator && *s == '-')  // Mixed.
+                                  slash_as_date_separator = PR_FALSE;
                                 s++;
 
                                 if (*s < '0' || *s > '9')                /* third 1, 2, 4, or 5 digits */
@@ -936,6 +1001,9 @@ PR_ParseTimeString(
                                   {
                                         /* #### In the ambiguous case, should we consult the
                                            locale to find out the local default? */
+                                        /* ^ That would be nice especially if the source time zone isn't specified.
+                                             Otherwise it may be used to guess - and it actually is below. */
+                                        ambiguous_sorting = !slash_as_date_separator && n2 <= 12;
                                         month = (TIME_TOKEN)(n1 + ((int)TT_JAN) - 1);
                                         date = n2;
                                         year = n3;
@@ -1045,11 +1113,21 @@ PR_ParseTimeString(
                 case TT_EST: zone_offset = -5 * 60; break;
                 case TT_EDT: zone_offset = -5 * 60; dst_offset = 1 * 60; break;
                 case TT_AST: zone_offset = -4 * 60; break;
+                case TT_ADT: zone_offset = -4 * 60; dst_offset = 1 * 60; break;
                 case TT_NST: zone_offset = -3 * 60 - 30; break;
+                case TT_NDT: zone_offset = -3 * 60 - 30; dst_offset = 1 * 60; break;
+                case TT_WET:
                 case TT_GMT: zone_offset =  0 * 60; break;
+                case TT_WEST:
                 case TT_BST: zone_offset =  0 * 60; dst_offset = 1 * 60; break;
+                case TT_CET:
                 case TT_MET: zone_offset =  1 * 60; break;
+                case TT_CEST: zone_offset = 1 * 60; dst_offset = 1 * 60; break;
                 case TT_EET: zone_offset =  2 * 60; break;
+                case TT_EEST: zone_offset = 2 * 60; dst_offset = 1 * 60; break;
+                case TT_MSK: zone_offset = 3 * 60; break;
+                case TT_IST: zone_offset = 5 * 60 + 30; break;
+                case TT_KST:
                 case TT_JST: zone_offset =  9 * 60; break;
                 default:
                   PR_ASSERT (0);
@@ -1063,6 +1141,21 @@ PR_ParseTimeString(
          a numerologically significant date... */
   if (month == TT_UNKNOWN || date == -1 || year == -1 || year > PR_INT16_MAX)
       return PR_FAILURE;
+
+  if (ambiguous_sorting && (zone != TT_UNKNOWN || default_to_gmt))
+        {
+          /* Falling here means MMDDYY got assumed. Change it if the timezone
+             doesn't apply to the North America.
+           */
+          if (zone != TT_PST && zone != TT_PDT && zone != TT_AST && zone != TT_ADT &&
+              zone != TT_MST && zone != TT_MDT && zone != TT_CDT && zone != TT_CST &&
+              zone != TT_NST && zone != TT_NDT && zone != TT_EST && zone != TT_EDT)
+                {
+                  int tmp = date;
+                  date = month - ((int)TT_JAN) + 1;
+                  month = (TIME_TOKEN)(tmp + ((int)TT_JAN) - 1);
+                }
+        }
 
   memset(result, 0, sizeof(*result));
   if (usec != -1)
