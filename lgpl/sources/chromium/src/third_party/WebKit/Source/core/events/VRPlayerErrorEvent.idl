@@ -1,6 +1,16 @@
 // Copyright (c) 2017 Opera Software AS. All rights reserved.
 
 [RuntimeEnabled=MediaVR] interface VRPlayerErrorEvent : Event {
-    const unsigned short UNKNOWN_ERROR = 1;
-    readonly attribute unsigned short errorType;
+  // These constants need to be kept in sync with
+  // components/vr_player/public/vr_error_type.h
+  const unsigned short OK = 0;
+  const unsigned short NO_API = 1;
+  const unsigned short NO_HMD = 2;
+  const unsigned short RENDERER_ERROR = 3;
+  const unsigned short VR_SESSION_ERROR = 4;
+  const unsigned short SERVICE_CONNECTION_ERROR = 5;
+  const unsigned short ACQUIRE_ERROR = 6;
+  const unsigned short VIDEO_FRAME_ERROR = 7;
+
+  readonly attribute unsigned short errorType;
 };

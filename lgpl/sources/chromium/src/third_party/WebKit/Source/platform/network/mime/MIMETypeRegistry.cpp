@@ -7,7 +7,6 @@
 #include "base/files/file_path.h"
 #include "base/power_save_mode/power_save_mode_monitor.h"
 #include "base/strings/string_util.h"
-#include "components/mime_util/mime_util.h"
 #include "media/base/mime_util.h"
 #include "media/filters/stream_parser_factory.h"
 #include "net/base/mime_util.h"
@@ -17,6 +16,7 @@
 #include "public/platform/InterfaceProvider.h"
 #include "public/platform/Platform.h"
 #include "public/platform/mime_registry.mojom-blink.h"
+#include "third_party/WebKit/common/mime_util/mime_util.h"
 
 namespace blink {
 
@@ -142,11 +142,11 @@ String MIMETypeRegistry::GetMIMETypeForPath(const String& path) {
 }
 
 bool MIMETypeRegistry::IsSupportedMIMEType(const String& mime_type) {
-  return mime_util::IsSupportedMimeType(ToLowerASCIIOrEmpty(mime_type));
+  return blink::IsSupportedMimeType(ToLowerASCIIOrEmpty(mime_type));
 }
 
 bool MIMETypeRegistry::IsSupportedImageMIMEType(const String& mime_type) {
-  return mime_util::IsSupportedImageMimeType(ToLowerASCIIOrEmpty(mime_type));
+  return blink::IsSupportedImageMimeType(ToLowerASCIIOrEmpty(mime_type));
 }
 
 bool MIMETypeRegistry::IsSupportedImageResourceMIMEType(
@@ -157,10 +157,10 @@ bool MIMETypeRegistry::IsSupportedImageResourceMIMEType(
 bool MIMETypeRegistry::IsSupportedImagePrefixedMIMEType(
     const String& mime_type) {
   std::string ascii_mime_type = ToLowerASCIIOrEmpty(mime_type);
-  return (mime_util::IsSupportedImageMimeType(ascii_mime_type) ||
+  return (blink::IsSupportedImageMimeType(ascii_mime_type) ||
           (base::StartsWith(ascii_mime_type, "image/",
                             base::CompareCase::SENSITIVE) &&
-           mime_util::IsSupportedNonImageMimeType(ascii_mime_type)));
+           blink::IsSupportedNonImageMimeType(ascii_mime_type)));
 }
 
 bool MIMETypeRegistry::IsSupportedImageMIMETypeForEncoding(
@@ -174,8 +174,7 @@ bool MIMETypeRegistry::IsSupportedImageMIMETypeForEncoding(
 }
 
 bool MIMETypeRegistry::IsSupportedJavaScriptMIMEType(const String& mime_type) {
-  return mime_util::IsSupportedJavascriptMimeType(
-      ToLowerASCIIOrEmpty(mime_type));
+  return blink::IsSupportedJavascriptMimeType(ToLowerASCIIOrEmpty(mime_type));
 }
 
 bool MIMETypeRegistry::IsLegacySupportedJavaScriptLanguage(
@@ -205,7 +204,7 @@ bool MIMETypeRegistry::IsLegacySupportedJavaScriptLanguage(
 }
 
 bool MIMETypeRegistry::IsSupportedNonImageMIMEType(const String& mime_type) {
-  return mime_util::IsSupportedNonImageMimeType(ToLowerASCIIOrEmpty(mime_type));
+  return blink::IsSupportedNonImageMimeType(ToLowerASCIIOrEmpty(mime_type));
 }
 
 bool MIMETypeRegistry::IsSupportedMediaMIMEType(const String& mime_type,

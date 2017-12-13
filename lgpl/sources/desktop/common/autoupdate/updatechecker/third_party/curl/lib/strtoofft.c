@@ -5,7 +5,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2011, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 1998 - 2016, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -29,7 +29,7 @@
  *
  * In the ISO C standard (IEEE Std 1003.1), there is a strtoimax() function we
  * could use in case strtoll() doesn't exist...  See
- * http://www.opengroup.org/onlinepubs/009695399/functions/strtoimax.html
+ * https://www.opengroup.org/onlinepubs/009695399/functions/strtoimax.html
  */
 
 #ifdef NEED_CURL_STRTOLL
@@ -132,7 +132,7 @@ curlx_strtoll(const char *nptr, char **endptr, int base)
     else
       value = CURL_OFF_T_MAX;
 
-    SET_ERRNO(ERANGE);
+    errno = ERANGE;
   }
 
   if(endptr)
@@ -165,7 +165,7 @@ static int get_char(char c, int base)
     value = c - 'a' + 10;
   }
 #else
-  const char * cp;
+  const char *cp;
   int value;
 
   cp = memchr(valchars, c, 10 + 26 + 26);

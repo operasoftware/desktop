@@ -5,7 +5,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2016, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 1998 - 2017, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -69,16 +69,14 @@
 #include "http.h" /* for HTTP proxy tunnel stuff */
 #include "socks.h"
 #include "smtp.h"
-
 #include "strtoofft.h"
-#include "strequal.h"
+#include "strcase.h"
 #include "vtls/vtls.h"
 #include "connect.h"
 #include "strerror.h"
 #include "select.h"
 #include "multiif.h"
 #include "url.h"
-#include "rawstr.h"
 #include "curl_gethostname.h"
 #include "curl_sasl.h"
 #include "warnless.h"
@@ -105,7 +103,7 @@ static CURLcode smtp_parse_custom_request(struct connectdata *conn);
 static CURLcode smtp_perform_auth(struct connectdata *conn, const char *mech,
                                   const char *initresp);
 static CURLcode smtp_continue_auth(struct connectdata *conn, const char *resp);
-static void smtp_get_message(char *buffer, char** outptr);
+static void smtp_get_message(char *buffer, char **outptr);
 
 /*
  * SMTP protocol handler.
@@ -126,9 +124,11 @@ const struct Curl_handler Curl_handler_smtp = {
   ZERO_NULL,                        /* perform_getsock */
   smtp_disconnect,                  /* disconnect */
   ZERO_NULL,                        /* readwrite */
+  ZERO_NULL,                        /* connection_check */
   PORT_SMTP,                        /* defport */
   CURLPROTO_SMTP,                   /* protocol */
-  PROTOPT_CLOSEACTION | PROTOPT_NOURLQUERY /* flags */
+  PROTOPT_CLOSEACTION | PROTOPT_NOURLQUERY | /* flags */
+  PROTOPT_URLOPTIONS
 };
 
 #ifdef USE_SSL
@@ -151,63 +151,12 @@ const struct Curl_handler Curl_handler_smtps = {
   ZERO_NULL,                        /* perform_getsock */
   smtp_disconnect,                  /* disconnect */
   ZERO_NULL,                        /* readwrite */
+  ZERO_NULL,                        /* connection_check */
   PORT_SMTPS,                       /* defport */
   CURLPROTO_SMTPS,                  /* protocol */
   PROTOPT_CLOSEACTION | PROTOPT_SSL
-  | PROTOPT_NOURLQUERY              /* flags */
+  | PROTOPT_NOURLQUERY | PROTOPT_URLOPTIONS /* flags */
 };
-#endif
-
-#ifndef CURL_DISABLE_HTTP
-/*
- * HTTP-proxyed SMTP protocol handler.
- */
-
-static const struct Curl_handler Curl_handler_smtp_proxy = {
-  "SMTP",                               /* scheme */
-  Curl_http_setup_conn,                 /* setup_connection */
-  Curl_http,                            /* do_it */
-  Curl_http_done,                       /* done */
-  ZERO_NULL,                            /* do_more */
-  ZERO_NULL,                            /* connect_it */
-  ZERO_NULL,                            /* connecting */
-  ZERO_NULL,                            /* doing */
-  ZERO_NULL,                            /* proto_getsock */
-  ZERO_NULL,                            /* doing_getsock */
-  ZERO_NULL,                            /* domore_getsock */
-  ZERO_NULL,                            /* perform_getsock */
-  ZERO_NULL,                            /* disconnect */
-  ZERO_NULL,                            /* readwrite */
-  PORT_SMTP,                            /* defport */
-  CURLPROTO_HTTP,                       /* protocol */
-  PROTOPT_NONE                          /* flags */
-};
-
-#ifdef USE_SSL
-/*
- * HTTP-proxyed SMTPS protocol handler.
- */
-
-static const struct Curl_handler Curl_handler_smtps_proxy = {
-  "SMTPS",                              /* scheme */
-  Curl_http_setup_conn,                 /* setup_connection */
-  Curl_http,                            /* do_it */
-  Curl_http_done,                       /* done */
-  ZERO_NULL,                            /* do_more */
-  ZERO_NULL,                            /* connect_it */
-  ZERO_NULL,                            /* connecting */
-  ZERO_NULL,                            /* doing */
-  ZERO_NULL,                            /* proto_getsock */
-  ZERO_NULL,                            /* doing_getsock */
-  ZERO_NULL,                            /* domore_getsock */
-  ZERO_NULL,                            /* perform_getsock */
-  ZERO_NULL,                            /* disconnect */
-  ZERO_NULL,                            /* readwrite */
-  PORT_SMTPS,                           /* defport */
-  CURLPROTO_HTTP,                       /* protocol */
-  PROTOPT_NONE                          /* flags */
-};
-#endif
 #endif
 
 /* SASL parameters for the smtp protocol */
@@ -280,10 +229,10 @@ static bool smtp_endofresp(struct connectdata *conn, char *line, size_t len,
  *
  * Gets the authentication message from the response buffer.
  */
-static void smtp_get_message(char *buffer, char** outptr)
+static void smtp_get_message(char *buffer, char **outptr)
 {
   size_t len = 0;
-  char* message = NULL;
+  char *message = NULL;
 
   /* Find the start of the message */
   for(message = buffer + 4; *message == ' ' || *message == '\t'; message++)
@@ -292,7 +241,7 @@ static void smtp_get_message(char *buffer, char** outptr)
   /* Find the end of the message */
   for(len = strlen(message); len--;)
     if(message[len] != '\r' && message[len] != '\n' && message[len] != ' ' &&
-        message[len] != '\t')
+       message[len] != '\t')
       break;
 
   /* Terminate the message */
@@ -490,7 +439,7 @@ static CURLcode smtp_perform_authentication(struct connectdata *conn)
   /* Check we have enough data to authenticate with, and the
      server supports authentiation, and end the connect phase if not */
   if(!smtpc->auth_supported ||
-      !Curl_sasl_can_authenticate(&smtpc->sasl, conn)) {
+     !Curl_sasl_can_authenticate(&smtpc->sasl, conn)) {
     state(conn, SMTP_STOP);
     return result;
   }
@@ -520,15 +469,15 @@ static CURLcode smtp_perform_authentication(struct connectdata *conn)
 static CURLcode smtp_perform_command(struct connectdata *conn)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   struct SMTP *smtp = data->req.protop;
 
   /* Send the command */
   if(smtp->rcpt)
     result = Curl_pp_sendf(&conn->proto.smtpc.pp, "%s %s",
-                            smtp->custom && smtp->custom[0] != '\0' ?
-                            smtp->custom : "VRFY",
-                            smtp->rcpt->data);
+                           smtp->custom && smtp->custom[0] != '\0' ?
+                           smtp->custom : "VRFY",
+                           smtp->rcpt->data);
   else
     result = Curl_pp_sendf(&conn->proto.smtpc.pp, "%s",
                            smtp->custom && smtp->custom[0] != '\0' ?
@@ -552,7 +501,7 @@ static CURLcode smtp_perform_mail(struct connectdata *conn)
   char *auth = NULL;
   char *size = NULL;
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
 
   /* Calculate the FROM parameter */
   if(!data->set.str[STRING_MAIL_FROM])
@@ -627,16 +576,16 @@ static CURLcode smtp_perform_mail(struct connectdata *conn)
 static CURLcode smtp_perform_rcpt_to(struct connectdata *conn)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   struct SMTP *smtp = data->req.protop;
 
   /* Send the RCPT TO command */
   if(smtp->rcpt->data[0] == '<')
     result = Curl_pp_sendf(&conn->proto.smtpc.pp, "RCPT TO:%s",
-                            smtp->rcpt->data);
+                           smtp->rcpt->data);
   else
     result = Curl_pp_sendf(&conn->proto.smtpc.pp, "RCPT TO:<%s>",
-                            smtp->rcpt->data);
+                           smtp->rcpt->data);
   if(!result)
     state(conn, SMTP_RCPT);
 
@@ -668,13 +617,13 @@ static CURLcode smtp_state_servergreet_resp(struct connectdata *conn,
                                             smtpstate instate)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
 
   (void)instate; /* no use for this yet */
 
   if(smtpcode/100 != 2) {
     failf(data, "Got unexpected smtp-server response: %d", smtpcode);
-    result = CURLE_FTP_WEIRD_SERVER_REPLY;
+    result = CURLE_WEIRD_SERVER_REPLY;
   }
   else
     result = smtp_perform_ehlo(conn);
@@ -688,13 +637,13 @@ static CURLcode smtp_state_starttls_resp(struct connectdata *conn,
                                          smtpstate instate)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
 
   (void)instate; /* no use for this yet */
 
   if(smtpcode != 220) {
     if(data->set.use_ssl != CURLUSESSL_TRY) {
-      failf(data, "STARTTLS denied. %c", smtpcode);
+      failf(data, "STARTTLS denied, code %d", smtpcode);
       result = CURLE_USE_SSL_FAILED;
     }
     else
@@ -711,7 +660,7 @@ static CURLcode smtp_state_ehlo_resp(struct connectdata *conn, int smtpcode,
                                      smtpstate instate)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   struct smtp_conn *smtpc = &conn->proto.smtpc;
   const char *line = data->state.buffer;
   size_t len = strlen(line);
@@ -806,7 +755,7 @@ static CURLcode smtp_state_helo_resp(struct connectdata *conn, int smtpcode,
                                      smtpstate instate)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
 
   (void)instate; /* no use for this yet */
 
@@ -827,7 +776,7 @@ static CURLcode smtp_state_auth_resp(struct connectdata *conn,
                                      smtpstate instate)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   struct smtp_conn *smtpc = &conn->proto.smtpc;
   saslprogress progress;
 
@@ -855,7 +804,7 @@ static CURLcode smtp_state_command_resp(struct connectdata *conn, int smtpcode,
                                         smtpstate instate)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   struct SMTP *smtp = data->req.protop;
   char *line = data->state.buffer;
   size_t len = strlen(line);
@@ -901,7 +850,7 @@ static CURLcode smtp_state_mail_resp(struct connectdata *conn, int smtpcode,
                                      smtpstate instate)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
 
   (void)instate; /* no use for this yet */
 
@@ -921,7 +870,7 @@ static CURLcode smtp_state_rcpt_resp(struct connectdata *conn, int smtpcode,
                                      smtpstate instate)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   struct SMTP *smtp = data->req.protop;
 
   (void)instate; /* no use for this yet */
@@ -953,7 +902,7 @@ static CURLcode smtp_state_data_resp(struct connectdata *conn, int smtpcode,
                                      smtpstate instate)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
 
   (void)instate; /* no use for this yet */
 
@@ -998,7 +947,7 @@ static CURLcode smtp_statemach_act(struct connectdata *conn)
 {
   CURLcode result = CURLE_OK;
   curl_socket_t sock = conn->sock[FIRSTSOCKET];
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   int smtpcode;
   struct smtp_conn *smtpc = &conn->proto.smtpc;
   struct pingpong *pp = &smtpc->pp;
@@ -1108,12 +1057,12 @@ static CURLcode smtp_block_statemach(struct connectdata *conn)
   return result;
 }
 
-/* Allocate and initialize the SMTP struct for the current SessionHandle if
+/* Allocate and initialize the SMTP struct for the current Curl_easy if
    required */
 static CURLcode smtp_init(struct connectdata *conn)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   struct SMTP *smtp;
 
   smtp = data->req.protop = calloc(sizeof(struct SMTP), 1);
@@ -1194,7 +1143,7 @@ static CURLcode smtp_done(struct connectdata *conn, CURLcode status,
                           bool premature)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   struct SMTP *smtp = data->req.protop;
   struct pingpong *pp = &conn->proto.smtpc.pp;
   char *eob;
@@ -1284,7 +1233,7 @@ static CURLcode smtp_perform(struct connectdata *conn, bool *connected,
 {
   /* This is SMTP and no proxy */
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   struct SMTP *smtp = data->req.protop;
 
   DEBUGF(infof(conn->data, "DO phase starts\n"));
@@ -1423,7 +1372,7 @@ static CURLcode smtp_regular_transfer(struct connectdata *conn,
 {
   CURLcode result = CURLE_OK;
   bool connected = FALSE;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
 
   /* Make sure size is unknown at this point */
   data->req.size = -1;
@@ -1446,35 +1395,11 @@ static CURLcode smtp_regular_transfer(struct connectdata *conn,
 
 static CURLcode smtp_setup_connection(struct connectdata *conn)
 {
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   CURLcode result;
 
   /* Clear the TLS upgraded flag */
   conn->tls_upgraded = FALSE;
-
-  /* Set up the proxy if necessary */
-  if(conn->bits.httpproxy && !data->set.tunnel_thru_httpproxy) {
-    /* Unless we have asked to tunnel SMTP operations through the proxy, we
-       switch and use HTTP operations only */
-#ifndef CURL_DISABLE_HTTP
-    if(conn->handler == &Curl_handler_smtp)
-      conn->handler = &Curl_handler_smtp_proxy;
-    else {
-#ifdef USE_SSL
-      conn->handler = &Curl_handler_smtps_proxy;
-#else
-      failf(data, "SMTPS not supported!");
-      return CURLE_UNSUPPORTED_PROTOCOL;
-#endif
-    }
-    /* set it up as a HTTP connection instead */
-    return conn->handler->setup_connection(conn);
-
-#else
-    failf(data, "SMTP over http proxy requires HTTP support built-in!");
-    return CURLE_UNSUPPORTED_PROTOCOL;
-#endif
-  }
 
   /* Initialise the SMTP layer */
   result = smtp_init(conn);
@@ -1505,14 +1430,14 @@ static CURLcode smtp_parse_url_options(struct connectdata *conn)
     const char *value;
 
     while(*ptr && *ptr != '=')
-        ptr++;
+      ptr++;
 
     value = ptr + 1;
 
     while(*ptr && *ptr != ';')
       ptr++;
 
-    if(strnequal(key, "AUTH=", 5))
+    if(strncasecompare(key, "AUTH=", 5))
       result = Curl_sasl_parse_url_auth_option(&smtpc->sasl,
                                                value, ptr - value);
     else
@@ -1534,7 +1459,7 @@ static CURLcode smtp_parse_url_options(struct connectdata *conn)
 static CURLcode smtp_parse_url_path(struct connectdata *conn)
 {
   /* The SMTP struct is already initialised in smtp_connect() */
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   struct smtp_conn *smtpc = &conn->proto.smtpc;
   const char *path = data->state.path;
   char localhost[HOSTNAME_MAX + 1];
@@ -1560,7 +1485,7 @@ static CURLcode smtp_parse_url_path(struct connectdata *conn)
 static CURLcode smtp_parse_custom_request(struct connectdata *conn)
 {
   CURLcode result = CURLE_OK;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   struct SMTP *smtp = data->req.protop;
   const char *custom = data->set.str[STRING_CUSTOMREQUEST];
 
@@ -1581,7 +1506,7 @@ CURLcode Curl_smtp_escape_eob(struct connectdata *conn, const ssize_t nread)
   */
   ssize_t i;
   ssize_t si;
-  struct SessionHandle *data = conn->data;
+  struct Curl_easy *data = conn->data;
   struct SMTP *smtp = data->req.protop;
   char *scratch = data->state.scratch;
   char *newscratch = NULL;
@@ -1592,7 +1517,7 @@ CURLcode Curl_smtp_escape_eob(struct connectdata *conn, const ssize_t nread)
   if(!scratch || data->set.crlf) {
     oldscratch = scratch;
 
-    scratch = newscratch = malloc(2 * BUFSIZE);
+    scratch = newscratch = malloc(2 * data->set.buffer_size);
     if(!newscratch) {
       failf(data, "Failed to alloc scratch buffer!");
 

@@ -32,12 +32,6 @@ blink_modules_sources("sensor") {
     "SensorProxy.h",
   ]
 
-  jumbo_excluded_sources = [
-    # using statements in global namespace
-    "Sensor.cpp",
-    "SensorProxy.cpp",
-  ]
-
   deps = [
     "//device/base/synchronization",
     "//services/device/public/cpp/generic_sensor",

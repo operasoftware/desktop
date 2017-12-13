@@ -9,10 +9,8 @@ DetachedViewControlEvent::DetachedViewControlEvent()
 }
 
 DetachedViewControlEvent::DetachedViewControlEvent(const String& control_name)
-    : Event(EventTypeNames::operadetachedviewcontrol, false, false)
-    , control_name_(control_name)
-{
-}
+    : Event(EventTypeNames::operacustomcontrol, false, false),
+      control_name_(control_name) {}
 
 DetachedViewControlEvent::~DetachedViewControlEvent()
 {

@@ -4,7 +4,7 @@
 #define DetachedViewControlEvent_h
 
 #include "core/clipboard/DataTransfer.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 
 namespace blink {
 

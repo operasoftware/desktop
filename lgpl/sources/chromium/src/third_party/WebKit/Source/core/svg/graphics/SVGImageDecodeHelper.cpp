@@ -20,7 +20,8 @@ SkBitmap DecodeSVGImage(const unsigned char* data,
   svg_image->SetData(buffer, true);
   RefPtr<Image> svg_container =
       SVGImageForContainer::Create(svg_image.Get(), size, 1, KURL());
-  sk_sp<SkImage> sk_image = svg_container->ImageForCurrentFrame();
+  sk_sp<SkImage> sk_image =
+      svg_container->PaintImageForCurrentFrame().GetSkImage();
   SkBitmap bitmap;
   sk_image->asLegacyBitmap(&bitmap, SkImage::kRO_LegacyBitmapMode);
   return bitmap;

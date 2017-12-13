@@ -62,10 +62,6 @@ void EmbeddedContentPainter::Paint(const PaintInfo& paint_info,
     return;
 
   if (layout_embedded_content_.GetEmbeddedContentView()) {
-    // TODO(schenney) crbug.com/93805 Speculative release assert to verify that
-    // the crashes we see in EmbeddedContentView painting are due to a destroyed
-    // LayoutEmbeddedContent object.
-    CHECK(layout_embedded_content_.GetNode());
     Optional<RoundedInnerRectClipper> clipper;
     if (layout_embedded_content_.Style()->HasBorderRadius()) {
       if (border_rect.IsEmpty())
@@ -137,7 +133,8 @@ void EmbeddedContentPainter::PaintContents(const PaintInfo& paint_info,
       AffineTransform::Translation(view_paint_offset.Width(),
                                    view_paint_offset.Height()));
   CullRect adjusted_cull_rect(paint_info.GetCullRect(), -view_paint_offset);
-  embedded_content_view->Paint(paint_info.context, adjusted_cull_rect);
+  embedded_content_view->Paint(
+      paint_info.context, paint_info.GetGlobalPaintFlags(), adjusted_cull_rect);
 }
 
 }  // namespace blink

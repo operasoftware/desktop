@@ -72,7 +72,7 @@ WebImage WebImage::FromData(const WebData& data, const WebSize& desired_size) {
     }
   }
 
-  ImageFrame* frame = decoder->FrameBufferAtIndex(index);
+  ImageFrame* frame = decoder->DecodeFrameBufferAtIndex(index);
   return (frame && !decoder->Failed()) ? WebImage(frame->Bitmap()) : WebImage();
 }
 
@@ -99,7 +99,7 @@ WebVector<WebImage> WebImage::FramesFromData(const WebData& data,
       continue;
     last_size = frame_size;
 
-    ImageFrame* frame = decoder->FrameBufferAtIndex(i);
+    ImageFrame* frame = decoder->DecodeFrameBufferAtIndex(i);
     if (!frame)
       continue;
 
@@ -131,7 +131,7 @@ WebImage::WebImage(PassRefPtr<Image> image) {
   if (!image)
     return;
 
-  if (sk_sp<SkImage> sk_image = image->ImageForCurrentFrame())
+  if (sk_sp<SkImage> sk_image = image->PaintImageForCurrentFrame().GetSkImage())
     sk_image->asLegacyBitmap(&bitmap_, SkImage::kRO_LegacyBitmapMode);
 }
 

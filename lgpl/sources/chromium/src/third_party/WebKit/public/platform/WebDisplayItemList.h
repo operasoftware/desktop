@@ -32,7 +32,7 @@ namespace blink {
 // 'drawing' items) and operations to be performed when rendering this content
 // (stored in 'clip', 'transform', 'filter', etc...). For more details see:
 // http://dev.chromium.org/blink/slimming-paint.
-class BLINK_PLATFORM_EXPORT WebDisplayItemList {
+class WebDisplayItemList {
  public:
   virtual ~WebDisplayItemList() {}
 

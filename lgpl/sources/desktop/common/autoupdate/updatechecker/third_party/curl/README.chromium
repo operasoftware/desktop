@@ -1,6 +1,6 @@
 Name: cURL
 URL: http://curl.haxx.se/dev/source.html
-Version: 7.49.1
+Version: 7.55.1
 License: Apache 2.0, MIT, GPL v2 and custom licenses
 License File: COPYING
 
@@ -10,8 +10,5 @@ applied when libcurl is upgraded.
 1. undef USE_OPENSSL in the file: lib/config-win32.h
    Leaving it defined causes compilation errors due to attempts to use OpenSSL,
    which we don't use on Windows.
-
-2. Remove non-ASCII characters from some source files.
-   Commit:e49534edf76ce04a4180783545b046b2daddb495
 
 

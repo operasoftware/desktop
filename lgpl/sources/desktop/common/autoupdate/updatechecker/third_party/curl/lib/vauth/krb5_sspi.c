@@ -5,7 +5,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 2014 - 2016, Steve Holme, <steve_holme@hotmail.com>.
+ * Copyright (C) 2014 - 2017, Steve Holme, <steve_holme@hotmail.com>.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -40,6 +40,28 @@
 #include "memdebug.h"
 
 /*
+ * Curl_auth_is_gssapi_supported()
+ *
+ * This is used to evaluate if GSSAPI (Kerberos V5) is supported.
+ *
+ * Parameters: None
+ *
+ * Returns TRUE if Kerberos V5 is supported by Windows SSPI.
+ */
+bool Curl_auth_is_gssapi_supported(void)
+{
+  PSecPkgInfo SecurityPackage;
+  SECURITY_STATUS status;
+
+  /* Query the security package for Kerberos */
+  status = s_pSecFn->QuerySecurityPackageInfo((TCHAR *)
+                                              TEXT(SP_NAME_KERBEROS),
+                                              &SecurityPackage);
+
+  return (status == SEC_E_OK ? TRUE : FALSE);
+}
+
+/*
  * Curl_auth_create_gssapi_user_message()
  *
  * This is used to generate an already encoded GSSAPI (Kerberos V5) user token
@@ -52,7 +74,7 @@
  * passdwp     [in]     - The user's password.
  * service     [in]     - The service type such as http, smtp, pop or imap.
  * host        [in]     - The host name.
- * mutual_auth [in]     - Flag specifing whether or not mutual authentication
+ * mutual_auth [in]     - Flag specifying whether or not mutual authentication
  *                        is enabled.
  * chlg64      [in]     - The optional base64 encoded challenge message.
  * krb5        [in/out] - The Kerberos 5 data struct being used and modified.
@@ -62,7 +84,7 @@
  *
  * Returns CURLE_OK on success.
  */
-CURLcode Curl_auth_create_gssapi_user_message(struct SessionHandle *data,
+CURLcode Curl_auth_create_gssapi_user_message(struct Curl_easy *data,
                                               const char *userp,
                                               const char *passwdp,
                                               const char *service,
@@ -240,7 +262,7 @@ CURLcode Curl_auth_create_gssapi_user_message(struct SessionHandle *data,
  *
  * Returns CURLE_OK on success.
  */
-CURLcode Curl_auth_create_gssapi_security_message(struct SessionHandle *data,
+CURLcode Curl_auth_create_gssapi_security_message(struct Curl_easy *data,
                                                   const char *chlg64,
                                                   struct kerberos5data *krb5,
                                                   char **outptr,

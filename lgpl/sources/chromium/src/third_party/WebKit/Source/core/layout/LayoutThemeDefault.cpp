@@ -208,6 +208,7 @@ void LayoutThemeDefault::SetCheckboxSize(ComputedStyle& style) const {
   float zoom_level = style.EffectiveZoom() / default_scale;
   size.SetWidth(size.Width() * zoom_level);
   size.SetHeight(size.Height() * zoom_level);
+  SetMinimumSizeIfAuto(style, size);
   SetSizeIfAuto(style, size);
 }
 
@@ -223,6 +224,7 @@ void LayoutThemeDefault::SetRadioSize(ComputedStyle& style) const {
   float zoom_level = style.EffectiveZoom() / default_scale;
   size.SetWidth(size.Width() * zoom_level);
   size.SetHeight(size.Height() * zoom_level);
+  SetMinimumSizeIfAuto(style, size);
   SetSizeIfAuto(style, size);
 }
 
@@ -262,11 +264,11 @@ Color LayoutThemeDefault::PlatformFocusRingColor() const {
 }
 
 void LayoutThemeDefault::SystemFont(CSSValueID system_font_id,
-                                    FontStyle& font_style,
-                                    FontWeight& font_weight,
+                                    FontSelectionValue& font_slope,
+                                    FontSelectionValue& font_weight,
                                     float& font_size,
                                     AtomicString& font_family) const {
-  LayoutThemeFontProvider::SystemFont(system_font_id, font_style, font_weight,
+  LayoutThemeFontProvider::SystemFont(system_font_id, font_slope, font_weight,
                                       font_size, font_family);
 }
 

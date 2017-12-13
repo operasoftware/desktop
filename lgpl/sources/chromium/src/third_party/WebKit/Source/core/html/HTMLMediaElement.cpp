@@ -32,6 +32,7 @@
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptEventListener.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
+#include "core/CoreInitializer.h"
 #include "core/HTMLNames.h"
 #include "core/css/MediaList.h"
 #include "core/dom/Attribute.h"
@@ -39,9 +40,9 @@
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/ShadowRoot.h"
 #include "core/dom/TaskRunnerHelper.h"
+#include "core/dom/events/Event.h"
 #include "core/dom/UserGestureIndicator.h"
 #include "core/events/DetachedViewControlEvent.h"
-#include "core/events/Event.h"
 #include "core/events/VRPlayerErrorEvent.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameClient.h"
@@ -72,8 +73,9 @@
 #include "core/layout/IntersectionGeometry.h"
 #include "core/layout/LayoutMedia.h"
 #include "core/layout/api/LayoutViewItem.h"
-#include "core/layout/compositing/PaintLayerCompositor.h"
 #include "core/page/ChromeClient.h"
+#include "core/page/Page.h"
+#include "core/paint/compositing/PaintLayerCompositor.h"
 #include "platform/Histogram.h"
 #include "platform/LayoutTestSupport.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -96,8 +98,10 @@
 #include "public/platform/WebAudioSourceProvider.h"
 #include "public/platform/WebContentDecryptionModule.h"
 #include "public/platform/WebInbandTextTrack.h"
+#include "public/platform/WebMediaPlayer.h"
 #include "public/platform/WebMediaPlayerSource.h"
 #include "public/platform/WebMediaStream.h"
+#include "public/platform/WebScreenInfo.h"
 #include "public/platform/modules/remoteplayback/WebRemotePlaybackAvailability.h"
 #include "public/platform/modules/remoteplayback/WebRemotePlaybackClient.h"
 #include "public/platform/modules/remoteplayback/WebRemotePlaybackState.h"
@@ -129,7 +133,6 @@ using DocumentElementSetMap =
 namespace {
 
 constexpr float kMostlyFillViewportThreshold = 0.85f;
-constexpr double kMostlyFillViewportBecomeStableSeconds = 5;
 constexpr double kCheckViewportIntersectionIntervalSeconds = 1;
 constexpr double kVRStateUpdateIntervalSeconds = 3;
 
@@ -361,12 +364,6 @@ bool IsDocumentCrossOrigin(Document& document) {
   return frame && frame->IsCrossOriginSubframe();
 }
 
-std::unique_ptr<MediaControls::Factory>& MediaControlsFactory() {
-  DEFINE_STATIC_LOCAL(std::unique_ptr<MediaControls::Factory>,
-                      media_controls_factory, ());
-  return media_controls_factory;
-}
-
 void RecordPlayPromiseRejected(PlayPromiseRejectReason reason) {
   DEFINE_STATIC_LOCAL(EnumerationHistogram, histogram,
                       ("Media.MediaElement.PlayPromiseReject",
@@ -447,13 +444,6 @@ void HTMLMediaElement::OnMediaControlsEnabledChange(Document* document) {
   }
 }
 
-// static
-void HTMLMediaElement::RegisterMediaControlsFactory(
-    std::unique_ptr<MediaControls::Factory> factory) {
-  DCHECK(!MediaControlsFactory());
-  MediaControlsFactory() = std::move(factory);
-}
-
 HTMLMediaElement::HTMLMediaElement(const QualifiedName& tag_name,
                                    Document& document)
     : HTMLElement(tag_name, document),
@@ -473,10 +463,6 @@ HTMLMediaElement::HTMLMediaElement(const QualifiedName& tag_name,
           TaskRunnerHelper::Get(TaskType::kUnthrottled, &document),
           this,
           &HTMLMediaElement::AudioTracksTimerFired),
-      viewport_fill_debouncer_timer_(
-          TaskRunnerHelper::Get(TaskType::kUnthrottled, &document),
-          this,
-          &HTMLMediaElement::ViewportFillDebouncerTimerFired),
       check_viewport_intersection_timer_(
           TaskRunnerHelper::Get(TaskType::kUnthrottled, &document),
           this,
@@ -485,7 +471,7 @@ HTMLMediaElement::HTMLMediaElement(const QualifiedName& tag_name,
           this,
           &HTMLMediaElement::VRPlayerStateChangeNeeded),
       played_time_ranges_(),
-      async_event_queue_(GenericEventQueue::Create(this)),
+      async_event_queue_(MediaElementEventQueue::Create(this)),
       playback_rate_(1.0f),
       default_playback_rate_(1.0f),
       network_state_(kNetworkEmpty),
@@ -529,9 +515,8 @@ HTMLMediaElement::HTMLMediaElement(const QualifiedName& tag_name,
       previous_player_had_detached_view_(false),
       previous_player_had_vr_player_(false),
       mostly_filling_viewport_(false),
-      audio_tracks_(this, AudioTrackList::Create(*this)),
-      video_tracks_(this, VideoTrackList::Create(*this)),
-      text_tracks_(this, nullptr),
+      audio_tracks_(AudioTrackList::Create(*this)),
+      video_tracks_(VideoTrackList::Create(*this)),
       audio_source_node_(nullptr),
       autoplay_policy_(new AutoplayPolicy(this)),
       remote_playback_client_(nullptr),
@@ -584,8 +569,6 @@ void HTMLMediaElement::DidMoveToNewDocument(Document& old_document) {
   playback_progress_timer_.MoveToNewTaskRunner(
       TaskRunnerHelper::Get(TaskType::kUnthrottled, &GetDocument()));
   audio_tracks_timer_.MoveToNewTaskRunner(
-      TaskRunnerHelper::Get(TaskType::kUnthrottled, &GetDocument()));
-  viewport_fill_debouncer_timer_.MoveToNewTaskRunner(
       TaskRunnerHelper::Get(TaskType::kUnthrottled, &GetDocument()));
   check_viewport_intersection_timer_.MoveToNewTaskRunner(
       TaskRunnerHelper::Get(TaskType::kUnthrottled, &GetDocument()));
@@ -780,6 +763,10 @@ void HTMLMediaElement::ScheduleEvent(Event* event) {
 }
 
 void HTMLMediaElement::LoadTimerFired(TimerBase*) {
+  if (!GetDocument().GetSettings() ||
+      !GetDocument().GetSettings()->GetMediaEnabled())
+    return;
+
   if (pending_action_flags_ & kLoadTextTrackResource)
     HonorUserPreferencesForAutomaticTextTrackSelection();
 
@@ -1190,10 +1177,10 @@ void HTMLMediaElement::LoadResource(const WebMediaPlayerSource& source,
 
   if (audio_source_node_)
     audio_source_node_->OnCurrentSrcChanged(current_src_);
-  if (RuntimeEnabledFeatures::NewRemotePlaybackPipelineEnabled() &&
-      RemotePlaybackClient()) {
-    RemotePlaybackClient()->SourceChanged(current_src_);
-  }
+
+  // Update remote playback client with the new src and consider it incompatible
+  // until proved otherwise.
+  RemotePlaybackCompatibilityChanged(current_src_, false);
 
   BLINK_MEDIA_LOG << "loadResource(" << (void*)this << ") - current_src_ -> "
                   << UrlForLoggingMedia(current_src_);
@@ -1295,8 +1282,10 @@ void HTMLMediaElement::StartPlayerLoad() {
     return;
   }
 
-  web_media_player_ =
-      frame->Client()->CreateWebMediaPlayer(*this, source, this);
+  web_media_player_ = frame->Client()->CreateWebMediaPlayer(
+      *this, source, this,
+      frame->GetPage()->GetChromeClient().GetWebLayerTreeView(frame));
+
   if (!web_media_player_) {
     MediaLoadingFailed(WebMediaPlayer::kNetworkStateFormatError,
                        BuildElementErrorMessage(
@@ -2285,7 +2274,10 @@ WebMediaPlayer::Preload HTMLMediaElement::PreloadType() const {
     return WebMediaPlayer::kPreloadMetaData;
   }
 
-  if (DeprecatedEqualIgnoringCase(preload, "auto")) {
+  // Per HTML spec, "The empty string ... maps to the Automatic state."
+  // https://html.spec.whatwg.org/#attr-media-preload
+  if (DeprecatedEqualIgnoringCase(preload, "auto") ||
+      DeprecatedEqualIgnoringCase(preload, "")) {
     UseCounter::Count(GetDocument(), WebFeature::kHTMLMediaElementPreloadAuto);
     return WebMediaPlayer::kPreloadAuto;
   }
@@ -2296,11 +2288,10 @@ WebMediaPlayer::Preload HTMLMediaElement::PreloadType() const {
 
   // The spec does not define an invalid value default:
   // https://www.w3.org/Bugs/Public/show_bug.cgi?id=28950
-
-  // TODO(foolip): Try to make "metadata" the default preload state:
-  // https://crbug.com/310450
   UseCounter::Count(GetDocument(), WebFeature::kHTMLMediaElementPreloadDefault);
-  return WebMediaPlayer::kPreloadAuto;
+  return RuntimeEnabledFeatures::PreloadDefaultIsMetadataEnabled()
+             ? WebMediaPlayer::kPreloadMetaData
+             : WebMediaPlayer::kPreloadAuto;
 }
 
 String HTMLMediaElement::EffectivePreload() const {
@@ -3261,14 +3252,14 @@ void HTMLMediaElement::PlaybackStateChanged() {
     PlayInternal();
 }
 
-void HTMLMediaElement::DetachedViewMuteStateChanged(bool muted) {
-  BLINK_MEDIA_LOG << "HTMLMediaElement::MuteStateChanged(" << (void*)this
-                  << ")";
+void HTMLMediaElement::MuteStateChanged(bool muted) {
+  BLINK_MEDIA_LOG << "HTMLMediaElement::MuteStateChanged("
+                  << reinterpret_cast<void*>(this) << ")";
 
   setMuted(muted);
 }
 
-void HTMLMediaElement::DetachedViewPlaybackStateToggled() {
+void HTMLMediaElement::PlaybackStateToggled() {
   if (paused())
     Play();
   else
@@ -3276,13 +3267,13 @@ void HTMLMediaElement::DetachedViewPlaybackStateToggled() {
 }
 
 void HTMLMediaElement::DetachedViewActionTriggered(const WebString& action) {
-  UserGestureIndicator gesture_indicator(
-      UserGestureToken::Create(&GetDocument()));
+  std::unique_ptr<UserGestureIndicator> gesture_indicator =
+    LocalFrame::CreateUserGesture(GetDocument().GetFrame());
   DispatchEvent(DetachedViewControlEvent::Create(action));
 }
 
-void HTMLMediaElement::VRPlayerErrorOccured() {
-  DispatchEvent(VRPlayerErrorEvent::Create(VRPlayerErrorEvent::kUnknownError));
+void HTMLMediaElement::VRPlayerErrorOccured(uint16_t type) {
+  DispatchEvent(VRPlayerErrorEvent::Create(type));
 }
 
 void HTMLMediaElement::RequestSeek(double time) {
@@ -3326,6 +3317,14 @@ void HTMLMediaElement::CancelledRemotePlaybackRequest() {
 void HTMLMediaElement::RemotePlaybackStarted() {
   if (RemotePlaybackClient())
     RemotePlaybackClient()->StateChanged(WebRemotePlaybackState::kConnected);
+}
+
+void HTMLMediaElement::RemotePlaybackCompatibilityChanged(const WebURL& url,
+                                                          bool is_compatible) {
+  if (RuntimeEnabledFeatures::NewRemotePlaybackPipelineEnabled() &&
+      RemotePlaybackClient()) {
+    RemotePlaybackClient()->SourceChanged(url, is_compatible);
+  }
 }
 
 bool HTMLMediaElement::HasSelectedVideoTrack() {
@@ -3814,11 +3813,12 @@ MediaControls* HTMLMediaElement::GetMediaControls() const {
 }
 
 void HTMLMediaElement::EnsureMediaControls() {
-  if (GetMediaControls() || !MediaControlsFactory())
+  if (GetMediaControls())
     return;
 
   ShadowRoot& shadow_root = EnsureUserAgentShadowRoot();
-  media_controls_ = MediaControlsFactory()->Create(*this, shadow_root);
+  media_controls_ =
+      CoreInitializer::GetInstance().CreateMediaControls(*this, shadow_root);
 
   // The media controls should be inserted after the text track container,
   // so that they are rendered in front of captions and subtitles. This check
@@ -4310,9 +4310,20 @@ bool HTMLMediaElement::HasNativeControls() {
   return ShouldShowControls(RecordMetricsBehavior::kDoRecord);
 }
 
+bool HTMLMediaElement::IsAudioElement() {
+  return IsHTMLAudioElement();
+}
+
 WebMediaPlayer::DisplayType HTMLMediaElement::DisplayType() const {
   return IsFullscreen() ? WebMediaPlayer::DisplayType::kFullscreen
                         : WebMediaPlayer::DisplayType::kInline;
+}
+
+gfx::ColorSpace HTMLMediaElement::TargetColorSpace() {
+  const LocalFrame* frame = GetDocument().GetFrame();
+  if (!frame)
+    return gfx::ColorSpace();
+  return frame->GetPage()->GetChromeClient().GetScreenInfo().color_space;
 }
 
 void HTMLMediaElement::CheckViewportIntersectionTimerFired(TimerBase*) {
@@ -4325,30 +4336,26 @@ void HTMLMediaElement::CheckViewportIntersectionTimerFired(TimerBase*) {
     return;
 
   current_intersect_rect_ = intersect_rect;
-  // Reset on any intersection change, since this indicates the user is
-  // scrolling around in the document, the document is changing layout, etc.
-  viewport_fill_debouncer_timer_.Stop();
   bool is_mostly_filling_viewport =
       (current_intersect_rect_.Size().Area() >
        kMostlyFillViewportThreshold * geometry.RootIntRect().Size().Area());
   if (mostly_filling_viewport_ == is_mostly_filling_viewport)
     return;
 
-  if (!is_mostly_filling_viewport) {
-    mostly_filling_viewport_ = is_mostly_filling_viewport;
-    if (web_media_player_)
-      web_media_player_->BecameDominantVisibleContent(mostly_filling_viewport_);
-    return;
-  }
-
-  viewport_fill_debouncer_timer_.StartOneShot(
-      kMostlyFillViewportBecomeStableSeconds, BLINK_FROM_HERE);
-}
-
-void HTMLMediaElement::ViewportFillDebouncerTimerFired(TimerBase*) {
-  mostly_filling_viewport_ = true;
+  mostly_filling_viewport_ = is_mostly_filling_viewport;
   if (web_media_player_)
     web_media_player_->BecameDominantVisibleContent(mostly_filling_viewport_);
 }
+
+STATIC_ASSERT_ENUM(WebMediaPlayer::kReadyStateHaveNothing,
+                   HTMLMediaElement::kHaveNothing);
+STATIC_ASSERT_ENUM(WebMediaPlayer::kReadyStateHaveMetadata,
+                   HTMLMediaElement::kHaveMetadata);
+STATIC_ASSERT_ENUM(WebMediaPlayer::kReadyStateHaveCurrentData,
+                   HTMLMediaElement::kHaveCurrentData);
+STATIC_ASSERT_ENUM(WebMediaPlayer::kReadyStateHaveFutureData,
+                   HTMLMediaElement::kHaveFutureData);
+STATIC_ASSERT_ENUM(WebMediaPlayer::kReadyStateHaveEnoughData,
+                   HTMLMediaElement::kHaveEnoughData);
 
 }  // namespace blink

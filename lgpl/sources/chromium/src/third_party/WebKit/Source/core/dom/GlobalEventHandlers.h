@@ -30,7 +30,7 @@
 #ifndef GlobalEventHandlers_h
 #define GlobalEventHandlers_h
 
-#include "core/events/EventTarget.h"
+#include "core/dom/events/EventTarget.h"
 
 namespace blink {
 
@@ -78,8 +78,8 @@ DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(mouseout);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(mouseover);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(mouseup);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(mousewheel);
+DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(operacustomcontrol);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(operadetachedviewchange);
-DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(operadetachedviewcontrol);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(operavrplayerchange);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(operavrplayererror);
 DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(pause);

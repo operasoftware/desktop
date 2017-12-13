@@ -3,7 +3,7 @@
 #ifndef VRPlayerErrorEvent_h
 #define VRPlayerErrorEvent_h
 
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 
 namespace blink {
 
@@ -11,7 +11,16 @@ class VRPlayerErrorEvent final : public Event {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  enum ErrorType { kUnknownError = 1 };
+  enum ErrorType {
+    kOk,
+    kNoApi,
+    kNoHmd,
+    kRendererError,
+    kVrSessionError,
+    kServiceConnectionError,
+    kAcquireError,
+    kVideoFrameError,
+  };
 
   ~VRPlayerErrorEvent() override;
 
