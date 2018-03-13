@@ -31,12 +31,11 @@
 #ifndef ContentEditablesController_h
 #define ContentEditablesController_h
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/HashFunctions.h"
 #include "platform/wtf/HashMap.h"
-#include "platform/wtf/PassRefPtr.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/text/StringHash.h"
 #include "platform/wtf/text/WTFString.h"
@@ -58,7 +57,7 @@ class ContentEditablesState final
   void SetContentEditablesContent(const Vector<String>&);
   bool IsRegistered(Element*);
 
-  DECLARE_TRACE();
+  void Trace(Visitor*);
 
  private:
   ContentEditablesState();
@@ -82,7 +81,7 @@ class ContentEditablesController final
   void SetContentEditablesContent(const Vector<String>&);
   bool IsRegistered(Element*);
 
-  DECLARE_TRACE();
+  void Trace(Visitor*);
 
  private:
   ContentEditablesController();

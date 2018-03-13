@@ -21,9 +21,8 @@ const AtomicString& DetachedViewControlEvent::InterfaceName() const
     return EventNames::DetachedViewControlEvent;
 }
 
-DEFINE_TRACE(DetachedViewControlEvent)
-{
-    Event::Trace(visitor);
+void DetachedViewControlEvent::Trace(Visitor* visitor) {
+  Event::Trace(visitor);
 }
 
 } // namespace blink

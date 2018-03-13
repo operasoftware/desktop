@@ -1171,10 +1171,10 @@ void decode_mb_mode(VP8Context *s, VP8mvbounds *mv_bounds,
                     uint8_t *segment, uint8_t *ref, int layout, int is_vp7)
 {
     VP56RangeCoder *c = &s->c;
-    static const char *vp7_feature_name[] = { "q-index",
-                                              "lf-delta",
-                                              "partial-golden-update",
-                                              "blit-pitch" };
+    static const char * const vp7_feature_name[] = { "q-index",
+                                                     "lf-delta",
+                                                     "partial-golden-update",
+                                                     "blit-pitch" };
     if (is_vp7) {
         int i;
         *segment = 0;
@@ -2549,6 +2549,8 @@ int vp78_decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
     int ret, i, referenced, num_jobs;
     enum AVDiscard skip_thresh;
     VP8Frame *av_uninit(curframe), *prev_frame;
+
+    av_assert0(avctx->pix_fmt == AV_PIX_FMT_YUVA420P || avctx->pix_fmt == AV_PIX_FMT_YUV420P);
 
     if (is_vp7)
         ret = vp7_decode_frame_header(s, avpkt->data, avpkt->size);

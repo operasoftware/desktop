@@ -1,8 +1,8 @@
-# -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
-#
 # Copyright (C) 2015 Opera Software AS.  All rights reserved.
 #
 # This file is an original work developed by Opera Software AS
+
+import("//build/config/sanitizers/sanitizers.gni")
 
 source_set("libcurl") {
   configs -= [ "//build/config/compiler:chromium_code" ]
@@ -257,6 +257,10 @@ source_set("libcurl") {
     "lib/wildcard.h",
     "lib/x509asn1.c",
     "lib/x509asn1.h",
+  ]
+
+  deps = [
+    "//build/config:exe_and_shlib_deps",
   ]
 
   if (is_win) {

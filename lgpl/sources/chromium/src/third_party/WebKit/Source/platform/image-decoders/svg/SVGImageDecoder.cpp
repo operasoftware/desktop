@@ -4,6 +4,8 @@
 
 #include "platform/image-decoders/svg/SVGImageDecoder.h"
 
+#include "third_party/skia/include/core/SkData.h"
+
 namespace blink {
 
 static SVGDecodeFunction s_decodeFunction = nullptr;

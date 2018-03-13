@@ -100,6 +100,7 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
   virtual void PlaybackStateToggled() = 0;
   virtual void VRPlayerStateChanged(bool) = 0;
   virtual void VRPlayerErrorOccured(uint16_t type) = 0;
+  virtual WebString VRPlayerGetControls() = 0;
   virtual void CancelledRemotePlaybackRequest() = 0;
   virtual void RemotePlaybackStarted() = 0;
   virtual void RemotePlaybackCompatibilityChanged(const WebURL&,

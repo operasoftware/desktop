@@ -11,8 +11,8 @@ found in the LICENSE file.
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
 
-    <!-- Origin Trial Token, feature = WebVR (For Chrome M59+), origin = https://webvr.info, expires = 2017-08-30 -->
-    <meta http-equiv="origin-trial" data-feature="WebVR (For Chrome M59+)" data-expires="2017-08-30" content="AmtVcdkEen4LWNSpr4fW02Z0wHiaM9p8no5KyO0jx70aZNWvoIFxwBHG8RPTVjbrgrYCxFQvYwAndg60tl3XVAYAAABMeyJvcmlnaW4iOiJodHRwczovL3dlYnZyLmluZm86NDQzIiwiZmVhdHVyZSI6IldlYlZSMS4xIiwiZXhwaXJ5IjoxNTA0MTI1ODEyfQ==">
+    <!-- Origin Trial Token, feature = WebVR (For Chrome M59+), origin = https://webvr.info, expires = 2017-10-13 -->
+    <meta http-equiv="origin-trial" data-feature="WebVR (For Chrome M59+)" data-expires="2017-10-13" content="Aqw0TUvp8CwZmgIS50pM1blhzy05y7OkBeW3AQQGjer4KuKV0p13xfrRbe2bT8B1+DgRW0O3Dda0yOjcL46GBwgAAABMeyJvcmlnaW4iOiJodHRwczovL3dlYnZyLmluZm86NDQzIiwiZmVhdHVyZSI6IldlYlZSMS4xIiwiZXhwaXJ5IjoxNTA3ODU5MDE4fQ==">
 
     <title>XX - 360 Video</title>
 
@@ -88,10 +88,38 @@ found in the LICENSE file.
       // ================================================================
 
       // WebGL setup.
-      var webglCanvas = document.getElementById("webgl-canvas");
       var gl = null;
       var panorama = null;
       var stats = null;
+
+      function onContextLost( event ) {
+        event.preventDefault();
+        console.log( 'WebGL Context Lost.' );
+        gl = null;
+        panorama = null;
+        stats = null;
+      }
+
+      function onContextRestored( event ) {
+        console.log( 'WebGL Context Restored.' );
+        init(vrDisplay ? vrDisplay.capabilities.hasExternalDisplay : false);
+      }
+
+      var webglCanvas = document.getElementById("webgl-canvas");
+      webglCanvas.addEventListener( 'webglcontextlost', onContextLost, false );
+      webglCanvas.addEventListener( 'webglcontextrestored', onContextRestored, false );
+
+      function getDefaultVideo() {
+        const video = document.createElement( "video" );
+        if(video.canPlayType('video/mp4; codecs="mp4v.20.8"')) {
+          return "media/textures/vr_bench_man.mp4";
+        } else if (video.canPlayType('video/webm; codecs="vp8, vorbis"')) {
+          return "media/textures/vr_bench_man.webm";
+        } else {
+          VRSamplesUtil.addError("No supported video available", 3000);
+          return null;
+        }
+      }
 
       function init (preserveDrawingBuffer) {
         var glAttribs = {
@@ -112,7 +140,7 @@ found in the LICENSE file.
 
         panorama = new VRPanorama(gl);
 
-        var defaultVideo = "media/textures/pano.webm";
+        var defaultVideo = getDefaultVideo();
         var videoUrl = WGLUUrl.getString(
             'videoUrl', defaultVideo);
         panorama.setVideo(videoUrl).catch(
@@ -198,6 +226,8 @@ found in the LICENSE file.
             init(false);
             VRSamplesUtil.addInfo("WebVR supported, but no VRDisplays found.", 3000);
           }
+        }, function () {
+          VRSamplesUtil.addError("Your browser does not support WebVR. See <a href='http://webvr.info'>webvr.info</a> for assistance.");
         });
       } else if (navigator.getVRDevices) {
         init(false);
@@ -231,6 +261,10 @@ found in the LICENSE file.
       }
 
       function onAnimationFrame (t) {
+        // do not attempt to render if there is no available WebGL context
+        if (!gl || !stats || !panorama) {
+          return;
+        }
         stats.begin();
 
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);

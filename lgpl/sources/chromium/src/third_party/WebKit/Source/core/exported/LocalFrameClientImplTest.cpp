@@ -79,7 +79,7 @@ class LocalFrameClientImplTest : public ::testing::Test {
   WebString UserAgent() {
     // The test always returns the same user agent, regardless of the URL passed
     // in.
-    KURL dummy_url(kParsedURLString, "about:blank");
+    KURL dummy_url("about:blank");
     WTF::CString user_agent = GetLocalFrameClient().UserAgent(dummy_url).Utf8();
     return WebString::FromUTF8(user_agent.data(), user_agent.length());
   }

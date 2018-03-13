@@ -255,19 +255,10 @@ static int init_muxer(AVFormatContext *s, AVDictionary **options)
 FF_DISABLE_DEPRECATION_WARNINGS
     if (s->nb_streams && s->streams[0]->codec->flags & AV_CODEC_FLAG_BITEXACT) {
         if (!(s->flags & AVFMT_FLAG_BITEXACT)) {
-#if FF_API_LAVF_BITEXACT
-            av_log(s, AV_LOG_WARNING,
-                   "Setting the AVFormatContext to bitexact mode, because "
-                   "the AVCodecContext is in that mode. This behavior will "
-                   "change in the future. To keep the current behavior, set "
-                   "AVFormatContext.flags |= AVFMT_FLAG_BITEXACT.\n");
-            s->flags |= AVFMT_FLAG_BITEXACT;
-#else
             av_log(s, AV_LOG_WARNING,
                    "The AVFormatContext is not in set to bitexact mode, only "
                    "the AVCodecContext. If this is not intended, set "
                    "AVFormatContext.flags |= AVFMT_FLAG_BITEXACT.\n");
-#endif
         }
     }
 FF_ENABLE_DEPRECATION_WARNINGS
@@ -283,17 +274,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
     for (i = 0; i < s->nb_streams; i++) {
         st  = s->streams[i];
         par = st->codecpar;
-
-#if FF_API_LAVF_CODEC_TB && FF_API_LAVF_AVCTX
-FF_DISABLE_DEPRECATION_WARNINGS
-        if (!st->time_base.num && st->codec->time_base.num) {
-            av_log(s, AV_LOG_WARNING, "Using AVStream.codec.time_base as a "
-                   "timebase hint to the muxer is deprecated. Set "
-                   "AVStream.time_base instead.\n");
-            avpriv_set_pts_info(st, 64, st->codec->time_base.num, st->codec->time_base.den);
-        }
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
 
 #if FF_API_LAVF_AVCTX
 FF_DISABLE_DEPRECATION_WARNINGS
@@ -468,6 +448,16 @@ static int init_pts(AVFormatContext *s)
     return 0;
 }
 
+static void flush_if_needed(AVFormatContext *s)
+{
+    if (s->pb && s->pb->error >= 0) {
+        if (s->flush_packets == 1 || s->flags & AVFMT_FLAG_FLUSH_PACKETS)
+            avio_flush(s->pb);
+        else if (s->flush_packets && !(s->oformat->flags & AVFMT_NOFILE))
+            avio_write_marker(s->pb, AV_NOPTS_VALUE, AVIO_DATA_MARKER_FLUSH_POINT);
+    }
+}
+
 static int write_header_internal(AVFormatContext *s)
 {
     if (!(s->oformat->flags & AVFMT_NOFILE) && s->pb)
@@ -479,8 +469,7 @@ static int write_header_internal(AVFormatContext *s)
         s->internal->write_header_ret = ret;
         if (ret < 0)
             return ret;
-        if (s->flush_packets && s->pb && s->pb->error >= 0 && s->flags & AVFMT_FLAG_FLUSH_PACKETS)
-            avio_flush(s->pb);
+        flush_if_needed(s);
     }
     s->internal->header_written = 1;
     if (!(s->oformat->flags & AVFMT_NOFILE) && s->pb)
@@ -685,7 +674,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
  */
 static int write_packet(AVFormatContext *s, AVPacket *pkt)
 {
-    int ret, did_split;
+    int ret;
     int64_t pts_backup, dts_backup;
 
     pts_backup = pkt->pts;
@@ -732,7 +721,7 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
                 av_log(s, AV_LOG_WARNING, "failed to avoid negative "
                     "pts %s in stream %d.\n"
                     "Try -avoid_negative_ts 1 as a possible workaround.\n",
-                    av_ts2str(pkt->dts),
+                    av_ts2str(pkt->pts),
                     pkt->stream_index
                 );
             }
@@ -750,12 +739,6 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
         }
     }
 
-#if FF_API_LAVF_MERGE_SD
-FF_DISABLE_DEPRECATION_WARNINGS
-    did_split = av_packet_split_side_data(pkt);
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
-
     if (!s->internal->header_written) {
         ret = s->internal->write_header_ret ? s->internal->write_header_ret : write_header_internal(s);
         if (ret < 0)
@@ -772,19 +755,12 @@ FF_ENABLE_DEPRECATION_WARNINGS
     }
 
     if (s->pb && ret >= 0) {
-        if (s->flush_packets && s->flags & AVFMT_FLAG_FLUSH_PACKETS)
-            avio_flush(s->pb);
+        flush_if_needed(s);
         if (s->pb->error < 0)
             ret = s->pb->error;
     }
 
 fail:
-#if FF_API_LAVF_MERGE_SD
-FF_DISABLE_DEPRECATION_WARNINGS
-    if (did_split)
-        av_packet_merge_side_data(pkt);
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
 
     if (ret < 0) {
         pkt->pts = pts_backup;
@@ -881,25 +857,8 @@ static int do_packet_auto_bsf(AVFormatContext *s, AVPacket *pkt) {
         }
     }
 
-#if FF_API_LAVF_MERGE_SD
-FF_DISABLE_DEPRECATION_WARNINGS
-    if (st->internal->nb_bsfcs) {
-        ret = av_packet_split_side_data(pkt);
-        if (ret < 0)
-            av_log(s, AV_LOG_WARNING, "Failed to split side data before bitstream filter\n");
-    }
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
-
     for (i = 0; i < st->internal->nb_bsfcs; i++) {
         AVBSFContext *ctx = st->internal->bsfcs[i];
-        if (i > 0) {
-            AVBSFContext* prev_ctx = st->internal->bsfcs[i - 1];
-            if (prev_ctx->par_out->extradata_size != ctx->par_in->extradata_size) {
-                if ((ret = avcodec_parameters_copy(ctx->par_in, prev_ctx->par_out)) < 0)
-                    return ret;
-            }
-        }
         // TODO: when any bitstream filter requires flushing at EOF, we'll need to
         // flush each stream's BSF chain on write_trailer.
         if ((ret = av_bsf_send_packet(ctx, pkt)) < 0) {
@@ -917,13 +876,9 @@ FF_ENABLE_DEPRECATION_WARNINGS
             av_log(ctx, AV_LOG_ERROR,
                     "Failed to send packet to filter %s for stream %d\n",
                     ctx->filter->name, pkt->stream_index);
-            return ret;
-        }
-        if (i == st->internal->nb_bsfcs - 1) {
-            if (ctx->par_out->extradata_size != st->codecpar->extradata_size) {
-                if ((ret = avcodec_parameters_copy(st->codecpar, ctx->par_out)) < 0)
-                    return ret;
-            }
+            if (s->error_recognition & AV_EF_EXPLODE)
+                return ret;
+            return 0;
         }
     }
     return 1;
@@ -945,8 +900,7 @@ int av_write_frame(AVFormatContext *s, AVPacket *pkt)
                     return ret;
             }
             ret = s->oformat->write_packet(s, NULL);
-            if (s->flush_packets && s->pb && s->pb->error >= 0 && s->flags & AVFMT_FLAG_FLUSH_PACKETS)
-                avio_flush(s->pb);
+            flush_if_needed(s);
             if (ret >= 0 && s->pb && s->pb->error < 0)
                 ret = s->pb->error;
             return ret;

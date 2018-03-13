@@ -11,16 +11,16 @@ found in the LICENSE file.
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
 
-    <!-- Origin Trial Token, feature = WebVR (For Chrome M59+), origin = https://webvr.info, expires = 2017-08-30 -->
-    <meta http-equiv="origin-trial" data-feature="WebVR (For Chrome M59+)" data-expires="2017-08-30" content="AmtVcdkEen4LWNSpr4fW02Z0wHiaM9p8no5KyO0jx70aZNWvoIFxwBHG8RPTVjbrgrYCxFQvYwAndg60tl3XVAYAAABMeyJvcmlnaW4iOiJodHRwczovL3dlYnZyLmluZm86NDQzIiwiZmVhdHVyZSI6IldlYlZSMS4xIiwiZXhwaXJ5IjoxNTA0MTI1ODEyfQ==">
+    <!-- Origin Trial Token, feature = WebVR (For Chrome M59+), origin = https://webvr.info, expires = 2017-10-13 -->
+    <meta http-equiv="origin-trial" data-feature="WebVR (For Chrome M59+)" data-expires="2017-10-13" content="Aqw0TUvp8CwZmgIS50pM1blhzy05y7OkBeW3AQQGjer4KuKV0p13xfrRbe2bT8B1+DgRW0O3Dda0yOjcL46GBwgAAABMeyJvcmlnaW4iOiJodHRwczovL3dlYnZyLmluZm86NDQzIiwiZmVhdHVyZSI6IldlYlZSMS4xIiwiZXhwaXJ5IjoxNTA3ODU5MDE4fQ==">
 
     <title>XX - VR Controllers</title>
 
     <!--
       This sample demonstrates how to handle gamepads with 6DoF support, such as
-      the Vive controllers or Oculus touch. PLEASE NOTE: The additions to the
-      gamepad API used here are not yet part of the standard, and subject to
-      change at any time!
+      the Vive controllers, Oculus touch or Windows Motion controllers.
+      PLEASE NOTE: The additions to the gamepad API used here are not yet
+      part of the standard, and subject to change at any time!
     -->
 
     <style>
@@ -102,11 +102,28 @@ found in the LICENSE file.
       // ===================================================
 
       // WebGL setup.
-      var webglCanvas = document.getElementById("webgl-canvas");
       var gl = null;
       var cubeIsland = null;
       var stats = null;
       var debugGeom = null;
+
+      function onContextLost( event ) {
+        event.preventDefault();
+        console.log( 'WebGL Context Lost.' );
+        gl = null;
+        cubeIsland = null;
+        stats = null;
+        debugGeom = null;
+      }
+
+      function onContextRestored( event ) {
+        console.log( 'WebGL Context Restored.' );
+        initWebGL(vrDisplay ? vrDisplay.capabilities.hasExternalDisplay : false);
+      }
+
+      var webglCanvas = document.getElementById("webgl-canvas");
+      webglCanvas.addEventListener( 'webglcontextlost', onContextLost, false );
+      webglCanvas.addEventListener( 'webglcontextrestored', onContextRestored, false );
 
       function initWebGL (preserveDrawingBuffer) {
         var glAttribs = {
@@ -213,6 +230,8 @@ found in the LICENSE file.
             initWebGL(false);
             VRSamplesUtil.addInfo("WebVR supported, but no VRDisplays found.", 3000);
           }
+        }, function () {
+          VRSamplesUtil.addError("Your browser does not support WebVR. See <a href='http://webvr.info'>webvr.info</a> for assistance.");
         });
       } else if (navigator.getVRDevices) {
         initWebGL(false);
@@ -242,6 +261,7 @@ found in the LICENSE file.
             Math.random() * 0.5,
             Math.random() * 0.5, 1.0);
       }
+      VRSamplesUtil.addVRClickListener(onClick);
       webglCanvas.addEventListener("click", onClick, false);
 
       function getStandingViewMatrix (out, view) {
@@ -257,8 +277,8 @@ found in the LICENSE file.
       }
 
       function getPoseMatrix (out, pose, isGamepad) {
-        orientation = pose.orientation;
-        position = pose.position;
+        orientation = pose && pose.orientation;
+        position = pose && pose.position;
         if (!orientation) { orientation = [0, 0, 0, 1]; }
         if (!position) {
           // If this is a gamepad without a pose set it out in front of us so
@@ -317,19 +337,19 @@ found in the LICENSE file.
 
           // Draw X/Y/Z axes for un-rotated controller standing coordinate system.
           getPoseMatrix(controllerDebugMat, {
-            position: gamepad.pose.position,
+            position: gamepad.pose && gamepad.pose.position,
             orientation: [0, 0, 0, 1]},
             true);
           debugGeom.drawCoordinateAxes(controllerDebugMat);
 
           // Show angular velocity from gyro if available
-          if (gamepad.pose.angularVelocity) {
+          if (gamepad.pose && gamepad.pose.angularVelocity) {
             vec4.set(arrowColor, 0.7, 0.5, 0.3, 1);
             debugGeom.drawArrow(controllerDebugMat, gamepad.pose.angularVelocity, arrowColor);
           }
 
           // Show linear acceleration if available
-          if (gamepad.pose.linearAcceleration) {
+          if (gamepad.pose && gamepad.pose.linearAcceleration) {
             //console.log('accel', gamepad.pose.linearAcceleration);
             vec4.set(arrowColor, 0.3, 0.2, 0.7, 1);
             // Linear acceleration is large since it contains 9.81 m/s^2 gravity,
@@ -392,6 +412,10 @@ found in the LICENSE file.
       }
 
       function onAnimationFrame (t) {
+        // do not attempt to render if there is no available WebGL context
+        if (!gl || !stats || !cubeIsland || !debugGeom) {
+          return;
+        }
         stats.begin();
 
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -406,9 +430,10 @@ found in the LICENSE file.
           for (var i = 0; i < gamepads.length; ++i) {
             var gamepad = gamepads[i];
             // The array may contain undefined gamepads, so check for that as
-            // well as a non-null pose.
+            // well as a non-null pose. VR clicker devices such as the Carboard
+            // touch handler for Daydream have a displayId but no pose.
             if (gamepad) {
-              if (gamepad.pose)
+              if (gamepad.pose || gamepad.displayId)
                 vrGamepads.push(gamepad);
 
               if ("hapticActuators" in gamepad && gamepad.hapticActuators.length > 0) {

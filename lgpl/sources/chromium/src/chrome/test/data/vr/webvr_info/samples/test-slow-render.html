@@ -11,8 +11,8 @@ found in the LICENSE file.
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
 
-    <!-- Origin Trial Token, feature = WebVR (For Chrome M59+), origin = https://webvr.info, expires = 2017-08-30 -->
-    <meta http-equiv="origin-trial" data-feature="WebVR (For Chrome M59+)" data-expires="2017-08-30" content="AmtVcdkEen4LWNSpr4fW02Z0wHiaM9p8no5KyO0jx70aZNWvoIFxwBHG8RPTVjbrgrYCxFQvYwAndg60tl3XVAYAAABMeyJvcmlnaW4iOiJodHRwczovL3dlYnZyLmluZm86NDQzIiwiZmVhdHVyZSI6IldlYlZSMS4xIiwiZXhwaXJ5IjoxNTA0MTI1ODEyfQ==">
+    <!-- Origin Trial Token, feature = WebVR (For Chrome M59+), origin = https://webvr.info, expires = 2017-10-13 -->
+    <meta http-equiv="origin-trial" data-feature="WebVR (For Chrome M59+)" data-expires="2017-10-13" content="Aqw0TUvp8CwZmgIS50pM1blhzy05y7OkBeW3AQQGjer4KuKV0p13xfrRbe2bT8B1+DgRW0O3Dda0yOjcL46GBwgAAABMeyJvcmlnaW4iOiJodHRwczovL3dlYnZyLmluZm86NDQzIiwiZmVhdHVyZSI6IldlYlZSMS4xIiwiZXhwaXJ5IjoxNTA3ODU5MDE4fQ==">
 
     <title>TEST - Slow Rendering</title>
 
@@ -88,6 +88,7 @@ found in the LICENSE file.
       var cubeCount = WGLUUrl.getInt('cubeCount', heavyGpu ? 12 : 10);
       var cubeScale = WGLUUrl.getFloat('cubeScale', 1.0);
       var simulatedWorkTimeMs = WGLUUrl.getFloat('workTime', 0);
+      var standardSize = WGLUUrl.getBool('standardSize', false);
       var renderScale = WGLUUrl.getFloat('renderScale', 1.0);
       var latencyPatch = WGLUUrl.getBool('latencyPatch', false);
 
@@ -96,10 +97,26 @@ found in the LICENSE file.
       // ================================
 
       // WebGL setup.
-      var webglCanvas = document.getElementById("webgl-canvas");
       var gl = null;
       var cubeSea = null;
       var stats = null;
+
+      function onContextLost( event ) {
+        event.preventDefault();
+        console.log( 'WebGL Context Lost.' );
+        gl = null;
+        cubeSea = null;
+        stats = null;
+      }
+
+      function onContextRestored( event ) {
+        console.log( 'WebGL Context Restored.' );
+        initWebGL(vrDisplay ? vrDisplay.capabilities.hasExternalDisplay : false);
+      }
+
+      var webglCanvas = document.getElementById("webgl-canvas");
+      webglCanvas.addEventListener( 'webglcontextlost', onContextLost, false );
+      webglCanvas.addEventListener( 'webglcontextrestored', onContextRestored, false );
 
       function initWebGL (preserveDrawingBuffer) {
         var glAttribs = {
@@ -193,6 +210,8 @@ found in the LICENSE file.
             initWebGL(false);
             VRSamplesUtil.addInfo("WebVR supported, but no VRDisplays found.", 3000);
           }
+        }, function () {
+          VRSamplesUtil.addError("Your browser does not support WebVR. See <a href='http://webvr.info'>webvr.info</a> for assistance.");
         });
       } else if (navigator.getVRDevices) {
         initWebGL(false);
@@ -207,8 +226,14 @@ found in the LICENSE file.
           var leftEye = vrDisplay.getEyeParameters("left");
           var rightEye = vrDisplay.getEyeParameters("right");
 
-          webglCanvas.width = Math.max(leftEye.renderWidth, rightEye.renderWidth) * 2 * renderScale;
-          webglCanvas.height = Math.max(leftEye.renderHeight, rightEye.renderHeight) * renderScale;
+          // If user has specified renderWidth/Height in URL, use that instead of the
+          // recommended resolution. Useful for testing to get cross-device comparable
+          // results. This still gets multiplied by renderScale if that is set.
+          var renderWidth = standardSize ? 1024 : Math.max(leftEye.renderWidth, rightEye.renderWidth);
+          var renderHeight = standardSize ? 1024 : Math.max(leftEye.renderHeight, rightEye.renderHeight);
+
+          webglCanvas.width = renderWidth * 2 * renderScale;
+          webglCanvas.height = renderHeight * renderScale;
         } else {
           webglCanvas.width = webglCanvas.offsetWidth * window.devicePixelRatio;
           webglCanvas.height = webglCanvas.offsetHeight * window.devicePixelRatio;
@@ -218,6 +243,10 @@ found in the LICENSE file.
       var now = (window.performance && performance.now) ? performance.now.bind(performance) : Date.now;
 
       function onAnimationFrame (t) {
+        // do not attempt to render if there is no available WebGL context
+        if (!gl || !stats || !cubeSea) {
+          return;
+        }
         stats.begin();
 
         if (simulatedWorkTimeMs > 0) {

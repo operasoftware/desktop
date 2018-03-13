@@ -29,7 +29,7 @@
 #include "platform/weborigin/SecurityPolicy.h"
 
 #include <memory>
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/OriginAccessEntry.h"
 #include "platform/weborigin/SchemeRegistry.h"
@@ -39,6 +39,7 @@
 #include "platform/wtf/HashSet.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/Threading.h"
+#include "platform/wtf/text/ParsingUtilities.h"
 #include "platform/wtf/text/StringHash.h"
 #include "public/platform/WebReferrerPolicy.h"
 
@@ -126,20 +127,20 @@ Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
       return Referrer(origin + "/", referrer_policy_no_default);
     }
     case kReferrerPolicyOriginWhenCrossOrigin: {
-      RefPtr<SecurityOrigin> referrer_origin =
+      scoped_refptr<SecurityOrigin> referrer_origin =
           SecurityOrigin::Create(referrer_url);
-      RefPtr<SecurityOrigin> url_origin = SecurityOrigin::Create(url);
-      if (!url_origin->IsSameSchemeHostPort(referrer_origin.Get())) {
+      scoped_refptr<SecurityOrigin> url_origin = SecurityOrigin::Create(url);
+      if (!url_origin->IsSameSchemeHostPort(referrer_origin.get())) {
         String origin = referrer_origin->ToString();
         return Referrer(origin + "/", referrer_policy_no_default);
       }
       break;
     }
     case kReferrerPolicySameOrigin: {
-      RefPtr<SecurityOrigin> referrer_origin =
+      scoped_refptr<SecurityOrigin> referrer_origin =
           SecurityOrigin::Create(referrer_url);
-      RefPtr<SecurityOrigin> url_origin = SecurityOrigin::Create(url);
-      if (!url_origin->IsSameSchemeHostPort(referrer_origin.Get())) {
+      scoped_refptr<SecurityOrigin> url_origin = SecurityOrigin::Create(url);
+      if (!url_origin->IsSameSchemeHostPort(referrer_origin.get())) {
         return Referrer(Referrer::NoReferrer(), referrer_policy_no_default);
       }
       return Referrer(referrer, referrer_policy_no_default);
@@ -152,10 +153,10 @@ Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
                       referrer_policy_no_default);
     }
     case kReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin: {
-      RefPtr<SecurityOrigin> referrer_origin =
+      scoped_refptr<SecurityOrigin> referrer_origin =
           SecurityOrigin::Create(referrer_url);
-      RefPtr<SecurityOrigin> url_origin = SecurityOrigin::Create(url);
-      if (!url_origin->IsSameSchemeHostPort(referrer_origin.Get())) {
+      scoped_refptr<SecurityOrigin> url_origin = SecurityOrigin::Create(url);
+      if (!url_origin->IsSameSchemeHostPort(referrer_origin.get())) {
         String origin = referrer_origin->ToString();
         return Referrer(ShouldHideReferrer(url, referrer_url)
                             ? Referrer::NoReferrer()
@@ -200,7 +201,7 @@ bool SecurityPolicy::IsUrlWhiteListedTrustworthy(const KURL& url) {
   // Early return to avoid initializing the SecurityOrigin.
   if (TrustworthyOriginSet().IsEmpty())
     return false;
-  return IsOriginWhiteListedTrustworthy(*SecurityOrigin::Create(url).Get());
+  return IsOriginWhiteListedTrustworthy(*SecurityOrigin::Create(url).get());
 }
 
 bool SecurityPolicy::IsAccessWhiteListed(const SecurityOrigin* active_origin,
@@ -221,8 +222,8 @@ bool SecurityPolicy::IsAccessWhiteListed(const SecurityOrigin* active_origin,
 bool SecurityPolicy::IsAccessToURLWhiteListed(
     const SecurityOrigin* active_origin,
     const KURL& url) {
-  RefPtr<SecurityOrigin> target_origin = SecurityOrigin::Create(url);
-  return IsAccessWhiteListed(active_origin, target_origin.Get());
+  scoped_refptr<SecurityOrigin> target_origin = SecurityOrigin::Create(url);
+  return IsAccessWhiteListed(active_origin, target_origin.get());
 }
 
 void SecurityPolicy::AddOriginAccessWhitelistEntry(
@@ -273,7 +274,7 @@ void SecurityPolicy::RemoveOriginAccessWhitelistEntry(
   if (index == kNotFound)
     return;
 
-  list->erase(index);
+  list->EraseAt(index);
 
   if (list->IsEmpty())
     map.erase(it);
@@ -293,7 +294,8 @@ bool SecurityPolicy::ReferrerPolicyFromString(
       (legacy_keywords_support == kSupportReferrerPolicyLegacyKeywords);
 
   if (EqualIgnoringASCIICase(policy, "no-referrer") ||
-      (support_legacy_keywords && EqualIgnoringASCIICase(policy, "never"))) {
+      (support_legacy_keywords && (EqualIgnoringASCIICase(policy, "never") ||
+                                   EqualIgnoringASCIICase(policy, "none")))) {
     *result = kReferrerPolicyNever;
     return true;
   }
@@ -332,6 +334,15 @@ bool SecurityPolicy::ReferrerPolicyFromString(
   return false;
 }
 
+namespace {
+
+template <typename CharType>
+inline bool IsASCIIAlphaOrHyphen(CharType c) {
+  return IsASCIIAlpha(c) || c == '-';
+}
+
+}  // namespace
+
 bool SecurityPolicy::ReferrerPolicyFromHeaderValue(
     const String& header_value,
     ReferrerPolicyLegacyKeywordsSupport legacy_keywords_support,
@@ -342,10 +353,19 @@ bool SecurityPolicy::ReferrerPolicyFromHeaderValue(
   header_value.Split(',', true, tokens);
   for (const auto& token : tokens) {
     ReferrerPolicy current_result;
+    auto stripped_token = token.StripWhiteSpace();
     if (SecurityPolicy::ReferrerPolicyFromString(token.StripWhiteSpace(),
                                                  legacy_keywords_support,
                                                  &current_result)) {
       referrer_policy = current_result;
+    } else {
+      Vector<UChar> characters;
+      stripped_token.AppendTo(characters);
+      const UChar* position = characters.data();
+      UChar* end = characters.data() + characters.size();
+      SkipWhile<UChar, IsASCIIAlphaOrHyphen>(position, end);
+      if (position != end)
+        return false;
     }
   }
 
@@ -358,7 +378,7 @@ bool SecurityPolicy::ReferrerPolicyFromHeaderValue(
 
 #if defined(OPERA_DESKTOP)
 void SecurityPolicy::AddOriginAsFirstPartyForSubframes(
-    RefPtr<SecurityOrigin> origin) {
+    scoped_refptr<SecurityOrigin> origin) {
 #if DCHECK_IS_ON()
   // Must be called before we start other threads.
   DCHECK(WTF::IsBeforeThreadCreated());

@@ -30,7 +30,7 @@ class VRPlayerErrorEvent final : public Event {
 
   unsigned short errorType() const { return type_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(Visitor*);
 
  private:
   VRPlayerErrorEvent(unsigned short type);

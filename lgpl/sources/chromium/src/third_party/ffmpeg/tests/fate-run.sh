@@ -142,8 +142,15 @@ crc(){
     ffmpeg "$@" -f crc -
 }
 
-md5(){
+md5pipe(){
     ffmpeg "$@" md5:
+}
+
+md5(){
+    encfile="${outdir}/${test}.out"
+    cleanfiles="$cleanfiles $encfile"
+    ffmpeg "$@" $encfile
+    do_md5sum $encfile | awk '{print $1}'
 }
 
 pcm(){
@@ -225,6 +232,15 @@ lavftest(){
     t="${test#lavf-}"
     ref=${base}/ref/lavf/$t
     ${base}/lavf-regression.sh $t lavf tests/vsynth1 "$target_exec" "$target_path" "$threads" "$thread_type" "$cpuflags" "$target_samples"
+}
+
+refcmp_metadata(){
+    refcmp=$1
+    pixfmt=$2
+    fuzz=${3:-0.001}
+    ffmpeg $FLAGS $ENC_OPTS \
+        -lavfi "testsrc2=size=300x200:rate=1:duration=5,format=${pixfmt},split[ref][tmp];[tmp]avgblur=4[enc];[enc][ref]${refcmp},metadata=print:file=-" \
+        -f null /dev/null | awk -v ref=${ref} -v fuzz=${fuzz} -f ${base}/refcmp-metadata.awk -
 }
 
 video_filter(){
@@ -336,6 +352,10 @@ concat(){
     fi
 }
 
+null(){
+    :
+}
+
 mkdir -p "$outdir"
 
 # Disable globbing: command arguments may contain globbing characters and
@@ -351,7 +371,7 @@ if [ $err -gt 128 ]; then
     test "${sig}" = "${sig%[!A-Za-z]*}" || unset sig
 fi
 
-if test -e "$ref" || test $cmp = "oneline" || test $cmp = "grep" ; then
+if test -e "$ref" || test $cmp = "oneline" || test $cmp = "null" || test $cmp = "grep" ; then
     case $cmp in
         diff)   diff -u -b "$ref" "$outfile"            >$cmpfile ;;
         rawdiff)diff -u    "$ref" "$outfile"            >$cmpfile ;;

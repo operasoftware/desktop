@@ -26,9 +26,9 @@ public:
 
     const String& controlName() const { return control_name_; }
 
-    DECLARE_VIRTUAL_TRACE();
+    virtual void Trace(Visitor*);
 
-private:
+   private:
     DetachedViewControlEvent();
     DetachedViewControlEvent(const String& control_name);
 

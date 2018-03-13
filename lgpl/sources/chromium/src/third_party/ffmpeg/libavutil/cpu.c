@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include <stddef.h>
 #include <stdint.h>
 #if defined(__linux__)
 #include <compat/atomics/gcc/stdatomic.h>
@@ -23,6 +24,7 @@
 #include <stdatomic.h>
 #endif  // __linux__
 
+#include "attributes.h"
 #include "cpu.h"
 #include "cpu_internal.h"
 #include "config.h"
@@ -65,7 +67,8 @@ static int get_cpu_flags(void)
 }
 
 void av_force_cpu_flags(int arg){
-    if (   (arg & ( AV_CPU_FLAG_3DNOW    |
+    if (ARCH_X86 &&
+           (arg & ( AV_CPU_FLAG_3DNOW    |
                     AV_CPU_FLAG_3DNOWEXT |
                     AV_CPU_FLAG_MMXEXT   |
                     AV_CPU_FLAG_SSE      |
@@ -301,4 +304,18 @@ int av_cpu_count(void)
     }
 
     return nb_cpus;
+}
+
+size_t av_cpu_max_align(void)
+{
+    if (ARCH_AARCH64)
+        return ff_get_cpu_max_align_aarch64();
+    if (ARCH_ARM)
+        return ff_get_cpu_max_align_arm();
+    if (ARCH_PPC)
+        return ff_get_cpu_max_align_ppc();
+    if (ARCH_X86)
+        return ff_get_cpu_max_align_x86();
+
+    return 8;
 }

@@ -32,13 +32,12 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8Element.h"
-#include "core/HTMLNames.h"
 #include "core/dom/Element.h"
 #include "core/editing/EditingUtilities.h"
-#include "core/html/TextControlElement.h"
 #include "core/html/custom/V0CustomElementProcessingStack.h"
+#include "core/html/forms/TextControlElement.h"
+#include "core/html_names.h"
 #include "platform/graphics/Image.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/AtomicString.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebRect.h"
@@ -50,7 +49,7 @@ using namespace HTMLNames;
 
 WebElement WebElement::FromV8Value(v8::Isolate* isolate,
                                    v8::Local<v8::Value> value) {
-  Element* element = V8Element::toImplWithTypeCheck(isolate, value);
+  Element* element = V8Element::ToImplWithTypeCheck(isolate, value);
   return WebElement(element);
 }
 
@@ -181,7 +180,7 @@ bool WebElement::IsVRPlaybackAllowed() {
 }
 
 WebString WebElement::InnerHTML() const {
-  return ConstUnwrap<Element>()->innerHTML();
+  return ConstUnwrap<Element>()->InnerHTMLAsString();
 }
 
 bool WebElement::HasNonEmptyLayoutSize() const {

@@ -56,8 +56,8 @@
 // allocated, WebView and LocalFrameView are currently not. In terms of
 // ownership and control, the relationships stays the same, but the references
 // from the off-heap WebView to the on-heap Page is handled by a Persistent<>,
-// not a RefPtr<>. Similarly, the mutual strong references between the on-heap
-// LocalFrame and the off-heap LocalFrameView is through a RefPtr (from
+// not a scoped_refptr<>. Similarly, the mutual strong references between the
+// on-heap LocalFrame and the off-heap LocalFrameView is through a RefPtr (from
 // LocalFrame to LocalFrameView), and a Persistent refers to the LocalFrame in
 // the other direction.
 //
@@ -101,7 +101,6 @@
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "bindings/core/v8/V8GCController.h"
 #include "build/build_config.h"
-#include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/IconURL.h"
 #include "core/dom/MessagePort.h"
@@ -111,19 +110,21 @@
 #include "core/dom/UserGestureIndicator.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
-#include "core/editing/FindInPageCoordinates.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/FrameSelection.h"
-#include "core/editing/ImeTextSpanVectorBuilder.h"
-#include "core/editing/InputMethodController.h"
 #include "core/editing/PlainTextRange.h"
+#include "core/editing/SelectionTemplate.h"
 #include "core/editing/SetSelectionOptions.h"
 #include "core/editing/TextAffinity.h"
-#include "core/editing/TextFinder.h"
+#include "core/editing/VisiblePosition.h"
+#include "core/editing/finder/FindInPageCoordinates.h"
+#include "core/editing/finder/TextFinder.h"
+#include "core/editing/ime/ImeTextSpanVectorBuilder.h"
+#include "core/editing/ime/InputMethodController.h"
 #include "core/editing/iterators/TextIterator.h"
 #include "core/editing/markers/DocumentMarkerController.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/editing/spellcheck/SpellChecker.h"
-#include "core/editing/spellcheck/TextCheckerClientImpl.h"
 #include "core/exported/LocalFrameClientImpl.h"
 #include "core/exported/SharedWorkerRepositoryClientImpl.h"
 #include "core/exported/WebAssociatedURLLoaderImpl.h"
@@ -132,28 +133,32 @@
 #include "core/exported/WebPluginContainerImpl.h"
 #include "core/exported/WebRemoteFrameImpl.h"
 #include "core/exported/WebViewImpl.h"
+#include "core/frame/Deprecation.h"
+#include "core/frame/FrameConsole.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/PageScaleConstraintsSet.h"
+#include "core/frame/PausableScriptExecutor.h"
 #include "core/frame/RemoteFrame.h"
 #include "core/frame/RemoteFrameOwner.h"
 #include "core/frame/ScreenOrientationController.h"
 #include "core/frame/Settings.h"
 #include "core/frame/SmartClip.h"
-#include "core/frame/SuspendableScriptExecutor.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/VisualViewport.h"
 #include "core/frame/WebFrameWidgetImpl.h"
 #include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLCollection.h"
-#include "core/html/HTMLFormElement.h"
 #include "core/html/HTMLFrameElementBase.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/HTMLHeadElement.h"
 #include "core/html/HTMLImageElement.h"
-#include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLLinkElement.h"
 #include "core/html/PluginDocument.h"
+#include "core/html/forms/HTMLFormElement.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html_names.h"
+#include "core/input/ContextMenuAllowedScope.h"
 #include "core/input/EventHandler.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/layout/HitTestResult.h"
@@ -175,9 +180,9 @@
 #include "core/paint/TransformRecorder.h"
 #include "core/timing/DOMWindowPerformance.h"
 #include "core/timing/Performance.h"
-#include "platform/ScriptForbiddenScope.h"
 #include "platform/WebFrameScheduler.h"
 #include "platform/bindings/DOMWrapperWorld.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/bindings/V8PerIsolateData.h"
 #include "platform/clipboard/ClipboardUtilities.h"
 #include "platform/fonts/FontCache.h"
@@ -185,7 +190,6 @@
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayerClient.h"
 #include "platform/graphics/paint/ClipRecorder.h"
-#include "platform/graphics/paint/DisplayItemCacheSkipper.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/graphics/paint/PaintRecordBuilder.h"
 #include "platform/graphics/skia/SkiaUtils.h"
@@ -201,9 +205,10 @@
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityPolicy.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebDoubleSize.h"
 #include "public/platform/WebFloatPoint.h"
 #include "public/platform/WebFloatRect.h"
@@ -213,7 +218,7 @@
 #include "public/platform/WebSecurityOrigin.h"
 #include "public/platform/WebSize.h"
 #include "public/platform/WebURLError.h"
-#include "public/platform/WebURLLoader.h"
+#include "public/platform/WebURLLoaderFactory.h"
 #include "public/platform/WebVector.h"
 #include "public/web/WebAssociatedURLLoaderOptions.h"
 #include "public/web/WebAutofillClient.h"
@@ -236,6 +241,7 @@
 #include "public/web/WebRange.h"
 #include "public/web/WebScriptSource.h"
 #include "public/web/WebSerializedScriptValue.h"
+#include "public/web/WebTextDirection.h"
 #include "public/web/WebTreeScopeType.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 
@@ -243,13 +249,17 @@ namespace blink {
 
 static int g_frame_count = 0;
 
-static HeapVector<ScriptSourceCode> CreateSourcesVector(
+namespace {
+
+HeapVector<ScriptSourceCode> CreateSourcesVector(
     const WebScriptSource* sources_in,
     unsigned num_sources) {
   HeapVector<ScriptSourceCode> sources;
   sources.Append(sources_in, num_sources);
   return sources;
 }
+
+}  // namespace
 
 // Simple class to override some of PrintContext behavior. Some of the methods
 // made virtual so that they can be overridden by ChromePluginPrintContext.
@@ -288,10 +298,10 @@ class ChromePrintContext : public PrintContext {
     // The page rect gets scaled and translated, so specify the entire
     // print content area here as the recording rect.
     IntRect bounds(0, 0, printed_page_height_, printed_page_width_);
-    PaintRecordBuilder builder(bounds, &canvas->getMetaData());
+    PaintRecordBuilder builder(&canvas->getMetaData());
     builder.Context().SetPrinting(true);
     builder.Context().BeginRecording(bounds);
-    float scale = SpoolPage(builder.Context(), page_number, bounds);
+    float scale = SpoolPage(builder.Context(), page_number);
     canvas->drawPicture(builder.Context().EndRecording());
     return scale;
   }
@@ -316,13 +326,13 @@ class ChromePrintContext : public PrintContext {
     int total_height = num_pages * (page_size_in_pixels.Height() + 1) - 1;
     IntRect all_pages_rect(0, 0, page_width, total_height);
 
-    PaintRecordBuilder builder(all_pages_rect, &canvas->getMetaData());
+    PaintRecordBuilder builder(&canvas->getMetaData());
     GraphicsContext& context = builder.Context();
     context.SetPrinting(true);
     context.BeginRecording(all_pages_rect);
 
     // Fill the whole background by white.
-    context.FillRect(FloatRect(0, 0, page_width, total_height), Color::kWhite);
+    context.FillRect(all_pages_rect, Color::kWhite);
 
     int current_height = 0;
     for (size_t page_index = 0; page_index < num_pages; page_index++) {
@@ -348,7 +358,7 @@ class ChromePrintContext : public PrintContext {
       context.Save();
       context.ConcatCTM(transform);
 
-      SpoolPage(context, page_index, all_pages_rect);
+      SpoolPage(context, page_index);
 
       context.Restore();
 
@@ -363,9 +373,7 @@ class ChromePrintContext : public PrintContext {
   // instead. Returns the scale to be applied.
   // On Linux, we don't have the problem with NativeTheme, hence we let WebKit
   // do the scaling and ignore the return value.
-  virtual float SpoolPage(GraphicsContext& context,
-                          int page_number,
-                          const IntRect& bounds) {
+  virtual float SpoolPage(GraphicsContext& context, int page_number) {
     IntRect page_rect = page_rects_[page_number];
     float scale = printed_page_width_ / page_rect.Width();
 
@@ -379,19 +387,13 @@ class ChromePrintContext : public PrintContext {
     context.ConcatCTM(transform);
     context.ClipRect(page_rect);
 
-    PaintRecordBuilder builder(bounds, &context.Canvas()->getMetaData(),
-                               &context);
-
-    // The local scope is so that the cache skipper is destroyed before
-    // we call endRecording().
+    PaintRecordBuilder builder(&context.Canvas()->getMetaData(), &context);
+    GetFrame()->View()->PaintContents(builder.Context(),
+                                      kGlobalPaintNormalPhase, page_rect);
     {
-      DisplayItemCacheSkipper skipper(builder.Context());
-      GetFrame()->View()->PaintContents(builder.Context(),
-                                        kGlobalPaintNormalPhase, page_rect);
-
       DrawingRecorder line_boundary_recorder(
           builder.Context(), builder,
-          DisplayItem::kPrintedContentDestinationLocations, page_rect);
+          DisplayItem::kPrintedContentDestinationLocations);
       OutputLinkedDestinations(builder.Context(), page_rect);
     }
     context.DrawRecord(builder.EndRecording());
@@ -433,7 +435,7 @@ class ChromePluginPrintContext final : public ChromePrintContext {
 
   ~ChromePluginPrintContext() override {}
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(plugin_);
     ChromePrintContext::Trace(visitor);
   }
@@ -462,17 +464,9 @@ class ChromePluginPrintContext final : public ChromePrintContext {
   // Spools the printed page, a subrect of frame(). Skip the scale step.
   // NativeTheme doesn't play well with scaling. Scaling is done browser side
   // instead. Returns the scale to be applied.
-  float SpoolPage(GraphicsContext& context,
-                  int page_number,
-                  const IntRect& bounds) override {
-    IntRect page_rect = page_rects_[page_number];
-    PaintRecordBuilder builder(bounds, &context.Canvas()->getMetaData());
-    // The local scope is so that the cache skipper is destroyed before
-    // we call endRecording().
-    {
-      DisplayItemCacheSkipper skipper(builder.Context());
-      plugin_->PrintPage(page_number, builder.Context(), page_rect);
-    }
+  float SpoolPage(GraphicsContext& context, int page_number) override {
+    PaintRecordBuilder builder(&context.Canvas()->getMetaData());
+    plugin_->PrintPage(page_number, builder.Context());
     context.DrawRecord(builder.EndRecording());
 
     return 1.0;
@@ -498,7 +492,7 @@ WebLocalFrame* WebLocalFrame::FrameForCurrentContext() {
   v8::Local<v8::Context> context =
       v8::Isolate::GetCurrent()->GetCurrentContext();
   if (context.IsEmpty())
-    return 0;
+    return nullptr;
   return FrameForContext(context);
 }
 
@@ -524,7 +518,7 @@ bool WebLocalFrameImpl::IsWebRemoteFrame() const {
 
 WebRemoteFrame* WebLocalFrameImpl::ToWebRemoteFrame() {
   NOTREACHED();
-  return 0;
+  return nullptr;
 }
 
 void WebLocalFrameImpl::Close() {
@@ -539,6 +533,9 @@ void WebLocalFrameImpl::Close() {
 
   if (print_context_)
     PrintEnd();
+#if DCHECK_IS_ON()
+  is_in_printing_ = false;
+#endif
 }
 
 WebString WebLocalFrameImpl::AssignedName() const {
@@ -596,6 +593,13 @@ void WebLocalFrameImpl::SetScrollOffset(const WebSize& offset) {
   }
 }
 
+void WebLocalFrameImpl::SetUserScrollDelta(const WebSize& offset) {
+  if (ScrollableArea* scrollable_area = LayoutViewportScrollableArea()) {
+    scrollable_area->UserScroll(kScrollByPixel,
+                                ScrollOffset(offset.width, offset.height));
+  }
+}
+
 WebSize WebLocalFrameImpl::ContentsSize() const {
   if (LocalFrameView* view = GetFrameView())
     return view->ContentsSize();
@@ -647,11 +651,8 @@ void WebLocalFrameImpl::DispatchUnloadEvent() {
 
 void WebLocalFrameImpl::ExecuteScript(const WebScriptSource& source) {
   DCHECK(GetFrame());
-  TextPosition position(OrdinalNumber::FromOneBasedInt(source.start_line),
-                        OrdinalNumber::First());
   v8::HandleScope handle_scope(ToIsolate(GetFrame()));
-  GetFrame()->GetScriptController().ExecuteScriptInMainWorld(
-      ScriptSourceCode(source.code, source.url, position));
+  GetFrame()->GetScriptController().ExecuteScriptInMainWorld(source);
 }
 
 void WebLocalFrameImpl::ExecuteScriptInIsolatedWorld(
@@ -665,8 +666,8 @@ void WebLocalFrameImpl::ExecuteScriptInIsolatedWorld(
   HeapVector<ScriptSourceCode> sources =
       CreateSourcesVector(sources_in, num_sources);
   v8::HandleScope handle_scope(ToIsolate(GetFrame()));
-  GetFrame()->GetScriptController().ExecuteScriptInIsolatedWorld(world_id,
-                                                                 sources, 0);
+  GetFrame()->GetScriptController().ExecuteScriptInIsolatedWorld(
+      world_id, sources, nullptr);
 }
 
 void WebLocalFrameImpl::SetIsolatedWorldSecurityOrigin(
@@ -711,10 +712,18 @@ void WebLocalFrameImpl::AddMessageToConsole(const WebConsoleMessage& message) {
       break;
   }
 
-  GetFrame()->GetDocument()->AddConsoleMessage(ConsoleMessage::Create(
-      kOtherMessageSource, web_core_message_level, message.text,
+  MessageSource message_source = message.nodes.empty()
+                                     ? kOtherMessageSource
+                                     : kRecommendationMessageSource;
+  Vector<DOMNodeId> nodes;
+  for (const blink::WebNode& web_node : message.nodes)
+    nodes.push_back(DOMNodeIds::IdForNode(&(*web_node)));
+  ConsoleMessage* console_message = ConsoleMessage::Create(
+      message_source, web_core_message_level, message.text,
       SourceLocation::Create(message.url, message.line_number,
-                             message.column_number, nullptr)));
+                             message.column_number, nullptr));
+  console_message->SetNodes(GetFrame(), std::move(nodes));
+  GetFrame()->GetDocument()->AddConsoleMessage(console_message);
 }
 
 void WebLocalFrameImpl::CollectGarbage() {
@@ -729,12 +738,9 @@ v8::Local<v8::Value> WebLocalFrameImpl::ExecuteScriptAndReturnValue(
     const WebScriptSource& source) {
   DCHECK(GetFrame());
 
-  TextPosition position(OrdinalNumber::FromOneBasedInt(source.start_line),
-                        OrdinalNumber::First());
   return GetFrame()
       ->GetScriptController()
-      .ExecuteScriptInMainWorldAndReturnValue(
-          ScriptSourceCode(source.code, source.url, position));
+      .ExecuteScriptInMainWorldAndReturnValue(source);
 }
 
 void WebLocalFrameImpl::RequestExecuteScriptAndReturnValue(
@@ -743,8 +749,8 @@ void WebLocalFrameImpl::RequestExecuteScriptAndReturnValue(
     WebScriptExecutionCallback* callback) {
   DCHECK(GetFrame());
 
-  RefPtr<DOMWrapperWorld> main_world = &DOMWrapperWorld::MainWorld();
-  SuspendableScriptExecutor* executor = SuspendableScriptExecutor::Create(
+  scoped_refptr<DOMWrapperWorld> main_world = &DOMWrapperWorld::MainWorld();
+  PausableScriptExecutor* executor = PausableScriptExecutor::Create(
       GetFrame(), std::move(main_world), CreateSourcesVector(&source, 1),
       user_gesture, callback);
   executor->Run();
@@ -758,9 +764,9 @@ void WebLocalFrameImpl::RequestExecuteV8Function(
     v8::Local<v8::Value> argv[],
     WebScriptExecutionCallback* callback) {
   DCHECK(GetFrame());
-  SuspendableScriptExecutor::CreateAndRun(GetFrame(), ToIsolate(GetFrame()),
-                                          context, function, receiver, argc,
-                                          argv, callback);
+  PausableScriptExecutor::CreateAndRun(GetFrame(), ToIsolate(GetFrame()),
+                                       context, function, receiver, argc, argv,
+                                       callback);
 }
 
 void WebLocalFrameImpl::ExecuteScriptInIsolatedWorld(
@@ -787,8 +793,8 @@ void WebLocalFrameImpl::ExecuteScriptInIsolatedWorld(
     results->Swap(v8_results);
   } else {
     v8::HandleScope handle_scope(ToIsolate(GetFrame()));
-    GetFrame()->GetScriptController().ExecuteScriptInIsolatedWorld(world_id,
-                                                                   sources, 0);
+    GetFrame()->GetScriptController().ExecuteScriptInIsolatedWorld(
+        world_id, sources, nullptr);
   }
 }
 
@@ -803,17 +809,17 @@ void WebLocalFrameImpl::RequestExecuteScriptInIsolatedWorld(
   CHECK_GT(world_id, 0);
   CHECK_LT(world_id, DOMWrapperWorld::kEmbedderWorldIdLimit);
 
-  RefPtr<DOMWrapperWorld> isolated_world =
+  scoped_refptr<DOMWrapperWorld> isolated_world =
       DOMWrapperWorld::EnsureIsolatedWorld(ToIsolate(GetFrame()), world_id);
-  SuspendableScriptExecutor* executor = SuspendableScriptExecutor::Create(
+  PausableScriptExecutor* executor = PausableScriptExecutor::Create(
       GetFrame(), std::move(isolated_world),
       CreateSourcesVector(sources_in, num_sources), user_gesture, callback);
   switch (option) {
     case kAsynchronousBlockingOnload:
-      executor->RunAsync(SuspendableScriptExecutor::kOnloadBlocking);
+      executor->RunAsync(PausableScriptExecutor::kOnloadBlocking);
       break;
     case kAsynchronous:
-      executor->RunAsync(SuspendableScriptExecutor::kNonBlocking);
+      executor->RunAsync(PausableScriptExecutor::kNonBlocking);
       break;
     case kSynchronous:
       executor->Run();
@@ -869,15 +875,13 @@ void WebLocalFrameImpl::ReloadWithOverrideURL(const WebURL& override_url,
   if (request.IsNull())
     return;
   Load(request, load_type, WebHistoryItem(), kWebHistoryDifferentDocumentLoad,
-       false);
+       false, base::UnguessableToken::Create());
 }
 
 void WebLocalFrameImpl::ReloadImage(const WebNode& web_node) {
   const Node* node = web_node.ConstUnwrap<Node>();
-  if (isHTMLImageElement(*node)) {
-    const HTMLImageElement& image_element = toHTMLImageElement(*node);
-    image_element.ForceReload();
-  }
+  if (auto* image_element = ToHTMLImageElementOrNull(*node))
+    image_element->ForceReload();
 }
 
 void WebLocalFrameImpl::ReloadLoFiImages() {
@@ -888,7 +892,8 @@ void WebLocalFrameImpl::LoadRequest(const WebURLRequest& request) {
   // TODO(clamy): Remove this function once RenderFrame calls load for all
   // requests.
   Load(request, WebFrameLoadType::kStandard, WebHistoryItem(),
-       kWebHistoryDifferentDocumentLoad, false);
+       kWebHistoryDifferentDocumentLoad, false,
+       base::UnguessableToken::Create());
 }
 
 void WebLocalFrameImpl::LoadHTMLString(const WebData& data,
@@ -1006,7 +1011,7 @@ size_t WebLocalFrameImpl::CharacterIndexForPoint(
   if (!GetFrame())
     return kNotFound;
 
-  IntPoint point = GetFrame()->View()->ViewportToContents(point_in_viewport);
+  LayoutPoint point = GetFrame()->View()->ViewportToContents(point_in_viewport);
   HitTestResult result = GetFrame()->GetEventHandler().HitTestResultAtPoint(
       point, HitTestRequest::kReadOnly | HitTestRequest::kActive);
   const EphemeralRange range =
@@ -1041,6 +1046,9 @@ bool WebLocalFrameImpl::ExecuteCommand(const WebString& name) {
           ? context_menu_node_
           : nullptr;
 
+  std::unique_ptr<UserGestureIndicator> gesture_indicator =
+      Frame::NotifyUserActivation(GetFrame(), UserGestureToken::kNewGesture);
+
   WebPluginContainerImpl* plugin_container =
       GetFrame()->GetWebPluginContainer(plugin_lookup_context_node);
   if (plugin_container && plugin_container->ExecuteEditCommand(name))
@@ -1053,6 +1061,9 @@ bool WebLocalFrameImpl::ExecuteCommand(const WebString& name,
                                        const WebString& value) {
   DCHECK(GetFrame());
 
+  std::unique_ptr<UserGestureIndicator> gesture_indicator =
+      Frame::NotifyUserActivation(GetFrame(), UserGestureToken::kNewGesture);
+
   WebPluginContainerImpl* plugin_container =
       GetFrame()->GetWebPluginContainer();
   if (plugin_container && plugin_container->ExecuteEditCommand(name, value))
@@ -1064,6 +1075,67 @@ bool WebLocalFrameImpl::ExecuteCommand(const WebString& name,
 bool WebLocalFrameImpl::IsCommandEnabled(const WebString& name) const {
   DCHECK(GetFrame());
   return GetFrame()->GetEditor().CreateCommand(name).IsEnabled();
+}
+
+bool WebLocalFrameImpl::SelectionTextDirection(WebTextDirection& start,
+                                               WebTextDirection& end) const {
+  FrameSelection& selection = frame_->Selection();
+  if (!selection.IsAvailable()) {
+    // plugins/mouse-capture-inside-shadow.html reaches here
+    return false;
+  }
+
+  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  frame_->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+
+  if (selection.ComputeVisibleSelectionInDOMTree()
+          .ToNormalizedEphemeralRange()
+          .IsNull())
+    return false;
+  start = ToWebTextDirection(PrimaryDirectionOf(
+      *selection.ComputeVisibleSelectionInDOMTree().Start().AnchorNode()));
+  end = ToWebTextDirection(PrimaryDirectionOf(
+      *selection.ComputeVisibleSelectionInDOMTree().End().AnchorNode()));
+  return true;
+}
+
+bool WebLocalFrameImpl::IsSelectionAnchorFirst() const {
+  FrameSelection& selection = frame_->Selection();
+  if (!selection.IsAvailable()) {
+    // plugins/mouse-capture-inside-shadow.html reaches here
+    return false;
+  }
+
+  return selection.ComputeVisibleSelectionInDOMTreeDeprecated().IsBaseFirst();
+}
+
+void WebLocalFrameImpl::SetTextDirection(WebTextDirection direction) {
+  // The Editor::SetBaseWritingDirection() function checks if we can change
+  // the text direction of the selected node and updates its DOM "dir"
+  // attribute and its CSS "direction" property.
+  // So, we just call the function as Safari does.
+  Editor& editor = frame_->GetEditor();
+  if (!editor.CanEdit())
+    return;
+
+  switch (direction) {
+    case kWebTextDirectionDefault:
+      editor.SetBaseWritingDirection(NaturalWritingDirection);
+      break;
+
+    case kWebTextDirectionLeftToRight:
+      editor.SetBaseWritingDirection(LeftToRightWritingDirection);
+      break;
+
+    case kWebTextDirectionRightToLeft:
+      editor.SetBaseWritingDirection(RightToLeftWritingDirection);
+      break;
+
+    default:
+      NOTIMPLEMENTED();
+      break;
+  }
 }
 
 void WebLocalFrameImpl::EnableSpellChecking(bool enable) {
@@ -1163,35 +1235,13 @@ WebString WebLocalFrameImpl::SelectionAsMarkup() const {
   return GetFrame()->Selection().SelectedHTMLForClipboard();
 }
 
-void WebLocalFrameImpl::SelectWordAroundPosition(LocalFrame* frame,
-                                                 VisiblePosition position) {
-  TRACE_EVENT0("blink", "WebLocalFrameImpl::selectWordAroundPosition");
-
-  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
-  // needs to be audited.  see http://crbug.com/590369 for more details.
-  frame->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
-
-  frame->Selection().SelectWordAroundPosition(position);
-}
-
 bool WebLocalFrameImpl::SelectWordAroundCaret() {
   TRACE_EVENT0("blink", "WebLocalFrameImpl::selectWordAroundCaret");
-
-  FrameSelection& selection = GetFrame()->Selection();
 
   // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
   // needs to be audited.  see http://crbug.com/590369 for more details.
   GetFrame()->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
-
-  // TODO(editing-dev): The use of VisibleSelection needs to be audited. See
-  // http://crbug.com/657237 for more details.
-  if (selection.ComputeVisibleSelectionInDOMTree().IsNone() ||
-      selection.ComputeVisibleSelectionInDOMTree().IsRange()) {
-    return false;
-  }
-
-  return GetFrame()->Selection().SelectWordAroundPosition(
-      selection.ComputeVisibleSelectionInDOMTree().VisibleStart());
+  return GetFrame()->Selection().SelectWordAroundCaret();
 }
 
 void WebLocalFrameImpl::SelectRange(const WebPoint& base_in_viewport,
@@ -1201,7 +1251,8 @@ void WebLocalFrameImpl::SelectRange(const WebPoint& base_in_viewport,
 
 void WebLocalFrameImpl::SelectRange(
     const WebRange& web_range,
-    HandleVisibilityBehavior handle_visibility_behavior) {
+    HandleVisibilityBehavior handle_visibility_behavior,
+    blink::mojom::SelectionMenuBehavior selection_menu_behavior) {
   TRACE_EVENT0("blink", "WebLocalFrameImpl::selectRange");
 
   // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
@@ -1217,13 +1268,23 @@ void WebLocalFrameImpl::SelectRange(
       handle_visibility_behavior == kShowSelectionHandle ||
       (handle_visibility_behavior == kPreserveHandleVisibility &&
        selection.IsHandleVisible());
+  using blink::mojom::SelectionMenuBehavior;
   selection.SetSelection(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(range)
-          .SetAffinity(VP_DEFAULT_AFFINITY)
-          .SetIsDirectional(false)
+          .SetAffinity(TextAffinity::kDefault)
           .Build(),
-      SetSelectionOptions::Builder().SetShouldShowHandle(show_handles).Build());
+      SetSelectionOptions::Builder()
+          .SetShouldShowHandle(show_handles)
+          .SetShouldShrinkNextTap(selection_menu_behavior ==
+                                  SelectionMenuBehavior::kShow)
+          .Build());
+
+  if (selection_menu_behavior == SelectionMenuBehavior::kShow) {
+    ContextMenuAllowedScope scope;
+    GetFrame()->GetEventHandler().ShowNonLocatedContextMenu(
+        nullptr, kMenuSourceAdjustSelection);
+  }
 }
 
 WebString WebLocalFrameImpl::RangeAsText(const WebRange& web_range) {
@@ -1371,7 +1432,46 @@ WebPlugin* WebLocalFrameImpl::FocusedPluginIfInputMethodSupported() {
   WebPluginContainerImpl* container = GetFrame()->GetWebPluginContainer();
   if (container && container->SupportsInputMethod())
     return container->Plugin();
-  return 0;
+  return nullptr;
+}
+
+void WebLocalFrameImpl::DispatchBeforePrintEvent() {
+#if DCHECK_IS_ON()
+  DCHECK(!is_in_printing_) << "DispatchAfterPrintEvent() should have been "
+                              "called after the previous "
+                              "DispatchBeforePrintEvent() call.";
+  is_in_printing_ = true;
+#endif
+
+  DispatchPrintEventRecursively(EventTypeNames::beforeprint);
+}
+
+void WebLocalFrameImpl::DispatchAfterPrintEvent() {
+#if DCHECK_IS_ON()
+  DCHECK(is_in_printing_) << "DispatchBeforePrintEvent() should be called "
+                             "before DispatchAfterPrintEvent().";
+  is_in_printing_ = false;
+#endif
+
+  if (View())
+    DispatchPrintEventRecursively(EventTypeNames::afterprint);
+}
+
+void WebLocalFrameImpl::DispatchPrintEventRecursively(
+    const AtomicString& event_type) {
+  HeapVector<Member<Frame>> frames;
+  for (Frame* frame = frame_; frame; frame = frame->Tree().TraverseNext(frame_))
+    frames.push_back(frame);
+
+  for (auto& frame : frames) {
+    if (frame->IsRemoteFrame()) {
+      // TODO(tkent): Support remote frames. crbug.com/455764.
+      continue;
+    }
+    if (!frame->Tree().IsDescendantOf(frame_))
+      continue;
+    ToLocalFrame(frame)->DomWindow()->DispatchEvent(Event::Create(event_type));
+  }
 }
 
 int WebLocalFrameImpl::PrintBegin(const WebPrintParams& print_params,
@@ -1487,8 +1587,9 @@ void WebLocalFrameImpl::PrintPagesForTesting(
 }
 
 WebRect WebLocalFrameImpl::GetSelectionBoundsRectForTesting() const {
-  return HasSelection() ? WebRect(IntRect(GetFrame()->Selection().Bounds()))
-                        : WebRect();
+  return HasSelection()
+             ? WebRect(IntRect(GetFrame()->Selection().UnclippedBounds()))
+             : WebRect();
 }
 
 WebImage WebLocalFrameImpl::FrameImage(const WebRect& source_rect,
@@ -1508,8 +1609,7 @@ WebImage WebLocalFrameImpl::FrameImage(const WebRect& source_rect,
 
   frame_view->UpdateAllLifecyclePhases();
 
-  IntRect bounds(0, 0, bitmap_width, bitmap_height);
-  PaintRecordBuilder builder(bounds);
+  PaintRecordBuilder builder;
 
   {
     GraphicsContext& graphics_context = builder.Context();
@@ -1556,6 +1656,43 @@ WebString WebLocalFrameImpl::GetLayerTreeAsTextForTesting(
       show_debug_info ? kLayerTreeIncludesDebugInfo : kLayerTreeNormal));
 }
 
+void WebLocalFrameImpl::SetPrintMediaType(bool use_print_style) {
+  LocalFrameView* frame_view = GetFrame()->View();
+  frame_view->AdjustMediaTypeForPrinting(use_print_style);
+  frame_view->UpdateLayout();
+  frame_view->AdjustViewSize();
+}
+
+void WebLocalFrameImpl::PaintContentsForPDF(WebCanvas* canvas, WebRect rect) {
+  LocalFrameView* frame_view = GetFrame()->View();
+  frame_view->UpdateLifecyclePhasesForPrinting();
+
+  FloatRect bounds = FloatRect(rect);
+  PaintRecordBuilder outer_builder(&canvas->getMetaData());
+  GraphicsContext& context = outer_builder.Context();
+
+  context.SetCapturing(true);
+  context.SetPrinting(true);
+  context.BeginRecording(bounds);
+
+  {
+    PaintRecordBuilder builder(&context.Canvas()->getMetaData(), &context);
+
+    // The local scope is so that the cache skipper is destroyed before
+    // we call endRecording().
+    {
+      DisplayItemCacheSkipper skipper(builder.Context());
+
+      frame_view->PaintContents(builder.Context(),
+          kGlobalPaintFlattenCompositingLayers,
+          rect);
+    }
+    context.DrawRecord(builder.EndRecording());
+  }
+
+  canvas->drawPicture(context.EndRecording());
+}
+
 // WebLocalFrameImpl public --------------------------------------------------
 
 WebLocalFrame* WebLocalFrame::CreateMainFrame(
@@ -1574,7 +1711,7 @@ WebLocalFrame* WebLocalFrame::CreateProvisional(
     InterfaceRegistry* interface_registry,
     WebRemoteFrame* old_web_frame,
     WebSandboxFlags flags,
-    WebParsedFeaturePolicy container_policy) {
+    ParsedFeaturePolicy container_policy) {
   return WebLocalFrameImpl::CreateProvisional(
       client, interface_registry, old_web_frame, flags, container_policy);
 }
@@ -1614,7 +1751,7 @@ WebLocalFrameImpl* WebLocalFrameImpl::CreateProvisional(
     blink::InterfaceRegistry* interface_registry,
     WebRemoteFrame* old_web_frame,
     WebSandboxFlags flags,
-    WebParsedFeaturePolicy container_policy) {
+    ParsedFeaturePolicy container_policy) {
   DCHECK(client);
   WebLocalFrameImpl* web_frame =
       new WebLocalFrameImpl(old_web_frame, client, interface_registry);
@@ -1670,12 +1807,11 @@ WebLocalFrameImpl::WebLocalFrameImpl(
     : WebLocalFrame(scope),
       local_frame_client_(LocalFrameClientImpl::Create(this)),
       client_(client),
-      autofill_client_(0),
+      autofill_client_(nullptr),
       input_events_scale_factor_for_emulation_(1),
       interface_registry_(interface_registry),
-      web_dev_tools_frontend_(0),
+      web_dev_tools_frontend_(nullptr),
       input_method_controller_(*this),
-      text_checker_client_(new TextCheckerClientImpl(this)),
       spell_check_panel_host_client_(nullptr),
       self_keep_alive_(this),
       has_detached_view_(false),
@@ -1701,7 +1837,7 @@ WebLocalFrameImpl::~WebLocalFrameImpl() {
   g_frame_count--;
 }
 
-DEFINE_TRACE(WebLocalFrameImpl) {
+void WebLocalFrameImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(local_frame_client_);
   visitor->Trace(frame_);
   visitor->Trace(dev_tools_agent_);
@@ -1710,12 +1846,15 @@ DEFINE_TRACE(WebLocalFrameImpl) {
   visitor->Trace(print_context_);
   visitor->Trace(context_menu_node_);
   visitor->Trace(input_method_controller_);
-  visitor->Trace(text_checker_client_);
   WebFrame::TraceFrames(visitor, this);
 }
 
 void WebLocalFrameImpl::SetCoreFrame(LocalFrame* frame) {
   frame_ = frame;
+
+  local_frame_client_->SetVirtualTimePauser(
+      frame_ ? frame_->FrameScheduler()->CreateWebScopedVirtualTimePauser()
+             : WebScopedVirtualTimePauser());
 }
 
 void WebLocalFrameImpl::InitializeCoreFrame(Page& page,
@@ -1909,11 +2048,11 @@ void WebLocalFrameImpl::LoadJavaScriptURL(const KURL& url) {
   String script = DecodeURLEscapeSequences(
       url.GetString().Substring(strlen("javascript:")));
   std::unique_ptr<UserGestureIndicator> gesture_indicator =
-      LocalFrame::CreateUserGesture(GetFrame(), UserGestureToken::kNewGesture);
+      Frame::NotifyUserActivation(GetFrame(), UserGestureToken::kNewGesture);
   v8::HandleScope handle_scope(ToIsolate(GetFrame()));
   v8::Local<v8::Value> result =
       GetFrame()->GetScriptController().ExecuteScriptInMainWorldAndReturnValue(
-          ScriptSourceCode(script));
+          ScriptSourceCode(script, ScriptSourceLocationType::kJavascriptUrl));
   if (result.IsEmpty() || !result->IsString())
     return;
   String script_result = ToCoreString(v8::Local<v8::String>::Cast(result));
@@ -1982,8 +2121,8 @@ void WebLocalFrameImpl::SendPings(const WebURL& destination_url) {
   DCHECK(GetFrame());
   DCHECK(context_menu_node_.Get());
   Element* anchor = context_menu_node_->EnclosingLinkEventParentOrSelf();
-  if (isHTMLAnchorElement(anchor))
-    toHTMLAnchorElement(anchor)->SendPings(destination_url);
+  if (auto* html_anchor = ToHTMLAnchorElementOrNull(anchor))
+    html_anchor->SendPings(destination_url);
 }
 
 bool WebLocalFrameImpl::DispatchBeforeUnloadEvent(bool is_reload) {
@@ -1995,10 +2134,10 @@ bool WebLocalFrameImpl::DispatchBeforeUnloadEvent(bool is_reload) {
 
 WebURLRequest WebLocalFrameImpl::RequestFromHistoryItem(
     const WebHistoryItem& item,
-    WebCachePolicy cache_policy) const {
+    mojom::FetchCacheMode cache_mode) const {
   HistoryItem* history_item = item;
   return WrappedResourceRequest(
-      history_item->GenerateResourceRequest(cache_policy));
+      history_item->GenerateResourceRequest(cache_mode));
 }
 
 WebURLRequest WebLocalFrameImpl::RequestForReload(
@@ -2010,11 +2149,13 @@ WebURLRequest WebLocalFrameImpl::RequestForReload(
   return WrappedResourceRequest(request);
 }
 
-void WebLocalFrameImpl::Load(const WebURLRequest& request,
-                             WebFrameLoadType web_frame_load_type,
-                             const WebHistoryItem& item,
-                             WebHistoryLoadType web_history_load_type,
-                             bool is_client_redirect) {
+void WebLocalFrameImpl::Load(
+    const WebURLRequest& request,
+    WebFrameLoadType web_frame_load_type,
+    const WebHistoryItem& item,
+    WebHistoryLoadType web_history_load_type,
+    bool is_client_redirect,
+    const base::UnguessableToken& devtools_navigation_token) {
   DCHECK(GetFrame());
   DCHECK(!request.IsNull());
   const ResourceRequest& resource_request = request.ToResourceRequest();
@@ -2028,7 +2169,9 @@ void WebLocalFrameImpl::Load(const WebURLRequest& request,
   if (text_finder_)
     text_finder_->ClearActiveFindMatch();
 
-  FrameLoadRequest frame_request = FrameLoadRequest(nullptr, resource_request);
+  FrameLoadRequest frame_request =
+      FrameLoadRequest(nullptr, resource_request, /*frame_name=*/AtomicString(),
+                       kCheckContentSecurityPolicy, devtools_navigation_token);
   if (is_client_redirect)
     frame_request.SetClientRedirect(ClientRedirectPolicy::kClientRedirect);
   HistoryItem* history_item = item;
@@ -2073,7 +2216,7 @@ void WebLocalFrameImpl::LoadData(const WebData& data,
   request.SetCheckForBrowserSideNavigation(false);
 
   FrameLoadRequest frame_request(
-      0, request,
+      nullptr, request,
       SubstituteData(data, mime_type, text_encoding, unreachable_url));
   DCHECK(frame_request.GetSubstituteData().IsValid());
   frame_request.SetReplacesCurrentItem(replace);
@@ -2404,15 +2547,14 @@ WebFrameWidgetBase* WebLocalFrameImpl::FrameWidget() const {
   return frame_widget_;
 }
 
-std::unique_ptr<WebURLLoader> WebLocalFrameImpl::CreateURLLoader(
-    const WebURLRequest& request,
-    SingleThreadTaskRunner* task_runner) {
-  return client_->CreateURLLoader(request, task_runner);
+std::unique_ptr<WebURLLoaderFactory>
+WebLocalFrameImpl::CreateURLLoaderFactory() {
+  return client_->CreateURLLoaderFactory();
 }
 
 void WebLocalFrameImpl::CopyImageAt(const WebPoint& pos_in_viewport) {
   HitTestResult result = HitTestResultForVisualViewportPos(pos_in_viewport);
-  if (!isHTMLCanvasElement(result.InnerNodeOrImageMapImage()) &&
+  if (!IsHTMLCanvasElement(result.InnerNodeOrImageMapImage()) &&
       result.AbsoluteImageURL().IsEmpty()) {
     // There isn't actually an image at these coordinates.  Might be because
     // the window scrolled while the context menu was open or because the page
@@ -2434,7 +2576,7 @@ void WebLocalFrameImpl::CopyImageAt(const WebPoint& pos_in_viewport) {
 void WebLocalFrameImpl::SaveImageAt(const WebPoint& pos_in_viewport) {
   Node* node = HitTestResultForVisualViewportPos(pos_in_viewport)
                    .InnerNodeOrImageMapImage();
-  if (!node || !(isHTMLCanvasElement(*node) || isHTMLImageElement(*node)))
+  if (!node || !(IsHTMLCanvasElement(*node) || IsHTMLImageElement(*node)))
     return;
 
   String url = ToElement(*node).ImageSourceURL();
@@ -2494,7 +2636,7 @@ void WebLocalFrameImpl::UsageCountChromeLoadTimes(const WebString& metric) {
   } else if (metric == "connectionInfo") {
     feature = WebFeature::kChromeLoadTimesConnectionInfo;
   }
-  UseCounter::Count(GetFrame(), feature);
+  Deprecation::CountDeprecation(GetFrame(), feature);
 }
 
 void WebLocalFrameImpl::SetHasDetachedView(bool has_detached_view) {
@@ -2517,25 +2659,9 @@ WebFrameScheduler* WebLocalFrameImpl::Scheduler() const {
   return GetFrame()->FrameScheduler();
 }
 
-SingleThreadTaskRunner* WebLocalFrameImpl::TimerTaskRunner() {
-  return GetFrame()
-      ->FrameScheduler()
-      ->ThrottleableTaskRunner()
-      ->ToSingleThreadTaskRunner();
-}
-
-SingleThreadTaskRunner* WebLocalFrameImpl::LoadingTaskRunner() {
-  return GetFrame()
-      ->FrameScheduler()
-      ->LoadingTaskRunner()
-      ->ToSingleThreadTaskRunner();
-}
-
-SingleThreadTaskRunner* WebLocalFrameImpl::UnthrottledTaskRunner() {
-  return GetFrame()
-      ->FrameScheduler()
-      ->PausableTaskRunner()
-      ->ToSingleThreadTaskRunner();
+scoped_refptr<base::SingleThreadTaskRunner> WebLocalFrameImpl::GetTaskRunner(
+    TaskType task_type) {
+  return GetFrame()->GetTaskRunner(task_type);
 }
 
 WebInputMethodController* WebLocalFrameImpl::GetInputMethodController() {
@@ -2588,10 +2714,6 @@ void WebLocalFrameImpl::AdvanceFocusInForm(WebFocusType focus_type) {
 
   next_element->scrollIntoViewIfNeeded(true /*centerIfNeeded*/);
   next_element->focus();
-}
-
-TextCheckerClient& WebLocalFrameImpl::GetTextCheckerClient() const {
-  return *text_checker_client_;
 }
 
 void WebLocalFrameImpl::SetTextCheckClient(

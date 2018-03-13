@@ -11,8 +11,8 @@ found in the LICENSE file.
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
 
-    <!-- Origin Trial Token, feature = WebVR (For Chrome M59+), origin = https://webvr.info, expires = 2017-08-30 -->
-    <meta http-equiv="origin-trial" data-feature="WebVR (For Chrome M59+)" data-expires="2017-08-30" content="AmtVcdkEen4LWNSpr4fW02Z0wHiaM9p8no5KyO0jx70aZNWvoIFxwBHG8RPTVjbrgrYCxFQvYwAndg60tl3XVAYAAABMeyJvcmlnaW4iOiJodHRwczovL3dlYnZyLmluZm86NDQzIiwiZmVhdHVyZSI6IldlYlZSMS4xIiwiZXhwaXJ5IjoxNTA0MTI1ODEyfQ==">
+    <!-- Origin Trial Token, feature = WebVR (For Chrome M59+), origin = https://webvr.info, expires = 2017-10-13 -->
+    <meta http-equiv="origin-trial" data-feature="WebVR (For Chrome M59+)" data-expires="2017-10-13" content="Aqw0TUvp8CwZmgIS50pM1blhzy05y7OkBeW3AQQGjer4KuKV0p13xfrRbe2bT8B1+DgRW0O3Dda0yOjcL46GBwgAAABMeyJvcmlnaW4iOiJodHRwczovL3dlYnZyLmluZm86NDQzIiwiZmVhdHVyZSI6IldlYlZSMS4xIiwiZXhwaXJ5IjoxNTA3ODU5MDE4fQ==">
 
     <title>09 - Splash Screen</title>
 
@@ -124,6 +124,25 @@ found in the LICENSE file.
       var textureLoader = null;
       var splashScreen = null;
 
+      function onContextLost( event ) {
+        event.preventDefault();
+        console.log( 'WebGL Context Lost.' );
+        gl = null;
+        cubeSea = null;
+        stats = null;
+        textureLoader = null;
+        splashScreen = null;
+      }
+
+      function onContextRestored( event ) {
+        console.log( 'WebGL Context Restored.' );
+        initWebGL(vrDisplay ? vrDisplay.capabilities.hasExternalDisplay : false);
+      }
+
+      webglCanvas = document.createElement('canvas');
+      webglCanvas.addEventListener( 'webglcontextlost', onContextLost, false );
+      webglCanvas.addEventListener( 'webglcontextrestored', onContextRestored, false );
+
       // This sample is going to use a slightly different start up sequence.
       // In order to show the splash screen effect we won't have any magic
       // window content and only begin loading the scene once the "Enter VR"
@@ -131,7 +150,6 @@ found in the LICENSE file.
       // splash screen and let it reproject while the real scene loads. Once
       // that scene is ready we'll begin rendering it.
       function initWebGL (preserveDrawingBuffer) {
-        webglCanvas = document.createElement('canvas');
         var glAttribs = {
           alpha: false,
           preserveDrawingBuffer: preserveDrawingBuffer
@@ -278,6 +296,11 @@ found in the LICENSE file.
       }
 
       function onSplashFrame (t) {
+        // do not attempt to render if there is no available WebGL context
+        if (!gl) {
+          return;
+        }
+
         // Splash screens should always be cleared to black to avoid showing the
         // edges of the reprojected frame
         gl.clearColor(0.0, 0.0, 0.0, 1.0);
@@ -311,8 +334,11 @@ found in the LICENSE file.
       }
 
       function onAnimationFrame (t) {
-        if (!vrDisplay.isPresenting)
+        // do not attempt to render if there is no available WebGL context
+        if (!gl || !stats || !cubeSea) {
+          window.requestAnimationFrame(onAnimationFrame);
           return;
+        }
 
         stats.begin();
 

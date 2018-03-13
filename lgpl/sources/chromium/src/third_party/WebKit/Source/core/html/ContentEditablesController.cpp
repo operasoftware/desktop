@@ -32,7 +32,7 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/html/HTMLElement.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -66,8 +66,10 @@ void ContentEditablesState::RestoreContentsIn(Element* element) {
 
   if (content_editables_with_paths_.at(htmlElement) == elementPath) {
     String content = saved_contents_.at(elementPath);
-    if (!content.IsEmpty())
-      htmlElement->setInnerHTML(content, IGNORE_EXCEPTION_FOR_TESTING);
+    if (!content.IsEmpty()) {
+      htmlElement->SetInnerHTMLFromString(content,
+                                          IGNORE_EXCEPTION_FOR_TESTING);
+    }
   }
 }
 
@@ -79,7 +81,7 @@ Vector<String> ContentEditablesState::ToStateVector() {
     result.push_back(String::Number(kContentEditablesSavedContentsVersion, 0u));
     for (const auto& iter : content_editables_with_paths_) {
       result.push_back(iter.value);
-      result.push_back(ToHTMLElement(iter.key)->innerHTML());
+      result.push_back(ToHTMLElement(iter.key)->InnerHTMLAsString());
     }
   }
   return result;
@@ -100,7 +102,7 @@ ContentEditablesState::ContentEditablesState() {}
 
 ContentEditablesState::~ContentEditablesState() {}
 
-DEFINE_TRACE(ContentEditablesState) {
+void ContentEditablesState::Trace(Visitor* visitor) {
   visitor->Trace(content_editables_with_paths_);
 }
 
@@ -137,7 +139,7 @@ void ContentEditablesController::SetContentEditablesContent(
   state_->SetContentEditablesContent(contents);
 }
 
-DEFINE_TRACE(ContentEditablesController) {
+void ContentEditablesController::Trace(Visitor* visitor) {
   visitor->Trace(state_);
 }
 

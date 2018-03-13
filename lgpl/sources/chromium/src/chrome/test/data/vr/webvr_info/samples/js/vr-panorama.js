@@ -159,17 +159,41 @@ window.VRPanorama = (function () {
         reject(video.error);
       }, false);
 
+      // Videos must be muted to play without a user gesture.
+      video.muted = true;
+
+      // These lines are required to play the video on iOS.
+      video.setAttribute("playsinline", "");
+      // This is for iOS 8 and 9 only, above line required for 10+.
+      video.setAttribute("webkit-playsinline", "");
+
       video.loop = true;
-      video.autoplay = true;
       video.crossOrigin = 'anonymous';
-      video.setAttribute('webkit-playsinline', '');
       video.src = url;
+
+      // As the video is never visible on the page, we must explicitly
+      // call play to start the video instead of being able to use
+      // autoplay attributes.
+      playVideo(video);
     });
   };
 
+  // Start the video. If the video fails to start, alert the user.
   Panorama.prototype.play = function() {
     if (this.videoElement)
-      this.videoElement.play();
+      playVideo(this.videoElement);
+  };
+
+  function playVideo(video) {
+    let promise = video.play();
+    if(promise) {
+      promise.catch((err) => {
+        console.error(err);
+        VRSamplesUtil.addError("Video has failed to start", 3000)
+      });
+    } else {
+      console.error("videoElement.play does not support promise api");
+    }
   };
 
   Panorama.prototype.pause = function() {

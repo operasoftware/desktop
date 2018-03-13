@@ -90,7 +90,7 @@ class PLATFORM_EXPORT SecurityPolicy {
                                        ReferrerPolicy* result);
 
 #if defined(OPERA_DESKTOP)
-  static void AddOriginAsFirstPartyForSubframes(RefPtr<SecurityOrigin>);
+  static void AddOriginAsFirstPartyForSubframes(scoped_refptr<SecurityOrigin>);
   static bool IsOriginFirstPartyWhenTopLevel(const SecurityOrigin&);
 #endif  // OPERA_DESKTOP
 

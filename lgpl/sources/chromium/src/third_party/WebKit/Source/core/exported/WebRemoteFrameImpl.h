@@ -20,6 +20,8 @@ class RemoteFrame;
 class RemoteFrameClientImpl;
 enum class WebFrameLoadType;
 class WebView;
+struct WebRect;
+struct WebRemoteScrollProperties;
 
 class CORE_EXPORT WebRemoteFrameImpl final
     : public GarbageCollectedFinalized<WebRemoteFrameImpl>,
@@ -48,13 +50,13 @@ class CORE_EXPORT WebRemoteFrameImpl final
                                   WebFrameClient*,
                                   blink::InterfaceRegistry*,
                                   WebFrame* previous_sibling,
-                                  const WebParsedFeaturePolicy&,
+                                  const ParsedFeaturePolicy&,
                                   const WebFrameOwnerProperties&,
                                   WebFrame* opener) override;
   WebRemoteFrame* CreateRemoteChild(WebTreeScopeType,
                                     const WebString& name,
                                     WebSandboxFlags,
-                                    const WebParsedFeaturePolicy&,
+                                    const ParsedFeaturePolicy&,
                                     WebRemoteFrameClient*,
                                     WebFrame* opener) override;
   void SetWebLayer(WebLayer*) override;
@@ -62,7 +64,7 @@ class CORE_EXPORT WebRemoteFrameImpl final
   void SetReplicatedSandboxFlags(WebSandboxFlags) override;
   void SetReplicatedName(const WebString&) override;
   void SetReplicatedFeaturePolicyHeader(
-      const WebParsedFeaturePolicy& parsed_header) override;
+      const ParsedFeaturePolicy& parsed_header) override;
   void AddReplicatedContentSecurityPolicyHeader(
       const WebString& header_value,
       WebContentSecurityPolicyType,
@@ -76,6 +78,8 @@ class CORE_EXPORT WebRemoteFrameImpl final
   bool IsIgnoredForHitTest() const override;
   void WillEnterFullscreen() override;
   void SetHasReceivedUserGesture() override;
+  void ScrollRectToVisible(const WebRect&,
+                           const WebRemoteScrollProperties&) override;
   v8::Local<v8::Object> GlobalProxy() const override;
 
   void InitializeCoreFrame(Page&, FrameOwner*, const AtomicString& name);
@@ -87,7 +91,7 @@ class CORE_EXPORT WebRemoteFrameImpl final
 
   static WebRemoteFrameImpl* FromFrame(RemoteFrame&);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   WebRemoteFrameImpl(WebTreeScopeType, WebRemoteFrameClient*);

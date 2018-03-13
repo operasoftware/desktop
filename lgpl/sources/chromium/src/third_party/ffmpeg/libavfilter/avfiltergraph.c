@@ -28,6 +28,7 @@
 #include "libavutil/avstring.h"
 #include "libavutil/bprint.h"
 #include "libavutil/channel_layout.h"
+#include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -136,23 +137,6 @@ void avfilter_graph_free(AVFilterGraph **graph)
     av_freep(graph);
 }
 
-#if FF_API_AVFILTER_OPEN
-int avfilter_graph_add_filter(AVFilterGraph *graph, AVFilterContext *filter)
-{
-    AVFilterContext **filters = av_realloc(graph->filters,
-                                           sizeof(*filters) * (graph->nb_filters + 1));
-    if (!filters)
-        return AVERROR(ENOMEM);
-
-    graph->filters = filters;
-    graph->filters[graph->nb_filters++] = filter;
-
-    filter->graph = graph;
-
-    return 0;
-}
-#endif
-
 int avfilter_graph_create_filter(AVFilterContext **filt_ctx, const AVFilter *filt,
                                  const char *name, const char *args, void *opaque,
                                  AVFilterGraph *graph_ctx)
@@ -193,7 +177,7 @@ AVFilterContext *avfilter_graph_alloc_filter(AVFilterGraph *graph,
         } else {
             int ret = ff_graph_thread_init(graph);
             if (ret < 0) {
-                av_log(graph, AV_LOG_ERROR, "Error initializing threading.\n");
+                av_log(graph, AV_LOG_ERROR, "Error initializing threading: %s.\n", av_err2str(ret));
                 return NULL;
             }
         }
@@ -277,6 +261,27 @@ static int graph_config_links(AVFilterGraph *graph, AVClass *log_ctx)
         }
     }
 
+    return 0;
+}
+
+static int graph_check_links(AVFilterGraph *graph, AVClass *log_ctx)
+{
+    AVFilterContext *f;
+    AVFilterLink *l;
+    unsigned i, j;
+    int ret;
+
+    for (i = 0; i < graph->nb_filters; i++) {
+        f = graph->filters[i];
+        for (j = 0; j < f->nb_outputs; j++) {
+            l = f->outputs[j];
+            if (l->type == AVMEDIA_TYPE_VIDEO) {
+                ret = av_image_check_size2(l->w, l->h, INT64_MAX, l->format, 0, f);
+                if (ret < 0)
+                    return ret;
+            }
+        }
+    }
     return 0;
 }
 
@@ -509,7 +514,7 @@ static int query_formats(AVFilterGraph *graph, AVClass *log_ctx)
 
             if (convert_needed) {
                 AVFilterContext *convert;
-                AVFilter *filter;
+                const AVFilter *filter;
                 AVFilterLink *inlink, *outlink;
                 char scale_args[256];
                 char inst_name[30];
@@ -1235,7 +1240,7 @@ static int graph_insert_fifos(AVFilterGraph *graph, AVClass *log_ctx)
         for (j = 0; j < f->nb_inputs; j++) {
             AVFilterLink *link = f->inputs[j];
             AVFilterContext *fifo_ctx;
-            AVFilter *fifo;
+            const AVFilter *fifo;
             char name[32];
 
             if (!link->dstpad->needs_fifo)
@@ -1272,6 +1277,8 @@ int avfilter_graph_config(AVFilterGraph *graphctx, void *log_ctx)
     if ((ret = graph_config_formats(graphctx, log_ctx)))
         return ret;
     if ((ret = graph_config_links(graphctx, log_ctx)))
+        return ret;
+    if ((ret = graph_check_links(graphctx, log_ctx)))
         return ret;
     if ((ret = graph_config_pointers(graphctx, log_ctx)))
         return ret;

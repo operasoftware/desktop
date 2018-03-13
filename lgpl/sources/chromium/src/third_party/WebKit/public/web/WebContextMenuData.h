@@ -31,7 +31,6 @@
 #ifndef WebContextMenuData_h
 #define WebContextMenuData_h
 
-#include "WebHistoryItem.h"
 #include "WebMenuItemInfo.h"
 #include "public/platform/WebMenuSourceType.h"
 #include "public/platform/WebPoint.h"
@@ -107,9 +106,6 @@ struct WebContextMenuData {
 
   // The encoding for the frame in context.
   WebString frame_encoding;
-
-  // History state of the subframe in context.
-  WebHistoryItem frame_history_item;
 
   enum MediaFlags {
     kMediaNone = 0x0,
@@ -204,6 +200,14 @@ struct WebContextMenuData {
 
   // Selection in viewport coordinates.
   WebRect selection_rect;
+
+  // TODO(https://crbug.com/781914): Remove this field after we done with Blink
+  // side tracking.
+  // Global index of start position for the current selection.
+  // If the current element is editable, then it starts from the first
+  // character within the element, otherwise, it starts from the beginning of
+  // the current webpage.
+  int selection_start_offset;
 
   WebMenuSourceType source_type;
 

@@ -31,6 +31,7 @@
 #include "platform/scroll/ScrollAnimator.h"
 
 #include <memory>
+#include "base/memory/scoped_refptr.h"
 #include "base/features/features.h"
 #include "base/power_save_mode/power_save_mode_monitor.h"
 #include "cc/animation/scroll_offset_animation_curve.h"
@@ -39,9 +40,8 @@
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/scroll/MainThreadScrollingReason.h"
 #include "platform/scroll/ScrollableArea.h"
-#include "platform/wtf/CurrentTime.h"
-#include "platform/wtf/PassRefPtr.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
 
@@ -449,7 +449,7 @@ bool ScrollAnimator::RegisterAndScheduleAnimation() {
   return true;
 }
 
-DEFINE_TRACE(ScrollAnimator) {
+void ScrollAnimator::Trace(blink::Visitor* visitor) {
   ScrollAnimatorBase::Trace(visitor);
 }
 

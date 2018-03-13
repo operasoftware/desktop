@@ -26,13 +26,12 @@
 #ifndef Node_h
 #define Node_h
 
-#include "bindings/core/v8/ExceptionState.h"
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/dom/MutationObserver.h"
-#include "core/dom/SimulatedClickOptions.h"
 #include "core/dom/TreeScope.h"
 #include "core/dom/events/EventTarget.h"
-#include "core/editing/EditingBoundary.h"
+#include "core/dom/events/SimulatedClickOptions.h"
 #include "core/style/ComputedStyleConstants.h"
 #include "platform/bindings/TraceWrapperMember.h"
 #include "platform/geometry/LayoutRect.h"
@@ -108,11 +107,9 @@ enum class SlotChangeType {
 };
 
 class NodeRenderingData {
-  WTF_MAKE_NONCOPYABLE(NodeRenderingData);
-
  public:
   explicit NodeRenderingData(LayoutObject* layout_object,
-                             RefPtr<ComputedStyle> non_attached_style);
+                             scoped_refptr<ComputedStyle> non_attached_style);
   ~NodeRenderingData();
 
   LayoutObject* GetLayoutObject() const { return layout_object_; }
@@ -122,16 +119,17 @@ class NodeRenderingData {
   }
 
   ComputedStyle* GetNonAttachedStyle() const {
-    return non_attached_style_.Get();
+    return non_attached_style_.get();
   }
-  void SetNonAttachedStyle(RefPtr<ComputedStyle> non_attached_style);
+  void SetNonAttachedStyle(scoped_refptr<ComputedStyle> non_attached_style);
 
   static NodeRenderingData& SharedEmptyData();
   bool IsSharedEmptyData() { return this == &SharedEmptyData(); }
 
  private:
   LayoutObject* layout_object_;
-  RefPtr<ComputedStyle> non_attached_style_;
+  scoped_refptr<ComputedStyle> non_attached_style_;
+  DISALLOW_COPY_AND_ASSIGN(NodeRenderingData);
 };
 
 class NodeRareDataBase {
@@ -143,7 +141,7 @@ class NodeRareDataBase {
   }
 
  protected:
-  NodeRareDataBase(NodeRenderingData* node_layout_data)
+  explicit NodeRareDataBase(NodeRenderingData* node_layout_data)
       : node_layout_data_(node_layout_data) {}
   ~NodeRareDataBase() {
     if (node_layout_data_ && !node_layout_data_->IsSharedEmptyData())
@@ -207,7 +205,7 @@ class CORE_EXPORT Node : public EventTarget {
     ThreadState* state =
         ThreadStateFor<ThreadingTrait<Node>::kAffinity>::GetState();
     const char* type_name = "blink::Node";
-    return ThreadHeap::AllocateOnArenaIndex(
+    return state->Heap().AllocateOnArenaIndex(
         state, size,
         is_eager ? BlinkGC::kEagerSweepArenaIndex : BlinkGC::kNodeArenaIndex,
         GCInfoTrait<EventTarget>::Index(), type_name);
@@ -246,7 +244,8 @@ class CORE_EXPORT Node : public EventTarget {
   void Before(const HeapVector<NodeOrString>&, ExceptionState&);
   void After(const HeapVector<NodeOrString>&, ExceptionState&);
   void ReplaceWith(const HeapVector<NodeOrString>&, ExceptionState&);
-  void remove(ExceptionState& = ASSERT_NO_EXCEPTION);
+  void remove(ExceptionState&);
+  void remove();
 
   Node* PseudoAwareNextSibling() const;
   Node* PseudoAwarePreviousSibling() const;
@@ -255,17 +254,18 @@ class CORE_EXPORT Node : public EventTarget {
 
   const KURL& baseURI() const;
 
-  Node* insertBefore(Node* new_child,
-                     Node* ref_child,
-                     ExceptionState& = ASSERT_NO_EXCEPTION);
-  Node* replaceChild(Node* new_child,
-                     Node* old_child,
-                     ExceptionState& = ASSERT_NO_EXCEPTION);
-  Node* removeChild(Node* child, ExceptionState& = ASSERT_NO_EXCEPTION);
-  Node* appendChild(Node* new_child, ExceptionState& = ASSERT_NO_EXCEPTION);
+  Node* insertBefore(Node* new_child, Node* ref_child, ExceptionState&);
+  Node* insertBefore(Node* new_child, Node* ref_child);
+  Node* replaceChild(Node* new_child, Node* old_child, ExceptionState&);
+  Node* replaceChild(Node* new_child, Node* old_child);
+  Node* removeChild(Node* child, ExceptionState&);
+  Node* removeChild(Node* child);
+  Node* appendChild(Node* new_child, ExceptionState&);
+  Node* appendChild(Node* new_child);
 
   bool hasChildren() const { return firstChild(); }
-  virtual Node* cloneNode(bool deep, ExceptionState& = ASSERT_NO_EXCEPTION) = 0;
+  virtual Node* cloneNode(bool deep, ExceptionState&) = 0;
+  Node* cloneNode(bool deep);
   void normalize();
 
   bool isEqualNode(Node*) const;
@@ -279,7 +279,7 @@ class CORE_EXPORT Node : public EventTarget {
 
   bool SupportsAltText();
 
-  void SetNonAttachedStyle(RefPtr<ComputedStyle> non_attached_style);
+  void SetNonAttachedStyle(scoped_refptr<ComputedStyle> non_attached_style);
 
   ComputedStyle* GetNonAttachedStyle() const {
     return HasRareData()
@@ -336,6 +336,10 @@ class CORE_EXPORT Node : public EventTarget {
   virtual bool IsCharacterDataNode() const { return false; }
   virtual bool IsFrameOwnerElement() const { return false; }
   virtual bool IsMediaRemotingInterstitial() const { return false; }
+
+  // Traverses the ancestors of this node and returns true if any of them are
+  // either a MediaControlElement or MediaControls.
+  bool HasMediaControlAncestor() const;
 
   bool IsStyledElement() const;
 
@@ -519,6 +523,7 @@ class CORE_EXPORT Node : public EventTarget {
   void SetNeedsStyleInvalidation();
 
   void UpdateDistribution();
+  bool MayContainLegacyNodeTreeWhereDistributionShouldBeSupported() const;
 
   void SetIsLink(bool f);
 
@@ -535,7 +540,7 @@ class CORE_EXPORT Node : public EventTarget {
 
   virtual int tabIndex() const;
 
-  virtual Node* FocusDelegate();
+  virtual const Node* FocusDelegate() const;
   // This is called only when the node is focused.
   virtual bool ShouldHaveFocusAppearance() const;
 
@@ -835,12 +840,17 @@ class CORE_EXPORT Node : public EventTarget {
     CheckSlotChange(SlotChangeType::kSignalSlotChangeEvent);
   }
 
+  void SetHasDuplicateAttributes() { SetFlag(kHasDuplicateAttributes); }
+  bool HasDuplicateAttribute() const {
+    return GetFlag(kHasDuplicateAttributes);
+  }
+
   // If the node is a plugin, then this returns its WebPluginContainer.
   WebPluginContainerImpl* GetWebPluginContainer() const;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
 
  private:
   enum NodeFlags {
@@ -889,6 +899,8 @@ class CORE_EXPORT Node : public EventTarget {
 
     kNeedsReattachLayoutTree = 1 << 26,
     kChildNeedsReattachLayoutTree = 1 << 27,
+
+    kHasDuplicateAttributes = 1 << 28,
 
     kDefaultNodeFlags =
         kIsFinishedParsingChildrenFlag | kNeedsReattachStyleChange

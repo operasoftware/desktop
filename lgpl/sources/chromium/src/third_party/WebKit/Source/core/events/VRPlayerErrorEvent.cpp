@@ -13,7 +13,7 @@ const AtomicString& VRPlayerErrorEvent::InterfaceName() const {
   return EventNames::VRPlayerErrorEvent;
 }
 
-DEFINE_TRACE(VRPlayerErrorEvent) {
+void VRPlayerErrorEvent::Trace(blink::Visitor* visitor) {
   Event::Trace(visitor);
 }
 
