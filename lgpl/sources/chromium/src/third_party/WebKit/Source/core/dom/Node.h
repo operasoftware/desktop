@@ -372,6 +372,7 @@ class CORE_EXPORT Node : public EventTarget {
   // This can happen when handling queued events (e.g. during execCommand())
   ShadowRoot* ContainingShadowRoot() const;
   ShadowRoot* YoungestShadowRoot() const;
+  bool IsInUserAgentShadowRoot() const;
 
   // Returns nullptr, a child of ShadowRoot, or a legacy shadow root.
   Node* NonBoundaryShadowTreeRootNode();
@@ -634,7 +635,6 @@ class CORE_EXPORT Node : public EventTarget {
 
   struct AttachContext {
     STACK_ALLOCATED();
-    ComputedStyle* resolved_style = nullptr;
     // Keep track of previously attached in-flow box during attachment so that
     // we don't need to backtrack past display:none/contents and out of flow
     // objects when we need to do whitespace re-attachment.

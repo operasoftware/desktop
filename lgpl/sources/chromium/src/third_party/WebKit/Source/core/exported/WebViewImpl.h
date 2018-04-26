@@ -38,9 +38,7 @@
 #include "core/exported/WebPagePopupImpl.h"
 #include "core/frame/ResizeViewportAnchor.h"
 #include "core/page/ChromeClient.h"
-#include "core/page/ContextMenuClient.h"
 #include "core/page/ContextMenuProvider.h"
-#include "core/page/EditorClient.h"
 #include "core/page/EventWithHitTestResults.h"
 #include "core/page/PageWidgetDelegate.h"
 #include "core/page/ScopedPagePauser.h"
@@ -102,9 +100,10 @@ class CORE_EXPORT WebViewImpl final
       public WebScheduler::InterventionReporter,
       public WebViewScheduler::WebViewSchedulerDelegate {
  public:
-  static WebViewImpl* Create(WebViewClient*, mojom::PageVisibilityState);
+  static WebViewImpl* Create(WebViewClient*,
+                             mojom::PageVisibilityState,
+                             WebViewImpl* opener);
   static HashSet<WebViewImpl*>& AllInstances();
-  static const WebInputEvent* CurrentInputEvent();
   // Returns true if popup menus should be rendered by the browser, false if
   // they should be rendered by WebKit (which is the default).
   static bool UseExternalPopupMenus();
@@ -120,7 +119,7 @@ class CORE_EXPORT WebViewImpl final
   void SetSuppressFrameRequestsWorkaroundFor704763Only(bool) override;
   void BeginFrame(double last_frame_time_monotonic) override;
 
-  void UpdateAllLifecyclePhases() override;
+  void UpdateLifecycle(LifecycleUpdate requested_update) override;
   void Paint(WebCanvas*, const WebRect&) override;
 #if defined(OS_ANDROID)
   void PaintIgnoringCompositing(WebCanvas*, const WebRect&) override;
@@ -130,6 +129,7 @@ class CORE_EXPORT WebViewImpl final
       WebCompositeAndReadbackAsyncCallback*) override;
   void ThemeChanged() override;
   WebInputEventResult HandleInputEvent(const WebCoalescedInputEvent&) override;
+  WebInputEventResult DispatchBufferedTouchEvents() override;
   void SetCursorVisibilityState(bool is_visible) override;
 
   void ApplyViewportDeltas(const WebFloatSize& visual_viewport_delta,
@@ -153,7 +153,6 @@ class CORE_EXPORT WebViewImpl final
 
   // WebView methods:
   virtual bool IsWebView() const { return true; }
-  void SetCredentialManagerClient(WebCredentialManagerClient*) override;
   void SetPrerendererClient(WebPrerendererClient*) override;
   WebSettings* GetSettings() override;
   WebString PageEncoding() const override;
@@ -208,9 +207,6 @@ class CORE_EXPORT WebViewImpl final
   float ZoomFactorForDeviceScaleFactor() override {
     return zoom_factor_for_device_scale_factor_;
   };
-
-  float AltDeviceScaleFactor() const override;
-  void SetAltDeviceScaleFactor(float) override;
 
   void EnableAutoResizeMode(const WebSize& min_size,
                             const WebSize& max_size) override;
@@ -475,6 +471,8 @@ class CORE_EXPORT WebViewImpl final
   }
 
  private:
+  WebInputEventResult HandleInputEventInternal(
+      const WebCoalescedInputEvent&) override;
   void SetPageScaleFactorAndLocation(float, const FloatPoint&);
   void PropagateZoomFactorToLocalFrameRoots(Frame*, float);
 
@@ -505,7 +503,7 @@ class CORE_EXPORT WebViewImpl final
   friend class WebViewFrameWidget;
   friend class WTF::RefCounted<WebViewImpl>;
 
-  explicit WebViewImpl(WebViewClient*, mojom::PageVisibilityState);
+  WebViewImpl(WebViewClient*, mojom::PageVisibilityState, WebViewImpl* opener);
   ~WebViewImpl() override;
 
   void HideSelectPopup();
@@ -565,8 +563,6 @@ class CORE_EXPORT WebViewImpl final
   WebViewClient* client_;  // Can be 0 (e.g. unittests, shared workers, etc.)
 
   Persistent<ChromeClient> chrome_client_;
-  ContextMenuClient context_menu_client_;
-  EditorClient editor_client_;
 
   WebSize size_;
   // If true, automatically resize the layout view around its content.
@@ -691,8 +687,6 @@ class CORE_EXPORT WebViewImpl final
   bool override_compositor_visibility_;
 
   Persistent<ResizeViewportAnchor> resize_viewport_anchor_;
-
-  static const WebInputEvent* current_input_event_;
 };
 
 // We have no ways to check if the specified WebView is an instance of

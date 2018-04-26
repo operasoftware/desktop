@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
- * Copyright (C) 2014 Opera Software AS. All rights reserved.
+ * Copyright (C) 2014 Opera Software ASA. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -132,7 +132,6 @@ class WebPluginContainer {
   // The caller is then responsible for destroying the old plugin.
   virtual void SetPlugin(WebPlugin*) = 0;
 
-  virtual float AltDeviceScaleFactor() = 0;
   virtual float DeviceScaleFactor() = 0;
   virtual float PageScaleFactor() = 0;
   virtual float PageZoomFactor() = 0;
@@ -146,7 +145,7 @@ class WebPluginContainer {
   virtual void CancelFullscreen() = 0;
 
  protected:
-  ~WebPluginContainer() {}
+  ~WebPluginContainer() = default;
 };
 
 }  // namespace blink

@@ -312,7 +312,7 @@ class CORE_EXPORT HTMLMediaElement
 
   // Checks to see if current media data is CORS-same-origin as the
   // specified origin.
-  bool IsMediaDataCORSSameOrigin(SecurityOrigin*) const;
+  bool IsMediaDataCORSSameOrigin(const SecurityOrigin*) const;
 
   // Returns this media element is in a cross-origin frame.
   bool IsInCrossOriginFrame() const;
@@ -360,6 +360,8 @@ class CORE_EXPORT HTMLMediaElement
   void FinishParsingChildren() final;
   bool IsURLAttribute(const Attribute&) const override;
   void AttachLayoutTree(AttachContext&) override;
+  void ParserDidSetAttributes() override;
+  void CopyNonAttributePropertiesFromElement(const Element&) override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;
   void RemovedFrom(ContainerNode*) override;
@@ -388,7 +390,7 @@ class CORE_EXPORT HTMLMediaElement
   bool LayoutObjectIsNeeded(const ComputedStyle&) override;
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
   void DidNotifySubtreeInsertionsToDocument() override;
-  void DidRecalcStyle() final;
+  void DidRecalcStyle(StyleRecalcChange) final;
 
   bool CanStartSelection(SelectionStartPolicy) const override { return false; }
 
@@ -709,7 +711,7 @@ class CORE_EXPORT HTMLMediaElement
     explicit AudioClientImpl(AudioSourceProviderClient* client)
         : client_(client) {}
 
-    ~AudioClientImpl() override {}
+    ~AudioClientImpl() override = default;
 
     // WebAudioSourceProviderClient
     void SetFormat(size_t number_of_channels, float sample_rate) override;
@@ -728,7 +730,7 @@ class CORE_EXPORT HTMLMediaElement
    public:
     AudioSourceProviderImpl() : web_audio_source_provider_(nullptr) {}
 
-    ~AudioSourceProviderImpl() override {}
+    ~AudioSourceProviderImpl() override = default;
 
     // Wraps the given WebAudioSourceProvider.
     void Wrap(WebAudioSourceProvider*);

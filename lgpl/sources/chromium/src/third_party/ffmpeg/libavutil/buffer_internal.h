@@ -19,11 +19,7 @@
 #ifndef AVUTIL_BUFFER_INTERNAL_H
 #define AVUTIL_BUFFER_INTERNAL_H
 
-#if defined(__linux__)
-#include <compat/atomics/gcc/stdatomic.h>
-#else
 #include <stdatomic.h>
-#endif  // __linux__
 #include <stdint.h>
 
 #include "buffer.h"

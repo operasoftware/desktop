@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -6,54 +6,53 @@ import("//third_party/WebKit/Source/core/core.gni")
 
 blink_core_sources("fetch") {
   sources = [
-    "AccessControlStatus.h",
-    "CSSStyleSheetResource.cpp",
-    "CSSStyleSheetResource.h",
-    "CachedMetadata.cpp",
-    "CachedMetadata.h",
-    "CachedMetadataHandler.h",
-    "ClientHintsPreferences.cpp",
-    "ClientHintsPreferences.h",
-    "CrossOriginAccessControl.cpp",
-    "CrossOriginAccessControl.h",
-    "FetchContext.cpp",
-    "FetchContext.h",
-    "FetchInitiatorInfo.h",
-    "FetchRequest.cpp",
-    "FetchRequest.h",
-    "FetchUtils.cpp",
-    "FetchUtils.h",
-    "FontResource.cpp",
-    "FontResource.h",
-    "ImageResource.cpp",
-    "ImageResource.h",
-    "IntegrityMetadata.cpp",
-    "IntegrityMetadata.h",
-    "MemoryCache.cpp",
-    "MemoryCache.h",
-    "MultipartImageResourceParser.cpp",
-    "MultipartImageResourceParser.h",
-    "RawResource.cpp",
-    "RawResource.h",
-    "Resource.cpp",
-    "Resource.h",
-    "ResourceClient.h",
-    "ResourceClientWalker.h",
-    "ResourceFetcher.cpp",
-    "ResourceFetcher.h",
-    "ResourceLoader.cpp",
-    "ResourceLoader.h",
-    "ResourceLoaderOptions.h",
-    "ResourceLoadingLog.h",
-    "SubstituteData.h",
-    "TextResource.cpp",
-    "TextResource.h",
-    "UniqueIdentifier.cpp",
-    "UniqueIdentifier.h",
+    "BlobBytesConsumer.cpp",
+    "BlobBytesConsumer.h",
+    "Body.cpp",
+    "Body.h",
+    "BodyStreamBuffer.cpp",
+    "BodyStreamBuffer.h",
+    "BytesConsumer.cpp",
+    "BytesConsumer.h",
+    "BytesConsumerForDataConsumerHandle.cpp",
+    "BytesConsumerForDataConsumerHandle.h",
+    "FetchDataLoader.cpp",
+    "FetchDataLoader.h",
+    "FetchHeaderList.cpp",
+    "FetchHeaderList.h",
+    "FetchManager.cpp",
+    "FetchManager.h",
+    "FetchRequestData.cpp",
+    "FetchRequestData.h",
+    "FetchResponseData.cpp",
+    "FetchResponseData.h",
+    "FormDataBytesConsumer.cpp",
+    "FormDataBytesConsumer.h",
+    "GlobalFetch.cpp",
+    "GlobalFetch.h",
+    "Headers.cpp",
+    "Headers.h",
+    "MultipartParser.cpp",
+    "MultipartParser.h",
+    "ReadableStreamBytesConsumer.cpp",
+    "ReadableStreamBytesConsumer.h",
+    "Request.cpp",
+    "Request.h",
+    "RequestInit.cpp",
+    "RequestInit.h",
+    "Response.cpp",
+    "Response.h",
   ]
 
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
+  if (is_win && is_component_build) {
+    # Body.cpp exports a class (CORE_EXPORT) that inherits from
+    # PairIterable<String, String> that is also used as base class by an
+    # imported (CORE_EXPORT) class and that confuses the Windows
+    # linker/compiler. https://crbug.com/739340
+    jumbo_excluded_sources = [ "Body.cpp" ]
+  }
+
+  public_deps = [
+    "//third_party/WebKit/Source/platform",
   ]
 }

@@ -16,11 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#if defined(__linux__)
-#include <compat/atomics/gcc/stdatomic.h>
-#else
 #include <stdatomic.h>
-#endif  // __linux__
 #include <stdint.h>
 #include <string.h>
 

@@ -1,148 +1,128 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "core/page/ContextMenuController.h"
 
-#include "core/clipboard/DataTransfer.h"
-#include "core/events/MouseEvent.h"
-#include "core/frame/FrameView.h"
-#include "core/frame/Settings.h"
-#include "core/html/HTMLElement.h"
-#include "core/testing/DummyPageHolder.h"
+#include "core/frame/FrameTestHelpers.h"
+#include "core/frame/WebLocalFrameImpl.h"
+#include "core/html/media/HTMLVideoElement.h"
+#include "core/input/ContextMenuAllowedScope.h"
+#include "core/page/ContextMenuController.h"
 #include "platform/ContextMenu.h"
+#include "platform/testing/EmptyWebMediaPlayer.h"
+#include "platform/testing/UnitTestHelpers.h"
+#include "public/platform/WebMenuSourceType.h"
+#include "public/web/WebContextMenuData.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <memory>
 
 namespace blink {
 
-class ContextMenuControllerTest : public testing::Test {
- protected:
-  virtual void SetUp() {
-    page_holder_ = DummyPageHolder::Create(IntSize(800, 600));
+namespace {
+
+class TestWebFrameClientImpl : public FrameTestHelpers::TestWebFrameClient {
+ public:
+  void ShowContextMenu(const WebContextMenuData& data) override {
+    context_menu_data_ = data;
   }
 
-  Document& GetDocument() const { return page_holder_->GetDocument(); }
+  WebMediaPlayer* CreateMediaPlayer(const WebMediaPlayerSource&,
+                                    WebMediaPlayerClient*,
+                                    WebMediaPlayerEncryptedMediaClient*,
+                                    WebContentDecryptionModule*,
+                                    const WebString& sink_id,
+                                    WebLayerTreeView*) {
+    return new EmptyWebMediaPlayer();
+  }
 
-  void SetBodyInnerHTML(const String& html_content) {
-    GetDocument().body()->setInnerHTML(html_content);
-    GetDocument().View()->UpdateAllLifecyclePhases();
+  const WebContextMenuData& GetContextMenuData() const {
+    return context_menu_data_;
   }
 
  private:
-  std::unique_ptr<DummyPageHolder> page_holder_;
+  WebContextMenuData context_menu_data_;
 };
 
-TEST_F(ContextMenuControllerTest, TestCustomMenu) {
-  GetDocument().GetSettings()->SetScriptEnabled(true);
-  // Load the the test page.
-  SetBodyInnerHTML(
-      "<button id=\"button_id\" contextmenu=\"menu_id\" style=\"height: 100px; "
-      "width: 100px;\">"
-      "<menu type=\"context\" id=\"menu_id\">"
-      "<menuitem label=\"Item1\" onclick='document.title = \"Title 1\";'>"
-      "</menuitem>"
-      "<menuitem label=\"Item2\" onclick='document.title = \"Title 2\";'>"
-      "</menuitem>"
-      "<menuitem label=\"Item3\" onclick='document.title = \"Title 3\";'>"
-      "</menuitem>"
-      "<menu label='Submenu'>"
-      "<menuitem label=\"Item4\" onclick='document.title = \"Title 4\";'>"
-      "</menuitem>"
-      "<menuitem label=\"Item5\" onclick='document.title = \"Title 5\";'>"
-      "</menuitem>"
-      "<menuitem label=\"Item6\" onclick='document.title = \"Title 6\";'>"
-      "</menuitem>"
-      "</menu>"
-      "<menuitem id=\"item7\" type=\"checkbox\" checked label=\"Item7\""
-      "onclick='if "
-      "(document.getElementById(\"item7\").hasAttribute(\"checked\"))"
-      "document.title = \"Title 7 checked\"; else document.title = \"Title 7 "
-      "not checked\";'>"
-      "</menuitem>"
-      "<menuitem id=\"item8\" type=\"radio\" radiogroup=\"group\" "
-      "label=\"Item8\""
-      "onclick='if "
-      "(document.getElementById(\"item8\").hasAttribute(\"checked\"))"
-      "document.title = \"Title 8 checked\"; else if "
-      "(document.getElementById(\"item9\").hasAttribute(\"checked\"))"
-      "document.title = \"Title 8 not checked and Title 9 checked\";'>"
-      "</menuitem>"
-      "<menuitem id=\"item9\" type=\"radio\" radiogroup=\"group\" checked "
-      "label=\"Item9\""
-      "onclick='if "
-      "(document.getElementById(\"item9\").hasAttribute(\"checked\"))"
-      "document.title = \"Title 9 checked\"; else document.title = \"Title 9 "
-      "not checked\";'>"
-      "</menuitem>"
-      "<menuitem id=\"item10\" type=\"radio\" radiogroup=\"group\" "
-      "label=\"Item10\""
-      "onclick='if "
-      "(document.getElementById(\"item10\").hasAttribute(\"checked\"))"
-      "document.title = \"Title 10 checked\"; else if "
-      "(document.getElementById(\"item8\").hasAttribute(\"checked\"))"
-      "document.title = \"Title 10 not checked and Title 8 checked\";'>"
-      "</menuitem>"
-      "</menu>"
-      "</button>");
+}  // anonymous namespace
 
-  MouseEventInit mouse_initializer;
-  mouse_initializer.setView(GetDocument().domWindow());
-  mouse_initializer.setScreenX(50);
-  mouse_initializer.setScreenY(50);
-  mouse_initializer.setButton(1);
+class ContextMenuControllerTest : public ::testing::Test {
+ public:
+  void SetUp() {
+    web_view_helper_.Initialize(&web_frame_client_);
 
-  // Create right button click event and pass it to context menu controller.
-  Event* event =
-      MouseEvent::Create(nullptr, EventTypeNames::click, mouse_initializer);
-  GetDocument().getElementById("button_id")->focus();
-  event->SetTarget(GetDocument().getElementById("button_id"));
-  GetDocument().GetPage()->GetContextMenuController().HandleContextMenuEvent(
-      event);
+    WebLocalFrameImpl* local_main_frame = web_view_helper_.LocalMainFrame();
+    local_main_frame->ViewImpl()->Resize(WebSize(640, 480));
+    local_main_frame->ViewImpl()->UpdateAllLifecyclePhases();
+  }
 
-  // Item 1
-  // Item 2
-  // Item 3
-  // Submenu > Item 4
-  //           Item 5
-  //           Item 6
-  // *Item 7
-  // Item 8
-  // *Item 9
-  // Item 10
-  const Vector<ContextMenuItem>& items = GetDocument()
-                                             .GetPage()
-                                             ->GetContextMenuController()
-                                             .GetContextMenu()
-                                             ->Items();
-  EXPECT_EQ(8u, items.size());
-  EXPECT_EQ(kActionType, items[0].GetType());
-  EXPECT_STREQ("Item1", items[0].Title().Utf8().data());
-  GetDocument().GetPage()->GetContextMenuController().ContextMenuItemSelected(
-      &items[0]);
-  EXPECT_STREQ("Title 1", GetDocument().title().Utf8().data());
-  EXPECT_EQ(kSubmenuType, items[3].GetType());
-  EXPECT_STREQ("Submenu", items[3].Title().Utf8().data());
-  const Vector<ContextMenuItem>& sub_menu_items = items[3].SubMenuItems();
-  EXPECT_EQ(3u, sub_menu_items.size());
-  EXPECT_STREQ("Item6", sub_menu_items[2].Title().Utf8().data());
-  GetDocument().GetPage()->GetContextMenuController().ContextMenuItemSelected(
-      &sub_menu_items[2]);
-  EXPECT_STREQ("Title 6", GetDocument().title().Utf8().data());
-  GetDocument().GetPage()->GetContextMenuController().ContextMenuItemSelected(
-      &items[4]);
-  EXPECT_STREQ("Title 7 checked", GetDocument().title().Utf8().data());
-  GetDocument().GetPage()->GetContextMenuController().ContextMenuItemSelected(
-      &items[4]);
-  EXPECT_STREQ("Title 7 not checked", GetDocument().title().Utf8().data());
-  GetDocument().GetPage()->GetContextMenuController().ContextMenuItemSelected(
-      &items[5]);
-  EXPECT_STREQ("Title 8 not checked and Title 9 checked",
-               GetDocument().title().Utf8().data());
-  GetDocument().GetPage()->GetContextMenuController().ContextMenuItemSelected(
-      &items[7]);
-  EXPECT_STREQ("Title 10 not checked and Title 8 checked",
-               GetDocument().title().Utf8().data());
+  bool ShowContextMenu(const ContextMenu* context_menu,
+                       WebMenuSourceType source) {
+    return web_view_helper_.GetWebView()
+        ->GetPage()
+        ->GetContextMenuController()
+        .ShowContextMenu(context_menu, source);
+  }
+
+  Document* GetDocument() {
+    return static_cast<Document*>(
+        web_view_helper_.LocalMainFrame()->GetDocument());
+  }
+
+  Page* GetPage() { return web_view_helper_.GetWebView()->GetPage(); }
+
+  const TestWebFrameClientImpl& GetWebFrameClient() const {
+    return web_frame_client_;
+  }
+
+ private:
+  TestWebFrameClientImpl web_frame_client_;
+  FrameTestHelpers::WebViewHelper web_view_helper_;
+};
+
+TEST_F(ContextMenuControllerTest, VideoNotLoaded) {
+  ContextMenuAllowedScope context_menu_allowed_scope;
+  HitTestResult hit_test_result;
+  ContextMenu context_menu;
+  const char video_url[] = "https://example.com/foo.webm";
+
+  // Setup video element.
+  Persistent<HTMLVideoElement> video = HTMLVideoElement::Create(*GetDocument());
+  video->SetSrc(video_url);
+  GetDocument()->body()->AppendChild(video);
+  testing::RunPendingTasks();
+
+  // Simulate a hit test result.
+  hit_test_result.SetInnerNode(video);
+  GetPage()->GetContextMenuController().SetHitTestResultForTests(
+      hit_test_result);
+
+  EXPECT_TRUE(ShowContextMenu(&context_menu, kMenuSourceMouse));
+
+  // Context menu info are sent to the WebFrameClient.
+  WebContextMenuData context_menu_data =
+      GetWebFrameClient().GetContextMenuData();
+  EXPECT_EQ(WebContextMenuData::kMediaTypeVideo, context_menu_data.media_type);
+  EXPECT_EQ(video_url, context_menu_data.src_url.GetString());
+
+  const std::vector<std::pair<WebContextMenuData::MediaFlags, bool>>
+      expected_media_flags = {
+          {WebContextMenuData::kMediaInError, false},
+          {WebContextMenuData::kMediaPaused, true},
+          {WebContextMenuData::kMediaMuted, false},
+          {WebContextMenuData::kMediaLoop, false},
+          {WebContextMenuData::kMediaCanSave, true},
+          {WebContextMenuData::kMediaHasAudio, false},
+          {WebContextMenuData::kMediaCanToggleControls, false},
+          {WebContextMenuData::kMediaControls, false},
+          {WebContextMenuData::kMediaCanPrint, false},
+          {WebContextMenuData::kMediaCanRotate, false},
+      };
+
+  for (const auto& expected_media_flag : expected_media_flags) {
+    EXPECT_EQ(expected_media_flag.second,
+              !!(context_menu_data.media_flags & expected_media_flag.first))
+        << "Flag " << expected_media_flag.first;
+  }
 }
 
 }  // namespace blink

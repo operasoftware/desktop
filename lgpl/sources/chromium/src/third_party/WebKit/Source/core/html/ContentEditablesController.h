@@ -83,6 +83,8 @@ class ContentEditablesController final
 
   void Trace(Visitor*);
 
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
+
  private:
   ContentEditablesController();
 

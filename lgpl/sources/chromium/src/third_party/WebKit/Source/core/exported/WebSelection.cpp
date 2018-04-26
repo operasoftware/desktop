@@ -45,10 +45,6 @@ WebSelection::WebSelection(const CompositedSelection& selection)
       end_(GetWebSelectionBound(selection, false)),
       bounding_rect_(selection.bounding_rect) {}
 
-WebSelection::WebSelection(const WebSelection& other)
-    : selection_type_(other.selection_type_),
-      start_(other.start_),
-      end_(other.end_),
-      bounding_rect_(other.bounding_rect_) {}
+WebSelection::WebSelection(const WebSelection& other) = default;
 
 }  // namespace blink

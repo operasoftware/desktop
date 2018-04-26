@@ -25,14 +25,12 @@
 
 #include "core/dom/Document.h"
 #include "core/events/MouseEvent.h"
-#include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLDimension.h"
 #include "core/html/HTMLFrameSetElement.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/LayoutFrame.h"
 #include "core/layout/LayoutView.h"
-#include "core/page/Page.h"
 #include "core/paint/FrameSetPainter.h"
 #include "platform/Cursor.h"
 #include "platform/graphics/GraphicsContext.h"
@@ -44,7 +42,7 @@ LayoutFrameSet::LayoutFrameSet(HTMLFrameSetElement* frame_set)
   SetInline(false);
 }
 
-LayoutFrameSet::~LayoutFrameSet() {}
+LayoutFrameSet::~LayoutFrameSet() = default;
 
 LayoutFrameSet::GridAxis::GridAxis() : split_being_resized_(kNoSplit) {}
 
@@ -101,17 +99,13 @@ void LayoutFrameSet::LayOutAxis(GridAxis& axis,
 
   float effective_zoom = Style()->EffectiveZoom();
 
-  const Page* page = GetFrameView()->GetPage();
-  float alt_dpi_scale = page ? page->AltDeviceScaleFactor() : 1.0f;
-
   // First we need to investigate how many columns of each type we have and
   // how much space these columns are going to require.
   for (int i = 0; i < grid_len; ++i) {
     // Count the total length of all of the fixed columns/rows -> totalFixed.
     // Count the number of columns/rows which are fixed -> countFixed.
     if (grid[i].IsAbsolute()) {
-      grid_layout[i] =
-          max<int>(grid[i].Value() * effective_zoom * alt_dpi_scale, 0);
+      grid_layout[i] = max<int>(grid[i].Value() * effective_zoom, 0);
       total_fixed += grid_layout[i];
       count_fixed++;
     }

@@ -44,6 +44,7 @@
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebFileSystemType.h"
 #include "public/web/WebLocalFrame.h"
+#include "public/web/devtools_agent.mojom-blink.h"
 
 #include <memory>
 
@@ -60,7 +61,6 @@ class WebAssociatedURLLoader;
 struct WebAssociatedURLLoaderOptions;
 class WebAutofillClient;
 class WebDevToolsAgentImpl;
-class WebDevToolsFrontendImpl;
 class WebFrameClient;
 class WebNode;
 class WebPerformance;
@@ -123,6 +123,7 @@ class CORE_EXPORT WebLocalFrameImpl final
                                 int argc,
                                 v8::Local<v8::Value> argv[],
                                 WebScriptExecutionCallback*) override;
+  void PostPausableTask(PausableTaskCallback) override;
   void ExecuteScriptInIsolatedWorld(
       int world_id,
       const WebScriptSource* sources_in,
@@ -135,7 +136,7 @@ class CORE_EXPORT WebLocalFrameImpl final
       bool user_gesture,
       ScriptExecutionType,
       WebScriptExecutionCallback*) override;
-  v8::Local<v8::Value> CallFunctionEvenIfScriptDisabled(
+  v8::MaybeLocal<v8::Value> CallFunctionEvenIfScriptDisabled(
       v8::Local<v8::Function>,
       v8::Local<v8::Value>,
       int argc,
@@ -179,8 +180,6 @@ class CORE_EXPORT WebLocalFrameImpl final
   void SetTextDirection(WebTextDirection) override;
   void SetTextCheckClient(WebTextCheckClient*) override;
   void SetSpellCheckPanelHostClient(WebSpellCheckPanelHostClient*) override;
-  void EnableSpellChecking(bool) override;
-  bool IsSpellCheckingEnabled() const override;
   void ReplaceMisspelledRange(const WebString&) override;
   void RemoveSpellingMarkers() override;
   void RemoveSpellingMarkersUnderWords(
@@ -254,8 +253,6 @@ class CORE_EXPORT WebLocalFrameImpl final
                                       blink::InterfaceRegistry*) override;
   void SetAutofillClient(WebAutofillClient*) override;
   WebAutofillClient* AutofillClient() override;
-  void SetDevToolsAgentClient(WebDevToolsAgentClient*) override;
-  WebDevToolsAgent* DevToolsAgent() override;
   WebLocalFrameImpl* LocalRoot() override;
   WebFrame* FindFrameByName(const WebString& name) override;
   void SendPings(const WebURL& destination_url) override;
@@ -318,6 +315,7 @@ class CORE_EXPORT WebLocalFrameImpl final
                              WebRect* selection_rect) override;
   float DistanceToNearestFindMatch(const WebFloatPoint&) override;
   void SetTickmarks(const WebVector<WebRect>&) override;
+  WebNode ContextMenuNode() const override;
   WebFrameWidgetBase* FrameWidget() const override;
   void CopyImageAt(const WebPoint&) override;
   void SaveImageAt(const WebPoint&) override;
@@ -380,6 +378,7 @@ class CORE_EXPORT WebLocalFrameImpl final
     return GetFrame() ? GetFrame()->View() : nullptr;
   }
 
+  void SetDevToolsAgentImpl(WebDevToolsAgentImpl*);
   WebDevToolsAgentImpl* DevToolsAgentImpl() const {
     return dev_tools_agent_.Get();
   }
@@ -431,18 +430,6 @@ class CORE_EXPORT WebLocalFrameImpl final
 
   void SetFrameWidget(WebFrameWidgetBase*);
 
-  // DevTools front-end bindings.
-  void SetDevToolsFrontend(WebDevToolsFrontendImpl* frontend) {
-    web_dev_tools_frontend_ = frontend;
-  }
-  WebDevToolsFrontendImpl* DevToolsFrontend() {
-    return web_dev_tools_frontend_;
-  }
-
-  WebNode ContextMenuNode() const { return context_menu_node_.Get(); }
-  void SetContextMenuNode(Node* node) { context_menu_node_ = node; }
-  void ClearContextMenuNode() { context_menu_node_.Clear(); }
-
   std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() override;
 
   WebFrameWidgetBase* LocalRootFrameWidget();
@@ -480,6 +467,10 @@ class CORE_EXPORT WebLocalFrameImpl final
   // A helper for DispatchBeforePrintEvent() and DispatchAfterPrintEvent().
   void DispatchPrintEventRecursively(const AtomicString& event_type);
 
+  Node* ContextMenuNodeInner() const;
+
+  void BindDevToolsAgentRequest(mojom::blink::DevToolsAgentAssociatedRequest);
+
   Member<LocalFrameClient> local_frame_client_;
 
   // The embedder retains a reference to the WebCore LocalFrame while it is
@@ -513,10 +504,6 @@ class CORE_EXPORT WebLocalFrameImpl final
 
   // Borrowed pointers to Mojo objects.
   blink::InterfaceRegistry* interface_registry_;
-
-  WebDevToolsFrontendImpl* web_dev_tools_frontend_;
-
-  Member<Node> context_menu_node_;
 
   WebInputMethodControllerImpl input_method_controller_;
 

@@ -135,6 +135,8 @@ bool HasOffscreenRect(Node*, WebFocusType = kWebFocusTypeNone);
 bool ScrollInDirection(LocalFrame*, WebFocusType);
 bool ScrollInDirection(Node* container, WebFocusType);
 bool IsNavigableContainer(const Node*, WebFocusType);
+CORE_EXPORT bool IsScrollableAreaOrDocument(const Node*);
+CORE_EXPORT Node* ScrollableAreaOrDocumentOf(Node*);
 bool CanScrollInDirection(const Node* container, WebFocusType);
 bool CanScrollInDirection(const LocalFrame*, WebFocusType);
 bool CanBeScrolledIntoView(WebFocusType, const FocusCandidate&);
@@ -143,9 +145,6 @@ bool AreElementsOnSameLine(const FocusCandidate& first_candidate,
 void DistanceDataForNode(WebFocusType,
                          const FocusCandidate& current,
                          FocusCandidate&);
-CORE_EXPORT Node* ScrollableEnclosingBoxOrParentFrameForNodeInDirection(
-    WebFocusType,
-    Node*);
 LayoutRect NodeRectInAbsoluteCoordinates(Node*, bool ignore_border = false);
 LayoutRect FrameRectInAbsoluteCoordinates(LocalFrame*);
 LayoutRect VirtualRectForDirection(WebFocusType,

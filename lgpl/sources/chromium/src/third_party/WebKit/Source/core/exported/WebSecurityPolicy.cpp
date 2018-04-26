@@ -68,7 +68,8 @@ void WebSecurityPolicy::RegisterURLSchemeAsFirstPartyWhenTopLevel(
 #if defined(OPERA_DESKTOP)
 void WebSecurityPolicy::AddOriginAsFirstPartyForSubframes(
     const WebSecurityOrigin& origin) {
-  SecurityPolicy::AddOriginAsFirstPartyForSubframes(origin);
+  scoped_refptr<const SecurityOrigin> o = origin;
+  SecurityPolicy::AddOriginAsFirstPartyForSubframes(o->IsolatedCopy());
 }
 #endif  // OPERA_DESKTOP
 

@@ -143,4 +143,7 @@ void ContentEditablesController::Trace(Visitor* visitor) {
   visitor->Trace(state_);
 }
 
+void ContentEditablesController::TraceWrappers(
+    const ScriptWrappableVisitor*) const {}
+
 }  // namespace blink

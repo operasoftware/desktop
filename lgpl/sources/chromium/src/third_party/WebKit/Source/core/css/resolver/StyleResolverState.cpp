@@ -26,9 +26,7 @@
 #include "core/css/CSSPropertyValueSet.h"
 #include "core/dom/Node.h"
 #include "core/dom/NodeComputedStyle.h"
-#include "core/layout/api/LayoutViewItem.h"
 #include "core/style/ComputedStyle.h"
-#include "third_party/WebKit/Source/core/page/Page.h"
 
 namespace blink {
 
@@ -48,9 +46,7 @@ StyleResolverState::StyleResolverState(
       apply_property_to_visited_link_style_(false),
       has_dir_auto_attribute_(false),
       font_builder_(&document),
-      element_style_resources_(document,
-                               max(document.GetPage()->AltDeviceScaleFactor(),
-                                   document.DevicePixelRatio())) {
+      element_style_resources_(document, document.DevicePixelRatio()) {
   DCHECK(!!parent_style_ == !!layout_parent_style_);
 
   if (!parent_style_) {
@@ -86,7 +82,7 @@ void StyleResolverState::SetStyle(scoped_refptr<ComputedStyle> style) {
   // FIXME: Improve RAII of StyleResolverState to remove this function.
   style_ = std::move(style);
   css_to_length_conversion_data_ = CSSToLengthConversionData(
-      style_.get(), RootElementStyle(), GetDocument().GetLayoutViewItem(),
+      style_.get(), RootElementStyle(), GetDocument().GetLayoutView(),
       style_->EffectiveZoom());
 }
 
@@ -100,7 +96,7 @@ CSSToLengthConversionData StyleResolverState::FontSizeConversionData() const {
   CSSToLengthConversionData::FontSizes font_sizes(em, rem,
                                                   &ParentStyle()->GetFont());
   CSSToLengthConversionData::ViewportSize viewport_size(
-      GetDocument().GetLayoutViewItem());
+      GetDocument().GetLayoutView());
 
   return CSSToLengthConversionData(Style(), font_sizes, viewport_size, 1);
 }

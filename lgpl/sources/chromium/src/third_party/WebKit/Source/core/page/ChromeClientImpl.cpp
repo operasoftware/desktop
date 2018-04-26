@@ -96,8 +96,6 @@
 #include "public/platform/WebRect.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/web/WebAutofillClient.h"
-#include "public/web/WebColorChooser.h"
-#include "public/web/WebColorSuggestion.h"
 #include "public/web/WebConsoleMessage.h"
 #include "public/web/WebFrameClient.h"
 #include "public/web/WebInputElement.h"
@@ -160,7 +158,7 @@ ChromeClientImpl::ChromeClientImpl(WebViewImpl* web_view)
       cursor_overridden_(false),
       did_request_non_empty_tool_tip_(false) {}
 
-ChromeClientImpl::~ChromeClientImpl() {}
+ChromeClientImpl::~ChromeClientImpl() = default;
 
 ChromeClientImpl* ChromeClientImpl::Create(WebViewImpl* web_view) {
   return new ChromeClientImpl(web_view);
@@ -175,13 +173,10 @@ void ChromeClientImpl::ChromeDestroyed() {
 }
 
 void ChromeClientImpl::SetWindowRect(const IntRect& r, LocalFrame& frame) {
-  FloatRect rect = r;
-  rect.SetWidth(ceilf(rect.Width() * web_view_->AltDeviceScaleFactor()));
-  rect.SetHeight(ceilf(rect.Height() * web_view_->AltDeviceScaleFactor()));
   DCHECK_EQ(&frame, web_view_->MainFrameImpl()->GetFrame());
   WebWidgetClient* client =
       WebLocalFrameImpl::FromFrame(&frame)->FrameWidget()->Client();
-  client->SetWindowRect(IntRect(rect));
+  client->SetWindowRect(r);
 }
 
 IntRect ChromeClientImpl::RootWindowRect() {
@@ -195,10 +190,7 @@ IntRect ChromeClientImpl::RootWindowRect() {
     rect.width = web_view_->Size().width;
     rect.height = web_view_->Size().height;
   }
-
-  FloatRect out(rect);
-  out.SetSize(out.Size() * (1.0f / web_view_->AltDeviceScaleFactor()));
-  return IntRect(out);
+  return IntRect(rect);
 }
 
 IntRect ChromeClientImpl::PageRect() {
@@ -507,11 +499,10 @@ void ChromeClientImpl::ShowMouseOverURL(const HitTestResult& result) {
                 IsHTMLEmbedElement(*result.InnerNode()))) {
       LayoutObject* object = result.InnerNode()->GetLayoutObject();
       if (object && object->IsLayoutEmbeddedContent()) {
-        PluginView* plugin_view = ToLayoutEmbeddedContent(object)->Plugin();
-        if (plugin_view && plugin_view->IsPluginContainer()) {
-          WebPluginContainerImpl* plugin =
-              ToWebPluginContainerImpl(plugin_view);
-          url = plugin->Plugin()->LinkAtPosition(
+        WebPluginContainerImpl* plugin_view =
+            ToLayoutEmbeddedContent(object)->Plugin();
+        if (plugin_view) {
+          url = plugin_view->Plugin()->LinkAtPosition(
               result.RoundedPointInInnerNodeFrame());
         }
       }
@@ -842,7 +833,7 @@ WebLayerTreeView* ChromeClientImpl::GetWebLayerTreeView(LocalFrame* frame) {
 
 void ChromeClientImpl::RequestDecode(LocalFrame* frame,
                                      const PaintImage& image,
-                                     WTF::Function<void(bool)> callback) {
+                                     base::OnceCallback<void(bool)> callback) {
   WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(frame);
   web_frame->LocalRoot()->FrameWidget()->RequestDecode(image,
                                                        std::move(callback));

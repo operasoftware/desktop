@@ -18,11 +18,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#if defined(__linux__)
-#include <compat/atomics/gcc/stdatomic.h>
-#else
 #include <stdatomic.h>
-#endif  // __linux__
 
 #include "attributes.h"
 #include "cpu.h"
@@ -84,7 +80,8 @@ void av_force_cpu_flags(int arg){
                     AV_CPU_FLAG_XOP      |
                     AV_CPU_FLAG_FMA3     |
                     AV_CPU_FLAG_FMA4     |
-                    AV_CPU_FLAG_AVX2     ))
+                    AV_CPU_FLAG_AVX2     |
+                    AV_CPU_FLAG_AVX512   ))
         && !(arg & AV_CPU_FLAG_MMX)) {
         av_log(NULL, AV_LOG_WARNING, "MMX implied by specified flags\n");
         arg |= AV_CPU_FLAG_MMX;
@@ -130,6 +127,7 @@ int av_parse_cpu_flags(const char *s)
 #define CPUFLAG_AVX2     (AV_CPU_FLAG_AVX2     | CPUFLAG_AVX)
 #define CPUFLAG_BMI2     (AV_CPU_FLAG_BMI2     | AV_CPU_FLAG_BMI1)
 #define CPUFLAG_AESNI    (AV_CPU_FLAG_AESNI    | CPUFLAG_SSE42)
+#define CPUFLAG_AVX512   (AV_CPU_FLAG_AVX512   | CPUFLAG_AVX2)
     static const AVOption cpuflags_opts[] = {
         { "flags"   , NULL, 0, AV_OPT_TYPE_FLAGS, { .i64 = 0 }, INT64_MIN, INT64_MAX, .unit = "flags" },
 #if   ARCH_PPC
@@ -158,6 +156,7 @@ int av_parse_cpu_flags(const char *s)
         { "3dnowext", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = CPUFLAG_3DNOWEXT     },    .unit = "flags" },
         { "cmov",     NULL, 0, AV_OPT_TYPE_CONST, { .i64 = AV_CPU_FLAG_CMOV     },    .unit = "flags" },
         { "aesni"   , NULL, 0, AV_OPT_TYPE_CONST, { .i64 = CPUFLAG_AESNI        },    .unit = "flags" },
+        { "avx512"  , NULL, 0, AV_OPT_TYPE_CONST, { .i64 = CPUFLAG_AVX512       },    .unit = "flags" },
 #elif ARCH_ARM
         { "armv5te",  NULL, 0, AV_OPT_TYPE_CONST, { .i64 = AV_CPU_FLAG_ARMV5TE  },    .unit = "flags" },
         { "armv6",    NULL, 0, AV_OPT_TYPE_CONST, { .i64 = AV_CPU_FLAG_ARMV6    },    .unit = "flags" },
@@ -220,6 +219,7 @@ int av_parse_cpu_caps(unsigned *flags, const char *s)
         { "3dnowext", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = AV_CPU_FLAG_3DNOWEXT },    .unit = "flags" },
         { "cmov",     NULL, 0, AV_OPT_TYPE_CONST, { .i64 = AV_CPU_FLAG_CMOV     },    .unit = "flags" },
         { "aesni",    NULL, 0, AV_OPT_TYPE_CONST, { .i64 = AV_CPU_FLAG_AESNI    },    .unit = "flags" },
+        { "avx512"  , NULL, 0, AV_OPT_TYPE_CONST, { .i64 = AV_CPU_FLAG_AVX512   },    .unit = "flags" },
 
 #define CPU_FLAG_P2 AV_CPU_FLAG_CMOV | AV_CPU_FLAG_MMX
 #define CPU_FLAG_P3 CPU_FLAG_P2 | AV_CPU_FLAG_MMX2 | AV_CPU_FLAG_SSE

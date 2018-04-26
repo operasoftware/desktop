@@ -30,6 +30,8 @@
 #define LocalFrame_h
 
 #include <memory>
+
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/dom/UserGestureIndicator.h"
 #include "core/dom/WeakIdentifierMap.h"
@@ -37,6 +39,7 @@
 #include "core/frame/Frame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/loader/FrameLoader.h"
+#include "core/loader/InteractiveDetector.h"
 #include "core/page/FrameTree.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
@@ -62,13 +65,13 @@ class FrameConsole;
 class FrameResourceCoordinator;
 class FrameSelection;
 class InputMethodController;
+class InspectorTraceEvents;
 class CoreProbeSink;
 class IdlenessDetector;
 class InterfaceRegistry;
 class IntPoint;
 class IntSize;
 class LayoutView;
-class LayoutViewItem;
 class LocalDOMWindow;
 class LocalWindowProxy;
 class LocalFrameClient;
@@ -114,14 +117,15 @@ class CORE_EXPORT LocalFrame final : public Frame,
                 UserGestureStatus) override;
   void Navigate(const FrameLoadRequest&) override;
   void Reload(FrameLoadType, ClientRedirectPolicy) override;
-  void AddResourceTiming(const ResourceTimingInfo&) override;
   void Detach(FrameDetachType) override;
   bool ShouldClose() override;
   SecurityContext* GetSecurityContext() const override;
-  void PrintNavigationErrorMessage(const Frame&, const char* reason) override;
-  void PrintNavigationWarning(const String&) override;
+  void PrintNavigationErrorMessage(const Frame&, const char* reason);
+  void PrintNavigationWarning(const String&);
   bool PrepareForCommit() override;
   void DidChangeVisibilityState() override;
+  void DidFreeze() override;
+  void DidResume() override;
   // This sets the is_inert_ flag and also recurses through this frame's
   // subtree, updating the inert bit on all descendant frames.
   void SetIsInert(bool) override;
@@ -146,7 +150,6 @@ class CORE_EXPORT LocalFrame final : public Frame,
 
   // Root of the layout tree for the document contained in this frame.
   LayoutView* ContentLayoutObject() const;
-  LayoutViewItem ContentLayoutItem() const;
 
   Editor& GetEditor() const;
   EventHandler& GetEventHandler() const;
@@ -250,8 +253,6 @@ class CORE_EXPORT LocalFrame final : public Frame,
   // https://chromium.googlesource.com/chromium/src/+/master/ipc#Using-Channel_associated-Interfaces.
   AssociatedInterfaceProvider* GetRemoteNavigationAssociatedInterfaces();
 
-  String GetInstrumentationToken() { return instrumentation_token_; }
-
   LocalFrameClient* Client() const;
 
   ContentSettingsClient* GetContentSettingsClient();
@@ -302,6 +303,18 @@ class CORE_EXPORT LocalFrame final : public Frame,
   void ForceSynchronousDocumentInstall(const AtomicString& mime_type,
                                        scoped_refptr<SharedBuffer> data);
 
+  bool should_send_resource_timing_info_to_parent() const {
+    return should_send_resource_timing_info_to_parent_;
+  }
+  void DidSendResourceTimingInfoToParent() {
+    should_send_resource_timing_info_to_parent_ = false;
+  }
+
+  void SetIsProvisional(bool is_provisional) {
+    is_provisional_ = is_provisional;
+  }
+  bool IsProvisional() const { return is_provisional_; }
+
  private:
   friend class FrameNavigationDisabler;
 
@@ -342,7 +355,14 @@ class CORE_EXPORT LocalFrame final : public Frame,
   const Member<InputMethodController> input_method_controller_;
   const Member<TextSuggestionController> text_suggestion_controller_;
 
+  bool is_provisional_ = false;
+
   int navigation_disable_count_;
+  // TODO(dcheng): In theory, this could be replaced by checking the
+  // FrameLoaderStateMachine if a real load has committed. Unfortunately, the
+  // internal state tracked there is incorrect today. See
+  // https://crbug.com/778318.
+  bool should_send_resource_timing_info_to_parent_ = true;
 
   float page_zoom_factor_;
   float text_zoom_factor_;
@@ -354,9 +374,9 @@ class CORE_EXPORT LocalFrame final : public Frame,
   Member<CoreProbeSink> probe_sink_;
   Member<PerformanceMonitor> performance_monitor_;
   Member<IdlenessDetector> idleness_detector_;
+  Member<InspectorTraceEvents> inspector_trace_events_;
 
   InterfaceRegistry* const interface_registry_;
-  String instrumentation_token_;
 
   IntRect remote_viewport_intersection_;
   std::unique_ptr<FrameResourceCoordinator> frame_resource_coordinator_;
@@ -429,7 +449,6 @@ DEFINE_TYPE_CASTS(LocalFrame,
 DECLARE_WEAK_IDENTIFIER_MAP(LocalFrame);
 
 class FrameNavigationDisabler {
-  WTF_MAKE_NONCOPYABLE(FrameNavigationDisabler);
   STACK_ALLOCATED();
 
  public:
@@ -438,6 +457,8 @@ class FrameNavigationDisabler {
 
  private:
   Member<LocalFrame> frame_;
+
+  DISALLOW_COPY_AND_ASSIGN(FrameNavigationDisabler);
 };
 
 // A helper class for attributing cost inside a scope to a LocalFrame, with
@@ -459,7 +480,6 @@ class FrameNavigationDisabler {
 // should be taken to ensure that it has an efficient fast path (for the common
 // case where we are not tracking this).
 class ScopedFrameBlamer {
-  WTF_MAKE_NONCOPYABLE(ScopedFrameBlamer);
   STACK_ALLOCATED();
 
  public:
@@ -473,6 +493,8 @@ class ScopedFrameBlamer {
   void LeaveContext();
 
   Member<LocalFrame> frame_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedFrameBlamer);
 };
 
 }  // namespace blink

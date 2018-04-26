@@ -73,11 +73,37 @@
 #include "connect.h"
 #include "non-ascii.h"
 #include "http2.h"
+#include "mime.h"
+#include "strcase.h"
 
 /* The last 3 #include files should be in this order */
 #include "curl_printf.h"
 #include "curl_memory.h"
 #include "memdebug.h"
+
+#if !defined(CURL_DISABLE_HTTP) || !defined(CURL_DISABLE_SMTP) || \
+    !defined(CURL_DISABLE_IMAP)
+/*
+ * checkheaders() checks the linked list of custom headers for a
+ * particular header (prefix).
+ *
+ * Returns a pointer to the first matching header or NULL if none matched.
+ */
+char *Curl_checkheaders(const struct connectdata *conn,
+                        const char *thisheader)
+{
+  struct curl_slist *head;
+  size_t thislen = strlen(thisheader);
+  struct Curl_easy *data = conn->data;
+
+  for(head = data->set.headers; head; head = head->next) {
+    if(strncasecompare(head->data, thisheader, thislen))
+      return head->data;
+  }
+
+  return NULL;
+}
+#endif
 
 /*
  * This function will call the read callback to fill our buffer with data
@@ -195,27 +221,30 @@ CURLcode Curl_fillreadbuffer(struct connectdata *conn, int bytes, int *nreadp)
            strlen(endofline_network));
 
 #ifdef CURL_DOES_CONVERSIONS
-    CURLcode result;
-    int length;
-    if(data->set.prefer_ascii) {
-      /* translate the protocol and data */
-      length = nread;
+    {
+      CURLcode result;
+      int length;
+      if(data->set.prefer_ascii)
+        /* translate the protocol and data */
+        length = nread;
+      else
+        /* just translate the protocol portion */
+        length = (int)strlen(hexbuffer);
+      result = Curl_convert_to_network(data, data->req.upload_fromhere,
+                                       length);
+      /* Curl_convert_to_network calls failf if unsuccessful */
+      if(result)
+        return result;
     }
-    else {
-      /* just translate the protocol portion */
-      length = strlen(hexbuffer);
-    }
-    result = Curl_convert_to_network(data, data->req.upload_fromhere, length);
-    /* Curl_convert_to_network calls failf if unsuccessful */
-    if(result)
-      return result;
 #endif /* CURL_DOES_CONVERSIONS */
 
-    if((nread - hexlen) == 0)
+    if((nread - hexlen) == 0) {
       /* mark this as done once this chunk is transferred */
       data->req.upload_done = TRUE;
+      infof(data, "Signaling end of chunked upload via terminating chunk.\n");
+    }
 
-    nread+=(int)strlen(endofline_native); /* for the added end of line */
+    nread += (int)strlen(endofline_native); /* for the added end of line */
   }
 #ifdef CURL_DOES_CONVERSIONS
   else if((data->set.prefer_ascii) && (!sending_http_headers)) {
@@ -241,6 +270,7 @@ CURLcode Curl_fillreadbuffer(struct connectdata *conn, int bytes, int *nreadp)
 CURLcode Curl_readrewind(struct connectdata *conn)
 {
   struct Curl_easy *data = conn->data;
+  curl_mimepart *mimepart = &data->set.mimepost;
 
   conn->bits.rewindaftersend = FALSE; /* we rewind now */
 
@@ -253,9 +283,21 @@ CURLcode Curl_readrewind(struct connectdata *conn)
   /* We have sent away data. If not using CURLOPT_POSTFIELDS or
      CURLOPT_HTTPPOST, call app to rewind
   */
-  if(data->set.postfields ||
-     (data->set.httpreq == HTTPREQ_POST_FORM))
+  if(conn->handler->protocol & PROTO_FAMILY_HTTP) {
+    struct HTTP *http = data->req.protop;
+
+    if(http->sendit)
+      mimepart = http->sendit;
+  }
+  if(data->set.postfields)
     ; /* do nothing */
+  else if(data->set.httpreq == HTTPREQ_POST_MIME ||
+          data->set.httpreq == HTTPREQ_POST_FORM) {
+    if(Curl_mime_rewind(mimepart)) {
+      failf(data, "Cannot rewind mime/post data");
+      return CURLE_SEND_FAIL_REWIND;
+    }
+  }
   else {
     if(data->set.seek_func) {
       int err;
@@ -450,7 +492,7 @@ static CURLcode readwrite_data(struct Curl_easy *data,
       Curl_pgrsTime(data, TIMER_STARTTRANSFER);
       if(k->exp100 > EXP100_SEND_DATA)
         /* set time stamp to compare with when waiting for the 100 */
-        k->start100 = Curl_tvnow();
+        k->start100 = Curl_now();
     }
 
     *didwhat |= KEEP_RECV;
@@ -560,7 +602,7 @@ static CURLcode readwrite_data(struct Curl_easy *data,
             infof(data, "Ignoring the response-body\n");
           }
           if(data->state.resume_from && !k->content_range &&
-             (data->set.httpreq==HTTPREQ_GET) &&
+             (data->set.httpreq == HTTPREQ_GET) &&
              !k->ignorebody) {
 
             if(k->size == data->state.resume_from) {
@@ -737,48 +779,19 @@ static CURLcode readwrite_data(struct Curl_easy *data,
              in http_chunks.c.
              Make sure that ALL_CONTENT_ENCODINGS contains all the
              encodings handled here. */
-#ifdef HAVE_LIBZ
-          switch(conn->data->set.http_ce_skip ?
-                 IDENTITY : k->auto_decoding) {
-          case IDENTITY:
-#endif
-            /* This is the default when the server sends no
-               Content-Encoding header. See Curl_readwrite_init; the
-               memset() call initializes k->auto_decoding to zero. */
+          if(conn->data->set.http_ce_skip || !k->writer_stack) {
             if(!k->ignorebody) {
-
 #ifndef CURL_DISABLE_POP3
-              if(conn->handler->protocol&PROTO_FAMILY_POP3)
+              if(conn->handler->protocol & PROTO_FAMILY_POP3)
                 result = Curl_pop3_write(conn, k->str, nread);
               else
 #endif /* CURL_DISABLE_POP3 */
-
                 result = Curl_client_write(conn, CLIENTWRITE_BODY, k->str,
                                            nread);
             }
-#ifdef HAVE_LIBZ
-            break;
-
-          case DEFLATE:
-            /* Assume CLIENTWRITE_BODY; headers are not encoded. */
-            if(!k->ignorebody)
-              result = Curl_unencode_deflate_write(conn, k, nread);
-            break;
-
-          case GZIP:
-            /* Assume CLIENTWRITE_BODY; headers are not encoded. */
-            if(!k->ignorebody)
-              result = Curl_unencode_gzip_write(conn, k, nread);
-            break;
-
-          default:
-            failf(data, "Unrecognized content encoding type. "
-                  "libcurl understands `identity', `deflate' and `gzip' "
-                  "content encodings.");
-            result = CURLE_BAD_CONTENT_ENCODING;
-            break;
           }
-#endif
+          else
+            result = Curl_unencode_write(conn, k->writer_stack, k->str, nread);
         }
         k->badheader = HEADER_NORMAL; /* taken care of now */
 
@@ -885,7 +898,7 @@ static CURLcode readwrite_upload(struct Curl_easy *data,
              go into the Expect: 100 state and await such a header */
           k->exp100 = EXP100_AWAITING_CONTINUE; /* wait for the header */
           k->keepon &= ~KEEP_SEND;         /* disable writing */
-          k->start100 = Curl_tvnow();       /* timeout count starts now */
+          k->start100 = Curl_now();       /* timeout count starts now */
           *didwhat &= ~KEEP_SEND;  /* we didn't write anything actually */
 
           /* set a timeout for the multi interface */
@@ -915,7 +928,7 @@ static CURLcode readwrite_upload(struct Curl_easy *data,
         /* this is a paused transfer */
         break;
       }
-      if(nread<=0) {
+      if(nread <= 0) {
         result = done_sending(conn, k);
         if(result)
           return result;
@@ -1006,7 +1019,8 @@ static CURLcode readwrite_upload(struct Curl_easy *data,
 
     k->writebytecount += bytes_written;
 
-    if(k->writebytecount == data->state.infilesize) {
+    if((!k->upload_chunky || k->forbidchunk) &&
+       (k->writebytecount == data->state.infilesize)) {
       /* we have sent all data we were supposed to */
       k->upload_done = TRUE;
       infof(data, "We are completely uploaded and fine\n");
@@ -1055,7 +1069,7 @@ CURLcode Curl_readwrite(struct connectdata *conn,
 {
   struct SingleRequest *k = &data->req;
   CURLcode result;
-  int didwhat=0;
+  int didwhat = 0;
 
   curl_socket_t fd_read;
   curl_socket_t fd_write;
@@ -1110,7 +1124,7 @@ CURLcode Curl_readwrite(struct connectdata *conn,
       return result;
   }
 
-  k->now = Curl_tvnow();
+  k->now = Curl_now();
   if(didwhat) {
     /* Update read/write counters */
     if(k->bytecountp)
@@ -1134,7 +1148,7 @@ CURLcode Curl_readwrite(struct connectdata *conn,
 
       */
 
-      time_t ms = Curl_tvdiff(k->now, k->start100);
+      timediff_t ms = Curl_timediff(k->now, k->start100);
       if(ms >= data->set.expect_100_timeout) {
         /* we've waited long enough, continue anyway */
         k->exp100 = EXP100_SEND_DATA;
@@ -1158,13 +1172,14 @@ CURLcode Curl_readwrite(struct connectdata *conn,
         failf(data, "Operation timed out after %ld milliseconds with %"
               CURL_FORMAT_CURL_OFF_T " out of %"
               CURL_FORMAT_CURL_OFF_T " bytes received",
-              Curl_tvdiff(k->now, data->progress.t_startsingle), k->bytecount,
-              k->size);
+              Curl_timediff(k->now, data->progress.t_startsingle),
+              k->bytecount, k->size);
       }
       else {
         failf(data, "Operation timed out after %ld milliseconds with %"
               CURL_FORMAT_CURL_OFF_T " bytes received",
-              Curl_tvdiff(k->now, data->progress.t_startsingle), k->bytecount);
+              Curl_timediff(k->now, data->progress.t_startsingle),
+              k->bytecount);
       }
       return CURLE_OPERATION_TIMEDOUT;
     }
@@ -1303,7 +1318,8 @@ CURLcode Curl_pretransfer(struct Curl_easy *data)
   if(result)
     return result;
 
-  data->set.followlocation=0; /* reset the location-follow counter */
+  data->state.wildcardmatch = data->set.wildcard_enabled;
+  data->set.followlocation = 0; /* reset the location-follow counter */
   data->state.this_is_a_follow = FALSE; /* reset this */
   data->state.errorbuf = FALSE; /* no error has occurred */
   data->state.httpversion = 0; /* don't assume any particular server version */
@@ -1345,7 +1361,7 @@ CURLcode Curl_pretransfer(struct Curl_easy *data)
 #endif
 
     Curl_initinfo(data); /* reset session-specific information "variables" */
-    Curl_pgrsResetTimesSizes(data);
+    Curl_pgrsResetTransferSizes(data);
     Curl_pgrsStartNow(data);
 
     if(data->set.timeout)
@@ -1360,7 +1376,7 @@ CURLcode Curl_pretransfer(struct Curl_easy *data)
     data->state.authhost.picked &= data->state.authhost.want;
     data->state.authproxy.picked &= data->state.authproxy.want;
 
-    if(data->set.wildcardmatch) {
+    if(data->state.wildcardmatch) {
       struct WildcardData *wc = &data->wildcard;
       if(wc->state < CURLWC_INIT) {
         result = Curl_wildcard_init(wc); /* init wildcard structures */
@@ -1427,14 +1443,14 @@ static const char *find_host_sep(const char *url)
 static size_t strlen_url(const char *url, bool relative)
 {
   const unsigned char *ptr;
-  size_t newlen=0;
-  bool left=TRUE; /* left side of the ? */
+  size_t newlen = 0;
+  bool left = TRUE; /* left side of the ? */
   const unsigned char *host_sep = (const unsigned char *) url;
 
   if(!relative)
     host_sep = (const unsigned char *) find_host_sep(url);
 
-  for(ptr=(unsigned char *)url; *ptr; ptr++) {
+  for(ptr = (unsigned char *)url; *ptr; ptr++) {
 
     if(ptr < host_sep) {
       ++newlen;
@@ -1443,7 +1459,7 @@ static size_t strlen_url(const char *url, bool relative)
 
     switch(*ptr) {
     case '?':
-      left=FALSE;
+      left = FALSE;
       /* fall through */
     default:
       if(*ptr >= 0x80)
@@ -1452,7 +1468,7 @@ static size_t strlen_url(const char *url, bool relative)
       break;
     case ' ':
       if(left)
-        newlen+=3;
+        newlen += 3;
       else
         newlen++;
       break;
@@ -1469,7 +1485,7 @@ static size_t strlen_url(const char *url, bool relative)
 static void strcpy_url(char *output, const char *url, bool relative)
 {
   /* we must add this with whitespace-replacing */
-  bool left=TRUE;
+  bool left = TRUE;
   const unsigned char *iptr;
   char *optr = output;
   const unsigned char *host_sep = (const unsigned char *) url;
@@ -1488,7 +1504,7 @@ static void strcpy_url(char *output, const char *url, bool relative)
 
     switch(*iptr) {
     case '?':
-      left=FALSE;
+      left = FALSE;
       /* fall through */
     default:
       if(*iptr >= 0x80) {
@@ -1509,7 +1525,7 @@ static void strcpy_url(char *output, const char *url, bool relative)
       break;
     }
   }
-  *optr=0; /* zero terminate output buffer */
+  *optr = 0; /* zero terminate output buffer */
 
 }
 
@@ -1548,26 +1564,26 @@ static char *concat_url(const char *base, const char *relurl)
 
   /* we must make our own copy of the URL to play with, as it may
      point to read-only data */
-  char *url_clone=strdup(base);
+  char *url_clone = strdup(base);
 
   if(!url_clone)
     return NULL; /* skip out of this NOW */
 
   /* protsep points to the start of the host name */
-  protsep=strstr(url_clone, "//");
+  protsep = strstr(url_clone, "//");
   if(!protsep)
-    protsep=url_clone;
+    protsep = url_clone;
   else
-    protsep+=2; /* pass the slashes */
+    protsep += 2; /* pass the slashes */
 
   if('/' != relurl[0]) {
-    int level=0;
+    int level = 0;
 
     /* First we need to find out if there's a ?-letter in the URL,
        and cut it and the right-side of that off */
     pathsep = strchr(protsep, '?');
     if(pathsep)
-      *pathsep=0;
+      *pathsep = 0;
 
     /* we have a relative path to append to the last slash if there's one
        available, or if the new URL is just a query string (starts with a
@@ -1576,14 +1592,14 @@ static char *concat_url(const char *base, const char *relurl)
     if(useurl[0] != '?') {
       pathsep = strrchr(protsep, '/');
       if(pathsep)
-        *pathsep=0;
+        *pathsep = 0;
     }
 
     /* Check if there's any slash after the host name, and if so, remember
        that position instead */
     pathsep = strchr(protsep, '/');
     if(pathsep)
-      protsep = pathsep+1;
+      protsep = pathsep + 1;
     else
       protsep = NULL;
 
@@ -1591,13 +1607,13 @@ static char *concat_url(const char *base, const char *relurl)
        and act accordingly */
 
     if((useurl[0] == '.') && (useurl[1] == '/'))
-      useurl+=2; /* just skip the "./" */
+      useurl += 2; /* just skip the "./" */
 
     while((useurl[0] == '.') &&
           (useurl[1] == '.') &&
           (useurl[2] == '/')) {
       level++;
-      useurl+=3; /* pass the "../" */
+      useurl += 3; /* pass the "../" */
     }
 
     if(protsep) {
@@ -1605,9 +1621,9 @@ static char *concat_url(const char *base, const char *relurl)
         /* cut off one more level from the right of the original URL */
         pathsep = strrchr(protsep, '/');
         if(pathsep)
-          *pathsep=0;
+          *pathsep = 0;
         else {
-          *protsep=0;
+          *protsep = 0;
           break;
         }
       }
@@ -1619,7 +1635,7 @@ static char *concat_url(const char *base, const char *relurl)
     if((relurl[0] == '/') && (relurl[1] == '/')) {
       /* the new URL starts with //, just keep the protocol part from the
          original one */
-      *protsep=0;
+      *protsep = 0;
       useurl = &relurl[2]; /* we keep the slashes from the original, so we
                               skip the new ones */
       host_changed = TRUE;
@@ -1635,7 +1651,7 @@ static char *concat_url(const char *base, const char *relurl)
         char *sep = strchr(protsep, '?');
         if(sep && (sep < pathsep))
           pathsep = sep;
-        *pathsep=0;
+        *pathsep = 0;
       }
       else {
         /* There was no slash. Now, since we might be operating on a badly
@@ -1644,7 +1660,7 @@ static char *concat_url(const char *base, const char *relurl)
            ?-letter as well! */
         pathsep = strchr(protsep, '?');
         if(pathsep)
-          *pathsep=0;
+          *pathsep = 0;
       }
     }
   }
@@ -1735,7 +1751,7 @@ CURLcode Curl_follow(struct Curl_easy *data,
     }
   }
 
-  if(!is_absolute_url(newurl))  {
+  if(!is_absolute_url(newurl)) {
     /***
      *DANG* this is an RFC 2068 violation. The URL is supposed
      to be absolute and this doesn't seem to be that!
@@ -1754,7 +1770,7 @@ CURLcode Curl_follow(struct Curl_easy *data,
     /* This is an absolute URL, don't allow the custom port number */
     disallowport = TRUE;
 
-    newest = malloc(newlen+1); /* get memory for this */
+    newest = malloc(newlen + 1); /* get memory for this */
     if(!newest)
       return CURLE_OUT_OF_MEMORY;
 
@@ -1826,7 +1842,8 @@ CURLcode Curl_follow(struct Curl_easy *data,
      * can be overridden with CURLOPT_POSTREDIR.
      */
     if((data->set.httpreq == HTTPREQ_POST
-        || data->set.httpreq == HTTPREQ_POST_FORM)
+        || data->set.httpreq == HTTPREQ_POST_FORM
+        || data->set.httpreq == HTTPREQ_POST_MIME)
        && !(data->set.keep_post & CURL_REDIR_POST_301)) {
       infof(data, "Switch from POST to GET\n");
       data->set.httpreq = HTTPREQ_GET;
@@ -1850,7 +1867,8 @@ CURLcode Curl_follow(struct Curl_easy *data,
      * can be overridden with CURLOPT_POSTREDIR.
      */
     if((data->set.httpreq == HTTPREQ_POST
-        || data->set.httpreq == HTTPREQ_POST_FORM)
+        || data->set.httpreq == HTTPREQ_POST_FORM
+        || data->set.httpreq == HTTPREQ_POST_MIME)
        && !(data->set.keep_post & CURL_REDIR_POST_302)) {
       infof(data, "Switch from POST to GET\n");
       data->set.httpreq = HTTPREQ_GET;
@@ -1883,7 +1901,7 @@ CURLcode Curl_follow(struct Curl_easy *data,
     break;
   }
   Curl_pgrsTime(data, TIMER_REDIRECT);
-  Curl_pgrsResetTimesSizes(data);
+  Curl_pgrsResetTransferSizes(data);
 
   return CURLE_OK;
 #endif /* CURL_DISABLE_HTTP */
@@ -2007,7 +2025,7 @@ Curl_setup_transfer(
          (http->sending == HTTPSEND_BODY)) {
         /* wait with write until we either got 100-continue or a timeout */
         k->exp100 = EXP100_AWAITING_CONTINUE;
-        k->start100 = Curl_tvnow();
+        k->start100 = Curl_now();
 
         /* Set a timeout for the multi interface. Add the inaccuracy margin so
            that we don't fire slightly too early and get denied to run. */

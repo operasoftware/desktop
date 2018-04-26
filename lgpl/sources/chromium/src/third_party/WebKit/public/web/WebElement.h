@@ -50,7 +50,7 @@ struct WebRect;
 class BLINK_EXPORT WebElement : public WebNode {
  public:
   WebElement() : WebNode() {}
-  WebElement(const WebElement& e) : WebNode(e) {}
+  WebElement(const WebElement& e) = default;
 
   WebElement& operator=(const WebElement& e) {
     WebNode::Assign(e);
@@ -100,6 +100,7 @@ class BLINK_EXPORT WebElement : public WebNode {
   // Returns the image contents of this element or a null WebImage
   // if there isn't any.
   WebImage ImageContents();
+  void RequestFullscreen();
 
 #if INSIDE_BLINK
   WebElement(Element*);

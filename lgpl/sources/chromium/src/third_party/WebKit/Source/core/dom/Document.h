@@ -57,6 +57,7 @@
 #include "core/dom/TreeScope.h"
 #include "core/dom/UserActionElementSet.h"
 #include "core/dom/ViewportDescription.h"
+#include "core/editing/Forward.h"
 #include "core/frame/DOMTimerCoordinator.h"
 #include "core/frame/HostsUsingFeatures.h"
 #include "core/html/custom/V0CustomElement.h"
@@ -138,7 +139,6 @@ class IdleRequestOptions;
 class IntersectionObserverController;
 class LayoutPoint;
 class LayoutView;
-class LayoutViewItem;
 class LiveNodeListBase;
 class LocalDOMWindow;
 class Locale;
@@ -284,8 +284,10 @@ class CORE_EXPORT Document : public ContainerNode,
   // a document instance representing window.document, and it works as the
   // source of ExecutionContext and security origin of the new document.
   // https://dom.spec.whatwg.org/#dom-document-document
-  static Document* Create(const Document&);
+  static Document* Create(Document&);
   ~Document() override;
+  static Range* CreateRangeAdjustedToTreeScope(const TreeScope&,
+                                               const Position&);
 
   // Support JS introspection of frame policy (e.g. feature policy).
   Policy* policy();
@@ -430,6 +432,7 @@ class CORE_EXPORT Document : public ContainerNode,
 
   HTMLCollection* WindowNamedItems(const AtomicString& name);
   DocumentNameCollection* DocumentNamedItems(const AtomicString& name);
+  HTMLCollection* DocumentAllNamedItems(const AtomicString& name);
 
   // "defaultView" attribute defined in HTML spec.
   LocalDOMWindow* defaultView() const;
@@ -584,7 +587,6 @@ class CORE_EXPORT Document : public ContainerNode,
   void GetLayoutObject() const = delete;
 
   LayoutView* GetLayoutView() const { return layout_view_; }
-  LayoutViewItem GetLayoutViewItem() const;
 
   Document& AXObjectCacheOwner() const;
   AXObjectCache* ExistingAXObjectCache() const;
@@ -1140,7 +1142,7 @@ class CORE_EXPORT Document : public ContainerNode,
 
   void EnqueueResizeEvent();
   void EnqueueScrollEventForNode(Node*);
-  void EnqueueAnimationFrameTask(WTF::Closure);
+  void EnqueueAnimationFrameTask(base::OnceClosure);
   void EnqueueAnimationFrameEvent(Event*);
   // Only one event for a target/event type combination will be dispatched per
   // frame.
@@ -1359,7 +1361,8 @@ class CORE_EXPORT Document : public ContainerNode,
 
   SnapCoordinator* GetSnapCoordinator();
 
-  void EnforceInsecureRequestPolicy(WebInsecureRequestPolicy);
+  void DidEnforceInsecureRequestPolicy();
+  void DidEnforceInsecureNavigationsSet();
 
   bool MayContainV0Shadow() const { return may_contain_v0_shadow_; }
 
@@ -1424,6 +1427,8 @@ class CORE_EXPORT Document : public ContainerNode,
   int64_t UkmSourceID() const;
 
   scoped_refptr<WebTaskRunner> GetTaskRunner(TaskType) override;
+
+  void RecordUkmOutliveTimeAfterShutdown(int outlive_time_count);
 
  protected:
   Document(const DocumentInit&, DocumentClassFlags = kDefaultDocumentClass);
@@ -1815,6 +1820,10 @@ class CORE_EXPORT Document : public ContainerNode,
   // the document to recorde UKM.
   std::unique_ptr<ukm::UkmRecorder> ukm_recorder_;
   int64_t ukm_source_id_;
+
+  bool needs_to_record_ukm_outlive_time_;
+
+  Member<Policy> policy_;
 };
 
 extern template class CORE_EXTERN_TEMPLATE_EXPORT Supplement<Document>;

@@ -134,7 +134,7 @@ int Curl_pgrsDone(struct connectdata *conn)
 {
   int rc;
   struct Curl_easy *data = conn->data;
-  data->progress.lastshow=0;
+  data->progress.lastshow = 0;
   rc = Curl_pgrsUpdate(conn); /* the final (forced) update */
   if(rc)
     return rc;
@@ -149,14 +149,9 @@ int Curl_pgrsDone(struct connectdata *conn)
   return 0;
 }
 
-/* reset all times except redirect, and reset the known transfer sizes */
-void Curl_pgrsResetTimesSizes(struct Curl_easy *data)
+/* reset the known transfer sizes */
+void Curl_pgrsResetTransferSizes(struct Curl_easy *data)
 {
-  data->progress.t_nslookup = 0;
-  data->progress.t_connect = 0;
-  data->progress.t_pretransfer = 0;
-  data->progress.t_starttransfer = 0;
-
   Curl_pgrsSetDownloadSize(data, -1);
   Curl_pgrsSetUploadSize(data, -1);
 }
@@ -166,7 +161,7 @@ void Curl_pgrsResetTimesSizes(struct Curl_easy *data)
  */
 void Curl_pgrsTime(struct Curl_easy *data, timerid timer)
 {
-  struct curltime now = Curl_tvnow();
+  struct curltime now = Curl_now();
   time_t *delta = NULL;
 
   switch(timer) {
@@ -181,6 +176,7 @@ void Curl_pgrsTime(struct Curl_easy *data, timerid timer)
   case TIMER_STARTSINGLE:
     /* This is set at the start of each single fetch */
     data->progress.t_startsingle = now;
+    data->progress.is_t_startransfer_set = false;
     break;
   case TIMER_STARTACCEPT:
     data->progress.t_acceptdata = now;
@@ -205,31 +201,33 @@ void Curl_pgrsTime(struct Curl_easy *data, timerid timer)
      * This prevents repeated invocations of the function from incorrectly
      * changing the t_starttransfer time.
      */
-    if (*delta > data->progress.t_redirect) {
+    if(data->progress.is_t_startransfer_set) {
       return;
     }
     else {
+      data->progress.is_t_startransfer_set = true;
       break;
     }
   case TIMER_POSTRANSFER:
     /* this is the normal end-of-transfer thing */
     break;
   case TIMER_REDIRECT:
-    data->progress.t_redirect = Curl_tvdiff_us(now, data->progress.start);
+    data->progress.t_redirect = Curl_timediff_us(now, data->progress.start);
     break;
   }
   if(delta) {
-    time_t us = Curl_tvdiff_us(now, data->progress.t_startsingle);
-    if(!us)
-      us++; /* make sure at least one microsecond passed */
-    *delta = us;
+    timediff_t us = Curl_timediff_us(now, data->progress.t_startsingle);
+    if(us < 1)
+      us = 1; /* make sure at least one microsecond passed */
+    *delta += us;
   }
 }
 
 void Curl_pgrsStartNow(struct Curl_easy *data)
 {
   data->progress.speeder_c = 0; /* reset the progress meter display */
-  data->progress.start = Curl_tvnow();
+  data->progress.start = Curl_now();
+  data->progress.is_t_startransfer_set = false;
   data->progress.ul_limit_start.tv_sec = 0;
   data->progress.ul_limit_start.tv_usec = 0;
   data->progress.dl_limit_start.tv_sec = 0;
@@ -276,7 +274,7 @@ long Curl_pgrsLimitWaitTime(curl_off_t cursize,
     return -1;
 
   minimum = (time_t) (CURL_OFF_T_C(1000) * size / limit);
-  actual = Curl_tvdiff(now, start);
+  actual = Curl_timediff(now, start);
 
   if(actual < minimum)
     /* this is a conversion on some systems (64bit time_t => 32bit long) */
@@ -287,7 +285,7 @@ long Curl_pgrsLimitWaitTime(curl_off_t cursize,
 
 void Curl_pgrsSetDownloadCounter(struct Curl_easy *data, curl_off_t size)
 {
-  struct curltime now = Curl_tvnow();
+  struct curltime now = Curl_now();
 
   data->progress.downloaded = size;
 
@@ -305,7 +303,7 @@ void Curl_pgrsSetDownloadCounter(struct Curl_easy *data, curl_off_t size)
 
 void Curl_pgrsSetUploadCounter(struct Curl_easy *data, curl_off_t size)
 {
-  struct curltime now = Curl_tvnow();
+  struct curltime now = Curl_now();
 
   data->progress.uploaded = size;
 
@@ -354,9 +352,9 @@ int Curl_pgrsUpdate(struct connectdata *conn)
   struct curltime now;
   int result;
   char max5[6][10];
-  curl_off_t dlpercen=0;
-  curl_off_t ulpercen=0;
-  curl_off_t total_percen=0;
+  curl_off_t dlpercen = 0;
+  curl_off_t ulpercen = 0;
+  curl_off_t total_percen = 0;
   curl_off_t total_transfer;
   curl_off_t total_expected_transfer;
   curl_off_t timespent;
@@ -367,15 +365,15 @@ int Curl_pgrsUpdate(struct connectdata *conn)
   char time_left[10];
   char time_total[10];
   char time_spent[10];
-  curl_off_t ulestimate=0;
-  curl_off_t dlestimate=0;
+  curl_off_t ulestimate = 0;
+  curl_off_t dlestimate = 0;
   curl_off_t total_estimate;
-  bool shownow=FALSE;
+  bool shownow = FALSE;
 
-  now = Curl_tvnow(); /* what time is it */
+  now = Curl_now(); /* what time is it */
 
   /* The time spent so far (from the start) */
-  data->progress.timespent = Curl_tvdiff_us(now, data->progress.start);
+  data->progress.timespent = Curl_timediff_us(now, data->progress.start);
   timespent = (curl_off_t)data->progress.timespent/1000000; /* seconds */
 
   /* The average download speed this far */
@@ -410,24 +408,24 @@ int Curl_pgrsUpdate(struct connectdata *conn)
        array. With N_ENTRIES filled in, we have about N_ENTRIES-1 seconds of
        transfer. Imagine, after one second we have filled in two entries,
        after two seconds we've filled in three entries etc. */
-    countindex = ((data->progress.speeder_c>=CURR_TIME)?
+    countindex = ((data->progress.speeder_c >= CURR_TIME)?
                   CURR_TIME:data->progress.speeder_c) - 1;
 
     /* first of all, we don't do this if there's no counted seconds yet */
     if(countindex) {
-      time_t span_ms;
+      timediff_t span_ms;
 
       /* Get the index position to compare with the 'nowindex' position.
          Get the oldest entry possible. While we have less than CURR_TIME
          entries, the first entry will remain the oldest. */
-      checkindex = (data->progress.speeder_c>=CURR_TIME)?
+      checkindex = (data->progress.speeder_c >= CURR_TIME)?
         data->progress.speeder_c%CURR_TIME:0;
 
       /* Figure out the exact time for the time span */
-      span_ms = Curl_tvdiff(now,
-                            data->progress.speeder_time[checkindex]);
+      span_ms = Curl_timediff(now,
+                              data->progress.speeder_time[checkindex]);
       if(0 == span_ms)
-        span_ms=1; /* at least one millisecond MUST have passed */
+        span_ms = 1; /* at least one millisecond MUST have passed */
 
       /* Calculate the average speed the last 'span_ms' milliseconds */
       {
@@ -457,22 +455,22 @@ int Curl_pgrsUpdate(struct connectdata *conn)
 
     if(data->set.fxferinfo) {
       /* There's a callback set, call that */
-      result= data->set.fxferinfo(data->set.progress_client,
-                                  data->progress.size_dl,
-                                  data->progress.downloaded,
-                                  data->progress.size_ul,
-                                  data->progress.uploaded);
+      result = data->set.fxferinfo(data->set.progress_client,
+                                   data->progress.size_dl,
+                                   data->progress.downloaded,
+                                   data->progress.size_ul,
+                                   data->progress.uploaded);
       if(result)
         failf(data, "Callback aborted");
       return result;
     }
     if(data->set.fprogress) {
       /* The older deprecated callback is set, call that */
-      result= data->set.fprogress(data->set.progress_client,
-                                  (double)data->progress.size_dl,
-                                  (double)data->progress.downloaded,
-                                  (double)data->progress.size_ul,
-                                  (double)data->progress.uploaded);
+      result = data->set.fprogress(data->set.progress_client,
+                                   (double)data->progress.size_dl,
+                                   (double)data->progress.downloaded,
+                                   (double)data->progress.size_ul,
+                                   (double)data->progress.uploaded);
       if(result)
         failf(data, "Callback aborted");
       return result;

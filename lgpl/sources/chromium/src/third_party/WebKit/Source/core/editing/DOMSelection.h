@@ -43,6 +43,7 @@ class DOMRect;
 class ExceptionState;
 class Node;
 class Range;
+class SetSelectionOptions;
 class TreeScope;
 
 class CORE_EXPORT DOMSelection final : public ScriptWrappable,
@@ -110,7 +111,9 @@ class CORE_EXPORT DOMSelection final : public ScriptWrappable,
 
   bool IsAvailable() const;
 
-  void UpdateFrameSelection(const SelectionInDOMTree&, Range*) const;
+  void UpdateFrameSelection(const SelectionInDOMTree&,
+                            Range*,
+                            const SetSelectionOptions&) const;
   // Convenience methods for accessors, does not check m_frame present.
   VisibleSelection GetVisibleSelection() const;
   bool IsBaseFirstInSelection() const;

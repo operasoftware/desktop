@@ -32,7 +32,6 @@
 #include "curl_base64.h"
 #include "strcase.h"
 #include "multiif.h"
-#include "conncache.h"
 #include "url.h"
 #include "connect.h"
 #include "strtoofft.h"
@@ -384,12 +383,12 @@ char *curl_pushheader_byname(struct curl_pushheaders *h, const char *header)
     struct HTTP *stream = h->data->req.protop;
     size_t len = strlen(header);
     size_t i;
-    for(i=0; i<stream->push_headers_used; i++) {
+    for(i = 0; i<stream->push_headers_used; i++) {
       if(!strncmp(header, stream->push_headers[i], len)) {
         /* sub-match, make sure that it is followed by a colon */
         if(stream->push_headers[i][len] != ':')
           continue;
-        return &stream->push_headers[i][len+1];
+        return &stream->push_headers[i][len + 1];
       }
     }
   }
@@ -464,7 +463,7 @@ static int push_promise(struct Curl_easy *data,
                               data->multi->push_userp);
 
     /* free the headers again */
-    for(i=0; i<stream->push_headers_used; i++)
+    for(i = 0; i<stream->push_headers_used; i++)
       free(stream->push_headers[i]);
     free(stream->push_headers);
     stream->push_headers = NULL;
@@ -1184,14 +1183,17 @@ CURLcode Curl_http2_request_upgrade(Curl_send_buffer *req,
                                          httpc->local_settings_num);
   if(!binlen) {
     failf(conn->data, "nghttp2 unexpectedly failed on pack_settings_payload");
+    Curl_add_buffer_free(req);
     return CURLE_FAILED_INIT;
   }
   conn->proto.httpc.binlen = binlen;
 
   result = Curl_base64url_encode(conn->data, (const char *)binsettings, binlen,
                                  &base64, &blen);
-  if(result)
+  if(result) {
+    Curl_add_buffer_free(req);
     return result;
+  }
 
   result = Curl_add_bufferf(req,
                             "Connection: Upgrade, HTTP2-Settings\r\n"
@@ -1582,7 +1584,7 @@ static ssize_t http2_recv(struct connectdata *conn, int sockindex,
       failf(data, "nghttp2_session_mem_recv() returned %d:%s\n",
             rv, nghttp2_strerror((int)rv));
       *err = CURLE_RECV_ERROR;
-      return 0;
+      return -1;
     }
     DEBUGF(infof(data, "nghttp2_session_mem_recv() returns %zd\n", rv));
     if(nread == rv) {
@@ -1600,7 +1602,7 @@ static ssize_t http2_recv(struct connectdata *conn, int sockindex,
     rv = h2_session_send(data, httpc->h2);
     if(rv != 0) {
       *err = CURLE_SEND_ERROR;
-      return 0;
+      return -1;
     }
 
     if(should_close_session(httpc)) {
@@ -1846,9 +1848,6 @@ static ssize_t http2_send(struct connectdata *conn, int sockindex,
     goto fail;
   }
 
-  hdbuf = end + 1;
-
-  end = line_end;
   nva[2].name = (unsigned char *)":scheme";
   nva[2].namelen = strlen((char *)nva[2].name);
   if(conn->handler->flags & PROTOPT_SSL)
@@ -1955,6 +1954,7 @@ static ssize_t http2_send(struct connectdata *conn, int sockindex,
   switch(conn->data->set.httpreq) {
   case HTTPREQ_POST:
   case HTTPREQ_POST_FORM:
+  case HTTPREQ_POST_MIME:
   case HTTPREQ_PUT:
     if(conn->data->state.infilesize != -1)
       stream->upload_left = conn->data->state.infilesize;

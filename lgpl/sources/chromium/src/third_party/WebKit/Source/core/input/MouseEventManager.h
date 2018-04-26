@@ -5,6 +5,7 @@
 #ifndef MouseEventManager_h
 #define MouseEventManager_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/dom/SynchronousMutationObserver.h"
 #include "core/input/BoundaryEventDispatcher.h"
@@ -36,7 +37,6 @@ enum class ThresholdAction;
 class CORE_EXPORT MouseEventManager final
     : public GarbageCollectedFinalized<MouseEventManager>,
       public SynchronousMutationObserver {
-  WTF_MAKE_NONCOPYABLE(MouseEventManager);
   USING_GARBAGE_COLLECTED_MIXIN(MouseEventManager);
 
  public:
@@ -94,6 +94,7 @@ class CORE_EXPORT MouseEventManager final
   void DispatchFakeMouseMoveEventSoonInQuad(const FloatQuad&);
 
   void SetLastKnownMousePosition(const WebMouseEvent&);
+  void SetLastMousePositionAsUnknown();
 
   bool HandleDragDropIfPossible(const GestureEventWithHitTestResults&);
 
@@ -134,7 +135,7 @@ class CORE_EXPORT MouseEventManager final
   FloatPoint LastKnownMousePositionGlobal();
 
   bool MousePressed();
-  void SetMousePressed(bool);
+  void ReleaseMousePress();
 
   bool CapturesDragging() const;
   void SetCapturesDragging(bool);
@@ -155,8 +156,6 @@ class CORE_EXPORT MouseEventManager final
 
  private:
   class MouseEventBoundaryEventDispatcher : public BoundaryEventDispatcher {
-    WTF_MAKE_NONCOPYABLE(MouseEventBoundaryEventDispatcher);
-
    public:
     MouseEventBoundaryEventDispatcher(MouseEventManager*,
                                       const WebMouseEvent*,
@@ -186,6 +185,7 @@ class CORE_EXPORT MouseEventManager final
     const WebMouseEvent* web_mouse_event_;
     Member<EventTarget> exited_target_;
     String canvas_region_id_;
+    DISALLOW_COPY_AND_ASSIGN(MouseEventBoundaryEventDispatcher);
   };
 
   // If the given element is a shadow host and its root has delegatesFocus=false
@@ -247,6 +247,8 @@ class CORE_EXPORT MouseEventManager final
   LayoutPoint drag_start_pos_;
 
   TaskRunnerTimer<MouseEventManager> fake_mouse_move_event_timer_;
+
+  DISALLOW_COPY_AND_ASSIGN(MouseEventManager);
 };
 
 }  // namespace blink

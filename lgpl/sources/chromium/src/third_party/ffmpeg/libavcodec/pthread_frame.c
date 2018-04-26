@@ -24,11 +24,7 @@
 
 #include "config.h"
 
-#if defined(__linux__)
-#include <compat/atomics/gcc/stdatomic.h>
-#else
 #include <stdatomic.h>
-#endif  // __linux__
 #include <stdint.h>
 
 #include "avcodec.h"
@@ -250,7 +246,7 @@ static int update_context_from_thread(AVCodecContext *dst, AVCodecContext *src, 
 {
     int err = 0;
 
-    if (dst != src && (for_user || !(av_codec_get_codec_descriptor(src)->props & AV_CODEC_PROP_INTRA_ONLY))) {
+    if (dst != src && (for_user || !(src->codec_descriptor->props & AV_CODEC_PROP_INTRA_ONLY))) {
         dst->time_base = src->time_base;
         dst->framerate = src->framerate;
         dst->width     = src->width;
@@ -731,10 +727,6 @@ int ff_frame_thread_init(AVCodecContext *avctx)
     AVCodecContext *src = avctx;
     FrameThreadContext *fctx;
     int i, err = 0;
-
-#if HAVE_W32THREADS
-    w32thread_init();
-#endif
 
     if (!thread_count) {
         int nb_cpus = av_cpu_count();

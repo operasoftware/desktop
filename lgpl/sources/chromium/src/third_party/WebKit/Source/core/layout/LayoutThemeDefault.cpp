@@ -59,7 +59,7 @@ LayoutThemeDefault::LayoutThemeDefault()
   caret_blink_interval_ = LayoutTheme::CaretBlinkInterval();
 }
 
-LayoutThemeDefault::~LayoutThemeDefault() {}
+LayoutThemeDefault::~LayoutThemeDefault() = default;
 
 bool LayoutThemeDefault::ThemeDrawsFocusRing(const ComputedStyle& style) const {
 #ifdef OPERA_DESKTOP
@@ -200,9 +200,7 @@ void LayoutThemeDefault::SetCheckboxSize(ComputedStyle& style) const {
 
   IntSize size = Platform::Current()->ThemeEngine()->GetSize(
       WebThemeEngine::kPartCheckbox);
-  const float default_scale = Platform::Current()->ThemeEngine()->GetScale(
-      WebThemeEngine::kPartCheckbox);
-  float zoom_level = style.EffectiveZoom() / default_scale;
+  float zoom_level = style.EffectiveZoom();
   size.SetWidth(size.Width() * zoom_level);
   size.SetHeight(size.Height() * zoom_level);
   SetMinimumSizeIfAuto(style, size);
@@ -216,9 +214,7 @@ void LayoutThemeDefault::SetRadioSize(ComputedStyle& style) const {
 
   IntSize size =
       Platform::Current()->ThemeEngine()->GetSize(WebThemeEngine::kPartRadio);
-  const float default_scale =
-      Platform::Current()->ThemeEngine()->GetScale(WebThemeEngine::kPartRadio);
-  float zoom_level = style.EffectiveZoom() / default_scale;
+  float zoom_level = style.EffectiveZoom();
   size.SetWidth(size.Width() * zoom_level);
   size.SetHeight(size.Height() * zoom_level);
   SetMinimumSizeIfAuto(style, size);

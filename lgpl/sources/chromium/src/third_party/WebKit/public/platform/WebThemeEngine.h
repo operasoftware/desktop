@@ -159,10 +159,6 @@ class WebThemeEngine {
   // the track while the height will be the minimum height.
   virtual WebSize GetSize(Part) { return WebSize(); }
 
-  // Returns scale of given theme part. This method is needed if we're using
-  // native elements, because they are already DPI-scaled.
-  virtual float GetScale(Part) { return 1.0f; }
-
   virtual bool SupportsNinePatch(Part) const { return false; }
   virtual WebSize NinePatchCanvasSize(Part) const { return WebSize(); }
   virtual WebRect NinePatchAperture(Part) const { return WebRect(); }

@@ -41,7 +41,6 @@
 
 namespace blink {
 
-class WebCredentialManagerClient;
 class WebFrame;
 class WebHitTestResult;
 class WebLocalFrame;
@@ -111,10 +110,10 @@ class WebView : protected WebWidget {
   // client may be null, while PageVisibilityState defines the initial
   // visibility of the page.
   BLINK_EXPORT static WebView* Create(WebViewClient*,
-                                      mojom::PageVisibilityState);
+                                      mojom::PageVisibilityState,
+                                      WebView* opener);
 
   // Initializes the various client interfaces.
-  virtual void SetCredentialManagerClient(WebCredentialManagerClient*) = 0;
   virtual void SetPrerendererClient(WebPrerendererClient*) = 0;
 
   // Options -------------------------------------------------------------
@@ -285,14 +284,6 @@ class WebView : protected WebWidget {
   // fully migrated to use zooming mechanism.
   virtual void SetDeviceScaleFactor(float) = 0;
 
-  // The ratio of the current device's screen DPI to the target device's screen
-  // DPI.
-  // Final page zoom factor should be multiplied by this value
-  virtual float AltDeviceScaleFactor() const = 0;
-
-  // Sets alternative device scale factor
-  virtual void SetAltDeviceScaleFactor(float) = 0;
-
   // Sets the additional zoom factor used for device scale factor. This is used
   // to scale the content by the device scale factor, without affecting zoom
   // level.
@@ -451,7 +442,7 @@ class WebView : protected WebWidget {
   WebWidget* GetWidget() { return this; }
 
  protected:
-  ~WebView() {}
+  ~WebView() = default;
 };
 
 }  // namespace blink

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef StylePropertyMapReadonly_h
-#define StylePropertyMapReadonly_h
+#ifndef StylePropertyMapReadOnly_h
+#define StylePropertyMapReadOnly_h
 
 #include "base/macros.h"
 #include "bindings/core/v8/Iterable.h"
@@ -15,34 +15,38 @@
 
 namespace blink {
 
-class CORE_EXPORT StylePropertyMapReadonly
+class CORE_EXPORT StylePropertyMapReadOnly
     : public ScriptWrappable,
       public PairIterable<String, CSSStyleValueOrCSSStyleValueSequence> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  typedef std::pair<String, CSSStyleValueOrCSSStyleValueSequence>
-      StylePropertyMapEntry;
+  using StylePropertyMapEntry =
+      std::pair<String, CSSStyleValueOrCSSStyleValueSequence>;
 
-  virtual ~StylePropertyMapReadonly() = default;
+  virtual ~StylePropertyMapReadOnly() = default;
 
   CSSStyleValue* get(const String& property_name, ExceptionState&);
   CSSStyleValueVector getAll(const String& property_name, ExceptionState&);
   bool has(const String& property_name, ExceptionState&);
 
-  virtual Vector<String> getProperties() = 0;
+  Vector<String> getProperties();
 
  protected:
-  StylePropertyMapReadonly() = default;
+  StylePropertyMapReadOnly() = default;
 
   virtual const CSSValue* GetProperty(CSSPropertyID) = 0;
   virtual const CSSValue* GetCustomProperty(AtomicString) = 0;
 
-  virtual HeapVector<StylePropertyMapEntry> GetIterationEntries() = 0;
+  using IterationCallback =
+      std::function<void(const AtomicString&, const CSSValue&)>;
+  virtual void ForEachProperty(const IterationCallback&) = 0;
+
+ private:
   IterationSource* StartIteration(ScriptState*, ExceptionState&) override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(StylePropertyMapReadonly);
+  DISALLOW_COPY_AND_ASSIGN(StylePropertyMapReadOnly);
 };
 
 }  // namespace blink

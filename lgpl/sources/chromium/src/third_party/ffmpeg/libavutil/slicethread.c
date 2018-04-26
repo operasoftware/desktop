@@ -16,11 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#if defined(__linux__)
-#include <compat/atomics/gcc/stdatomic.h>
-#else
 #include <stdatomic.h>
-#endif  // __linux__
 #include "slicethread.h"
 #include "mem.h"
 #include "thread.h"
@@ -102,10 +98,6 @@ int avpriv_slicethread_create(AVSliceThread **pctx, void *priv,
 {
     AVSliceThread *ctx;
     int nb_workers, i;
-
-#if HAVE_W32THREADS
-    w32thread_init();
-#endif
 
     av_assert0(nb_threads >= 0);
     if (!nb_threads) {

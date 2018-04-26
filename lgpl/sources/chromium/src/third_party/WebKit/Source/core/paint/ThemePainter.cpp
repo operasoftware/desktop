@@ -40,7 +40,6 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebFallbackThemeEngine.h"
 #include "public/platform/WebRect.h"
-#include "public/platform/WebThemeEngine.h"
 
 // The methods in this file are shared by all themes on every platform.
 
@@ -61,7 +60,7 @@ WebFallbackThemeEngine::State GetWebFallbackThemeState(const Node* node) {
 
 }  // anonymous namespace
 
-ThemePainter::ThemePainter() {}
+ThemePainter::ThemePainter() = default;
 
 bool ThemePainter::Paint(const LayoutObject& o,
                          const PaintInfo& paint_info,
@@ -334,7 +333,8 @@ void ThemePainter::PaintSliderTicks(const LayoutObject& o,
       tick_rect.SetX(tick_position);
     else
       tick_rect.SetY(tick_position);
-    paint_info.context.FillRect(tick_rect, o.ResolveColor(CSSPropertyColor));
+    paint_info.context.FillRect(tick_rect,
+                                o.ResolveColor(GetCSSPropertyColor()));
   }
 }
 
@@ -364,9 +364,7 @@ bool ThemePainter::PaintCheckboxUsingFallbackTheme(const Node* node,
   extra_params.button.checked = LayoutTheme::IsChecked(node);
   extra_params.button.indeterminate = LayoutTheme::IsIndeterminate(node);
 
-  const float default_scale = Platform::Current()->ThemeEngine()->GetScale(
-      WebThemeEngine::kPartCheckbox);
-  float zoom_level = style.EffectiveZoom() / default_scale;
+  float zoom_level = style.EffectiveZoom();
   GraphicsContextStateSaver state_saver(paint_info.context);
   IntRect unzoomed_rect = paint_rect;
   if (zoom_level != 1) {
@@ -392,9 +390,7 @@ bool ThemePainter::PaintRadioUsingFallbackTheme(const Node* node,
   extra_params.button.checked = LayoutTheme::IsChecked(node);
   extra_params.button.indeterminate = LayoutTheme::IsIndeterminate(node);
 
-  const float default_scale = Platform::Current()->ThemeEngine()->GetScale(
-      WebThemeEngine::kPartCheckbox);
-  float zoom_level = style.EffectiveZoom() / default_scale;
+  float zoom_level = style.EffectiveZoom();
   GraphicsContextStateSaver state_saver(paint_info.context);
   IntRect unzoomed_rect = paint_rect;
   if (zoom_level != 1) {
