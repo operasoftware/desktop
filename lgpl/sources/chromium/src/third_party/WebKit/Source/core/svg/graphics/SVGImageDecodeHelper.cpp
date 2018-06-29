@@ -6,8 +6,8 @@
 
 #include "core/svg/graphics/SVGImage.h"
 #include "core/svg/graphics/SVGImageForContainer.h"
-#include "platform/geometry/LayoutSize.h"
 #include "platform/SharedBuffer.h"
+#include "platform/geometry/FloatSize.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkImage.h"
 
@@ -19,8 +19,8 @@ SkBitmap DecodeSVGImage(const unsigned char* data,
   scoped_refptr<SVGImage> svg_image = SVGImage::Create(nullptr);
   scoped_refptr<SharedBuffer> buffer = SharedBuffer::Create(data, length);
   svg_image->SetData(buffer, true);
-  scoped_refptr<Image> svg_container = SVGImageForContainer::Create(
-      svg_image.get(), LayoutSize(size), 1, KURL());
+  scoped_refptr<Image> svg_container =
+      SVGImageForContainer::Create(svg_image.get(), FloatSize(size), 1, KURL());
   sk_sp<SkImage> sk_image =
       svg_container->PaintImageForCurrentFrame().GetSkImage();
   SkBitmap bitmap;

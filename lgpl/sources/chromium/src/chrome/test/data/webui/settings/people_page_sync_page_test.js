@@ -3,42 +3,6 @@
 // found in the LICENSE file.
 
 cr.define('settings_people_page_sync_page', function() {
-  /** @implements {settings.SyncBrowserProxy} */
-  class TestSyncBrowserProxy extends TestBrowserProxy {
-    constructor() {
-      super([
-        'didNavigateToSyncPage',
-        'didNavigateAwayFromSyncPage',
-        'setSyncDatatypes',
-        'setSyncEncryption',
-      ]);
-
-      /* @type {!settings.PageStatus} */
-      this.encryptionResponse = settings.PageStatus.CONFIGURE;
-    }
-
-    /** @override */
-    didNavigateToSyncPage() {
-      this.methodCalled('didNavigateToSyncPage');
-    }
-
-    /** @override */
-    didNavigateAwayFromSyncPage() {
-      this.methodCalled('didNavigateAwayFromSyncPage');
-    }
-
-    /** @override */
-    setSyncDatatypes(syncPrefs) {
-      this.methodCalled('setSyncDatatypes', syncPrefs);
-      return Promise.resolve(settings.PageStatus.CONFIGURE);
-    }
-
-    /** @override */
-    setSyncEncryption(syncPrefs) {
-      this.methodCalled('setSyncEncryption', syncPrefs);
-      return Promise.resolve(this.encryptionResponse);
-    }
-  }
 
   suite('AdvancedSyncSettingsTests', function() {
     let syncPage = null;
@@ -268,7 +232,7 @@ cr.define('settings_people_page_sync_page', function() {
       link.href = '#';
       // Prevent the link from triggering a page navigation when tapped.
       // Breaks the test in Vulcanized mode.
-      link.addEventListener('tap', function(e) { e.preventDefault(); });
+      link.addEventListener('click', function(e) { e.preventDefault(); });
 
       MockInteractions.tap(link);
 

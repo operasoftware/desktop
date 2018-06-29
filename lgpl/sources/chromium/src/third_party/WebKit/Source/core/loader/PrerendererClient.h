@@ -49,13 +49,14 @@ class CORE_EXPORT PrerendererClient
   USING_GARBAGE_COLLECTED_MIXIN(PrerendererClient);
 
  public:
+  static const char kSupplementName[];
+
   PrerendererClient(Page&, WebPrerendererClient*);
 
   virtual bool CanPrerender();
   virtual void WillAddPrerender(Prerender*);
   virtual bool IsPrefetchOnly();
 
-  static const char* SupplementName();
   static PrerendererClient* From(Page*);
 
  private:

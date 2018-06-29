@@ -74,6 +74,14 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
     background_rect.Unite(layout_view_.DocumentRect());
   }
 
+  // Opera Snap patch:
+  // Background should be captured also for scrolled area
+  if (paint_info.IsPrinting()) {
+    const auto scrolled_content_offset = layout_view_.ScrolledContentOffset();
+    background_rect.Move(-scrolled_content_offset.Width(),
+                         -scrolled_content_offset.Height());
+  }
+
   const DisplayItemClient* display_item_client = &layout_view_;
 
   Optional<ScopedPaintChunkProperties> scoped_scroll_property;

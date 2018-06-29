@@ -54,6 +54,7 @@ class WebMediaPlayerSource;
 class WebSecurityOrigin;
 class WebString;
 class WebURL;
+enum class WebFullscreenVideoStatus;
 struct WebRect;
 struct WebSize;
 
@@ -129,6 +130,7 @@ class WebMediaPlayer {
   virtual void Seek(double seconds) = 0;
   virtual void SetRate(double) = 0;
   virtual void SetVolume(double) = 0;
+  virtual void EnterPictureInPicture() = 0;
 
   virtual void RequestRemotePlayback() {}
   virtual void RequestRemotePlaybackControl() {}
@@ -198,6 +200,7 @@ class WebMediaPlayer {
 
   virtual bool DidLoadingProgress() = 0;
 
+  virtual bool DidGetOpaqueResponseFromServiceWorker() const = 0;
   virtual bool HasSingleSecurityOrigin() const = 0;
   virtual bool DidPassCORSAccessCheck() const = 0;
 
@@ -322,7 +325,7 @@ class WebMediaPlayer {
   //
   // TODO(zqzhang): merge with BecameDominantVisibleContent(). See
   // https://crbug.com/696211
-  virtual void SetIsEffectivelyFullscreen(bool) {}
+  virtual void SetIsEffectivelyFullscreen(WebFullscreenVideoStatus) {}
 
   virtual void EnabledAudioTracksChanged(
       const WebVector<TrackId>& enabled_track_ids) {}
@@ -345,6 +348,10 @@ class WebMediaPlayer {
   // Callback called whenever the media element display type changes. By
   // default, the display type is `kInline`.
   virtual void OnDisplayTypeChanged(DisplayType) {}
+
+  // Test helper methods for exercising media suspension.
+  virtual void ForceStaleStateForTesting() {}
+  virtual bool IsSuspendedForTesting() { return false; }
 };
 
 }  // namespace blink

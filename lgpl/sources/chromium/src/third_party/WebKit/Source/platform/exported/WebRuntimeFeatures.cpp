@@ -132,10 +132,6 @@ void WebRuntimeFeatures::EnableFastMobileScrolling(bool enable) {
   RuntimeEnabledFeatures::SetFastMobileScrollingEnabled(enable);
 }
 
-void WebRuntimeFeatures::EnableFeaturePolicy(bool enable) {
-  RuntimeEnabledFeatures::SetFeaturePolicyEnabled(enable);
-}
-
 void WebRuntimeFeatures::EnableFileSystem(bool enable) {
   RuntimeEnabledFeatures::SetFileSystemEnabled(enable);
 }
@@ -418,10 +414,6 @@ void WebRuntimeFeatures::EnableMediaVR(bool enable) {
   RuntimeEnabledFeatures::SetMediaVREnabled(enable);
 }
 
-void WebRuntimeFeatures::EnableServiceWorkerScriptStreaming(bool enable) {
-  RuntimeEnabledFeatures::SetServiceWorkerScriptStreamingEnabled(enable);
-}
-
 void WebRuntimeFeatures::EnableServiceWorkerScriptFullCodeCache(bool enable) {
   RuntimeEnabledFeatures::SetServiceWorkerScriptFullCodeCacheEnabled(enable);
 }
@@ -532,6 +524,18 @@ void WebRuntimeFeatures::EnablePWAFullCodeCache(bool enable) {
 
 void WebRuntimeFeatures::EnableDoubleTapToJumpOnVideo(bool enable) {
   RuntimeEnabledFeatures::SetDoubleTapToJumpOnVideoEnabled(enable);
+}
+
+void WebRuntimeFeatures::EnableCodeCacheAfterExecute(bool enable) {
+  RuntimeEnabledFeatures::SetCodeCacheAfterExecuteEnabled(enable);
+}
+
+void WebRuntimeFeatures::EnableUnifiedTouchAdjustment(bool enable) {
+  RuntimeEnabledFeatures::SetUnifiedTouchAdjustmentEnabled(enable);
+}
+
+void WebRuntimeFeatures::EnableMojoBlobURLs(bool enable) {
+  RuntimeEnabledFeatures::SetMojoBlobURLsEnabled(enable);
 }
 
 }  // namespace blink

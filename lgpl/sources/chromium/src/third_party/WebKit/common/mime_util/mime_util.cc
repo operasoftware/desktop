@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "third_party/WebKit/common/mime_util/mime_util.h"
+#include "third_party/WebKit/public/common/mime_util/mime_util.h"
 
 #include <stddef.h>
 
@@ -96,6 +96,7 @@ static const char* const kSupportedNonImageTypes[] = {
     "application/rss+xml",
 #endif  // !defined(OPERA_DESKTOP)
     "application/xhtml+xml", "application/json",
+    "message/rfc822",     // For MHTML support.
     "multipart/related",  // For MHTML support.
     "multipart/x-mixed-replace"
     // Note: ADDING a new type here will probably render it AS HTML. This can

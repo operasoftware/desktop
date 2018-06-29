@@ -34,6 +34,10 @@ cr.define('settings_sections_tests', function() {
       page = document.createElement('print-preview-app');
       document.body.appendChild(page);
 
+      // Since onInitialSettingsSet_ will never be called to check if there are
+      // sticky settings, set this manually.
+      page.$.model.hasStickySettings_ = false;
+
       const fooDestination = new print_preview.Destination(
           'FooPrinter', print_preview.DestinationType.LOCAL,
           print_preview.DestinationOrigin.LOCAL, 'Foo Printer',
@@ -43,6 +47,8 @@ cr.define('settings_sections_tests', function() {
               .capabilities;
       page.set('destination_', fooDestination);
       initDocumentInfo(false, false);
+      // Manually set ready state, since destination is set manually.
+      page.$.state.transitTo(print_preview_new.State.READY);
       Polymer.dom.flush();
     });
 

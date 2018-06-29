@@ -22,10 +22,10 @@ suite('CrActionMenu', function() {
     document.body.innerHTML = `
       <button id="dots">...</button>
       <dialog is="cr-action-menu">
-        <button class="dropdown-item">Un</button>
-        <hr>
-        <button class="dropdown-item">Dos</button>
-        <button class="dropdown-item">Tres</button>
+        <button slot="item" class="dropdown-item">Un</button>
+        <hr slot="item">
+        <button slot="item" class="dropdown-item">Dos</button>
+        <button slot="item" class="dropdown-item">Tres</button>
       </dialog>
     `;
 
@@ -111,6 +111,7 @@ suite('CrActionMenu', function() {
     // Can modify children after attached() and before showAt().
     const item = document.createElement('button');
     item.classList.add('dropdown-item');
+    item.setAttribute('slot', 'item');
     menu.insertBefore(item, items[0]);
     menu.showAt(dots);
 
@@ -197,6 +198,7 @@ suite('CrActionMenu', function() {
 
   test('items automatically given accessibility role', function() {
     const newItem = document.createElement('button');
+    newItem.setAttribute('slot', 'item');
     newItem.classList.add('dropdown-item');
 
     items[1].setAttribute('role', 'checkbox');
@@ -302,6 +304,47 @@ suite('CrActionMenu', function() {
     assertEquals('250px', menu.style.top);
     menu.close();
   });
+
+  // TODO(scottchen): fix flakiness and re-enable this test.
+  // test(
+  //     '[auto-reposition] enables repositioning if content changes',
+  //     function(done) {
+  //       menu.autoReposition = true;
+
+  //       dots.style.marginLeft = '800px';
+
+  //       let dotsRect = dots.getBoundingClientRect();
+
+  //       // Anchored at right-top by default.
+  //       menu.showAt(dots);
+  //       assertTrue(menu.open);
+  //       let menuRect = menu.getBoundingClientRect();
+  //       assertEquals(
+  //           Math.round(dotsRect.left + dotsRect.width),
+  //           Math.round(menuRect.left + menuRect.width));
+  //       assertEquals(dotsRect.top, menuRect.top);
+
+  //       const lastMenuLeft = menuRect.left;
+  //       const lastMenuWidth = menuRect.width;
+
+  //       menu.addEventListener('cr-action-menu-repositioned', () => {
+  //         assertTrue(menu.open);
+  //         menuRect = menu.getBoundingClientRect();
+  //         // Test that menu width got larger.
+  //         assertTrue(menuRect.width > lastMenuWidth);
+  //         // Test that menu upper-left moved further left.
+  //         assertTrue(menuRect.left < lastMenuLeft);
+  //         // Test that right and top did not move since it is anchored there.
+  //         assertEquals(
+  //             Math.round(dotsRect.left + dotsRect.width),
+  //             Math.round(menuRect.left + menuRect.width));
+  //         assertEquals(dotsRect.top, menuRect.top);
+  //         done();
+  //       });
+
+  //       // Still anchored at the right place after content size changes.
+  //       items[0].textContent = 'this is a long string to make menu wide';
+  //     });
 
   suite('offscreen scroll positioning', function() {
     const bodyHeight = 10000;

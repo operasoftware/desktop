@@ -6,9 +6,24 @@
 class TestSyncBrowserProxy extends TestBrowserProxy {
   constructor() {
     super([
+      'didNavigateAwayFromSyncPage',
+      'didNavigateToSyncPage',
+      'getPromoImpressionCount',
+      'getStoredAccounts',
       'getSyncStatus',
+      'incrementPromoImpressionCount',
+      'setSyncDatatypes',
+      'setSyncEncryption',
       'signOut',
+      'startSignIn',
+      'startSyncingWithEmail',
     ]);
+
+    /** @private {number} */
+    this.impressionCount_ = 0;
+
+    /** @type {!settings.PageStatus} */
+    this.encryptionResponse = settings.PageStatus.CONFIGURE;
   }
 
   /** @override */
@@ -21,7 +36,60 @@ class TestSyncBrowserProxy extends TestBrowserProxy {
   }
 
   /** @override */
+  getStoredAccounts() {
+    this.methodCalled('getStoredAccounts');
+    return Promise.resolve([]);
+  }
+
+  /** @override */
   signOut(deleteProfile) {
     this.methodCalled('signOut', deleteProfile);
+  }
+
+  /** @override */
+  startSignIn() {
+    this.methodCalled('startSignIn');
+  }
+
+  /** @override */
+  startSyncingWithEmail(email) {
+    this.methodCalled('startSyncingWithEmail', email);
+  }
+
+  setImpressionCount(count) {
+    this.impressionCount_ = count;
+  }
+
+  /** @override */
+  getPromoImpressionCount() {
+    this.methodCalled('getPromoImpressionCount');
+    return this.impressionCount_;
+  }
+
+  /** @override */
+  incrementPromoImpressionCount() {
+    this.methodCalled('incrementPromoImpressionCount');
+  }
+
+  /** @override */
+  didNavigateToSyncPage() {
+    this.methodCalled('didNavigateToSyncPage');
+  }
+
+  /** @override */
+  didNavigateAwayFromSyncPage() {
+    this.methodCalled('didNavigateAwayFromSyncPage');
+  }
+
+  /** @override */
+  setSyncDatatypes(syncPrefs) {
+    this.methodCalled('setSyncDatatypes', syncPrefs);
+    return Promise.resolve(settings.PageStatus.CONFIGURE);
+  }
+
+  /** @override */
+  setSyncEncryption(syncPrefs) {
+    this.methodCalled('setSyncEncryption', syncPrefs);
+    return Promise.resolve(this.encryptionResponse);
   }
 }

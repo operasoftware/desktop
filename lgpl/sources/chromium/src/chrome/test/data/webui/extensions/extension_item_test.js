@@ -74,6 +74,7 @@ cr.define('extension_item_tests', function() {
     SourceIndicator: 'source indicator',
     EnableToggle: 'toggle is disabled when necessary',
     RemoveButton: 'remove button hidden when necessary',
+    HtmlInName: 'html in extension name',
   };
 
   var suiteName = 'ExtensionItemTest';
@@ -104,6 +105,8 @@ cr.define('extension_item_tests', function() {
 
       expectTrue(item.$['enable-toggle'].checked);
       item.set('data.state', 'DISABLED');
+      expectFalse(item.$['enable-toggle'].checked);
+      item.set('data.state', 'BLACKLISTED');
       expectFalse(item.$['enable-toggle'].checked);
     });
 
@@ -301,7 +304,15 @@ cr.define('extension_item_tests', function() {
 
     test(assert(TestNames.EnableToggle), function() {
       expectFalse(item.$['enable-toggle'].disabled);
+
+      // Test case where user does not have permission.
       item.set('data.userMayModify', false);
+      Polymer.dom.flush();
+      expectTrue(item.$['enable-toggle'].disabled);
+
+      // Test case of a blacklisted extension.
+      item.set('data.userMayModify', true);
+      item.set('data.state', 'BLACKLISTED');
       Polymer.dom.flush();
       expectTrue(item.$['enable-toggle'].disabled);
     });
@@ -311,6 +322,16 @@ cr.define('extension_item_tests', function() {
       item.set('data.controlledInfo', {type: 'POLICY', text: 'policy'});
       Polymer.dom.flush();
       expectTrue(item.$['remove-button'].hidden);
+    });
+
+    test(assert(TestNames.HtmlInName), function() {
+      let name = '<HTML> in the name!';
+      item.set('data.name', name);
+      Polymer.dom.flush();
+      assertEquals(name, item.$.name.textContent.trim());
+      // "Related to $1" is IDS_MD_EXTENSIONS_EXTENSION_A11Y_ASSOCIATION.
+      assertEquals(
+          `Related to ${name}`, item.$.a11yAssociation.textContent.trim());
     });
   });
 

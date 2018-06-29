@@ -35,6 +35,8 @@
 
 namespace blink {
 
+const size_t ImageDecoder::kNoDecodedImageByteLimit;
+
 inline bool MatchesJPEGSignature(const char* contents) {
   return !memcmp(contents, "\xFF\xD8\xFF", 3);
 }

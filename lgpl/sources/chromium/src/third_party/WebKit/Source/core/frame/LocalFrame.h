@@ -33,6 +33,7 @@
 
 #include "base/macros.h"
 #include "core/CoreExport.h"
+#include "core/dom/ComputedAccessibleNode.h"
 #include "core/dom/UserGestureIndicator.h"
 #include "core/dom/WeakIdentifierMap.h"
 #include "core/editing/Forward.h"
@@ -44,6 +45,8 @@
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 #include "platform/scroll/ScrollTypes.h"
+#include "third_party/WebKit/Source/core/dom/AXObjectCache.h"
+#include "third_party/WebKit/public/mojom/loader/prefetch_url_loader_service.mojom-blink.h"
 
 namespace service_manager {
 class InterfaceProvider;
@@ -53,6 +56,7 @@ namespace blink {
 
 class AssociatedInterfaceProvider;
 class Color;
+class ComputedAccessibleNode;
 class ContentSettingsClient;
 class Document;
 class DOMRect;
@@ -68,8 +72,8 @@ class InputMethodController;
 class InspectorTraceEvents;
 class CoreProbeSink;
 class IdlenessDetector;
+class InspectorTaskRunner;
 class InterfaceRegistry;
-class IntPoint;
 class IntSize;
 class LayoutView;
 class LocalDOMWindow;
@@ -83,6 +87,7 @@ class PluginData;
 class ScriptController;
 class SpellChecker;
 class TextSuggestionController;
+class WebComputedAXTree;
 class WebFrameScheduler;
 class WebPluginContainerImpl;
 class WebURLLoaderFactory;
@@ -101,12 +106,7 @@ class CORE_EXPORT LocalFrame final : public Frame,
 
   void Init();
   void SetView(LocalFrameView*);
-  void CreateView(const IntSize&,
-                  const Color&,
-                  ScrollbarMode = kScrollbarAuto,
-                  bool horizontal_lock = false,
-                  ScrollbarMode = kScrollbarAuto,
-                  bool vertical_lock = false);
+  void CreateView(const IntSize&, const Color&);
 
   // Frame overrides:
   ~LocalFrame() override;
@@ -123,6 +123,7 @@ class CORE_EXPORT LocalFrame final : public Frame,
   void PrintNavigationErrorMessage(const Frame&, const char* reason);
   void PrintNavigationWarning(const String&);
   bool PrepareForCommit() override;
+  void CheckCompleted() override;
   void DidChangeVisibilityState() override;
   void DidFreeze() override;
   void DidResume() override;
@@ -162,6 +163,8 @@ class CORE_EXPORT LocalFrame final : public Frame,
   SpellChecker& GetSpellChecker() const;
   FrameConsole& Console() const;
 
+  void IntrinsicSizingInfoChanged(const IntrinsicSizingInfo&);
+
   DOMRect* GetSelectionBoundingRect();
 
   // This method is used to get the highest level LocalFrame in this
@@ -179,6 +182,7 @@ class CORE_EXPORT LocalFrame final : public Frame,
   bool IsCrossOriginSubframe() const;
 
   CoreProbeSink* GetProbeSink() { return probe_sink_.Get(); }
+  scoped_refptr<InspectorTaskRunner> GetInspectorTaskRunner();
 
   // =========================================================================
   // All public functions below this point are candidates to move out of
@@ -187,10 +191,17 @@ class CORE_EXPORT LocalFrame final : public Frame,
   // See GraphicsLayerClient.h for accepted flags.
   String GetLayerTreeAsTextForTesting(unsigned flags = 0) const;
 
-  void SetPrinting(bool printing,
-                   const FloatSize& page_size,
-                   const FloatSize& original_page_size,
-                   float maximum_shrink_ratio);
+  // Begin printing with the given page size information.
+  // The frame content will fit to the page size with specified shrink ratio.
+  void StartPrinting(const FloatSize& page_size,
+                     const FloatSize& original_page_size,
+                     float maximum_shrink_ratio);
+
+  // Begin printing without changing the the frame's layout. This is used for
+  // child frames because they don't need to fit to a page size.
+  void StartPrintingWithoutPrintingLayout();
+
+  void EndPrinting();
   bool ShouldUsePrintingLayout() const;
   FloatSize ResizePageRectsKeepingRatio(const FloatSize& original_size,
                                         const FloatSize& expected_size) const;
@@ -214,8 +225,6 @@ class CORE_EXPORT LocalFrame final : public Frame,
   PositionWithAffinityTemplate<EditingAlgorithm<NodeTraversal>>
   PositionForPoint(const LayoutPoint& frame_point);
   Document* DocumentAtPoint(const LayoutPoint&);
-  EphemeralRangeTemplate<EditingAlgorithm<NodeTraversal>> RangeForPoint(
-      const IntPoint& frame_point);
 
   bool ShouldReuseDefaultView(const KURL&) const;
   void RemoveSpellingMarkersUnderWords(const Vector<String>& words);
@@ -227,7 +236,7 @@ class CORE_EXPORT LocalFrame final : public Frame,
 
   // Returns the frame scheduler, creating one if needed.
   WebFrameScheduler* FrameScheduler();
-  scoped_refptr<WebTaskRunner> GetTaskRunner(TaskType);
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(TaskType);
   void ScheduleVisualUpdateUnlessThrottled();
 
   bool IsNavigationAllowed() const { return navigation_disable_count_ == 0; }
@@ -315,6 +324,16 @@ class CORE_EXPORT LocalFrame final : public Frame,
   }
   bool IsProvisional() const { return is_provisional_; }
 
+  // Returns whether the frame is trying to save network data by showing a
+  // preview.
+  bool IsUsingDataSavingPreview() const;
+
+  // Prefetch URLLoader service. May return nullptr.
+  blink::mojom::blink::PrefetchURLLoaderService* PrefetchURLLoaderService();
+
+  ComputedAccessibleNode* GetOrCreateComputedAccessibleNode(AXID,
+                                                            WebComputedAXTree*);
+
  private:
   friend class FrameNavigationDisabler;
 
@@ -334,6 +353,17 @@ class CORE_EXPORT LocalFrame final : public Frame,
   bool CanNavigateWithoutFramebusting(const Frame&, String& error_reason);
 
   void PropagateInertToChildFrames();
+
+  // Internal implementation for starting or ending printing.
+  // |printing| is true when printing starts, false when printing ends.
+  // |page_size|, |original_page_size|, and |maximum_shrink_ratio| are only
+  // meaningful when starting to print with printing layout -- both |printing|
+  // and |use_printing_layout| are true.
+  void SetPrinting(bool printing,
+                   bool use_printing_layout,
+                   const FloatSize& page_size,
+                   const FloatSize& original_page_size,
+                   float maximum_shrink_ratio);
 
   std::unique_ptr<WebFrameScheduler> frame_scheduler_;
 
@@ -372,6 +402,7 @@ class CORE_EXPORT LocalFrame final : public Frame,
   bool in_view_source_mode_;
 
   Member<CoreProbeSink> probe_sink_;
+  scoped_refptr<InspectorTaskRunner> inspector_task_runner_;
   Member<PerformanceMonitor> performance_monitor_;
   Member<IdlenessDetector> idleness_detector_;
   Member<InspectorTraceEvents> inspector_trace_events_;
@@ -381,8 +412,14 @@ class CORE_EXPORT LocalFrame final : public Frame,
   IntRect remote_viewport_intersection_;
   std::unique_ptr<FrameResourceCoordinator> frame_resource_coordinator_;
 
+  // Used to keep track of which ComputedAccessibleNodes have already been
+  // instantiated in this frame to avoid constructing duplicates.
+  HeapHashMap<AXID, Member<ComputedAccessibleNode>> computed_node_mapping_;
+
   // Per-frame URLLoader factory.
   std::unique_ptr<WebURLLoaderFactory> url_loader_factory_;
+
+  blink::mojom::blink::PrefetchURLLoaderServicePtr prefetch_loader_service_;
 };
 
 inline FrameLoader& LocalFrame::Loader() const {

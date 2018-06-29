@@ -53,21 +53,6 @@ cr.define('settings_people_page', function() {
         assertTrue(newBg.includes(iconDataUrl));
       });
     });
-
-    test('GetProfileManagesSupervisedUsers', function() {
-      return browserProxy.whenCalled('getProfileManagesSupervisedUsers').then(
-          function() {
-            Polymer.dom.flush();
-            assertFalse(!!peoplePage.$$('#manageSupervisedUsersContainer'));
-
-            cr.webUIListenerCallback(
-              'profile-manages-supervised-users-changed',
-              true);
-
-            Polymer.dom.flush();
-            assertTrue(!!peoplePage.$$('#manageSupervisedUsersContainer'));
-          });
-    });
   });
 
   if (!cr.isChromeOS) {
@@ -97,6 +82,14 @@ cr.define('settings_people_page', function() {
       });
 
       teardown(function() { peoplePage.remove(); });
+
+      // This makes sure UI meant for DICE-enabled profiles are not leaked to
+      // non-dice profiles.
+      // TODO(scottchen): This should be removed once all profiles are fully
+      // migrated.
+      test('NoManageProfileRow', function() {
+        assertFalse(!!peoplePage.$$('#edit-profile'));
+      });
 
       test('GetProfileInfo', function() {
         let disconnectButton = null;
@@ -132,11 +125,10 @@ cr.define('settings_people_page', function() {
         }).then(function(deleteProfile) {
           assertFalse(deleteProfile);
 
-          cr.webUIListenerCallback('sync-status-changed', {
+          sync_test_util.simulateSyncStatus({
             signedIn: true,
             domain: 'example.com',
           });
-          Polymer.dom.flush();
 
           assertFalse(!!peoplePage.$$('#disconnectDialog'));
           MockInteractions.tap(disconnectButton);
@@ -253,7 +245,7 @@ cr.define('settings_people_page', function() {
                 listenOnce(window, 'popstate', resolve);
               });
 
-              cr.webUIListenerCallback('sync-status-changed', {
+              sync_test_util.simulateSyncStatus({
                 signedIn: false,
               });
 
@@ -274,7 +266,7 @@ cr.define('settings_people_page', function() {
         assertFalse(!!peoplePage.$$('#sync-status'));
 
         return browserProxy.whenCalled('getSyncStatus').then(function() {
-          cr.webUIListenerCallback('sync-status-changed', {
+          sync_test_util.simulateSyncStatus({
             signedIn: true,
             syncSystemEnabled: true,
           });
@@ -284,7 +276,7 @@ cr.define('settings_people_page', function() {
           assertTrue(!!syncStatusContainer);
           assertTrue(syncStatusContainer.hasAttribute('actionable'));
 
-          cr.webUIListenerCallback('sync-status-changed', {
+          sync_test_util.simulateSyncStatus({
             managed: true,
             signedIn: true,
             syncSystemEnabled: true,
@@ -301,7 +293,7 @@ cr.define('settings_people_page', function() {
         assertFalse(!!peoplePage.$$('#sync-status'));
 
         return browserProxy.whenCalled('getSyncStatus').then(function() {
-          cr.webUIListenerCallback('sync-status-changed', {
+          sync_test_util.simulateSyncStatus({
             hasError: true,
             statusAction: settings.StatusAction.NO_ACTION,
             signedIn: true,
@@ -313,7 +305,7 @@ cr.define('settings_people_page', function() {
           assertTrue(!!syncStatusContainer);
           assertFalse(syncStatusContainer.hasAttribute('actionable'));
 
-          cr.webUIListenerCallback('sync-status-changed', {
+          sync_test_util.simulateSyncStatus({
             hasError: true,
             statusAction: settings.StatusAction.UPGRADE_CLIENT,
             signedIn: true,
@@ -324,6 +316,75 @@ cr.define('settings_people_page', function() {
           syncStatusContainer = peoplePage.$$('#sync-status');
           assertTrue(!!syncStatusContainer);
           assertTrue(syncStatusContainer.hasAttribute('actionable'));
+        });
+      });
+    });
+
+    suite('DiceUITest', function() {
+      let peoplePage = null;
+      let browserProxy = null;
+      let profileInfoBrowserProxy = null;
+
+      suiteSetup(function() {
+        // Force UIs to think DICE is enabled for this profile.
+        loadTimeData.overrideValues({
+          diceEnabled: true,
+        });
+      });
+
+      setup(function() {
+        browserProxy = new TestSyncBrowserProxy();
+        settings.SyncBrowserProxyImpl.instance_ = browserProxy;
+
+        profileInfoBrowserProxy = new TestProfileInfoBrowserProxy();
+        settings.ProfileInfoBrowserProxyImpl.instance_ =
+            profileInfoBrowserProxy;
+
+        PolymerTest.clearBody();
+        peoplePage = document.createElement('settings-people-page');
+        document.body.appendChild(peoplePage);
+
+        Polymer.dom.flush();
+      });
+
+      teardown(function() {
+        peoplePage.remove();
+      });
+
+      test('ShowCorrectRows', function() {
+        return browserProxy.whenCalled('getSyncStatus').then(function() {
+          // The correct /manageProfile link row is shown.
+          assertTrue(!!peoplePage.$$('#edit-profile'));
+          assertFalse(!!peoplePage.$$('#picture-subpage-trigger'));
+
+          // Sync-overview row should not exist when diceEnabled is true, even
+          // if syncStatus values would've warranted the row otherwise.
+          sync_test_util.simulateSyncStatus({
+            signedIn: false,
+            signinAllowed: true,
+            syncSystemEnabled: true,
+          });
+          assertFalse(!!peoplePage.$$('#sync-overview'));
+
+          // The control element should exist when policy allows.
+          const accountControl = peoplePage.$$('settings-sync-account-control');
+          assertTrue(
+              window.getComputedStyle(accountControl)['display'] != 'none');
+
+          // Control element doesn't exist when policy forbids sync or sign-in.
+          sync_test_util.simulateSyncStatus({
+            signinAllowed: false,
+            syncSystemEnabled: true,
+          });
+          assertEquals(
+              window.getComputedStyle(accountControl)['display'], 'none');
+
+          sync_test_util.simulateSyncStatus({
+            signinAllowed: true,
+            syncSystemEnabled: false,
+          });
+          assertEquals(
+              window.getComputedStyle(accountControl)['display'], 'none');
         });
       });
     });
