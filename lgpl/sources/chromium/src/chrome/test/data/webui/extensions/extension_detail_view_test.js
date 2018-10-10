@@ -55,7 +55,7 @@ cr.define('extension_detail_view_tests', function() {
       extension_test_util.testIcons(item);
 
       var testIsVisible = extension_test_util.isVisible.bind(null, item);
-      expectTrue(testIsVisible('#close-button'));
+      expectTrue(testIsVisible('#closeButton'));
       expectTrue(testIsVisible('#icon'));
       expectTrue(testIsVisible('#enable-toggle'));
       expectFalse(testIsVisible('#extensions-options'));
@@ -149,10 +149,10 @@ cr.define('extension_detail_view_tests', function() {
       Polymer.dom.flush();
       assertTrue(extensionOptions.disabled);
 
-      expectFalse(testIsVisible('#error-icon'));
+      expectFalse(testIsVisible('.warning-icon'));
       item.set('data.runtimeWarnings', ['Dummy warning']);
       Polymer.dom.flush();
-      expectTrue(testIsVisible('#error-icon'));
+      expectTrue(testIsVisible('.warning-icon'));
     });
 
     test(assert(TestNames.LayoutSource), function() {
@@ -207,12 +207,10 @@ cr.define('extension_detail_view_tests', function() {
       mockDelegate.testClickingCalls(
           item.$$('#remove-extension'), 'deleteItem', [extensionData.id]);
       mockDelegate.testClickingCalls(
-          item.$$('#load-path > a[is=\'action-link\']'),
-          'showInFolder', [extensionData.id]);
+          item.$$('#load-path > a[is=\'action-link\']'), 'showInFolder',
+          [extensionData.id]);
       mockDelegate.testClickingCalls(
-          item.$$('#reload-button'),
-          'reloadItem',
-          [extensionData.id],
+          item.$$('#reload-button'), 'reloadItem', [extensionData.id],
           Promise.resolve());
     });
 

@@ -14,7 +14,9 @@ cr.define('signin_sync_confirmation', function() {
 
     // Tests that no DCHECKS are thrown during initialization of the UI.
     test('LoadPage', function() {
-      assertEquals('Get even more from Chrome', app.$.heading.textContent);
+      assertEquals(
+          'Get Google smarts in Chrome',
+          app.$.syncConfirmationHeading.textContent.trim());
     });
   });
 
@@ -29,9 +31,9 @@ cr.define('signin_sync_confirmation', function() {
     setup(function() {
       // This test suite makes comparisons with strings in their default locale,
       // which is en-US.
-      assertEquals('en-US', navigator.language,
-                   'Cannot verify strings for the ' + navigator.language +
-                       'locale.');
+      assertEquals(
+          'en-US', navigator.language,
+          'Cannot verify strings for the ' + navigator.language + 'locale.');
 
       browserProxy = new TestSyncConfirmationBrowserProxy();
       sync.confirmation.SyncConfirmationBrowserProxyImpl.instance_ =
@@ -43,18 +45,14 @@ cr.define('signin_sync_confirmation', function() {
     });
 
     const STANDARD_CONSENT_DESCRIPTION_TEXT = [
-        'Get even more from Chrome',
-        'Sync your bookmarks, passwords, and history on all your devices',
-        'Get more personalized experiences, such as better ' +
-            'content suggestions and smarter Translate',
-        'Bring powerful Google services like spell check and tap to search ' +
-            'to Chrome',
-        'You can customize what information Google collects in ' +
-            '<a id="settingsLink" href="chrome://settings">Settings</a> ' +
-            'anytime.',
-        'Google may use your browsing activity, content on some sites you ' +
-            'visit, and other browser interactions to personalize Chrome and ' +
-            'other Google services like Translate, Search, and ads.',
+      'Get Google smarts in Chrome',
+      'Your bookmarks, passwords, history, and more on all your devices',
+      'Personalized Google services like Google Pay',
+      'Improve Chrome and its security by sending system and usage ' +
+          'information to Google',
+      'Google may use content on sites you visit and browsing activity and ' +
+          'interactions to personalize Chrome and other Google services like ' +
+          'Translate, Search, and ads. You can customize this in Settings.',
     ];
 
 
@@ -62,36 +60,32 @@ cr.define('signin_sync_confirmation', function() {
     // button.
     test('recordConsentOnConfirm', function() {
       app.$$('#confirmButton').click();
-      return browserProxy.whenCalled('confirm').then(
-          function(arguments) {
-              assertEquals(2, arguments.length);
-              var description = arguments[0];
-              var confirmation = arguments[1];
+      return browserProxy.whenCalled('confirm').then(function(arguments) {
+        assertEquals(2, arguments.length);
+        var description = arguments[0];
+        var confirmation = arguments[1];
 
-              assertEquals(JSON.stringify(STANDARD_CONSENT_DESCRIPTION_TEXT),
-                           JSON.stringify(description));
-              assertEquals('Yes, I\'m in', confirmation);
-          });
+        assertEquals(
+            JSON.stringify(STANDARD_CONSENT_DESCRIPTION_TEXT),
+            JSON.stringify(description));
+        assertEquals('Yes, I\'m in', confirmation);
+      });
     });
 
     // Tests that the expected strings are recorded when clicking the Confirm
     // button.
     test('recordConsentOnSettingsLink', function() {
-      app.$$('#settingsLink').click();
-      return browserProxy.whenCalled('goToSettings').then(
-          function(arguments) {
-            assertEquals(2, arguments.length);
-            var description = arguments[0];
-            var confirmation = arguments[1];
+      app.$$('#settingsButton').click();
+      return browserProxy.whenCalled('goToSettings').then(function(arguments) {
+        assertEquals(2, arguments.length);
+        var description = arguments[0];
+        var confirmation = arguments[1];
 
-            assertEquals(JSON.stringify(STANDARD_CONSENT_DESCRIPTION_TEXT),
-                         JSON.stringify(description));
-            assertEquals(
-                'You can customize what information Google collects in ' +
-                    '<a id="settingsLink" href="chrome://settings">Settings' +
-                    '</a> anytime.',
-                confirmation);
-          });
+        assertEquals(
+            JSON.stringify(STANDARD_CONSENT_DESCRIPTION_TEXT),
+            JSON.stringify(description));
+        assertEquals('Settings', confirmation);
+      });
     });
   });
 });

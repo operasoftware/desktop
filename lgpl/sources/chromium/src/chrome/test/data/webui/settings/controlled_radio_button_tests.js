@@ -21,11 +21,10 @@ suite('controlled radio button', function() {
   });
 
   test('disables when pref is managed', function() {
-    radioButton.set('pref.enforcement',
-                    chrome.settingsPrivate.Enforcement.ENFORCED);
+    radioButton.set(
+        'pref.enforcement', chrome.settingsPrivate.Enforcement.ENFORCED);
     Polymer.dom.flush();
-    // TODO(dbeam): rewrite this not to test private state (controlled_).
-    assertTrue(radioButton.controlled_);
+    assertTrue(radioButton.disabled);
     assertFalse(!!radioButton.$$('cr-policy-pref-indicator'));
 
     radioButton.set('name', 'true');
@@ -34,8 +33,8 @@ suite('controlled radio button', function() {
 
     radioButton.set('pref.enforcement', undefined);
     Polymer.dom.flush();
-    assertFalse(radioButton.controlled_);
-    assertEquals('none',
-                 radioButton.$$('cr-policy-pref-indicator').style.display);
+    assertFalse(radioButton.disabled);
+    assertEquals(
+        'none', radioButton.$$('cr-policy-pref-indicator').style.display);
   });
 });

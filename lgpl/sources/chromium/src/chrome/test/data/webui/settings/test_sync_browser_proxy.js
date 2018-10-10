@@ -29,10 +29,7 @@ class TestSyncBrowserProxy extends TestBrowserProxy {
   /** @override */
   getSyncStatus() {
     this.methodCalled('getSyncStatus');
-    return Promise.resolve({
-      signedIn: true,
-      signedInUsername: 'fakeUsername'
-    });
+    return Promise.resolve({signedIn: true, signedInUsername: 'fakeUsername'});
   }
 
   /** @override */
@@ -52,8 +49,8 @@ class TestSyncBrowserProxy extends TestBrowserProxy {
   }
 
   /** @override */
-  startSyncingWithEmail(email) {
-    this.methodCalled('startSyncingWithEmail', email);
+  startSyncingWithEmail(email, isDefaultPromoAccount) {
+    this.methodCalled('startSyncingWithEmail', [email, isDefaultPromoAccount]);
   }
 
   setImpressionCount(count) {
@@ -77,8 +74,8 @@ class TestSyncBrowserProxy extends TestBrowserProxy {
   }
 
   /** @override */
-  didNavigateAwayFromSyncPage() {
-    this.methodCalled('didNavigateAwayFromSyncPage');
+  didNavigateAwayFromSyncPage(abort) {
+    this.methodCalled('didNavigateAwayFromSyncPage', abort);
   }
 
   /** @override */

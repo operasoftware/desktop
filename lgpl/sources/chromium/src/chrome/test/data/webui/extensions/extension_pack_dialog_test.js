@@ -65,7 +65,7 @@ cr.define('extension_pack_dialog_tests', function() {
     });
 
     test(assert(TestNames.Interaction), function() {
-      var dialogElement = packDialog.$$('dialog');
+      var dialogElement = packDialog.$$('cr-dialog').getNative();
 
       expectFalse(extension_test_util.isElementVisible(dialogElement));
       packDialog.show();
@@ -82,6 +82,7 @@ cr.define('extension_pack_dialog_tests', function() {
         expectEquals(kRootPath, packDialog.packDirectory_);
       }));
 
+      Polymer.dom.flush();
       expectEquals('', packDialog.$$('#key-file').value);
       MockInteractions.tap(packDialog.$$('#key-file-browse'));
       expectTrue(!!mockDelegate.keyPromise);
@@ -104,7 +105,7 @@ cr.define('extension_pack_dialog_tests', function() {
     });
 
     test(assert(TestNames.PackSuccess), function() {
-      var dialogElement = packDialog.$$('dialog');
+      var dialogElement = packDialog.$$('cr-dialog').getNative();
       var packDialogAlert;
       var alertElement;
 
@@ -128,7 +129,7 @@ cr.define('extension_pack_dialog_tests', function() {
           })
           .then(() => {
             packDialogAlert = packDialog.$$('extensions-pack-dialog-alert');
-            alertElement = packDialogAlert.$.dialog;
+            alertElement = packDialogAlert.$.dialog.getNative();
             expectTrue(extension_test_util.isElementVisible(alertElement));
             expectTrue(extension_test_util.isElementVisible(dialogElement));
             expectTrue(!!packDialogAlert.$$('.action-button'));
@@ -144,7 +145,7 @@ cr.define('extension_pack_dialog_tests', function() {
     });
 
     test(assert(TestNames.PackError), function() {
-      var dialogElement = packDialog.$$('dialog');
+      var dialogElement = packDialog.$$('cr-dialog').getNative();
       var packDialogAlert;
       var alertElement;
 
@@ -166,7 +167,7 @@ cr.define('extension_pack_dialog_tests', function() {
 
         // Make sure new alert and the appropriate buttons are visible.
         packDialogAlert = packDialog.$$('extensions-pack-dialog-alert');
-        alertElement = packDialogAlert.$.dialog;
+        alertElement = packDialogAlert.$.dialog.getNative();
         expectTrue(extension_test_util.isElementVisible(alertElement));
         expectTrue(extension_test_util.isElementVisible(dialogElement));
         expectTrue(!!packDialogAlert.$$('.action-button'));
@@ -181,7 +182,7 @@ cr.define('extension_pack_dialog_tests', function() {
     });
 
     test(assert(TestNames.PackWarning), function() {
-      var dialogElement = packDialog.$$('dialog');
+      var dialogElement = packDialog.$$('cr-dialog').getNative();
       var packDialogAlert;
       var alertElement;
 
@@ -207,7 +208,7 @@ cr.define('extension_pack_dialog_tests', function() {
 
             // Make sure new alert and the appropriate buttons are visible.
             packDialogAlert = packDialog.$$('extensions-pack-dialog-alert');
-            alertElement = packDialogAlert.$.dialog;
+            alertElement = packDialogAlert.$.dialog.getNative();
             expectTrue(extension_test_util.isElementVisible(alertElement));
             expectTrue(extension_test_util.isElementVisible(dialogElement));
             expectFalse(packDialogAlert.$$('.cancel-button').hidden);

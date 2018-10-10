@@ -8,8 +8,8 @@
 var ROOT_PATH = '../../../../../';
 
 // Polymer BrowserTest fixture.
-GEN_INCLUDE([
-    ROOT_PATH + 'chrome/test/data/webui/polymer_browser_test_base.js']);
+GEN_INCLUDE(
+    [ROOT_PATH + 'chrome/test/data/webui/polymer_browser_test_base.js']);
 GEN('#include "chrome/browser/ui/webui/extensions/' +
     'extension_settings_browsertest.h"');
 GEN('#include "chrome/common/chrome_features.h"');
@@ -226,11 +226,9 @@ TEST_F('CrExtensionsDetailViewTest', 'LayoutSource', function() {
   this.runMochaTest(extension_detail_view_tests.TestNames.LayoutSource);
 });
 
-TEST_F(
-    'CrExtensionsDetailViewTest', 'ClickableElements', function() {
-      this.runMochaTest(
-          extension_detail_view_tests.TestNames.ClickableElements);
-    });
+TEST_F('CrExtensionsDetailViewTest', 'ClickableElements', function() {
+  this.runMochaTest(extension_detail_view_tests.TestNames.ClickableElements);
+});
 
 TEST_F('CrExtensionsDetailViewTest', 'IndicatorTest', function() {
   this.runMochaTest(extension_detail_view_tests.TestNames.Indicator);
@@ -476,6 +474,10 @@ TEST_F('CrExtensionsShortcutTest', 'KeyStrokeToString', function() {
   this.runMochaTest(extension_shortcut_tests.TestNames.IsValidKeyCode);
 });
 
+TEST_F('CrExtensionsShortcutTest', 'ScopeChange', function() {
+  this.runMochaTest(extension_shortcut_tests.TestNames.ScopeChange);
+});
+
 var CrExtensionsShortcutInputTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get browsePreload() {
@@ -520,7 +522,14 @@ TEST_F('CrExtensionsPackDialogTest', 'Interaction', function() {
   this.runMochaTest(extension_pack_dialog_tests.TestNames.Interaction);
 });
 
-TEST_F('CrExtensionsPackDialogTest', 'PackSuccess', function() {
+// Disabling on Windows due to flaky timeout on some build bots.
+// http://crbug.com/832885
+GEN('#if defined(OS_WIN)');
+GEN('#define MAYBE_PackSuccess DISABLED_PackSuccess');
+GEN('#else');
+GEN('#define MAYBE_PackSuccess PackSuccess');
+GEN('#endif');
+TEST_F('CrExtensionsPackDialogTest', 'MAYBE_PackSuccess', function() {
   this.runMochaTest(extension_pack_dialog_tests.TestNames.PackSuccess);
 });
 
@@ -686,6 +695,57 @@ TEST_F('CrExtensionsViewManagerTest', 'VisibilityTest', function() {
 
 TEST_F('CrExtensionsViewManagerTest', 'EventFiringTest', function() {
   this.runMochaTest(extension_view_manager_tests.TestNames.EventFiring);
+});
+
+////////////////////////////////////////////////////////////////////////////////
+// Error Console tests
+
+var CrExtensionsErrorConsoleTest = class extends CrExtensionsBrowserTest {
+  /** @override */
+  get suiteName() {
+    return 'ErrorConsoleTests';
+  }
+
+  /** @override */
+  get browsePreload() {
+    return 'chrome://extensions/?errors=oehidglfoeondlkoeloailjdmmghacge';
+  }
+
+  /** @override */
+  testGenPreamble() {
+    GEN('  SetDevModeEnabled(true);');
+    GEN('  EnableErrorConsole();');
+    GEN('  InstallErrorsExtension();');
+  }
+
+  /** @override */
+  testGenPostamble() {
+    GEN('  SetDevModeEnabled(false);');  // Return this to default.
+  }
+};
+
+TEST_F('CrExtensionsErrorConsoleTest', 'TestUpDownErrors', function() {
+  const STACK_ERRORS = '* /deep/ li';
+  const ACTIVE_ERROR_IN_STACK = '* /deep/ li[tabindex="0"]';
+
+  let initialFocus = document.querySelector(ACTIVE_ERROR_IN_STACK);
+  assertTrue(!!initialFocus);
+  assertEquals(1, document.querySelectorAll(ACTIVE_ERROR_IN_STACK).length);
+  assertEquals(4, document.querySelectorAll(STACK_ERRORS).length);
+
+  // Pressing up when the first item is focused should NOT change focus.
+  MockInteractions.keyDownOn(initialFocus, 38, '', 'ArrowUp');
+  assertEquals(initialFocus, document.querySelector(ACTIVE_ERROR_IN_STACK));
+
+  // Pressing down when the first item is focused should change focus.
+  MockInteractions.keyDownOn(initialFocus, 40, '', 'ArrowDown');
+  assertNotEquals(initialFocus, document.querySelector(ACTIVE_ERROR_IN_STACK));
+
+  // Pressing up when the second item is focused should focus the first again.
+  MockInteractions.keyDownOn(initialFocus, 38, '', 'ArrowUp');
+  assertEquals(initialFocus, document.querySelector(ACTIVE_ERROR_IN_STACK));
+
+  testDone();
 });
 
 ////////////////////////////////////////////////////////////////////////////////

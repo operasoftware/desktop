@@ -10,6 +10,7 @@ const ROOT_PATH = '../../../../../';
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(
     [ROOT_PATH + 'chrome/test/data/webui/polymer_browser_test_base.js']);
+GEN('#include "chrome/common/chrome_features.h"');
 
 /**
  * Test fixture for Polymer Settings elements.
@@ -755,6 +756,7 @@ CrSettingsSearchEnginesTest.prototype = {
   /** @override */
   extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
     '../test_browser_proxy.js',
+    'test_util.js',
     'test_extension_control_browser_proxy.js',
     'test_search_engines_browser_proxy.js',
     'search_engines_page_test.js',
@@ -803,6 +805,41 @@ GEN('#endif  // defined(USE_NSS_CERTS)');
  * @constructor
  * @extends {CrSettingsBrowserTest}
  */
+function CrSettingsPersonalizationOptionsTest() {}
+
+CrSettingsPersonalizationOptionsTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://settings/privacy_page/personalization_options.html',
+
+  /** @override */
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    ROOT_PATH + 'ui/webui/resources/js/promise_resolver.js',
+    'test_util.js',
+    '../test_browser_proxy.js',
+    'test_privacy_page_browser_proxy.js',
+    'personalization_options_test.js',
+  ]),
+};
+
+TEST_F('CrSettingsPersonalizationOptionsTest', 'NonOfficialBuild', function() {
+  settings_personalization_options.registerTests();
+  mocha.run();
+});
+
+GEN('#if defined(GOOGLE_CHROME_BUILD)');
+TEST_F('CrSettingsPersonalizationOptionsTest', 'OfficialBuild', function() {
+  settings_personalization_options.registerOfficialBuildTests();
+  mocha.run();
+});
+GEN('#endif');
+
+/**
+ * Test fixture for chrome/browser/resources/settings/privacy_page/.
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
 function CrSettingsPrivacyPageTest() {}
 
 CrSettingsPrivacyPageTest.prototype = {
@@ -837,10 +874,7 @@ CrSettingsSiteDataDetailsTest.prototype = {
   /** @override */
   browsePreload: 'chrome://settings/privacy_page/privacy_page.html',
 
-  /** @override */
-  commandLineSwitches: [{
-    switchName: 'enable-site-settings',
-  }],
+  featureList: ['features::kSiteSettings', ''],
 
   /** @override */
   extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
@@ -916,10 +950,7 @@ CrSettingsAllSitesTest.prototype = {
   /** @override */
   browsePreload: 'chrome://settings/privacy_page/privacy_page.html',
 
-  /** @override */
-  commandLineSwitches: [{
-    switchName: 'enable-site-settings',
-  }],
+  featureList: ['features::kSiteSettings', ''],
 
   /** @override */
   extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
@@ -955,7 +986,15 @@ CrSettingsSiteDetailsTest.prototype = {
   ]),
 };
 
-TEST_F('CrSettingsSiteDetailsTest', 'All', function() {
+// Disabling on Windows debug due to flaky timeout on Win7 Tests (dbg)(1) bot.
+// https://crbug.com/825304
+GEN('#if defined(OS_WIN) && !defined(NDEBUG)');
+GEN('#define MAYBE_All DISABLED_All');
+GEN('#else');
+GEN('#define MAYBE_All All');
+GEN('#endif');
+
+TEST_F('CrSettingsSiteDetailsTest', 'MAYBE_All', function() {
   mocha.run();
 });
 
@@ -996,10 +1035,7 @@ CrSettingsSiteListTest.prototype = {
   /** @override */
   browsePreload: 'chrome://settings/privacy_page/privacy_page.html',
 
-  /** @override */
-  commandLineSwitches: [{
-    switchName: 'enable-site-settings',
-  }],
+  featureList: ['features::kSiteSettings', ''],
 
   /** @override */
   extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
@@ -1690,6 +1726,31 @@ TEST_F('CrSettingsPrintingPageTest', 'All', function() {
 });
 
 /**
+ * Test fixture for the Smb Shares page.
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
+function CrSettingsSmbPageTest() {}
+
+CrSettingsSmbPageTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://settings/downloads_page/smb_shares_page.html',
+
+  /** @override */
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    'test_util.js',
+    '../test_browser_proxy.js',
+    'smb_shares_page_tests.js',
+  ]),
+};
+
+TEST_F('CrSettingsSmbPageTest', 'All', function() {
+  mocha.run();
+});
+
+/**
  * Test fixture for the multidevice settings page.
  * @constructor
  * @extends {CrSettingsBrowserTest}
@@ -1712,9 +1773,33 @@ TEST_F('CrSettingsMultidevicePageTest', 'All', function() {
   mocha.run();
 });
 
-GEN('#endif  // defined(OS_CHROMEOS)');
+/**
+ * Test fixture for the Linux for Chromebook (Crostini) page.
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
+function CrSettingsCrostiniPageTest() {}
 
-GEN('#if defined(OS_CHROMEOS)');
+CrSettingsCrostiniPageTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://settings/crostini_page/crostini_page.html',
+
+  /** @override */
+  featureList: ['features::kExperimentalCrostiniUI', ''],
+
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    ROOT_PATH + 'ui/webui/resources/js/promise_resolver.js',
+    '../test_browser_proxy.js',
+    'test_crostini_browser_proxy.js',
+    'crostini_page_test.js',
+  ]),
+};
+
+TEST_F('CrSettingsCrostiniPageTest', 'All', function() {
+  mocha.run();
+});
 
 /**
  * Test fixture for the Google Play Store (ARC) page.
@@ -1737,7 +1822,7 @@ CrSettingsAndroidAppsPageTest.prototype = {
   ]),
 };
 
-TEST_F('CrSettingsAndroidAppsPageTest', 'All', function() {
+TEST_F('CrSettingsAndroidAppsPageTest', 'DISABLED_All', function() {
   mocha.run();
 });
 
@@ -1866,3 +1951,27 @@ CrSettingsOnStartupPageTest.prototype = {
 TEST_F('CrSettingsOnStartupPageTest', 'All', function() {
   mocha.run();
 });
+GEN('#if defined(OS_CHROMEOS)');
+
+/**
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
+function CrSettingsDisplaySizeSliderTest() {}
+
+CrSettingsDisplaySizeSliderTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://settings/device_page/display_size_slider.html',
+
+  /** @override */
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    'display_size_slider_test.js',
+  ]),
+};
+
+TEST_F('CrSettingsDisplaySizeSliderTest', 'All', function() {
+  mocha.run();
+});
+GEN('#endif  // defined(OS_CHROMEOS)');
