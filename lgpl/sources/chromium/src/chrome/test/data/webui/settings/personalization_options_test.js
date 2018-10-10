@@ -52,7 +52,7 @@ cr.define('settings_personalization_options', function() {
               assertEquals(false, !!control.pref.controlledBy);
 
               // Tapping on the box will check it again.
-              MockInteractions.tap(control);
+              control.click();
 
               return testBrowserProxy.whenCalled(
                   'setSafeBrowsingExtendedReportingEnabled');
@@ -93,12 +93,9 @@ cr.define('settings_personalization_options', function() {
             testElement.root.querySelectorAll('settings-toggle-button').length);
         testElement.unifiedConsentEnabled = true;
         Polymer.dom.flush();
-        // #spellCheckControl should be set to display: none by false dom-if.
-        assertTrue(
-            testElement.$$('#spellCheckControl').style.display === 'none');
-        assertTrue(!!testElement.$$('#spellCheckLinkBox'));
-        assertTrue(
-            testElement.$$('#spellCheckLinkBox').style.display !== 'none');
+        assertEquals(
+            8,
+            testElement.root.querySelectorAll('settings-toggle-button').length);
       });
     });
   }

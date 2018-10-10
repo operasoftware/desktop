@@ -35,10 +35,10 @@ cr.define('settings_dropdown_menu', function() {
     setup(function() {
       PolymerTest.clearBody();
       dropdown = document.createElement('settings-dropdown-menu');
+      document.body.appendChild(dropdown);
       selectElement = assert(dropdown.$$('select'));
       const options = selectElement.options;
       customOption = assert(options[options.length - 1]);
-      document.body.appendChild(dropdown);
     });
 
     test('with number options', function testNumberOptions() {
@@ -118,6 +118,11 @@ cr.define('settings_dropdown_menu', function() {
         {value: 'a', name: 'AAA'}, {value: 'b', name: 'BBB'},
         {value: 'c', name: 'CCC'}, {value: 'd', name: 'DDD'}
       ];
+      dropdown.addEventListener('settings-control-change', () => {
+        // Failure, custom value shouldn't ever call this.
+        fail(
+            'settings-control-change should not be triggered for custom value');
+      });
 
       return waitUntilDropdownUpdated().then(function() {
         // "Custom" initially selected.
@@ -174,6 +179,7 @@ cr.define('settings_dropdown_menu', function() {
     });
 
     test('works with dictionary pref', function testDictionaryPref() {
+      let settingsControlChangeCount = 0;
       dropdown.pref = {
         key: 'test.dictionary',
         type: chrome.settingsPrivate.PrefType.DICTIONARY,
@@ -188,6 +194,9 @@ cr.define('settings_dropdown_menu', function() {
         {value: 'value3', name: 'Option 3'},
         {value: 'value4', name: 'Option 4'},
       ];
+      dropdown.addEventListener('settings-control-change', () => {
+        ++settingsControlChangeCount;
+      });
 
       return waitUntilDropdownUpdated()
           .then(function() {
@@ -196,11 +205,18 @@ cr.define('settings_dropdown_menu', function() {
                 'Option 2',
                 selectElement.selectedOptions[0].textContent.trim());
 
+            // Setup does not call the settings-control-change event.
+            assertEquals(0, settingsControlChangeCount);
+
             // Selecting an item updates the pref.
             return simulateChangeEvent('value3');
           })
           .then(function() {
             assertEquals('value3', dropdown.pref.value['key2']);
+
+            // The settings-control-change callback should have been triggered
+            // exactly once.
+            assertEquals(1, settingsControlChangeCount);
 
             // Updating the pref selects an item.
             dropdown.set('pref.value.key2', 'value4');
@@ -208,6 +224,11 @@ cr.define('settings_dropdown_menu', function() {
           })
           .then(function() {
             assertEquals('value4', selectElement.value);
+
+            // The settings-control-change callback should have been triggered
+            // exactly once still -- manually updating the pref is not a user
+            // action so the count should not be incremented.
+            assertEquals(1, settingsControlChangeCount);
           });
     });
   });

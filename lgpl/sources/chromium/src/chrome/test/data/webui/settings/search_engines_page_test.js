@@ -76,7 +76,7 @@ cr.define('settings_search_engines_page', function() {
       test('DialogOpenAndClose', function() {
         return browserProxy.whenCalled('searchEngineEditStarted')
             .then(function() {
-              MockInteractions.tap(dialog.$.dialog.getCloseButton());
+              dialog.$.dialog.getCloseButton().click();
               return browserProxy.whenCalled('searchEngineEditCancelled');
             });
       });
@@ -86,20 +86,20 @@ cr.define('settings_search_engines_page', function() {
       test('DialogOpenAndCancel', function() {
         return browserProxy.whenCalled('searchEngineEditStarted')
             .then(function() {
-              MockInteractions.tap(dialog.$.cancel);
+              dialog.$.cancel.click();
               return browserProxy.whenCalled('searchEngineEditCancelled');
             });
       });
 
       // Tests the dialog to add a new search engine. Specifically
-      //  - paper-input elements are empty initially.
+      //  - cr-input elements are empty initially.
       //  - action button initially disabled.
       //  - validation is triggered on 'input' event.
       //  - action button is enabled when all fields are valid.
       //  - action button triggers appropriate browser signal when tapped.
       test('DialogAddSearchEngine', function() {
         /**
-         * Triggers an 'input' event on the paper-input element and checks that
+         * Triggers an 'input' event on the cr-input element and checks that
          * validation is triggered.
          * @param {string} inputId
          * @return {!Promise}
@@ -138,7 +138,7 @@ cr.define('settings_search_engines_page', function() {
               // Assert that the action button has been enabled now that all
               // input is valid and non-empty.
               assertFalse(actionButton.disabled);
-              MockInteractions.tap(actionButton);
+              actionButton.click();
               return browserProxy.whenCalled('searchEngineEditCompleted');
             });
       });
@@ -208,14 +208,14 @@ cr.define('settings_search_engines_page', function() {
 
       test('Remove_Enabled', function() {
         // Open action menu.
-        MockInteractions.tap(entry.$$('button'));
+        entry.$$('button').click();
         const menu = entry.$$('cr-action-menu');
         assertTrue(menu.open);
 
         const deleteButton = entry.$.delete;
         assertTrue(!!deleteButton);
         assertFalse(deleteButton.hidden);
-        MockInteractions.tap(deleteButton);
+        deleteButton.click();
         return browserProxy.whenCalled('removeSearchEngine')
             .then(function(modelIndex) {
               assertFalse(menu.open);
@@ -225,13 +225,13 @@ cr.define('settings_search_engines_page', function() {
 
       test('MakeDefault_Enabled', function() {
         // Open action menu.
-        MockInteractions.tap(entry.$$('button'));
+        entry.$$('button').click();
         const menu = entry.$$('cr-action-menu');
         assertTrue(menu.open);
 
         const makeDefaultButton = entry.$.makeDefault;
         assertTrue(!!makeDefaultButton);
-        MockInteractions.tap(makeDefaultButton);
+        makeDefaultButton.click();
         return browserProxy.whenCalled('setDefaultSearchEngine')
             .then(function(modelIndex) {
               assertFalse(menu.open);
@@ -242,7 +242,7 @@ cr.define('settings_search_engines_page', function() {
       // Test that clicking the "edit" fires edit event.
       test('Edit_Enabled', function() {
         // Open action menu.
-        MockInteractions.tap(entry.$$('button'));
+        entry.$$('button').click();
         const menu = entry.$$('cr-action-menu');
         assertTrue(menu.open);
 
@@ -258,7 +258,7 @@ cr.define('settings_search_engines_page', function() {
                   entry.$$('paper-icon-button-light button'),
                   e.detail.anchorElement);
             });
-        MockInteractions.tap(editButton);
+        editButton.click();
         return promise;
       });
 
@@ -405,7 +405,7 @@ cr.define('settings_search_engines_page', function() {
         const addSearchEngineButton = page.$.addSearchEngine;
         assertTrue(!!addSearchEngineButton);
 
-        MockInteractions.tap(addSearchEngineButton);
+        addSearchEngineButton.click();
         Polymer.dom.flush();
         assertTrue(!!page.$$('settings-search-engine-dialog'));
       });
@@ -421,7 +421,7 @@ cr.define('settings_search_engines_page', function() {
               const dialog = page.$$('settings-search-engine-dialog');
               assertTrue(!!dialog);
 
-              // Check that the paper-input fields are pre-populated.
+              // Check that the cr-input fields are pre-populated.
               assertEquals(engine.name, dialog.$.searchEngine.value);
               assertEquals(engine.keyword, dialog.$.keyword.value);
               assertEquals(engine.url, dialog.$.queryUrl.value);
@@ -516,7 +516,7 @@ cr.define('settings_search_engines_page', function() {
         document.body.appendChild(entry);
 
         // Open action menu.
-        MockInteractions.tap(entry.$$('button'));
+        entry.$$('button').click();
       });
 
       teardown(function() {
@@ -526,7 +526,7 @@ cr.define('settings_search_engines_page', function() {
       test('Manage', function() {
         const manageButton = entry.$.manage;
         assertTrue(!!manageButton);
-        MockInteractions.tap(manageButton);
+        manageButton.click();
         return browserProxy.whenCalled('manageExtension')
             .then(function(extensionId) {
               assertEquals(entry.engine.extension.id, extensionId);
@@ -536,7 +536,7 @@ cr.define('settings_search_engines_page', function() {
       test('Disable', function() {
         const disableButton = entry.$.disable;
         assertTrue(!!disableButton);
-        MockInteractions.tap(disableButton);
+        disableButton.click();
         return browserProxy.whenCalled('disableExtension')
             .then(function(extensionId) {
               assertEquals(entry.engine.extension.id, extensionId);

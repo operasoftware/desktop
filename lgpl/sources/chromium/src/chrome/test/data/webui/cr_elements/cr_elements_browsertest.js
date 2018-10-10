@@ -272,11 +272,35 @@ CrElementsDialogTest.prototype = {
 
   /** @override */
   extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    '../settings/test_util.js',
     'cr_dialog_test.js',
   ]),
 };
 
 TEST_F('CrElementsDialogTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
+function CrElementsSliderTest() {}
+
+CrElementsSliderTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://resources/cr_elements/cr_slider/cr_slider.html',
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    '../settings/test_util.js',
+    'cr_slider_test.js',
+  ]),
+};
+
+TEST_F('CrElementsSliderTest', 'All', function() {
   mocha.run();
 });
 

@@ -398,7 +398,7 @@ cr.define('device_page_tests', function() {
                const row = assert(devicePage.$$('#main #' + subpage + 'Row'));
                devicePage.$$('#pages').addEventListener(
                    'neon-animation-finish', resolve);
-               MockInteractions.tap(row);
+               row.click();
              })
           .then(function() {
             assertEquals(expectedRoute, settings.getCurrentRoute());
@@ -530,7 +530,7 @@ cr.define('device_page_tests', function() {
         const slider = assert(pointersPage.$$('#mouse settings-slider'));
         expectEquals(4, slider.pref.value);
         MockInteractions.pressAndReleaseKeyOn(
-            slider.$$('#slider'), 37 /* left */);
+            slider.$$('cr-slider').$$('#slider'), 37 /* left */);
         expectEquals(3, devicePage.prefs.settings.mouse.sensitivity2.value);
 
         pointersPage.set('prefs.settings.mouse.sensitivity2.value', 5);
@@ -546,7 +546,7 @@ cr.define('device_page_tests', function() {
         const slider = assert(pointersPage.$$('#touchpad settings-slider'));
         expectEquals(3, slider.pref.value);
         MockInteractions.pressAndReleaseKeyOn(
-            slider.$$('#slider'), 39 /* right */);
+            slider.$$('cr-slider').$$('#slider'), 39 /* right */);
         expectEquals(4, devicePage.prefs.settings.touchpad.sensitivity2.value);
 
         pointersPage.set('prefs.settings.touchpad.sensitivity2.value', 2);
@@ -565,10 +565,10 @@ cr.define('device_page_tests', function() {
         // Prevent actually opening a link, which would block test.
         a.removeAttribute('href');
 
-        MockInteractions.tap(a);
+        a.click();
         expectNaturalScrollValue(pointersPage, false);
 
-        MockInteractions.tap(naturalScrollOn);
+        naturalScrollOn.click();
         expectNaturalScrollValue(pointersPage, true);
         devicePage.set('prefs.settings.touchpad.natural_scroll.value', false);
         expectNaturalScrollValue(pointersPage, false);
@@ -637,9 +637,12 @@ cr.define('device_page_tests', function() {
             // Test interaction with the settings-slider's underlying
             // paper-slider.
             MockInteractions.pressAndReleaseKeyOn(
-                keyboardPage.$$('#delaySlider').$$('#slider'), 37 /* left */);
+                keyboardPage.$$('#delaySlider').$$('cr-slider').$$('#slider'),
+                37 /* left */);
             MockInteractions.pressAndReleaseKeyOn(
-                keyboardPage.$$('#repeatRateSlider').$$('#slider'),
+                keyboardPage.$$('#repeatRateSlider')
+                    .$$('cr-slider')
+                    .$$('#slider'),
                 39 /* right */);
             const language = devicePage.prefs.settings.language;
             expectEquals(1000, language.xkb_auto_repeat_delay_r2.value);
@@ -669,7 +672,7 @@ cr.define('device_page_tests', function() {
             expectFalse(collapse.opened);
 
             // Test keyboard shortcut overlay button.
-            MockInteractions.tap(keyboardPage.$$('#keyboardOverlay'));
+            keyboardPage.$$('#keyboardOverlay').click();
             expectEquals(
                 1,
                 settings.DevicePageBrowserProxyImpl.getInstance()
@@ -758,7 +761,7 @@ cr.define('device_page_tests', function() {
             assertTrue(!!displayLayout);
             const displayDiv = displayLayout.$$('#_fakeDisplayId2');
             assertTrue(!!displayDiv);
-            MockInteractions.tap(displayDiv);
+            displayDiv.click();
             expectEquals(
                 displayPage.displays[1].id, displayPage.selectedDisplay.id);
 
@@ -845,7 +848,6 @@ cr.define('device_page_tests', function() {
       suite('power settings', function() {
         let powerPage;
         let powerSourceRow;
-        let powerSourceWrapper;
         let powerSourceSelect;
         let idleSelect;
         let lidClosedToggle;
@@ -862,8 +864,6 @@ cr.define('device_page_tests', function() {
               .then(function(page) {
                 powerPage = page;
                 powerSourceRow = assert(powerPage.$$('#powerSourceRow'));
-                powerSourceWrapper =
-                    assert(powerSourceRow.querySelector('.md-select-wrapper'));
                 powerSourceSelect = assert(powerPage.$$('#powerSource'));
                 assertEquals(
                     1,
@@ -916,7 +916,7 @@ cr.define('device_page_tests', function() {
 
           // Power sources row is visible but dropdown is hidden.
           assertFalse(powerSourceRow.hidden);
-          assertTrue(powerSourceWrapper.hidden);
+          assertTrue(powerSourceSelect.hidden);
 
           // Attach a dual-role USB device.
           const powerSource = {
@@ -928,13 +928,13 @@ cr.define('device_page_tests', function() {
           Polymer.dom.flush();
 
           // "Battery" should be selected.
-          assertFalse(powerSourceWrapper.hidden);
+          assertFalse(powerSourceSelect.hidden);
           assertEquals('', powerSourceSelect.value);
 
           // Select the power source.
           setPowerSources([powerSource], powerSource.id, true);
           Polymer.dom.flush();
-          assertFalse(powerSourceWrapper.hidden);
+          assertFalse(powerSourceSelect.hidden);
           assertEquals(powerSource.id, powerSourceSelect.value);
 
           // Send another power source; the first should still be selected.
@@ -943,7 +943,7 @@ cr.define('device_page_tests', function() {
           setPowerSources(
               [otherPowerSource, powerSource], powerSource.id, true);
           Polymer.dom.flush();
-          assertFalse(powerSourceWrapper.hidden);
+          assertFalse(powerSourceSelect.hidden);
           assertEquals(powerSource.id, powerSourceSelect.value);
         });
 
@@ -997,7 +997,7 @@ cr.define('device_page_tests', function() {
           sendLid(settings.LidClosedBehavior.SUSPEND);
           assertTrue(lidClosedToggle.checked);
 
-          MockInteractions.tap(lidClosedToggle.$$('#control'));
+          lidClosedToggle.$$('#control').click();
           expectEquals(
               settings.LidClosedBehavior.DO_NOTHING,
               settings.DevicePageBrowserProxyImpl.getInstance()
@@ -1005,7 +1005,7 @@ cr.define('device_page_tests', function() {
           sendLid(settings.LidClosedBehavior.DO_NOTHING);
           expectFalse(lidClosedToggle.checked);
 
-          MockInteractions.tap(lidClosedToggle.$$('#control'));
+          lidClosedToggle.$$('#control').click();
           expectEquals(
               settings.LidClosedBehavior.SUSPEND,
               settings.DevicePageBrowserProxyImpl.getInstance()
@@ -1127,7 +1127,6 @@ cr.define('device_page_tests', function() {
       let browserProxy;
       let noAppsDiv;
       let waitingDiv;
-      let selectAppDiv;
 
       // Shorthand for settings.NoteAppLockScreenSupport.
       let LockScreenSupport;
@@ -1144,10 +1143,9 @@ cr.define('device_page_tests', function() {
             .then(function(page) {
               stylusPage = page;
               browserProxy = settings.DevicePageBrowserProxyImpl.getInstance();
-              appSelector = assert(page.$$('#menu'));
+              appSelector = assert(page.$$('#selectApp'));
               noAppsDiv = assert(page.$$('#no-apps'));
               waitingDiv = assert(page.$$('#waiting'));
-              selectAppDiv = assert(page.$$('#select-app'));
               LockScreenSupport = settings.NoteAppLockScreenSupport;
 
               assertEquals(1, browserProxy.requestNoteTakingApps_);
@@ -1216,10 +1214,10 @@ cr.define('device_page_tests', function() {
 
         // Tapping the enable stylus tools pref causes the launch palette on
         // eject pref toggle to not be disabled anymore.
-        MockInteractions.tap(stylusPage.$$('#enableStylusToolsToggle'));
+        stylusPage.$$('#enableStylusToolsToggle').click();
         expectTrue(devicePage.prefs.settings.enable_stylus_tools.value);
         expectFalse(stylusPage.$$('#launchPaletteOnEjectEventToggle').disabled);
-        MockInteractions.tap(stylusPage.$$('#launchPaletteOnEjectEventToggle'));
+        stylusPage.$$('#launchPaletteOnEjectEventToggle').click();
         expectTrue(
             devicePage.prefs.settings.launch_palette_on_eject_event.value);
       });
@@ -1292,31 +1290,31 @@ cr.define('device_page_tests', function() {
         browserProxy.setNoteTakingApps([]);
         assert(noAppsDiv.hidden);
         assert(!waitingDiv.hidden);
-        assert(selectAppDiv.hidden);
+        assert(appSelector.hidden);
 
         // Waiting for apps to finish loading.
         browserProxy.setAndroidAppsReceived(true);
         assert(!noAppsDiv.hidden);
         assert(waitingDiv.hidden);
-        assert(selectAppDiv.hidden);
+        assert(appSelector.hidden);
 
         // Apps loaded, show selector.
         browserProxy.addNoteTakingApp(
             entry('n', 'v', false, LockScreenSupport.NOT_SUPPORTED));
         assert(noAppsDiv.hidden);
         assert(waitingDiv.hidden);
-        assert(!selectAppDiv.hidden);
+        assert(!appSelector.hidden);
 
         // Waiting for Android apps again.
         browserProxy.setAndroidAppsReceived(false);
         assert(noAppsDiv.hidden);
         assert(!waitingDiv.hidden);
-        assert(selectAppDiv.hidden);
+        assert(appSelector.hidden);
 
         browserProxy.setAndroidAppsReceived(true);
         assert(noAppsDiv.hidden);
         assert(waitingDiv.hidden);
-        assert(!selectAppDiv.hidden);
+        assert(!appSelector.hidden);
       });
 
       test('enabled-on-lock-screen', function() {
@@ -1478,7 +1476,7 @@ cr.define('device_page_tests', function() {
               expectFalse(enableAppOnLockScreenToggle().checked);
               expectFalse(isVisible(enableAppOnLockScreenPolicyIndicator()));
 
-              MockInteractions.tap(enableAppOnLockScreenToggle());
+              enableAppOnLockScreenToggle().click();
               assertEquals(1, browserProxy.setAppOnLockScreenCount_);
 
               return new Promise(function(resolve) {
@@ -1494,7 +1492,7 @@ cr.define('device_page_tests', function() {
                   LockScreenSupport.ENABLED,
                   browserProxy.getPreferredAppLockScreenState());
 
-              MockInteractions.tap(enableAppOnLockScreenToggle());
+              enableAppOnLockScreenToggle().click();
               assertEquals(2, browserProxy.setAppOnLockScreenCount_);
 
               return new Promise(function(resolve) {
@@ -1523,7 +1521,7 @@ cr.define('device_page_tests', function() {
               assert(isVisible(enableAppOnLockScreenToggle()));
               expectFalse(enableAppOnLockScreenToggle().checked);
 
-              MockInteractions.tap(enableAppOnLockScreenToggleLabel());
+              enableAppOnLockScreenToggleLabel().click();
               assertEquals(1, browserProxy.setAppOnLockScreenCount_);
 
               return new Promise(function(resolve) {
@@ -1539,7 +1537,7 @@ cr.define('device_page_tests', function() {
                   LockScreenSupport.ENABLED,
                   browserProxy.getPreferredAppLockScreenState());
 
-              MockInteractions.tap(enableAppOnLockScreenToggleLabel());
+              enableAppOnLockScreenToggleLabel().click();
               assertEquals(2, browserProxy.setAppOnLockScreenCount_);
 
               return new Promise(function(resolve) {
@@ -1575,7 +1573,7 @@ cr.define('device_page_tests', function() {
 
               // The toggle should be disabled, so enabling app on lock screen
               // should not be attempted.
-              MockInteractions.tap(enableAppOnLockScreenToggle());
+              enableAppOnLockScreenToggle().click();
               assertEquals(0, browserProxy.setAppOnLockScreenCount_);
 
               return new Promise(function(resolve) {
@@ -1586,7 +1584,7 @@ cr.define('device_page_tests', function() {
               Polymer.dom.flush();
 
               // Tap on label should not work either.
-              MockInteractions.tap(enableAppOnLockScreenToggleLabel());
+              enableAppOnLockScreenToggleLabel().click();
               assertEquals(0, browserProxy.setAppOnLockScreenCount_);
 
               return new Promise(function(resolve) {
@@ -1646,8 +1644,7 @@ cr.define('device_page_tests', function() {
               expectTrue(keepLastNoteOnLockScreenToggle().checked);
 
               // Clicking the toggle updates the pref value.
-              MockInteractions.tap(
-                  keepLastNoteOnLockScreenToggle().$$('#control'));
+              keepLastNoteOnLockScreenToggle().$$('#control').click();
               expectFalse(keepLastNoteOnLockScreenToggle().checked);
 
               expectFalse(devicePage.prefs.settings

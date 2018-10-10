@@ -31,7 +31,25 @@
     "indicator_selector": "A CSS selector that locates the controlled setting indicator directly affected by the policy. This is appended to the selector 'span.controlled-setting-indicator'."
   },
 
+  "TabLifecyclesEnabled": {
+    "os": ["win"],
+    "official_only": true,
+    "test_policy": { "TabLifecyclesEnabled": false },
+    "pref_mappings": [
+      { "pref": "tab_lifecycles_enabled",
+        "local_state": true
+      }
+    ]
+  },
+
+  "OverrideSecurityRestrictionsOnInsecureOrigin": {
+    "os": ["win", "linux", "mac"],
+    "test_policy": { "OverrideSecurityRestrictionsOnInsecureOrigin": ["http://example.com/"] },
+    "pref_mappings": [ { "pref": "unsafely_treat_insecure_origin_as_secure" } ]
+  },
+
   "UnsafelyTreatInsecureOriginAsSecure": {
+    "note": "This policy is deprecated.",
     "os": ["win", "linux", "mac"],
     "test_policy": { "UnsafelyTreatInsecureOriginAsSecure": ["http://example.com/"] },
     "pref_mappings": [ { "pref": "unsafely_treat_insecure_origin_as_secure" } ]
@@ -450,17 +468,12 @@
     ]
   },
 
+  "AutofillAddressEnabled": {
+    "note": "The pref behind this policy is always set and therefore cannot be tested with this generic test"
+  },
+
   "AutofillCreditCardEnabled": {
-    "os": ["win", "linux", "mac", "chromeos"],
-    "can_be_recommended": true,
-    "test_policy": { "AutofillCreditCardEnabled": false },
-    "pref_mappings": [
-      { "pref": "autofill.credit_card_enabled",
-        "indicator_tests": [
-          { "policy": { "AutofillCreditCardEnabled": false } }
-        ]
-      }
-    ]
+    "note": "The pref behind this policy is always set and therefore cannot be tested with this generic test"
   },
 
   "DisabledPlugins.0": {
@@ -2423,7 +2436,7 @@
 
   "RelaunchNotification": {
     "os": ["win", "linux", "mac"],
-    "test_policy": { "RelaunchNotification": 1},
+    "test_policy": { "RelaunchNotification": 1 },
     "pref_mappings": [
       { "pref": "browser.relaunch_notification",
         "local_state": true
@@ -2433,9 +2446,19 @@
 
   "RelaunchNotificationPeriod": {
     "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": { "RelaunchNotificationPeriod": 86400000},
+    "test_policy": { "RelaunchNotificationPeriod": 86400000 },
     "pref_mappings": [
       { "pref": "browser.relaunch_notification_period",
+        "local_state": true
+      }
+    ]
+  },
+
+  "PromotionalTabsEnabled": {
+    "os": ["win", "linux", "mac"],
+    "test_policy": { "PromotionalTabsEnabled": false },
+    "pref_mappings": [
+      { "pref": "browser.promotional_tabs_enabled",
         "local_state": true
       }
     ]
@@ -3121,6 +3144,35 @@
     ]
   },
 
+  "AllowedUILocales": {
+    "os": ["chromeos"],
+    "can_be_recommended": false,
+    "test_policy": { "AllowedUILocales": ["en-US", "de"] },
+    "pref_mappings": [
+      { "pref": "intl.allowed_ui_locales" }
+    ]
+  },
+
+  "AllowedInputMethods": {
+    "os": ["chromeos"],
+    "can_be_recommended": false,
+    "test_policy": { "AllowedInputMethods": ["xkb:us::en"] },
+    "pref_mappings": [
+      { "pref": "settings.language.allowed_input_methods" }
+    ]
+  },
+
+  "UrlKeyedAnonymizedDataCollectionEnabled": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "UrlKeyedAnonymizedDataCollectionEnabled": false },
+    "pref_mappings": [
+      { "pref": "url_keyed_anonymized_data_collection.enabled",
+        "indicator_tests": [
+          { "policy": { "url_keyed_anonymized_data_collection.enabled": false } }
+        ]
+      }
+    ]
+  },
 
   "----- Chrome OS device policies ---------------------------------------": {},
 
@@ -3722,7 +3774,10 @@
   },
 
   "UsageTimeLimit": {
-    "note": "TODO(hgrandinetti): Re-enable the test once the feature is no longer behind an experiment flag (crbug.com/849738)"
+    "os": ["chromeos"],
+    "test_policy": { "UsageTimeLimit": { "time_window_limit": { "entries": [{ "effective_day": "WEDNESDAY", "starts_at": { "hour": 21, "minute": 0 }, "ends_at": { "hour": 7, "minute": 30 }, "last_updated_millis": "1000000" }, { "effective_day": "SATURDAY", "starts_at": { "hour": 14, "minute": 0 }, "ends_at": { "hour": 16, "minute": 15 }, "last_updated_millis": "1400000" }]}, "time_usage_limit": { "monday": { "usage_quota_mins": 120, "last_updated_millis": "1200000" }, "thursday": { "usage_quota_mins": 15, "last_updated_millis": "1600000" }, "reset_at": { "hour": 6, "minute": 0 }}, "overrides": [{ "action": "UNLOCK", "created_at_millis": "1250000", "action_specific_data": { "duration_mins": 30 }}]}},
+    "can_be_recommended": false,
+    "pref_mappings": [{ "pref": "screen_time.limit" }]
   },
 
   "EnableSyncConsent": {
@@ -3731,6 +3786,21 @@
     "pref_mappings": [{ "pref": "sync_consent.enabled" }]
   },
 
+  "ContextualSuggestionsEnabled": {
+    "os": ["android"],
+    "test_policy": { "ContextualSuggestionsEnabled": false },
+    "pref_mappings": [{ "pref": "contextual_suggestions.enabled" }]
+  },
+
+  "DeviceAutoUpdateTimeRestrictions": {
+    "os": ["chromeos"],
+    "test_policy": {"UpdateTimeRestrictions": [{"start" : {"day_of_week" : "Wednesday", "minutes": 30, "hours": 3}, "end": {"day_of_week" : "Thursday", "minutes": 20, "hours": 13}}, {"start": {"day_of_week": "Monday", "minutes": 45, "hours": 1}, "end": {"day_of_week": "Monday", "minutes": 50, "hours": 15}}]}
+  },
+
+  "DeviceUpdateStagingPercentOfFleetPerWeek": {
+    "os": ["chromeos"],
+    "note": "Chrome OS device policy used by update_engine only, not used in Chrome."
+  },
 
   "----- Chrome Frame policies -------------------------------------------": {},
 
@@ -3758,9 +3828,6 @@
   "SkipMetadataCheck": {
   },
 
-  "AllowedLocales": {
-  },
-
   "ArcBackupRestoreServiceEnabled": {
     "os": ["chromeos"],
     "can_be_recommended": false,
@@ -3777,5 +3844,12 @@
     "pref_mappings": [
       { "pref": "arc.location_service.enabled" }
     ]
+  },
+
+  "SafeSitesFilterBehavior": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "can_be_recommended": false,
+    "test_policy": { "SafeSitesFilterBehavior": 0 },
+    "note": "pref_mappings cannot be tested here as the code where the pref will be registered is not yet ready."
   }
 }

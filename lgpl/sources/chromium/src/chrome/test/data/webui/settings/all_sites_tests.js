@@ -3,19 +3,6 @@
 // found in the LICENSE file.
 
 /**
- * An example pref with exceptions with origins and patterns from
- * different providers.
- * @type {SiteSettingsPref}
- */
-let prefsMixedProvider;
-
-/**
- * An example pref with mixed origin and pattern.
- * @type {SiteSettingsPref}
- */
-let prefsMixedOriginAndPattern;
-
-/**
  * An example pref with multiple categories and multiple allow/block
  * state.
  * @type {SiteSettingsPref}
@@ -45,28 +32,6 @@ suite('AllSites', function() {
 
   // Initialize a site-list before each test.
   setup(function() {
-    prefsMixedProvider = test_util.createSiteSettingsPrefs(
-        [], [test_util.createContentSettingTypeToValuePair(
-                settings.ContentSettingsTypes.GEOLOCATION, [
-                  test_util.createRawSiteException('https://[*.]foo.com', {
-                    setting: settings.ContentSetting.BLOCK,
-                    source: settings.SiteSettingSource.POLICY,
-                  }),
-                  test_util.createRawSiteException('https://bar.foo.com', {
-                    setting: settings.ContentSetting.BLOCK,
-                  }),
-                  test_util.createRawSiteException('https://[*.]foo.com', {
-                    setting: settings.ContentSetting.BLOCK,
-                  }),
-                ])]);
-
-    prefsMixedOriginAndPattern = test_util.createSiteSettingsPrefs(
-        [], [test_util.createContentSettingTypeToValuePair(
-                settings.ContentSettingsTypes.GEOLOCATION, [
-                  test_util.createRawSiteException('https://foo.com'),
-                  test_util.createRawSiteException('https://[*.]foo.com'),
-                ])]);
-
     prefsVarious = test_util.createSiteSettingsPrefs([], [
       test_util.createContentSettingTypeToValuePair(
           settings.ContentSettingsTypes.GEOLOCATION,
@@ -94,7 +59,6 @@ suite('AllSites', function() {
     browserProxy = new TestSiteSettingsPrefsBrowserProxy();
     settings.SiteSettingsPrefsBrowserProxyImpl.instance_ = browserProxy;
     PolymerTest.clearBody();
-    browserProxy.setPrefs(prefsMixedOriginAndPattern);
     testElement = document.createElement('all-sites');
     assertTrue(!!testElement);
     document.body.appendChild(testElement);
@@ -120,124 +84,75 @@ suite('AllSites', function() {
     };
   }
 
-  test('All sites category no action menu', function() {
+  test('All sites list populated', function() {
     setUpCategory(prefsVarious);
-    return browserProxy.whenCalled('getExceptionList')
-        .then(function(contentType) {
-          // Use resolver to ensure that the list container is populated.
-          const resolver = new PromiseResolver();
-          testElement.async(resolver.resolve);
-          return resolver.promise.then(function() {
-            const item = testElement.$.listContainer.children[0];
-            assertEquals('SITE-ENTRY', item.tagName);
-            const name = item.root.querySelector('#displayName');
-            assertTrue(!!name);
-          });
+    testElement.populateList_();
+    return browserProxy.whenCalled('getAllSites').then(() => {
+      // Use resolver to ensure that the list container is populated.
+      const resolver = new PromiseResolver();
+      testElement.async(resolver.resolve);
+      return resolver.promise.then(() => {
+        assertEquals(3, testElement.siteGroupList.length);
+
+        // Flush to be sure list container is populated.
+        Polymer.dom.flush();
+        const siteEntries =
+            testElement.$.listContainer.querySelectorAll('site-entry');
+        assertEquals(3, siteEntries.length);
+      });
+    });
+  });
+
+  test('search query filters list', function() {
+    const SEARCH_QUERY = 'foo';
+    setUpCategory(prefsVarious);
+    testElement.populateList_();
+    return browserProxy.whenCalled('getAllSites')
+        .then(() => {
+          // Flush to be sure list container is populated.
+          Polymer.dom.flush();
+          const siteEntries =
+              testElement.$.listContainer.querySelectorAll('site-entry');
+          assertEquals(3, siteEntries.length);
+
+          testElement.searchQuery_ = SEARCH_QUERY;
+        })
+        .then(() => {
+          Polymer.dom.flush();
+          const siteEntries =
+              testElement.$.listContainer.querySelectorAll('site-entry');
+          const hiddenSiteEntries = Polymer.dom(testElement.root)
+                                        .querySelectorAll('site-entry[hidden]');
+          assertEquals(1, siteEntries.length - hiddenSiteEntries.length);
+
+          for (let i = 0; i < siteEntries; ++i) {
+            const entry = siteEntries[i];
+            if (!hiddenSiteEntries.includes(entry)) {
+              assertTrue(entry.siteGroup.origins.some((origin) => {
+                return origin.includes(SEARCH_QUERY);
+              }));
+            }
+          }
         });
   });
 
-  test('All sites category', function() {
-    // Prefs: Multiple and overlapping sites.
+  test('can be sorted by name', function() {
     setUpCategory(prefsVarious);
+    testElement.populateList_();
+    return browserProxy.whenCalled('getAllSites').then(() => {
+      Polymer.dom.flush();
+      const siteEntries =
+          testElement.$.listContainer.querySelectorAll('site-entry');
 
-    return browserProxy.whenCalled('getExceptionList')
-        .then(function(contentType) {
-          // Use resolver to ensure asserts bubble up to the framework with
-          // meaningful errors.
-          const resolver = new PromiseResolver();
-          testElement.async(resolver.resolve);
-          return resolver.promise.then(function() {
-            // All Sites calls getExceptionList for all categories, starting
-            // with Cookies.
-            assertEquals(settings.ContentSettingsTypes.COOKIES, contentType);
-
-            // Required for firstItem to be found below.
-            Polymer.dom.flush();
-
-            // Validate that the sites gets populated from pre-canned prefs.
-            assertEquals(
-                3, testElement.sites.length,
-                'If this fails with 5 instead of the expected 3, then ' +
-                    'the de-duping of sites is not working for site_list');
-            assertEquals(
-                prefsVarious
-                    .exceptions[settings.ContentSettingsTypes.GEOLOCATION][1]
-                    .origin,
-                testElement.sites[0].origin);
-            assertEquals(
-                prefsVarious
-                    .exceptions[settings.ContentSettingsTypes.GEOLOCATION][0]
-                    .origin,
-                testElement.sites[1].origin);
-            assertEquals(
-                prefsVarious
-                    .exceptions[settings.ContentSettingsTypes.NOTIFICATIONS][0]
-                    .origin,
-                testElement.sites[2].origin);
-            assertEquals(undefined, testElement.selectedOrigin);
-
-            // Validate that the sites are shown in UI and can be selected.
-            const firstItem = testElement.$.listContainer.children[1];
-            const clickable = firstItem.root.querySelector('.middle');
-            assertNotEquals(undefined, clickable);
-            MockInteractions.tap(clickable);
-            assertEquals(
-                prefsVarious
-                    .exceptions[settings.ContentSettingsTypes.GEOLOCATION][0]
-                    .origin,
-                settings.getQueryParameters().get('site'));
-          });
-        });
-  });
-
-  test('All sites mixed pattern and origin', function() {
-    // Prefs: One site, represented as origin and pattern.
-    setUpCategory(prefsMixedOriginAndPattern);
-
-    return browserProxy.whenCalled('getExceptionList')
-        .then(function(contentType) {
-          // Use resolver to ensure asserts bubble up to the framework with
-          // meaningful errors.
-          const resolver = new PromiseResolver();
-          testElement.async(resolver.resolve);
-          return resolver.promise.then(function() {
-            // All Sites calls getExceptionList for all categories, starting
-            // with Cookies.
-            assertEquals(settings.ContentSettingsTypes.COOKIES, contentType);
-
-            // Required for firstItem to be found below.
-            Polymer.dom.flush();
-
-            // Validate that the sites gets populated from pre-canned prefs.
-            // TODO(dschuyler): de-duping of sites is under discussion, so
-            // it is currently disabled. It should be enabled again or this
-            // code should be removed.
-            assertEquals(
-                2, testElement.sites.length,
-                'If this fails with 1 instead of the expected 2, then ' +
-                    'the de-duping of sites has been enabled for site_list.');
-            if (testElement.sites.length == 1) {
-              assertEquals(
-                  prefsMixedOriginAndPattern
-                      .exceptions[settings.ContentSettingsTypes.GEOLOCATION][0]
-                      .origin,
-                  testElement.sites[0].displayName);
-            }
-
-            assertEquals(undefined, testElement.selectedOrigin);
-            // Validate that the sites are shown in UI and can be selected.
-            const firstItem = testElement.$.listContainer.children[0];
-            const clickable = firstItem.root.querySelector('.middle');
-            assertNotEquals(undefined, clickable);
-            MockInteractions.tap(clickable);
-            if (testElement.sites.length == 1) {
-              assertEquals(
-                  prefsMixedOriginAndPattern
-                      .exceptions[settings.ContentSettingsTypes.GEOLOCATION][0]
-                      .origin,
-                  testElement.sites[0].displayName);
-            }
-          });
-        });
+      // TODO(https://crbug.com/835712): When there is more than one sort
+      // method, check that the all sites list can be sorted by name from an
+      // existing all sites list that is out of order. Currently this is not
+      // possible as the all sites list will always initially be sorted by the
+      // default sort method, and the default sort method is by name.
+      assertEquals(3, siteEntries.length);
+      assertEquals('bar.com', siteEntries[0].$.displayName.innerText.trim());
+      assertEquals('foo.com', siteEntries[1].$.displayName.innerText.trim());
+      assertEquals('google.com', siteEntries[2].$.displayName.innerText.trim());
+    });
   });
 });

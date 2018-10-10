@@ -8,20 +8,20 @@ cr.define('extension_item_tests', function() {
    * The data used to populate the extension item.
    * @type {chrome.developerPrivate.ExtensionInfo}
    */
-  var extensionData = extension_test_util.createExtensionInfo();
+  const extensionData = extension_test_util.createExtensionInfo();
 
   // The normal elements, which should always be shown.
-  var normalElements = [
+  const normalElements = [
     {selector: '#name', text: extensionData.name},
     {selector: '#icon'},
     {selector: '#description', text: extensionData.description},
     {selector: '#enable-toggle'},
-    {selector: '#details-button'},
+    {selector: '#detailsButton'},
     {selector: '#remove-button'},
   ];
   // The developer elements, which should only be shown if in developer
   // mode *and* showing details.
-  var devElements = [
+  const devElements = [
     {selector: '#version', text: extensionData.version},
     {selector: '#extension-id', text: `ID: ${extensionData.id}`},
     {selector: '#inspect-views'},
@@ -66,7 +66,7 @@ cr.define('extension_item_tests', function() {
   }
 
   /** @enum {string} */
-  var TestNames = {
+  const TestNames = {
     ElementVisibilityNormalState: 'element visibility: normal state',
     ElementVisibilityDeveloperState:
         'element visibility: after enabling developer mode',
@@ -79,17 +79,17 @@ cr.define('extension_item_tests', function() {
     HtmlInName: 'html in extension name',
   };
 
-  var suiteName = 'ExtensionItemTest';
+  const suiteName = 'ExtensionItemTest';
 
   suite(suiteName, function() {
     /**
      * Extension item created before each test.
      * @type {extensions.Item}
      */
-    var item;
+    let item;
 
     /** @type {extension_test_util.MockItemDelegate} */
-    var mockDelegate;
+    let mockDelegate;
 
     // Initialize an extension item before each test.
     setup(function() {
@@ -148,12 +148,12 @@ cr.define('extension_item_tests', function() {
           [item.data.id, item.data.views[0]]);
 
       // Setup for testing navigation buttons.
-      var currentPage = null;
+      let currentPage = null;
       extensions.navigation.addListener(newPage => {
         currentPage = newPage;
       });
 
-      MockInteractions.tap(item.$$('#details-button'));
+      MockInteractions.tap(item.$$('#detailsButton'));
       expectDeepEquals(
           currentPage, {page: Page.DETAILS, extensionId: item.data.id});
 
@@ -193,16 +193,16 @@ cr.define('extension_item_tests', function() {
       // rejected promise).
       // This is a bit of a pain to verify because the promises finish
       // asynchronously, so we have to use setTimeout()s.
-      var firedLoadError = false;
+      let firedLoadError = false;
       item.addEventListener('load-error', () => {
         firedLoadError = true;
       });
 
       // This is easier to test with a TestBrowserProxy-style delegate.
-      var proxyDelegate = new extensions.TestService();
+      const proxyDelegate = new extensions.TestService();
       item.delegate = proxyDelegate;
 
-      var verifyEventPromise = function(expectCalled) {
+      const verifyEventPromise = function(expectCalled) {
         return new Promise((resolve, reject) => {
           setTimeout(() => {
             expectEquals(expectCalled, firedLoadError);
@@ -260,7 +260,7 @@ cr.define('extension_item_tests', function() {
       Polymer.dom.flush();
       assertWarnings(kCorrupt | kSuspicious | kBlacklisted);
 
-      item.set('data.blacklistText', undefined);
+      item.set('data.blacklistText', null);
       Polymer.dom.flush();
       assertWarnings(kCorrupt | kSuspicious);
 
@@ -280,7 +280,7 @@ cr.define('extension_item_tests', function() {
       item.set('data.location', 'UNPACKED');
       Polymer.dom.flush();
       expectTrue(extension_test_util.isVisible(item, '#source-indicator'));
-      var icon = item.$$('#source-indicator iron-icon');
+      const icon = item.$$('#source-indicator iron-icon');
       assertTrue(!!icon);
       expectEquals('extensions-icons:unpacked', icon.icon);
       extension_test_util.testIcons(item);
@@ -288,20 +288,20 @@ cr.define('extension_item_tests', function() {
       item.set('data.location', 'THIRD_PARTY');
       Polymer.dom.flush();
       expectTrue(extension_test_util.isVisible(item, '#source-indicator'));
-      expectEquals('input', icon.icon);
+      expectEquals('extensions-icons:input', icon.icon);
       extension_test_util.testIcons(item);
 
       item.set('data.location', 'UNKNOWN');
       Polymer.dom.flush();
       expectTrue(extension_test_util.isVisible(item, '#source-indicator'));
-      expectEquals('input', icon.icon);
+      expectEquals('extensions-icons:input', icon.icon);
       extension_test_util.testIcons(item);
 
       item.set('data.location', 'FROM_STORE');
       item.set('data.controlledInfo', {type: 'POLICY', text: 'policy'});
       Polymer.dom.flush();
       expectTrue(extension_test_util.isVisible(item, '#source-indicator'));
-      expectEquals('communication:business', icon.icon);
+      expectEquals('extensions-icons:business', icon.icon);
       extension_test_util.testIcons(item);
 
       item.set('data.controlledInfo', null);

@@ -5,20 +5,20 @@
 /** @fileoverview Suite of tests for extension-toolbar. */
 cr.define('extension_toolbar_tests', function() {
   /** @enum {string} */
-  var TestNames = {
+  const TestNames = {
     Layout: 'layout',
     ClickHandlers: 'click handlers',
     DevModeToggle: 'dev mode toggle',
     KioskMode: 'kiosk mode button'
   };
 
-  var suiteName = 'ExtensionToolbarTest';
+  const suiteName = 'ExtensionToolbarTest';
   suite(suiteName, function() {
     /** @type {MockDelegate} */
-    var mockDelegate;
+    let mockDelegate;
 
     /** @type {extensions.Toolbar} */
-    var toolbar;
+    let toolbar;
 
     setup(function() {
       toolbar =
@@ -30,7 +30,7 @@ cr.define('extension_toolbar_tests', function() {
     test(assert(TestNames.Layout), function() {
       extension_test_util.testIcons(toolbar);
 
-      var testVisible = extension_test_util.testVisible.bind(null, toolbar);
+      const testVisible = extension_test_util.testVisible.bind(null, toolbar);
       testVisible('#devMode', true);
       assertEquals(toolbar.$.devMode.disabled, false);
       testVisible('#loadUnpacked', false);
@@ -78,32 +78,41 @@ cr.define('extension_toolbar_tests', function() {
       toolbar.set('inDevMode', true);
       Polymer.dom.flush();
 
-      MockInteractions.tap(toolbar.$.devMode);
+      toolbar.$.devMode.click();
       return mockDelegate.whenCalled('setProfileInDevMode')
           .then(function(arg) {
             assertFalse(arg);
             mockDelegate.reset();
-            MockInteractions.tap(toolbar.$.devMode);
+            toolbar.$.devMode.click();
             return mockDelegate.whenCalled('setProfileInDevMode');
           })
           .then(function(arg) {
             assertTrue(arg);
-            MockInteractions.tap(toolbar.$.loadUnpacked);
+            toolbar.$.loadUnpacked.click();
             return mockDelegate.whenCalled('loadUnpacked');
           })
           .then(function() {
             assertFalse(toolbar.$$('cr-toast').open);
-            MockInteractions.tap(toolbar.$.updateNow);
+            toolbar.$.updateNow.click();
             // Simulate user rapidly clicking update button multiple times.
-            MockInteractions.tap(toolbar.$.updateNow);
+            toolbar.$.updateNow.click();
             assertTrue(toolbar.$$('cr-toast').open);
             return mockDelegate.whenCalled('updateAllExtensions');
           })
           .then(function() {
             assertEquals(1, mockDelegate.getCallCount('updateAllExtensions'));
-            const whenTapped = test_util.eventToPromise('pack-tap', toolbar);
-            MockInteractions.tap(toolbar.$.packExtensions);
-            return whenTapped;
+            assertFalse(!!toolbar.$$('extensions-pack-dialog'));
+            toolbar.$.packExtensions.click();
+            Polymer.dom.flush();
+            const dialog = toolbar.$$('extensions-pack-dialog');
+            assertTrue(!!dialog);
+
+            if (!cr.isMac) {
+              const whenFocused =
+                  test_util.eventToPromise('focus', toolbar.$.packExtensions);
+              dialog.$.dialog.cancel();
+              return whenFocused;
+            }
           });
     });
 
@@ -115,7 +124,7 @@ cr.define('extension_toolbar_tests', function() {
         expectFalse(button.hidden);
 
         const whenTapped = test_util.eventToPromise('kiosk-tap', toolbar);
-        MockInteractions.tap(button);
+        button.click();
         return whenTapped;
       });
     }

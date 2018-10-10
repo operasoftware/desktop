@@ -11,6 +11,52 @@ suite('cr-dialog', function() {
     PolymerTest.clearBody();
   });
 
+  test('cr-dialog-open event fires when opened', function() {
+    document.body.innerHTML = `
+      <cr-dialog>
+        <div slot="title">title</div>
+        <div slot="body">body</div>
+      </cr-dialog>`;
+
+    const dialog = document.body.querySelector('cr-dialog');
+    const whenFired = test_util.eventToPromise('cr-dialog-open', dialog);
+    dialog.showModal();
+    return whenFired;
+  });
+
+  test('close event bubbles', function() {
+    document.body.innerHTML = `
+      <cr-dialog>
+        <div slot="title">title</div>
+        <div slot="body">body</div>
+      </cr-dialog>`;
+
+    const dialog = document.body.querySelector('cr-dialog');
+    dialog.showModal();
+    const whenFired = test_util.eventToPromise('close', dialog);
+    dialog.close();
+    return whenFired.then(() => {
+      assertEquals('success', dialog.getNative().returnValue);
+    });
+  });
+
+  test('cancel and close events bubbles when cancelled', function() {
+    document.body.innerHTML = `
+      <cr-dialog>
+        <div slot="title">title</div>
+        <div slot="body">body</div>
+      </cr-dialog>`;
+
+    const dialog = document.body.querySelector('cr-dialog');
+    dialog.showModal();
+    const whenCancelFired = test_util.eventToPromise('cancel', dialog);
+    const whenCloseFired = test_util.eventToPromise('close', dialog);
+    dialog.cancel();
+    return Promise.all([whenCancelFired, whenCloseFired]).then(() => {
+      assertEquals('', dialog.getNative().returnValue);
+    });
+  });
+
   test('focuses title on show', function() {
     document.body.innerHTML = `
       <cr-dialog>
@@ -97,12 +143,12 @@ suite('cr-dialog', function() {
     assertTrue(clicked);
   });
 
-  test('enter keys from paper-inputs (only) are processed', function() {
+  test('enter keys from cr-inputs (only) are processed', function() {
     document.body.innerHTML = `
       <cr-dialog>
         <div slot="title">title</div>
         <div slot="body">
-          <paper-input></paper-input>
+          <cr-input></cr-input>
           <foobar></foobar>
           <button class="action-button">active</button>
         </div>
@@ -110,7 +156,7 @@ suite('cr-dialog', function() {
 
     const dialog = document.body.querySelector('cr-dialog');
 
-    const inputElement = document.body.querySelector('paper-input');
+    const inputElement = document.body.querySelector('cr-input');
     const otherElement = document.body.querySelector('foobar');
     const actionButton = document.body.querySelector('.action-button');
     assertTrue(!!inputElement);
@@ -238,14 +284,14 @@ suite('cr-dialog', function() {
 
     // Hitting escape fires a 'cancel' event. Cancelling that event prevents the
     // dialog from closing.
-    let e = new Event('cancel', {cancelable: true});
-    dialog.dispatchEvent(e);
+    let e = new CustomEvent('cancel', {cancelable: true});
+    dialog.getNative().dispatchEvent(e);
     assertTrue(e.defaultPrevented);
 
     dialog.noCancel = false;
 
-    e = new Event('cancel', {cancelable: true});
-    dialog.dispatchEvent(e);
+    e = new CustomEvent('cancel', {cancelable: true});
+    dialog.getNative().dispatchEvent(e);
     assertFalse(e.defaultPrevented);
   });
 

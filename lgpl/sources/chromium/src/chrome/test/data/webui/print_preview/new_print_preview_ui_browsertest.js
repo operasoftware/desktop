@@ -50,7 +50,7 @@ PrintPreviewSettingsSectionsTest = class extends NewPrintPreviewTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      ROOT_PATH + 'chrome/test/data/webui/settings/test_util.js',
+      '../settings/test_util.js',
       '../test_browser_proxy.js',
       'native_layer_stub.js',
       'plugin_stub.js',
@@ -187,7 +187,7 @@ PrintPreviewPagesSettingsTest = class extends NewPrintPreviewTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      ROOT_PATH + 'chrome/test/data/webui/settings/test_util.js',
+      '../settings/test_util.js',
       'print_preview_test_utils.js',
       'pages_settings_test.js',
     ]);
@@ -252,6 +252,7 @@ PrintPreviewModelTest = class extends NewPrintPreviewTest {
   get extraLibraries() {
     return super.extraLibraries.concat([
       '../settings/test_util.js',
+      'print_preview_test_utils.js',
       'model_test.js',
     ]);
   }
@@ -264,6 +265,14 @@ PrintPreviewModelTest = class extends NewPrintPreviewTest {
 
 TEST_F('PrintPreviewModelTest', 'SetStickySettings', function() {
   this.runMochaTest(model_test.TestNames.SetStickySettings);
+});
+
+TEST_F('PrintPreviewModelTest', 'GetPrintTicket', function() {
+  this.runMochaTest(model_test.TestNames.GetPrintTicket);
+});
+
+TEST_F('PrintPreviewModelTest', 'GetCloudPrintTicket', function() {
+  this.runMochaTest(model_test.TestNames.GetCloudPrintTicket);
 });
 
 PrintPreviewPreviewGenerationTest = class extends NewPrintPreviewTest {
@@ -391,7 +400,7 @@ PrintPreviewSystemDialogBrowserTest = class extends NewPrintPreviewTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      ROOT_PATH + 'chrome/test/data/webui/settings/test_util.js',
+      '../settings/test_util.js',
       '../test_browser_proxy.js',
       'native_layer_stub.js',
       'plugin_stub.js',
@@ -430,8 +439,8 @@ PrintPreviewInvalidSettingsBrowserTest = class extends NewPrintPreviewTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      ROOT_PATH + 'chrome/test/data/webui/settings/test_util.js',
       ROOT_PATH + 'ui/webui/resources/js/cr/event_target.js',
+      '../settings/test_util.js',
       '../test_browser_proxy.js',
       'cloud_print_interface_stub.js',
       'native_layer_stub.js',
@@ -544,9 +553,9 @@ PrintPreviewDestinationDialogTest = class extends NewPrintPreviewTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      ROOT_PATH + 'chrome/test/data/webui/settings/test_util.js',
       ROOT_PATH + 'ui/webui/resources/js/webui_listener_tracker.js',
       ROOT_PATH + 'ui/webui/resources/js/cr/event_target.js',
+      '../settings/test_util.js',
       '../test_browser_proxy.js',
       'cloud_print_interface_stub.js',
       'native_layer_stub.js',
@@ -574,6 +583,7 @@ PrintPreviewAdvancedDialogTest = class extends NewPrintPreviewTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
+      '../settings/test_util.js',
       'print_preview_test_utils.js',
       'advanced_dialog_test.js',
     ]);
@@ -595,6 +605,18 @@ TEST_F(
           advanced_dialog_test.TestNames.AdvancedSettings2Options);
     });
 
+TEST_F('PrintPreviewAdvancedDialogTest', 'AdvancedSettingsApply', function() {
+  this.runMochaTest(advanced_dialog_test.TestNames.AdvancedSettingsApply);
+});
+
+TEST_F('PrintPreviewAdvancedDialogTest', 'AdvancedSettingsClose', function() {
+  this.runMochaTest(advanced_dialog_test.TestNames.AdvancedSettingsClose);
+});
+
+TEST_F('PrintPreviewAdvancedDialogTest', 'AdvancedSettingsFilter', function() {
+  this.runMochaTest(advanced_dialog_test.TestNames.AdvancedSettingsFilter);
+});
+
 PrintPreviewCustomMarginsTest = class extends NewPrintPreviewTest {
   /** @override */
   get browsePreload() {
@@ -604,7 +626,7 @@ PrintPreviewCustomMarginsTest = class extends NewPrintPreviewTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      ROOT_PATH + 'chrome/test/data/webui/settings/test_util.js',
+      '../settings/test_util.js',
       'print_preview_test_utils.js',
       'custom_margins_test.js',
     ]);
@@ -620,6 +642,18 @@ TEST_F('PrintPreviewCustomMarginsTest', 'ControlsCheck', function() {
   this.runMochaTest(custom_margins_test.TestNames.ControlsCheck);
 });
 
+TEST_F('PrintPreviewCustomMarginsTest', 'SetFromStickySettings', function() {
+  this.runMochaTest(custom_margins_test.TestNames.SetFromStickySettings);
+});
+
+TEST_F('PrintPreviewCustomMarginsTest', 'DragControls', function() {
+  this.runMochaTest(custom_margins_test.TestNames.DragControls);
+});
+
+TEST_F('PrintPreviewCustomMarginsTest', 'SetControlsWithTextbox', function() {
+  this.runMochaTest(custom_margins_test.TestNames.SetControlsWithTextbox);
+});
+
 PrintPreviewNewDestinationSearchTest = class extends NewPrintPreviewTest {
   /** @override */
   get browsePreload() {
@@ -629,8 +663,8 @@ PrintPreviewNewDestinationSearchTest = class extends NewPrintPreviewTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      ROOT_PATH + 'chrome/test/data/webui/settings/test_util.js',
       ROOT_PATH + 'ui/webui/resources/js/webui_listener_tracker.js',
+      '../settings/test_util.js',
       '../test_browser_proxy.js',
       'native_layer_stub.js',
       'print_preview_test_utils.js',
@@ -710,4 +744,118 @@ TEST_F('PrintPreviewHeaderTest', 'HeaderWithNup', function() {
 
 TEST_F('PrintPreviewHeaderTest', 'HeaderChangesForState', function() {
   this.runMochaTest(header_test.TestNames.HeaderChangesForState);
+});
+
+PrintPreviewDestinationItemTest = class extends NewPrintPreviewTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://print/new/destination_list_item.html';
+  }
+
+  /** @override */
+  get extraLibraries() {
+    return super.extraLibraries.concat([
+      'print_preview_test_utils.js',
+      'destination_item_test.js',
+    ]);
+  }
+
+  /** @override */
+  get suiteName() {
+    return destination_item_test.suiteName;
+  }
+};
+
+TEST_F('PrintPreviewDestinationItemTest', 'Online', function() {
+  this.runMochaTest(destination_item_test.TestNames.Online);
+});
+
+TEST_F('PrintPreviewDestinationItemTest', 'Offline', function() {
+  this.runMochaTest(destination_item_test.TestNames.Offline);
+});
+
+TEST_F('PrintPreviewDestinationItemTest', 'BadCertificate', function() {
+  loadTimeData.overrideValues({isEnterpriseManaged: false});
+  this.runMochaTest(destination_item_test.TestNames.BadCertificate);
+});
+
+TEST_F('PrintPreviewDestinationItemTest', 'QueryName', function() {
+  this.runMochaTest(destination_item_test.TestNames.QueryName);
+});
+
+TEST_F('PrintPreviewDestinationItemTest', 'QueryDescription', function() {
+  this.runMochaTest(destination_item_test.TestNames.QueryDescription);
+});
+
+PrintPreviewAdvancedItemTest = class extends NewPrintPreviewTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://print/new/advanced_settings_item.html';
+  }
+
+  /** @override */
+  get extraLibraries() {
+    return super.extraLibraries.concat([
+      'print_preview_test_utils.js',
+      'advanced_item_test.js',
+    ]);
+  }
+
+  /** @override */
+  get suiteName() {
+    return advanced_item_test.suiteName;
+  }
+};
+
+TEST_F('PrintPreviewAdvancedItemTest', 'DisplaySelect', function() {
+  this.runMochaTest(advanced_item_test.TestNames.DisplaySelect);
+});
+
+TEST_F('PrintPreviewAdvancedItemTest', 'DisplayInput', function() {
+  this.runMochaTest(advanced_item_test.TestNames.DisplayInput);
+});
+
+TEST_F('PrintPreviewAdvancedItemTest', 'UpdateSelect', function() {
+  this.runMochaTest(advanced_item_test.TestNames.UpdateSelect);
+});
+
+TEST_F('PrintPreviewAdvancedItemTest', 'UpdateInput', function() {
+  this.runMochaTest(advanced_item_test.TestNames.UpdateInput);
+});
+
+TEST_F('PrintPreviewAdvancedItemTest', 'QueryName', function() {
+  this.runMochaTest(advanced_item_test.TestNames.QueryName);
+});
+
+TEST_F('PrintPreviewAdvancedItemTest', 'QueryOption', function() {
+  this.runMochaTest(advanced_item_test.TestNames.QueryOption);
+});
+
+PrintPreviewDestinationListTest = class extends NewPrintPreviewTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://print/new/destination_list.html';
+  }
+
+  /** @override */
+  get extraLibraries() {
+    return super.extraLibraries.concat([
+      '../settings/test_util.js',
+      'destination_list_test.js',
+    ]);
+  }
+
+  /** @override */
+  get suiteName() {
+    return destination_list_test.suiteName;
+  }
+};
+
+TEST_F('PrintPreviewDestinationListTest', 'FilterDestinations', function() {
+  this.runMochaTest(destination_list_test.TestNames.FilterDestinations);
+});
+
+TEST_F('PrintPreviewDestinationListTest', 'FireDestinationSelected',
+    function() {
+  this.runMochaTest(destination_list_test.TestNames.FireDestinationSelected);
 });

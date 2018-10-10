@@ -12,22 +12,16 @@ GEN_INCLUDE([
 ]);
 GEN('#include "chrome/browser/ui/webui/extensions/' +
     'extension_settings_browsertest.h"');
-GEN('#include "chrome/common/chrome_features.h"');
 
 /**
  * Test fixture for Accessibility of Chrome Extensions.
  * @constructor
  * @extends {PolymerTest}
  */
-var CrExtensionsA11yTest = class extends PolymerTest {
+CrExtensionsA11yTest = class extends PolymerTest {
   /** @override */
   get browsePreload() {
     return 'chrome://extensions/';
-  }
-
-  /** @override */
-  get featureList() {
-    return ['features::kMaterialDesignExtensions', ''];
   }
 
   // Include files that define the mocha tests.
@@ -112,8 +106,7 @@ AccessibilityTest.define('CrExtensionsA11yTest', {
   },
 });
 
-var CrExtensionsA11yTestWithMultipleExensions =
-    class extends CrExtensionsA11yTest {
+CrExtensionsA11yTestWithMultipleExensions = class extends CrExtensionsA11yTest {
   /** @override */
   testGenPreamble() {
     GEN('  InstallGoodExtension();');
@@ -143,7 +136,7 @@ AccessibilityTest.define('CrExtensionsA11yTestWithMultipleExensions', {
   },
 });
 
-var CrExtensionsShortcutA11yTestWithNoExtensions =
+CrExtensionsShortcutA11yTestWithNoExtensions =
     class extends CrExtensionsA11yTest {
   /** @override */
   get browsePreload() {
@@ -171,7 +164,7 @@ AccessibilityTest.define('CrExtensionsShortcutA11yTestWithNoExtensions', {
   },
 });
 
-var CrExtensionsShortcutA11yTestWithExtensions =
+CrExtensionsShortcutA11yTestWithExtensions =
     class extends CrExtensionsShortcutA11yTestWithNoExtensions {
   /** @override */
   testGenPreamble() {
@@ -199,7 +192,7 @@ AccessibilityTest.define('CrExtensionsShortcutA11yTestWithExtensions', {
   },
 });
 
-var CrExtensionsErrorConsoleA11yTest =
+CrExtensionsErrorConsoleA11yTest =
     class extends CrExtensionsShortcutA11yTestWithNoExtensions {
   /** @override */
   get browsePreload() {

@@ -106,6 +106,13 @@ cr.define('settings', function() {
           displayName: 'Greek',
           nativeDisplayName: 'Ελληνικά',
           supportsUI: true,
+        },
+        {
+          // A fake language for ARC IMEs which is for internal use only. The
+          // value of the |code| must be the same as |kArcImeLanguage| in
+          // ui/base/ime/chromeos/extension_ime_util.cc.
+          code: '_arc_ime_language_',
+          displayName: 'Keyboard apps',
         }
       ];
 
@@ -388,11 +395,6 @@ cr.define('settings', function() {
         key: 'intl.accept_languages',
         type: chrome.settingsPrivate.PrefType.STRING,
         value: 'en-US,sw',
-      },
-      {
-        key: 'intl.allowed_locales',
-        type: chrome.settingsPrivate.PrefType.LIST,
-        value: [],
       },
       {
         key: 'spellcheck.dictionaries',

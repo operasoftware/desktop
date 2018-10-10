@@ -7,12 +7,18 @@ class TestSmbBrowserProxy extends TestBrowserProxy {
   constructor() {
     super([
       'smbMount',
+      'startDiscovery',
     ]);
   }
 
   /** @override */
-  smbMount(smbUrl, username, password) {
-    this.methodCalled('smbMount', [smbUrl, username, password]);
+  smbMount(smbUrl, smbName, username, password) {
+    this.methodCalled('smbMount', [smbUrl, smbName, username, password]);
+  }
+
+  /** @override */
+  startDiscovery() {
+    this.methodCalled('startDiscovery');
   }
 }
 
@@ -62,12 +68,17 @@ suite('AddSmbShareDialogTests', function() {
 
   test('ClickAdd', function() {
     const expectedSmbUrl = 'smb://192.168.1.1/testshare';
+    const expectedSmbName = 'testname';
     const expectedUsername = 'username';
     const expectedPassword = 'password';
 
     const url = addDialog.$$('#address');
     expectTrue(!!url);
     url.value = expectedSmbUrl;
+
+    const name = addDialog.$$('#name');
+    expectTrue(!!name);
+    name.value = expectedSmbName;
 
     const un = addDialog.$$('#username');
     expectTrue(!!un);
@@ -83,8 +94,14 @@ suite('AddSmbShareDialogTests', function() {
     addButton.click();
     return smbBrowserProxy.whenCalled('smbMount').then(function(args) {
       expectEquals(expectedSmbUrl, args[0]);
-      expectEquals(expectedUsername, args[1]);
-      expectEquals(expectedPassword, args[2]);
+      expectEquals(expectedSmbName, args[1]);
+      expectEquals(expectedUsername, args[2]);
+      expectEquals(expectedPassword, args[3]);
     });
   });
+
+  test('StartDiscovery', function() {
+    return smbBrowserProxy.whenCalled('startDiscovery');
+  });
+
 });

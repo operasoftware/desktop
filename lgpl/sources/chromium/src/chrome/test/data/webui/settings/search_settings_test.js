@@ -106,14 +106,20 @@ cr.define('settings_test', function() {
     test('ignored elements are ignored', function() {
       const text = 'hello';
       document.body.innerHTML = `<settings-section hidden-by-search>
-             <cr-events>${text}</cr-events>
+             <cr-action-menu>${text}</cr-action-menu>
+             <cr-dialog>${text}</cr-dialog>
              <dialog>${text}</dialog>
              <iron-icon>${text}</iron-icon>
              <iron-list>${text}</iron-list>
              <paper-icon-button>${text}</paper-icon-button>
+             <paper-icon-button-light>
+               <button>${text}</button>
+             </paper-icon-button-light>
              <paper-ripple>${text}</paper-ripple>
              <paper-slider>${text}</paper-slider>
              <paper-spinner-lite>${text}</paper-spinner-lite>
+             <slot>${text}</slot>
+             <content>${text}</content>
              <style>${text}</style>
              <template>${text}</template>
            </settings-section>`;
@@ -124,6 +130,69 @@ cr.define('settings_test', function() {
       return searchManager.search(text, section).then(function() {
         assertTrue(section.hiddenBySearch);
       });
+    });
+
+    test('no-search elements are ignored', function() {
+      // Define a dummy test element with the necessary structure for testing.
+      Polymer({
+        is: 'dummy-test-element',
+
+        properties: {
+          noSearch: {
+            type: Boolean,
+            value: true,
+          },
+        },
+      });
+
+      const text = 'hello';
+
+      document.body.innerHTML = `
+        <dom-module id="dummy-test-element">
+          <template>
+            <button></button>
+            <settings-section hidden-by-search>
+              <!-- Test case were no-search is part of a data binding. -->
+              <template is="dom-if" route-path="/myPath0"
+                  no-search="[[noSearch]]">
+                <settings-subpage associated-control="[[$$('button')]]">
+                  ${text}
+                </settings-subpage>
+              </template>
+
+              <!-- Test case were no-search is not part of any data binding.-->
+              <template is="dom-if" route-path="/myPath1" no-search>
+                <settings-subpage associated-control="[[$$('button')]]">
+                  ${text}
+                </settings-subpage>
+              </template>
+            </settings-section>
+          </template>
+        </dom-module>
+        <dummy-test-element></dummy-test-element>`;
+
+      const element = document.body.querySelector('dummy-test-element');
+      const section = element.$$('settings-section');
+
+      // Ensure that no settings-subpage instance exists.
+      assertEquals(null, element.$$('settings-subpage'));
+
+      return searchManager.search(text, section)
+          .then(function() {
+            assertTrue(section.hiddenBySearch);
+            // Check that searching did not cause a settings-subpage instance to
+            // be forced rendered.
+            assertEquals(null, element.$$('settings-subpage'));
+
+            element.noSearch = false;
+            return searchManager.search(text, section);
+          })
+          .then(function() {
+            // Check that searching caused a settings-subpage instance to be
+            // forced rendered.
+            assertFalse(section.hiddenBySearch);
+            assertTrue(!!element.$$('settings-subpage'));
+          });
     });
 
     // Test that multiple requests for the same text correctly highlight their

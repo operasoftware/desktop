@@ -918,7 +918,7 @@ suite('EditExceptionDialog', function() {
   });
 
   test('invalid input', function() {
-    const input = dialog.$$('paper-input');
+    const input = dialog.$$('cr-input');
     assertTrue(!!input);
     assertFalse(input.invalid);
 
@@ -947,7 +947,7 @@ suite('EditExceptionDialog', function() {
   });
 
   test('action button calls proxy', function() {
-    const input = dialog.$$('paper-input');
+    const input = dialog.$$('cr-input');
     assertTrue(!!input);
     // Simulate user edit.
     const newValue = input.value + ':1234';
@@ -991,8 +991,8 @@ suite('AddExceptionDialog', function() {
     dialog = document.createElement('add-site-dialog');
     dialog.category = settings.ContentSettingsTypes.GEOLOCATION;
     dialog.contentSetting = settings.ContentSetting.ALLOW;
+    dialog.hasIncognito = false;
     document.body.appendChild(dialog);
-    dialog.open();
   });
 
   teardown(function() {
@@ -1000,22 +1000,20 @@ suite('AddExceptionDialog', function() {
   });
 
   test('incognito', function() {
-    cr.webUIListenerCallback(
-        'onIncognitoStatusChanged',
-        /*hasIncognito=*/true);
+    dialog.set('hasIncognito', true);
+    Polymer.dom.flush();
     assertFalse(dialog.$.incognito.checked);
     dialog.$.incognito.checked = true;
     // Changing the incognito status will reset the checkbox.
-    cr.webUIListenerCallback(
-        'onIncognitoStatusChanged',
-        /*hasIncognito=*/false);
+    dialog.set('hasIncognito', false);
+    Polymer.dom.flush();
     assertFalse(dialog.$.incognito.checked);
   });
 
   test('invalid input', function() {
     // Initially the action button should be disabled, but the error warning
     // should not be shown for an empty input.
-    const input = dialog.$$('paper-input');
+    const input = dialog.$$('cr-input');
     assertTrue(!!input);
     assertFalse(input.invalid);
 

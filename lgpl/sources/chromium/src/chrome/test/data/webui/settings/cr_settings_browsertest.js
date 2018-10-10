@@ -94,6 +94,28 @@ TEST_F('CrSettingsSliderTest', 'All', function() {
  * @constructor
  * @extends {CrSettingsBrowserTest}
  */
+function CrSettingsTextareaTest() {}
+
+CrSettingsTextareaTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://settings/controls/settings_textarea.html',
+
+  /** @override */
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    'settings_textarea_tests.js',
+  ]),
+};
+
+TEST_F('CrSettingsTextareaTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
 function CrSettingsToggleButtonTest() {}
 
 CrSettingsToggleButtonTest.prototype = {
@@ -942,6 +964,32 @@ TEST_F('CrSettingsCategorySettingExceptionsTest', 'All', function() {
  * @constructor
  * @extends {CrSettingsBrowserTest}
  */
+function CrSettingsSiteEntryTest() {}
+
+CrSettingsSiteEntryTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://settings/privacy_page/privacy_page.html',
+
+  /** @override */
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    '../test_browser_proxy.js',
+    'test_local_data_browser_proxy.js',
+    'test_util.js',
+    'test_site_settings_prefs_browser_proxy.js',
+    'site_entry_tests.js',
+  ]),
+};
+
+TEST_F('CrSettingsSiteEntryTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
 function CrSettingsAllSitesTest() {}
 
 CrSettingsAllSitesTest.prototype = {
@@ -1751,6 +1799,55 @@ TEST_F('CrSettingsSmbPageTest', 'All', function() {
 });
 
 /**
+ * Test fixture for the multidevice settings subpage feature item.
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
+function CrSettingsMultideviceFeatureItemTest() {}
+
+CrSettingsMultideviceFeatureItemTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload:
+      'chrome://settings/multidevice_page/multidevice_feature_item.html',
+
+  /** @override */
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    'multidevice_feature_item_tests.js',
+  ]),
+};
+
+TEST_F('CrSettingsMultideviceFeatureItemTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * Test fixture for the multidevice settings page container.
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
+function CrSettingsMultidevicePageContainerTest() {}
+
+CrSettingsMultidevicePageContainerTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload:
+      'chrome://settings/multidevice_page/multidevice_page_container.html',
+
+  /** @override */
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    '../test_browser_proxy.js',
+    'multidevice_page_container_tests.js',
+  ]),
+};
+
+TEST_F('CrSettingsMultidevicePageContainerTest', 'All', function() {
+  mocha.run();
+});
+
+/**
  * Test fixture for the multidevice settings page.
  * @constructor
  * @extends {CrSettingsBrowserTest}
@@ -1765,6 +1862,7 @@ CrSettingsMultidevicePageTest.prototype = {
 
   /** @override */
   extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    '../test_browser_proxy.js',
     'multidevice_page_tests.js',
   ]),
 };

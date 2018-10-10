@@ -116,11 +116,11 @@ SettingsAutofillSectionBrowserTest.prototype = {
    * Creates the autofill section for the given lists.
    * @param {!Array<!chrome.passwordsPrivate.PasswordUiEntry>} passwordList
    * @param {!Array<!chrome.passwordsPrivate.ExceptionEntry>} exceptionList
-   * @param {!Object} pref_value
+   * @param {!Object} prefValues
    * @return {!Object}
    * @private
    */
-  createAutofillSection_: function(addresses, creditCards, pref_value) {
+  createAutofillSection_: function(addresses, creditCards, prefValues) {
     // Override the AutofillManagerImpl for testing.
     this.autofillManager = new TestAutofillManager();
     this.autofillManager.data.addresses = addresses;
@@ -128,7 +128,7 @@ SettingsAutofillSectionBrowserTest.prototype = {
     AutofillManagerImpl.instance_ = this.autofillManager;
 
     const section = document.createElement('settings-autofill-section');
-    section.prefs = {autofill: {credit_card_enabled: pref_value}};
+    section.prefs = {autofill: prefValues};
     document.body.appendChild(section);
     Polymer.dom.flush();
 
@@ -171,7 +171,9 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'uiTest', function() {
     test('testAutofillExtensionIndicator', function() {
       // Initializing with fake prefs
       const section = document.createElement('settings-autofill-section');
-      section.prefs = {autofill: {enabled: {}, credit_card_enabled: {}}};
+      section.prefs = {
+        autofill: {enabled: {}, credit_card_enabled: {}, profile_enabled: {}}
+      };
       document.body.appendChild(section);
 
       assertFalse(!!section.$$('#autofillExtensionIndicator'));
@@ -199,7 +201,8 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'CreditCardTests', function() {
     });
 
     test('verifyCreditCardCount', function() {
-      const section = self.createAutofillSection_([], [], {});
+      const section = self.createAutofillSection_(
+          [], [], {enabled: {value: true}, credit_card_enabled: {value: true}});
 
       const creditCardList = section.$$('#creditCardList');
       assertTrue(!!creditCardList);
@@ -207,14 +210,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'CreditCardTests', function() {
 
       assertFalse(section.$$('#noCreditCardsLabel').hidden);
       assertTrue(section.$$('#creditCardsHeading').hidden);
-      assertTrue(section.$$('#CreditCardsDisabledLabel').hidden);
-    });
-
-    test('verifyCreditCardsDisabled', function() {
-      const section = self.createAutofillSection_([], [], {value: false});
-
-      assertEquals(0, section.querySelectorAll('#creditCardList').length);
-      assertFalse(section.$$('#CreditCardsDisabledLabel').hidden);
+      assertFalse(section.$$('#addCreditCard').disabled);
     });
 
     test('verifyCreditCardCount', function() {
@@ -227,7 +223,9 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'CreditCardTests', function() {
         FakeDataMaker.creditCardEntry(),
       ];
 
-      const section = self.createAutofillSection_([], creditCards, {});
+      const section = self.createAutofillSection_(
+          [], creditCards,
+          {enabled: {value: true}, credit_card_enabled: {value: true}});
       const creditCardList = section.$$('#creditCardList');
       assertTrue(!!creditCardList);
       assertEquals(
@@ -236,7 +234,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'CreditCardTests', function() {
 
       assertTrue(section.$$('#noCreditCardsLabel').hidden);
       assertFalse(section.$$('#creditCardsHeading').hidden);
-      assertTrue(section.$$('#CreditCardsDisabledLabel').hidden);
+      assertFalse(section.$$('#addCreditCard').disabled);
     });
 
     test('verifyCreditCardFields', function() {
@@ -414,7 +412,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'CreditCardTests', function() {
                   assertEquals(creditCard.guid, event.detail.guid);
                   done();
                 });
-            MockInteractions.tap(creditCardDialog.$.saveButton);
+            creditCardDialog.$.saveButton.click();
           });
     });
 
@@ -437,7 +435,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'CreditCardTests', function() {
               window.setTimeout(done, 100);
             });
 
-            MockInteractions.tap(creditCardDialog.$.cancelButton);
+            creditCardDialog.$.cancelButton.click();
           });
     });
 
@@ -540,7 +538,8 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressTests', function() {
     });
 
     test('verifyNoAddresses', function() {
-      const section = self.createAutofillSection_([], [], {});
+      const section = self.createAutofillSection_(
+          [], [], {enabled: {value: true}, profile_enabled: {value: true}});
 
       const addressList = section.$.addressList;
       assertTrue(!!addressList);
@@ -548,6 +547,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressTests', function() {
       assertEquals(1, addressList.children.length);
 
       assertFalse(section.$.noAddressesLabel.hidden);
+      assertFalse(section.$$('#addAddress').disabled);
     });
 
     test('verifyAddressCount', function() {
@@ -559,7 +559,9 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressTests', function() {
         FakeDataMaker.addressEntry(),
       ];
 
-      const section = self.createAutofillSection_(addresses, [], {});
+      const section = self.createAutofillSection_(
+          addresses, [],
+          {enabled: {value: true}, profile_enabled: {value: true}});
 
       const addressList = section.$.addressList;
       assertTrue(!!addressList);
@@ -567,6 +569,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressTests', function() {
           addresses.length, addressList.querySelectorAll('.list-item').length);
 
       assertTrue(section.$.noAddressesLabel.hidden);
+      assertFalse(section.$$('#addAddress').disabled);
     });
 
     test('verifyAddressFields', function() {
@@ -671,7 +674,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressTests', function() {
         dialog.$.emailInput.value = emailAddress;
 
         return expectEvent(dialog, 'save-address', function() {
-                 MockInteractions.tap(dialog.$.saveButton);
+                 dialog.$.saveButton.click();
                }).then(function() {
           assertEquals(phoneNumber, dialog.$.phoneInput.value);
           assertEquals(phoneNumber, address.phoneNumbers[0]);
@@ -700,7 +703,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressTests', function() {
         dialog.$.emailInput.value = '';
 
         return expectEvent(dialog, 'save-address', function() {
-                 MockInteractions.tap(dialog.$.saveButton);
+                 dialog.$.saveButton.click();
                }).then(function() {
           assertEquals(0, address.phoneNumbers.length);
           assertEquals(0, address.emailAddresses.length);
@@ -716,7 +719,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressTests', function() {
           .then(function(dialog) {
             const saveButton = dialog.$.saveButton;
             const testElements =
-                dialog.$.dialog.querySelectorAll('paper-input,paper-textarea');
+                dialog.$.dialog.querySelectorAll('settings-textarea, cr-input');
 
             // Default country is 'US' expecting: Name, Organization,
             // Street address, City, State, ZIP code, Phone, and Email.
@@ -782,7 +785,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressTests', function() {
         return expectEvent(dialog, 'save-address', function() {
                  // Verify |countryCode| is not set.
                  assertEquals(undefined, address.countryCode);
-                 MockInteractions.tap(dialog.$.saveButton);
+                 dialog.$.saveButton.click();
                }).then(function(event) {
           // 'US' is the default country for these tests.
           assertEquals('US', event.detail.countryCode);
@@ -805,7 +808,7 @@ TEST_F('SettingsAutofillSectionBrowserTest', 'AddressTests', function() {
               window.setTimeout(done, 100);
             });
 
-            MockInteractions.tap(dialog.$.cancelButton);
+            dialog.$.cancelButton.click();
           });
     });
   });

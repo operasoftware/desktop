@@ -179,9 +179,9 @@ source_set("libcurl") {
     "lib/setopt.h",
     "lib/setup-os400.h",
     "lib/setup-vms.h",
+    "lib/sha256.c",
     "lib/share.c",
     "lib/share.h",
-    "lib/sha256.c",
     "lib/sigpipe.h",
     "lib/slist.c",
     "lib/slist.h",
@@ -198,9 +198,9 @@ source_set("libcurl") {
     "lib/speedcheck.h",
     "lib/splay.c",
     "lib/splay.h",
+    "lib/ssh-libssh.c",
     "lib/ssh.c",
     "lib/ssh.h",
-    "lib/ssh-libssh.c",
     "lib/strcase.c",
     "lib/strcase.h",
     "lib/strdup.c",
@@ -271,10 +271,6 @@ source_set("libcurl") {
     "lib/wildcard.h",
     "lib/x509asn1.c",
     "lib/x509asn1.h",
-  ]
-
-  deps = [
-    "//build/config:exe_and_shlib_deps",
   ]
 
   if (is_win) {
