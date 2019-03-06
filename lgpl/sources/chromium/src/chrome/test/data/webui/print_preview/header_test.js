@@ -10,6 +10,7 @@ cr.define('header_test', function() {
     HeaderWithCopies: 'header with copies',
     HeaderWithNup: 'header with nup',
     HeaderChangesForState: 'header changes for state',
+    ButtonOrder: 'button order',
   };
 
   const suiteName = 'HeaderTest';
@@ -38,13 +39,6 @@ cr.define('header_test', function() {
         pages: {
           value: [1],
           unavailableValue: [],
-          valid: true,
-          available: true,
-          key: '',
-        },
-        pagesPerSheet: {
-          value: 1,
-          unavailableValue: 1,
           valid: true,
           available: true,
           key: '',
@@ -114,35 +108,11 @@ cr.define('header_test', function() {
       assertEquals('Total: 8 sheets of paper', summary.textContent);
     });
 
-    // Tests that the message is correctly adjusted for N-up.
-    test(assert(TestNames.HeaderWithNup), function() {
-      const summary = header.$$('.summary');
-      assertEquals('Total: 1 sheet of paper', summary.textContent);
-      header.setSetting('pagesPerSheet', 4);
-      assertEquals('Total: 1 sheet of paper', summary.textContent);
-      header.setSetting('pages', [1, 2, 3, 4, 5, 6]);
-      assertEquals('Total: 2 sheets of paper', summary.textContent);
-      header.setSetting('duplex', true);
-      assertEquals('Total: 1 sheet of paper', summary.textContent);
-      header.setSetting('pagesPerSheet', 2);
-      assertEquals('Total: 2 sheets of paper', summary.textContent);
-      header.setSetting('pagesPerSheet', 3);
-      assertEquals('Total: 1 sheet of paper', summary.textContent);
-      header.setSetting('copies', 2);
-      assertEquals('Total: 2 sheets of paper', summary.textContent);
-
-      // Check PDF destination
-      header.setSetting('copies', 1);
-      header.setSetting('duplex', false);
-      setPdfDestination();
-      assertEquals('Total: 2 pages', summary.textContent);
-    });
-
     // Tests that the correct message is shown for non-READY states, and that
     // the print button is disabled appropriately.
     test(assert(TestNames.HeaderChangesForState), function() {
       const summary = header.$$('.summary');
-      const printButton = header.$$('.print');
+      const printButton = header.$$('.action-button');
       assertEquals('Total: 1 sheet of paper', summary.textContent);
       assertFalse(printButton.disabled);
 
@@ -169,6 +139,28 @@ cr.define('header_test', function() {
       header.set('state', print_preview_new.State.FATAL_ERROR);
       assertEquals(testError, summary.textContent);
       assertTrue(printButton.disabled);
+    });
+
+    // Tests that the buttons are in the correct order for different platforms.
+    // See https://crbug.com/880562.
+    test(assert(TestNames.ButtonOrder), function() {
+      // Verify that there are only 2 buttons.
+      assertEquals(
+          2, header.shadowRoot.querySelectorAll('paper-button').length);
+
+      const firstButton = header.$$('paper-button:first-child');
+      const lastButton = header.$$('paper-button:last-child');
+      const printButton = header.$$('paper-button.action-button');
+      const cancelButton = header.$$('paper-button.cancel-button');
+
+      if (cr.isWindows) {
+        // On Windows, the print button is on the left.
+        assertEquals(firstButton, printButton);
+        assertEquals(lastButton, cancelButton);
+      } else {
+        assertEquals(firstButton, cancelButton);
+        assertEquals(lastButton, printButton);
+      }
     });
   });
 

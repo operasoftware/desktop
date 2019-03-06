@@ -13,6 +13,24 @@ function postToWindowClients(msg) {
   });
 }
 
+self.addEventListener('message', e => {
+  const fetchPromise = self.registration.backgroundFetch.fetch(
+    'sw-fetch', '/background_fetch/types_of_cheese.txt');
+  if (e.data === 'fetchnowait')
+    postToWindowClients('ok');
+  else if (e.data === 'fetch')
+    fetchPromise.catch(e => postToWindowClients('permissionerror'));
+  else
+    postToWindowClients('unexpected message');
+});
+
 // Background Fetch event listeners.
-self.addEventListener('backgroundfetched', e => postToWindowClients(e.type));
-self.addEventListener('backgroundfetchfail', e => postToWindowClients(e.type));
+self.addEventListener('backgroundfetchsuccess', e => {
+  e.waitUntil(e.updateUI({title: 'New Fetched Title!'}).then(
+      () => postToWindowClients(e.type)));
+});
+
+self.addEventListener('backgroundfetchfail', e => {
+  e.waitUntil(e.updateUI({title: 'New Failed Title!'}).then(
+      () => postToWindowClients(e.type)));
+});

@@ -26,6 +26,7 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
       'fetchUsbDevices',
       'fetchZoomLevels',
       'getAllSites',
+      'getFormattedBytes',
       'getDefaultValueForContentType',
       'getExceptionList',
       'getOriginPermissions',
@@ -43,6 +44,7 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
       'setOriginPermissions',
       'setProtocolDefault',
       'updateIncognitoStatus',
+      'fetchBlockAutoplayStatus',
     ]);
 
     /** @private {boolean} */
@@ -203,18 +205,32 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
     const origins_array = [...origins_set];
     let result = [];
     origins_array.forEach((origin, index) => {
-      let entry = {};
       // Functionality to get the eTLD+1 from an origin exists only on the
       // C++ side, so just do an (incorrect) approximate extraction here.
       const host = new URL(origin).host;
       let urlParts = host.split('.');
       urlParts = urlParts.slice(Math.max(urlParts.length - 2, 0));
-      entry['etldPlus1'] = urlParts.join('.');
-      entry['origins'] = [origin];
-      result.push(entry);
+      const etldPlus1Name = urlParts.join('.');
+
+      let existing = result.find(siteGroup => {
+        return siteGroup.etldPlus1 == etldPlus1Name;
+      });
+
+      if (existing) {
+        existing.origins.push(test_util.createOriginInfo(origin));
+      } else {
+        const entry = test_util.createSiteGroup(etldPlus1Name, [origin]);
+        result.push(entry);
+      }
     });
 
     return Promise.resolve(result);
+  }
+
+  /** @override */
+  getFormattedBytes(numBytes) {
+    this.methodCalled('getFormattedBytes', numBytes);
+    return Promise.resolve(`${numBytes} B`);
   }
 
   /** @override */
@@ -227,7 +243,11 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
 
   /** @override */
   getExceptionList(contentType) {
-    this.methodCalled('getExceptionList', contentType);
+    // Defer |methodCalled| call so that |then| callback for the promise
+    // returned from this method runs before the one for the promise returned
+    // from |whenCalled| calls in tests.
+    window.setTimeout(
+        () => this.methodCalled('getExceptionList', contentType), 0);
     let pref = this.prefs_.exceptions[contentType];
     assert(pref != undefined, 'Pref is missing for ' + contentType);
 
@@ -370,5 +390,10 @@ class TestSiteSettingsPrefsBrowserProxy extends TestBrowserProxy {
   /** @override */
   updateIncognitoStatus() {
     this.methodCalled('updateIncognitoStatus', arguments);
+  }
+
+  /** @override */
+  fetchBlockAutoplayStatus() {
+    this.methodCalled('fetchBlockAutoplayStatus');
   }
 }

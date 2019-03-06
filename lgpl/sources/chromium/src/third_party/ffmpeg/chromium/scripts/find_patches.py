@@ -98,10 +98,21 @@ def main(argv):
   else:
     origin_branch = "HEAD"
 
+  # Make sure that upstream is up-to-date, else many things will likely not
+  # be reachable from it.  We don't do this if run as part of a script.
+  if subprocess.call(["git", "fetch", "upstream"]):
+    raise Exception("Could not fetch from upstream")
+
+  write_patches_file(origin_branch, sys.stdout)
+
+def write_patches_file(origin_branch, output_file):
+  """Write the patches file for |origin_branch| to |output_file|."""
   # Get the latest upstream commit that's reachable from the origin branch.
   # We'll use that to compare against.
   upstream = run(["git", "merge-base", "upstream/master", origin_branch]
                 ).strip()
+  if not upstream:
+    raise Exception("Could not find upstream commit")
 
   # "Everything reachable from |origin_branch| but not |upstream|".  In other
   # words, all and only chromium changes.  Note that there are non-chromium
@@ -208,20 +219,24 @@ def main(argv):
     sha1_to_date[sha1] = date
 
   # Print the patches file.
-  log("Writing patch file to stdout")
-  print("--------------------------------------------------------------------")
-  print("-- Chromium Patches                                               --")
-  print("--------------------------------------------------------------------")
-  print("\n")
+  log("Writing patch file")
+  print("--------------------------------------------------------------------",
+          file=output_file)
+  print("-- Chromium Patches                                               --",
+          file=output_file)
+  print("--------------------------------------------------------------------",
+          file=output_file)
+  print("\n", file=output_file)
   wd = os.getcwd()
   for sha1, date in sorted(sha1_to_date.iteritems(), key=lambda (k,v): v):
-    print("------------------------------------------------------------------")
-    print(run(["git", "log", "-1", "%s" % sha1]))
-    print(" Affects: ")
+    print("------------------------------------------------------------------",
+            file=output_file)
+    print(run(["git", "log", "-1", "%s" % sha1]), file=output_file)
+    print(" Affects: ", file=output_file)
     # TODO(liberato): maybe add the lines that were affected.
     for file in sha1ToFiles[sha1]:
-      print(os.path.relpath(file, wd))
-    print()
+      print(os.path.relpath(file, wd), file=output_file)
+    print(file=output_file)
 
   log("Done")
 

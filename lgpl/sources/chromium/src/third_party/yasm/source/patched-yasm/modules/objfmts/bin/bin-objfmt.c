@@ -1866,8 +1866,7 @@ dosexe_objfmt_output(yasm_object *object, FILE *f, /*@unused@*/ int all_syms,
     bss_size = tot_size - size;
 #ifdef HAVE_FTRUNCATE
     if (size != tot_size)
-        if (ftruncate(fileno(f), EXE_HEADER_SIZE + size) != 0)
-            ; /* No-op. Report an error? */
+        ftruncate(fileno(f), EXE_HEADER_SIZE + size);
 #endif
     fseek(f, 0, SEEK_SET);
 

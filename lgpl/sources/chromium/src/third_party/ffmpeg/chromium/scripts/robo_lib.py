@@ -21,6 +21,14 @@ class RoboConfiguration:
     Important: We might be doing --setup, so these sanity checks should only be
     for things that we don't plan for fix as part of that.
     """
+    # This is the prefix that our branches start with.
+    self._sushi_branch_prefix = "sushi-"
+    # This is the title that we use for the commit with GN configs.
+    self._gn_commit_title = "GN Configuration"
+    # Title of the commit with chromium/patches/README.
+    self._patches_commit_title = "Chromium patches file"
+    # Title of the commit with chromium/patches/config_flag_changes.txt
+    self._build_changes_commit_title = "Build Config Changes Summary"
     self.EnsureHostInfo()
     self.EnsureChromeSrc()
     self.EnsurePathContainsLLVM()
@@ -28,6 +36,10 @@ class RoboConfiguration:
     self.EnsureFFmpegHome()
     log("Using ffmpeg home: %s" % self.ffmpeg_home())
     self.EnsureASANConfig()
+    self.ComputeBranchName()
+    log("On branch: %s" % self.branch_name())
+    if self.sushi_branch_name():
+      log("On sushi branch: %s" % self.sushi_branch_name())
 
   def chrome_src(self):
     """Return /path/to/chromium/src"""
@@ -56,6 +68,29 @@ class RoboConfiguration:
 
   def chdir_to_ffmpeg_home(self):
     os.chdir(self.ffmpeg_home())
+
+  def branch_name(self):
+    """Return the current workspace's branch name, or None.  This might be any
+    branch (e.g., "master"), not just one that we've created."""
+    return self._branch_name
+
+  def sushi_branch_name(self):
+    """If the workspace is currently on a branch that we created (a "sushi
+    branch"), return it.  Else return None."""
+    return self._sushi_branch_name
+
+  def sushi_branch_prefix(self):
+    """Return the branch name that indicates that this is a "sushi branch"."""
+    return self._sushi_branch_prefix
+
+  def gn_commit_title(self):
+    return self._gn_commit_title
+
+  def patches_commit_title(self):
+    return self._patches_commit_title
+
+  def build_changes_commit_title(self):
+    return self._build_changes_commit_title
 
   def EnsureHostInfo(self):
     """Ensure that the host architecture and platform are set."""
@@ -97,3 +132,17 @@ class RoboConfiguration:
     if llvm_path not in os.environ["PATH"]:
       raise Exception("Please add %s to the beginning of $PATH" % llvm_path)
 
+  def ComputeBranchName(self):
+    """Get the current branch name and set it."""
+    self.chdir_to_ffmpeg_home()
+    branch_name = subprocess.Popen(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+          stdout=subprocess.PIPE).communicate()[0].strip()
+    self.SetBranchName(branch_name)
+
+  def SetBranchName(self, name):
+    """Set our branch name, which may be a sushi branch or not."""
+    self._branch_name = name
+    # If this is one of our branches, then record that too.
+    if name and not name.startswith(self.sushi_branch_prefix()):
+      name = None
+    self._sushi_branch_name = name

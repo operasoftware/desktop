@@ -22,7 +22,9 @@ CrElementsBrowserTest.prototype = {
   __proto__: PolymerTest.prototype,
 
   /** @override */
-  extraLibraries: PolymerTest.getLibraries(ROOT_PATH),
+  extraLibraries: PolymerTest.getLibraries(ROOT_PATH).concat([
+    ROOT_PATH + 'ui/webui/resources/js/assert.js',
+  ]),
 
   /** @override */
   get browsePreload() {
@@ -349,4 +351,59 @@ CrElementsRadioButtonTest.prototype = {
 
 TEST_F('CrElementsRadioButtonTest', 'All', function() {
   mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
+function CrElementsSearchableDropDownTest() {}
+
+CrElementsSearchableDropDownTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://resources/cr_elements/cr_searchable_drop_down/' +
+      'cr_searchable_drop_down.html',
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    '../settings/test_util.js',
+    'cr_searchable_drop_down_tests.js',
+  ]),
+};
+
+TEST_F('CrElementsSearchableDropDownTest', 'All', function() {
+  mocha.run();
+});
+
+////////////////////////////////////////////////////////////////////////////////
+// View Manager Tests
+
+CrElementsViewManagerTest = class extends CrElementsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://resources/cr_elements/cr_view_manager/cr_view_manager.html';
+  }
+
+  /** @override */
+  get extraLibraries() {
+    return super.extraLibraries.concat([
+      '../extensions/test_util.js',
+      'cr_view_manager_test.js',
+    ]);
+  }
+
+  /** @override */
+  get suiteName() {
+    return cr_view_manager_test.suiteName;
+  }
+};
+
+TEST_F('CrElementsViewManagerTest', 'VisibilityTest', function() {
+  runMochaTest(this.suiteName, cr_view_manager_test.TestNames.Visibility);
+});
+
+TEST_F('CrElementsViewManagerTest', 'EventFiringTest', function() {
+  runMochaTest(this.suiteName, cr_view_manager_test.TestNames.EventFiring);
 });

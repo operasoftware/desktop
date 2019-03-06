@@ -32,9 +32,9 @@ cr.define('multidevice_setup', () => {
 
       const START = 'start-setup-page';
       const DEVICES = [
-        {name: 'Pixel XL', publicKey: 'abcdxl'},
-        {name: 'Nexus 6P', publicKey: 'PpPpPp'},
-        {name: 'Nexus 5', publicKey: '12345'},
+        {deviceName: 'Pixel XL', deviceId: 'abcdxl'},
+        {deviceName: 'Nexus 6P', deviceId: 'PpPpPp'},
+        {deviceName: 'Nexus 5', deviceId: '12345'},
       ];
 
       setup(() => {
@@ -47,7 +47,7 @@ cr.define('multidevice_setup', () => {
 
       let selectOptionByTextContent = function(optionText) {
         const optionNodeList =
-            startSetupPageElement.querySelectorAll('* /deep/ option');
+            startSetupPageElement.$.deviceDropdown.querySelectorAll('option');
         for (option of optionNodeList.values()) {
           if (option.textContent.trim() == optionText) {
             MockInteractions.tap(option);
@@ -60,21 +60,22 @@ cr.define('multidevice_setup', () => {
           'Finding devices populates dropdown and defines selected device',
           () => {
             assertEquals(
-                startSetupPageElement.querySelectorAll('* /deep/ option')
+                startSetupPageElement.$.deviceDropdown
+                    .querySelectorAll('option')
                     .length,
                 DEVICES.length);
-            assertEquals(startSetupPageElement.selectedPublicKey, 'abcdxl');
+            assertEquals(startSetupPageElement.selectedDeviceId, 'abcdxl');
           });
 
       test(
-          'selectedPublicKey changes when dropdown options are selected',
+          'selectedDeviceId changes when dropdown options are selected',
           () => {
             selectOptionByTextContent('Nexus 6P');
-            assertEquals(startSetupPageElement.selectedPublicKey, 'PpPpPp');
+            assertEquals(startSetupPageElement.selectedDeviceId, 'PpPpPp');
             selectOptionByTextContent('Nexus 5');
-            assertEquals(startSetupPageElement.selectedPublicKey, '12345');
+            assertEquals(startSetupPageElement.selectedDeviceId, '12345');
             selectOptionByTextContent('Pixel XL');
-            assertEquals(startSetupPageElement.selectedPublicKey, 'abcdxl');
+            assertEquals(startSetupPageElement.selectedDeviceId, 'abcdxl');
           });
     });
   }

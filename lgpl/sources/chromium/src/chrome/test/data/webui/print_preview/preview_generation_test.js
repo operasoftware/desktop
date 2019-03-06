@@ -18,6 +18,7 @@ cr.define('preview_generation_test', function() {
     Scaling: 'scaling',
     SelectionOnly: 'selection only',
     Destination: 'destination',
+    ChangeMarginsByPagesPerSheet: 'change margins by pages per sheet',
   };
 
   const suiteName = 'PreviewGenerationTest';
@@ -27,9 +28,6 @@ cr.define('preview_generation_test', function() {
 
     /** @type {?print_preview.NativeLayer} */
     let nativeLayer = null;
-
-    /** @type {?print_preview.DocumentInfo} */
-    let documentInfo = null;
 
     /** @type {!print_preview.NativeInitialSettings} */
     const initialSettings =
@@ -43,9 +41,8 @@ cr.define('preview_generation_test', function() {
     });
 
     /**
-     * Initializes the UI with a default local destination. |documentInfo| is
-     * initialized to a 3 page HTML document with no selection if it has not
-     * been set yet.
+     * Initializes the UI with a default local destination and a 3 page document
+     * length.
      * @return {!Promise} Promise that resolves when initialization is done,
      *     destination is set, and initial preview request is complete.
      */
@@ -68,25 +65,11 @@ cr.define('preview_generation_test', function() {
             nativeLayer.whenCalled('getPrinterCapabilities'),
           ])
           .then(function() {
-            if (!documentInfo)
-              initDocumentInfo(false, false);
-            page.set('documentInfo_', documentInfo);
-            page.notifyPath('documentInfo_.isModifiable');
+            if (!page.documentInfo_.isModifiable)
+              page.documentInfo_.updateFitToPageScaling(98);
+            page.documentInfo_.updatePageCount(3);
             return nativeLayer.whenCalled('getPreview');
           });
-    }
-
-    /**
-     * Initializes |documentInfo| with a 3 page document.
-     * @param {boolean} isPdf Whether the document should be a PDF.
-     * @param {boolean} hasSelection Whether the document has a selection.
-     */
-    function initDocumentInfo(isPdf, hasSelection) {
-      documentInfo = new print_preview.DocumentInfo();
-      documentInfo.init(!isPdf, 'title', hasSelection);
-      if (isPdf)
-        documentInfo.updateFitToPageScaling(98);
-      documentInfo.updatePageCount(3);
     }
 
     /**
@@ -110,6 +93,7 @@ cr.define('preview_generation_test', function() {
       return initialize()
           .then(function(args) {
             const originalTicket = JSON.parse(args.printTicket);
+            assertEquals(0, originalTicket.requestID);
             assertEquals(initialTicketValue, originalTicket[ticketKey]);
             nativeLayer.resetResolver('getPreview');
             assertEquals(
@@ -122,7 +106,7 @@ cr.define('preview_generation_test', function() {
                 updatedSettingValue, page.getSettingValue(settingName));
             const ticket = JSON.parse(args.printTicket);
             assertEquals(updatedTicketValue, ticket[ticketKey]);
-            assertEquals(2, ticket.requestID);
+            assertEquals(1, ticket.requestID);
           });
     }
 
@@ -142,7 +126,7 @@ cr.define('preview_generation_test', function() {
     /** Validate changing the fit to page setting updates the preview. */
     test(assert(TestNames.FitToPage), function() {
       // Set PDF document so setting is available.
-      initDocumentInfo(true, false);
+      initialSettings.previewModifiable = false;
       return testSimpleSetting(
           'fitToPage', false, true, 'fitToPageEnabled', false, true);
     });
@@ -167,6 +151,47 @@ cr.define('preview_generation_test', function() {
           print_preview.ticket_items.MarginsTypeValue.MINIMUM);
     });
 
+    /**
+     * Validate changing the pages per sheet updates the preview, and resets
+     * margins to print_preview.ticket_items.MarginsTypeValue.DEFAULT.
+     */
+    test(assert(TestNames.ChangeMarginsByPagesPerSheet), function() {
+      const marginsTypeEnum = print_preview.ticket_items.MarginsTypeValue;
+      return initialize()
+          .then(function(args) {
+            const originalTicket = JSON.parse(args.printTicket);
+            assertEquals(0, originalTicket.requestID);
+            assertEquals(
+                marginsTypeEnum.DEFAULT, originalTicket['marginsType']);
+            assertEquals(
+                marginsTypeEnum.DEFAULT, page.getSettingValue('margins'));
+            assertEquals(1, page.getSettingValue('pagesPerSheet'));
+            assertEquals(1, originalTicket['pagesPerSheet']);
+            nativeLayer.resetResolver('getPreview');
+            page.setSetting('margins', marginsTypeEnum.MINIMUM);
+            return nativeLayer.whenCalled('getPreview');
+          })
+          .then(function(args) {
+            assertEquals(
+                marginsTypeEnum.MINIMUM, page.getSettingValue('margins'));
+            const ticket = JSON.parse(args.printTicket);
+            assertEquals(marginsTypeEnum.MINIMUM, ticket['marginsType']);
+            nativeLayer.resetResolver('getPreview');
+            assertEquals(1, ticket.requestID);
+            page.setSetting('pagesPerSheet', 4);
+            return nativeLayer.whenCalled('getPreview');
+          })
+          .then(function(args) {
+            assertEquals(
+                marginsTypeEnum.DEFAULT, page.getSettingValue('margins'));
+            assertEquals(4, page.getSettingValue('pagesPerSheet'));
+            const ticket = JSON.parse(args.printTicket);
+            assertEquals(marginsTypeEnum.DEFAULT, ticket['marginsType']);
+            assertEquals(4, ticket['pagesPerSheet']);
+            assertEquals(2, ticket.requestID);
+          });
+    });
+
     /** Validate changing the paper size updates the preview. */
     test(assert(TestNames.MediaSize), function() {
       const mediaSizeCapability =
@@ -183,6 +208,7 @@ cr.define('preview_generation_test', function() {
             assertEquals(
                 letterOption.height_microns,
                 originalTicket.mediaSize.height_microns);
+            assertEquals(0, originalTicket.requestID);
             nativeLayer.resetResolver('getPreview');
             const mediaSizeSetting = page.getSettingValue('mediaSize');
             assertEquals(
@@ -206,7 +232,7 @@ cr.define('preview_generation_test', function() {
             assertEquals(
                 squareOption.height_microns, ticket.mediaSize.height_microns);
             nativeLayer.resetResolver('getPreview');
-            assertEquals(2, ticket.requestID);
+            assertEquals(1, ticket.requestID);
           });
     });
 
@@ -237,7 +263,7 @@ cr.define('preview_generation_test', function() {
     /** Validate changing the selection only setting updates the preview. */
     test(assert(TestNames.SelectionOnly), function() {
       // Set has selection to true so that the setting is available.
-      initDocumentInfo(false, true);
+      initialSettings.hasSelection = true;
       return testSimpleSetting(
           'selectionOnly', false, true, 'shouldPrintSelectionOnly', false,
           true);
@@ -259,7 +285,7 @@ cr.define('preview_generation_test', function() {
      */
     test(assert(TestNames.Rasterize), function() {
       // Set PDF document so setting is available.
-      initDocumentInfo(true, false);
+      initialSettings.previewModifiable = false;
       return testSimpleSetting(
           'rasterize', false, true, 'rasterizePDF', false, true);
     });

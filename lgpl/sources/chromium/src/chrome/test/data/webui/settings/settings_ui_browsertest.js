@@ -26,7 +26,7 @@ SettingsUIBrowserTest.prototype = {
 // and several times that in a Debug build. See https://crbug.com/558434
 // and http://crbug.com/711256.
 
-GEN('#if !defined(NDEBUG) || defined(OS_MACOSX)');
+GEN('#if !defined(NDEBUG) || defined(OS_MACOSX) || defined(OS_WINDOWS)');
 GEN('#define MAYBE_All DISABLED_All');
 GEN('#else');
 GEN('#define MAYBE_All All');
@@ -165,21 +165,6 @@ TEST_F('SettingsUIBrowserTest', 'MAYBE_All', function() {
       searchField.setValue('   ');
       urlParams = settings.getQueryParameters();
       assertFalse(urlParams.has('search'));
-    });
-
-    test('find shortcut', function() {
-      document.body.focus();
-      assertTrue(ui.canHandleFindShortcut());
-
-      ui.handleFindShortcut();
-      assertTrue(ui.$$('cr-toolbar').getSearchField().isSearchFocused());
-
-      const whenDialogOpen = test_util.eventToPromise('cr-dialog-open', ui);
-      settings.navigateTo(settings.routes.RESET_DIALOG);
-
-      return whenDialogOpen.then(function() {
-        assertFalse(ui.canHandleFindShortcut());
-      });
     });
   });
 

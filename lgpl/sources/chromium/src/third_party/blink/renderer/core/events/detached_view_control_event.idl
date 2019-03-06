@@ -1,0 +1,5 @@
+// Copyright (c) 2016 Opera Software AS. All rights reserved.
+
+[RuntimeEnabled=MediaDetachedView] interface DetachedViewControlEvent : Event {
+    readonly attribute DOMString controlName;
+};

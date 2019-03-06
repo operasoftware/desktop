@@ -27,7 +27,7 @@ const CrExtensionsBrowserTest = class extends PolymerTest {
   get extraLibraries() {
     return PolymerTest.getLibraries(ROOT_PATH).concat([
       ROOT_PATH + 'ui/webui/resources/js/assert.js',
-      'extension_test_util.js',
+      'test_util.js',
       '../mock_controller.js',
       '../../../../../ui/webui/resources/js/promise_resolver.js',
       '../../../../../ui/webui/resources/js/webui_resource_test.js',
@@ -78,7 +78,7 @@ CrExtensionsSidebarTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_sidebar_test.js',
+      'sidebar_test.js',
     ]);
   }
 
@@ -103,7 +103,7 @@ CrExtensionsToolbarTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_toolbar_test.js',
+      'toolbar_test.js',
     ]);
   }
 
@@ -121,7 +121,13 @@ TEST_F('CrExtensionsToolbarTest', 'DevModeToggle', function() {
   this.runMochaTest(extension_toolbar_tests.TestNames.DevModeToggle);
 });
 
-TEST_F('CrExtensionsToolbarTest', 'ClickHandlers', function() {
+// TODO(crbug.com/882342) Disabled on other platforms but MacOS due to timeouts.
+GEN('#if !defined(OS_MACOSX)');
+GEN('#define MAYBE_ClickHandlers DISABLED_ClickHandlers');
+GEN('#else');
+GEN('#define MAYBE_ClickHandlers ClickHandlers');
+GEN('#endif');
+TEST_F('CrExtensionsToolbarTest', 'MAYBE_ClickHandlers', function() {
   this.runMochaTest(extension_toolbar_tests.TestNames.ClickHandlers);
 });
 
@@ -142,7 +148,7 @@ CrExtensionsItemsTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_item_test.js',
+      'item_test.js',
     ]);
   }
 
@@ -202,7 +208,7 @@ CrExtensionsDetailViewTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_detail_view_test.js',
+      'detail_view_test.js',
     ]);
   }
 
@@ -232,19 +238,6 @@ TEST_F('CrExtensionsDetailViewTest', 'Warnings', function() {
   this.runMochaTest(extension_detail_view_tests.TestNames.Warnings);
 });
 
-TEST_F(
-    'CrExtensionsDetailViewTest', 'RuntimeHostPermissionsDisplay', function() {
-      this.runMochaTest(
-          extension_detail_view_tests.TestNames.RuntimeHostPermissionsDisplay);
-    });
-
-TEST_F(
-    'CrExtensionsDetailViewTest', 'RuntimeHostPermissionsSelection',
-    function() {
-      this.runMochaTest(extension_detail_view_tests.TestNames
-                            .RuntimeHostPermissionsSelection);
-    });
-
 ////////////////////////////////////////////////////////////////////////////////
 // Extension Item List Tests
 
@@ -257,7 +250,7 @@ CrExtensionsItemListTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_item_list_test.js',
+      'item_list_test.js',
     ]);
   }
 
@@ -298,7 +291,7 @@ CrExtensionsLoadErrorTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_load_error_test.js',
+      'load_error_test.js',
     ]);
   }
 
@@ -333,7 +326,7 @@ CrExtensionsManagerUnitTest = class extends CrExtensionsBrowserTest {
   get extraLibraries() {
     return super.extraLibraries.concat([
       'test_kiosk_browser_proxy.js',
-      'extension_manager_unit_test.js',
+      'manager_unit_test.js',
     ]);
   }
 
@@ -383,7 +376,7 @@ CrExtensionsManagerTestWithMultipleExtensionTypesInstalled =
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_manager_test.js',
+      'manager_test.js',
     ]);
   }
 
@@ -429,7 +422,7 @@ CrExtensionsManagerTestWithIdQueryParam =
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_manager_test.js',
+      'manager_test.js',
     ]);
   }
 
@@ -459,7 +452,7 @@ CrExtensionsShortcutTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_keyboard_shortcuts_test.js',
+      'keyboard_shortcuts_test.js',
     ]);
   }
 
@@ -494,7 +487,7 @@ CrExtensionsShortcutInputTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_shortcut_input_test.js',
+      'shortcut_input_test.js',
     ]);
   }
 
@@ -515,7 +508,7 @@ CrExtensionsPackDialogTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_pack_dialog_test.js',
+      'pack_dialog_test.js',
     ]);
   }
 
@@ -531,7 +524,9 @@ TEST_F('CrExtensionsPackDialogTest', 'Interaction', function() {
 
 // Disabling on Windows due to flaky timeout on some build bots.
 // http://crbug.com/832885
-GEN('#if defined(OS_WIN)');
+// Temporarily disabling on Mac due to flaky dialog visibility failure.
+// http://crbug.com/877109
+GEN('#if defined(OS_WIN) || defined(OS_MACOSX)');
 GEN('#define MAYBE_PackSuccess DISABLED_PackSuccess');
 GEN('#else');
 GEN('#define MAYBE_PackSuccess PackSuccess');
@@ -561,7 +556,7 @@ CrExtensionsOptionsDialogTest = class extends CrExtensionsBrowserTest {
   get extraLibraries() {
     return super.extraLibraries.concat([
       '../settings/test_util.js',
-      'extension_options_dialog_test.js',
+      'options_dialog_test.js',
     ]);
   }
 
@@ -587,7 +582,7 @@ CrExtensionsErrorPageTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_error_page_test.js',
+      'error_page_test.js',
     ]);
   }
 
@@ -616,7 +611,7 @@ CrExtensionsCodeSectionTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_code_section_test.js',
+      'code_section_test.js',
     ]);
   }
 
@@ -646,7 +641,7 @@ CrExtensionsNavigationHelperTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      'extension_navigation_helper_test.js',
+      'navigation_helper_test.js',
     ]);
   }
 
@@ -672,36 +667,6 @@ TEST_F('CrExtensionsNavigationHelperTest', 'PushAndReplaceState', function() {
 TEST_F('CrExtensionsNavigationHelperTest', 'SupportedRoutes', function() {
   this.runMochaTest(
       extension_navigation_helper_tests.TestNames.SupportedRoutes);
-});
-
-////////////////////////////////////////////////////////////////////////////////
-// Extension View Manager Tests
-
-CrExtensionsViewManagerTest = class extends CrExtensionsBrowserTest {
-  /** @override */
-  get browsePreload() {
-    return 'chrome://extensions/view_manager.html';
-  }
-
-  /** @override */
-  get extraLibraries() {
-    return super.extraLibraries.concat([
-      'extension_view_manager_test.js',
-    ]);
-  }
-
-  /** @override */
-  get suiteName() {
-    return extension_view_manager_tests.suiteName;
-  }
-};
-
-TEST_F('CrExtensionsViewManagerTest', 'VisibilityTest', function() {
-  this.runMochaTest(extension_view_manager_tests.TestNames.Visibility);
-});
-
-TEST_F('CrExtensionsViewManagerTest', 'EventFiringTest', function() {
-  this.runMochaTest(extension_view_manager_tests.TestNames.EventFiring);
 });
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -801,7 +766,7 @@ CrExtensionsKioskModeTest = class extends CrExtensionsBrowserTest {
   get extraLibraries() {
     return super.extraLibraries.concat([
       'test_kiosk_browser_proxy.js',
-      'extension_kiosk_mode_test.js',
+      'kiosk_mode_test.js',
     ]);
   }
   /** @override */
@@ -835,3 +800,43 @@ TEST_F('CrExtensionsKioskModeTest', 'AddError', function() {
 });
 
 GEN('#endif');
+
+////////////////////////////////////////////////////////////////////////////////
+// RuntimeHostsDialog tests
+
+CrExtensionsRuntimeHostsDialogTest = class extends CrExtensionsBrowserTest {
+  /** @override */
+  get browserPreload() {
+    return 'chrome://extensions/runtime_hosts_dialog.html';
+  }
+
+  get extraLibraries() {
+    return super.extraLibraries.concat([
+      'runtime_hosts_dialog_test.js',
+    ]);
+  }
+};
+
+TEST_F('CrExtensionsRuntimeHostsDialogTest', 'All', () => {
+  mocha.run();
+});
+
+////////////////////////////////////////////////////////////////////////////////
+// RuntimeHostPermissions tests
+
+CrExtensionsRuntimeHostPermissionsTest = class extends CrExtensionsBrowserTest {
+  /** @override */
+  get browserPreload() {
+    return 'chrome://extensions/runtime_host_permissions.html';
+  }
+
+  get extraLibraries() {
+    return super.extraLibraries.concat([
+      'runtime_host_permissions_test.js',
+    ]);
+  }
+};
+
+TEST_F('CrExtensionsRuntimeHostPermissionsTest', 'All', () => {
+  mocha.run();
+});

@@ -23,7 +23,8 @@ suite('cr-input', function() {
       // [externalName, internalName, defaultValue, testValue]
       ['autofocus', 'autofocus', false, true],
       ['disabled', 'disabled', false, true],
-      ['incremental', 'incremental', false, true],
+      ['max', 'max', '', '100'],
+      ['min', 'min', '', '1'],
       ['maxlength', 'maxLength', -1, 5],
       ['minlength', 'minLength', -1, 5],
       ['pattern', 'pattern', '', '[a-z]+'],
@@ -179,8 +180,22 @@ suite('cr-input', function() {
         })
         .then(() => {
           input.blur();
+          whenTransitionEnd =
+              test_util.eventToPromise('transitionend', underline);
+          // Wait for underline to fade out.
+          return whenTransitionEnd;
+        })
+        .then(() => {
+          whenTransitionEnd =
+              test_util.eventToPromise('transitionend', underline);
           assertFalse(crInput.hasAttribute('focused_'));
           assertEquals('0', getComputedStyle(underline).opacity);
+          // The width transition has a delay larger than the opacity transition
+          // duration so that the width can be reset to 0 after the underline is
+          // no longer visible.
+          return whenTransitionEnd;
+        })
+        .then(() => {
           assertEquals(0, underline.offsetWidth);
         });
   });
@@ -244,6 +259,38 @@ suite('cr-input', function() {
     assertFalse(crInput.invalid);
     assertFalse(input.checkValidity());
     crInput.value = '';
+    assertFalse(crInput.invalid);
+    assertFalse(input.checkValidity());
+  });
+
+  test('numberValidation', function() {
+    crInput.type = 'number';
+    crInput.value = '50';
+    crInput.autoValidate = true;
+    assertFalse(crInput.invalid);
+
+    // Note that even with |autoValidate|, crInput.invalid only updates after
+    // |value| is changed.
+    const testMin = 1;
+    const testMax = 100;
+    crInput.setAttribute('min', testMin);
+    crInput.setAttribute('max', testMax);
+    crInput.value = '200';
+    assertTrue(crInput.invalid);
+    crInput.value = '20';
+    assertFalse(crInput.invalid);
+    crInput.value = '-2';
+    assertTrue(crInput.invalid);
+    crInput.value = '40';
+    assertFalse(crInput.invalid);
+
+    // Without |autoValidate|, crInput.invalid should not change even if input
+    // value is not valid.
+    crInput.autoValidate = false;
+    crInput.value = '200';
+    assertFalse(crInput.invalid);
+    assertFalse(input.checkValidity());
+    crInput.value = '-2';
     assertFalse(crInput.invalid);
     assertFalse(input.checkValidity());
   });

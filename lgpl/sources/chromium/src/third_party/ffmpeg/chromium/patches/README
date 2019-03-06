@@ -718,23 +718,6 @@ Date:   Mon Mar 5 12:36:28 2018 -0800
 libavformat/oggparseflac.c
 
 ------------------------------------------------------------------
-commit c73a378a91143356644b89768850c9903d52b4e4
-Author: Matt Wolenetz <wolenetz@chromium.org>
-Date:   Mon Mar 12 17:10:42 2018 -0700
-
-    Update chromium patches README
-    
-    Removes patch entries for those that came in during the M67 merge from
-    upstream.
-    
-    Removes another UNCHECKED_BITSTREAM_READER (lavc/utvideodec.c)
-    
-    BUG=803898,812567,816787,804097,806122,801821,806580
-
- Affects: 
-libavcodec/utvideodec.c
-
-------------------------------------------------------------------
 commit 24bf13b3c13a22c5d1ae4295badc9b79f94e6398
 Author: Dale Curtis <dalecurtis@chromium.org>
 Date:   Tue Apr 17 11:14:57 2018 -0700
@@ -803,17 +786,17 @@ Date:   Thu May 24 13:43:24 2018 -0700
 libavutil/encryption_info.c
 
 ------------------------------------------------------------------
-commit 5ceb9b2b805173b4eea81ae15065e254014f867a
-Author: Jacob Trimble <modmaker-at-google.com@ffmpeg.org>
-Date:   Tue Jun 12 14:26:20 2018 -0700
+commit 9846ee38e057a93db62f6730d0107bf68d8329ae
+Merge: bbe6b81a6c 179ed2d2e0
+Author: John Rummell <jrummell@chromium.org>
+Date:   Fri Sep 28 10:56:34 2018 -0700
 
-    avformat/mov: Add check for per-sample IV size.
+    Merge remote-tracking branch 'upstream/master' into sushi-2018-09-28-10-43-19
     
-    Found by Chrome's ClusterFuzz: http://crbug.com/849062.
-    
-    Signed-off-by: Jacob Trimble <modmaker@google.com>
-    Signed-off-by: Michael Niedermayer <michael@niedermayer.cc>
+    Conflicts:
+      configure
+      libavcodec/utvideodec.c
 
  Affects: 
-libavformat/mov.c
+libavcodec/utvideodec.c
 

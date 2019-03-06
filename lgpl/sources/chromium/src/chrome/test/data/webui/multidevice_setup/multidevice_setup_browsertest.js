@@ -26,6 +26,10 @@ MultiDeviceSetupBrowserTest.prototype = {
   browsePreload: 'chrome://multidevice-setup/',
 
   extraLibraries: PolymerTest.getLibraries(ROOT_PATH).concat([
+    '../test_browser_proxy.js',
+    '../fake_chrome_event.js',  // Necessary for fake_quick_unlock_private.js
+    '../settings/fake_quick_unlock_private.js',
+    '../settings/test_util.js',
     'integration_test.js',
     'setup_succeeded_page_test.js',
     'start_setup_page_test.js',

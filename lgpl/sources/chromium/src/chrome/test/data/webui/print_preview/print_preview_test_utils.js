@@ -15,6 +15,7 @@ cr.define('print_preview_test_utils', function() {
       documentTitle: 'title',
       documentHasSelection: true,
       shouldPrintSelectionOnly: false,
+      isHeaderFooterManaged: false,
       printerName: 'FooDevice',
       serializedAppStateStr: null,
       serializedDefaultDestinationSelectionRulesStr: null
@@ -167,6 +168,38 @@ cr.define('print_preview_test_utils', function() {
   }
 
   /**
+   * @return {!print_preview.PrinterCapabilitiesResponse} The capabilities of
+   *     the Save as PDF destination.
+   */
+  function getPdfPrinter() {
+    return {
+      printer: {
+        deviceName: 'Save as PDF',
+      },
+      capabilities: {
+        version: '1.0',
+        printer: {
+          page_orientation: {
+            option: [
+              {type: 'AUTO', is_default: true}, {type: 'PORTRAIT'},
+              {type: 'LANDSCAPE'}
+            ]
+          },
+          color: {option: [{type: 'STANDARD_COLOR', is_default: true}]},
+          media_size: {
+            option: [{
+              name: 'NA_LETTER',
+              width_microns: 0,
+              height_microns: 0,
+              is_default: true
+            }]
+          }
+        }
+      }
+    };
+  }
+
+  /**
    * Get the default media size for |device|.
    * @param {!print_preview.PrinterCapabilitiesResponse} device
    * @return {{width_microns: number,
@@ -248,6 +281,16 @@ cr.define('print_preview_test_utils', function() {
     };
   }
 
+  /**
+   * @param {!HTMLInputElement} element
+   * @param {!string} input The value to set for the input element.
+   */
+  function triggerInputEvent(element, input) {
+    element.value = input;
+    element.dispatchEvent(
+        new CustomEvent('input', {composed: true, bubbles: true}));
+  }
+
   return {
     getDefaultInitialSettings: getDefaultInitialSettings,
     getCddTemplate: getCddTemplate,
@@ -259,5 +302,7 @@ cr.define('print_preview_test_utils', function() {
     getDestinations: getDestinations,
     getMediaSizeCapabilityWithCustomNames:
         getMediaSizeCapabilityWithCustomNames,
+    getPdfPrinter: getPdfPrinter,
+    triggerInputEvent: triggerInputEvent,
   };
 });

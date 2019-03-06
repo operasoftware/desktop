@@ -192,21 +192,54 @@ cr.define('test_util', function() {
    * @return {SiteGroup}
    */
   function createSiteGroup(eTLDPlus1Name, originList) {
+    const originInfoList = originList.map(origin => createOriginInfo(origin));
     return {
       etldPlus1: eTLDPlus1Name,
-      origins: originList,
+      origins: originInfoList,
+      numCookies: 0,
     };
   }
 
+  function createOriginInfo(origin, override) {
+    if (override === undefined)
+      override = {};
+    return Object.assign(
+        {
+          origin: origin,
+          engagement: 0,
+          usage: 0,
+        },
+        override);
+  }
+
+  /**
+   * Converts beforeNextRender() API to promise-based.
+   * @param {!Element} element
+   * @return {!Promise}
+   */
+  function waitForRender(element) {
+    return new Promise(resolve => {
+      // TODO(dpapad): Remove early return once Polymer 2 migration is complete.
+      if (!Polymer.DomIf) {
+        resolve();
+        return;
+      }
+
+      Polymer.RenderStatus.beforeNextRender(element, resolve);
+    });
+  }
+
   return {
-    eventToPromise: eventToPromise,
-    fakeDataBind: fakeDataBind,
-    whenAttributeIs: whenAttributeIs,
     createContentSettingTypeToValuePair: createContentSettingTypeToValuePair,
     createDefaultContentSetting: createDefaultContentSetting,
+    createOriginInfo: createOriginInfo,
     createRawSiteException: createRawSiteException,
-    createSiteSettingsPrefs: createSiteSettingsPrefs,
     createSiteGroup: createSiteGroup,
+    createSiteSettingsPrefs: createSiteSettingsPrefs,
+    eventToPromise: eventToPromise,
+    fakeDataBind: fakeDataBind,
+    waitForRender: waitForRender,
+    whenAttributeIs: whenAttributeIs,
   };
 
 });

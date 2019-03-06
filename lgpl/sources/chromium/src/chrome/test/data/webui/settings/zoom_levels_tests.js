@@ -56,7 +56,9 @@ suite('ZoomLevels', function() {
     PolymerTest.clearBody();
     testElement = document.createElement('zoom-levels');
     document.body.appendChild(testElement);
-    return browserProxy.whenCalled('fetchZoomLevels');
+    return browserProxy.whenCalled('fetchZoomLevels').then(() => {
+      return test_util.waitForRender(testElement);
+    });
   }
 
   /**
@@ -75,7 +77,7 @@ suite('ZoomLevels', function() {
     assertEquals(0, list.items.length);
     assertEquals(
         0, testElement.shadowRoot.querySelectorAll('.list-item').length);
-    assertTrue(!!testElement.$$('#empty'));
+    assertFalse(testElement.$.empty.hidden);
   });
 
   test('non-empty zoom state', function() {
@@ -86,7 +88,7 @@ suite('ZoomLevels', function() {
           const list = testElement.$.list;
           assertTrue(!!list);
           assertEquals(2, list.items.length);
-          assertFalse(!!testElement.$$('#empty'));
+          assertTrue(testElement.$.empty.hidden);
           assertEquals(
               2, testElement.shadowRoot.querySelectorAll('.list-item').length);
 

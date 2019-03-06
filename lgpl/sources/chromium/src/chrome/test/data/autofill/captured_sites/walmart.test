@@ -1,147 +1,298 @@
 {
-  "name": "Sign In",
+  "originalURL": "https://www.walmart.com/ip/Zyrtec-24-Hour-Allergy-Relief-Tablets-with-10-mg-Cetirizine-HCl-70-ct/14971994",
   "startingURL": "https://www.walmart.com/checkout/#/sign-in",
+  "autofillProfile": [
+    {
+      "type": "ADDRESS_HOME_CITY",
+      "value": "Austin"
+    },
+    {
+      "type": "ADDRESS_HOME_LINE1",
+      "value": "4120 Freidrich Lane"
+    },
+    {
+      "type": "ADDRESS_HOME_LINE2",
+      "value": "Apt 8"
+    },
+    {
+      "type": "ADDRESS_HOME_STATE",
+      "value": "TX"
+    },
+    {
+      "type": "ADDRESS_HOME_ZIP",
+      "value": "78744"
+    },
+    {
+      "type": "EMAIL_ADDRESS",
+      "value": "red.swingline@initech.com"
+    },
+    {
+      "type": "HTML_TYPE_CREDIT_CARD_EXP_MONTH",
+      "value": "05"
+    },
+    {
+      "type": "HTML_TYPE_CREDIT_CARD_EXP_YEAR",
+      "value": "2027"
+    },
+    {
+      "type": "HTML_TYPE_CREDIT_CARD_NUMBER",
+      "value": "9621327911759602"
+    },
+    {
+      "type": "NAME_FIRST",
+      "value": "Milton"
+    },
+    {
+      "type": "NAME_LAST",
+      "value": "Waddams"
+    },
+    {
+      "type": "PHONE_HOME_CITY_AND_NUMBER",
+      "value": "5125551234"
+    }
+  ],
+  "passwordManagerProfiles": [],
+  "pruned_actions": [
+    {
+      "selector": "//span[text()=\"Add to Cart\"]",
+      "visibility": 7,
+      "context": {
+        "isIframe": false
+      },
+      "type": "click",
+      "action_index": 1
+    },
+    {
+      "selector": "//button[@data-automation-id=\"pac-pos-proceed-to-checkout\" and text()=\"Check Out\"]",
+      "visibility": 7,
+      "context": {
+        "isIframe": false
+      },
+      "type": "click",
+      "action_index": 2
+    }
+  ],
   "actions": [
     {
-      "selectorType": "xpath",
-      "selector": "//button[@data-automation-id='new-guest-continue-button']",
-      "context": [],
-      "type": "click"
+      "url": "https://www.walmart.com/checkout/#/sign-in",
+      "context": {
+        "isIframe": false
+      },
+      "type": "loadPage",
+      "action_index": 3
     },
     {
-      "context": [],
-      "type": "waitFor",
-      "assertions": [
-        "return automation_helper.isElementWithXpathReady(`//div[@aria-label='Select your shipping option']`);",
-        "return automation_helper.isElementWithXpathReady(`//div[@aria-label='Select your pickup option']`);",
-        "return automation_helper.isElementWithXpathReady(`//label[@data-automation-id='shipMethod-EXPEDITED']`);",
-        "return automation_helper.isElementWithXpathReady(`//div[@class='persistent-order-summary']`);"
-      ]
+      "selector": "//button[@type=\"button\" and @aria-label=\"Continue to checkout without an account.\"]",
+      "visibility": 7,
+      "context": {
+        "isIframe": false
+      },
+      "type": "click",
+      "action_index": 4
     },
     {
-      "selectorType": "xpath",
-      "selector": "//button[@aria-label='Continue to Shipping Address']",
-      "context": [],
-      "type": "click"
+      "selector": "//span[text()=\"Continue\"]",
+      "visibility": 7,
+      "context": {
+        "isIframe": false
+      },
+      "type": "click",
+      "action_index": 5
     },
     {
-      "selectorType": "xpath",
-      "selector": "//input[@type='text' and @name='firstName']",
-      "context": [],
+      "selector": "//input[@type=\"text\" and @data-tl-id=\"COAC2ShpAddrFirstName\"]",
+      "context": {
+        "isIframe": false
+      },
       "type": "autofill",
-      "fields" : [
-        {
-          "selectorType": "xpath",
-          "selector": "//input[@type='text' and @name='firstName']",
-          "context": [],
-          "expectedAutofillType": "NAME_FIRST",
-          "expectedValue": "Milton"
-        },
-        {
-          "selectorType": "xpath",
-          "selector": "//input[@type='text' and @name='lastName']",
-          "context": [],
-          "expectedAutofillType": "NAME_LAST",
-          "expectedValue": "Waddams"
-        },
-        {
-          "selectorType": "xpath",
-          "selector": "//input[@type='text' and @name='phone']",
-          "context": [],
-          "expectedAutofillType": "PHONE_HOME_CITY_AND_NUMBER",
-          "expectedValue": "5125551234"
-        },
-        {
-          "selectorType": "xpath",
-          "selector": "//input[@type='text' and @name='email']",
-          "context": [],
-          "expectedAutofillType": "EMAIL_ADDRESS",
-          "expectedValue": "red.swingline@initech.com"
-        },
-        {
-          "selectorType": "xpath",
-          "selector": "//input[@type='text' and @name='addressLineOne']",
-          "context": [],
-          "expectedAutofillType": "ADDRESS_HOME_LINE1",
-          "expectedValue": "4120 Freidrich Lane"
-        },
-        {
-          "selectorType": "xpath",
-          "selector": "//input[@type='text' and @name='addressLineTwo']",
-          "context": [],
-          "expectedAutofillType": "ADDRESS_HOME_LINE2",
-          "expectedValue": "Apt 8"
-        },
-        {
-          "selectorType": "xpath",
-          "selector": "//input[@type='text' and @name='city']",
-          "context": [],
-          "expectedAutofillType": "ADDRESS_HOME_CITY",
-          "expectedValue": "Austin"
-        },
-        {
-          "selectorType": "xpath",
-          "selector": "//*[@name='state']",
-          "context": [],
-          "expectedAutofillType": "ADDRESS_HOME_STATE",
-          "expectedValue": "TX"
-        },
-        {
-          "selectorType": "xpath",
-          "selector": "//input[@type='text' and @name='postalCode']",
-          "context": [],
-          "expectedAutofillType": "ADDRESS_HOME_ZIP",
-          "expectedValue": "78744"
-        }
-      ]
+      "visibility": 3,
+      "action_index": 6
     },
     {
-      "selectorType": "xpath",
-      "selector": "//button[contains(., 'Continue')]",
-      "context": [],
-      "type": "click"
+      "context": {
+        "isIframe": false
+      },
+      "expectedValue": "Waddams",
+      "selector": "//input[@type=\"text\" and @data-tl-id=\"COAC2ShpAddrLastName\"]",
+      "type": "validateField",
+      "visibility": 3,
+      "expectedAutofillType": "NAME_LAST",
+      "action_index": 7
     },
     {
-      "context": [],
-      "type": "waitFor",
-      "assertions": [
-        "return automation_helper.isElementWithXpathReady(`//div[@data-automation-id='address-validation-message-address']`);"
-      ]
+      "context": {
+        "isIframe": false
+      },
+      "expectedValue": "5125551234",
+      "selector": "//input[@type=\"text\" and @data-tl-id=\"COAC2ShpAddrPhone\"]",
+      "type": "validateField",
+      "visibility": 3,
+      "expectedAutofillType": "PHONE_HOME_CITY_AND_NUMBER",
+      "action_index": 8
     },
     {
-      "selectorType": "xpath",
-      "selector": "//button[contains(., 'Use Address Provided')]",
-      "context": [],
-      "type": "click"
+      "context": {
+        "isIframe": false
+      },
+      "expectedValue": "red.swingline@initech.com",
+      "selector": "//input[@type=\"text\" and @data-tl-id=\"COAC2ShpAddrEmail\"]",
+      "type": "validateField",
+      "visibility": 3,
+      "expectedAutofillType": "EMAIL_ADDRESS",
+      "action_index": 9
     },
     {
-      "selectorType": "xpath",
-      "selector": "//*[@id=\"creditCard\"]",
-      "context": [],
+      "context": {
+        "isIframe": false
+      },
+      "expectedValue": "4120 Freidrich Lane",
+      "selector": "//input[@type=\"text\" and @data-tl-id=\"COAC2ShpAddrAddress1\"]",
+      "type": "validateField",
+      "visibility": 3,
+      "expectedAutofillType": "ADDRESS_HOME_LINE1",
+      "action_index": 10
+    },
+    {
+      "context": {
+        "isIframe": false
+      },
+      "expectedValue": "Apt 8",
+      "selector": "//input[@type=\"text\" and @data-tl-id=\"COAC2ShpAddrAddress2\"]",
+      "type": "validateField",
+      "visibility": 3,
+      "expectedAutofillType": "ADDRESS_HOME_LINE2",
+      "action_index": 11
+    },
+    {
+      "context": {
+        "isIframe": false
+      },
+      "expectedValue": "Austin",
+      "selector": "//input[@type=\"text\" and @data-tl-id=\"COAC2ShpAddrCity\"]",
+      "type": "validateField",
+      "visibility": 3,
+      "expectedAutofillType": "ADDRESS_HOME_CITY",
+      "action_index": 12
+    },
+    {
+      "context": {
+        "isIframe": false
+      },
+      "expectedValue": "TX",
+      "selector": "//select",
+      "type": "validateField",
+      "visibility": 3,
+      "expectedAutofillType": "ADDRESS_HOME_STATE",
+      "action_index": 13
+    },
+    {
+      "context": {
+        "isIframe": false
+      },
+      "expectedValue": "78744",
+      "selector": "//input[@type=\"text\" and @data-tl-id=\"COAC2ShpAddrZip\"]",
+      "type": "validateField",
+      "visibility": 3,
+      "expectedAutofillType": "ADDRESS_HOME_ZIP",
+      "action_index": 14
+    },
+    {
+      "context": {
+        "isIframe": false
+      },
+      "expectedValue": "Milton",
+      "selector": "//input[@type=\"text\" and @data-tl-id=\"COAC2ShpAddrFirstName\"]",
+      "type": "validateField",
+      "visibility": 3,
+      "expectedAutofillType": "NAME_FIRST",
+      "action_index": 15
+    },
+    {
+      "selector": "//label[@for=\"4\"]",
+      "visibility": 3,
+      "context": {
+        "isIframe": false
+      },
+      "type": "click",
+      "action_index": 16
+    },
+    {
+      "selector": "//span[text()=\"Continue\"]",
+      "visibility": 3,
+      "context": {
+        "isIframe": false
+      },
+      "type": "click",
+      "action_index": 17
+    },
+    {
+      "selector": "//button[@type=\"button\" and @aria-disabled=\"false\"]",
+      "visibility": 7,
+      "context": {
+        "isIframe": false
+      },
+      "type": "click",
+      "action_index": 18
+    },
+    {
+      "selector": "//span[text()=\"Continue\"]",
+      "visibility": 3,
+      "context": {
+        "isIframe": false
+      },
+      "type": "click",
+      "action_index": 17
+    },
+    {
+      "selector": "//button[@type=\"button\" and @aria-disabled=\"false\"]",
+      "visibility": 7,
+      "context": {
+        "isIframe": false
+      },
+      "type": "click",
+      "action_index": 18
+    },
+    {
+      "selector": "//input[@value and @pattern=\"[0-9]*\" and @name=\"creditCard\"]",
+      "context": {
+        "isIframe": false
+      },
       "type": "autofill",
-      "fields" : [
-        {
-          "selectorType": "xpath",
-          "selector": "//*[@id=\"creditCard\"]",
-          "context": [],
-          "expectedAutofillType": "HTML_TYPE_CREDIT_CARD_NUMBER",
-          "expectedValue": "9621327911759602"
-        },
-        {
-          "selectorType": "xpath",
-          "selector": "//*[@id=\"month-chooser\"]",
-          "context": [],
-          "expectedAutofillType": "HTML_TYPE_CREDIT_CARD_EXP_MONTH",
-          "expectedValue": "05"
-        },
-        {
-          "selectorType": "xpath",
-          "selector": "//*[@id=\"year-chooser\"]",
-          "context": [],
-          "expectedAutofillType": "HTML_TYPE_CREDIT_CARD_EXP_YEAR",
-          "expectedValue": "2027"
-        }
-      ]
+      "visibility": 3,
+      "action_index": 20
+    },
+    {
+      "context": {
+        "isIframe": false
+      },
+      "expectedValue": "05",
+      "selector": "//select[@id=\"month-chooser\"]",
+      "type": "validateField",
+      "visibility": 3,
+      "expectedAutofillType": "HTML_TYPE_CREDIT_CARD_EXP_MONTH",
+      "action_index": 21
+    },
+    {
+      "context": {
+        "isIframe": false
+      },
+      "expectedValue": "2027",
+      "selector": "//select[@id=\"year-chooser\"]",
+      "type": "validateField",
+      "visibility": 3,
+      "expectedAutofillType": "HTML_TYPE_CREDIT_CARD_EXP_YEAR",
+      "action_index": 22
+    },
+    {
+      "context": {
+        "isIframe": false
+      },
+      "expectedValue": "9621327911759602",
+      "selector": "//input[@value=\"9621327911759602\"]",
+      "type": "validateField",
+      "visibility": 3,
+      "expectedAutofillType": "HTML_TYPE_CREDIT_CARD_NUMBER",
+      "action_index": 23
     }
   ]
 }

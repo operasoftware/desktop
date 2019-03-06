@@ -2051,8 +2051,16 @@ int ff_nvenc_send_frame(AVCodecContext *avctx, const AVFrame *frame)
     if ((!ctx->cu_context && !ctx->d3d11_device) || !ctx->nvencoder)
         return AVERROR(EINVAL);
 
-    if (ctx->encoder_flushing)
-        return AVERROR_EOF;
+    if (ctx->encoder_flushing) {
+        if (avctx->internal->draining)
+            return AVERROR_EOF;
+
+        ctx->encoder_flushing = 0;
+        ctx->first_packet_output = 0;
+        ctx->initial_pts[0] = AV_NOPTS_VALUE;
+        ctx->initial_pts[1] = AV_NOPTS_VALUE;
+        av_fifo_reset(ctx->timestamp_list);
+    }
 
     if (frame) {
         in_surf = get_free_frame(ctx);
@@ -2099,7 +2107,7 @@ int ff_nvenc_send_frame(AVCodecContext *avctx, const AVFrame *frame)
 
         pic_params.inputTimeStamp = frame->pts;
 
-        if (av_frame_get_side_data(frame, AV_FRAME_DATA_A53_CC)) {
+        if (ctx->a53_cc && av_frame_get_side_data(frame, AV_FRAME_DATA_A53_CC)) {
             if (ff_alloc_a53_sei(frame, sizeof(NV_ENC_SEI_PAYLOAD), (void**)&sei_data, &sei_size) < 0) {
                 av_log(ctx, AV_LOG_ERROR, "Not enough memory for closed captions, skipping\n");
             }
