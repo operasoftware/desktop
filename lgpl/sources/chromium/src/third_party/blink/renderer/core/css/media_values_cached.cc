@@ -4,6 +4,9 @@
 
 #include "third_party/blink/renderer/core/css/media_values_cached.h"
 
+#include "third_party/blink/public/common/css/forced_colors.h"
+#include "third_party/blink/public/common/css/navigation_controls.h"
+#include "third_party/blink/public/common/css/preferred_color_scheme.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -28,9 +31,13 @@ MediaValuesCached::MediaValuesCachedData::MediaValuesCachedData()
       three_d_enabled(false),
       immersive_mode(false),
       strict_mode(true),
-      display_mode(kWebDisplayModeBrowser),
+      display_mode(blink::mojom::DisplayMode::kBrowser),
       display_shape(kDisplayShapeRect),
-      color_gamut(ColorSpaceGamut::kUnknown) {}
+      color_gamut(ColorSpaceGamut::kUnknown),
+      preferred_color_scheme(PreferredColorScheme::kNoPreference),
+      prefers_reduced_motion(false),
+      forced_colors(ForcedColors::kNone),
+      navigation_controls(NavigationControls::kNone) {}
 
 MediaValuesCached::MediaValuesCachedData::MediaValuesCachedData(
     Document& document)
@@ -69,16 +76,11 @@ MediaValuesCached::MediaValuesCachedData::MediaValuesCachedData(
     media_type = MediaValues::CalculateMediaType(frame);
     display_shape = MediaValues::CalculateDisplayShape(frame);
     color_gamut = MediaValues::CalculateColorGamut(frame);
+    preferred_color_scheme = MediaValues::CalculatePreferredColorScheme(frame);
+    prefers_reduced_motion = MediaValues::CalculatePrefersReducedMotion(frame);
+    forced_colors = MediaValues::CalculateForcedColors();
+    navigation_controls = MediaValues::CalculateNavigationControls(frame);
   }
-}
-
-MediaValuesCached* MediaValuesCached::Create() {
-  return new MediaValuesCached();
-}
-
-MediaValuesCached* MediaValuesCached::Create(
-    const MediaValuesCachedData& data) {
-  return new MediaValuesCached(data);
 }
 
 MediaValuesCached::MediaValuesCached() = default;
@@ -87,7 +89,7 @@ MediaValuesCached::MediaValuesCached(const MediaValuesCachedData& data)
     : data_(data) {}
 
 MediaValues* MediaValuesCached::Copy() const {
-  return new MediaValuesCached(data_);
+  return MakeGarbageCollected<MediaValuesCached>(data_);
 }
 
 bool MediaValuesCached::ComputeLength(double value,
@@ -166,7 +168,7 @@ const String MediaValuesCached::MediaType() const {
   return data_.media_type;
 }
 
-WebDisplayMode MediaValuesCached::DisplayMode() const {
+blink::mojom::DisplayMode MediaValuesCached::DisplayMode() const {
   return data_.display_mode;
 }
 
@@ -190,6 +192,22 @@ DisplayShape MediaValuesCached::GetDisplayShape() const {
 
 ColorSpaceGamut MediaValuesCached::ColorGamut() const {
   return data_.color_gamut;
+}
+
+PreferredColorScheme MediaValuesCached::GetPreferredColorScheme() const {
+  return data_.preferred_color_scheme;
+}
+
+bool MediaValuesCached::PrefersReducedMotion() const {
+  return data_.prefers_reduced_motion;
+}
+
+ForcedColors MediaValuesCached::GetForcedColors() const {
+  return data_.forced_colors;
+}
+
+NavigationControls MediaValuesCached::GetNavigationControls() const {
+  return data_.navigation_controls;
 }
 
 }  // namespace blink

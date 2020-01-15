@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // This file has been auto-generated from the Jinja2 template
-// third_party/blink/renderer/bindings/templates/callback_function.cpp.tmpl
+// third_party/blink/renderer/bindings/templates/callback_function.cc.tmpl
 // by the script code_generator_v8.py.
 // DO NOT MODIFY!
 
@@ -20,6 +20,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 
 namespace blink {
 
@@ -27,8 +28,16 @@ const char* V8LongCallbackFunction::NameInHeapSnapshot() const {
   return "V8LongCallbackFunction";
 }
 
-v8::Maybe<int32_t> V8LongCallbackFunction::Invoke(ScriptWrappable* callback_this_value, int32_t num1, int32_t num2) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+v8::Maybe<int32_t> V8LongCallbackFunction::Invoke(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, int32_t num1, int32_t num2) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "LongCallbackFunction",
+          "invoke");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<int32_t>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -48,10 +57,15 @@ v8::Maybe<int32_t> V8LongCallbackFunction::Invoke(ScriptWrappable* callback_this
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<int32_t>();
+  }
 
   v8::Local<v8::Function> function;
   // callback function's invoke:
@@ -62,14 +76,19 @@ v8::Maybe<int32_t> V8LongCallbackFunction::Invoke(ScriptWrappable* callback_this
   function = CallbackFunction();
 
   v8::Local<v8::Value> this_arg;
-  this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+  if (callback_this_value.IsEmpty()) {
+    // step 2. If thisArg was not given, let thisArg be undefined.
+    this_arg = v8::Undefined(GetIsolate());
+  } else {
+    this_arg = callback_this_value.V8Value(callback_relevant_script_state);
+  }
 
   // step: Let esArgs be the result of converting args to an ECMAScript
   //   arguments list. If this throws an exception, set completion to the
   //   completion value representing the thrown exception and jump to the step
   //   labeled return.
   v8::Local<v8::Object> argument_creation_context =
-      CallbackRelevantScriptState()->GetContext()->Global();
+      callback_relevant_script_state->GetContext()->Global();
   ALLOW_UNUSED_LOCAL(argument_creation_context);
   v8::Local<v8::Value> v8_num1 = v8::Integer::New(GetIsolate(), num1);
   v8::Local<v8::Value> v8_num2 = v8::Integer::New(GetIsolate(), num2);
@@ -81,7 +100,7 @@ v8::Maybe<int32_t> V8LongCallbackFunction::Invoke(ScriptWrappable* callback_this
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,
@@ -106,11 +125,6 @@ v8::Maybe<int32_t> V8LongCallbackFunction::Invoke(ScriptWrappable* callback_this
     else
       return v8::Just<int32_t>(native_result);
   }
-}
-
-v8::Maybe<int32_t> V8PersistentCallbackFunction<V8LongCallbackFunction>::Invoke(ScriptWrappable* callback_this_value, int32_t num1, int32_t num2) {
-  return Proxy()->Invoke(
-      callback_this_value, num1, num2);
 }
 
 }  // namespace blink

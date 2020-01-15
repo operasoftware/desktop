@@ -21,16 +21,71 @@
 
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/file_metadata.h"
 #include "third_party/blink/renderer/platform/network/form_data_encoder.h"
-#include "third_party/blink/renderer/platform/wtf/text/cstring.h"
+#include "third_party/blink/renderer/platform/network/wrapped_data_pipe_getter.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 
 namespace blink {
 
+FormDataElement::FormDataElement() : type_(kData) {}
+
+FormDataElement::FormDataElement(const Vector<char>& array)
+    : type_(kData), data_(array) {}
+
 bool FormDataElement::IsSafeToSendToAnotherThread() const {
   return filename_.IsSafeToSendToAnotherThread() &&
          blob_uuid_.IsSafeToSendToAnotherThread();
+}
+
+FormDataElement::FormDataElement(const String& filename,
+                                 int64_t file_start,
+                                 int64_t file_length,
+                                 double expected_file_modification_time)
+    : type_(kEncodedFile),
+      filename_(filename),
+      file_start_(file_start),
+      file_length_(file_length),
+      expected_file_modification_time_(expected_file_modification_time) {}
+
+FormDataElement::FormDataElement(const String& blob_uuid,
+                                 scoped_refptr<BlobDataHandle> optional_handle)
+    : type_(kEncodedBlob),
+      blob_uuid_(blob_uuid),
+      optional_blob_data_handle_(std::move(optional_handle)) {}
+
+FormDataElement::FormDataElement(
+    scoped_refptr<WrappedDataPipeGetter> data_pipe_getter)
+    : type_(kDataPipe), data_pipe_getter_(std::move(data_pipe_getter)) {}
+
+FormDataElement::FormDataElement(const FormDataElement&) = default;
+FormDataElement::FormDataElement(FormDataElement&&) = default;
+FormDataElement::~FormDataElement() = default;
+FormDataElement& FormDataElement::operator=(const FormDataElement&) = default;
+FormDataElement& FormDataElement::operator=(FormDataElement&&) = default;
+
+bool operator==(const FormDataElement& a, const FormDataElement& b) {
+  if (&a == &b)
+    return true;
+
+  if (a.type_ != b.type_)
+    return false;
+  if (a.type_ == FormDataElement::kData)
+    return a.data_ == b.data_;
+  if (a.type_ == FormDataElement::kEncodedFile) {
+    return a.filename_ == b.filename_ && a.file_start_ == b.file_start_ &&
+           a.file_length_ == b.file_length_ &&
+           a.expected_file_modification_time_ ==
+               b.expected_file_modification_time_;
+  }
+  if (a.type_ == FormDataElement::kEncodedBlob)
+    return a.blob_uuid_ == b.blob_uuid_;
+  if (a.type_ == FormDataElement::kDataPipe)
+    return a.data_pipe_getter_ == b.data_pipe_getter_;
+
+  return true;
 }
 
 inline EncodedFormData::EncodedFormData()
@@ -49,15 +104,16 @@ scoped_refptr<EncodedFormData> EncodedFormData::Create() {
 }
 
 scoped_refptr<EncodedFormData> EncodedFormData::Create(const void* data,
-                                                       size_t size) {
+                                                       wtf_size_t size) {
   scoped_refptr<EncodedFormData> result = Create();
   result->AppendData(data, size);
   return result;
 }
 
-scoped_refptr<EncodedFormData> EncodedFormData::Create(const CString& string) {
+scoped_refptr<EncodedFormData> EncodedFormData::Create(
+    base::span<const char> string) {
   scoped_refptr<EncodedFormData> result = Create();
-  result->AppendData(string.data(), string.length());
+  result->AppendData(string.data(), string.size());
   return result;
 }
 
@@ -79,10 +135,8 @@ scoped_refptr<EncodedFormData> EncodedFormData::DeepCopy() const {
   form_data->boundary_ = boundary_;
   form_data->contains_password_data_ = contains_password_data_;
 
-  size_t n = elements_.size();
-  form_data->elements_.ReserveInitialCapacity(n);
-  for (size_t i = 0; i < n; ++i) {
-    const FormDataElement& e = elements_[i];
+  form_data->elements_.ReserveInitialCapacity(elements_.size());
+  for (const FormDataElement& e : elements_) {
     switch (e.type_) {
       case FormDataElement::kData:
         form_data->elements_.UncheckedAppend(FormDataElement(e.data_));
@@ -97,9 +151,10 @@ scoped_refptr<EncodedFormData> EncodedFormData::DeepCopy() const {
             e.blob_uuid_.IsolatedCopy(), e.optional_blob_data_handle_));
         break;
       case FormDataElement::kDataPipe:
-        network::mojom::blink::DataPipeGetterPtr data_pipe_getter;
-        (*e.data_pipe_getter_->GetPtr())
-            ->Clone(mojo::MakeRequest(&data_pipe_getter));
+        mojo::PendingRemote<network::mojom::blink::DataPipeGetter>
+            data_pipe_getter;
+        e.data_pipe_getter_->GetDataPipeGetter()->Clone(
+            data_pipe_getter.InitWithNewPipeAndPassReceiver());
         auto wrapped = base::MakeRefCounted<WrappedDataPipeGetter>(
             std::move(data_pipe_getter));
         form_data->elements_.UncheckedAppend(
@@ -110,11 +165,11 @@ scoped_refptr<EncodedFormData> EncodedFormData::DeepCopy() const {
   return form_data;
 }
 
-void EncodedFormData::AppendData(const void* data, size_t size) {
+void EncodedFormData::AppendData(const void* data, wtf_size_t size) {
   if (elements_.IsEmpty() || elements_.back().type_ != FormDataElement::kData)
     elements_.push_back(FormDataElement());
   FormDataElement& e = elements_.back();
-  size_t old_size = e.data_.size();
+  wtf_size_t old_size = e.data_.size();
   e.data_.Grow(old_size + size);
   memcpy(e.data_.data() + old_size, data, size);
 }
@@ -125,8 +180,8 @@ void EncodedFormData::AppendFile(const String& filename) {
 }
 
 void EncodedFormData::AppendFileRange(const String& filename,
-                                      long long start,
-                                      long long length,
+                                      int64_t start,
+                                      int64_t length,
                                       double expected_modification_time) {
   elements_.push_back(
       FormDataElement(filename, start, length, expected_modification_time));
@@ -146,11 +201,9 @@ void EncodedFormData::AppendDataPipe(
 void EncodedFormData::Flatten(Vector<char>& data) const {
   // Concatenate all the byte arrays, but omit everything else.
   data.clear();
-  size_t n = elements_.size();
-  for (size_t i = 0; i < n; ++i) {
-    const FormDataElement& e = elements_[i];
+  for (const FormDataElement& e : elements_) {
     if (e.type_ == FormDataElement::kData)
-      data.Append(e.data_.data(), static_cast<size_t>(e.data_.size()));
+      data.Append(e.data_.data(), e.data_.size());
   }
 }
 
@@ -161,11 +214,9 @@ String EncodedFormData::FlattenToString() const {
                                  bytes.size());
 }
 
-unsigned long long EncodedFormData::SizeInBytes() const {
+uint64_t EncodedFormData::SizeInBytes() const {
   unsigned size = 0;
-  size_t n = elements_.size();
-  for (size_t i = 0; i < n; ++i) {
-    const FormDataElement& e = elements_[i];
+  for (const FormDataElement& e : elements_) {
     switch (e.type_) {
       case FormDataElement::kData:
         size += e.data_.size();

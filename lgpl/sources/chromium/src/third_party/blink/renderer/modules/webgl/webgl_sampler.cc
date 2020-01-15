@@ -10,7 +10,7 @@
 namespace blink {
 
 WebGLSampler* WebGLSampler::Create(WebGL2RenderingContextBase* ctx) {
-  return new WebGLSampler(ctx);
+  return MakeGarbageCollected<WebGLSampler>(ctx);
 }
 
 WebGLSampler::WebGLSampler(WebGL2RenderingContextBase* ctx)
@@ -20,9 +20,7 @@ WebGLSampler::WebGLSampler(WebGL2RenderingContextBase* ctx)
   SetObject(sampler);
 }
 
-WebGLSampler::~WebGLSampler() {
-  RunDestructor();
-}
+WebGLSampler::~WebGLSampler() = default;
 
 void WebGLSampler::DeleteObjectImpl(gpu::gles2::GLES2Interface* gl) {
   gl->DeleteSamplers(1, &object_);

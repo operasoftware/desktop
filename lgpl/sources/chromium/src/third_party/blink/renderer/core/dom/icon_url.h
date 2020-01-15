@@ -32,9 +32,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_ICON_URL_H_
 
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
-#include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -43,7 +42,6 @@ enum IconType {
   kFavicon = 1,
   kTouchIcon = 1 << 1,
   kTouchPrecomposedIcon = 1 << 2,
-  kPinnedIcon = 1 << 3
 };
 
 struct IconURL {
@@ -53,7 +51,6 @@ struct IconURL {
   String mime_type_;
   KURL icon_url_;
   bool is_default_icon_;
-  Color color_;
 
   IconURL() : icon_type_(kInvalidIcon), is_default_icon_(false) {}
 

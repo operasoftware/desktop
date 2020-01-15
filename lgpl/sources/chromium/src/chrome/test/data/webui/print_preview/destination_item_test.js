@@ -32,7 +32,6 @@ cr.define('destination_item_test', function() {
       item.destination = new print_preview.Destination(
           printerId, print_preview.DestinationType.GOOGLE,
           print_preview.DestinationOrigin.COOKIES, printerName,
-          true /* isRecent */,
           print_preview.DestinationConnectionStatus.ONLINE);
       item.searchQuery = null;
       document.body.appendChild(item);
@@ -55,7 +54,7 @@ cr.define('destination_item_test', function() {
     test(assert(TestNames.Offline), function() {
       const now = new Date();
       let twoMonthsAgo = new Date(now.getTime());
-      const month = twoMonthsAgo.getMonth() - 2;
+      let month = twoMonthsAgo.getMonth() - 2;
       if (month < 0) {
         month = month + 12;
         twoMonthsAgo.setFullYear(now.getFullYear() - 1);
@@ -64,7 +63,6 @@ cr.define('destination_item_test', function() {
       item.destination = new print_preview.Destination(
           printerId, print_preview.DestinationType.GOOGLE,
           print_preview.DestinationOrigin.COOKIES, printerName,
-          true /* isRecent */,
           print_preview.DestinationConnectionStatus.OFFLINE,
           {lastAccessTime: twoMonthsAgo.getTime()});
 
@@ -82,6 +80,7 @@ cr.define('destination_item_test', function() {
     // Test that the destination is opaque and the correct status shows up if
     // the destination has a bad cloud print certificate.
     test(assert(TestNames.BadCertificate), function() {
+      loadTimeData.overrideValues({isEnterpriseManaged: false});
       item.destination =
           print_preview_test_utils.createDestinationWithCertificateStatus(
               printerId, printerName, true);
@@ -124,8 +123,7 @@ cr.define('destination_item_test', function() {
       item.destination = new print_preview.Destination(
           printerId, print_preview.DestinationType.GOOGLE,
           print_preview.DestinationOrigin.COOKIES, printerName,
-          true /* isRecent */, print_preview.DestinationConnectionStatus.ONLINE,
-          params);
+          print_preview.DestinationConnectionStatus.ONLINE, params);
       item.searchQuery = /(ABC)/i;
 
       // No highlighting on name.

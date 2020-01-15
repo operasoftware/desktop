@@ -27,8 +27,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_TEXT_TRACK_LOADER_H_
 
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_parser.h"
-#include "third_party/blink/renderer/platform/cross_origin_attribute_value.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/loader/fetch/cross_origin_attribute_value.h"
 #include "third_party/blink/renderer/platform/loader/fetch/raw_resource.h"
 
 namespace blink {
@@ -44,16 +44,13 @@ class TextTrackLoaderClient : public GarbageCollectedMixin {
   virtual void CueLoadingCompleted(TextTrackLoader*, bool loading_failed) = 0;
 };
 
-class TextTrackLoader final : public GarbageCollectedFinalized<TextTrackLoader>,
+class TextTrackLoader final : public GarbageCollected<TextTrackLoader>,
                               public RawResourceClient,
                               private VTTParserClient {
   USING_GARBAGE_COLLECTED_MIXIN(TextTrackLoader);
 
  public:
-  static TextTrackLoader* Create(TextTrackLoaderClient& client,
-                                 Document& document) {
-    return new TextTrackLoader(client, document);
-  }
+  TextTrackLoader(TextTrackLoaderClient&, Document&);
   ~TextTrackLoader() override;
 
   bool Load(const KURL&, CrossOriginAttributeValue);
@@ -63,6 +60,7 @@ class TextTrackLoader final : public GarbageCollectedFinalized<TextTrackLoader>,
   State LoadState() { return state_; }
 
   void GetNewCues(HeapVector<Member<TextTrackCue>>& output_cues);
+  void GetNewStyleSheets(HeapVector<Member<CSSStyleSheet>>& output_sheets);
 
   void Trace(blink::Visitor*) override;
 
@@ -75,8 +73,6 @@ class TextTrackLoader final : public GarbageCollectedFinalized<TextTrackLoader>,
   // VTTParserClient
   void NewCuesParsed() override;
   void FileFailedToParse() override;
-
-  TextTrackLoader(TextTrackLoaderClient&, Document&);
 
   void CueLoadTimerFired(TimerBase*);
   void CorsPolicyPreventedLoad(const SecurityOrigin*, const KURL&);

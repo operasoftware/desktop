@@ -4,8 +4,11 @@
 
 #include "third_party/blink/renderer/modules/canvas/imagebitmap/image_bitmap_rendering_context.h"
 
+#include <utility>
+#include "third_party/blink/renderer/bindings/modules/v8/offscreen_rendering_context.h"
 #include "third_party/blink/renderer/bindings/modules/v8/rendering_context.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
+#include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 
 namespace blink {
@@ -21,6 +24,10 @@ void ImageBitmapRenderingContext::SetCanvasGetContextResult(
     RenderingContext& result) {
   result.SetImageBitmapRenderingContext(this);
 }
+void ImageBitmapRenderingContext::SetOffscreenCanvasGetContextResult(
+    OffscreenRenderingContext& result) {
+  result.SetImageBitmapRenderingContext(this);
+}
 
 void ImageBitmapRenderingContext::transferFromImageBitmap(
     ImageBitmap* image_bitmap,
@@ -32,13 +39,26 @@ void ImageBitmapRenderingContext::transferFromImageBitmap(
     return;
   }
 
+  if (image_bitmap && image_bitmap->WouldTaintOrigin()) {
+    Host()->SetOriginTainted();
+  }
+
   SetImage(image_bitmap);
+}
+
+ImageBitmap* ImageBitmapRenderingContext::TransferToImageBitmap(ScriptState*) {
+  scoped_refptr<StaticBitmapImage> image = GetImageAndResetInternal();
+  if (!image)
+    return nullptr;
+
+  image->Transfer();
+  return ImageBitmap::Create(std::move(image));
 }
 
 CanvasRenderingContext* ImageBitmapRenderingContext::Factory::Create(
     CanvasRenderingContextHost* host,
     const CanvasContextCreationAttributesCore& attrs) {
-  return new ImageBitmapRenderingContext(host, attrs);
+  return MakeGarbageCollected<ImageBitmapRenderingContext>(host, attrs);
 }
 
 }  // namespace blink

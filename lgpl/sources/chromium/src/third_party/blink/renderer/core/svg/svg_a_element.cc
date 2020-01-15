@@ -43,16 +43,17 @@
 #include "third_party/blink/renderer/core/svg/animation/svg_smil_element.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/core/xlink_names.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 
 namespace blink {
 
-using namespace HTMLNames;
-
-inline SVGAElement::SVGAElement(Document& document)
-    : SVGGraphicsElement(SVGNames::aTag, document),
+SVGAElement::SVGAElement(Document& document)
+    : SVGGraphicsElement(svg_names::kATag, document),
       SVGURIReference(this),
-      svg_target_(SVGAnimatedString::Create(this, SVGNames::targetAttr)) {
+      svg_target_(
+          MakeGarbageCollected<SVGAnimatedString>(this,
+                                                  svg_names::kTargetAttr)) {
   AddToPropertyMap(svg_target_);
 }
 
@@ -62,11 +63,9 @@ void SVGAElement::Trace(blink::Visitor* visitor) {
   SVGURIReference::Trace(visitor);
 }
 
-DEFINE_NODE_FACTORY(SVGAElement)
-
 String SVGAElement::title() const {
   // If the xlink:title is set (non-empty string), use it.
-  const AtomicString& title = FastGetAttribute(XLinkNames::titleAttr);
+  const AtomicString& title = FastGetAttribute(xlink_names::kTitleAttr);
   if (!title.IsEmpty())
     return title;
 
@@ -96,9 +95,10 @@ void SVGAElement::SvgAttributeChanged(const QualifiedName& attr_name) {
   SVGGraphicsElement::SvgAttributeChanged(attr_name);
 }
 
-LayoutObject* SVGAElement::CreateLayoutObject(const ComputedStyle&) {
-  if (parentNode() && parentNode()->IsSVGElement() &&
-      ToSVGElement(parentNode())->IsTextContent())
+LayoutObject* SVGAElement::CreateLayoutObject(const ComputedStyle&,
+                                              LegacyLayout) {
+  auto* svg_element = DynamicTo<SVGElement>(parentNode());
+  if (svg_element && svg_element->IsTextContent())
     return new LayoutSVGInline(this);
 
   return new LayoutSVGTransformableContainer(this);
@@ -118,30 +118,39 @@ void SVGAElement::DefaultEventHandler(Event& event) {
       if (url[0] == '#') {
         Element* target_element =
             GetTreeScope().getElementById(AtomicString(url.Substring(1)));
-        if (target_element && IsSVGSMILElement(*target_element)) {
-          ToSVGSMILElement(target_element)->BeginByLinkActivation();
+        if (auto* svg_smil_element =
+                DynamicTo<SVGSMILElement>(target_element)) {
+          svg_smil_element->BeginByLinkActivation();
           event.SetDefaultHandled();
           return;
         }
       }
 
       AtomicString target(svg_target_->CurrentValue()->Value());
-      if (target.IsEmpty() && FastGetAttribute(XLinkNames::showAttr) == "new")
+      if (target.IsEmpty() && FastGetAttribute(xlink_names::kShowAttr) == "new")
         target = AtomicString("_blank");
       event.SetDefaultHandled();
 
-      LocalFrame* frame = GetDocument().GetFrame();
+      if (!GetDocument().GetFrame())
+        return;
+
+      FrameLoadRequest frame_request(
+          &GetDocument(), ResourceRequest(GetDocument().CompleteURL(url)));
+      frame_request.SetNavigationPolicy(NavigationPolicyFromEvent(&event));
+      frame_request.SetTriggeringEventInfo(
+          event.isTrusted() ? TriggeringEventInfo::kFromTrustedEvent
+                            : TriggeringEventInfo::kFromUntrustedEvent);
+      frame_request.GetResourceRequest().SetHasUserGesture(
+          LocalFrame::HasTransientUserActivation(GetDocument().GetFrame()));
+
+      Frame* frame = GetDocument()
+                         .GetFrame()
+                         ->Tree()
+                         .FindOrCreateFrameForNavigation(frame_request, target)
+                         .frame;
       if (!frame)
         return;
-      FrameLoadRequest frame_request(
-          &GetDocument(), ResourceRequest(GetDocument().CompleteURL(url)),
-          target);
-      frame_request.SetTriggeringEventInfo(
-          event.isTrusted() ? WebTriggeringEventInfo::kFromTrustedEvent
-                            : WebTriggeringEventInfo::kFromUntrustedEvent);
-      frame->Loader().StartNavigation(frame_request,
-                                      WebFrameLoadType::kStandard,
-                                      NavigationPolicyFromEvent(&event));
+      frame->Navigate(frame_request, WebFrameLoadType::kStandard);
       return;
     }
   }
@@ -172,7 +181,7 @@ bool SVGAElement::ShouldHaveFocusAppearance() const {
 }
 
 bool SVGAElement::IsURLAttribute(const Attribute& attribute) const {
-  return attribute.GetName().LocalName() == hrefAttr ||
+  return attribute.GetName().LocalName() == html_names::kHrefAttr ||
          SVGGraphicsElement::IsURLAttribute(attribute);
 }
 

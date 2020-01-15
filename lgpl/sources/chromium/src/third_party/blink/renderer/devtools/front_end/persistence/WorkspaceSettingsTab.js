@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-Persistence.WorkspaceSettingsTab = class extends UI.VBox {
+export default class WorkspaceSettingsTab extends UI.VBox {
   constructor() {
     super();
     this.registerRequiredCSS('persistence/workspaceSettingsTab.css');
 
     const header = this.element.createChild('header');
-    header.createChild('h3').createTextChild(Common.UIString('Workspace'));
+    header.createChild('h1').createTextChild(Common.UIString('Workspace'));
 
     this.containerElement = this.element.createChild('div', 'settings-container-wrapper')
                                 .createChild('div', 'settings-tab settings-content settings-container');
@@ -29,8 +29,9 @@ Persistence.WorkspaceSettingsTab = class extends UI.VBox {
 
     this._fileSystemsListContainer = this.containerElement.createChild('div', '');
 
-    this.containerElement.appendChild(
-        UI.createTextButton(Common.UIString('Add folder\u2026'), this._addFileSystemClicked.bind(this)));
+    const addButton = UI.createTextButton(ls`Add folder\u2026`, this._addFileSystemClicked.bind(this));
+    this.containerElement.appendChild(addButton);
+    this.setDefaultFocusedElement(addButton);
 
     /** @type {!Map<string, !Element>} */
     this._elementByPath = new Map();
@@ -39,8 +40,9 @@ Persistence.WorkspaceSettingsTab = class extends UI.VBox {
     this._mappingViewByPath = new Map();
 
     const fileSystems = Persistence.isolatedFileSystemManager.fileSystems();
-    for (let i = 0; i < fileSystems.length; ++i)
+    for (let i = 0; i < fileSystems.length; ++i) {
       this._addItem(fileSystems[i]);
+    }
   }
 
   /**
@@ -49,8 +51,9 @@ Persistence.WorkspaceSettingsTab = class extends UI.VBox {
   _createFolderExcludePatternInput() {
     const p = createElement('p');
     const labelElement = p.createChild('label');
-    labelElement.textContent = Common.UIString('Folder exclude pattern');
+    labelElement.textContent = ls`Folder exclude pattern`;
     const inputElement = UI.createInput('', 'text');
+    UI.ARIAUtils.bindLabelToControl(labelElement, inputElement);
     p.appendChild(inputElement);
     inputElement.style.width = '270px';
     const folderExcludeSetting = Persistence.isolatedFileSystemManager.workspaceFolderExcludePatternSetting();
@@ -62,7 +65,7 @@ Persistence.WorkspaceSettingsTab = class extends UI.VBox {
 
     /**
      * @param {string} value
-     * @return {boolean}
+     * @return {{valid: boolean, errorMessage: (string|undefined)}}
      */
     function regexValidator(value) {
       let regex;
@@ -70,7 +73,8 @@ Persistence.WorkspaceSettingsTab = class extends UI.VBox {
         regex = new RegExp(value);
       } catch (e) {
       }
-      return !!regex;
+      const valid = !!regex;
+      return {valid};
     }
   }
 
@@ -78,10 +82,17 @@ Persistence.WorkspaceSettingsTab = class extends UI.VBox {
    * @param {!Persistence.PlatformFileSystem} fileSystem
    */
   _addItem(fileSystem) {
+    // Support managing only instances of IsolatedFileSystem.
+    if (!(fileSystem instanceof Persistence.IsolatedFileSystem)) {
+      return;
+    }
     const networkPersistenceProject = Persistence.networkPersistenceManager.project();
     if (networkPersistenceProject &&
-        Persistence.isolatedFileSystemManager.fileSystem(networkPersistenceProject.fileSystemPath()) === fileSystem)
+        Persistence.isolatedFileSystemManager.fileSystem(
+            /** @type {!Persistence.FileSystemWorkspaceBinding.FileSystem} */ (networkPersistenceProject)
+                .fileSystemPath()) === fileSystem) {
       return;
+    }
     const element = this._renderFileSystem(fileSystem);
     this._elementByPath.set(fileSystem.path(), element);
 
@@ -99,13 +110,15 @@ Persistence.WorkspaceSettingsTab = class extends UI.VBox {
    */
   _renderFileSystem(fileSystem) {
     const fileSystemPath = fileSystem.path();
-    const lastIndexOfSlash = fileSystemPath.lastIndexOf(Host.isWin() ? '\\' : '/');
+    const lastIndexOfSlash = fileSystemPath.lastIndexOf('/');
     const folderName = fileSystemPath.substr(lastIndexOfSlash + 1);
 
     const element = createElementWithClass('div', 'file-system-container');
     const header = element.createChild('div', 'file-system-header');
 
-    header.createChild('div', 'file-system-name').textContent = folderName;
+    const nameElement = header.createChild('div', 'file-system-name');
+    nameElement.textContent = folderName;
+    UI.ARIAUtils.markAsHeading(nameElement, 2);
     const path = header.createChild('div', 'file-system-path');
     path.textContent = fileSystemPath;
     path.title = fileSystemPath;
@@ -153,4 +166,13 @@ Persistence.WorkspaceSettingsTab = class extends UI.VBox {
       element.remove();
     }
   }
-};
+}
+
+/* Legacy exported object */
+self.Persistence = self.Persistence || {};
+
+/* Legacy exported object */
+Persistence = Persistence || {};
+
+/** @constructor */
+Persistence.WorkspaceSettingsTab = WorkspaceSettingsTab;

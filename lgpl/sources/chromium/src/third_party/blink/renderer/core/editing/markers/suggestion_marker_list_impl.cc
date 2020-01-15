@@ -34,7 +34,7 @@ ComputeOffsetsAfterNonSuggestionEditingOperating(const DocumentMarker& marker,
   // Text inserted/replaced immediately after the marker, remove marker if first
   // character is a (Unicode) letter or digit
   if (offset == marker_end && new_length > 0) {
-    if (WTF::Unicode::IsAlphanumeric(GetCodePointAt(node_text, offset)))
+    if (WTF::unicode::IsAlphanumeric(GetCodePointAt(node_text, offset)))
       return {};
     return marker.ComputeOffsetsAfterShift(offset, old_length, new_length);
   }
@@ -42,7 +42,7 @@ ComputeOffsetsAfterNonSuggestionEditingOperating(const DocumentMarker& marker,
   // Text inserted/replaced immediately before the marker, remove marker if
   // first character is a (Unicode) letter or digit
   if (offset == marker_start && new_length > 0) {
-    if (WTF::Unicode::IsAlphanumeric(
+    if (WTF::unicode::IsAlphanumeric(
             GetCodePointAt(node_text, offset + new_length - 1)))
       return {};
     return marker.ComputeOffsetsAfterShift(offset, old_length, new_length);
@@ -191,14 +191,14 @@ bool SuggestionMarkerListImpl::ShiftMarkersForNonSuggestionEditingOperation(
   return did_shift_marker;
 }
 
-void SuggestionMarkerListImpl::Trace(blink::Visitor* visitor) {
+void SuggestionMarkerListImpl::Trace(Visitor* visitor) {
   visitor->Trace(markers_);
   DocumentMarkerList::Trace(visitor);
 }
 
 bool SuggestionMarkerListImpl::RemoveMarkerByTag(int32_t tag) {
   for (auto* it = markers_.begin(); it != markers_.end(); it++) {
-    if (ToSuggestionMarker(*it)->Tag() == tag) {
+    if (To<SuggestionMarker>(it->Get())->Tag() == tag) {
       markers_.erase(it);
       return true;
     }

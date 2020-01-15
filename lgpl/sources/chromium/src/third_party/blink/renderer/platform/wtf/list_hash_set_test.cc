@@ -43,7 +43,7 @@ class ListOrLinkedHashSetTest : public testing::Test {};
 
 using SetTypes =
     testing::Types<ListHashSet<int>, ListHashSet<int, 1>, LinkedHashSet<int>>;
-TYPED_TEST_CASE(ListOrLinkedHashSetTest, SetTypes);
+TYPED_TEST_SUITE(ListOrLinkedHashSetTest, SetTypes);
 
 TYPED_TEST(ListOrLinkedHashSetTest, RemoveFirst) {
   using Set = TypeParam;
@@ -410,7 +410,7 @@ using RefPtrSetTypes =
     testing::Types<ListHashSet<scoped_refptr<DummyRefCounted>>,
                    ListHashSet<scoped_refptr<DummyRefCounted>, 1>,
                    LinkedHashSet<scoped_refptr<DummyRefCounted>>>;
-TYPED_TEST_CASE(ListOrLinkedHashSetRefPtrTest, RefPtrSetTypes);
+TYPED_TEST_SUITE(ListOrLinkedHashSetRefPtrTest, RefPtrSetTypes);
 
 TYPED_TEST(ListOrLinkedHashSetRefPtrTest, WithRefPtr) {
   using Set = TypeParam;
@@ -482,11 +482,12 @@ TYPED_TEST(ListOrLinkedHashSetRefPtrTest, ExerciseValuePeekInType) {
 }
 
 struct Simple {
-  Simple(int value) : value_(value){};
+  Simple(int value) : value_(value) {}
   int value_;
 };
 
 struct Complicated {
+  Complicated() : Complicated(0) {}
   Complicated(int value) : simple_(value) { objects_constructed_++; }
 
   Complicated(const Complicated& other) : simple_(other.simple_) {
@@ -495,9 +496,6 @@ struct Complicated {
 
   Simple simple_;
   static int objects_constructed_;
-
- private:
-  Complicated() = delete;
 };
 
 int Complicated::objects_constructed_ = 0;
@@ -522,7 +520,7 @@ using TranslatorSetTypes =
     testing::Types<ListHashSet<Complicated, 256, ComplicatedHashFunctions>,
                    ListHashSet<Complicated, 1, ComplicatedHashFunctions>,
                    LinkedHashSet<Complicated, ComplicatedHashFunctions>>;
-TYPED_TEST_CASE(ListOrLinkedHashSetTranslatorTest, TranslatorSetTypes);
+TYPED_TEST_SUITE(ListOrLinkedHashSetTranslatorTest, TranslatorSetTypes);
 
 TYPED_TEST(ListOrLinkedHashSetTranslatorTest, ComplexityTranslator) {
   using Set = TypeParam;
@@ -628,7 +626,7 @@ class ListOrLinkedHashSetCountCopyTest : public testing::Test {};
 using CountCopySetTypes = testing::Types<ListHashSet<CountCopy>,
                                          ListHashSet<CountCopy, 1>,
                                          LinkedHashSet<CountCopy>>;
-TYPED_TEST_CASE(ListOrLinkedHashSetCountCopyTest, CountCopySetTypes);
+TYPED_TEST_SUITE(ListOrLinkedHashSetCountCopyTest, CountCopySetTypes);
 
 TYPED_TEST(ListOrLinkedHashSetCountCopyTest,
            MoveConstructionShouldNotMakeCopy) {
@@ -660,7 +658,7 @@ class ListOrLinkedHashSetMoveOnlyTest : public testing::Test {};
 using MoveOnlySetTypes = testing::Types<ListHashSet<MoveOnlyHashValue>,
                                         ListHashSet<MoveOnlyHashValue, 1>,
                                         LinkedHashSet<MoveOnlyHashValue>>;
-TYPED_TEST_CASE(ListOrLinkedHashSetMoveOnlyTest, MoveOnlySetTypes);
+TYPED_TEST_SUITE(ListOrLinkedHashSetMoveOnlyTest, MoveOnlySetTypes);
 
 TYPED_TEST(ListOrLinkedHashSetMoveOnlyTest, MoveOnlyValue) {
   using Set = TypeParam;
@@ -730,5 +728,46 @@ TYPED_TEST(ListOrLinkedHashSetMoveOnlyTest, MoveOnlyValue) {
 }
 
 }  // anonymous namespace
+
+// A unit type which objects to its state being initialized wrong.
+struct InvalidZeroValue {
+  InvalidZeroValue() = default;
+  InvalidZeroValue(WTF::HashTableDeletedValueType) : deleted_(true) {}
+  ~InvalidZeroValue() { CHECK(ok_); }
+  bool IsHashTableDeletedValue() const { return deleted_; }
+
+  bool ok_ = true;
+  bool deleted_ = false;
+};
+
+template <>
+struct HashTraits<InvalidZeroValue> : SimpleClassHashTraits<InvalidZeroValue> {
+  static const bool kEmptyValueIsZero = false;
+};
+
+template <>
+struct DefaultHash<InvalidZeroValue> {
+  struct Hash {
+    static unsigned GetHash(const InvalidZeroValue&) { return 0; }
+    static bool Equal(const InvalidZeroValue&, const InvalidZeroValue&) {
+      return true;
+    }
+  };
+};
+
+template <typename Set>
+class ListOrLinkedHashSetInvalidZeroTest : public testing::Test {};
+
+using InvalidZeroValueSetTypes =
+    testing::Types<ListHashSet<InvalidZeroValue>,
+                   ListHashSet<InvalidZeroValue, 1>,
+                   LinkedHashSet<InvalidZeroValue>>;
+TYPED_TEST_SUITE(ListOrLinkedHashSetInvalidZeroTest, InvalidZeroValueSetTypes);
+
+TYPED_TEST(ListOrLinkedHashSetInvalidZeroTest, InvalidZeroValue) {
+  using Set = TypeParam;
+  Set set;
+  set.insert(InvalidZeroValue());
+}
 
 }  // namespace WTF

@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/core/paint/object_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/paint/scoped_paint_state.h"
 #include "third_party/blink/renderer/core/paint/scrollable_area_painter.h"
 #include "third_party/blink/renderer/core/paint/selection_painting_utils.h"
@@ -49,27 +50,14 @@ ScopedReplacedContentPaintState::ScopedReplacedContentPaintState(
 
   const auto* content_transform = paint_properties->ReplacedContentTransform();
   if (content_transform && replaced.IsSVGRoot()) {
-    new_properties.SetTransform(content_transform);
+    new_properties.SetTransform(*content_transform);
     adjusted_paint_info_.emplace(input_paint_info_);
-    DCHECK(content_transform->Matrix().IsAffine());
-    adjusted_paint_info_->UpdateCullRect(
-        content_transform->Matrix().ToAffineTransform());
+    adjusted_paint_info_->TransformCullRect(*content_transform);
     property_changed = true;
   }
 
-  bool painter_implements_content_box_clip = replaced.IsLayoutImage();
-  if (paint_properties->OverflowClip() &&
-      (!painter_implements_content_box_clip ||
-       replaced.StyleRef().HasBorderRadius())) {
-    new_properties.SetClip(paint_properties->OverflowClip());
-    property_changed = true;
-  }
-
-  // Check filter for optimized image policy violation highlights, which
-  // may be applied locally.
-  if (paint_properties->Filter() &&
-      (!replaced.HasLayer() || !replaced.Layer()->IsSelfPaintingLayer())) {
-    new_properties.SetEffect(paint_properties->Filter());
+  if (const auto* clip = paint_properties->OverflowClip()) {
+    new_properties.SetClip(*clip);
     property_changed = true;
   }
 
@@ -81,6 +69,15 @@ ScopedReplacedContentPaintState::ScopedReplacedContentPaintState(
 }
 
 }  // anonymous namespace
+
+bool ReplacedPainter::ShouldPaintBoxDecorationBackground(
+    const PaintInfo& paint_info) {
+  // LayoutFrameSet paints everything in the foreground phase.
+  if (layout_replaced_.IsLayoutEmbeddedContent() &&
+      layout_replaced_.Parent()->IsFrameSet())
+    return paint_info.phase == PaintPhase::kForeground;
+  return ShouldPaintSelfBlockBackground(paint_info.phase);
+}
 
 void ReplacedPainter::Paint(const PaintInfo& paint_info) {
   // TODO(crbug.com/797779): For now embedded contents don't know whether
@@ -100,18 +97,29 @@ void ReplacedPainter::Paint(const PaintInfo& paint_info) {
 
   const auto& local_paint_info = paint_state.GetPaintInfo();
   auto paint_offset = paint_state.PaintOffset();
-  LayoutRect border_rect(paint_offset, layout_replaced_.Size());
+  PhysicalRect border_rect(paint_offset, layout_replaced_.Size());
 
-  if (ShouldPaintSelfBlockBackground(local_paint_info.phase)) {
-    if (layout_replaced_.StyleRef().Visibility() == EVisibility::kVisible &&
-        layout_replaced_.HasBoxDecorationBackground()) {
+  if (ShouldPaintBoxDecorationBackground(local_paint_info)) {
+    bool should_paint_background = false;
+    if (layout_replaced_.StyleRef().Visibility() == EVisibility::kVisible) {
+      if (layout_replaced_.HasBoxDecorationBackground())
+        should_paint_background = true;
+      if (layout_replaced_.HasEffectiveAllowedTouchAction())
+        should_paint_background = true;
+    }
+    if (should_paint_background) {
       if (layout_replaced_.HasLayer() &&
           layout_replaced_.Layer()->GetCompositingState() ==
               kPaintsIntoOwnBacking &&
           layout_replaced_.Layer()
               ->GetCompositedLayerMapping()
-              ->DrawsBackgroundOntoContentLayer())
+              ->DrawsBackgroundOntoContentLayer()) {
+        // If the background paints into the content layer, we can skip painting
+        // the background but still need to paint the hit test rects.
+        BoxPainter(layout_replaced_)
+            .RecordHitTestData(local_paint_info, border_rect, layout_replaced_);
         return;
+      }
 
       BoxPainter(layout_replaced_)
           .PaintBoxDecorationBackground(local_paint_info, paint_offset);
@@ -141,23 +149,25 @@ void ReplacedPainter::Paint(const PaintInfo& paint_info) {
       !layout_replaced_.IsSelected())
     return;
 
-  bool skip_clip = layout_replaced_.IsSVGRoot() &&
-                   !ToLayoutSVGRoot(layout_replaced_).ShouldApplyViewportClip();
-  if (skip_clip || !layout_replaced_.PhysicalContentBoxRect().IsEmpty()) {
+  bool has_clip =
+      layout_replaced_.FirstFragment().PaintProperties() &&
+      layout_replaced_.FirstFragment().PaintProperties()->OverflowClip();
+  if (!has_clip || !layout_replaced_.PhysicalContentBoxRect().IsEmpty()) {
     ScopedReplacedContentPaintState content_paint_state(paint_state,
                                                         layout_replaced_);
-    if (RuntimeEnabledFeatures::PaintTouchActionRectsEnabled()) {
-      RecordHitTestData(content_paint_state.GetPaintInfo(),
-                        content_paint_state.PaintOffset());
-    }
     layout_replaced_.PaintReplaced(content_paint_state.GetPaintInfo(),
                                    content_paint_state.PaintOffset());
   }
 
   if (layout_replaced_.CanResize()) {
-    ScrollableAreaPainter(*layout_replaced_.Layer()->GetScrollableArea())
-        .PaintResizer(local_paint_info.context, RoundedIntPoint(paint_offset),
-                      local_paint_info.GetCullRect());
+    auto* scrollable_area = layout_replaced_.GetScrollableArea();
+    DCHECK(scrollable_area);
+    if (!scrollable_area->HasLayerForScrollCorner()) {
+      ScrollableAreaPainter(*scrollable_area)
+          .PaintResizer(local_paint_info.context, RoundedIntPoint(paint_offset),
+                        local_paint_info.GetCullRect());
+    }
+    // Otherwise the resizer will be painted by the scroll corner layer.
   }
 
   // The selection tint never gets clipped by border-radius rounding, since we
@@ -169,8 +179,9 @@ void ReplacedPainter::Paint(const PaintInfo& paint_info) {
   if (draw_selection_tint && !DrawingRecorder::UseCachedDrawingIfPossible(
                                  local_paint_info.context, layout_replaced_,
                                  DisplayItem::kSelectionTint)) {
-    LayoutRect selection_painting_rect = layout_replaced_.LocalSelectionRect();
-    selection_painting_rect.MoveBy(paint_offset);
+    PhysicalRect selection_painting_rect =
+        layout_replaced_.LocalSelectionVisualRect();
+    selection_painting_rect.Move(paint_offset);
     IntRect selection_painting_int_rect =
         PixelSnappedIntRect(selection_painting_rect);
 
@@ -184,29 +195,10 @@ void ReplacedPainter::Paint(const PaintInfo& paint_info) {
   }
 }
 
-void ReplacedPainter::RecordHitTestData(const PaintInfo& paint_info,
-                                        const LayoutPoint& paint_offset) {
-  // Hit test display items are only needed for compositing. This flag is used
-  // for for printing and drag images which do not need hit testing.
-  if (paint_info.GetGlobalPaintFlags() & kGlobalPaintFlattenCompositingLayers)
-    return;
-
-  if (paint_info.phase != PaintPhase::kForeground)
-    return;
-
-  auto touch_action = layout_replaced_.EffectiveWhitelistedTouchAction();
-  if (touch_action == TouchAction::kTouchActionAuto)
-    return;
-
-  auto rect = layout_replaced_.VisualOverflowRect();
-  rect.MoveBy(paint_offset);
-  HitTestData::RecordHitTestRect(paint_info.context, layout_replaced_,
-                                 HitTestRect(rect, touch_action));
-}
-
 bool ReplacedPainter::ShouldPaint(const ScopedPaintState& paint_state) const {
   const auto& paint_info = paint_state.GetPaintInfo();
   if (paint_info.phase != PaintPhase::kForeground &&
+      paint_info.phase != PaintPhase::kForcedColorsModeBackplate &&
       !ShouldPaintSelfOutline(paint_info.phase) &&
       paint_info.phase != PaintPhase::kSelection &&
       paint_info.phase != PaintPhase::kMask &&
@@ -223,9 +215,8 @@ bool ReplacedPainter::ShouldPaint(const ScopedPaintState& paint_state) const {
       layout_replaced_.StyleRef().Visibility() != EVisibility::kVisible)
     return false;
 
-  LayoutRect local_rect(layout_replaced_.VisualOverflowRect());
-  local_rect.Unite(layout_replaced_.LocalSelectionRect());
-  layout_replaced_.FlipForWritingMode(local_rect);
+  PhysicalRect local_rect = layout_replaced_.PhysicalVisualOverflowRect();
+  local_rect.Unite(layout_replaced_.LocalSelectionVisualRect());
   if (!paint_state.LocalRectIntersectsCullRect(local_rect))
     return false;
 

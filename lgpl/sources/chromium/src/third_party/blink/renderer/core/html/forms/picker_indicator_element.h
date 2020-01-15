@@ -57,9 +57,9 @@ class PickerIndicatorElement final : public HTMLDivElement,
     virtual bool SetupDateTimeChooserParameters(DateTimeChooserParameters&) = 0;
   };
 
-  static PickerIndicatorElement* Create(Document&, PickerIndicatorOwner&);
+  PickerIndicatorElement(Document&, PickerIndicatorOwner&);
   ~PickerIndicatorElement() override;
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
   void OpenPopup();
   void ClosePopup();
@@ -74,10 +74,9 @@ class PickerIndicatorElement final : public HTMLDivElement,
   void DidEndChooser() override;
 
  private:
-  PickerIndicatorElement(Document&, PickerIndicatorOwner&);
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
   void DefaultEventHandler(Event&) override;
-  void DetachLayoutTree(const AttachContext& = AttachContext()) override;
+  void DetachLayoutTree(bool performing_reattach) override;
   bool IsPickerIndicatorElement() const override;
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void DidNotifySubtreeInsertionsToDocument() override;

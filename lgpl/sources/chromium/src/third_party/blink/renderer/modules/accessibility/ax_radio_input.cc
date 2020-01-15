@@ -13,8 +13,6 @@
 
 namespace blink {
 
-using namespace HTMLNames;
-
 AXRadioInput::AXRadioInput(LayoutObject* layout_object,
                            AXObjectCacheImpl& ax_object_cache)
     : AXLayoutObject(layout_object, ax_object_cache) {
@@ -24,11 +22,6 @@ AXRadioInput::AXRadioInput(LayoutObject* layout_object,
   // When a new object is inserted, it needs to update setSize for the previous
   // objects.
   RequestUpdateToNextNode(false);
-}
-
-AXRadioInput* AXRadioInput::Create(LayoutObject* layout_object,
-                                   AXObjectCacheImpl& ax_object_cache) {
-  return new AXRadioInput(layout_object, ax_object_cache);
 }
 
 void AXRadioInput::UpdatePosAndSetSize(int position) {

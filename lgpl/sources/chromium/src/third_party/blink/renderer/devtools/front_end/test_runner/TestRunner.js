@@ -13,7 +13,7 @@
 self.testRunner;
 
 /**
- * Only tests in /LayoutTests/http/tests/devtools/startup/ need to call
+ * Only tests in web_tests/http/tests/devtools/startup/ need to call
  * this method because these tests need certain activities to be exercised
  * in the inspected page prior to the DevTools session.
  * @param {string} path
@@ -30,7 +30,7 @@ TestRunner.setupStartupTest = function(path) {
 };
 
 TestRunner._executeTestScript = function() {
-  const testScriptURL = /** @type {string} */ (Runtime.queryParam('test'));
+  const testScriptURL = /** @type {string} */ (Root.Runtime.queryParam('test'));
   fetch(testScriptURL)
       .then(data => data.text())
       .then(testScript => {
@@ -39,17 +39,19 @@ TestRunner._executeTestScript = function() {
           TestRunner.completeTest = () => console.log('Test completed');
 
           // Auto-start unit tests
-          if (!self.testRunner)
+          if (!self.testRunner) {
             eval(`(function test(){${testScript}})()\n//# sourceURL=${testScriptURL}`);
-          else
+          } else {
             self.eval(`function test(){${testScript}}\n//# sourceURL=${testScriptURL}`);
+          }
           return;
         }
 
         // Convert the test script into an expression (if needed)
         testScript = testScript.trimRight();
-        if (testScript.endsWith(';'))
+        if (testScript.endsWith(';')) {
           testScript = testScript.slice(0, testScript.length - 1);
+        }
 
         (async function() {
           try {
@@ -107,10 +109,12 @@ TestRunner.addResult = function(text) {
  * @param {!Array<string>} textArray
  */
 TestRunner.addResults = function(textArray) {
-  if (!textArray)
+  if (!textArray) {
     return;
-  for (let i = 0, size = textArray.length; i < size; ++i)
+  }
+  for (let i = 0, size = textArray.length; i < size; ++i) {
     TestRunner.addResult(textArray[i]);
+  }
 };
 
 /**
@@ -127,8 +131,9 @@ TestRunner.runTests = function(tests) {
     }
     TestRunner.addResult('\ntest: ' + test.name);
     let testPromise = test();
-    if (!(testPromise instanceof Promise))
+    if (!(testPromise instanceof Promise)) {
       testPromise = Promise.resolve();
+    }
     testPromise.then(nextTest);
   }
 };
@@ -143,16 +148,18 @@ TestRunner.addSniffer = function(receiver, methodName, override, opt_sticky) {
   override = TestRunner.safeWrap(override);
 
   const original = receiver[methodName];
-  if (typeof original !== 'function')
+  if (typeof original !== 'function') {
     throw new Error('Cannot find method to override: ' + methodName);
+  }
 
   receiver[methodName] = function(var_args) {
     let result;
     try {
       result = original.apply(this, arguments);
     } finally {
-      if (!opt_sticky)
+      if (!opt_sticky) {
         receiver[methodName] = original;
+      }
     }
     // In case of exception the override won't be called.
     try {
@@ -208,8 +215,9 @@ TestRunner._resolveOnFinishInits;
 TestRunner.loadModule = async function(module) {
   const promise = new Promise(resolve => TestRunner._resolveOnFinishInits = resolve);
   await self.runtime.loadModulePromise(module);
-  if (!TestRunner._pendingInits)
+  if (!TestRunner._pendingInits) {
     return;
+  }
   return promise;
 };
 
@@ -242,6 +250,8 @@ TestRunner.createKeyEvent = function(key, ctrlKey, altKey, shiftKey, metaKey) {
 };
 
 /**
+ * Wraps a test function with an exception filter. Does not work
+ * correctly for async functions; use safeAsyncWrap instead.
  * @param {!Function|undefined} func
  * @param {!Function=} onexception
  * @return {!Function}
@@ -251,17 +261,45 @@ TestRunner.safeWrap = function(func, onexception) {
    * @this {*}
    */
   function result() {
-    if (!func)
+    if (!func) {
       return;
+    }
     const wrapThis = this;
     try {
       return func.apply(wrapThis, arguments);
     } catch (e) {
       TestRunner.addResult('Exception while running: ' + func + '\n' + (e.stack || e));
-      if (onexception)
+      if (onexception) {
         TestRunner.safeWrap(onexception)();
-      else
+      } else {
         TestRunner.completeTest();
+      }
+    }
+  }
+  return result;
+};
+
+/**
+ * Wraps a test function that returns a Promise with an exception
+ * filter. Does not work correctly for functions which don't return
+ * a Promise; use safeWrap instead.
+ * @param {function(...):Promise<*>} func
+ * @return {function(...):Promise<*>}
+ */
+TestRunner.safeAsyncWrap = function(func) {
+  /**
+   * @this {*}
+   */
+  async function result() {
+    if (!func) {
+      return;
+    }
+    const wrapThis = this;
+    try {
+      return await func.apply(wrapThis, arguments);
+    } catch (e) {
+      TestRunner.addResult('Exception while running: ' + func + '\n' + (e.stack || e));
+      TestRunner.completeTest();
     }
   }
   return result;
@@ -276,8 +314,9 @@ TestRunner.textContentWithLineBreaks = function(node) {
     let result = 0;
     while (currentNode && currentNode !== node) {
       if (currentNode.nodeName === 'OL' &&
-          !(currentNode.classList && currentNode.classList.contains('object-properties-section')))
+          !(currentNode.classList && currentNode.classList.contains('object-properties-section'))) {
         ++result;
+      }
       currentNode = currentNode.parentNode;
     }
     return Array(result * 4 + 1).join(' ');
@@ -291,10 +330,11 @@ TestRunner.textContentWithLineBreaks = function(node) {
     if (currentNode.nodeType === Node.TEXT_NODE) {
       buffer += currentNode.nodeValue;
     } else if (currentNode.nodeName === 'LI' || currentNode.nodeName === 'TR') {
-      if (!ignoreFirst)
+      if (!ignoreFirst) {
         buffer += '\n' + padding(currentNode);
-      else
+      } else {
         ignoreFirst = false;
+      }
     } else if (currentNode.nodeName === 'STYLE') {
       currentNode = currentNode.traverseNextNode(node);
       continue;
@@ -314,10 +354,11 @@ TestRunner.textContentWithoutStyles = function(node) {
   let currentNode = node;
   while (currentNode.traverseNextNode(node)) {
     currentNode = currentNode.traverseNextNode(node);
-    if (currentNode.nodeType === Node.TEXT_NODE)
+    if (currentNode.nodeType === Node.TEXT_NODE) {
       buffer += currentNode.nodeValue;
-    else if (currentNode.nodeName === 'STYLE')
+    } else if (currentNode.nodeName === 'STYLE') {
       currentNode = currentNode.traverseNextNode(node);
+    }
   }
   return buffer;
 };
@@ -380,14 +421,14 @@ TestRunner._evaluateInPageCounter = 0;
 
 /**
  * @param {string} code
- * @return {!Promise<{response: !SDK.RemoteObject,
+ * @return {!Promise<undefined|{response: (!SDK.RemoteObject|undefined),
  *   exceptionDetails: (!Protocol.Runtime.ExceptionDetails|undefined)}>}
  */
 TestRunner._evaluateInPage = async function(code) {
   const lines = new Error().stack.split('at ');
 
   // Handles cases where the function is safe wrapped
-  const testScriptURL = /** @type {string} */ (Runtime.queryParam('test'));
+  const testScriptURL = /** @type {string} */ (Root.Runtime.queryParam('test'));
   const functionLine = lines.reduce((acc, line) => line.includes(testScriptURL) ? line : acc, lines[lines.length - 2]);
 
   const components = functionLine.trim().split('/');
@@ -396,8 +437,9 @@ TestRunner._evaluateInPage = async function(code) {
   const sourceURL = `test://evaluations/${TestRunner._evaluateInPageCounter++}/` + fileName;
   const lineOffset = parseInt(source[1], 10);
   code = '\n'.repeat(lineOffset - 1) + code;
-  if (code.indexOf('sourceURL=') === -1)
+  if (code.indexOf('sourceURL=') === -1) {
     code += `//# sourceURL=${sourceURL}`;
+  }
   const response = await TestRunner.RuntimeAgent.invoke_evaluate({expression: code, objectGroup: 'console'});
   const error = response[Protocol.Error];
   if (error) {
@@ -418,8 +460,9 @@ TestRunner._evaluateInPage = async function(code) {
 TestRunner.evaluateInPageAnonymously = async function(code, userGesture) {
   const response =
       await TestRunner.RuntimeAgent.invoke_evaluate({expression: code, objectGroup: 'console', userGesture});
-  if (!response[Protocol.Error])
+  if (!response[Protocol.Error]) {
     return response.result.value;
+  }
   TestRunner.addResult(
       'Error: ' +
       (response.exceptionDetails && response.exceptionDetails.text || 'exception from evaluateInPageAnonymously.'));
@@ -443,8 +486,9 @@ TestRunner.evaluateInPageAsync = async function(code) {
       {expression: code, objectGroup: 'console', includeCommandLineAPI: false, awaitPromise: true});
 
   const error = response[Protocol.Error];
-  if (!error && !response.exceptionDetails)
+  if (!error && !response.exceptionDetails) {
     return response.result.value;
+  }
   TestRunner.addResult(
       'Error: ' +
       (error || response.exceptionDetails && response.exceptionDetails.text || 'exception while evaluation in page.'));
@@ -496,17 +540,16 @@ TestRunner.evaluateFunctionInOverlay = function(func, callback) {
  * @param {string} failureText
  */
 TestRunner.check = function(passCondition, failureText) {
-  if (!passCondition)
+  if (!passCondition) {
     TestRunner.addResult('FAIL: ' + failureText);
+  }
 };
 
 /**
  * @param {!Function} callback
  */
 TestRunner.deprecatedRunAfterPendingDispatches = function(callback) {
-  const targets = SDK.targetManager.targets();
-  const promises = targets.map(target => new Promise(resolve => target._deprecatedRunAfterPendingDispatches(resolve)));
-  Promise.all(promises).then(TestRunner.safeWrap(callback));
+  Protocol.test.deprecatedRunAfterPendingDispatches(callback);
 };
 
 /**
@@ -521,10 +564,11 @@ TestRunner.loadHTML = function(html) {
     // <!DOCTYPE...> tag needs to be first
     const doctypeRegex = /(<!DOCTYPE.*?>)/i;
     const baseTag = `<base href="${TestRunner.url()}">`;
-    if (html.match(doctypeRegex))
+    if (html.match(doctypeRegex)) {
       html = html.replace(doctypeRegex, '$1' + baseTag);
-    else
+    } else {
       html = baseTag + html;
+    }
   }
   html = html.replace(/'/g, '\\\'').replace(/\n/g, '\\n');
   return TestRunner.evaluateInPageAnonymously(`document.write(\`${html}\`);document.close();`);
@@ -552,14 +596,13 @@ TestRunner.addScriptTag = function(path) {
 TestRunner.addStylesheetTag = function(path) {
   return TestRunner.evaluateInPageAsync(`
     (function(){
-      let link = document.createElement('link');
+      const link = document.createElement('link');
       link.rel = 'stylesheet';
-      link.type = 'text/css';
       link.href = '${path}';
       link.onload = onload;
       document.head.append(link);
       let resolve;
-      let promise = new Promise(r => resolve = r);
+      const promise = new Promise(r => resolve = r);
       function onload() {
         // TODO(chenwilliam): It shouldn't be necessary to force
         // style recalc here but some tests rely on it.
@@ -578,10 +621,10 @@ TestRunner.addStylesheetTag = function(path) {
 TestRunner.addHTMLImport = function(path) {
   return TestRunner.evaluateInPageAsync(`
     (function(){
-      let link = document.createElement('link');
+      const link = document.createElement('link');
       link.rel = 'import';
       link.href = '${path}';
-      let promise = new Promise(r => link.onload = r);
+      const promise = new Promise(r => link.onload = r);
       document.body.append(link);
       return promise;
     })();
@@ -589,6 +632,9 @@ TestRunner.addHTMLImport = function(path) {
 };
 
 /**
+ * NOTE you should manually ensure the path is correct. There
+ * is no error event triggered if it is incorrect, and this is
+ * in line with the standard (crbug 365457).
  * @param {string} path
  * @param {!Object|undefined} options
  * @return {!Promise<*>}
@@ -598,7 +644,7 @@ TestRunner.addIframe = function(path, options = {}) {
   options.name = options.name || '';
   return TestRunner.evaluateInPageAsync(`
     (function(){
-      let iframe = document.createElement('iframe');
+      const iframe = document.createElement('iframe');
       iframe.src = '${path}';
       iframe.id = '${options.id}';
       iframe.name = '${options.name}';
@@ -629,8 +675,9 @@ TestRunner.deprecatedInitAsync = async function(code) {
   TestRunner._pendingInits++;
   await TestRunner.RuntimeAgent.invoke_evaluate({expression: code, objectGroup: 'console'});
   TestRunner._pendingInits--;
-  if (!TestRunner._pendingInits)
+  if (!TestRunner._pendingInits) {
     TestRunner._resolveOnFinishInits();
+  }
 };
 
 /**
@@ -641,11 +688,7 @@ TestRunner.markStep = function(title) {
 };
 
 TestRunner.startDumpingProtocolMessages = function() {
-  // TODO(chenwilliam): stop abusing Closure interface which is why
-  // we need to opt out of type checking here
-  const untypedConnection = /** @type {*} */ (Protocol.InspectorBackend.Connection);
-  untypedConnection.prototype._dumpProtocolMessage = self.testRunner.logToStderr.bind(self.testRunner);
-  Protocol.InspectorBackend.Options.dumpInspectorProtocolMessages = 1;
+  Protocol.test.dumpProtocol = self.testRunner.logToStderr.bind(self.testRunner);
 };
 
 /**
@@ -674,8 +717,9 @@ TestRunner.formatters.formatAsTypeName = function(value) {
  * @return {string}
  */
 TestRunner.formatters.formatAsTypeNameOrNull = function(value) {
-  if (value === null)
+  if (value === null) {
     return 'null';
+  }
   return TestRunner.formatters.formatAsTypeName(value);
 };
 
@@ -684,8 +728,9 @@ TestRunner.formatters.formatAsTypeNameOrNull = function(value) {
  * @return {string|!Date}
  */
 TestRunner.formatters.formatAsRecentTime = function(value) {
-  if (typeof value !== 'object' || !(value instanceof Date))
+  if (typeof value !== 'object' || !(value instanceof Date)) {
     return TestRunner.formatters.formatAsTypeName(value);
+  }
   const delta = Date.now() - value;
   return 0 <= delta && delta < 30 * 60 * 1000 ? '<plausible>' : value;
 };
@@ -695,11 +740,13 @@ TestRunner.formatters.formatAsRecentTime = function(value) {
  * @return {string}
  */
 TestRunner.formatters.formatAsURL = function(value) {
-  if (!value)
+  if (!value) {
     return value;
+  }
   const lastIndex = value.lastIndexOf('devtools/');
-  if (lastIndex < 0)
+  if (lastIndex < 0) {
     return value;
+  }
   return '.../' + value.substr(lastIndex);
 };
 
@@ -708,8 +755,9 @@ TestRunner.formatters.formatAsURL = function(value) {
  * @return {string}
  */
 TestRunner.formatters.formatAsDescription = function(value) {
-  if (!value)
+  if (!value) {
     return value;
+  }
   return '"' + value.replace(/^function [gs]et /, 'function ') + '"';
 };
 
@@ -732,8 +780,9 @@ TestRunner.addObject = function(object, customFormatters, prefix, firstLinePrefi
   propertyNames.sort();
   for (let i = 0; i < propertyNames.length; ++i) {
     const prop = propertyNames[i];
-    if (!object.hasOwnProperty(prop))
+    if (!object.hasOwnProperty(prop)) {
       continue;
+    }
     const prefixWithName = '    ' + prefix + prop + ' : ';
     const propValue = object[prop];
     if (customFormatters && customFormatters[prop]) {
@@ -759,8 +808,9 @@ TestRunner.addArray = function(array, customFormatters, prefix, firstLinePrefix)
   prefix = prefix || '';
   firstLinePrefix = firstLinePrefix || prefix;
   TestRunner.addResult(firstLinePrefix + '[');
-  for (let i = 0; i < array.length; ++i)
+  for (let i = 0; i < array.length; ++i) {
     TestRunner.dump(array[i], customFormatters, prefix + '    ');
+  }
   TestRunner.addResult(prefix + ']');
 };
 
@@ -775,21 +825,25 @@ TestRunner.dumpDeepInnerHTML = function(node) {
   function innerHTML(prefix, node) {
     const openTag = [];
     if (node.nodeType === Node.TEXT_NODE) {
-      if (!node.parentElement || node.parentElement.nodeName !== 'STYLE')
+      if (!node.parentElement || node.parentElement.nodeName !== 'STYLE') {
         TestRunner.addResult(node.nodeValue);
+      }
       return;
     }
     openTag.push('<' + node.nodeName);
     const attrs = node.attributes;
-    for (let i = 0; attrs && i < attrs.length; ++i)
+    for (let i = 0; attrs && i < attrs.length; ++i) {
       openTag.push(attrs[i].name + '=' + attrs[i].value);
+    }
 
     openTag.push('>');
     TestRunner.addResult(prefix + openTag.join(' '));
-    for (let child = node.firstChild; child; child = child.nextSibling)
+    for (let child = node.firstChild; child; child = child.nextSibling) {
       innerHTML(prefix + '    ', child);
-    if (node.shadowRoot)
+    }
+    if (node.shadowRoot) {
       innerHTML(prefix + '    ', node.shadowRoot);
+    }
     TestRunner.addResult(prefix + '</' + node.nodeName + '>');
   }
   innerHTML('', node);
@@ -800,16 +854,20 @@ TestRunner.dumpDeepInnerHTML = function(node) {
  * @return {string}
  */
 TestRunner.deepTextContent = function(node) {
-  if (!node)
+  if (!node) {
     return '';
-  if (node.nodeType === Node.TEXT_NODE && node.nodeValue)
+  }
+  if (node.nodeType === Node.TEXT_NODE && node.nodeValue) {
     return !node.parentElement || node.parentElement.nodeName !== 'STYLE' ? node.nodeValue : '';
+  }
   let res = '';
   const children = node.childNodes;
-  for (let i = 0; i < children.length; ++i)
+  for (let i = 0; i < children.length; ++i) {
     res += TestRunner.deepTextContent(children[i]);
-  if (node.shadowRoot)
+  }
+  if (node.shadowRoot) {
     res += TestRunner.deepTextContent(node.shadowRoot);
+  }
   return res;
 };
 
@@ -825,16 +883,17 @@ TestRunner.dump = function(value, customFormatters, prefix, prefixWithName) {
     TestRunner.addResult(prefixWithName + 'was skipped due to prefix length limit');
     return;
   }
-  if (value === null)
+  if (value === null) {
     TestRunner.addResult(prefixWithName + 'null');
-  else if (value && value.constructor && value.constructor.name === 'Array')
+  } else if (value && value.constructor && value.constructor.name === 'Array') {
     TestRunner.addArray(/** @type {!Array} */ (value), customFormatters, prefix, prefixWithName);
-  else if (typeof value === 'object')
+  } else if (typeof value === 'object') {
     TestRunner.addObject(/** @type {!Object} */ (value), customFormatters, prefix, prefixWithName);
-  else if (typeof value === 'string')
+  } else if (typeof value === 'string') {
     TestRunner.addResult(prefixWithName + '"' + value + '"');
-  else
+  } else {
     TestRunner.addResult(prefixWithName + value);
+  }
 };
 
 /**
@@ -853,25 +912,26 @@ TestRunner.dumpObjectPropertyTreeElement = function(treeElement) {
 };
 
 /**
- * @param {symbol} event
+ * @param {symbol} eventName
  * @param {!Common.Object} obj
  * @param {function(?):boolean=} condition
  * @return {!Promise}
  */
-TestRunner.waitForEvent = function(event, obj, condition) {
+TestRunner.waitForEvent = function(eventName, obj, condition) {
   condition = condition || function() {
     return true;
   };
   return new Promise(resolve => {
-    obj.addEventListener(event, onEventFired);
+    obj.addEventListener(eventName, onEventFired);
 
     /**
      * @param {!Common.Event} event
      */
     function onEventFired(event) {
-      if (!condition(event.data))
+      if (!condition(event.data)) {
         return;
-      obj.removeEventListener(event, onEventFired);
+      }
+      obj.removeEventListener(eventName, onEventFired);
       resolve(event.data);
     }
   });
@@ -884,8 +944,9 @@ TestRunner.waitForEvent = function(event, obj, condition) {
 TestRunner.waitForTarget = function(filter) {
   filter = filter || (target => true);
   for (const target of SDK.targetManager.targets()) {
-    if (filter(target))
+    if (filter(target)) {
       return Promise.resolve(target);
+    }
   }
   return new Promise(fulfill => {
     const observer = /** @type {!SDK.TargetManager.Observer} */ ({
@@ -902,12 +963,32 @@ TestRunner.waitForTarget = function(filter) {
 };
 
 /**
+ * @param {!SDK.Target} targetToRemove
+ * @return {!Promise<!SDK.Target>}
+ */
+TestRunner.waitForTargetRemoved = function(targetToRemove) {
+  return new Promise(fulfill => {
+    const observer = /** @type {!SDK.TargetManager.Observer} */ ({
+      targetRemoved: function(target) {
+        if (target === targetToRemove) {
+          SDK.targetManager.unobserveTargets(observer);
+          fulfill(target);
+        }
+      },
+      targetAdded: function() {},
+    });
+    SDK.targetManager.observeTargets(observer);
+  });
+};
+
+/**
  * @param {!SDK.RuntimeModel} runtimeModel
  * @return {!Promise}
  */
 TestRunner.waitForExecutionContext = function(runtimeModel) {
-  if (runtimeModel.executionContexts().length)
+  if (runtimeModel.executionContexts().length) {
     return Promise.resolve(runtimeModel.executionContexts()[0]);
+  }
   return runtimeModel.once(SDK.RuntimeModel.Events.ExecutionContextCreated);
 };
 
@@ -917,8 +998,9 @@ TestRunner.waitForExecutionContext = function(runtimeModel) {
  */
 TestRunner.waitForExecutionContextDestroyed = function(context) {
   const runtimeModel = context.runtimeModel;
-  if (runtimeModel.executionContexts().indexOf(context) === -1)
+  if (runtimeModel.executionContexts().indexOf(context) === -1) {
     return Promise.resolve();
+  }
   return TestRunner.waitForEvent(
       SDK.RuntimeModel.Events.ExecutionContextDestroyed, runtimeModel,
       destroyedContext => destroyedContext === context);
@@ -930,8 +1012,9 @@ TestRunner.waitForExecutionContextDestroyed = function(context) {
  * @param {string=} message
  */
 TestRunner.assertGreaterOrEqual = function(a, b, message) {
-  if (a < b)
+  if (a < b) {
     TestRunner.addResult('FAILED: ' + (message ? message + ': ' : '') + a + ' < ' + b);
+  }
 };
 
 /**
@@ -1031,8 +1114,9 @@ TestRunner.waitForPageLoad = function(callback) {
 TestRunner.runWhenPageLoads = function(callback) {
   const oldCallback = TestRunner._pageLoadedCallback;
   function chainedCallback() {
-    if (oldCallback)
+    if (oldCallback) {
       oldCallback();
+    }
     callback();
   }
   TestRunner._pageLoadedCallback = TestRunner.safeWrap(chainedCallback);
@@ -1060,19 +1144,36 @@ TestRunner.runTestSuite = function(testSuite) {
 };
 
 /**
+ * @param {!Array<function():Promise<*>>} testSuite
+ */
+TestRunner.runAsyncTestSuite = async function(testSuite) {
+  for (const nextTest of testSuite) {
+    TestRunner.addResult('');
+    TestRunner.addResult(
+        'Running: ' +
+        /function\s([^(]*)/.exec(nextTest)[1]);
+    await TestRunner.safeAsyncWrap(nextTest)();
+  }
+
+  TestRunner.completeTest();
+};
+
+/**
  * @param {*} expected
  * @param {*} found
  * @param {string} message
  */
 TestRunner.assertEquals = function(expected, found, message) {
-  if (expected === found)
+  if (expected === found) {
     return;
+  }
 
   let error;
-  if (message)
+  if (message) {
     error = 'Failure (' + message + '):';
-  else
+  } else {
     error = 'Failure:';
+  }
   throw new Error(error + ' expected <' + expected + '> found <' + found + '>');
 };
 
@@ -1095,8 +1196,9 @@ TestRunner.override = function(receiver, methodName, override, opt_sticky) {
   override = TestRunner.safeWrap(override);
 
   const original = receiver[methodName];
-  if (typeof original !== 'function')
+  if (typeof original !== 'function') {
     throw new Error('Cannot find method to override: ' + methodName);
+  }
 
   receiver[methodName] = function(var_args) {
     try {
@@ -1104,8 +1206,9 @@ TestRunner.override = function(receiver, methodName, override, opt_sticky) {
     } catch (e) {
       throw new Error('Exception in overriden method \'' + methodName + '\': ' + e);
     } finally {
-      if (!opt_sticky)
+      if (!opt_sticky) {
         receiver[methodName] = original;
+      }
     }
   };
 
@@ -1193,16 +1296,17 @@ TestRunner.MockSetting = class {
 };
 
 /**
- * @return {!Array<!Runtime.Module>}
+ * @return {!Array<!Root.Runtime.Module>}
  */
 TestRunner.loadedModules = function() {
   return self.runtime._modules.filter(module => module._loadedForTest)
+      .filter(module => module.name() !== 'help')
       .filter(module => module.name().indexOf('test_runner') === -1);
 };
 
 /**
- * @param {!Array<!Runtime.Module>} relativeTo
- * @return {!Array<!Runtime.Module>}
+ * @param {!Array<!Root.Runtime.Module>} relativeTo
+ * @return {!Array<!Root.Runtime.Module>}
  */
 TestRunner.dumpLoadedModules = function(relativeTo) {
   const previous = new Set(relativeTo || []);
@@ -1213,42 +1317,12 @@ TestRunner.dumpLoadedModules = function(relativeTo) {
   TestRunner.addResult('Loaded modules:');
   const loadedModules = TestRunner.loadedModules().sort(moduleSorter);
   for (const module of loadedModules) {
-    if (previous.has(module))
+    if (previous.has(module)) {
       continue;
+    }
     TestRunner.addResult('    ' + module._descriptor.name);
   }
   return loadedModules;
-};
-
-/**
- * @param {!SDK.Target} target
- * @return {boolean}
- */
-TestRunner.isDedicatedWorker = function(target) {
-  return target && !target.hasBrowserCapability() && target.hasJSCapability() && target.hasLogCapability();
-};
-
-/**
- * @param {!SDK.Target} target
- * @return {boolean}
- */
-TestRunner.isServiceWorker = function(target) {
-  return target && !target.hasBrowserCapability() && !target.hasJSCapability() && target.hasNetworkCapability() &&
-      target.hasTargetCapability();
-};
-
-/**
- * @param {!SDK.Target} target
- * @return {string}
- */
-TestRunner.describeTargetType = function(target) {
-  if (TestRunner.isDedicatedWorker(target))
-    return 'worker';
-  if (TestRunner.isServiceWorker(target))
-    return 'service-worker';
-  if (!target.parentTarget())
-    return 'page';
-  return 'frame';
 };
 
 /**
@@ -1262,18 +1336,22 @@ TestRunner.waitForUISourceCode = function(urlSuffix, projectType) {
    * @return {boolean}
    */
   function matches(uiSourceCode) {
-    if (projectType && uiSourceCode.project().type() !== projectType)
+    if (projectType && uiSourceCode.project().type() !== projectType) {
       return false;
-    if (!projectType && uiSourceCode.project().type() === Workspace.projectTypes.Service)
+    }
+    if (!projectType && uiSourceCode.project().type() === Workspace.projectTypes.Service) {
       return false;
-    if (urlSuffix && !uiSourceCode.url().endsWith(urlSuffix))
+    }
+    if (urlSuffix && !uiSourceCode.url().endsWith(urlSuffix)) {
       return false;
+    }
     return true;
   }
 
   for (const uiSourceCode of Workspace.workspace.uiSourceCodes()) {
-    if (urlSuffix && matches(uiSourceCode))
+    if (urlSuffix && matches(uiSourceCode)) {
       return Promise.resolve(uiSourceCode);
+    }
   }
 
   return TestRunner.waitForEvent(Workspace.Workspace.Events.UISourceCodeAdded, Workspace.workspace, matches);
@@ -1291,7 +1369,7 @@ TestRunner.waitForUISourceCodeRemoved = function(callback) {
  * @return {string}
  */
 TestRunner.url = function(url = '') {
-  const testScriptURL = /** @type {string} */ (Runtime.queryParam('test'));
+  const testScriptURL = /** @type {string} */ (Root.Runtime.queryParam('test'));
 
   // This handles relative (e.g. "../file"), root (e.g. "/resource"),
   // absolute (e.g. "http://", "data:") and empty (e.g. "") paths
@@ -1314,10 +1392,11 @@ TestRunner.dumpSyntaxHighlight = function(str, mimeType) {
     const node_parts = [];
 
     for (let i = 0; i < node.childNodes.length; i++) {
-      if (node.childNodes[i].getAttribute)
+      if (node.childNodes[i].getAttribute) {
         node_parts.push(node.childNodes[i].getAttribute('class'));
-      else
+      } else {
         node_parts.push('*');
+      }
     }
 
     TestRunner.addResult(str + ': ' + node_parts.join(', '));
@@ -1337,8 +1416,9 @@ TestRunner._consoleOutputHook = function(messageType) {
  * messages printed at the top of the test expectation file (default behavior).
  */
 TestRunner._printDevToolsConsole = function() {
-  if (TestRunner._isDebugTest())
+  if (TestRunner._isDebugTest()) {
     return;
+  }
   console.log = TestRunner._consoleOutputHook.bind(TestRunner, 'log');
   console.error = TestRunner._consoleOutputHook.bind(TestRunner, 'error');
   console.info = TestRunner._consoleOutputHook.bind(TestRunner, 'info');
@@ -1364,12 +1444,16 @@ TestRunner._TestObserver = class {
    * @override
    */
   targetAdded(target) {
-    if (TestRunner._startedTest)
+    if (target.id() === 'main') {
+      TestRunner._setupTestHelpers(target);
+    }
+    if (TestRunner._startedTest) {
       return;
+    }
     TestRunner._startedTest = true;
-    TestRunner._setupTestHelpers(target);
-    if (TestRunner._isStartupTest())
+    if (TestRunner._isStartupTest()) {
       return;
+    }
     TestRunner
         .loadHTML(`
       <head>
@@ -1392,14 +1476,14 @@ TestRunner._TestObserver = class {
  * @return {boolean}
  */
 TestRunner._isDebugTest = function() {
-  return !self.testRunner || !!Runtime.queryParam('debugFrontend');
+  return !self.testRunner || !!Root.Runtime.queryParam('debugFrontend');
 };
 
 /**
  * @return {boolean}
  */
 TestRunner._isStartupTest = function() {
-  return Runtime.queryParam('test').includes('/startup/');
+  return Root.Runtime.queryParam('test').includes('/startup/');
 };
 
 (async function() {
@@ -1418,8 +1502,9 @@ TestRunner._isStartupTest = function() {
   self['onerror'] = completeTestOnError;
   TestRunner._printDevToolsConsole();
   SDK.targetManager.observeTargets(new TestRunner._TestObserver());
-  if (!TestRunner._isStartupTest())
+  if (!TestRunner._isStartupTest()) {
     return;
+  }
   /**
    * Startup test initialization:
    * 1. Wait for DevTools app UI to load

@@ -34,33 +34,28 @@
 #include <memory>
 #include <utility>
 
+#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/renderer/platform/audio/audio_source_provider.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
+#include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
 namespace blink {
 
 class WebAudioSourceProvider;
 
-class MediaStreamWebAudioSource : public AudioSourceProvider {
-  WTF_MAKE_NONCOPYABLE(MediaStreamWebAudioSource);
-
+class PLATFORM_EXPORT MediaStreamWebAudioSource : public AudioSourceProvider {
  public:
-  static std::unique_ptr<MediaStreamWebAudioSource> Create(
-      std::unique_ptr<WebAudioSourceProvider> provider) {
-    return base::WrapUnique(new MediaStreamWebAudioSource(std::move(provider)));
-  }
-
+  explicit MediaStreamWebAudioSource(std::unique_ptr<WebAudioSourceProvider>);
   ~MediaStreamWebAudioSource() override;
 
  private:
-  explicit MediaStreamWebAudioSource(std::unique_ptr<WebAudioSourceProvider>);
-
   // blink::AudioSourceProvider implementation.
-  void ProvideInput(AudioBus*, size_t frames_to_process) override;
+  void ProvideInput(AudioBus*, uint32_t frames_to_process) override;
 
   std::unique_ptr<WebAudioSourceProvider> web_audio_source_provider_;
+
+  DISALLOW_COPY_AND_ASSIGN(MediaStreamWebAudioSource);
 };
 
 }  // namespace blink

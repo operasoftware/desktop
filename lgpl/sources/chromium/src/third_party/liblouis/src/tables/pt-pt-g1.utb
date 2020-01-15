@@ -1,33 +1,51 @@
 # liblouis: Portuguese Grade 1 Braille Table
-# Created by Leon Ungier <Leon.Ungier@ViewPlus.com>.
 #
-#  Copyright (C) 2009 ViewPlus Technologies, Inc. www.viewplus.com and
-#  JJB Software, Inc. www.jjb-software.com
+# -----------
+#-index-name: Portuguese, uncontracted
+#-display-name: Portuguese uncontracted braille
+#
+#+locale:pt
+#+type:literary
+#+contraction:no
+#+grade:1
+#
+# TODO: Please correct the metadata above. It is not meant to be
+# accurate nor complete. It hasn't been verified by the table
+# author yet. It is merely an attempt by the liblouis maintainers
+# to get some sensible initial values in place.
+#
+# TODO: Please add a reference to official documentation about
+# the implemented braille code. Preferably submit the documents
+# to https://github.com/liblouis/braille-specs.
+# -----------
+#
+#  Copyright (C) 2004-2008 ViewPlus Technologies, Inc. www.viewplus.com
+#  Copyright (C) 2004-2006 JJB Software, Inc. www.jjb-software.com
+#  Copyright (C) 2012 Mesar Hameed <mesar.hameed@gmail.com>
 #
 #  This file is part of liblouis.
-
+#
 #  liblouis is free software: you can redistribute it and/or modify it
-#  under the terms of the Lesser GNU General Public License as
-#  published by the Free Software Foundation, either version 3 of the
+#  under the terms of the GNU Lesser General Public License as
+#  published by the Free Software Foundation, either version 2.1 of the
 #  License, or (at your option) any later version.
-
+#
 #  liblouis is distributed in the hope that it will be useful, but
 #  WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the Lesser
-#  GNU General Public License for more details.
-
-#  You should have received a copy of the Lesser GNU General Public
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+#  Lesser General Public License for more details.
+#
+#  You should have received a copy of the GNU Lesser General Public
 #  License along with liblouis. If not, see
 #  <http://www.gnu.org/licenses/>.
 
-locale Portugal
+# Created by Leon Ungier <Leon.Ungier@ViewPlus.com>.
 
+space \x00a0 a
+include spaces.uti
 include text_nabcc.dis
 
 #--------------------- All chars definitions ------------------------------
-
-space \t 0 tab            #  9
-space \s 0 blank					# 32
 
 punctuation ! 235				exclamation mark	33
 punctuation " 236				double quote			34
@@ -44,7 +62,6 @@ punctuation , 2					coma							44
 punctuation - 36				hyphen-minus			45
 punctuation . 3					point							46
 math / 6-2							solidus						47
-include digits6Dots.uti
 punctuation : 25			colon					58		x003A
 punctuation ;	23			semicolon			59		x003B
 math < 246													60		x003C
@@ -53,7 +70,9 @@ math > 135													62		x003E
 punctuation ? 26										63		x003F
 sign @ 156						commercial at	64		x0040
 
-include latinLetterDef6Dots.uti
+include latinLetterDef6Dots.uti 
+include digits6Dots.uti # Must come after letters.
+include litdigits6Dots.uti # Must come after letters.
 
 punctuation [ 12356-3		left square bracket			x005B
 sign \\ 5-3							reverse solidus					x005C
@@ -70,7 +89,6 @@ punctuation } 456-2		right curly bracket			x007D
 sign ~ 5						tilde										x007E
 sign \x0080 15-136-1235-135										x0080
 
-space \X00A0 0				# no-break space													x00A0
 sign ¢ 4-14						cent sign																	x00A2
 sign £ 4-123					pound sign																x00A3
 sign ¤ 45-15					currency sign															x00A4
@@ -110,7 +128,7 @@ uplow \x00D3\x00F3 346			o with acute ó					x00D3 / 00F3
 uplow \x00D4\x00F4 1456			o with circumflex ô			x00D4 / 00F4
 uplow \x00D5\x00F5 246			o with tilde						x00D5 / 00F5
 uplow Öö 246								O with diaeresis				x00D6 / 00F6
-uplow \X00DA\x00FA 23456		u with acute						x00DA / 00FA
+uplow \x00DA\x00FA 23456		u with acute						x00DA / 00FA
 uplow \x00DC\x00FC 1256			u with diaeresis				x00FC
 
 uplow \x00D1\x00F1 12456			n with tilde
@@ -149,16 +167,19 @@ sign \x2260 45-2356											not equal to
 #-------------- end defintions ------------------------------------------
 
 
-capsign 46
-# begcaps 46-46-136			# uncomment if you don't want capitalization
-begcaps 46-46
+capsletter 46
+# capsword 46-46-136			# uncomment if you don't want capitalization
+begcapsword 46-46
 
-begital 35
-begbold 35
-begunder 35
-endital 35
-endbold 35
-endunder 35
+emphclass italic
+emphclass underline
+emphclass bold
+begemph italic 35
+begemph bold 35
+begemph underline 35
+endemph italic 35
+endemph bold 35
+endemph underline 35
 begcomp 5-2
 endcomp 5-2
 

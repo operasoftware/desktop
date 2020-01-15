@@ -26,7 +26,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-"""Base class used to start servers used by the layout tests."""
+"""Base class used to start servers used by the web tests."""
 
 import errno
 import logging
@@ -42,7 +42,7 @@ class ServerError(Exception):
 
 
 class ServerBase(object):
-    """A skeleton class for starting and stopping servers used by the layout tests."""
+    """A skeleton class for starting and stopping servers used by the web tests."""
 
     def __init__(self, port_obj, output_dir):
         self._port_obj = port_obj
@@ -51,9 +51,8 @@ class ServerBase(object):
         self._platform = port_obj.host.platform
         self._output_dir = output_dir
 
-        # On Mac and Linux tmpdir is set to '/tmp' for (i) consistency
-        # and (ii) because it is hardcoded in the Apache
-        # ScoreBoardFile directive.
+        # On Mac and Linux tmpdir is set to '/tmp' for (i) consistency and
+        # (ii) because it is hardcoded in the Apache ScoreBoardFile directive.
         tmpdir = tempfile.gettempdir()
         if self._platform.is_mac() or self._platform.is_linux():
             tmpdir = '/tmp'
@@ -71,6 +70,10 @@ class ServerBase(object):
         # Subclasses may override these fields.
         self._env = None
         self._cwd = None
+        # TODO(robertma): There is a risk of deadlocks since we don't read from
+        # the pipes until the subprocess exits. For now, subclasses need to
+        # either make sure server processes don't spam on stdout/stderr, or
+        # redirect them to files.
         self._stdout = self._executive.PIPE
         self._stderr = self._executive.PIPE
         self._process = None
@@ -251,13 +254,14 @@ class ServerBase(object):
         for mapping in self._mappings:
             s = socket.socket()
             port = mapping['port']
+            scheme = mapping['scheme']
             try:
                 s.connect(('localhost', port))
-                _log.debug('Server running on %d', port)
+                _log.info('Server running on %s://localhost:%d', scheme, port)
             except IOError as error:
                 if error.errno not in (errno.ECONNREFUSED, errno.ECONNRESET):
                     raise
-                _log.debug('Server NOT running on %d: %s', port, error)
+                _log.debug('Server NOT running on %s://localhost:%d : %s', scheme, port, error)
                 return False
             finally:
                 s.close()

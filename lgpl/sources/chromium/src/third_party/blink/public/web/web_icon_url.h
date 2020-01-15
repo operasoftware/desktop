@@ -32,7 +32,7 @@
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_ICON_URL_H_
 
 #if INSIDE_BLINK
-#include "third_party/blink/renderer/core/dom/icon_url.h"
+#include "third_party/blink/renderer/core/dom/icon_url.h"  // nogncheck
 #endif
 #include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/public/platform/web_url.h"
@@ -46,19 +46,16 @@ class WebIconURL {
     kTypeInvalid = 0,
     kTypeFavicon = 1 << 0,
     kTypeTouch = 1 << 1,
-    kTypeTouchPrecomposed = 1 << 2,
-    kTypePinned = 1 << 3
+    kTypeTouchPrecomposed = 1 << 2
   };
 
-  WebIconURL() : icon_type_(kTypeInvalid), color_(0) {}
+  WebIconURL() : icon_type_(kTypeInvalid) {}
 
-  WebIconURL(const WebURL& url, Type type) : icon_type_(type), icon_url_(url), color_(0) {}
+  WebIconURL(const WebURL& url, Type type) : icon_type_(type), icon_url_(url) {}
 
   Type IconType() const { return icon_type_; }
 
   const WebURL& GetIconURL() const { return icon_url_; }
-
-  uint32_t Color() const { return color_; }
 
   const WebVector<WebSize>& Sizes() const { return sizes_; }
 
@@ -66,15 +63,13 @@ class WebIconURL {
   WebIconURL(const IconURL& icon_url)
       : icon_type_(static_cast<Type>(icon_url.icon_type_)),
         icon_url_(icon_url.icon_url_),
-        sizes_(icon_url.sizes_),
-        color_(icon_url.color_.Rgb()) {}
+        sizes_(icon_url.sizes_) {}
 #endif
 
  private:
   Type icon_type_;
   WebURL icon_url_;
   WebVector<WebSize> sizes_;
-  uint32_t color_;
 };
 }
 

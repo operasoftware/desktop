@@ -32,13 +32,9 @@ namespace blink {
 
 class RemoveFormatCommand final : public CompositeEditCommand {
  public:
-  static RemoveFormatCommand* Create(Document& document) {
-    return new RemoveFormatCommand(document);
-  }
-
- private:
   explicit RemoveFormatCommand(Document&);
 
+ private:
   void DoApply(EditingState*) override;
   InputEvent::InputType GetInputType() const override;
 };

@@ -15,15 +15,14 @@ ScreenScreenOrientation& ScreenScreenOrientation::From(Screen& screen) {
   ScreenScreenOrientation* supplement =
       Supplement<Screen>::From<ScreenScreenOrientation>(screen);
   if (!supplement) {
-    supplement = new ScreenScreenOrientation();
+    supplement = MakeGarbageCollected<ScreenScreenOrientation>();
     ProvideTo(screen, supplement);
   }
   return *supplement;
 }
 
 // static
-ScreenOrientation* ScreenScreenOrientation::orientation(ScriptState* state,
-                                                        Screen& screen) {
+ScreenOrientation* ScreenScreenOrientation::orientation(Screen& screen) {
   ScreenScreenOrientation& self = ScreenScreenOrientation::From(screen);
   if (!screen.GetFrame())
     return nullptr;

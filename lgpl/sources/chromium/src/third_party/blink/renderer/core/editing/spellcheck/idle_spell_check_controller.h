@@ -26,14 +26,17 @@ class SpellCheckRequester;
   V(InColdModeInvocation)
 
 // Main class for the implementation of idle time spell checker.
+// See design doc for details: https://goo.gl/zONC3v
 class CORE_EXPORT IdleSpellCheckController final
-    : public GarbageCollectedFinalized<IdleSpellCheckController>,
+    : public GarbageCollected<IdleSpellCheckController>,
       public DocumentShutdownObserver {
   DISALLOW_COPY_AND_ASSIGN(IdleSpellCheckController);
   USING_GARBAGE_COLLECTED_MIXIN(IdleSpellCheckController);
 
  public:
   static IdleSpellCheckController* Create(LocalFrame&);
+
+  explicit IdleSpellCheckController(LocalFrame&);
   ~IdleSpellCheckController();
 
   enum class State {
@@ -52,7 +55,7 @@ class CORE_EXPORT IdleSpellCheckController final
   // document is detached or spellchecking is globally disabled.
   void Deactivate();
 
-  void DocumentAttached(Document*);
+  void DidAttachDocument(Document*);
 
   // Exposed for testing only.
   SpellCheckRequester& GetSpellCheckRequester() const;
@@ -61,12 +64,10 @@ class CORE_EXPORT IdleSpellCheckController final
   void SkipColdModeTimerForTesting();
   int IdleCallbackHandle() const { return idle_callback_handle_; }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
   class IdleCallback;
-
-  explicit IdleSpellCheckController(LocalFrame&);
 
   LocalFrame& GetFrame() const { return *frame_; }
 

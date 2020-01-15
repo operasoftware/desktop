@@ -41,7 +41,7 @@ namespace blink {
 class SVGElement;
 class SVGAnimationElement;
 
-class SVGPropertyBase : public GarbageCollectedFinalized<SVGPropertyBase> {
+class SVGPropertyBase : public GarbageCollected<SVGPropertyBase> {
  public:
   // Properties do not have a primitive type by default
   typedef void PrimitiveType;
@@ -102,7 +102,7 @@ class SVGPropertyBase : public GarbageCollectedFinalized<SVGPropertyBase> {
 #define DEFINE_SVG_PROPERTY_TYPE_CASTS(thisType)               \
   DEFINE_TYPE_CASTS(thisType, SVGPropertyBase, value,          \
                     value->GetType() == thisType::ClassType(), \
-                    value.GetType() == thisType::ClassType());
+                    value.GetType() == thisType::ClassType())
 
 }  // namespace blink
 

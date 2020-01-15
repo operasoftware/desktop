@@ -8,6 +8,7 @@
 #include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/unpacked_serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
+#include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
 #include "third_party/blink/renderer/core/fileapi/file.h"
@@ -25,8 +26,12 @@
 #include "third_party/blink/renderer/core/messaging/message_port.h"
 #include "third_party/blink/renderer/core/mojo/mojo_handle.h"
 #include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
+#include "third_party/blink/renderer/core/streams/readable_stream.h"
+#include "third_party/blink/renderer/core/streams/transform_stream.h"
+#include "third_party/blink/renderer/core/streams/writable_stream.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_shared_array_buffer.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
 
 namespace blink {
@@ -168,8 +173,17 @@ v8::Local<v8::Value> V8ScriptValueDeserializer::Deserialize() {
 }
 
 void V8ScriptValueDeserializer::Transfer() {
-  // Thre's nothing to transfer if the deserializer was not given an unpacked
-  // value.
+  if (RuntimeEnabledFeatures::TransferableStreamsEnabled()) {
+    // TODO(ricea): Make ExtendableMessageEvent store an
+    // UnpackedSerializedScriptValue like MessageEvent does, and then this
+    // special case won't be necessary.
+    transferred_stream_ports_ = MessagePort::EntanglePorts(
+        *ExecutionContext::From(script_state_),
+        serialized_script_value_->GetStreamChannels());
+  }
+
+  // There's nothing else to transfer if the deserializer was not given an
+  // unpacked value.
   if (!unpacked_value_)
     return;
 
@@ -206,7 +220,8 @@ bool V8ScriptValueDeserializer::ReadUTF8String(String* string) {
 }
 
 ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
-    SerializationTag tag) {
+    SerializationTag tag,
+    ExceptionState& exception_state) {
   switch (tag) {
     case kBlobTag: {
       if (Version() < 3)
@@ -247,7 +262,7 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
       uint32_t length;
       if (!ReadUint32(&length))
         return nullptr;
-      FileList* file_list = FileList::Create();
+      auto* file_list = MakeGarbageCollected<FileList>();
       for (uint32_t i = 0; i < length; i++) {
         if (File* file = ReadFile())
           file_list->Append(file);
@@ -262,7 +277,7 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
       uint32_t length;
       if (!ReadUint32(&length))
         return nullptr;
-      FileList* file_list = FileList::Create();
+      auto* file_list = MakeGarbageCollected<FileList>();
       for (uint32_t i = 0; i < length; i++) {
         if (File* file = ReadFileIndex())
           file_list->Append(file);
@@ -310,8 +325,9 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
               if (!ReadUint32(&is_premultiplied) || is_premultiplied > 1)
                 return nullptr;
               break;
-            default:
-              NOTREACHED();
+            case ImageSerializationTag::kImageDataStorageFormatTag:
+              // Does not apply to ImageBitmap.
+              return nullptr;
           }
         } while (!is_done);
       } else if (!ReadUint32(&origin_clean) || origin_clean > 1 ||
@@ -369,8 +385,12 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
                       &image_data_storage_format))
                 return nullptr;
               break;
-            default:
-              NOTREACHED();
+            case ImageSerializationTag::kCanvasPixelFormatTag:
+            case ImageSerializationTag::kOriginCleanTag:
+            case ImageSerializationTag::kIsPremultipliedTag:
+            case ImageSerializationTag::kCanvasOpacityModeTag:
+              // Does not apply to ImageData.
+              return nullptr;
           }
         } while (!is_done);
       }
@@ -422,19 +442,21 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
       return ReadDOMRectReadOnly();
     }
     case kDOMQuadTag: {
-      DOMPointInit pointInits[4];
-      for (DOMPointInit& init : pointInits) {
+      DOMPointInit* point_inits[4];
+      for (int i = 0; i < 4; ++i) {
+        auto* init = DOMPointInit::Create();
         double x = 0, y = 0, z = 0, w = 0;
         if (!ReadDouble(&x) || !ReadDouble(&y) || !ReadDouble(&z) ||
             !ReadDouble(&w))
           return nullptr;
-        init.setX(x);
-        init.setY(y);
-        init.setZ(z);
-        init.setW(w);
+        init->setX(x);
+        init->setY(y);
+        init->setZ(z);
+        init->setW(w);
+        point_inits[i] = init;
       }
-      return DOMQuad::Create(pointInits[0], pointInits[1], pointInits[2],
-                             pointInits[3]);
+      return DOMQuad::Create(point_inits[0], point_inits[1], point_inits[2],
+                             point_inits[3]);
     }
     case kDOMMatrix2DTag: {
       double values[6];
@@ -483,7 +505,7 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
           index >= serialized_script_value_->MojoHandles().size()) {
         return nullptr;
       }
-      return MojoHandle::Create(
+      return MakeGarbageCollected<MojoHandle>(
           std::move(serialized_script_value_->MojoHandles()[index]));
     }
     case kOffscreenCanvasTransferTag: {
@@ -492,10 +514,66 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
           !ReadUint32(&canvas_id) || !ReadUint32(&client_id) ||
           !ReadUint32(&sink_id))
         return nullptr;
-      OffscreenCanvas* canvas = OffscreenCanvas::Create(width, height);
+      OffscreenCanvas* canvas = OffscreenCanvas::Create(
+          ExecutionContext::From(GetScriptState()), width, height);
       canvas->SetPlaceholderCanvasId(canvas_id);
       canvas->SetFrameSinkId(client_id, sink_id);
       return canvas;
+    }
+    case kReadableStreamTransferTag: {
+      if (!RuntimeEnabledFeatures::TransferableStreamsEnabled())
+        return nullptr;
+      uint32_t index = 0;
+      if (!ReadUint32(&index) || !transferred_stream_ports_ ||
+          index >= transferred_stream_ports_->size()) {
+        return nullptr;
+      }
+      return ReadableStream::Deserialize(
+          script_state_, (*transferred_stream_ports_)[index].Get(),
+          exception_state);
+    }
+    case kWritableStreamTransferTag: {
+      if (!RuntimeEnabledFeatures::TransferableStreamsEnabled())
+        return nullptr;
+      uint32_t index = 0;
+      if (!ReadUint32(&index) || !transferred_stream_ports_ ||
+          index >= transferred_stream_ports_->size()) {
+        return nullptr;
+      }
+      return WritableStream::Deserialize(
+          script_state_, (*transferred_stream_ports_)[index].Get(),
+          exception_state);
+    }
+    case kTransformStreamTransferTag: {
+      if (!RuntimeEnabledFeatures::TransferableStreamsEnabled())
+        return nullptr;
+      uint32_t index = 0;
+      if (!ReadUint32(&index) || !transferred_stream_ports_ ||
+          index + 1 >= transferred_stream_ports_->size()) {
+        return nullptr;
+      }
+      ReadableStream* readable = ReadableStream::Deserialize(
+          script_state_, (*transferred_stream_ports_)[index].Get(),
+          exception_state);
+      if (!readable)
+        return nullptr;
+
+      WritableStream* writable = WritableStream::Deserialize(
+          script_state_, (*transferred_stream_ports_)[index + 1].Get(),
+          exception_state);
+      if (!writable)
+        return nullptr;
+
+      return MakeGarbageCollected<TransformStream>(readable, writable);
+    }
+    case kDOMExceptionTag: {
+      // See the serialization side for |stack_unused|.
+      String name, message, stack_unused;
+      if (!ReadUTF8String(&name) || !ReadUTF8String(&message) ||
+          !ReadUTF8String(&stack_unused)) {
+        return nullptr;
+      }
+      return DOMException::Create(name, message);
     }
     default:
       break;
@@ -599,8 +677,11 @@ v8::MaybeLocal<v8::Object> V8ScriptValueDeserializer::ReadHostObject(
                                  nullptr, nullptr);
   ScriptWrappable* wrappable = nullptr;
   SerializationTag tag = kVersionTag;
-  if (ReadTag(&tag))
-    wrappable = ReadDOMObject(tag);
+  if (ReadTag(&tag)) {
+    wrappable = ReadDOMObject(tag, exception_state);
+    if (exception_state.HadException())
+      return v8::MaybeLocal<v8::Object>();
+  }
   if (!wrappable) {
     exception_state.ThrowDOMException(DOMExceptionCode::kDataCloneError,
                                       "Unable to deserialize cloned data.");
@@ -613,15 +694,15 @@ v8::MaybeLocal<v8::Object> V8ScriptValueDeserializer::ReadHostObject(
   return wrapper.As<v8::Object>();
 }
 
-v8::MaybeLocal<v8::WasmCompiledModule>
+v8::MaybeLocal<v8::WasmModuleObject>
 V8ScriptValueDeserializer::GetWasmModuleFromId(v8::Isolate* isolate,
                                                uint32_t id) {
   if (id < serialized_script_value_->WasmModules().size()) {
-    return v8::WasmCompiledModule::FromTransferrableModule(
+    return v8::WasmModuleObject::FromCompiledModule(
         isolate, serialized_script_value_->WasmModules()[id]);
   }
   CHECK(serialized_script_value_->WasmModules().IsEmpty());
-  return v8::MaybeLocal<v8::WasmCompiledModule>();
+  return v8::MaybeLocal<v8::WasmModuleObject>();
 }
 
 v8::MaybeLocal<v8::SharedArrayBuffer>

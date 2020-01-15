@@ -100,6 +100,7 @@ static const struct {
     uint32_t           fourcc;
 } supported_pixel_formats[] = {
     { AV_PIX_FMT_NV12, MFX_FOURCC_NV12 },
+    { AV_PIX_FMT_BGRA, MFX_FOURCC_RGB4 },
     { AV_PIX_FMT_P010, MFX_FOURCC_P010 },
     { AV_PIX_FMT_PAL8, MFX_FOURCC_P8   },
 };
@@ -388,7 +389,7 @@ static mfxStatus frame_alloc(mfxHDL pthis, mfxFrameAllocRequest *req,
         !(req->Type & (MFX_MEMTYPE_FROM_VPPIN | MFX_MEMTYPE_FROM_VPPOUT)) ||
         !(req->Type & MFX_MEMTYPE_EXTERNAL_FRAME))
         return MFX_ERR_UNSUPPORTED;
-    if (i->Width  != i1->Width || i->Height != i1->Height ||
+    if (i->Width  > i1->Width || i->Height > i1->Height ||
         i->FourCC != i1->FourCC || i->ChromaFormat != i1->ChromaFormat) {
         av_log(ctx, AV_LOG_ERROR, "Mismatching surface properties in an "
                "allocation request: %dx%d %d %d vs %dx%d %d %d\n",
@@ -751,6 +752,37 @@ static int qsv_transfer_data_child(AVHWFramesContext *ctx, AVFrame *dst,
     return ret;
 }
 
+static int map_frame_to_surface(const AVFrame *frame, mfxFrameSurface1 *surface)
+{
+    switch (frame->format) {
+    case AV_PIX_FMT_NV12:
+    case AV_PIX_FMT_P010:
+        surface->Data.Y  = frame->data[0];
+        surface->Data.UV = frame->data[1];
+        break;
+
+    case AV_PIX_FMT_YUV420P:
+        surface->Data.Y = frame->data[0];
+        surface->Data.U = frame->data[1];
+        surface->Data.V = frame->data[2];
+        break;
+
+    case AV_PIX_FMT_BGRA:
+        surface->Data.B = frame->data[0];
+        surface->Data.G = frame->data[0] + 1;
+        surface->Data.R = frame->data[0] + 2;
+        surface->Data.A = frame->data[0] + 3;
+        break;
+
+    default:
+        return MFX_ERR_UNSUPPORTED;
+    }
+    surface->Data.Pitch     = frame->linesize[0];
+    surface->Data.TimeStamp = frame->pts;
+
+    return 0;
+}
+
 static int qsv_transfer_data_from(AVHWFramesContext *ctx, AVFrame *dst,
                                   const AVFrame *src)
 {
@@ -796,11 +828,7 @@ static int qsv_transfer_data_from(AVHWFramesContext *ctx, AVFrame *dst,
     }
 
     out.Info = in->Info;
-    out.Data.PitchLow = dst->linesize[0];
-    out.Data.Y        = dst->data[0];
-    out.Data.U        = dst->data[1];
-    out.Data.V        = dst->data[2];
-    out.Data.A        = dst->data[3];
+    map_frame_to_surface(dst, &out);
 
     do {
         err = MFXVideoVPP_RunFrameVPPAsync(s->session_download, in, &out, NULL, &sync);
@@ -833,7 +861,12 @@ static int qsv_transfer_data_to(AVHWFramesContext *ctx, AVFrame *dst,
 
     mfxSyncPoint sync = NULL;
     mfxStatus err;
-    int ret;
+    int ret = 0;
+    /* make a copy if the input is not padded as libmfx requires */
+    AVFrame tmp_frame;
+    const AVFrame *src_frame;
+    int realigned = 0;
+
 
     while (!s->session_upload_init && !s->session_upload && !ret) {
 #if HAVE_PTHREADS
@@ -859,20 +892,35 @@ static int qsv_transfer_data_to(AVHWFramesContext *ctx, AVFrame *dst,
     if (ret < 0)
         return ret;
 
+    if (src->height & 15 || src->linesize[0] & 15) {
+        realigned = 1;
+        memset(&tmp_frame, 0, sizeof(tmp_frame));
+        tmp_frame.format         = src->format;
+        tmp_frame.width          = FFALIGN(src->width, 16);
+        tmp_frame.height         = FFALIGN(src->height, 16);
+        ret = av_frame_get_buffer(&tmp_frame, 32);
+        if (ret < 0)
+            return ret;
+
+        ret = av_frame_copy(&tmp_frame, src);
+        if (ret < 0) {
+            av_frame_unref(&tmp_frame);
+            return ret;
+        }
+    }
+
+    src_frame = realigned ? &tmp_frame : src;
+
     if (!s->session_upload) {
         if (s->child_frames_ref)
-            return qsv_transfer_data_child(ctx, dst, src);
+            return qsv_transfer_data_child(ctx, dst, src_frame);
 
         av_log(ctx, AV_LOG_ERROR, "Surface upload not possible\n");
         return AVERROR(ENOSYS);
     }
 
     in.Info = out->Info;
-    in.Data.PitchLow = src->linesize[0];
-    in.Data.Y        = src->data[0];
-    in.Data.U        = src->data[1];
-    in.Data.V        = src->data[2];
-    in.Data.A        = src->data[3];
+    map_frame_to_surface(src_frame, &in);
 
     do {
         err = MFXVideoVPP_RunFrameVPPAsync(s->session_upload, &in, out, NULL, &sync);
@@ -892,6 +940,9 @@ static int qsv_transfer_data_to(AVHWFramesContext *ctx, AVFrame *dst,
         av_log(ctx, AV_LOG_ERROR, "Error synchronizing the operation\n");
         return AVERROR_UNKNOWN;
     }
+
+    if (realigned)
+        av_frame_unref(&tmp_frame);
 
     return 0;
 }
@@ -1155,6 +1206,7 @@ static int qsv_device_create(AVHWDeviceContext *ctx, const char *device,
     QSVDevicePriv *priv;
     enum AVHWDeviceType child_device_type;
     AVHWDeviceContext *child_device;
+    AVDictionary *child_device_opts;
     AVDictionaryEntry *e;
 
     mfxIMPL impl;
@@ -1169,9 +1221,17 @@ static int qsv_device_create(AVHWDeviceContext *ctx, const char *device,
 
     e = av_dict_get(opts, "child_device", NULL, 0);
 
-    if (CONFIG_VAAPI)
+    child_device_opts = NULL;
+    if (CONFIG_VAAPI) {
         child_device_type = AV_HWDEVICE_TYPE_VAAPI;
-    else if (CONFIG_DXVA2)
+        // libmfx does not actually implement VAAPI properly, rather it
+        // depends on the specific behaviour of a matching iHD driver when
+        // used on recent Intel hardware.  Set options to the VAAPI device
+        // creation so that we should pick a usable setup by default if
+        // possible, even when multiple devices and drivers are available.
+        av_dict_set(&child_device_opts, "kernel_driver", "i915", 0);
+        av_dict_set(&child_device_opts, "driver",        "iHD",  0);
+    } else if (CONFIG_DXVA2)
         child_device_type = AV_HWDEVICE_TYPE_DXVA2;
     else {
         av_log(ctx, AV_LOG_ERROR, "No supported child device type is enabled\n");
@@ -1179,7 +1239,9 @@ static int qsv_device_create(AVHWDeviceContext *ctx, const char *device,
     }
 
     ret = av_hwdevice_ctx_create(&priv->child_device_ctx, child_device_type,
-                                 e ? e->value : NULL, NULL, 0);
+                                 e ? e->value : NULL, child_device_opts, 0);
+
+    av_dict_free(&child_device_opts);
     if (ret < 0)
         return ret;
 

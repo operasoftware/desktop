@@ -31,16 +31,14 @@ class SVGSymbolElement final : public SVGElement, public SVGFitToViewBox {
   USING_GARBAGE_COLLECTED_MIXIN(SVGSymbolElement);
 
  public:
-  DECLARE_NODE_FACTORY(SVGSymbolElement);
+  explicit SVGSymbolElement(Document&);
 
   void Trace(blink::Visitor*) override;
 
  private:
-  explicit SVGSymbolElement(Document&);
-
   void SvgAttributeChanged(const QualifiedName&) override;
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 };
 
 }  // namespace blink

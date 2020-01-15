@@ -20,6 +20,8 @@
 
 #include "third_party/blink/renderer/core/css/css_property_value.h"
 
+#include "third_party/blink/renderer/core/css/css_custom_property_declaration.h"
+#include "third_party/blink/renderer/core/css/css_property_name.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
 
@@ -36,7 +38,7 @@ static_assert(sizeof(CSSPropertyValue) == sizeof(SameSizeAsCSSPropertyValue),
 
 CSSPropertyID CSSPropertyValueMetadata::ShorthandID() const {
   if (!is_set_from_shorthand_)
-    return CSSPropertyInvalid;
+    return CSSPropertyID::kInvalid;
 
   Vector<StylePropertyShorthand, 4> shorthands;
   getMatchingShorthandsForLonghand(Property().PropertyID(), &shorthands);
@@ -44,6 +46,13 @@ CSSPropertyID CSSPropertyValueMetadata::ShorthandID() const {
   DCHECK_GE(index_in_shorthands_vector_, 0u);
   DCHECK_LT(index_in_shorthands_vector_, shorthands.size());
   return shorthands.at(index_in_shorthands_vector_).id();
+}
+
+CSSPropertyName CSSPropertyValue::Name() const {
+  if (Id() != CSSPropertyID::kVariable)
+    return CSSPropertyName(Id());
+  return CSSPropertyName(
+      To<CSSCustomPropertyDeclaration>(value_.Get())->GetName());
 }
 
 bool CSSPropertyValue::operator==(const CSSPropertyValue& other) const {

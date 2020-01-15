@@ -21,6 +21,7 @@ from blinkpy.common.net.buildbot import current_build_link
 from blinkpy.common.net.git_cl import GitCL
 from blinkpy.common.net.network_transaction import NetworkTimeout
 from blinkpy.common.path_finder import PathFinder
+from blinkpy.common.system.executive import ScriptError
 from blinkpy.common.system.log_utils import configure_logging
 from blinkpy.w3c.chromium_exportable_commits import exportable_commits_over_last_n_commits
 from blinkpy.w3c.common import read_credentials, is_testharness_baseline, is_file_exportable, WPT_GH_URL
@@ -39,7 +40,7 @@ POLL_DELAY_SECONDS = 2 * 60
 TIMEOUT_SECONDS = 210 * 60
 
 # Sheriff calendar URL, used for getting the ecosystem infra sheriff to TBR.
-ROTATIONS_URL = 'https://build.chromium.org/deprecated/chromium/all_rotations.js'
+ROTATIONS_URL = 'https://rota-ng.appspot.com/legacy/all_rotations.js'
 TBR_FALLBACK = 'robertma'
 
 _log = logging.getLogger(__file__)
@@ -55,7 +56,7 @@ class TestImporter(object):
         self.fs = host.filesystem
         self.finder = PathFinder(self.fs)
         self.chromium_git = self.host.git(self.finder.chromium_base())
-        self.dest_path = self.finder.path_from_layout_tests('external', 'wpt')
+        self.dest_path = self.finder.path_from_web_tests('external', 'wpt')
 
         # A common.net.git_cl.GitCL instance.
         self.git_cl = None
@@ -84,6 +85,10 @@ class TestImporter(object):
         if options.verbose:
             # Print out the full output when executive.run_command fails.
             self.host.executive.error_output_limit = None
+
+        if options.auto_update and options.auto_upload:
+            _log.error('--auto-upload and --auto-update cannot be used together.')
+            return 1
 
         if not self.checkout_is_okay():
             return 1
@@ -146,10 +151,6 @@ class TestImporter(object):
         # TODO(crbug.com/800570 robertma): Re-enable it once we fix the bug.
         # self._delete_orphaned_baselines()
 
-        # TODO(qyearsley): Consider running the imported tests with
-        # `run_web_tests.py --reset-results external/wpt` to get some baselines
-        # before the try jobs are started.
-
         _log.info('Updating TestExpectations for any removed or renamed tests.')
         self.update_all_test_expectations_files(self._list_deleted_tests(), self._list_renamed_tests())
 
@@ -164,7 +165,7 @@ class TestImporter(object):
         self._commit_changes(commit_message)
         _log.info('Changes imported and committed.')
 
-        if not options.auto_update:
+        if not options.auto_upload and not options.auto_update:
             return 0
 
         self._upload_cl()
@@ -172,6 +173,9 @@ class TestImporter(object):
 
         if not self.update_expectations_for_cl():
             return 1
+
+        if not options.auto_update:
+            return 0
 
         if not self.run_commit_queue_for_cl():
             return 1
@@ -259,7 +263,14 @@ class TestImporter(object):
             return True
 
         _log.error('Cannot submit CL; aborting.')
-        self.git_cl.run(['set-close'])
+        try:
+            self.git_cl.run(['set-close'])
+        except ScriptError as e:
+            if e.output and 'Conflict: change is merged' in e.output:
+                _log.error('CL is already merged; treating as success.')
+                return True
+            else:
+                raise e
         return False
 
     def blink_try_bots(self):
@@ -276,6 +287,9 @@ class TestImporter(object):
             '--ignore-exportable-commits', action='store_true',
             help='do not check for exportable commits that would be clobbered')
         parser.add_argument('-r', '--revision', help='target wpt revision')
+        parser.add_argument(
+            '--auto-upload', action='store_true',
+            help='upload a CL, update expectations, but do NOT trigger CQ')
         parser.add_argument(
             '--auto-update', action='store_true',
             help='upload a CL, update expectations, and trigger CQ')
@@ -329,9 +343,8 @@ class TestImporter(object):
             _log.info('Applying exportable commit locally:')
             _log.info(commit.url())
             _log.info('Subject: %s', commit.subject().strip())
-            # TODO(qyearsley): We probably don't need to know about
-            # corresponding PRs at all anymore, although this information
-            # could still be useful for reference.
+            # Log a note about the corresponding PR.
+            # This might not be necessary, and could potentially be removed.
             pull_request = self.wpt_github.pr_for_chromium_commit(commit)
             if pull_request:
                 _log.info('PR: %spull/%d', WPT_GH_URL, pull_request.number)
@@ -384,7 +397,7 @@ class TestImporter(object):
             is_file_exportable(fs.relpath(fs.join(dirname, basename), self.finder.chromium_base())))
         files_to_delete = self.fs.files_under(self.dest_path, file_filter=should_remove)
         for subpath in files_to_delete:
-            self.remove(self.finder.path_from_layout_tests('external', subpath))
+            self.remove(self.finder.path_from_web_tests('external', subpath))
 
     def _commit_changes(self, commit_message):
         _log.info('Committing changes.')
@@ -414,10 +427,11 @@ class TestImporter(object):
 
         baselines = self.fs.files_under(self.dest_path, file_filter=is_baseline_filter)
 
-        # TODO(qyearsley): Factor out the manifest path to a common location.
-        # TODO(qyearsley): Factor out the manifest reading from here and Port
-        # to WPTManifest.
-        manifest_path = self.finder.path_from_layout_tests('external', 'wpt', 'MANIFEST.json')
+        # Note about possible refactoring:
+        #  - the manifest path could be factored out to a common location, and
+        #  - the logic for reading the manifest could be factored out from here
+        # and the Port class.
+        manifest_path = self.finder.path_from_web_tests('external', 'wpt', 'MANIFEST.json')
         manifest = WPTManifest(self.fs.read_text_file(manifest_path))
         wpt_urls = manifest.all_urls()
 
@@ -427,7 +441,7 @@ class TestImporter(object):
         # TODO(qyearsley): Remove this when this behavior is fixed.
         wpt_urls = [url.split('?')[0] for url in wpt_urls]
 
-        wpt_dir = self.finder.path_from_layout_tests('external', 'wpt')
+        wpt_dir = self.finder.path_from_web_tests('external', 'wpt')
         for full_path in baselines:
             rel_path = self.fs.relpath(full_path, wpt_dir)
             if not self._has_corresponding_test(rel_path, wpt_urls):
@@ -534,6 +548,9 @@ class TestImporter(object):
             username = self._fetch_ecosystem_infra_sheriff_username()
         except (IOError, KeyError, ValueError) as error:
             _log.error('Exception while fetching current sheriff: %s', error)
+        if username in ['kyleju']:
+            _log.warning('Cannot TBR by %s: not a committer', username)
+            username = ''
         return username or TBR_FALLBACK
 
     def _fetch_ecosystem_infra_sheriff_username(self):
@@ -578,19 +595,26 @@ class TestImporter(object):
         for path, file_contents in port.all_expectations_dict().iteritems():
             parser = TestExpectationParser(port, all_tests=None, is_lint_mode=False)
             expectation_lines = parser.parse(path, file_contents)
-            self._update_single_test_expectations_file(path, expectation_lines, deleted_tests, renamed_tests)
+            self._update_single_test_expectations_file(port, path, expectation_lines, deleted_tests, renamed_tests)
 
-    def _update_single_test_expectations_file(self, path, expectation_lines, deleted_tests, renamed_tests):
+    def _update_single_test_expectations_file(self, port, path, expectation_lines, deleted_tests, renamed_tests):
         """Updates a single test expectations file."""
         # FIXME: This won't work for removed or renamed directories with test
         # expectations that are directories rather than individual tests.
         new_lines = []
         changed_lines = []
         for expectation_line in expectation_lines:
-            if expectation_line.name in deleted_tests:
+            expectation_test_name = expectation_line.name
+            if expectation_test_name and self.finder.is_webdriver_test_path(expectation_test_name):
+                expectation_test_name, subtest_suffix = port.split_webdriver_test_name(expectation_test_name)
+            if expectation_test_name in deleted_tests:
                 continue
-            if expectation_line.name in renamed_tests:
-                expectation_line.name = renamed_tests[expectation_line.name]
+            if expectation_test_name in renamed_tests:
+                if self.finder.is_webdriver_test_path(expectation_line.name):
+                    renamed_test = renamed_tests[expectation_test_name]
+                    expectation_line.name = port.add_webdriver_subtest_suffix(renamed_test, subtest_suffix)
+                else:
+                    expectation_line.name = renamed_tests[expectation_test_name]
                 # Upon parsing the file, a "path does not exist" warning is expected
                 # to be there for tests that have been renamed, and if there are warnings,
                 # then the original string is used. If the warnings are reset, then the
@@ -602,12 +626,12 @@ class TestImporter(object):
         self.host.filesystem.write_text_file(path, new_file_contents)
 
     def _list_deleted_tests(self):
-        """List of layout tests that have been deleted."""
+        """List of web tests that have been deleted."""
         # TODO(robertma): Improve Git.changed_files so that we can use it here.
         out = self.chromium_git.run(['diff', 'origin/master', '-M100%', '--diff-filter=D', '--name-only'])
         deleted_tests = []
         for path in out.splitlines():
-            test = self._relative_to_layout_test_dir(path)
+            test = self._relative_to_web_test_dir(path)
             if test:
                 deleted_tests.append(test)
         return deleted_tests
@@ -621,18 +645,18 @@ class TestImporter(object):
         renamed_tests = {}
         for line in out.splitlines():
             _, source_path, dest_path = line.split()
-            source_test = self._relative_to_layout_test_dir(source_path)
-            dest_test = self._relative_to_layout_test_dir(dest_path)
+            source_test = self._relative_to_web_test_dir(source_path)
+            dest_test = self._relative_to_web_test_dir(dest_path)
             if source_test and dest_test:
                 renamed_tests[source_test] = dest_test
         return renamed_tests
 
-    def _relative_to_layout_test_dir(self, path_relative_to_repo_root):
-        """Returns a path that's relative to the layout tests directory."""
+    def _relative_to_web_test_dir(self, path_relative_to_repo_root):
+        """Returns a path that's relative to the web tests directory."""
         abs_path = self.finder.path_from_chromium_base(path_relative_to_repo_root)
-        if not abs_path.startswith(self.finder.layout_tests_dir()):
+        if not abs_path.startswith(self.finder.web_tests_dir()):
             return None
-        return self.fs.relpath(abs_path, self.finder.layout_tests_dir())
+        return self.fs.relpath(abs_path, self.finder.web_tests_dir())
 
     def _get_last_imported_wpt_revision(self):
         """Finds the last imported WPT revision."""

@@ -26,9 +26,12 @@
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 
 #include <memory>
+
+#include "base/bind_helpers.h"
 #include "cc/paint/paint_canvas.h"
+#include "third_party/blink/public/mojom/feature_policy/feature_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/web_fullscreen_video_status.h"
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
@@ -37,13 +40,13 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/picture_in_picture_controller.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen_options.h"
 #include "third_party/blink/renderer/core/html/media/media_custom_controls_fullscreen_detector.h"
 #include "third_party/blink/renderer/core/html/media/media_element_parser_helpers.h"
 #include "third_party/blink/renderer/core/html/media/media_remoting_interstitial.h"
 #include "third_party/blink/renderer/core/html/media/picture_in_picture_interstitial.h"
+#include "third_party/blink/renderer/core/html/media/video_wake_lock.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
@@ -55,15 +58,18 @@
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/extensions_3d_util.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
-#include "third_party/blink/renderer/platform/histogram.h"
-#include "third_party/blink/renderer/platform/layout_test_support.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/web_test_support.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 namespace {
+
+constexpr float kMostlyFillViewportThreshold = 0.85f;
 
 // This enum is used to record histograms. Do not reorder.
 enum VideoPersistenceControlsType {
@@ -74,8 +80,8 @@ enum VideoPersistenceControlsType {
 
 }  // anonymous namespace
 
-inline HTMLVideoElement::HTMLVideoElement(Document& document)
-    : HTMLMediaElement(videoTag, document),
+HTMLVideoElement::HTMLVideoElement(Document& document)
+    : HTMLMediaElement(kVideoTag, document),
       remoting_interstitial_(nullptr),
       picture_in_picture_interstitial_(nullptr),
       in_overlay_fullscreen_video_(false) {
@@ -86,29 +92,29 @@ inline HTMLVideoElement::HTMLVideoElement(Document& document)
 
   if (RuntimeEnabledFeatures::VideoFullscreenDetectionEnabled()) {
     custom_controls_fullscreen_detector_ =
-        new MediaCustomControlsFullscreenDetector(*this);
+        MakeGarbageCollected<MediaCustomControlsFullscreenDetector>(*this);
   }
 
-  if (MediaElementParserHelpers::IsMediaElement(this) &&
-      !MediaElementParserHelpers::IsUnsizedMediaEnabled(document)) {
+  if (media_element_parser_helpers::IsMediaElement(this) &&
+      !document.IsFeatureEnabled(mojom::FeaturePolicyFeature::kUnsizedMedia)) {
     is_default_overridden_intrinsic_size_ = true;
     overridden_intrinsic_size_ =
         IntSize(LayoutReplaced::kDefaultWidth, LayoutReplaced::kDefaultHeight);
   }
+
+  wake_lock_ = MakeGarbageCollected<VideoWakeLock>(*this);
+
+  EnsureUserAgentShadowRoot();
+  UpdateStateIfNeeded();
 }
 
-HTMLVideoElement* HTMLVideoElement::Create(Document& document) {
-  HTMLVideoElement* video = new HTMLVideoElement(document);
-  video->EnsureUserAgentShadowRoot();
-  video->PauseIfNeeded();
-  return video;
-}
-
-void HTMLVideoElement::Trace(blink::Visitor* visitor) {
+void HTMLVideoElement::Trace(Visitor* visitor) {
   visitor->Trace(image_loader_);
   visitor->Trace(custom_controls_fullscreen_detector_);
+  visitor->Trace(wake_lock_);
   visitor->Trace(remoting_interstitial_);
   visitor->Trace(picture_in_picture_interstitial_);
+  visitor->Trace(viewport_intersection_observer_);
   HTMLMediaElement::Trace(visitor);
 }
 
@@ -145,7 +151,8 @@ bool HTMLVideoElement::LayoutObjectIsNeeded(const ComputedStyle& style) const {
   return HTMLElement::LayoutObjectIsNeeded(style);
 }
 
-LayoutObject* HTMLVideoElement::CreateLayoutObject(const ComputedStyle&) {
+LayoutObject* HTMLVideoElement::CreateLayoutObject(const ComputedStyle&,
+                                                   LegacyLayout) {
   return new LayoutVideo(this);
 }
 
@@ -155,7 +162,7 @@ void HTMLVideoElement::AttachLayoutTree(AttachContext& context) {
   UpdateDisplayState();
   if (ShouldDisplayPosterImage()) {
     if (!image_loader_)
-      image_loader_ = HTMLImageLoader::Create(this);
+      image_loader_ = MakeGarbageCollected<HTMLImageLoader>(this);
     image_loader_->UpdateFromElement();
     if (GetLayoutObject()) {
       ToLayoutImage(GetLayoutObject())
@@ -169,24 +176,24 @@ void HTMLVideoElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
     MutableCSSPropertyValueSet* style) {
-  if (name == widthAttr)
-    AddHTMLLengthToStyle(style, CSSPropertyWidth, value);
-  else if (name == heightAttr)
-    AddHTMLLengthToStyle(style, CSSPropertyHeight, value);
+  if (name == kWidthAttr)
+    AddHTMLLengthToStyle(style, CSSPropertyID::kWidth, value);
+  else if (name == kHeightAttr)
+    AddHTMLLengthToStyle(style, CSSPropertyID::kHeight, value);
   else
     HTMLMediaElement::CollectStyleForPresentationAttribute(name, value, style);
 }
 
 bool HTMLVideoElement::IsPresentationAttribute(
     const QualifiedName& name) const {
-  if (name == widthAttr || name == heightAttr)
+  if (name == kWidthAttr || name == kHeightAttr)
     return true;
   return HTMLMediaElement::IsPresentationAttribute(name);
 }
 
 void HTMLVideoElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  if (params.name == posterAttr) {
+  if (params.name == kPosterAttr) {
     // In case the poster attribute is set after playback, don't update the
     // display state, post playback the correct state will be picked up.
     if (GetDisplayMode() < kVideo || !HasAvailableVideoFrame()) {
@@ -197,7 +204,7 @@ void HTMLVideoElement::ParseAttribute(
     }
     if (!PosterImageURL().IsEmpty()) {
       if (!image_loader_)
-        image_loader_ = HTMLImageLoader::Create(this);
+        image_loader_ = MakeGarbageCollected<HTMLImageLoader>(this);
       image_loader_->UpdateFromElement(ImageLoader::kUpdateIgnorePreviousError);
     } else {
       if (GetLayoutObject()) {
@@ -216,22 +223,16 @@ void HTMLVideoElement::ParseAttribute(
       remoting_interstitial_->OnPosterImageChanged();
     if (picture_in_picture_interstitial_)
       picture_in_picture_interstitial_->OnPosterImageChanged();
-  } else if (params.name == intrinsicsizeAttr &&
-             RuntimeEnabledFeatures::
-                 ExperimentalProductivityFeaturesEnabled()) {
-    String message;
-    bool intrinsic_size_changed =
-        MediaElementParserHelpers::ParseIntrinsicSizeAttribute(
-            params.new_value, this, &overridden_intrinsic_size_,
-            &is_default_overridden_intrinsic_size_, &message);
-    if (!message.IsEmpty()) {
-      GetDocument().AddConsoleMessage(ConsoleMessage::Create(
-          kOtherMessageSource, kWarningMessageLevel, message));
+  } else if (params.name == kAutopictureinpictureAttr &&
+             RuntimeEnabledFeatures::AutoPictureInPictureEnabled(
+                 GetExecutionContext())) {
+    if (!params.new_value.IsNull()) {
+      PictureInPictureController::From(GetDocument())
+          .AddToAutoPictureInPictureElementsList(this);
+    } else {
+      PictureInPictureController::From(GetDocument())
+          .RemoveFromAutoPictureInPictureElementsList(this);
     }
-
-    if (intrinsic_size_changed && GetLayoutObject() &&
-        GetLayoutObject()->IsVideo())
-      ToLayoutVideo(GetLayoutObject())->IntrinsicSizeChanged();
   } else {
     HTMLMediaElement::ParseAttribute(params);
   }
@@ -263,12 +264,12 @@ IntSize HTMLVideoElement::GetOverriddenIntrinsicSize() const {
 }
 
 bool HTMLVideoElement::IsURLAttribute(const Attribute& attribute) const {
-  return attribute.GetName() == posterAttr ||
+  return attribute.GetName() == kPosterAttr ||
          HTMLMediaElement::IsURLAttribute(attribute);
 }
 
 const AtomicString HTMLVideoElement::ImageSourceURL() const {
-  const AtomicString& url = getAttribute(posterAttr);
+  const AtomicString& url = getAttribute(kPosterAttr);
   if (!StripLeadingAndTrailingHTMLSpaces(url).IsEmpty())
     return url;
   return default_poster_url_;
@@ -350,15 +351,58 @@ void HTMLVideoElement::OnBecamePersistentVideo(bool value) {
     GetWebMediaPlayer()->OnDisplayTypeChanged(DisplayType());
 }
 
+void HTMLVideoElement::ActivateViewportIntersectionMonitoring(bool activate) {
+  if (activate && !viewport_intersection_observer_) {
+    viewport_intersection_observer_ = IntersectionObserver::Create(
+        {}, {kMostlyFillViewportThreshold}, &(GetDocument()),
+        WTF::BindRepeating(&HTMLVideoElement::OnViewportIntersectionChanged,
+                           WrapWeakPersistent(this)),
+        IntersectionObserver::kDeliverDuringPostLifecycleSteps,
+        IntersectionObserver::kFractionOfRoot);
+    viewport_intersection_observer_->observe(this);
+  } else if (!activate && viewport_intersection_observer_) {
+    viewport_intersection_observer_->disconnect();
+    viewport_intersection_observer_ = nullptr;
+    mostly_filling_viewport_ = false;
+  }
+}
+
 bool HTMLVideoElement::IsPersistent() const {
   return is_persistent_;
 }
 
 void HTMLVideoElement::UpdateDisplayState() {
-  if (PosterImageURL().IsEmpty())
+  if (PosterImageURL().IsEmpty() || HasAvailableVideoFrame())
     SetDisplayMode(kVideo);
   else if (GetDisplayMode() < kPoster)
     SetDisplayMode(kPoster);
+}
+
+void HTMLVideoElement::OnPlay() {
+  if (!RuntimeEnabledFeatures::VideoAutoFullscreenEnabled() ||
+      FastHasAttribute(html_names::kPlaysinlineAttr)) {
+    return;
+  }
+
+  std::unique_ptr<UserGestureIndicator> gesture =
+      LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
+  webkitEnterFullscreen();
+}
+
+void HTMLVideoElement::OnLoadStarted() {
+  web_media_player_->BecameDominantVisibleContent(mostly_filling_viewport_);
+}
+
+void HTMLVideoElement::OnLoadFinished() {
+  // If the player did a lazy load, it's expecting to be called when the
+  // element actually becomes visible to complete the load.
+  if (web_media_player_->DidLazyLoad() && !PotentiallyPlaying()) {
+    lazy_load_intersection_observer_ = IntersectionObserver::Create(
+        {}, {IntersectionObserver::kMinimumThreshold}, &GetDocument(),
+        WTF::BindRepeating(&HTMLVideoElement::OnIntersectionChangedForLazyLoad,
+                           WrapWeakPersistent(this)));
+    lazy_load_intersection_observer_->observe(this);
+  }
 }
 
 void HTMLVideoElement::PaintCurrentFrame(
@@ -376,6 +420,7 @@ void HTMLVideoElement::PaintCurrentFrame(
   } else {
     media_flags.setAlpha(0xFF);
     media_flags.setFilterQuality(kLow_SkFilterQuality);
+    media_flags.setBlendMode(SkBlendMode::kSrc);
   }
 
   GetWebMediaPlayer()->Paint(canvas, dest_rect, media_flags,
@@ -443,19 +488,28 @@ bool HTMLVideoElement::TexImageImpl(
       xoffset, yoffset, zoffset, flip_y, premultiply_alpha);
 }
 
-bool HTMLVideoElement::HasAvailableVideoFrame() const {
+bool HTMLVideoElement::PrepareVideoFrameForWebGL(
+    gpu::gles2::GLES2Interface* gl,
+    GLenum target,
+    GLuint texture,
+    bool already_uploaded_id,
+    WebMediaPlayer::VideoFrameUploadMetadata* out_metadata) {
   if (!GetWebMediaPlayer())
     return false;
+  return GetWebMediaPlayer()->PrepareVideoFrameForWebGL(
+      gl, target, texture, already_uploaded_id, out_metadata);
+}
 
-  return GetWebMediaPlayer()->HasVideo() &&
-         GetWebMediaPlayer()->GetReadyState() >=
-             WebMediaPlayer::kReadyStateHaveCurrentData;
+bool HTMLVideoElement::HasAvailableVideoFrame() const {
+  if (auto* wmp = GetWebMediaPlayer())
+    return wmp->HasAvailableVideoFrame();
+  return false;
 }
 
 void HTMLVideoElement::webkitEnterFullscreen() {
   if (!IsFullscreen()) {
-    FullscreenOptions options;
-    options.setNavigationUI("hide");
+    FullscreenOptions* options = FullscreenOptions::Create();
+    options->setNavigationUI("hide");
     Fullscreen::RequestFullscreen(*this, options,
                                   Fullscreen::RequestType::kPrefixed);
   }
@@ -485,12 +539,14 @@ bool HTMLVideoElement::UsesOverlayFullscreenVideo() const {
 void HTMLVideoElement::DidEnterFullscreen() {
   UpdateControlsVisibility();
 
-  if (DisplayType() == WebMediaPlayer::DisplayType::kPictureInPicture)
-    exitPictureInPicture(base::DoNothing());
+  if (DisplayType() == WebMediaPlayer::DisplayType::kPictureInPicture) {
+    PictureInPictureController::From(GetDocument())
+        .ExitPictureInPicture(this, nullptr);
+  }
 
   if (GetWebMediaPlayer()) {
-    // FIXME: There is no embedder-side handling in layout test mode.
-    if (!LayoutTestSupport::IsRunningLayoutTest())
+    // FIXME: There is no embedder-side handling in web test mode.
+    if (!WebTestSupport::IsRunningWebTest())
       GetWebMediaPlayer()->EnteredFullscreen();
     GetWebMediaPlayer()->OnDisplayTypeChanged(DisplayType());
   }
@@ -516,11 +572,23 @@ void HTMLVideoElement::DidExitFullscreen() {
         kCompositingUpdateRebuildTree);
   }
   in_overlay_fullscreen_video_ = false;
+
+  if (RuntimeEnabledFeatures::VideoAutoFullscreenEnabled() &&
+      !FastHasAttribute(html_names::kPlaysinlineAttr)) {
+    pause();
+  }
 }
 
 void HTMLVideoElement::DidMoveToNewDocument(Document& old_document) {
   if (image_loader_)
     image_loader_->ElementDidMoveToNewDocument();
+
+  if (viewport_intersection_observer_) {
+    ActivateViewportIntersectionMonitoring(false);
+    ActivateViewportIntersectionMonitoring(true);
+  }
+
+  wake_lock_->ElementDidMoveToNewDocument();
 
   HTMLMediaElement::DidMoveToNewDocument(old_document);
 }
@@ -556,14 +624,17 @@ scoped_refptr<Image> HTMLVideoElement::GetSourceImageForCanvas(
   }
 
   IntSize intrinsic_size(videoWidth(), videoHeight());
-  // FIXME: Not sure if we dhould we be doing anything with the AccelerationHint
+  // TODO(fserb): this should not be default software.
+  // FIXME: Not sure if we should we be doing anything with the AccelerationHint
   // argument here? Currently we use unacceleration mode.
   std::unique_ptr<CanvasResourceProvider> resource_provider =
       CanvasResourceProvider::Create(
-          intrinsic_size, CanvasResourceProvider::kSoftwareResourceUsage,
+          intrinsic_size,
+          CanvasResourceProvider::ResourceUsage::kSoftwareResourceUsage,
           nullptr,  // context_provider_wrapper
           0,        // msaa_sample_count
-          CanvasColorParams(), CanvasResourceProvider::kDefaultPresentationMode,
+          kLow_SkFilterQuality, CanvasColorParams(),
+          CanvasResourceProvider::kDefaultPresentationMode,
           nullptr);  // canvas_resource_dispatcher
   if (!resource_provider) {
     *status = kInvalidSourceImageStatus;
@@ -582,9 +653,8 @@ scoped_refptr<Image> HTMLVideoElement::GetSourceImageForCanvas(
   return snapshot;
 }
 
-bool HTMLVideoElement::WouldTaintOrigin(
-    const SecurityOrigin* destination_security_origin) const {
-  return !IsMediaDataCORSSameOrigin(destination_security_origin);
+bool HTMLVideoElement::WouldTaintOrigin() const {
+  return !IsMediaDataCorsSameOrigin();
 }
 
 FloatSize HTMLVideoElement::ElementSize(const FloatSize&) const {
@@ -599,18 +669,18 @@ ScriptPromise HTMLVideoElement::CreateImageBitmap(
     ScriptState* script_state,
     EventTarget& event_target,
     base::Optional<IntRect> crop_rect,
-    const ImageBitmapOptions& options) {
+    const ImageBitmapOptions* options) {
   DCHECK(event_target.ToLocalDOMWindow());
   if (getNetworkState() == HTMLMediaElement::kNetworkEmpty) {
     return ScriptPromise::RejectWithDOMException(
-        script_state,
-        DOMException::Create(DOMExceptionCode::kInvalidStateError,
-                             "The provided element has not retrieved data."));
+        script_state, MakeGarbageCollected<DOMException>(
+                          DOMExceptionCode::kInvalidStateError,
+                          "The provided element has not retrieved data."));
   }
   if (getReadyState() <= HTMLMediaElement::kHaveMetadata) {
     return ScriptPromise::RejectWithDOMException(
         script_state,
-        DOMException::Create(
+        MakeGarbageCollected<DOMException>(
             DOMExceptionCode::kInvalidStateError,
             "The provided element's player has no current data."));
   }
@@ -624,7 +694,8 @@ ScriptPromise HTMLVideoElement::CreateImageBitmap(
 void HTMLVideoElement::MediaRemotingStarted(
     const WebString& remote_device_friendly_name) {
   if (!remoting_interstitial_) {
-    remoting_interstitial_ = new MediaRemotingInterstitial(*this);
+    remoting_interstitial_ =
+        MakeGarbageCollected<MediaRemotingInterstitial>(*this);
     ShadowRoot& shadow_root = EnsureUserAgentShadowRoot();
     shadow_root.InsertBefore(remoting_interstitial_, shadow_root.firstChild());
     HTMLMediaElement::AssertShadowRootChildren(shadow_root);
@@ -632,10 +703,9 @@ void HTMLVideoElement::MediaRemotingStarted(
   remoting_interstitial_->Show(remote_device_friendly_name);
 }
 
-void HTMLVideoElement::MediaRemotingStopped(
-    WebLocalizedString::Name error_msg) {
+void HTMLVideoElement::MediaRemotingStopped(int error_code) {
   if (remoting_interstitial_)
-    remoting_interstitial_->Hide(error_msg);
+    remoting_interstitial_->Hide(error_code);
 }
 
 bool HTMLVideoElement::SupportsPictureInPicture() const {
@@ -644,45 +714,9 @@ bool HTMLVideoElement::SupportsPictureInPicture() const {
          PictureInPictureController::Status::kEnabled;
 }
 
-void HTMLVideoElement::enterPictureInPicture(
-    WebMediaPlayer::PipWindowOpenedCallback callback) {
-  if (DisplayType() == WebMediaPlayer::DisplayType::kFullscreen)
-    Fullscreen::ExitFullscreen(GetDocument());
-
-  if (GetWebMediaPlayer())
-    GetWebMediaPlayer()->EnterPictureInPicture(std::move(callback));
-}
-
-void HTMLVideoElement::exitPictureInPicture(
-    WebMediaPlayer::PipWindowClosedCallback callback) {
-  if (GetWebMediaPlayer())
-    GetWebMediaPlayer()->ExitPictureInPicture(std::move(callback));
-}
-
-void HTMLVideoElement::SendCustomControlsToPipWindow() {
-  // TODO(sawtelle): Allow setting controls multiple times for a video, even
-  // when not active, https://crbug.com/869133
-  if (!GetWebMediaPlayer() || !HasPictureInPictureCustomControls())
-    return;
-  GetWebMediaPlayer()->SetPictureInPictureCustomControls(
-      GetPictureInPictureCustomControls());
-}
-
-void HTMLVideoElement::PictureInPictureStopped() {
-  PictureInPictureController::From(GetDocument())
-      .OnExitedPictureInPicture(nullptr);
-}
-
-void HTMLVideoElement::PictureInPictureControlClicked(
-    const WebString& control_id) {
-  PictureInPictureController::From(GetDocument())
-      .OnPictureInPictureControlClicked(control_id);
-}
-
 WebMediaPlayer::DisplayType HTMLVideoElement::DisplayType() const {
   if (is_auto_picture_in_picture_ ||
-      PictureInPictureController::From(GetDocument())
-          .IsPictureInPictureElement(this)) {
+      PictureInPictureController::IsElementInPictureInPicture(this)) {
     return WebMediaPlayer::DisplayType::kPictureInPicture;
   }
 
@@ -696,15 +730,29 @@ bool HTMLVideoElement::IsInAutoPIP() const {
   return is_auto_picture_in_picture_;
 }
 
+void HTMLVideoElement::OnPictureInPictureStateChange() {
+  if (DisplayType() != WebMediaPlayer::DisplayType::kPictureInPicture ||
+      IsInAutoPIP()) {
+    return;
+  }
+
+  PictureInPictureController::From(GetDocument())
+      .OnPictureInPictureStateChange();
+}
+
 void HTMLVideoElement::OnEnteredPictureInPicture() {
   if (!picture_in_picture_interstitial_) {
-    picture_in_picture_interstitial_ = new PictureInPictureInterstitial(*this);
+    picture_in_picture_interstitial_ =
+        MakeGarbageCollected<PictureInPictureInterstitial>(*this);
     ShadowRoot& shadow_root = EnsureUserAgentShadowRoot();
     shadow_root.InsertBefore(picture_in_picture_interstitial_,
                              shadow_root.firstChild());
     HTMLMediaElement::AssertShadowRootChildren(shadow_root);
   }
   picture_in_picture_interstitial_->Show();
+
+  if (RuntimeEnabledFeatures::CSSPictureInPictureEnabled())
+    PseudoStateChanged(CSSSelector::kPseudoPictureInPicture);
 
   DCHECK(GetWebMediaPlayer());
   GetWebMediaPlayer()->OnDisplayTypeChanged(DisplayType());
@@ -714,22 +762,11 @@ void HTMLVideoElement::OnExitedPictureInPicture() {
   if (picture_in_picture_interstitial_)
     picture_in_picture_interstitial_->Hide();
 
+  if (RuntimeEnabledFeatures::CSSPictureInPictureEnabled())
+    PseudoStateChanged(CSSSelector::kPseudoPictureInPicture);
+
   if (GetWebMediaPlayer())
     GetWebMediaPlayer()->OnDisplayTypeChanged(DisplayType());
-}
-
-void HTMLVideoElement::SetPictureInPictureCustomControls(
-    const std::vector<PictureInPictureControlInfo>& pip_custom_controls) {
-  pip_custom_controls_ = pip_custom_controls;
-}
-
-const std::vector<PictureInPictureControlInfo>&
-HTMLVideoElement::GetPictureInPictureCustomControls() const {
-  return pip_custom_controls_;
-}
-
-bool HTMLVideoElement::HasPictureInPictureCustomControls() const {
-  return !pip_custom_controls_.empty();
 }
 
 void HTMLVideoElement::SetIsEffectivelyFullscreen(
@@ -746,10 +783,10 @@ void HTMLVideoElement::SetIsEffectivelyFullscreen(
 void HTMLVideoElement::AddedEventListener(
     const AtomicString& event_type,
     RegisteredEventListener& registered_listener) {
-  if (event_type == EventTypeNames::enterpictureinpicture) {
+  if (event_type == event_type_names::kEnterpictureinpicture) {
     UseCounter::Count(GetExecutionContext(),
                       WebFeature::kEnterPictureInPictureEventListener);
-  } else if (event_type == EventTypeNames::leavepictureinpicture) {
+  } else if (event_type == event_type_names::kLeavepictureinpicture) {
     UseCounter::Count(GetExecutionContext(),
                       WebFeature::kLeavePictureInPictureEventListener);
   }
@@ -759,6 +796,29 @@ void HTMLVideoElement::AddedEventListener(
 
 bool HTMLVideoElement::IsRemotingInterstitialVisible() const {
   return remoting_interstitial_ && remoting_interstitial_->IsVisible();
+}
+
+void HTMLVideoElement::OnViewportIntersectionChanged(
+    const HeapVector<Member<IntersectionObserverEntry>>& entries) {
+  const bool is_mostly_filling_viewport =
+      (entries.back()->intersectionRatio() >= kMostlyFillViewportThreshold);
+  if (mostly_filling_viewport_ == is_mostly_filling_viewport)
+    return;
+
+  mostly_filling_viewport_ = is_mostly_filling_viewport;
+  if (web_media_player_)
+    web_media_player_->BecameDominantVisibleContent(mostly_filling_viewport_);
+}
+
+void HTMLVideoElement::OnIntersectionChangedForLazyLoad(
+    const HeapVector<Member<IntersectionObserverEntry>>& entries) {
+  bool is_visible = (entries.back()->intersectionRatio() > 0);
+  if (!is_visible || !web_media_player_)
+    return;
+
+  web_media_player_->OnBecameVisible();
+  lazy_load_intersection_observer_->disconnect();
+  lazy_load_intersection_observer_ = nullptr;
 }
 
 }  // namespace blink

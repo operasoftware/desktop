@@ -27,17 +27,19 @@
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/dom/events/window_event_context.h"
 #include "third_party/blink/renderer/core/dom/static_node_list.h"
+#include "third_party/blink/renderer/core/event_interface_names.h"
 #include "third_party/blink/renderer/core/events/focus_event.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/events/pointer_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/hosts_using_features.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -45,16 +47,16 @@ static bool IsEventTypeScopedInV0(const AtomicString& event_type) {
   // WebKit never allowed selectstart event to cross the the shadow DOM
   // boundary.  Changing this breaks existing sites.
   // See https://bugs.webkit.org/show_bug.cgi?id=52195 for details.
-  return event_type == EventTypeNames::abort ||
-         event_type == EventTypeNames::change ||
-         event_type == EventTypeNames::error ||
-         event_type == EventTypeNames::load ||
-         event_type == EventTypeNames::reset ||
-         event_type == EventTypeNames::resize ||
-         event_type == EventTypeNames::scroll ||
-         event_type == EventTypeNames::select ||
-         event_type == EventTypeNames::selectstart ||
-         event_type == EventTypeNames::slotchange;
+  return event_type == event_type_names::kAbort ||
+         event_type == event_type_names::kChange ||
+         event_type == event_type_names::kError ||
+         event_type == event_type_names::kLoad ||
+         event_type == event_type_names::kReset ||
+         event_type == event_type_names::kResize ||
+         event_type == event_type_names::kScroll ||
+         event_type == event_type_names::kSelect ||
+         event_type == event_type_names::kSelectstart ||
+         event_type == event_type_names::kSlotchange;
 }
 
 Event::Event() : Event("", Bubbles::kNo, Cancelable::kNo) {
@@ -64,7 +66,7 @@ Event::Event() : Event("", Bubbles::kNo, Cancelable::kNo) {
 Event::Event(const AtomicString& event_type,
              Bubbles bubbles,
              Cancelable cancelable,
-             TimeTicks platform_time_stamp)
+             base::TimeTicks platform_time_stamp)
     : Event(event_type,
             bubbles,
             cancelable,
@@ -79,13 +81,13 @@ Event::Event(const AtomicString& event_type,
             bubbles,
             cancelable,
             composed_mode,
-            CurrentTimeTicks()) {}
+            base::TimeTicks::Now()) {}
 
 Event::Event(const AtomicString& event_type,
              Bubbles bubbles,
              Cancelable cancelable,
              ComposedMode composed_mode,
-             TimeTicks platform_time_stamp)
+             base::TimeTicks platform_time_stamp)
     : type_(event_type),
       bubbles_(bubbles == Bubbles::kYes),
       cancelable_(cancelable == Cancelable::kYes),
@@ -97,7 +99,6 @@ Event::Event(const AtomicString& event_type,
       default_handled_(false),
       was_initialized_(true),
       is_trusted_(false),
-      executed_listener_or_default_action_(false),
       prevent_default_called_on_uncancelable_event_(false),
       legacy_did_listeners_throw_flag_(false),
       fire_only_capture_listeners_at_target_(false),
@@ -108,13 +109,13 @@ Event::Event(const AtomicString& event_type,
       platform_time_stamp_(platform_time_stamp) {}
 
 Event::Event(const AtomicString& event_type,
-             const EventInit& initializer,
-             TimeTicks platform_time_stamp)
+             const EventInit* initializer,
+             base::TimeTicks platform_time_stamp)
     : Event(event_type,
-            initializer.bubbles() ? Bubbles::kYes : Bubbles::kNo,
-            initializer.cancelable() ? Cancelable::kYes : Cancelable::kNo,
-            initializer.composed() ? ComposedMode::kComposed
-                                   : ComposedMode::kScoped,
+            initializer->bubbles() ? Bubbles::kYes : Bubbles::kNo,
+            initializer->cancelable() ? Cancelable::kYes : Cancelable::kNo,
+            initializer->composed() ? ComposedMode::kComposed
+                                    : ComposedMode::kScoped,
             platform_time_stamp) {}
 
 Event::~Event() = default;
@@ -164,15 +165,18 @@ void Event::setLegacyReturnValue(ScriptState* script_state, bool return_value) {
   if (return_value) {
     UseCounter::Count(ExecutionContext::From(script_state),
                       WebFeature::kEventSetReturnValueTrue);
+    // Don't allow already prevented events to be reset.
+    if (!defaultPrevented())
+      default_prevented_ = false;
   } else {
     UseCounter::Count(ExecutionContext::From(script_state),
                       WebFeature::kEventSetReturnValueFalse);
+    preventDefault();
   }
-  SetDefaultPrevented(!return_value);
 }
 
 const AtomicString& Event::InterfaceName() const {
-  return EventNames::Event;
+  return event_interface_names::kEvent;
 }
 
 bool Event::HasInterface(const AtomicString& name) const {
@@ -223,10 +227,6 @@ bool Event::IsCompositionEvent() const {
   return false;
 }
 
-bool Event::IsActivateInvisibleEvent() const {
-  return false;
-}
-
 bool Event::IsClipboardEvent() const {
   return false;
 }
@@ -246,7 +246,6 @@ bool Event::IsErrorEvent() const {
 void Event::preventDefault() {
   if (handling_passive_ != PassiveMode::kNotPassive &&
       handling_passive_ != PassiveMode::kNotPassiveDefault) {
-    prevent_default_called_during_passive_ = true;
 
     const LocalDOMWindow* window =
         event_path_ ? event_path_->GetWindowEventContext().Window() : nullptr;
@@ -272,10 +271,6 @@ void Event::SetTarget(EventTarget* target) {
     ReceivedTarget();
 }
 
-void Event::DoneDispatchingEventAtCurrentTarget() {
-  SetExecutedListenerOrDefaultAction();
-}
-
 void Event::SetRelatedTargetIfExists(EventTarget* related_target) {
   if (IsMouseEvent()) {
     ToMouseEvent(this)->SetRelatedTarget(related_target);
@@ -298,7 +293,7 @@ void Event::SetUnderlyingEvent(Event* ue) {
 
 void Event::InitEventPath(Node& node) {
   if (!event_path_) {
-    event_path_ = new EventPath(node, this);
+    event_path_ = MakeGarbageCollected<EventPath>(node, this);
   } else {
     event_path_->InitializeWith(node, this);
   }
@@ -306,7 +301,7 @@ void Event::InitEventPath(Node& node) {
 
 ScriptValue Event::path(ScriptState* script_state) const {
   return ScriptValue(
-      script_state,
+      script_state->GetIsolate(),
       ToV8(PathInternal(script_state, kNonEmptyAfterDispatch), script_state));
 }
 
@@ -317,7 +312,6 @@ HeapVector<Member<EventTarget>> Event::composedPath(
 
 void Event::SetHandlingPassive(PassiveMode mode) {
   handling_passive_ = mode;
-  prevent_default_called_during_passive_ = false;
 }
 
 HeapVector<Member<EventTarget>> Event::PathInternal(ScriptState* script_state,
@@ -364,9 +358,9 @@ HeapVector<Member<EventTarget>> Event::PathInternal(ScriptState* script_state,
 EventTarget* Event::currentTarget() const {
   if (!current_target_)
     return nullptr;
-  Node* node = current_target_->ToNode();
-  if (node && node->IsSVGElement()) {
-    if (SVGElement* svg_element = ToSVGElement(node)->CorrespondingElement())
+  if (auto* curr_svg_element =
+          DynamicTo<SVGElement>(current_target_->ToNode())) {
+    if (SVGElement* svg_element = curr_svg_element->CorrespondingElement())
       return svg_element;
   }
   return current_target_.Get();
@@ -393,7 +387,7 @@ DispatchEventResult Event::DispatchEvent(EventDispatcher& dispatcher) {
   return dispatcher.Dispatch();
 }
 
-void Event::Trace(blink::Visitor* visitor) {
+void Event::Trace(Visitor* visitor) {
   visitor->Trace(current_target_);
   visitor->Trace(target_);
   visitor->Trace(underlying_event_);

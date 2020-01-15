@@ -36,8 +36,8 @@
 
 namespace blink {
 
-struct SameSizeAsElementData
-    : public GarbageCollectedFinalized<SameSizeAsElementData> {
+struct SameSizeAsElementData final
+    : public GarbageCollected<SameSizeAsElementData> {
   unsigned bitfield;
   Member<void*> willbe_member;
   void* pointers[2];
@@ -46,8 +46,9 @@ struct SameSizeAsElementData
 static_assert(sizeof(ElementData) == sizeof(SameSizeAsElementData),
               "ElementData should stay small");
 
-static size_t SizeForShareableElementDataWithAttributeCount(unsigned count) {
-  return sizeof(ShareableElementData) + sizeof(Attribute) * count;
+static AdditionalBytes AdditionalBytesForShareableElementDataWithAttributeCount(
+    unsigned count) {
+  return AdditionalBytes(sizeof(Attribute) * count);
 }
 
 ElementData::ElementData()
@@ -79,16 +80,17 @@ ElementData::ElementData(const ElementData& other, bool is_unique)
 }
 
 void ElementData::FinalizeGarbageCollectedObject() {
-  if (is_unique_)
-    ToUniqueElementData(this)->~UniqueElementData();
+  if (auto* unique_element_data = DynamicTo<UniqueElementData>(this))
+    unique_element_data->~UniqueElementData();
   else
-    ToShareableElementData(this)->~ShareableElementData();
+    To<ShareableElementData>(this)->~ShareableElementData();
 }
 
 UniqueElementData* ElementData::MakeUniqueCopy() const {
-  if (IsUnique())
-    return new UniqueElementData(ToUniqueElementData(*this));
-  return new UniqueElementData(ToShareableElementData(*this));
+  if (auto* unique_element_data = DynamicTo<UniqueElementData>(this))
+    return MakeGarbageCollected<UniqueElementData>(*unique_element_data);
+  return MakeGarbageCollected<UniqueElementData>(
+      To<ShareableElementData>(*this));
 }
 
 bool ElementData::IsEquivalent(const ElementData* other) const {
@@ -108,11 +110,11 @@ bool ElementData::IsEquivalent(const ElementData* other) const {
   return true;
 }
 
-void ElementData::Trace(blink::Visitor* visitor) {
-  if (is_unique_)
-    ToUniqueElementData(this)->TraceAfterDispatch(visitor);
+void ElementData::Trace(Visitor* visitor) {
+  if (auto* unique_element_data = DynamicTo<UniqueElementData>(this))
+    unique_element_data->TraceAfterDispatch(visitor);
   else
-    ToShareableElementData(this)->TraceAfterDispatch(visitor);
+    To<ShareableElementData>(this)->TraceAfterDispatch(visitor);
 }
 
 void ElementData::TraceAfterDispatch(blink::Visitor* visitor) {
@@ -144,9 +146,10 @@ ShareableElementData::ShareableElementData(const UniqueElementData& other)
 
 ShareableElementData* ShareableElementData::CreateWithAttributes(
     const Vector<Attribute>& attributes) {
-  void* slot = ThreadHeap::Allocate<ElementData>(
-      SizeForShareableElementDataWithAttributeCount(attributes.size()));
-  return new (slot) ShareableElementData(attributes);
+  return MakeGarbageCollected<ShareableElementData>(
+      AdditionalBytesForShareableElementDataWithAttributeCount(
+          attributes.size()),
+      attributes);
 }
 
 UniqueElementData::UniqueElementData() = default;
@@ -172,14 +175,11 @@ UniqueElementData::UniqueElementData(const ShareableElementData& other)
     attribute_vector_.UncheckedAppend(other.attribute_array_[i]);
 }
 
-UniqueElementData* UniqueElementData::Create() {
-  return new UniqueElementData;
-}
-
 ShareableElementData* UniqueElementData::MakeShareableCopy() const {
-  void* slot = ThreadHeap::Allocate<ElementData>(
-      SizeForShareableElementDataWithAttributeCount(attribute_vector_.size()));
-  return new (slot) ShareableElementData(*this);
+  return MakeGarbageCollected<ShareableElementData>(
+      AdditionalBytesForShareableElementDataWithAttributeCount(
+          attribute_vector_.size()),
+      *this);
 }
 
 void UniqueElementData::TraceAfterDispatch(blink::Visitor* visitor) {

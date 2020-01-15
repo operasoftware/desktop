@@ -4,45 +4,16 @@
 
 #include "third_party/blink/renderer/core/layout/ng/ng_fragmentation_utils.h"
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_block_break_token.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_box_fragment.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_box_fragment_builder.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_constraint_space_builder.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
 
 namespace blink {
-
-// Return the total amount of block space spent on a node by fragments
-// preceding this one (but not including this one).
-LayoutUnit PreviouslyUsedBlockSpace(const NGConstraintSpace& constraint_space,
-                                    const NGPhysicalFragment& fragment) {
-  if (!fragment.IsBox())
-    return LayoutUnit();
-  const auto* break_token = ToNGBlockBreakToken(fragment.BreakToken());
-  if (!break_token)
-    return LayoutUnit();
-  NGBoxFragment logical_fragment(constraint_space.GetWritingMode(),
-                                 constraint_space.Direction(),
-                                 ToNGPhysicalBoxFragment(fragment));
-  return break_token->UsedBlockSize() - logical_fragment.BlockSize();
-}
-
-// Return true if the specified fragment is the first generated fragment of
-// some node.
-bool IsFirstFragment(const NGConstraintSpace& constraint_space,
-                     const NGPhysicalFragment& fragment) {
-  // TODO(mstensho): Figure out how to behave for non-box fragments here. How
-  // can we tell whether it's the first one? Looking for previously used block
-  // space certainly isn't the answer.
-  if (!fragment.IsBox())
-    return true;
-  return PreviouslyUsedBlockSpace(constraint_space, fragment) <= LayoutUnit();
-}
-
-// Return true if the specified fragment is the final fragment of some node.
-bool IsLastFragment(const NGPhysicalFragment& fragment) {
-  const auto* break_token = fragment.BreakToken();
-  return !break_token || break_token->IsFinished();
-}
 
 // At a class A break point [1], the break value with the highest precedence
 // wins. If the two values have the same precedence (e.g. "left" and "right"),
@@ -95,6 +66,9 @@ bool IsForcedBreakValue(const NGConstraintSpace& constraint_space,
                         EBreakBetween break_value) {
   if (break_value == EBreakBetween::kColumn)
     return constraint_space.BlockFragmentationType() == kFragmentColumn;
+  // TODO(mstensho): The innermost fragmentation type doesn't tell us everything
+  // here. We might want to force a break to the next page, even if we're in
+  // multicol (printing multicol, for instance).
   if (break_value == EBreakBetween::kLeft ||
       break_value == EBreakBetween::kPage ||
       break_value == EBreakBetween::kRecto ||
@@ -104,27 +78,114 @@ bool IsForcedBreakValue(const NGConstraintSpace& constraint_space,
   return false;
 }
 
-bool ShouldIgnoreBlockStartMargin(const NGConstraintSpace& constraint_space,
-                                  NGLayoutInputNode child,
-                                  const NGBreakToken* child_break_token) {
-  // Always ignore margins if we're not at the start of the child.
-  if (child_break_token && child_break_token->IsBlockType() &&
-      !ToNGBlockBreakToken(child_break_token)->IsBreakBefore())
-    return true;
+template <typename Property>
+bool IsAvoidBreakValue(const NGConstraintSpace& constraint_space,
+                       Property break_value) {
+  if (break_value == Property::kAvoid)
+    return constraint_space.HasBlockFragmentation();
+  if (break_value == Property::kAvoidColumn)
+    return constraint_space.BlockFragmentationType() == kFragmentColumn;
+  // TODO(mstensho): The innermost fragmentation type doesn't tell us everything
+  // here. We might want to avoid breaking to the next page, even if we're
+  // in multicol (printing multicol, for instance).
+  if (break_value == Property::kAvoidPage)
+    return constraint_space.BlockFragmentationType() == kFragmentPage;
+  return false;
+}
+// The properties break-after, break-before and break-inside may all specify
+// avoid* values. break-after and break-before use EBreakBetween, and
+// break-inside uses EBreakInside.
+template bool CORE_TEMPLATE_EXPORT IsAvoidBreakValue(const NGConstraintSpace&,
+                                                     EBreakBetween);
+template bool CORE_TEMPLATE_EXPORT IsAvoidBreakValue(const NGConstraintSpace&,
+                                                     EBreakInside);
 
-  // If we're not fragmented or have been explicitly instructed to honor
-  // margins, don't ignore them.
-  if (!constraint_space.HasBlockFragmentation() ||
-      constraint_space.HasSeparateLeadingFragmentainerMargins())
-    return false;
+EBreakBetween CalculateBreakBetweenValue(NGLayoutInputNode child,
+                                         const NGLayoutResult& layout_result,
+                                         const NGBoxFragmentBuilder& builder) {
+  if (child.IsInline())
+    return EBreakBetween::kAuto;
+  EBreakBetween break_before = JoinFragmentainerBreakValues(
+      child.Style().BreakBefore(), layout_result.InitialBreakBefore());
+  return builder.JoinedBreakBetweenValue(break_before);
+}
 
-  // Only ignore margins if we're at the start of the fragmentainer.
-  if (constraint_space.FragmentainerBlockSize() !=
-      constraint_space.FragmentainerSpaceAtBfcStart())
-    return false;
+NGBreakAppeal CalculateBreakAppealInside(const NGConstraintSpace& space,
+                                         NGBlockNode child,
+                                         const NGLayoutResult& layout_result) {
+  if (layout_result.HasForcedBreak())
+    return kBreakAppealPerfect;
+  const auto& physical_fragment = layout_result.PhysicalFragment();
+  NGBreakAppeal appeal;
+  // If we actually broke, get the appeal from the break token. Otherwise, get
+  // the early break appeal.
+  if (const auto* block_break_token =
+          DynamicTo<NGBlockBreakToken>(physical_fragment.BreakToken()))
+    appeal = block_break_token->BreakAppeal();
+  else
+    appeal = layout_result.EarlyBreakAppeal();
 
-  // Otherwise, only ignore in-flow margins.
-  return !child.IsFloating() && !child.IsOutOfFlowPositioned();
+  // We don't let break-inside:avoid affect the child's stored break appeal, but
+  // we rather handle it now, on the outside. The reason is that we want to be
+  // able to honor any 'avoid' values on break-before or break-after among the
+  // children of the child, even if we need to disregrard a break-inside:avoid
+  // rule on the child itself. This prevents us from violating more rules than
+  // necessary: if we need to break inside the child (even if it should be
+  // avoided), we'll at least break at the most appealing location inside.
+  if (appeal > kBreakAppealViolatingBreakAvoid &&
+      IsAvoidBreakValue(space, child.Style().BreakInside()))
+    appeal = kBreakAppealViolatingBreakAvoid;
+  return appeal;
+}
+
+void SetupFragmentation(const NGConstraintSpace& parent_space,
+                        LayoutUnit new_bfc_block_offset,
+                        NGConstraintSpaceBuilder* builder,
+                        bool is_new_fc) {
+  DCHECK(parent_space.HasBlockFragmentation());
+
+  builder->SetFragmentainerBlockSize(parent_space.FragmentainerBlockSize());
+  new_bfc_block_offset += parent_space.FragmentainerOffsetAtBfc();
+  builder->SetFragmentainerOffsetAtBfc(new_bfc_block_offset);
+  builder->SetFragmentationType(parent_space.BlockFragmentationType());
+
+  if (parent_space.IsInColumnBfc() && !is_new_fc)
+    builder->SetIsInColumnBfc();
+}
+
+void FinishFragmentation(const NGConstraintSpace& space,
+                         LayoutUnit block_size,
+                         LayoutUnit intrinsic_block_size,
+                         LayoutUnit previously_consumed_block_size,
+                         LayoutUnit space_left,
+                         NGBoxFragmentBuilder* builder) {
+  if (builder->DidBreak()) {
+    // One of our children broke. Even if we fit within the remaining space, we
+    // need to prepare a break token.
+    builder->SetConsumedBlockSize(std::min(space_left, block_size) +
+                                  previously_consumed_block_size);
+    builder->SetBlockSize(std::min(space_left, block_size));
+    builder->SetIntrinsicBlockSize(space_left);
+    return;
+  }
+
+  if (block_size > space_left) {
+    // Need a break inside this block.
+    builder->SetConsumedBlockSize(space_left + previously_consumed_block_size);
+    builder->SetDidBreak();
+    builder->SetBreakAppeal(kBreakAppealPerfect);
+    builder->SetBlockSize(space_left);
+    builder->SetIntrinsicBlockSize(space_left);
+    if (space.BlockFragmentationType() == kFragmentColumn &&
+        !space.IsInitialColumnBalancingPass())
+      builder->PropagateSpaceShortage(block_size - space_left);
+    return;
+  }
+
+  // The end of the block fits in the current fragmentainer.
+  builder->SetConsumedBlockSize(previously_consumed_block_size + block_size);
+  builder->SetBlockSize(block_size);
+  builder->SetIntrinsicBlockSize(intrinsic_block_size);
 }
 
 }  // namespace blink

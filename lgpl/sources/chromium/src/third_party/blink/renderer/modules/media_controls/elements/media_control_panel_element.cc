@@ -6,10 +6,10 @@
 
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
-#include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_elements_helper.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
 
@@ -20,67 +20,9 @@ const char kTransparentClassName[] = "transparent";
 
 }  // anonymous namespace
 
-// Listens for the 'transitionend' event.
-class MediaControlPanelElement::TransitionEventListener final
-    : public EventListener {
- public:
-  using Callback = base::RepeatingCallback<void()>;
-
-  // |element| is the element to listen for the 'transitionend' event on.
-  // |callback| is the callback to call when the event is handled.
-  explicit TransitionEventListener(Element* element, Callback callback)
-      : EventListener(EventListener::kCPPEventListenerType),
-        callback_(callback),
-        element_(element) {
-    DCHECK(callback_);
-    DCHECK(element_);
-  }
-
-  void Attach() {
-    DCHECK(!attached_);
-    attached_ = true;
-
-    element_->addEventListener(EventTypeNames::transitionend, this, false);
-  }
-
-  void Detach() {
-    DCHECK(attached_);
-    attached_ = false;
-
-    element_->removeEventListener(EventTypeNames::transitionend, this, false);
-  }
-
-  bool IsAttached() const { return attached_; }
-
-  bool operator==(const EventListener& other) const override {
-    return this == &other;
-  }
-
-  void Trace(blink::Visitor* visitor) override {
-    EventListener::Trace(visitor);
-    visitor->Trace(element_);
-  }
-
- private:
-  void handleEvent(ExecutionContext* context, Event* event) override {
-    if (event->type() == EventTypeNames::transitionend) {
-      callback_.Run();
-      return;
-    }
-
-    NOTREACHED();
-  }
-
-  bool attached_ = false;
-
-  Callback callback_;
-  Member<Element> element_;
-};
-
 MediaControlPanelElement::MediaControlPanelElement(
     MediaControlsImpl& media_controls)
-    : MediaControlDivElement(media_controls, kMediaControlsPanel),
-      event_listener_(nullptr) {
+    : MediaControlDivElement(media_controls), event_listener_(nullptr) {
   SetShadowPseudoId(AtomicString("-webkit-media-controls-panel"));
 }
 
@@ -102,13 +44,13 @@ void MediaControlPanelElement::MakeOpaque() {
     return;
 
   opaque_ = true;
+  removeAttribute("class");
 
   if (is_displayed_) {
     // Make sure we are listening for the 'transitionend' event.
     EnsureTransitionEventListener();
 
     SetIsWanted(true);
-    removeAttribute("class");
     DidBecomeVisible();
   }
 }
@@ -150,7 +92,8 @@ bool MediaControlPanelElement::EventListenerIsAttachedForTest() const {
 void MediaControlPanelElement::EnsureTransitionEventListener() {
   // Create the event listener if it doesn't exist.
   if (!event_listener_) {
-    event_listener_ = new MediaControlPanelElement::TransitionEventListener(
+    event_listener_ = MakeGarbageCollected<
+        MediaControlsSharedHelpers::TransitionEventListener>(
         this,
         WTF::BindRepeating(&MediaControlPanelElement::HandleTransitionEndEvent,
                            WrapWeakPersistent(this)));
@@ -170,19 +113,8 @@ void MediaControlPanelElement::DetachTransitionEventListener() {
     event_listener_->Detach();
 }
 
-void MediaControlPanelElement::DefaultEventHandler(Event& event) {
-  // Suppress the media element activation behavior (toggle play/pause) when
-  // any part of the control panel is clicked.
-  if (event.type() == EventTypeNames::click && !MediaControlsImpl::IsModern()) {
-    event.SetDefaultHandled();
-    return;
-  }
-  HTMLDivElement::DefaultEventHandler(event);
-}
-
 bool MediaControlPanelElement::KeepEventInNode(const Event& event) const {
-  return (!MediaControlsImpl::IsModern() ||
-          GetMediaControls().ShouldShowAudioControls()) &&
+  return GetMediaControls().ShouldShowAudioControls() &&
          MediaControlElementsHelper::IsUserInteractionEvent(event);
 }
 

@@ -26,10 +26,10 @@
 
 namespace blink {
 
-class PopupMenu : public GarbageCollectedFinalized<PopupMenu> {
+class PopupMenu : public GarbageCollected<PopupMenu> {
  public:
   virtual ~PopupMenu() = default;
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) {}
   virtual void Show() = 0;
   virtual void Hide() = 0;
   enum UpdateReason {

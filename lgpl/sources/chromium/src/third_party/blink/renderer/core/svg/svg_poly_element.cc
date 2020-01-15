@@ -22,15 +22,17 @@
 
 #include "third_party/blink/renderer/core/svg/svg_animated_point_list.h"
 #include "third_party/blink/renderer/platform/graphics/path.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
 SVGPolyElement::SVGPolyElement(const QualifiedName& tag_name,
                                Document& document)
     : SVGGeometryElement(tag_name, document),
-      points_(SVGAnimatedPointList::Create(this,
-                                           SVGNames::pointsAttr,
-                                           SVGPointList::Create())) {
+      points_(MakeGarbageCollected<SVGAnimatedPointList>(
+          this,
+          svg_names::kPointsAttr,
+          MakeGarbageCollected<SVGPointList>())) {
   AddToPropertyMap(points_);
 }
 
@@ -59,7 +61,7 @@ Path SVGPolyElement::AsPathFromPoints() const {
 }
 
 void SVGPolyElement::SvgAttributeChanged(const QualifiedName& attr_name) {
-  if (attr_name == SVGNames::pointsAttr) {
+  if (attr_name == svg_names::kPointsAttr) {
     GeometryAttributeChanged();
     return;
   }

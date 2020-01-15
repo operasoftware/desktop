@@ -3,23 +3,36 @@
 // found in the LICENSE file.
 
 /**
- * @unrestricted
+ * @implements {Protocol.Connection}
  */
-SDK.MainConnection = class extends Protocol.InspectorBackend.Connection {
-  /**
-   * @param {!Protocol.InspectorBackend.Connection.Params} params
-   */
-  constructor(params) {
-    super();
-    this._onMessage = params.onMessage;
-    this._onDisconnect = params.onDisconnect;
-    this._disconnected = false;
+export class MainConnection {
+  constructor() {
+    this._onMessage = null;
+    this._onDisconnect = null;
+    this._messageBuffer = '';
+    this._messageSize = 0;
     this._eventListeners = [
-      InspectorFrontendHost.events.addEventListener(
-          InspectorFrontendHostAPI.Events.DispatchMessage, this._dispatchMessage, this),
-      InspectorFrontendHost.events.addEventListener(
-          InspectorFrontendHostAPI.Events.DispatchMessageChunk, this._dispatchMessageChunk, this),
+      Host.InspectorFrontendHost.events.addEventListener(
+          Host.InspectorFrontendHostAPI.Events.DispatchMessage, this._dispatchMessage, this),
+      Host.InspectorFrontendHost.events.addEventListener(
+          Host.InspectorFrontendHostAPI.Events.DispatchMessageChunk, this._dispatchMessageChunk, this),
     ];
+  }
+
+  /**
+   * @override
+   * @param {function((!Object|string))} onMessage
+   */
+  setOnMessage(onMessage) {
+    this._onMessage = onMessage;
+  }
+
+  /**
+   * @override
+   * @param {function(string)} onDisconnect
+   */
+  setOnDisconnect(onDisconnect) {
+    this._onDisconnect = onDisconnect;
   }
 
   /**
@@ -27,15 +40,18 @@ SDK.MainConnection = class extends Protocol.InspectorBackend.Connection {
    * @param {string} message
    */
   sendRawMessage(message) {
-    if (!this._disconnected)
-      InspectorFrontendHost.sendMessageToBackend(message);
+    if (this._onMessage) {
+      Host.InspectorFrontendHost.sendMessageToBackend(message);
+    }
   }
 
   /**
    * @param {!Common.Event} event
    */
   _dispatchMessage(event) {
-    this._onMessage.call(null, /** @type {string} */ (event.data));
+    if (this._onMessage) {
+      this._onMessage.call(null, /** @type {string} */ (event.data));
+    }
   }
 
   /**
@@ -65,39 +81,54 @@ SDK.MainConnection = class extends Protocol.InspectorBackend.Connection {
     Common.EventTarget.removeEventListeners(this._eventListeners);
     this._onDisconnect = null;
     this._onMessage = null;
-    this._disconnected = true;
 
-    let fulfill;
-    const promise = new Promise(f => fulfill = f);
-    InspectorFrontendHost.reattach(() => {
+    if (onDisconnect) {
       onDisconnect.call(null, 'force disconnect');
-      fulfill();
-    });
-    return promise;
+    }
+    return Promise.resolve();
   }
-};
+}
 
 /**
- * @unrestricted
+ * @implements {Protocol.Connection}
  */
-SDK.WebSocketConnection = class extends Protocol.InspectorBackend.Connection {
+export class WebSocketConnection {
   /**
    * @param {string} url
    * @param {function()} onWebSocketDisconnect
-   * @param {!Protocol.InspectorBackend.Connection.Params} params
    */
-  constructor(url, onWebSocketDisconnect, params) {
-    super();
+  constructor(url, onWebSocketDisconnect) {
     this._socket = new WebSocket(url);
     this._socket.onerror = this._onError.bind(this);
     this._socket.onopen = this._onOpen.bind(this);
-    this._socket.onmessage = messageEvent => params.onMessage.call(null, /** @type {string} */ (messageEvent.data));
+    this._socket.onmessage = messageEvent => {
+      if (this._onMessage) {
+        this._onMessage.call(null, /** @type {string} */ (messageEvent.data));
+      }
+    };
     this._socket.onclose = this._onClose.bind(this);
 
-    this._onDisconnect = params.onDisconnect;
+    this._onMessage = null;
+    this._onDisconnect = null;
     this._onWebSocketDisconnect = onWebSocketDisconnect;
     this._connected = false;
     this._messages = [];
+  }
+
+  /**
+   * @override
+   * @param {function((!Object|string))} onMessage
+   */
+  setOnMessage(onMessage) {
+    this._onMessage = onMessage;
+  }
+
+  /**
+   * @override
+   * @param {function(string)} onDisconnect
+   */
+  setOnDisconnect(onDisconnect) {
+    this._onDisconnect = onDisconnect;
   }
 
   _onError() {
@@ -110,8 +141,9 @@ SDK.WebSocketConnection = class extends Protocol.InspectorBackend.Connection {
   _onOpen() {
     this._socket.onerror = console.error;
     this._connected = true;
-    for (const message of this._messages)
+    for (const message of this._messages) {
       this._socket.send(message);
+    }
     this._messages = [];
   }
 
@@ -139,10 +171,11 @@ SDK.WebSocketConnection = class extends Protocol.InspectorBackend.Connection {
    * @param {string} message
    */
   sendRawMessage(message) {
-    if (this._connected)
+    if (this._connected) {
       this._socket.send(message);
-    else
+    } else {
       this._messages.push(message);
+    }
   }
 
   /**
@@ -153,24 +186,38 @@ SDK.WebSocketConnection = class extends Protocol.InspectorBackend.Connection {
     let fulfill;
     const promise = new Promise(f => fulfill = f);
     this._close(() => {
-      this._onDisconnect.call(null, 'force disconnect');
+      if (this._onDisconnect) {
+        this._onDisconnect.call(null, 'force disconnect');
+      }
       fulfill();
     });
     return promise;
   }
-};
+}
 
 /**
- * @unrestricted
+ * @implements {Protocol.Connection}
  */
-SDK.StubConnection = class extends Protocol.InspectorBackend.Connection {
+export class StubConnection {
+  constructor() {
+    this._onMessage = null;
+    this._onDisconnect = null;
+  }
+
   /**
-   * @param {!Protocol.InspectorBackend.Connection.Params} params
+   * @override
+   * @param {function((!Object|string))} onMessage
    */
-  constructor(params) {
-    super();
-    this._onMessage = params.onMessage;
-    this._onDisconnect = params.onDisconnect;
+  setOnMessage(onMessage) {
+    this._onMessage = onMessage;
+  }
+
+  /**
+   * @override
+   * @param {function(string)} onDisconnect
+   */
+  setOnDisconnect(onDisconnect) {
+    this._onDisconnect = onDisconnect;
   }
 
   /**
@@ -188,10 +235,12 @@ SDK.StubConnection = class extends Protocol.InspectorBackend.Connection {
     const messageObject = JSON.parse(message);
     const error = {
       message: 'This is a stub connection, can\'t dispatch message.',
-      code: Protocol.InspectorBackend.DevToolsStubErrorCode,
+      code: Protocol.DevToolsStubErrorCode,
       data: messageObject
     };
-    this._onMessage.call(null, {id: messageObject.id, error: error});
+    if (this._onMessage) {
+      this._onMessage.call(null, {id: messageObject.id, error: error});
+    }
   }
 
   /**
@@ -199,25 +248,44 @@ SDK.StubConnection = class extends Protocol.InspectorBackend.Connection {
    * @return {!Promise}
    */
   disconnect() {
-    this._onDisconnect.call(null, 'force disconnect');
+    if (this._onDisconnect) {
+      this._onDisconnect.call(null, 'force disconnect');
+    }
     this._onDisconnect = null;
     this._onMessage = null;
     return Promise.resolve();
   }
-};
+}
 
-SDK.ChildConnection = class extends Protocol.InspectorBackend.Connection {
+/**
+ * @implements {Protocol.Connection}
+ */
+export class ParallelConnection {
   /**
-   * @param {!Protocol.TargetAgent} agent
+   * @param {!Protocol.Connection} connection
    * @param {string} sessionId
-   * @param {!Protocol.InspectorBackend.Connection.Params} params
    */
-  constructor(agent, sessionId, params) {
-    super();
-    this._agent = agent;
+  constructor(connection, sessionId) {
+    this._connection = connection;
     this._sessionId = sessionId;
-    this.onMessage = params.onMessage;
-    this.onDisconnect = params.onDisconnect;
+    this._onMessage = null;
+    this._onDisconnect = null;
+  }
+
+  /**
+   * @override
+   * @param {function(!Object)} onMessage
+   */
+  setOnMessage(onMessage) {
+    this._onMessage = onMessage;
+  }
+
+  /**
+   * @override
+   * @param {function(string)} onDisconnect
+   */
+  setOnDisconnect(onDisconnect) {
+    this._onDisconnect = onDisconnect;
   }
 
   /**
@@ -225,7 +293,12 @@ SDK.ChildConnection = class extends Protocol.InspectorBackend.Connection {
    * @param {string} message
    */
   sendRawMessage(message) {
-    this._agent.sendMessageToTarget(message, this._sessionId);
+    const messageObject = JSON.parse(message);
+    // If the message isn't for a specific session, it must be for the root session.
+    if (!messageObject.sessionId) {
+      messageObject.sessionId = this._sessionId;
+    }
+    this._connection.sendRawMessage(JSON.stringify(messageObject));
   }
 
   /**
@@ -233,25 +306,65 @@ SDK.ChildConnection = class extends Protocol.InspectorBackend.Connection {
    * @return {!Promise}
    */
   disconnect() {
-    throw 'Not implemented';
+    if (this._onDisconnect) {
+      this._onDisconnect.call(null, 'force disconnect');
+    }
+    this._onDisconnect = null;
+    this._onMessage = null;
+    return Promise.resolve();
   }
-};
+}
 
 /**
- * @param {!Protocol.InspectorBackend.Connection.Params} params
- * @param {function()} connectionLostCallback
- * @return {!Protocol.InspectorBackend.Connection}
+ * @param {function():!Promise<undefined>} createMainTarget
+ * @param {function()} websocketConnectionLost
+ * @return {!Promise}
  */
-SDK.createMainConnection = function(params, connectionLostCallback) {
-  const wsParam = Runtime.queryParam('ws');
-  const wssParam = Runtime.queryParam('wss');
+export async function initMainConnection(createMainTarget, websocketConnectionLost) {
+  Protocol.Connection.setFactory(_createMainConnection.bind(null, websocketConnectionLost));
+  await createMainTarget();
+  Host.InspectorFrontendHost.connectionReady();
+  Host.InspectorFrontendHost.events.addEventListener(Host.InspectorFrontendHostAPI.Events.ReattachMainTarget, () => {
+    SDK.targetManager.mainTarget().router().connection().disconnect();
+    createMainTarget();
+  });
+  return Promise.resolve();
+}
 
+/**
+ * @param {function()} websocketConnectionLost
+ * @return {!Protocol.Connection}
+ */
+export function _createMainConnection(websocketConnectionLost) {
+  const wsParam = Root.Runtime.queryParam('ws');
+  const wssParam = Root.Runtime.queryParam('wss');
   if (wsParam || wssParam) {
     const ws = wsParam ? `ws://${wsParam}` : `wss://${wssParam}`;
-    return new SDK.WebSocketConnection(ws, connectionLostCallback, params);
+    return new WebSocketConnection(ws, websocketConnectionLost);
+  } else if (Host.InspectorFrontendHost.isHostedMode()) {
+    return new StubConnection();
   }
 
-  if (InspectorFrontendHost.isHostedMode())
-    return new SDK.StubConnection(params);
-  return new SDK.MainConnection(params);
-};
+  return new MainConnection();
+}
+
+/* Legacy exported object */
+self.SDK = self.SDK || {};
+
+/* Legacy exported object */
+SDK = SDK || {};
+
+/** @constructor */
+SDK.MainConnection = MainConnection;
+
+/** @constructor */
+SDK.WebSocketConnection = WebSocketConnection;
+
+/** @constructor */
+SDK.StubConnection = StubConnection;
+
+/** @constructor */
+SDK.ParallelConnection = ParallelConnection;
+
+SDK.initMainConnection = initMainConnection;
+SDK._createMainConnection = _createMainConnection;

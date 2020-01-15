@@ -177,38 +177,24 @@ inline void V8SetReturnValueFast(const CallbackInfo& callbackInfo,
   V8SetReturnValueFast(callbackInfo, notShared.View(), wrappable);
 }
 
+template <typename CallbackInfo, typename T>
+inline void V8SetReturnValue(const CallbackInfo& callback_info,
+                             MaybeShared<T> maybe_shared) {
+  V8SetReturnValue(callback_info, maybe_shared.View());
+}
+
+template <typename CallbackInfo, typename T>
+inline void V8SetReturnValueFast(const CallbackInfo& callback_info,
+                                 MaybeShared<T> maybe_shared,
+                                 const ScriptWrappable* wrappable) {
+  V8SetReturnValueFast(callback_info, maybe_shared.View(), wrappable);
+}
+
 // Specialized overload, used by interface indexed property handlers in their
 // descriptor callbacks, which need an actual V8 Object with the properties of
 // a property descriptor.
-template <typename CallbackInfo>
-inline void V8SetReturnValue(const CallbackInfo& callback_info,
-                             const v8::PropertyDescriptor& descriptor) {
-  DCHECK(descriptor.has_configurable());
-  DCHECK(descriptor.has_enumerable());
-  DCHECK(descriptor.has_value());
-  DCHECK(descriptor.has_writable());
-  v8::Local<v8::Object> desc = v8::Object::New(callback_info.GetIsolate());
-  desc->Set(callback_info.GetIsolate()->GetCurrentContext(),
-            V8AtomicString(callback_info.GetIsolate(), "configurable"),
-            ToV8(descriptor.configurable(), callback_info.Holder(),
-                 callback_info.GetIsolate()))
-      .ToChecked();
-  desc->Set(callback_info.GetIsolate()->GetCurrentContext(),
-            V8AtomicString(callback_info.GetIsolate(), "enumerable"),
-            ToV8(descriptor.enumerable(), callback_info.Holder(),
-                 callback_info.GetIsolate()))
-      .ToChecked();
-  desc->Set(callback_info.GetIsolate()->GetCurrentContext(),
-            V8AtomicString(callback_info.GetIsolate(), "value"),
-            descriptor.value())
-      .ToChecked();
-  desc->Set(callback_info.GetIsolate()->GetCurrentContext(),
-            V8AtomicString(callback_info.GetIsolate(), "writable"),
-            ToV8(descriptor.writable(), callback_info.Holder(),
-                 callback_info.GetIsolate()))
-      .ToChecked();
-  callback_info.GetReturnValue().Set(desc);
-}
+CORE_EXPORT void V8SetReturnValue(const v8::PropertyCallbackInfo<v8::Value>&,
+                                  const v8::PropertyDescriptor&);
 
 // Conversion flags, used in toIntXX/toUIntXX.
 enum IntegerConversionConfiguration {
@@ -218,15 +204,12 @@ enum IntegerConversionConfiguration {
 };
 
 // Convert a value to a boolean.
-CORE_EXPORT bool ToBooleanSlow(v8::Isolate*,
-                               v8::Local<v8::Value>,
-                               ExceptionState&);
 inline bool ToBoolean(v8::Isolate* isolate,
                       v8::Local<v8::Value> value,
                       ExceptionState& exception_state) {
   if (LIKELY(value->IsBoolean()))
     return value.As<v8::Boolean>()->Value();
-  return ToBooleanSlow(isolate, value, exception_state);
+  return value->BooleanValue(isolate);
 }
 
 // Convert a value to a 8-bit signed integer. The conversion fails if the
@@ -346,23 +329,22 @@ inline uint64_t ToUInt64(v8::Isolate* isolate,
 
 // NaNs and +/-Infinity should be 0, otherwise modulo 2^64.
 // Step 8 - 12 of https://heycam.github.io/webidl/#abstract-opdef-converttoint
-inline unsigned long long DoubleToInteger(double d) {
+inline uint64_t DoubleToInteger(double d) {
   if (std::isnan(d) || std::isinf(d))
     return 0;
-  constexpr unsigned long long kMaxULL =
-      std::numeric_limits<unsigned long long>::max();
+  constexpr uint64_t kMaxULL = std::numeric_limits<uint64_t>::max();
 
   // -2^{64} < fmod_value < 2^{64}.
   double fmod_value = fmod(trunc(d), kMaxULL + 1.0);
   if (fmod_value >= 0) {
     // 0 <= fmod_value < 2^{64}.
     // 0 <= value < 2^{64}. This cast causes no loss.
-    return static_cast<unsigned long long>(fmod_value);
+    return static_cast<uint64_t>(fmod_value);
   }
   // -2^{64} < fmod_value < 0.
   // 0 < fmod_value_in_unsigned_long_long < 2^{64}. This cast causes no loss.
-  unsigned long long fmod_value_in_unsigned_long_long =
-      static_cast<unsigned long long>(-fmod_value);
+  uint64_t fmod_value_in_unsigned_long_long =
+      static_cast<uint64_t>(-fmod_value);
   // -1 < (kMaxULL - fmod_value_in_unsigned_long_long) < 2^{64} - 1.
   // 0 < value < 2^{64}.
   return kMaxULL - fmod_value_in_unsigned_long_long + 1;
@@ -389,7 +371,15 @@ CORE_EXPORT double ToRestrictedDouble(v8::Isolate*,
 inline float ToFloat(v8::Isolate* isolate,
                      v8::Local<v8::Value> value,
                      ExceptionState& exception_state) {
-  return static_cast<float>(ToDouble(isolate, value, exception_state));
+  double double_value = ToDouble(isolate, value, exception_state);
+  if (exception_state.HadException())
+    return 0;
+  using Limits = std::numeric_limits<float>;
+  if (UNLIKELY(double_value > Limits::max()))
+    return Limits::infinity();
+  if (UNLIKELY(double_value < Limits::lowest()))
+    return -Limits::infinity();
+  return static_cast<float>(double_value);
 }
 
 // Convert a value to a single precision float, throwing on non-finite values.
@@ -466,12 +456,12 @@ CORE_EXPORT bool HasCallableIteratorSymbol(v8::Isolate*,
                                            v8::Local<v8::Value>,
                                            ExceptionState&);
 
-CORE_EXPORT v8::Isolate* ToIsolate(ExecutionContext*);
-CORE_EXPORT v8::Isolate* ToIsolate(LocalFrame*);
+CORE_EXPORT v8::Isolate* ToIsolate(const LocalFrame*);
 
 CORE_EXPORT DOMWindow* ToDOMWindow(v8::Isolate*, v8::Local<v8::Value>);
 CORE_EXPORT LocalDOMWindow* ToLocalDOMWindow(v8::Local<v8::Context>);
 LocalDOMWindow* EnteredDOMWindow(v8::Isolate*);
+LocalDOMWindow* IncumbentDOMWindow(v8::Isolate*);
 CORE_EXPORT LocalDOMWindow* CurrentDOMWindow(v8::Isolate*);
 CORE_EXPORT ExecutionContext* ToExecutionContext(v8::Local<v8::Context>);
 CORE_EXPORT void RegisterToExecutionContextForModules(ExecutionContext* (
@@ -493,6 +483,7 @@ CORE_EXPORT v8::Local<v8::Context> ToV8ContextEvenIfDetached(LocalFrame*,
 
 // These methods can return nullptr if the context associated with the
 // ScriptState has already been detached.
+CORE_EXPORT ScriptState* ToScriptState(ExecutionContext*, DOMWrapperWorld&);
 CORE_EXPORT ScriptState* ToScriptState(LocalFrame*, DOMWrapperWorld&);
 // Do not use this method unless you are sure you should use the main world's
 // ScriptState
@@ -511,12 +502,12 @@ CORE_EXPORT void ToFlexibleArrayBufferView(v8::Isolate*,
                                            void* storage = nullptr);
 
 CORE_EXPORT bool IsValidEnum(const String& value,
-                             const char** valid_values,
+                             const char* const* valid_values,
                              size_t length,
                              const String& enum_name,
                              ExceptionState&);
 CORE_EXPORT bool IsValidEnum(const Vector<String>& values,
-                             const char** valid_values,
+                             const char* const* valid_values,
                              size_t length,
                              const String& enum_name,
                              ExceptionState&);
@@ -563,6 +554,9 @@ MaybeSharedType ToMaybeShared(v8::Isolate* isolate,
 CORE_EXPORT Vector<String> GetOwnPropertyNames(v8::Isolate*,
                                                const v8::Local<v8::Object>&,
                                                ExceptionState&);
+
+v8::MicrotaskQueue* ToMicrotaskQueue(ExecutionContext*);
+v8::MicrotaskQueue* ToMicrotaskQueue(ScriptState*);
 
 }  // namespace blink
 

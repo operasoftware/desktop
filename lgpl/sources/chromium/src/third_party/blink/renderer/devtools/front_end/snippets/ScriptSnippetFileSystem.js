@@ -28,7 +28,7 @@ Snippets.SnippetFileSystem = class extends Persistence.PlatformFileSystem {
     const nextId = this._lastSnippetIdentifierSetting.get() + 1;
     this._lastSnippetIdentifierSetting.set(nextId);
 
-    const snippetName = `Script snippet #${nextId}`;
+    const snippetName = ls`Script snippet #${nextId}`;
     const snippets = this._snippetsSetting.get();
     snippets.push({name: snippetName, content: ''});
     this._snippetsSetting.set(snippets);
@@ -55,12 +55,12 @@ Snippets.SnippetFileSystem = class extends Persistence.PlatformFileSystem {
   /**
    * @override
    * @param {string} path
-   * @param {function(?string,boolean)} callback
+   * @returns {!Promise<!Common.DeferredContent>}
    */
-  requestFileContent(path, callback) {
+  async requestFileContent(path) {
     const name = unescape(path.substring(1));
     const snippet = this._snippetsSetting.get().find(snippet => snippet.name === name);
-    callback(snippet ? snippet.content : null, /* encoded */ false);
+    return {content: snippet ? snippet.content : null, isEncoded: false};
   }
 
   /**
@@ -153,48 +153,50 @@ Snippets.SnippetFileSystem = class extends Persistence.PlatformFileSystem {
  * @param {!Workspace.UISourceCode} uiSourceCode
  */
 Snippets.evaluateScriptSnippet = async function(uiSourceCode) {
-  if (!uiSourceCode.url().startsWith('snippet://'))
+  if (!uiSourceCode.url().startsWith('snippet://')) {
     return;
+  }
 
   const executionContext = UI.context.flavor(SDK.ExecutionContext);
-  if (!executionContext)
+  if (!executionContext) {
     return;
+  }
 
   const runtimeModel = executionContext.runtimeModel;
-
   await uiSourceCode.requestContent();
   uiSourceCode.commitWorkingCopy();
   const expression = uiSourceCode.workingCopy();
   Common.console.show();
 
   const url = uiSourceCode.url();
-  let scriptId;
-  {
-    const result = await runtimeModel.compileScript(expression, url, true, executionContext.id);
-    if (!result.scriptId && !result.exceptionDetails)
-      return;
-    if (!result.scriptId) {
-      SDK.consoleModel.addMessage(SDK.ConsoleMessage.fromException(
-          runtimeModel, result.exceptionDetails, /* messageType */ undefined, /* timestamp */ undefined, url));
-      return;
-    }
-    scriptId = result.scriptId;
-  }
-  const result = await runtimeModel.runScript(
-      scriptId, executionContext.id, 'console', /* silent */ false, /* includeCommandLineAPI */ true,
-      /* returnByValue */ false, /* generatePreview */ true);
-  if (!result.object && !result.exceptionDetails)
+
+  const result = await executionContext.evaluate(
+      {
+        expression: `${expression}\n//# sourceURL=${url}`,
+        objectGroup: 'console',
+        silent: false,
+        includeCommandLineAPI: true,
+        returnByValue: false,
+        generatePreview: true,
+      },
+      /* userGesture */ false,
+      /* awaitPromise */ true);
+
+  if (result.exceptionDetails) {
+    SDK.consoleModel.addMessage(SDK.ConsoleMessage.fromException(
+        runtimeModel, result.exceptionDetails, /* messageType */ undefined, /* timestamp */ undefined, url));
     return;
-  if (result.object) {
-    const consoleMessage = new SDK.ConsoleMessage(
-        runtimeModel, SDK.ConsoleMessage.MessageSource.JS, SDK.ConsoleMessage.MessageLevel.Info, '',
-        SDK.ConsoleMessage.MessageType.Result, url, undefined, undefined, [result.object], undefined, undefined,
-        executionContext.id, scriptId);
-    SDK.consoleModel.addMessage(consoleMessage);
-  } else {
-    SDK.consoleModel.addMessage(
-        SDK.ConsoleMessage.fromException(runtimeModel, result.exceptionDetails, undefined, undefined, url));
   }
+  if (!result.object) {
+    return;
+  }
+
+  const scripts = executionContext.debuggerModel.scriptsForSourceURL(url);
+  const scriptId = scripts[scripts.length - 1].scriptId;
+  SDK.consoleModel.addMessage(new SDK.ConsoleMessage(
+      runtimeModel, SDK.ConsoleMessage.MessageSource.JS, SDK.ConsoleMessage.MessageLevel.Info, '',
+      SDK.ConsoleMessage.MessageType.Result, url, undefined, undefined, [result.object], undefined, undefined,
+      executionContext.id, scriptId));
 };
 
 /**

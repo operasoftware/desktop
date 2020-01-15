@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_VR_VR_POSE_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_VR_VR_POSE_H_
 
-#include "device/vr/public/mojom/vr_service.mojom-blink.h"
+#include "device/vr/public/mojom/vr_service.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -17,7 +17,9 @@ class VRPose final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static VRPose* Create() { return new VRPose(); }
+  static VRPose* Create() { return MakeGarbageCollected<VRPose>(); }
+
+  VRPose();
 
   DOMFloat32Array* orientation() const { return orientation_; }
   DOMFloat32Array* position() const { return position_; }
@@ -31,8 +33,6 @@ class VRPose final : public ScriptWrappable {
   void Trace(blink::Visitor*) override;
 
  private:
-  VRPose();
-
   Member<DOMFloat32Array> orientation_;
   Member<DOMFloat32Array> position_;
   Member<DOMFloat32Array> angular_velocity_;

@@ -20,7 +20,6 @@
 
 #include "third_party/blink/renderer/platform/fonts/font_platform_data.h"
 
-#include "SkTypeface.h"
 #include "build/build_config.h"
 #include "hb-ot.h"
 #include "hb.h"
@@ -28,12 +27,14 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/harfbuzz_face.h"
-#include "third_party/blink/renderer/platform/layout_test_support.h"
 #include "third_party/blink/renderer/platform/text/character.h"
+#include "third_party/blink/renderer/platform/web_test_support.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/skia/include/core/SkFont.h"
+#include "third_party/skia/include/core/SkTypeface.h"
 
 #if defined(OS_MACOSX)
 #include "third_party/skia/include/ports/SkTypeface_mac.h"
@@ -50,7 +51,7 @@ FontPlatformData::FontPlatformData(WTF::HashTableDeletedValueType)
       is_hash_table_deleted_value_(true)
 #if defined(OS_WIN)
       ,
-      paint_text_flags_(0)
+      font_flags_(0)
 #endif
 {
 }
@@ -64,7 +65,7 @@ FontPlatformData::FontPlatformData()
       is_hash_table_deleted_value_(false)
 #if defined(OS_WIN)
       ,
-      paint_text_flags_(0)
+      font_flags_(0)
 #endif
 {
 }
@@ -81,14 +82,14 @@ FontPlatformData::FontPlatformData(float size,
       is_hash_table_deleted_value_(false)
 #if defined(OS_WIN)
       ,
-      paint_text_flags_(0)
+      font_flags_(0)
 #endif
 {
 }
 
 FontPlatformData::FontPlatformData(const FontPlatformData& source)
     : typeface_(source.typeface_),
-#if !defined(OS_WIN)
+#if !defined(OS_WIN) && !defined(OS_MACOSX)
       family_(source.family_),
 #endif
       text_size_(source.text_size_),
@@ -103,17 +104,17 @@ FontPlatformData::FontPlatformData(const FontPlatformData& source)
       is_hash_table_deleted_value_(false)
 #if defined(OS_WIN)
       ,
-      paint_text_flags_(source.paint_text_flags_)
+      font_flags_(source.font_flags_)
 #endif
 {
 }
 
 FontPlatformData::FontPlatformData(const FontPlatformData& src, float text_size)
     : FontPlatformData(src.typeface_,
-#if !defined(OS_WIN)
+#if !defined(OS_WIN) && !defined(OS_MACOSX)
                        src.family_.data(),
 #else
-                       CString(),
+                       std::string(),
 #endif
                        text_size,
                        src.synthetic_bold_,
@@ -122,13 +123,13 @@ FontPlatformData::FontPlatformData(const FontPlatformData& src, float text_size)
 }
 
 FontPlatformData::FontPlatformData(sk_sp<SkTypeface> typeface,
-                                   const CString& family,
+                                   const std::string& family,
                                    float text_size,
                                    bool synthetic_bold,
                                    bool synthetic_italic,
                                    FontOrientation orientation)
     : typeface_(typeface),
-#if !defined(OS_WIN)
+#if !defined(OS_WIN) && !defined(OS_MACOSX)
       family_(family),
 #endif
       text_size_(text_size),
@@ -139,7 +140,7 @@ FontPlatformData::FontPlatformData(sk_sp<SkTypeface> typeface,
       is_hash_table_deleted_value_(false)
 #if defined(OS_WIN)
       ,
-      paint_text_flags_(0)
+      font_flags_(0)
 #endif
 {
 #if !defined(OS_WIN) && !defined(OS_MACOSX)
@@ -147,11 +148,11 @@ FontPlatformData::FontPlatformData(sk_sp<SkTypeface> typeface,
   auto system_style =
       QuerySystemRenderStyle(family_, text_size_, typeface_->fontStyle());
 
-  // In layout tests, ignore system preference for subpixel positioning,
+  // In web tests, ignore system preference for subpixel positioning,
   // or explicitly disable if requested.
-  if (LayoutTestSupport::IsRunningLayoutTest()) {
+  if (WebTestSupport::IsRunningWebTest()) {
     system_style.use_subpixel_positioning =
-        LayoutTestSupport::IsTextSubpixelPositioningAllowedForTest()
+        WebTestSupport::IsTextSubpixelPositioningAllowedForTest()
             ? WebFontRenderStyle::kNoPreference
             : 0;
   }
@@ -169,12 +170,6 @@ FontPlatformData::~FontPlatformData() = default;
 #if defined(OS_MACOSX)
 CTFontRef FontPlatformData::CtFont() const {
   return SkTypeface_GetCTFontRef(typeface_.get());
-};
-
-CGFontRef FontPlatformData::CgFont() const {
-  if (!CtFont())
-    return nullptr;
-  return CTFontCopyGraphicsFont(CtFont(), 0);
 }
 #endif
 
@@ -185,7 +180,7 @@ const FontPlatformData& FontPlatformData::operator=(
     return *this;
 
   typeface_ = other.typeface_;
-#if !defined(OS_WIN)
+#if !defined(OS_WIN) && !defined(OS_MACOSX)
   family_ = other.family_;
 #endif
   text_size_ = other.text_size_;
@@ -199,7 +194,7 @@ const FontPlatformData& FontPlatformData::operator=(
 #endif
 
 #if defined(OS_WIN)
-  paint_text_flags_ = 0;
+  font_flags_ = 0;
 #endif
 
   return *this;
@@ -238,7 +233,8 @@ String FontPlatformData::FontFamilyName() const {
          !localized_string.fString.size()) {
   }
   font_family_iterator->unref();
-  return String::FromUTF8(localized_string.fString.c_str());
+  return String::FromUTF8(localized_string.fString.c_str(),
+                          localized_string.fString.size());
 }
 
 SkTypeface* FontPlatformData::Typeface() const {
@@ -281,20 +277,16 @@ unsigned FontPlatformData::GetHash() const {
 
 #if !defined(OS_MACOSX)
 bool FontPlatformData::FontContainsCharacter(UChar32 character) {
-  PaintFont font;
-  SetupPaintFont(&font);
-  font.SetTextEncoding(SkPaint::kUTF32_TextEncoding);
-
-  uint16_t glyph;
-  font.ToSkPaint().textToGlyphs(&character, sizeof(character), &glyph);
-  return glyph;
+  SkFont font;
+  SetupSkFont(&font);
+  return font.unicharToGlyph(character);
 }
 #endif
 
 #if !defined(OS_MACOSX) && !defined(OS_WIN)
 // static
 WebFontRenderStyle FontPlatformData::QuerySystemRenderStyle(
-    const CString& family,
+    const std::string& family,
     float text_size,
     SkFontStyle font_style) {
   WebFontRenderStyle result;
@@ -314,18 +306,18 @@ WebFontRenderStyle FontPlatformData::QuerySystemRenderStyle(
   return result;
 }
 
-void FontPlatformData::SetupPaintFont(PaintFont* font,
-                                      float device_scale_factor,
-                                      const Font*) const {
-  style_.ApplyToPaintFont(*font, device_scale_factor);
+void FontPlatformData::SetupSkFont(SkFont* font,
+                                   float device_scale_factor,
+                                   const Font*) const {
+  style_.ApplyToSkFont(font, device_scale_factor);
 
   const float ts = text_size_ >= 0 ? text_size_ : 12;
-  font->SetTextSize(SkFloatToScalar(ts));
-  font->SetTypeface(typeface_);
-  font->SetFakeBoldText(synthetic_bold_);
-  font->SetTextSkewX(synthetic_italic_ ? -SK_Scalar1 / 4 : 0);
+  font->setSize(SkFloatToScalar(ts));
+  font->setTypeface(typeface_);
+  font->setEmbolden(synthetic_bold_);
+  font->setSkewX(synthetic_italic_ ? -SK_Scalar1 / 4 : 0);
 
-  font->SetEmbeddedBitmapText(!avoid_embedded_bitmaps_);
+  font->setEmbeddedBitmaps(!avoid_embedded_bitmaps_);
 }
 #endif
 

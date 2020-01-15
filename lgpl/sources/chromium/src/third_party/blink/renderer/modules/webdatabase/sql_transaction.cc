@@ -28,6 +28,7 @@
 
 #include "third_party/blink/renderer/modules/webdatabase/sql_transaction.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/modules/webdatabase/database.h"
 #include "third_party/blink/renderer/modules/webdatabase/database_authorizer.h"
@@ -85,8 +86,8 @@ SQLTransaction* SQLTransaction::Create(Database* db,
                                        OnSuccessCallback* success_callback,
                                        OnErrorCallback* error_callback,
                                        bool read_only) {
-  return new SQLTransaction(db, callback, success_callback, error_callback,
-                            read_only);
+  return MakeGarbageCollected<SQLTransaction>(db, callback, success_callback,
+                                              error_callback, read_only);
 }
 
 SQLTransaction::SQLTransaction(Database* db,
@@ -102,7 +103,8 @@ SQLTransaction::SQLTransaction(Database* db,
       read_only_(read_only) {
   DCHECK(IsMainThread());
   DCHECK(database_);
-  probe::AsyncTaskScheduled(db->GetExecutionContext(), "SQLTransaction", this);
+  probe::AsyncTaskScheduled(db->GetExecutionContext(), "SQLTransaction",
+                            &async_task_id_);
 }
 
 SQLTransaction::~SQLTransaction() = default;
@@ -152,7 +154,7 @@ SQLTransaction::StateFunction SQLTransaction::StateFunctionFor(
       &SQLTransaction::DeliverSuccessCallback            // 12.
   };
 
-  DCHECK(arraysize(kStateFunctions) ==
+  DCHECK(base::size(kStateFunctions) ==
          static_cast<int>(SQLTransactionState::kNumberOfStates));
   DCHECK(state < SQLTransactionState::kNumberOfStates);
 
@@ -183,7 +185,7 @@ SQLTransactionState SQLTransaction::NextStateForTransactionError() {
 
 SQLTransactionState SQLTransaction::DeliverTransactionCallback() {
   bool should_deliver_error_callback = false;
-  probe::AsyncTask async_task(database_->GetExecutionContext(), this,
+  probe::AsyncTask async_task(database_->GetExecutionContext(), &async_task_id_,
                               "transaction");
 
   // Spec 4.3.2 4: Invoke the transaction callback with the new SQLTransaction
@@ -198,18 +200,17 @@ SQLTransactionState SQLTransaction::DeliverTransactionCallback() {
   // jump to the error callback.
   SQLTransactionState next_state = SQLTransactionState::kRunStatements;
   if (should_deliver_error_callback) {
-    database_->ReportStartTransactionResult(5, SQLError::kUnknownErr, 0);
-    transaction_error_ = SQLErrorData::Create(
+    transaction_error_ = std::make_unique<SQLErrorData>(
         SQLError::kUnknownErr,
         "the SQLTransactionCallback was null or threw an exception");
     next_state = SQLTransactionState::kDeliverTransactionErrorCallback;
   }
-  database_->ReportStartTransactionResult(0, -1, 0);  // OK
   return next_state;
 }
 
 SQLTransactionState SQLTransaction::DeliverTransactionErrorCallback() {
-  probe::AsyncTask async_task(database_->GetExecutionContext(), this);
+  probe::AsyncTask async_task(database_->GetExecutionContext(),
+                              &async_task_id_);
 
   // Spec 4.3.2.10: If exists, invoke error callback with the last
   // error to have occurred in this transaction.
@@ -220,10 +221,12 @@ SQLTransactionState SQLTransaction::DeliverTransactionErrorCallback() {
     // a lock.
     if (!transaction_error_) {
       DCHECK(backend_->TransactionError());
-      transaction_error_ = SQLErrorData::Create(*backend_->TransactionError());
+      transaction_error_ =
+          std::make_unique<SQLErrorData>(*backend_->TransactionError());
     }
     DCHECK(transaction_error_);
-    error_callback->OnError(SQLError::Create(*transaction_error_));
+    error_callback->OnError(
+        MakeGarbageCollected<SQLError>(*transaction_error_));
 
     transaction_error_ = nullptr;
   }
@@ -249,11 +252,10 @@ SQLTransactionState SQLTransaction::DeliverStatementCallback() {
   execute_sql_allowed_ = false;
 
   if (result) {
-    database_->ReportCommitTransactionResult(2, SQLError::kUnknownErr, 0);
-    transaction_error_ =
-        SQLErrorData::Create(SQLError::kUnknownErr,
-                             "the statement callback raised an exception or "
-                             "statement error callback did not return false");
+    transaction_error_ = std::make_unique<SQLErrorData>(
+        SQLError::kUnknownErr,
+        "the statement callback raised an exception or "
+        "statement error callback did not return false");
     return NextStateForTransactionError();
   }
   return SQLTransactionState::kRunStatements;
@@ -272,7 +274,8 @@ SQLTransactionState SQLTransaction::DeliverQuotaIncreaseCallback() {
 
 SQLTransactionState SQLTransaction::DeliverSuccessCallback() {
   DCHECK(IsMainThread());
-  probe::AsyncTask async_task(database_->GetExecutionContext(), this);
+  probe::AsyncTask async_task(database_->GetExecutionContext(),
+                              &async_task_id_);
 
   // Spec 4.3.2.8: Deliver success callback.
   if (OnSuccessCallback* success_callback = success_callback_.Release())
@@ -329,8 +332,8 @@ void SQLTransaction::ExecuteSQL(const String& sql_statement,
   else if (read_only_)
     permissions |= DatabaseAuthorizer::kReadOnlyMask;
 
-  SQLStatement* statement =
-      SQLStatement::Create(database_.Get(), callback, callback_error);
+  auto* statement = MakeGarbageCollected<SQLStatement>(
+      database_.Get(), callback, callback_error);
   backend_->ExecuteSQL(statement, sql_statement, arguments, permissions);
 }
 
@@ -344,7 +347,7 @@ void SQLTransaction::executeSql(ScriptState* script_state,
 void SQLTransaction::executeSql(
     ScriptState* script_state,
     const String& sql_statement,
-    const base::Optional<Vector<ScriptValue>>& arguments,
+    const base::Optional<HeapVector<ScriptValue>>& arguments,
     V8SQLStatementCallback* callback,
     V8SQLStatementErrorCallback* callback_error,
     ExceptionState& exception_state) {

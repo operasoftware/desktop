@@ -32,7 +32,7 @@
 
 namespace blink {
 
-namespace ShadowElementNames {
+namespace shadow_element_names {
 
 const AtomicString& DetailsContent() {
   DEFINE_STATIC_LOCAL(AtomicString, name, ("details-content"));
@@ -84,6 +84,11 @@ const AtomicString& SearchClearButton() {
   return name;
 }
 
+const AtomicString& PasswordRevealButton() {
+  DEFINE_STATIC_LOCAL(AtomicString, name, ("password-reveal"));
+  return name;
+}
+
 const AtomicString& SearchDecoration() {
   DEFINE_STATIC_LOCAL(AtomicString, name, ("decoration"));
   return name;
@@ -109,6 +114,6 @@ const AtomicString& OptGroupLabel() {
   return name;
 }
 
-}  // namespace ShadowElementNames
+}  // namespace shadow_element_names
 
 }  // namespace blink

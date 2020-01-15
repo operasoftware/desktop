@@ -5,8 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_LINK_HEADER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_LINK_HEADER_H_
 
+#include "base/optional.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -23,9 +24,17 @@ class LinkHeader {
   const String& CrossOrigin() const { return cross_origin_; }
   const String& Nonce() const { return nonce_; }
   const String& Integrity() const { return integrity_; }
-  const String& Srcset() const { return srcset_; }
-  const String& Imgsizes() const { return imgsizes_; }
+  const String& ImageSrcset() const { return image_srcset_; }
+  const String& ImageSizes() const { return image_sizes_; }
+  const String& HeaderIntegrity() const { return header_integrity_; }
+  const String& Variants() const { return variants_; }
+  const String& VariantKey() const { return variant_key_; }
+  const base::Optional<String>& Anchor() const { return anchor_; }
   bool Valid() const { return is_valid_; }
+  bool IsViewportDependent() const {
+    return !Media().IsEmpty() || !ImageSrcset().IsEmpty() ||
+           !ImageSizes().IsEmpty();
+  }
 
   enum LinkParameterName {
     kLinkParameterRel,
@@ -41,8 +50,11 @@ class LinkHeader {
     kLinkParameterAs,
     kLinkParameterNonce,
     kLinkParameterIntegrity,
-    kLinkParameterSrcset,
-    kLinkParameterImgsizes,
+    kLinkParameterImageSrcset,
+    kLinkParameterImageSizes,
+    kLinkParameterHeaderIntegrity,
+    kLinkParameterVariants,
+    kLinkParameterVariantKey,
   };
 
  private:
@@ -60,8 +72,12 @@ class LinkHeader {
   String cross_origin_;
   String nonce_;
   String integrity_;
-  String srcset_;
-  String imgsizes_;
+  String image_srcset_;
+  String image_sizes_;
+  String header_integrity_;
+  String variants_;
+  String variant_key_;
+  base::Optional<String> anchor_;
   bool is_valid_;
 };
 
@@ -75,8 +91,8 @@ class PLATFORM_EXPORT LinkHeaderSet {
     return header_set_.begin();
   }
   Vector<LinkHeader>::const_iterator end() const { return header_set_.end(); }
-  LinkHeader& operator[](size_t i) { return header_set_[i]; }
-  size_t size() { return header_set_.size(); }
+  LinkHeader& operator[](wtf_size_t i) { return header_set_[i]; }
+  wtf_size_t size() { return header_set_.size(); }
 
  private:
   Vector<LinkHeader> header_set_;

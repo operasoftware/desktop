@@ -49,9 +49,9 @@ class WebTextCheckClient;
 
 class CORE_EXPORT SpellChecker final : public GarbageCollected<SpellChecker> {
  public:
-  static SpellChecker* Create(LocalFrame&);
+  explicit SpellChecker(LocalFrame&);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
   WebSpellCheckPanelHostClient& SpellCheckPanelHostClient() const;
   WebTextCheckClient* GetTextCheckerClient() const;
@@ -79,7 +79,6 @@ class CORE_EXPORT SpellChecker final : public GarbageCollected<SpellChecker> {
   bool SelectionStartHasMarkerFor(DocumentMarker::MarkerType,
                                   int from,
                                   int length) const;
-  void CancelCheck();
 
   // Exposed for testing and idle time spell checker
   SpellCheckRequester& GetSpellCheckRequester() const {
@@ -89,19 +88,9 @@ class CORE_EXPORT SpellChecker final : public GarbageCollected<SpellChecker> {
     return *idle_spell_check_controller_;
   }
 
-  // The leak detector will report leaks should queued requests be posted
-  // while it GCs repeatedly, as the requests keep their associated element
-  // alive.
-  //
-  // Hence allow the leak detector to effectively stop the spell checker to
-  // ensure leak reporting stability.
-  void PrepareForLeakDetection();
-
-  void DocumentAttached(Document*);
+  void DidAttachDocument(Document*);
 
  private:
-  explicit SpellChecker(LocalFrame&);
-
   LocalFrame& GetFrame() const {
     DCHECK(frame_);
     return *frame_;

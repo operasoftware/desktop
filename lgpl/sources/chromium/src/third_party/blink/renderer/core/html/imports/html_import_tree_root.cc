@@ -11,10 +11,6 @@
 
 namespace blink {
 
-HTMLImportTreeRoot* HTMLImportTreeRoot::Create(Document* document) {
-  return new HTMLImportTreeRoot(document);
-}
-
 HTMLImportTreeRoot::HTMLImportTreeRoot(Document* document)
     : HTMLImport(HTMLImport::kSync),
       document_(document),
@@ -59,7 +55,7 @@ void HTMLImportTreeRoot::ScheduleRecalcState() {
   DCHECK(document_);
   if (recalc_timer_.IsActive() || !document_->IsActive())
     return;
-  recalc_timer_.StartOneShot(TimeDelta(), FROM_HERE);
+  recalc_timer_.StartOneShot(base::TimeDelta(), FROM_HERE);
 }
 
 HTMLImportChild* HTMLImportTreeRoot::Add(HTMLImportChild* child) {
@@ -81,7 +77,7 @@ void HTMLImportTreeRoot::RecalcTimerFired(TimerBase*) {
   HTMLImport::RecalcTreeState(this);
 }
 
-void HTMLImportTreeRoot::Trace(blink::Visitor* visitor) {
+void HTMLImportTreeRoot::Trace(Visitor* visitor) {
   visitor->Trace(document_);
   visitor->Trace(imports_);
   HTMLImport::Trace(visitor);

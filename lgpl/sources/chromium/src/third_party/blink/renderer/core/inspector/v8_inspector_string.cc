@@ -4,7 +4,9 @@
 
 #include "third_party/blink/renderer/core/inspector/v8_inspector_string.h"
 
+#include <utility>
 #include "third_party/blink/renderer/core/inspector/protocol/Protocol.h"
+#include "third_party/blink/renderer/platform/wtf/text/base64.h"
 
 namespace blink {
 
@@ -57,6 +59,20 @@ std::unique_ptr<protocol::Value> StringUtil::parseJSON(const String& string) {
 }
 
 // static
+ProtocolMessage StringUtil::jsonToMessage(const String& message) {
+  ProtocolMessage result;
+  result.json = message;
+  return result;
+}
+
+// static
+ProtocolMessage StringUtil::binaryToMessage(WebVector<uint8_t> message) {
+  ProtocolMessage result;
+  result.binary = std::move(message);
+  return result;
+}
+
+// static
 void StringUtil::builderAppendQuotedString(StringBuilder& builder,
                                            const String& str) {
   builder.Append('"');
@@ -74,6 +90,91 @@ void StringUtil::builderAppendQuotedString(StringBuilder& builder,
   builder.Append('"');
 }
 
-}  // namespace protocol
+// static
+String StringUtil::fromUTF16LE(const uint16_t* data, size_t length) {
+  // Chromium doesn't support big endian architectures, so it's OK to cast here.
+  return String(reinterpret_cast<const UChar*>(data), length);
+}
 
+namespace {
+class BinaryBasedOnSharedBuffer : public Binary::Impl {
+ public:
+  explicit BinaryBasedOnSharedBuffer(scoped_refptr<SharedBuffer> buffer)
+      : buffer_(std::move(buffer)) {}
+
+  const uint8_t* data() const override {
+    return reinterpret_cast<const uint8_t*>(buffer_->Data());
+  }
+  size_t size() const override { return buffer_->size(); }
+
+ private:
+  // buffer_ is mutable so we can call SharedBuffer::Data(),
+  // which flattens the segments of the buffer.
+  mutable scoped_refptr<SharedBuffer> buffer_;
+};
+
+class BinaryBasedOnVector : public Binary::Impl {
+ public:
+  explicit BinaryBasedOnVector(Vector<uint8_t> values)
+      : values_(std::move(values)) {}
+
+  const uint8_t* data() const override { return values_.data(); }
+  size_t size() const override { return values_.size(); }
+
+ private:
+  Vector<uint8_t> values_;
+};
+
+class BinaryBasedOnCachedData : public Binary::Impl {
+ public:
+  explicit BinaryBasedOnCachedData(
+      std::unique_ptr<v8::ScriptCompiler::CachedData> data)
+      : data_(std::move(data)) {}
+
+  const uint8_t* data() const override { return data_->data; }
+  size_t size() const override { return data_->length; }
+
+ private:
+  std::unique_ptr<v8::ScriptCompiler::CachedData> data_;
+};
+}  // namespace
+
+String Binary::toBase64() const {
+  return impl_ ? Base64Encode(*impl_) : String();
+}
+
+// static
+Binary Binary::fromBase64(const String& base64, bool* success) {
+  Vector<char> out;
+  *success = WTF::Base64Decode(base64, out);
+  return Binary(base::AdoptRef(
+      new BinaryBasedOnSharedBuffer(SharedBuffer::AdoptVector(out))));
+}
+
+// static
+Binary Binary::fromSharedBuffer(scoped_refptr<SharedBuffer> buffer) {
+  return Binary(
+      base::AdoptRef(new BinaryBasedOnSharedBuffer(std::move(buffer))));
+}
+
+// static
+Binary Binary::fromVector(Vector<uint8_t> in) {
+  return Binary(base::AdoptRef(new BinaryBasedOnVector(std::move(in))));
+}
+
+// static
+Binary Binary::fromSpan(const uint8_t* data, size_t size) {
+  Vector<uint8_t> in;
+  in.Append(data, size);
+  return Binary::fromVector(std::move(in));
+}
+
+// static
+Binary Binary::fromCachedData(
+    std::unique_ptr<v8::ScriptCompiler::CachedData> data) {
+  CHECK_EQ(data->buffer_policy, v8::ScriptCompiler::CachedData::BufferOwned);
+  return Binary(base::AdoptRef(new BinaryBasedOnCachedData(std::move(data))));
+}
+
+}  // namespace protocol
 }  // namespace blink

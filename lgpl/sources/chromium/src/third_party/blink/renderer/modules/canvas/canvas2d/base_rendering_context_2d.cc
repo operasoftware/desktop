@@ -4,35 +4,25 @@
 
 #include "third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.h"
 
+#include <algorithm>
+#include <cmath>
+#include <memory>
+
+#include "base/metrics/histogram_functions.h"
 #include "base/numerics/checked_math.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/css/cssom/css_url_image_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
-#include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
-#include "third_party/blink/renderer/core/html/canvas/image_data.h"
 #include "third_party/blink/renderer/core/html/canvas/text_metrics.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
-#include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
 #include "third_party/blink/renderer/core/svg/svg_image_element.h"
-#include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
-#include "third_party/blink/renderer/modules/canvas/canvas2d/canvas_gradient.h"
 #include "third_party/blink/renderer/modules/canvas/canvas2d/canvas_pattern.h"
-#include "third_party/blink/renderer/modules/canvas/canvas2d/canvas_style.h"
 #include "third_party/blink/renderer/modules/canvas/canvas2d/path_2d.h"
-#include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/geometry/float_quad.h"
-#include "third_party/blink/renderer/platform/graphics/canvas_heuristic_parameters.h"
-#include "third_party/blink/renderer/platform/graphics/color.h"
-#include "third_party/blink/renderer/platform/graphics/image.h"
-#include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
-#include "third_party/blink/renderer/platform/graphics/paint/paint_flags.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/graphics/stroke_data.h"
-#include "third_party/blink/renderer/platform/histogram.h"
-#include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 namespace blink {
 
@@ -44,7 +34,7 @@ const double BaseRenderingContext2D::kCDeviceScaleFactor = 1.0;
 
 BaseRenderingContext2D::BaseRenderingContext2D()
     : clip_antialiasing_(kNotAntiAliased), origin_tainted_by_content_(false) {
-  state_stack_.push_back(CanvasRenderingContext2DState::Create());
+  state_stack_.push_back(MakeGarbageCollected<CanvasRenderingContext2DState>());
 }
 
 BaseRenderingContext2D::~BaseRenderingContext2D() = default;
@@ -61,7 +51,7 @@ void BaseRenderingContext2D::RealizeSaves() {
     // Reduce the current state's unrealized count by one now,
     // to reflect the fact we are saving one state.
     state_stack_.back()->Restore();
-    state_stack_.push_back(CanvasRenderingContext2DState::Create(
+    state_stack_.push_back(MakeGarbageCollected<CanvasRenderingContext2DState>(
         GetState(), CanvasRenderingContext2DState::kDontCopyClipList));
     // Set the new state's unrealized count to 0, because it has no outstanding
     // saves.
@@ -79,6 +69,7 @@ void BaseRenderingContext2D::RealizeSaves() {
 
 void BaseRenderingContext2D::save() {
   state_stack_.back()->Save();
+  ValidateStateStack();
 }
 
 void BaseRenderingContext2D::restore() {
@@ -140,7 +131,7 @@ void BaseRenderingContext2D::Reset() {
   ValidateStateStack();
   UnwindStateStack();
   state_stack_.resize(1);
-  state_stack_.front() = CanvasRenderingContext2DState::Create();
+  state_stack_.front() = MakeGarbageCollected<CanvasRenderingContext2DState>();
   path_.Clear();
   if (cc::PaintCanvas* c = ExistingDrawingCanvas()) {
     // The canvas should always have an initial/unbalanced save frame, which
@@ -245,8 +236,6 @@ void BaseRenderingContext2D::setFillStyle(
     if (!origin_tainted_by_content_ && !canvas_pattern->OriginClean()) {
       SetOriginTaintedByContent();
     }
-    if (canvas_pattern->GetPattern()->IsTextureBacked())
-      DisableDeferral(kDisableDeferralReasonUsingTextureBackedPattern);
     canvas_style = CanvasStyle::CreateFromPattern(canvas_pattern);
   }
 
@@ -421,9 +410,9 @@ void BaseRenderingContext2D::setFilter(
     return;
 
   const CSSValue* filter_value = CSSParser::ParseSingleValue(
-      CSSPropertyFilter, filter_string,
-      CSSParserContext::Create(kHTMLStandardMode,
-                               execution_context->GetSecureContextMode()));
+      CSSPropertyID::kFilter, filter_string,
+      MakeGarbageCollected<CSSParserContext>(
+          kHTMLStandardMode, execution_context->GetSecureContextMode()));
 
   if (!filter_value || filter_value->IsCSSWideKeyword())
     return;
@@ -582,7 +571,7 @@ void BaseRenderingContext2D::setTransform(double m11,
   transform(fm11, fm12, fm21, fm22, fdx, fdy);
 }
 
-void BaseRenderingContext2D::setTransform(DOMMatrix2DInit& transform,
+void BaseRenderingContext2D::setTransform(DOMMatrix2DInit* transform,
                                           ExceptionState& exception_state) {
   DOMMatrixReadOnly* m =
       DOMMatrixReadOnly::fromMatrix2D(transform, exception_state);
@@ -650,8 +639,8 @@ void BaseRenderingContext2D::DrawPathInternal(
 
   SkPath sk_path = path.GetSkPath();
   FloatRect bounds = path.BoundingRect();
-  if (isnan(bounds.X()) || isnan(bounds.Y()) || isnan(bounds.Width()) ||
-      isnan(bounds.Height()))
+  if (std::isnan(bounds.X()) || std::isnan(bounds.Y()) ||
+      std::isnan(bounds.Width()) || std::isnan(bounds.Height()))
     return;
   sk_path.setFillType(fill_type);
 
@@ -715,6 +704,15 @@ void BaseRenderingContext2D::fillRect(double x,
   float fwidth = clampTo<float>(width);
   float fheight = clampTo<float>(height);
 
+  // We are assuming that if the pattern is not accelerated and the current
+  // canvas is accelerated, the texture of the pattern will not be able to be
+  // moved to the texture of the canvas receiving the pattern (because if the
+  // pattern was unaccelerated is because it was not possible to hold that image
+  // in an accelerated texture - that is, into the GPU). That's why we disable
+  // the acceleration to be sure that it will work.
+  if (IsAccelerated() && GetState().HasPattern() &&
+      !GetState().PatternIsAccelerated())
+    DisableAcceleration();
   SkRect rect = SkRect::MakeXYWH(fx, fy, fwidth, fheight);
   Draw([&rect](cc::PaintCanvas* c, const PaintFlags* flags)  // draw lambda
        { c->drawRect(rect, *flags); },
@@ -1135,28 +1133,9 @@ void BaseRenderingContext2D::DrawImageInternal(cc::PaintCanvas* c,
         c,
         IntRect(IntPoint(), IntSize(video->videoWidth(), video->videoHeight())),
         &image_flags);
-  }
+  };
 
   c->restoreToCount(initial_save_count);
-}
-
-bool ShouldDisableDeferral(CanvasImageSource* image_source,
-                           DisableDeferralReason* reason) {
-  DCHECK(reason);
-  DCHECK_EQ(*reason, kDisableDeferralReasonUnknown);
-
-  if (image_source->IsVideoElement()) {
-    *reason = kDisableDeferralReasonDrawImageOfVideo;
-    return true;
-  }
-  if (image_source->IsCanvasElement()) {
-    HTMLCanvasElement* canvas = static_cast<HTMLCanvasElement*>(image_source);
-    if (canvas->IsAnimated2d()) {
-      *reason = kDisableDeferralReasonDrawImageOfAnimated2dCanvas;
-      return true;
-    }
-  }
-  return false;
 }
 
 void BaseRenderingContext2D::SetOriginTaintedByContent() {
@@ -1180,76 +1159,7 @@ void BaseRenderingContext2D::drawImage(ScriptState* script_state,
   if (!DrawingCanvas())
     return;
 
-  TimeTicks start_time;
-  base::Optional<CustomCountHistogram> timer;
-  if (!IsPaint2D()) {
-    start_time = WTF::CurrentTimeTicks();
-    if (CanCreateCanvas2dResourceProvider() && IsAccelerated()) {
-      if (image_source->IsVideoElement()) {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(
-            CustomCountHistogram, scoped_us_counter_video_gpu,
-            ("Blink.Canvas.DrawImage.Video.GPU", 0, 10000000, 50));
-        timer.emplace(scoped_us_counter_video_gpu);
-      } else if (image_source->IsCanvasElement()) {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(
-            CustomCountHistogram, scoped_us_counter_canvas_gpu,
-            ("Blink.Canvas.DrawImage.Canvas.GPU", 0, 10000000, 50));
-        timer.emplace(scoped_us_counter_canvas_gpu);
-      } else if (image_source->IsSVGSource()) {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(
-            CustomCountHistogram, scoped_us_counter_svggpu,
-            ("Blink.Canvas.DrawImage.SVG.GPU", 0, 10000000, 50));
-        timer.emplace(scoped_us_counter_svggpu);
-      } else if (image_source->IsImageBitmap()) {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(
-            CustomCountHistogram, scoped_us_counter_image_bitmap_gpu,
-            ("Blink.Canvas.DrawImage.ImageBitmap.GPU", 0, 10000000, 50));
-        timer.emplace(scoped_us_counter_image_bitmap_gpu);
-      } else if (image_source->IsOffscreenCanvas()) {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(
-            CustomCountHistogram, scoped_us_counter_offscreencanvas_gpu,
-            ("Blink.Canvas.DrawImage.OffscreenCanvas.GPU", 0, 10000000, 50));
-        timer.emplace(scoped_us_counter_offscreencanvas_gpu);
-      } else {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(
-            CustomCountHistogram, scoped_us_counter_others_gpu,
-            ("Blink.Canvas.DrawImage.Others.GPU", 0, 10000000, 50));
-        timer.emplace(scoped_us_counter_others_gpu);
-      }
-    } else {
-      if (image_source->IsVideoElement()) {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(
-            CustomCountHistogram, scoped_us_counter_video_cpu,
-            ("Blink.Canvas.DrawImage.Video.CPU", 0, 10000000, 50));
-        timer.emplace(scoped_us_counter_video_cpu);
-      } else if (image_source->IsCanvasElement()) {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(
-            CustomCountHistogram, scoped_us_counter_canvas_cpu,
-            ("Blink.Canvas.DrawImage.Canvas.CPU", 0, 10000000, 50));
-        timer.emplace(scoped_us_counter_canvas_cpu);
-      } else if (image_source->IsSVGSource()) {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(
-            CustomCountHistogram, scoped_us_counter_svgcpu,
-            ("Blink.Canvas.DrawImage.SVG.CPU", 0, 10000000, 50));
-        timer.emplace(scoped_us_counter_svgcpu);
-      } else if (image_source->IsImageBitmap()) {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(
-            CustomCountHistogram, scoped_us_counter_image_bitmap_cpu,
-            ("Blink.Canvas.DrawImage.ImageBitmap.CPU", 0, 10000000, 50));
-        timer.emplace(scoped_us_counter_image_bitmap_cpu);
-      } else if (image_source->IsOffscreenCanvas()) {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(
-            CustomCountHistogram, scoped_us_counter_offscreencanvas_cpu,
-            ("Blink.Canvas.DrawImage.OffscreenCanvas.CPU", 0, 10000000, 50));
-        timer.emplace(scoped_us_counter_offscreencanvas_cpu);
-      } else {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(
-            CustomCountHistogram, scoped_us_counter_others_cpu,
-            ("Blink.Canvas.DrawImage.Others.CPU", 0, 10000000, 50));
-        timer.emplace(scoped_us_counter_others_cpu);
-      }
-    }
-  }
+  base::TimeTicks start_time = base::TimeTicks::Now();
 
   scoped_refptr<Image> image;
   FloatSize default_object_size(Width(), Height());
@@ -1298,45 +1208,13 @@ void BaseRenderingContext2D::drawImage(ScriptState* script_state,
   if (src_rect.IsEmpty())
     return;
 
-  DisableDeferralReason reason = kDisableDeferralReasonUnknown;
-  if (ShouldDisableDeferral(image_source, &reason))
-    DisableDeferral(reason);
-  else if (image->IsTextureBacked())
-    DisableDeferral(kDisableDeferralDrawImageWithTextureBackedSourceImage);
-
   ValidateStateStack();
 
   WillDrawImage(image_source);
 
   ValidateStateStack();
 
-  // Heuristic for disabling acceleration based on anticipated texture upload
-  // overhead.
-  // See comments in CanvasHeuristicParameters.h for explanation.
-  if (CanCreateCanvas2dResourceProvider() && IsAccelerated() &&
-      !image_source->IsAccelerated()) {
-    float src_area = src_rect.Width() * src_rect.Height();
-    if (src_area >
-        CanvasHeuristicParameters::kDrawImageTextureUploadHardSizeLimit) {
-      this->DisableAcceleration();
-    } else if (src_area > CanvasHeuristicParameters::
-                              kDrawImageTextureUploadSoftSizeLimit) {
-      SkRect bounds = dst_rect;
-      SkMatrix ctm = DrawingCanvas()->getTotalMatrix();
-      ctm.mapRect(&bounds);
-      float dst_area = dst_rect.Width() * dst_rect.Height();
-      if (src_area >
-          dst_area * CanvasHeuristicParameters::
-                         kDrawImageTextureUploadSoftSizeLimitScaleThreshold) {
-        this->DisableAcceleration();
-      }
-    }
-  }
-
-  ValidateStateStack();
-
-  if (!origin_tainted_by_content_ &&
-      WouldTaintOrigin(image_source, ExecutionContext::From(script_state)))
+  if (!origin_tainted_by_content_ && WouldTaintOrigin(image_source))
     SetOriginTaintedByContent();
 
   Draw(
@@ -1354,10 +1232,59 @@ void BaseRenderingContext2D::drawImage(ScriptState* script_state,
           : CanvasRenderingContext2DState::kNonOpaqueImage);
 
   ValidateStateStack();
-
+  bool source_is_canvas = false;
   if (!IsPaint2D()) {
-    DCHECK(!start_time.is_null());
-    timer->CountMicroseconds(WTF::CurrentTimeTicks() - start_time);
+    std::string image_source_name;
+    if (image_source->IsCanvasElement()) {
+      image_source_name = "Canvas";
+      source_is_canvas = true;
+    } else if (image_source->IsCSSImageValue()) {
+      image_source_name = "CssImage";
+    } else if (image_source->IsImageElement()) {
+      image_source_name = "ImageElement";
+    } else if (image_source->IsImageBitmap()) {
+      image_source_name = "ImageBitmap";
+    } else if (image_source->IsOffscreenCanvas()) {
+      image_source_name = "OffscreenCanvas";
+      source_is_canvas = true;
+    } else if (image_source->IsSVGSource()) {
+      image_source_name = "SVG";
+    } else if (image_source->IsVideoElement()) {
+      image_source_name = "Video";
+    } else {  // Unknown source.
+      image_source_name = "Unknown";
+    }
+
+    std::string duration_histogram_name =
+        "Blink.Canvas.DrawImage.Duration." + image_source_name;
+    std::string size_histogram_name =
+        "Blink.Canvas.DrawImage.SqrtNumberOfPixels." + image_source_name;
+
+    if (CanCreateCanvas2dResourceProvider() && IsAccelerated()) {
+      if (source_is_canvas)
+        size_histogram_name.append(".GPU");
+      duration_histogram_name.append(".GPU");
+    } else {
+      if (source_is_canvas)
+        size_histogram_name.append(".CPU");
+      duration_histogram_name.append(".CPU");
+    }
+
+    base::TimeDelta elapsed = base::TimeTicks::Now() - start_time;
+
+    // TODO(crbug.com/983261) Change this to use UmaHistogramMicrosecondsTimes.
+    base::UmaHistogramMicrosecondsTimesUnderTenMilliseconds(
+        duration_histogram_name, elapsed);
+
+    float sqrt_pixels_float =
+        std::sqrt(dst_rect.Width()) * std::sqrt(dst_rect.Height());
+    // If sqrt_pixels_float overflows as int CheckedNumeric will store it
+    // as invalid, then ValueOrDefault will return the maximum int.
+    base::CheckedNumeric<int> sqrt_pixels = sqrt_pixels_float;
+    base::UmaHistogramCustomCounts(
+        size_histogram_name,
+        sqrt_pixels.ValueOrDefault(std::numeric_limits<int>::max()), 1, 5000,
+        50);
   }
 }
 
@@ -1394,8 +1321,8 @@ CanvasGradient* BaseRenderingContext2D::createLinearGradient(double x0,
   float fx1 = clampTo<float>(x1);
   float fy1 = clampTo<float>(y1);
 
-  CanvasGradient* gradient =
-      CanvasGradient::Create(FloatPoint(fx0, fy0), FloatPoint(fx1, fy1));
+  auto* gradient = MakeGarbageCollected<CanvasGradient>(FloatPoint(fx0, fy0),
+                                                        FloatPoint(fx1, fy1));
   return gradient;
 }
 
@@ -1427,8 +1354,8 @@ CanvasGradient* BaseRenderingContext2D::createRadialGradient(
   float fy1 = clampTo<float>(y1);
   float fr1 = clampTo<float>(r1);
 
-  CanvasGradient* gradient = CanvasGradient::Create(FloatPoint(fx0, fy0), fr0,
-                                                    FloatPoint(fx1, fy1), fr1);
+  auto* gradient = MakeGarbageCollected<CanvasGradient>(
+      FloatPoint(fx0, fy0), fr0, FloatPoint(fx1, fy1), fr1);
   return gradient;
 }
 
@@ -1495,11 +1422,10 @@ CanvasPattern* BaseRenderingContext2D::createPattern(
   }
   DCHECK(image_for_rendering);
 
-  bool origin_clean =
-      !WouldTaintOrigin(image_source, ExecutionContext::From(script_state));
+  bool origin_clean = !WouldTaintOrigin(image_source);
 
-  return CanvasPattern::Create(std::move(image_for_rendering), repeat_mode,
-                               origin_clean);
+  return MakeGarbageCollected<CanvasPattern>(std::move(image_for_rendering),
+                                             repeat_mode, origin_clean);
 }
 
 bool BaseRenderingContext2D::ComputeDirtyRect(const FloatRect& local_rect,
@@ -1534,12 +1460,12 @@ bool BaseRenderingContext2D::ComputeDirtyRect(
   return true;
 }
 
-ImageDataColorSettings
+ImageDataColorSettings*
 BaseRenderingContext2D::GetColorSettingsAsImageDataColorSettings() const {
-  ImageDataColorSettings color_settings;
-  color_settings.setColorSpace(ColorSpaceAsString());
+  ImageDataColorSettings* color_settings = ImageDataColorSettings::Create();
+  color_settings->setColorSpace(ColorSpaceAsString());
   if (PixelFormat() == kF16CanvasPixelFormat)
-    color_settings.setStorageFormat(kFloat32ArrayStorageFormatName);
+    color_settings->setStorageFormat(kFloat32ArrayStorageFormatName);
   return color_settings;
 }
 
@@ -1547,9 +1473,9 @@ ImageData* BaseRenderingContext2D::createImageData(
     ImageData* image_data,
     ExceptionState& exception_state) const {
   ImageData* result = nullptr;
-  ImageDataColorSettings color_settings =
+  ImageDataColorSettings* color_settings =
       GetColorSettingsAsImageDataColorSettings();
-  result = ImageData::Create(image_data->Size(), &color_settings);
+  result = ImageData::Create(image_data->Size(), color_settings);
   if (!result)
     exception_state.ThrowRangeError("Out of memory at ImageData creation");
   return result;
@@ -1568,9 +1494,9 @@ ImageData* BaseRenderingContext2D::createImageData(
 
   IntSize size(abs(sw), abs(sh));
   ImageData* result = nullptr;
-  ImageDataColorSettings color_settings =
+  ImageDataColorSettings* color_settings =
       GetColorSettingsAsImageDataColorSettings();
-  result = ImageData::Create(size, &color_settings);
+  result = ImageData::Create(size, color_settings);
 
   if (!result)
     exception_state.ThrowRangeError("Out of memory at ImageData creation");
@@ -1580,7 +1506,7 @@ ImageData* BaseRenderingContext2D::createImageData(
 ImageData* BaseRenderingContext2D::createImageData(
     unsigned width,
     unsigned height,
-    ImageDataColorSettings& color_settings,
+    ImageDataColorSettings* color_settings,
     ExceptionState& exception_state) const {
   return ImageData::CreateImageData(width, height, color_settings,
                                     exception_state);
@@ -1591,8 +1517,8 @@ ImageData* BaseRenderingContext2D::createImageData(
     unsigned width,
     unsigned height,
     ExceptionState& exception_state) const {
-  ImageDataColorSettings color_settings;
-  return ImageData::CreateImageData(data_array, width, height, color_settings,
+  return ImageData::CreateImageData(data_array, width, height,
+                                    ImageDataColorSettings::Create(),
                                     exception_state);
 }
 
@@ -1600,7 +1526,7 @@ ImageData* BaseRenderingContext2D::createImageData(
     ImageDataArray& data_array,
     unsigned width,
     unsigned height,
-    ImageDataColorSettings& color_settings,
+    ImageDataColorSettings* color_settings,
     ExceptionState& exception_state) const {
   return ImageData::CreateImageData(data_array, width, height, color_settings,
                                     exception_state);
@@ -1616,6 +1542,8 @@ ImageData* BaseRenderingContext2D::getImageData(
     exception_state.ThrowRangeError("Out of memory at ImageData creation");
     return nullptr;
   }
+
+  base::TimeTicks start_time = base::TimeTicks::Now();
 
   usage_counters_.num_get_image_data_calls++;
   usage_counters_.area_get_image_data_calls += sw * sh;
@@ -1637,7 +1565,7 @@ ImageData* BaseRenderingContext2D::getImageData(
       return nullptr;
     }
     sx += sw;
-    sw = -sw;
+    sw = base::saturated_cast<int>(base::SafeUnsignedAbs(sw));
   }
   if (sh < 0) {
     if (!base::CheckAdd(sy, sh).IsValid<int>()) {
@@ -1645,7 +1573,7 @@ ImageData* BaseRenderingContext2D::getImageData(
       return nullptr;
     }
     sy += sh;
-    sh = -sh;
+    sh = base::saturated_cast<int>(base::SafeUnsignedAbs(sh));
   }
 
   if (!base::CheckAdd(sx, sw).IsValid<int>() ||
@@ -1653,28 +1581,14 @@ ImageData* BaseRenderingContext2D::getImageData(
     exception_state.ThrowRangeError("Out of memory at ImageData creation");
     return nullptr;
   }
-  base::Optional<ScopedUsHistogramTimer> timer;
-  if (!IsPaint2D()) {
-    if (CanCreateCanvas2dResourceProvider() && IsAccelerated()) {
-      DEFINE_THREAD_SAFE_STATIC_LOCAL(
-          CustomCountHistogram, scoped_us_counter_gpu,
-          ("Blink.Canvas.GetImageData.GPU", 0, 10000000, 50));
-      timer.emplace(scoped_us_counter_gpu);
-    } else {
-      DEFINE_THREAD_SAFE_STATIC_LOCAL(
-          CustomCountHistogram, scoped_us_counter_cpu,
-          ("Blink.Canvas.GetImageData.CPU", 0, 10000000, 50));
-      timer.emplace(scoped_us_counter_cpu);
-    }
-  }
 
   IntRect image_data_rect(sx, sy, sw, sh);
   bool hasResourceProvider = CanCreateCanvas2dResourceProvider();
-  ImageDataColorSettings color_settings =
+  ImageDataColorSettings* color_settings =
       GetColorSettingsAsImageDataColorSettings();
   if (!hasResourceProvider || isContextLost()) {
     ImageData* result =
-        ImageData::Create(image_data_rect.Size(), &color_settings);
+        ImageData::Create(image_data_rect.Size(), color_settings);
     if (!result)
       exception_state.ThrowRangeError("Out of memory at ImageData creation");
     return result;
@@ -1683,7 +1597,14 @@ ImageData* BaseRenderingContext2D::getImageData(
   WTF::ArrayBufferContents contents;
 
   const CanvasColorParams& color_params = ColorParams();
+  // Deferred offscreen canvases might have recorded commands, make sure
+  // that those get drawn here
+  FinalizeFrame();
   scoped_refptr<StaticBitmapImage> snapshot = GetImage(kPreferNoAcceleration);
+
+  // GetImagedata is faster in Unaccelerated canvases
+  if (IsAccelerated())
+    DisableAcceleration();
 
   if (!StaticBitmapImage::ConvertToArrayBufferContents(
           snapshot, contents, image_data_rect, color_params, IsAccelerated())) {
@@ -1691,31 +1612,52 @@ ImageData* BaseRenderingContext2D::getImageData(
     return nullptr;
   }
 
-  if (!!snapshot) {
-    // If source image is not null, the ConvertToArrayBufferContents function
-    // must have invoked SkImage::readPixels.
-    DidInvokeGPUReadbackInCurrentFrame();
-  }
-
-  NeedsFinalizeFrame();
-
   // Convert pixels to proper storage format if needed
   if (PixelFormat() != kRGBA8CanvasPixelFormat) {
     ImageDataStorageFormat storage_format =
-        ImageData::GetImageDataStorageFormat(color_settings.storageFormat());
+        ImageData::GetImageDataStorageFormat(color_settings->storageFormat());
     DOMArrayBufferView* array_buffer_view =
         ImageData::ConvertPixelsFromCanvasPixelFormatToImageDataStorageFormat(
             contents, PixelFormat(), storage_format);
     return ImageData::Create(image_data_rect.Size(),
                              NotShared<DOMArrayBufferView>(array_buffer_view),
-                             &color_settings);
+                             color_settings);
   }
   DOMArrayBuffer* array_buffer = DOMArrayBuffer::Create(contents);
-  return ImageData::Create(
+
+  ImageData* imageData = ImageData::Create(
       image_data_rect.Size(),
       NotShared<DOMUint8ClampedArray>(DOMUint8ClampedArray::Create(
           array_buffer, 0, array_buffer->ByteLength())),
-      &color_settings);
+      color_settings);
+
+  if (!IsPaint2D()) {
+    int scaled_time = getScaledElapsedTime(
+        image_data_rect.Width(), image_data_rect.Height(), start_time);
+    if (CanCreateCanvas2dResourceProvider() && IsAccelerated()) {
+      base::UmaHistogramCounts1000(
+          "Blink.Canvas.GetImageDataScaledDuration.GPU", scaled_time);
+    } else {
+      base::UmaHistogramCounts1000(
+          "Blink.Canvas.GetImageDataScaledDuration.CPU", scaled_time);
+    }
+  }
+
+  return imageData;
+}
+
+int BaseRenderingContext2D::getScaledElapsedTime(float width,
+                                                 float height,
+                                                 base::TimeTicks start_time) {
+  base::TimeDelta elapsed_time = base::TimeTicks::Now() - start_time;
+  float sqrt_pixels = std::sqrt(width) * std::sqrt(height);
+  float scaled_time_float = elapsed_time.InMicrosecondsF() * 10.0f /
+                            (sqrt_pixels == 0 ? 1.0f : sqrt_pixels);
+
+  // If scaled_time_float overflows as integer, CheckedNumeric will store it
+  // as invalid, then ValueOrDefault will return the maximum int.
+  base::CheckedNumeric<int> checked_scaled_time = scaled_time_float;
+  return checked_scaled_time.ValueOrDefault(std::numeric_limits<int>::max());
 }
 
 void BaseRenderingContext2D::putImageData(ImageData* data,
@@ -1737,12 +1679,13 @@ void BaseRenderingContext2D::putImageData(ImageData* data,
   if (!base::CheckMul(dirty_width, dirty_height).IsValid<int>()) {
     return;
   }
+  base::TimeTicks start_time = base::TimeTicks::Now();
   usage_counters_.num_put_image_data_calls++;
   usage_counters_.area_put_image_data_calls += dirty_width * dirty_height;
 
-  if (data->BufferBase()->IsNeutered()) {
+  if (data->BufferBase()->IsDetached()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
-                                      "The source data has been neutered.");
+                                      "The source data has been detached.");
     return;
   }
 
@@ -1751,13 +1694,23 @@ void BaseRenderingContext2D::putImageData(ImageData* data,
     return;
 
   if (dirty_width < 0) {
-    dirty_x += dirty_width;
-    dirty_width = -dirty_width;
+    if (dirty_x < 0) {
+      dirty_x = dirty_width = 0;
+    } else {
+      dirty_x += dirty_width;
+      dirty_width =
+          base::saturated_cast<int>(base::SafeUnsignedAbs(dirty_width));
+    }
   }
 
   if (dirty_height < 0) {
-    dirty_y += dirty_height;
-    dirty_height = -dirty_height;
+    if (dirty_y < 0) {
+      dirty_y = dirty_height = 0;
+    } else {
+      dirty_y += dirty_height;
+      dirty_height =
+          base::saturated_cast<int>(base::SafeUnsignedAbs(dirty_height));
+    }
   }
 
   IntRect dest_rect(dirty_x, dirty_y, dirty_width, dirty_height);
@@ -1767,21 +1720,6 @@ void BaseRenderingContext2D::putImageData(ImageData* data,
   dest_rect.Intersect(IntRect(0, 0, Width(), Height()));
   if (dest_rect.IsEmpty())
     return;
-
-  base::Optional<ScopedUsHistogramTimer> timer;
-  if (!IsPaint2D()) {
-    if (hasResourceProvider && IsAccelerated()) {
-      DEFINE_THREAD_SAFE_STATIC_LOCAL(
-          CustomCountHistogram, scoped_us_counter_gpu,
-          ("Blink.Canvas.PutImageData.GPU", 0, 10000000, 50));
-      timer.emplace(scoped_us_counter_gpu);
-    } else {
-      DEFINE_THREAD_SAFE_STATIC_LOCAL(
-          CustomCountHistogram, scoped_us_counter_cpu,
-          ("Blink.Canvas.PutImageData.CPU", 0, 10000000, 50));
-      timer.emplace(scoped_us_counter_cpu);
-    }
-  }
 
   IntRect source_rect(dest_rect);
   source_rect.Move(-dest_offset);
@@ -1799,8 +1737,11 @@ void BaseRenderingContext2D::putImageData(ImageData* data,
       CanvasColorParams(ColorParams().ColorSpace(), PixelFormat(), kNonOpaque);
   if (data_color_params.NeedsColorConversion(context_color_params) ||
       PixelFormat() == kF16CanvasPixelFormat) {
-    size_t data_length =
-        data->Size().Area() * context_color_params.BytesPerPixel();
+    size_t data_length;
+    if (!base::CheckMul(data->Size().Area(),
+                        context_color_params.BytesPerPixel())
+             .AssignIfValid(&data_length))
+      return;
     std::unique_ptr<uint8_t[]> converted_pixels(new uint8_t[data_length]);
     if (data->ImageDataInCanvasColorSettings(
             ColorParams().ColorSpace(), PixelFormat(), converted_pixels.get(),
@@ -1813,6 +1754,19 @@ void BaseRenderingContext2D::putImageData(ImageData* data,
     PutByteArray(data->data()->Data(), IntSize(data->width(), data->height()),
                  source_rect, IntPoint(dest_offset));
   }
+
+  if (!IsPaint2D()) {
+    int scaled_time =
+        getScaledElapsedTime(dest_rect.Width(), dest_rect.Height(), start_time);
+    if (CanCreateCanvas2dResourceProvider() && IsAccelerated()) {
+      base::UmaHistogramCounts1000(
+          "Blink.Canvas.PutImageDataScaledDuration.GPU", scaled_time);
+    } else {
+      base::UmaHistogramCounts1000(
+          "Blink.Canvas.PutImageDataScaledDuration.CPU", scaled_time);
+    }
+  }
+
   DidDraw(dest_rect);
 }
 

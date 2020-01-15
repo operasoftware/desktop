@@ -50,7 +50,7 @@ class SubtleCrypto final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SubtleCrypto* Create() { return new SubtleCrypto(); }
+  SubtleCrypto();
 
   ScriptPromise encrypt(ScriptState*,
                         const AlgorithmIdentifier&,
@@ -111,9 +111,6 @@ class SubtleCrypto final : public ScriptWrappable {
                           const AlgorithmIdentifier&,
                           bool extractable,
                           const Vector<String>&);
-
- private:
-  SubtleCrypto();
 };
 
 }  // namespace blink

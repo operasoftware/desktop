@@ -26,6 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_VALIDATION_MESSAGE_CLIENT_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_VALIDATION_MESSAGE_CLIENT_IMPL_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/popup_opening_observer.h"
 #include "third_party/blink/renderer/core/page/validation_message_client.h"
@@ -37,39 +38,47 @@
 namespace blink {
 
 class LocalFrameView;
-class PageOverlay;
+class FrameOverlay;
 class ValidationMessageOverlayDelegate;
 
-class ValidationMessageClientImpl final
-    : public GarbageCollectedFinalized<ValidationMessageClientImpl>,
+class CORE_EXPORT ValidationMessageClientImpl final
+    : public GarbageCollected<ValidationMessageClientImpl>,
       public ValidationMessageClient,
       private PopupOpeningObserver {
   USING_GARBAGE_COLLECTED_MIXIN(ValidationMessageClientImpl);
 
  public:
-  static ValidationMessageClientImpl* Create(Page&);
+  explicit ValidationMessageClientImpl(Page&);
   ~ValidationMessageClientImpl() override;
-
-  void Trace(blink::Visitor*) override;
-
- private:
-  ValidationMessageClientImpl(Page&);
-  void CheckAnchorStatus(TimerBase*);
-  LocalFrameView* CurrentView();
-  void HideValidationMessageImmediately(const Element& anchor);
-  void Reset(TimerBase*);
 
   void ShowValidationMessage(const Element& anchor,
                              const String& message,
                              TextDirection message_dir,
                              const String& sub_message,
                              TextDirection sub_message_dir) override;
+
+  void Trace(blink::Visitor*) override;
+
+  ValidationMessageOverlayDelegate* GetDelegateForTesting() const {
+    return overlay_delegate_;
+  }
+
+ private:
+  void CheckAnchorStatus(TimerBase*);
+  LocalFrameView* CurrentView();
+  void HideValidationMessageImmediately(const Element& anchor);
+  void Reset(TimerBase*);
+  void ValidationMessageVisibilityChanged(const Element& anchor);
+
   void HideValidationMessage(const Element& anchor) override;
   bool IsValidationMessageVisible(const Element& anchor) override;
   void DocumentDetached(const Document&) override;
+  void DidChangeFocusTo(const Element* new_element) override;
   void WillBeDestroyed() override;
+  void ServiceScriptedAnimations(base::TimeTicks) override;
   void LayoutOverlay() override;
-  void PaintOverlay() override;
+  void UpdatePrePaint() override;
+  void PaintOverlay(GraphicsContext&) override;
 
   // PopupOpeningObserver function
   void WillOpenPopup() override;
@@ -77,11 +86,12 @@ class ValidationMessageClientImpl final
   Member<Page> page_;
   Member<const Element> current_anchor_;
   String message_;
-  TimeTicks finish_time_;
+  base::TimeTicks finish_time_;
   std::unique_ptr<TimerBase> timer_;
-  std::unique_ptr<PageOverlay> overlay_;
+  std::unique_ptr<FrameOverlay> overlay_;
   // Raw pointer. This pointer is valid unless overlay_ is nullptr.
   ValidationMessageOverlayDelegate* overlay_delegate_ = nullptr;
+  bool allow_initial_empty_anchor_ = false;
 };
 
 }  // namespace blink

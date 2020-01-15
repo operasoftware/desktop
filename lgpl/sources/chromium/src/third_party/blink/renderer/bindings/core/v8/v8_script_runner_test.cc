@@ -15,6 +15,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/cached_metadata.h"
 #include "third_party/blink/renderer/platform/loader/fetch/cached_metadata_handler.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 #include "v8/include/v8.h"
 
@@ -63,14 +64,13 @@ class V8ScriptRunnerTest : public testing::Test {
     std::tie(compile_options, produce_cache_options, no_cache_reason) =
         V8CodeCache::GetCompileOptions(cache_options, source_code);
     v8::MaybeLocal<v8::Script> compiled_script = V8ScriptRunner::CompileScript(
-        script_state, source_code, kOpaqueResource, compile_options,
-        no_cache_reason, ReferrerScriptInfo());
+        script_state, source_code, SanitizeScriptErrors::kSanitize,
+        compile_options, no_cache_reason, ReferrerScriptInfo());
     if (compiled_script.IsEmpty()) {
       return false;
     }
     V8CodeCache::ProduceCache(isolate, compiled_script.ToLocalChecked(),
-                              source_code, produce_cache_options,
-                              compile_options);
+                              source_code, produce_cache_options);
     return true;
   }
 
@@ -81,28 +81,32 @@ class V8ScriptRunnerTest : public testing::Test {
                      v8::ScriptCompiler::NoCacheReason no_cache_reason,
                      V8CodeCache::ProduceCacheOptions produce_cache_options) {
     v8::MaybeLocal<v8::Script> compiled_script = V8ScriptRunner::CompileScript(
-        script_state, source_code, kOpaqueResource, compile_options,
-        no_cache_reason, ReferrerScriptInfo());
+        script_state, source_code, SanitizeScriptErrors::kSanitize,
+        compile_options, no_cache_reason, ReferrerScriptInfo());
     if (compiled_script.IsEmpty()) {
       return false;
     }
     V8CodeCache::ProduceCache(isolate, compiled_script.ToLocalChecked(),
-                              source_code, produce_cache_options,
-                              compile_options);
+                              source_code, produce_cache_options);
     return true;
   }
 
   ScriptResource* CreateEmptyResource() {
-    return ScriptResource::CreateForTest(NullURL(), UTF8Encoding());
+    ScriptResource* resource =
+        ScriptResource::CreateForTest(NullURL(), UTF8Encoding());
+    resource->SetClientIsWaitingForFinished();
+    return resource;
   }
 
   ScriptResource* CreateResource(const WTF::TextEncoding& encoding) {
     ScriptResource* resource = ScriptResource::CreateForTest(Url(), encoding);
+    resource->SetClientIsWaitingForFinished();
     String code = Code();
     ResourceResponse response(Url());
-    response.SetHTTPStatusCode(200);
+    response.SetHttpStatusCode(200);
     resource->SetResponse(response);
-    resource->AppendData(code.Utf8().data(), code.Utf8().length());
+    StringUTF8Adaptor code_utf8(code);
+    resource->AppendData(code_utf8.data(), code_utf8.size());
     resource->FinishForTest();
     return resource;
   }

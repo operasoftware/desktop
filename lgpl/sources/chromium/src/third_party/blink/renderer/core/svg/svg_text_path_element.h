@@ -31,19 +31,14 @@ enum SVGTextPathMethodType {
   kSVGTextPathMethodAlign,
   kSVGTextPathMethodStretch
 };
+DECLARE_SVG_ENUM_MAP(SVGTextPathMethodType);
 
 enum SVGTextPathSpacingType {
   kSVGTextPathSpacingUnknown = 0,
   kSVGTextPathSpacingAuto,
   kSVGTextPathSpacingExact
 };
-
-template <>
-const SVGEnumerationStringEntries&
-GetStaticStringEntries<SVGTextPathMethodType>();
-template <>
-const SVGEnumerationStringEntries&
-GetStaticStringEntries<SVGTextPathSpacingType>();
+DECLARE_SVG_ENUM_MAP(SVGTextPathSpacingType);
 
 class SVGTextPathElement final : public SVGTextContentElement,
                                  public SVGURIReference {
@@ -61,7 +56,7 @@ class SVGTextPathElement final : public SVGTextContentElement,
     kTextpathSpacingtypeExact = kSVGTextPathSpacingExact
   };
 
-  DECLARE_NODE_FACTORY(SVGTextPathElement);
+  explicit SVGTextPathElement(Document&);
 
   SVGAnimatedLength* startOffset() const { return start_offset_.Get(); }
   SVGAnimatedEnumeration<SVGTextPathMethodType>* method() {
@@ -71,11 +66,13 @@ class SVGTextPathElement final : public SVGTextContentElement,
     return spacing_.Get();
   }
 
+  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override {
+    return SVGURIReference::GetCheckedAttributeTypes();
+  }
+
   void Trace(blink::Visitor*) override;
 
  private:
-  explicit SVGTextPathElement(Document&);
-
   ~SVGTextPathElement() override;
 
   void ClearResourceReferences();
@@ -86,7 +83,7 @@ class SVGTextPathElement final : public SVGTextContentElement,
 
   void SvgAttributeChanged(const QualifiedName&) override;
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override;
 
   bool SelfHasRelativeLengths() const override;

@@ -12,7 +12,7 @@ var tests = [
       'viewer-pdf-toolbar',
       'viewer-zoom-toolbar',
       'viewer-password-screen',
-      'viewer-error-screen'
+      'viewer-error-screen',
     ];
     for (var i = 0; i < elementNames.length; i++) {
       var elements = document.body.querySelectorAll(elementNames[i]);
@@ -45,7 +45,7 @@ var tests = [
     chrome.test.assertTrue(shouldIgnoreKeyEvents(toolbar));
 
     // Test case where the active element has a shadow root of its own.
-    toolbar.$.buttons.children[1].focus();
+    toolbar.$['rotate-right'].focus();
     chrome.test.assertFalse(shouldIgnoreKeyEvents(toolbar));
 
     chrome.test.assertFalse(
@@ -67,23 +67,24 @@ var tests = [
 
     // Clicking on the plugin should close the bookmarks menu.
     chrome.test.assertFalse(dropdown.dropdownOpen);
-    MockInteractions.tap(dropdown.$.icon);
+    dropdown.$.button.click();
     chrome.test.assertTrue(dropdown.dropdownOpen);
-    MockInteractions.tap(plugin);
-    chrome.test.assertFalse(dropdown.dropdownOpen,
-        "Clicking plugin closes dropdown");
+    // Generate pointer event manually, as MockInteractions doesn't include
+    // this.
+    plugin.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true}));
+    chrome.test.assertFalse(
+        dropdown.dropdownOpen, 'Clicking plugin closes dropdown');
 
-    MockInteractions.tap(dropdown.$.icon);
+    dropdown.$.button.click();
     chrome.test.assertTrue(dropdown.dropdownOpen);
     MockInteractions.pressAndReleaseKeyOn(document, ESC_KEY);
-    chrome.test.assertFalse(dropdown.dropdownOpen,
-        "Escape key closes dropdown");
-    chrome.test.assertTrue(toolbar.opened,
-        "First escape key does not close toolbar");
+    chrome.test.assertFalse(
+        dropdown.dropdownOpen, 'Escape key closes dropdown');
+    chrome.test.assertTrue(
+        toolbar.opened, 'First escape key does not close toolbar');
 
     MockInteractions.pressAndReleaseKeyOn(document, ESC_KEY);
-    chrome.test.assertFalse(toolbar.opened,
-        "Second escape key closes toolbar");
+    chrome.test.assertFalse(toolbar.opened, 'Second escape key closes toolbar');
 
     chrome.test.succeed();
   },

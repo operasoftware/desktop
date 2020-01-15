@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NGBreakToken_h
-#define NGBreakToken_h
+#ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_BREAK_TOKEN_H_
+#define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_BREAK_TOKEN_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_break_appeal.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_input_node.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 
 namespace blink {
@@ -31,10 +33,15 @@ namespace blink {
 //
 // The break token should encapsulate enough information to "resume" the layout.
 class CORE_EXPORT NGBreakToken : public RefCounted<NGBreakToken> {
+  USING_FAST_MALLOC(NGBreakToken);
+
  public:
   virtual ~NGBreakToken() = default;
 
-  enum NGBreakTokenType { kBlockBreakToken, kInlineBreakToken };
+  enum NGBreakTokenType {
+    kBlockBreakToken = NGLayoutInputNode::kBlock,
+    kInlineBreakToken = NGLayoutInputNode::kInline
+  };
   NGBreakTokenType Type() const { return static_cast<NGBreakTokenType>(type_); }
 
   bool IsBlockType() const { return Type() == kBlockBreakToken; }
@@ -47,26 +54,69 @@ class CORE_EXPORT NGBreakToken : public RefCounted<NGBreakToken> {
 
   // Returns the node associated with this break token. A break token cannot be
   // used with any other node.
-  NGLayoutInputNode InputNode() const { return node_; }
+  NGLayoutInputNode InputNode() const {
+    return NGLayoutInputNode::Create(
+        box_, static_cast<NGLayoutInputNode::NGLayoutInputNodeType>(type_));
+  }
 
-#ifndef NDEBUG
+  NGBreakAppeal BreakAppeal() const {
+    return static_cast<NGBreakAppeal>(break_appeal_);
+  }
+
+#if DCHECK_IS_ON()
   virtual String ToString() const;
   void ShowBreakTokenTree() const;
-#endif  // NDEBUG
+#endif
 
  protected:
   NGBreakToken(NGBreakTokenType type,
                NGBreakTokenStatus status,
                NGLayoutInputNode node)
-      : type_(type), status_(status), node_(node) {}
+      : box_(node.GetLayoutBox()),
+        type_(type),
+        status_(status),
+        flags_(0),
+        is_break_before_(false),
+        is_forced_break_(false),
+        break_appeal_(kBreakAppealPerfect),
+        has_seen_all_children_(false) {
+    DCHECK_EQ(type, static_cast<NGBreakTokenType>(node.Type()));
+  }
 
  private:
+  // Because |NGLayoutInputNode| has a pointer and 1 bit flag, and it's fast to
+  // re-construct, keep |LayoutBox| to save the memory consumed by alignment.
+  LayoutBox* box_;
+
   unsigned type_ : 1;
   unsigned status_ : 1;
 
-  NGLayoutInputNode node_;
+ protected:
+  // The following bitfields are only to be used by NGInlineBreakToken (it's
+  // defined here to save memory, since that class has no bitfields).
+
+  unsigned flags_ : 2;  // NGInlineBreakTokenFlags
+
+  // The following bitfields are only to be used by NGBlockBreakToken (it's
+  // defined here to save memory, since that class has no bitfields).
+
+  unsigned is_break_before_ : 1;
+
+  unsigned is_forced_break_ : 1;
+
+  // If the break is unforced, this is the appeal of the break. Higher is
+  // better. Violating breaking rules decreases appeal. Forced breaks always
+  // have perfect appeal.
+  unsigned break_appeal_ : 2;  // NGBreakAppeal
+
+  // All children of this container have been "seen" at this point. This means
+  // that all children have been fully laid out, or have break tokens. No more
+  // children left to discover.
+  unsigned has_seen_all_children_ : 1;
 };
+
+typedef Vector<scoped_refptr<const NGBreakToken>> NGBreakTokenVector;
 
 }  // namespace blink
 
-#endif  // NGBreakToken_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_BREAK_TOKEN_H_

@@ -131,9 +131,10 @@
     "large",
     "x-large",
     "xx-large",
-    "-webkit-xxx-large",
+    "xxx-large",
     "smaller",
     "larger",
+    "-webkit-xxx-large",
 
     //
     // font-family (<generic-family> in CSS 2.1)
@@ -196,6 +197,7 @@
     "inactivecaptiontext",
     "infobackground",
     "infotext",
+    "linktext",
     "menutext",
     "scrollbar",
     "threeddarkshadow",
@@ -203,6 +205,7 @@
     "threedhighlight",
     "threedlightshadow",
     "threedshadow",
+    "visitedtext",
     "window",
     "windowframe",
     "windowtext",
@@ -220,6 +223,9 @@
     // Value used to implement the behavior in:
     // https://quirks.spec.whatwg.org/#the-tables-inherit-color-from-body-quirk
     "-internal-quirk-inherit",
+    // The default color value for the root element. Using a keyword to account
+    // for different values for different color schemes like dark mode.
+    "-internal-root-color",
     //
     // background-repeat
     //
@@ -455,6 +461,7 @@
     "bidi-override",
     "blink",
     "both",
+    "break-spaces",
     "close-quote",
     "embed",
     "fixed",
@@ -636,64 +643,40 @@
     // normal
     "strict",
     "after-white-space",
+    "anywhere",
 
     // hyphens
     "manual",
 
     // -webkit-appearance
-    // The order here must match the order in the ControlPart enum in ThemeTypes.h.
-    // All appearance values that should be accepted by the parser should be listed between 'checkbox' and 'textarea':
+    // The order here must match the order in the ControlPart enum in
+    // theme_types.h.
+    // All appearance values that should be accepted by the parser should be
+    // listed between 'checkbox' and 'textarea'.
     "checkbox",
     "radio",
     "push-button",
     "square-button",
     "button",
-    "button-bevel",
     "inner-spin-button",
     "listbox",
-    "listitem",
-    "media-enter-fullscreen-button",
-    "media-exit-fullscreen-button",
-    "media-mute-button",
-    "media-play-button",
-    "media-overlay-play-button",
-    "media-toggle-closed-captions-button",
     "media-slider",
     "media-sliderthumb",
-    "media-volume-slider-container",
     "media-volume-slider",
     "media-volume-sliderthumb",
-    "media-controls-background",
-    "media-controls-fullscreen-background",
-    "media-current-time-display",
-    "media-time-remaining-display",
-    "-internal-media-cast-off-button",
-    "-internal-media-overlay-cast-off-button",
-    "-internal-media-track-selection-checkmark",
-    "-internal-media-closed-captions-icon",
-    "-internal-media-subtitles-icon",
-    "-internal-media-overflow-button",
-    "-internal-media-download-button",
-    "-internal-media-remoting-cast-icon",
     "-internal-media-control",
     "menulist",
     "menulist-button",
-    "menulist-text",
-    "menulist-textfield",
     "meter",
     "progress-bar",
-    "progress-bar-value",
     "slider-horizontal",
     "slider-vertical",
     "sliderthumb-horizontal",
     "sliderthumb-vertical",
-    "caret",
     "searchfield",
     "searchfield-cancel-button",
     "textfield",
     "textarea",
-    // An appearance value that should not be accepted by the parser:
-    "caps-lock-indicator",
 
     //
     // border-image
@@ -775,8 +758,11 @@
     "ease-in",
     "ease-out",
     "ease-in-out",
+    "jump-both",
+    "jump-end",
+    "jump-none",
+    "jump-start",
     "step-start",
-    "step-middle",
     "step-end",
     "steps",
     "frames",
@@ -797,9 +783,9 @@
     //
     // pointer-events
     //
-    "visiblePainted",
-    "visibleFill",
-    "visibleStroke",
+    "visiblepainted",
+    "visiblefill",
+    "visiblestroke",
     //visible
     "painted",
     "fill",
@@ -955,10 +941,6 @@
     // column-fill
     "balance",
 
-    // overflow
-    "-webkit-paged-x",
-    "-webkit-paged-y",
-
     // -webkit-app-region
     "drag",
     "no-drag",
@@ -1094,6 +1076,7 @@
     "rgba",
     "hsl",
     "hsla",
+    "-internal-light-dark-color",
 
     // transform
     "matrix",
@@ -1128,8 +1111,13 @@
     "ray",
     "sides",
 
+    // math functions
+    // https://drafts.csswg.org/css-values-4/#math
     "calc",
     "-webkit-calc",
+    "min",
+    "max",
+    "clamp",
 
     // scroll-snap-type
     // none
@@ -1196,5 +1184,30 @@
     // pan-up,
     // pan-down
     // none
+
+    // @property
+    "true",
+    "false",
+
+    // (prefers-*:) media features
+    "no-preference",
+
+    // (prefers-color-scheme:) media feature
+    "dark",
+    "light",
+
+    // color-scheme
+    "only",
+
+    // (prefers-reduced-motion:) media feature
+    "reduce",
+
+    // (forced-colors:) media feature
+    // none
+    "active",
+
+    // (navigation-controls) media feature
+    // none
+    "back-button",
   ],
 }

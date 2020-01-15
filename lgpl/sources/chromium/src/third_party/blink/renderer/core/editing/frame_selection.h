@@ -35,10 +35,10 @@
 #include "third_party/blink/renderer/core/dom/synchronous_mutation_observer.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/editing/set_selection_options.h"
+#include "third_party/blink/renderer/core/scroll/scroll_alignment.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/scroll/scroll_alignment.h"
 
 namespace blink {
 
@@ -50,7 +50,7 @@ class LocalFrame;
 class FrameCaret;
 class GranularityStrategy;
 class GraphicsContext;
-class NGPaintFragment;
+class NGInlineCursor;
 class Range;
 class SelectionEditor;
 class LayoutSelection;
@@ -59,6 +59,8 @@ enum class SelectionModifyDirection;
 enum class SelectionState;
 class TextIteratorBehavior;
 struct PaintInvalidatorContext;
+struct PhysicalOffset;
+struct PhysicalRect;
 
 enum RevealExtentOption { kRevealExtent, kDoNotRevealExtent };
 
@@ -67,7 +69,7 @@ enum class CaretVisibility;
 enum class HandleVisibility { kNotVisible, kVisible };
 enum class SelectSoftLineBreak { kNotSelected, kSelected };
 
-// This is return type of ComputeLayoutSelectionStatus(paintfragment).
+// This is return type of ComputeLayoutSelectionStatus(cursor).
 // This structure represents how the fragment is selected.
 // |start|, |end| : Selection start/end offset. This offset is based on
 //   the text of NGInlineNode of a parent block thus
@@ -119,14 +121,16 @@ struct LayoutTextSelectionStatus {
 };
 
 class CORE_EXPORT FrameSelection final
-    : public GarbageCollectedFinalized<FrameSelection>,
+    : public GarbageCollected<FrameSelection>,
       public SynchronousMutationObserver {
   USING_GARBAGE_COLLECTED_MIXIN(FrameSelection);
 
  public:
   static FrameSelection* Create(LocalFrame& frame) {
-    return new FrameSelection(frame);
+    return MakeGarbageCollected<FrameSelection>(frame);
   }
+
+  explicit FrameSelection(LocalFrame&);
   ~FrameSelection();
 
   bool IsAvailable() const { return LifecycleContext(); }
@@ -169,7 +173,7 @@ class CORE_EXPORT FrameSelection final
   // the frame you entirely selected.
   void SelectFrameElementInParentIfFullySelected();
 
-  bool Contains(const LayoutPoint&);
+  bool Contains(const PhysicalOffset&);
 
   bool Modify(SelectionModifyAlteration,
               SelectionModifyDirection,
@@ -199,12 +203,16 @@ class CORE_EXPORT FrameSelection final
   // Note: this updates styles and layout, use cautiously.
   bool ComputeAbsoluteBounds(IntRect& anchor, IntRect& focus) const;
 
+  // Computes the rect we should use when scrolling/zooming a selection into
+  // view.
+  IntRect ComputeRectToScroll(RevealExtentOption);
+
   void DidChangeFocus();
 
   SelectionInDOMTree GetSelectionInDOMTree() const;
   bool IsDirectional() const;
 
-  void DocumentAttached(Document*);
+  void DidAttachDocument(Document*);
 
   void DidLayout();
   void CommitAppearanceIfNeeded();
@@ -218,7 +226,7 @@ class CORE_EXPORT FrameSelection final
   void UpdateStyleAndLayoutIfNeeded();
   void InvalidatePaint(const LayoutBlock&, const PaintInvalidatorContext&);
 
-  void PaintCaret(GraphicsContext&, const LayoutPoint&);
+  void PaintCaret(GraphicsContext&, const PhysicalOffset&);
 
   // Used to suspend caret blinking while the mouse is down.
   void SetCaretBlinkingSuspended(bool);
@@ -237,7 +245,7 @@ class CORE_EXPORT FrameSelection final
   // Returns true if a word is selected.
   bool SelectWordAroundCaret();
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
   void ShowTreeForThis() const;
 #endif
 
@@ -251,7 +259,7 @@ class CORE_EXPORT FrameSelection final
 
   // This returns last layouted selection bounds of LayoutSelection rather than
   // SelectionEditor keeps.
-  LayoutRect AbsoluteUnclippedBounds() const;
+  PhysicalRect AbsoluteUnclippedBounds() const;
 
   // TODO(tkent): This function has a bug that scrolling doesn't work well in
   // a case of RangeSelection. crbug.com/443061
@@ -273,17 +281,15 @@ class CORE_EXPORT FrameSelection final
   LayoutTextSelectionStatus ComputeLayoutSelectionStatus(
       const LayoutText& text) const;
   LayoutSelectionStatus ComputeLayoutSelectionStatus(
-      const NGPaintFragment&) const;
+      const NGInlineCursor& cursor) const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
   friend class CaretDisplayItemClientTest;
   friend class FrameSelectionTest;
   friend class PaintControllerPaintTestBase;
   friend class SelectionControllerTest;
-
-  explicit FrameSelection(LocalFrame&);
 
   const DisplayItemClient& CaretDisplayItemClientForTesting() const;
 
@@ -298,8 +304,6 @@ class CORE_EXPORT FrameSelection final
   void FocusedOrActiveStateChanged();
 
   GranularityStrategy* GetGranularityStrategy();
-
-  IntRect ComputeRectToScroll(RevealExtentOption);
 
   void MoveRangeSelectionInternal(const SelectionInDOMTree&, TextGranularity);
 
@@ -333,8 +337,8 @@ class CORE_EXPORT FrameSelection final
 
 }  // namespace blink
 
-#ifndef NDEBUG
-// Outside the WebCore namespace for ease of invocation from gdb.
+#if DCHECK_IS_ON()
+// Outside the blink namespace for ease of invocation from gdb.
 void showTree(const blink::FrameSelection&);
 void showTree(const blink::FrameSelection*);
 #endif

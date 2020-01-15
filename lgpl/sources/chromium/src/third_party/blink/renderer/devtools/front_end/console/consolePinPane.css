@@ -5,6 +5,7 @@
  */
 
 .console-pins {
+  max-height: 200px;
   overflow-y: auto;
   background: var(--toolbar-bg-color);
   --error-background-color: hsl(0, 100%, 97%);
@@ -71,7 +72,8 @@
   cursor: pointer;
 }
 
-.console-delete-pin:hover {
+.console-delete-pin:hover,
+.console-delete-pin[data-keyboard-focus="true"]:focus {
   opacity: 1;
 }
 

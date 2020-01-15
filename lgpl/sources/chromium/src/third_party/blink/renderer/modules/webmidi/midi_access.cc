@@ -41,7 +41,6 @@
 #include "third_party/blink/renderer/modules/webmidi/midi_output.h"
 #include "third_party/blink/renderer/modules/webmidi/midi_output_map.h"
 #include "third_party/blink/renderer/modules/webmidi/midi_port.h"
-#include "third_party/blink/renderer/platform/async_method_runner.h"
 
 namespace blink {
 
@@ -60,15 +59,15 @@ PortState ToDeviceState(PortState state) {
 }  // namespace
 
 MIDIAccess::MIDIAccess(
-    std::unique_ptr<MIDIAccessor> accessor,
+    std::unique_ptr<MIDIDispatcher> dispatcher,
     bool sysex_enabled,
     const Vector<MIDIAccessInitializer::PortDescriptor>& ports,
     ExecutionContext* execution_context)
     : ContextLifecycleObserver(execution_context),
-      accessor_(std::move(accessor)),
+      dispatcher_(std::move(dispatcher)),
       sysex_enabled_(sysex_enabled),
       has_pending_activity_(false) {
-  accessor_->SetClient(this);
+  dispatcher_->SetClient(this);
   for (const auto& port : ports) {
     if (port.type == MIDIPort::kTypeInput) {
       inputs_.push_back(MIDIInput::Create(this, port.id, port.manufacturer,
@@ -85,16 +84,16 @@ MIDIAccess::MIDIAccess(
 MIDIAccess::~MIDIAccess() = default;
 
 void MIDIAccess::Dispose() {
-  accessor_.reset();
+  dispatcher_.reset();
 }
 
 EventListener* MIDIAccess::onstatechange() {
-  return GetAttributeEventListener(EventTypeNames::statechange);
+  return GetAttributeEventListener(event_type_names::kStatechange);
 }
 
 void MIDIAccess::setOnstatechange(EventListener* listener) {
   has_pending_activity_ = listener;
-  SetAttributeEventListener(EventTypeNames::statechange, listener);
+  SetAttributeEventListener(event_type_names::kStatechange, listener);
 }
 
 bool MIDIAccess::HasPendingActivity() const {
@@ -115,7 +114,7 @@ MIDIInputMap* MIDIAccess::inputs() const {
     // There is id duplication that violates the spec.
     inputs.clear();
   }
-  return new MIDIInputMap(inputs);
+  return MakeGarbageCollected<MIDIInputMap>(inputs);
 }
 
 MIDIOutputMap* MIDIAccess::outputs() const {
@@ -131,7 +130,7 @@ MIDIOutputMap* MIDIAccess::outputs() const {
     // There is id duplication that violates the spec.
     outputs.clear();
   }
-  return new MIDIOutputMap(outputs);
+  return MakeGarbageCollected<MIDIOutputMap>(outputs);
 }
 
 void MIDIAccess::DidAddInputPort(const String& id,
@@ -181,8 +180,8 @@ void MIDIAccess::DidSetOutputPortState(unsigned port_index, PortState state) {
 
 void MIDIAccess::DidReceiveMIDIData(unsigned port_index,
                                     const unsigned char* data,
-                                    size_t length,
-                                    TimeTicks time_stamp) {
+                                    wtf_size_t length,
+                                    base::TimeTicks time_stamp) {
   DCHECK(IsMainThread());
   if (port_index >= inputs_.size())
     return;
@@ -192,18 +191,18 @@ void MIDIAccess::DidReceiveMIDIData(unsigned port_index,
 
 void MIDIAccess::SendMIDIData(unsigned port_index,
                               const unsigned char* data,
-                              size_t length,
-                              TimeTicks time_stamp) {
+                              wtf_size_t length,
+                              base::TimeTicks time_stamp) {
   DCHECK(!time_stamp.is_null());
   if (!GetExecutionContext() || !data || !length ||
       port_index >= outputs_.size())
     return;
 
-  accessor_->SendMIDIData(port_index, data, length, time_stamp);
+  dispatcher_->SendMIDIData(port_index, data, length, time_stamp);
 }
 
 void MIDIAccess::ContextDestroyed(ExecutionContext*) {
-  accessor_.reset();
+  dispatcher_.reset();
 }
 
 void MIDIAccess::Trace(blink::Visitor* visitor) {

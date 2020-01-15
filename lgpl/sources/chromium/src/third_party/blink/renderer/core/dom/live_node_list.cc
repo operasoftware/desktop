@@ -59,7 +59,7 @@ unsigned LiveNodeList::length() const {
 Element* LiveNodeList::item(unsigned offset) const {
   Element* element = collection_items_cache_.NodeAt(*this, offset);
   if (element && element->GetDocument().InDOMNodeRemovedHandler()) {
-    if (NodeChildRemovalTracker::IsBeingRemoved(element))
+    if (NodeChildRemovalTracker::IsBeingRemoved(*element))
       GetDocument().CountDetachingNodeAccessInDOMNodeRemovedHandler();
   }
   return element;
@@ -88,7 +88,7 @@ Element* LiveNodeList::TraverseBackwardToOffset(
       current_element, &RootNode(), offset, current_offset, IsMatch(*this));
 }
 
-void LiveNodeList::Trace(blink::Visitor* visitor) {
+void LiveNodeList::Trace(Visitor* visitor) {
   visitor->Trace(collection_items_cache_);
   LiveNodeListBase::Trace(visitor);
   NodeList::Trace(visitor);

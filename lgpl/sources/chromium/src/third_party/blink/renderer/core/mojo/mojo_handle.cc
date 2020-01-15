@@ -4,6 +4,9 @@
 
 #include "third_party/blink/renderer/core/mojo/mojo_handle.h"
 
+#include "base/numerics/safe_math.h"
+#include "mojo/public/c/system/message_pipe.h"
+#include "mojo/public/cpp/bindings/message.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "third_party/blink/renderer/bindings/core/v8/array_buffer_or_array_buffer_view.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -29,10 +32,6 @@ static const size_t kHandleVectorInlineCapacity = 4;
 
 namespace blink {
 
-MojoHandle* MojoHandle::Create(mojo::ScopedHandle handle) {
-  return new MojoHandle(std::move(handle));
-}
-
 mojo::ScopedHandle MojoHandle::TakeHandle() {
   return std::move(handle_);
 }
@@ -45,7 +44,7 @@ void MojoHandle::close() {
 }
 
 MojoWatcher* MojoHandle::watch(ScriptState* script_state,
-                               const MojoHandleSignals& signals,
+                               const MojoHandleSignals* signals,
                                V8MojoWatchCallback* callback) {
   return MojoWatcher::Create(handle_.get(), signals, callback,
                              ExecutionContext::From(script_state));
@@ -54,11 +53,17 @@ MojoWatcher* MojoHandle::watch(ScriptState* script_state,
 MojoResult MojoHandle::writeMessage(
     ArrayBufferOrArrayBufferView& buffer,
     const HeapVector<Member<MojoHandle>>& handles) {
-  // mojo::WriteMessageRaw takes ownership of the handles, so release them here.
-  Vector<::MojoHandle, kHandleVectorInlineCapacity> raw_handles(handles.size());
-  std::transform(
-      handles.begin(), handles.end(), raw_handles.begin(),
-      [](MojoHandle* handle) { return handle->handle_.release().value(); });
+  Vector<mojo::ScopedHandle, kHandleVectorInlineCapacity> scoped_handles;
+  scoped_handles.ReserveCapacity(handles.size());
+  bool has_invalid_handles = false;
+  for (auto& handle : handles) {
+    if (!handle->handle_.is_valid())
+      has_invalid_handles = true;
+    else
+      scoped_handles.emplace_back(std::move(handle->handle_));
+  }
+  if (has_invalid_handles)
+    return MOJO_RESULT_INVALID_ARGUMENT;
 
   const void* bytes = nullptr;
   size_t num_bytes = 0;
@@ -72,26 +77,32 @@ MojoResult MojoHandle::writeMessage(
     num_bytes = view->byteLength();
   }
 
-  return mojo::WriteMessageRaw(
-      mojo::MessagePipeHandle(handle_.get().value()), bytes, num_bytes,
-      raw_handles.data(), raw_handles.size(), MOJO_WRITE_MESSAGE_FLAG_NONE);
+  auto message = mojo::Message(
+      base::make_span(static_cast<const uint8_t*>(bytes), num_bytes),
+      base::make_span(scoped_handles));
+  DCHECK(!message.IsNull());
+  return mojo::WriteMessageNew(mojo::MessagePipeHandle(handle_.get().value()),
+                               message.TakeMojoMessage(),
+                               MOJO_WRITE_MESSAGE_FLAG_NONE);
 }
 
-void MojoHandle::readMessage(const MojoReadMessageFlags& flags_dict,
-                             MojoReadMessageResult& result_dict) {
+MojoReadMessageResult* MojoHandle::readMessage(
+    const MojoReadMessageFlags* flags_dict) {
+  MojoReadMessageResult* result_dict = MojoReadMessageResult::Create();
+
   mojo::ScopedMessageHandle message;
   MojoResult result =
       mojo::ReadMessageNew(mojo::MessagePipeHandle(handle_.get().value()),
                            &message, MOJO_READ_MESSAGE_FLAG_NONE);
   if (result != MOJO_RESULT_OK) {
-    result_dict.setResult(result);
-    return;
+    result_dict->setResult(result);
+    return result_dict;
   }
 
   result = MojoSerializeMessage(message->value(), nullptr);
   if (result != MOJO_RESULT_OK && result != MOJO_RESULT_FAILED_PRECONDITION) {
-    result_dict.setResult(MOJO_RESULT_ABORTED);
-    return;
+    result_dict->setResult(MOJO_RESULT_ABORTED);
+    return result_dict;
   }
 
   uint32_t num_bytes = 0, num_handles = 0;
@@ -106,8 +117,8 @@ void MojoHandle::readMessage(const MojoReadMessageFlags& flags_dict,
   }
 
   if (result != MOJO_RESULT_OK) {
-    result_dict.setResult(MOJO_RESULT_ABORTED);
-    return;
+    result_dict->setResult(MOJO_RESULT_ABORTED);
+    return result_dict;
   }
 
   DOMArrayBuffer* buffer =
@@ -116,22 +127,26 @@ void MojoHandle::readMessage(const MojoReadMessageFlags& flags_dict,
     CHECK(buffer);
     memcpy(buffer->Data(), bytes, num_bytes);
   }
-  result_dict.setBuffer(buffer);
+  result_dict->setBuffer(buffer);
 
   HeapVector<Member<MojoHandle>> handles(num_handles);
   for (uint32_t i = 0; i < num_handles; ++i) {
-    handles[i] = MojoHandle::Create(
+    handles[i] = MakeGarbageCollected<MojoHandle>(
         mojo::MakeScopedHandle(mojo::Handle(raw_handles[i])));
   }
-  result_dict.setHandles(handles);
-  result_dict.setResult(result);
+  result_dict->setHandles(handles);
+  result_dict->setResult(result);
+
+  return result_dict;
 }
 
-void MojoHandle::writeData(const ArrayBufferOrArrayBufferView& buffer,
-                           const MojoWriteDataOptions& options_dict,
-                           MojoWriteDataResult& result_dict) {
+MojoWriteDataResult* MojoHandle::writeData(
+    const ArrayBufferOrArrayBufferView& buffer,
+    const MojoWriteDataOptions* options_dict) {
+  MojoWriteDataResult* result_dict = MojoWriteDataResult::Create();
+
   MojoWriteDataFlags flags = MOJO_WRITE_DATA_FLAG_NONE;
-  if (options_dict.allOrNone())
+  if (options_dict->allOrNone())
     flags |= MOJO_WRITE_DATA_FLAG_ALL_OR_NONE;
 
   const void* elements = nullptr;
@@ -151,26 +166,30 @@ void MojoHandle::writeData(const ArrayBufferOrArrayBufferView& buffer,
   options.flags = flags;
   MojoResult result =
       MojoWriteData(handle_.get().value(), elements, &num_bytes, &options);
-  result_dict.setResult(result);
-  result_dict.setNumBytes(result == MOJO_RESULT_OK ? num_bytes : 0);
+  result_dict->setResult(result);
+  result_dict->setNumBytes(result == MOJO_RESULT_OK ? num_bytes : 0);
+  return result_dict;
 }
 
-void MojoHandle::queryData(MojoReadDataResult& result_dict) {
+MojoReadDataResult* MojoHandle::queryData() const {
+  MojoReadDataResult* result_dict = MojoReadDataResult::Create();
   uint32_t num_bytes = 0;
   ::MojoReadDataOptions options;
   options.struct_size = sizeof(options);
   options.flags = MOJO_READ_DATA_FLAG_QUERY;
   MojoResult result =
       MojoReadData(handle_.get().value(), &options, nullptr, &num_bytes);
-  result_dict.setResult(result);
-  result_dict.setNumBytes(num_bytes);
+  result_dict->setResult(result);
+  result_dict->setNumBytes(num_bytes);
+  return result_dict;
 }
 
-void MojoHandle::discardData(unsigned num_bytes,
-                             const MojoDiscardDataOptions& options_dict,
-                             MojoReadDataResult& result_dict) {
+MojoReadDataResult* MojoHandle::discardData(
+    unsigned num_bytes,
+    const MojoDiscardDataOptions* options_dict) {
+  MojoReadDataResult* result_dict = MojoReadDataResult::Create();
   MojoReadDataFlags flags = MOJO_READ_DATA_FLAG_DISCARD;
-  if (options_dict.allOrNone())
+  if (options_dict->allOrNone())
     flags |= MOJO_READ_DATA_FLAG_ALL_OR_NONE;
 
   ::MojoReadDataOptions options;
@@ -178,17 +197,19 @@ void MojoHandle::discardData(unsigned num_bytes,
   options.flags = flags;
   MojoResult result =
       MojoReadData(handle_.get().value(), &options, nullptr, &num_bytes);
-  result_dict.setResult(result);
-  result_dict.setNumBytes(result == MOJO_RESULT_OK ? num_bytes : 0);
+  result_dict->setResult(result);
+  result_dict->setNumBytes(result == MOJO_RESULT_OK ? num_bytes : 0);
+  return result_dict;
 }
 
-void MojoHandle::readData(ArrayBufferOrArrayBufferView& buffer,
-                          const MojoReadDataOptions& options_dict,
-                          MojoReadDataResult& result_dict) {
+MojoReadDataResult* MojoHandle::readData(
+    ArrayBufferOrArrayBufferView& buffer,
+    const MojoReadDataOptions* options_dict) const {
+  MojoReadDataResult* result_dict = MojoReadDataResult::Create();
   MojoReadDataFlags flags = MOJO_READ_DATA_FLAG_NONE;
-  if (options_dict.allOrNone())
+  if (options_dict->allOrNone())
     flags |= MOJO_READ_DATA_FLAG_ALL_OR_NONE;
-  if (options_dict.peek())
+  if (options_dict->peek())
     flags |= MOJO_READ_DATA_FLAG_PEEK;
 
   void* elements = nullptr;
@@ -208,17 +229,18 @@ void MojoHandle::readData(ArrayBufferOrArrayBufferView& buffer,
   options.flags = flags;
   MojoResult result =
       MojoReadData(handle_.get().value(), &options, elements, &num_bytes);
-  result_dict.setResult(result);
-  result_dict.setNumBytes(result == MOJO_RESULT_OK ? num_bytes : 0);
+  result_dict->setResult(result);
+  result_dict->setNumBytes(result == MOJO_RESULT_OK ? num_bytes : 0);
+  return result_dict;
 }
 
-void MojoHandle::mapBuffer(unsigned offset,
-                           unsigned num_bytes,
-                           MojoMapBufferResult& result_dict) {
+MojoMapBufferResult* MojoHandle::mapBuffer(unsigned offset,
+                                           unsigned num_bytes) {
+  MojoMapBufferResult* result_dict = MojoMapBufferResult::Create();
   void* data = nullptr;
   MojoResult result =
       MojoMapBuffer(handle_.get().value(), offset, num_bytes, nullptr, &data);
-  result_dict.setResult(result);
+  result_dict->setResult(result);
   if (result == MOJO_RESULT_OK) {
     WTF::ArrayBufferContents::DataHandle data_handle(
         data, num_bytes,
@@ -229,25 +251,30 @@ void MojoHandle::mapBuffer(unsigned offset,
         nullptr);
     WTF::ArrayBufferContents contents(std::move(data_handle),
                                       WTF::ArrayBufferContents::kNotShared);
-    result_dict.setBuffer(DOMArrayBuffer::Create(contents));
+    result_dict->setBuffer(DOMArrayBuffer::Create(contents));
   }
+  return result_dict;
 }
 
-void MojoHandle::duplicateBufferHandle(
-    const MojoDuplicateBufferHandleOptions& options_dict,
-    MojoCreateSharedBufferResult& result_dict) {
+MojoCreateSharedBufferResult* MojoHandle::duplicateBufferHandle(
+    const MojoDuplicateBufferHandleOptions* options_dict) {
+  MojoCreateSharedBufferResult* result_dict =
+      MojoCreateSharedBufferResult::Create();
+
   ::MojoDuplicateBufferHandleOptions options = {
       sizeof(options), MOJO_DUPLICATE_BUFFER_HANDLE_FLAG_NONE};
-  if (options_dict.readOnly())
+  if (options_dict->readOnly())
     options.flags |= MOJO_DUPLICATE_BUFFER_HANDLE_FLAG_READ_ONLY;
 
   mojo::Handle handle;
   MojoResult result = MojoDuplicateBufferHandle(handle_.get().value(), &options,
                                                 handle.mutable_value());
-  result_dict.setResult(result);
+  result_dict->setResult(result);
   if (result == MOJO_RESULT_OK) {
-    result_dict.setHandle(MojoHandle::Create(mojo::MakeScopedHandle(handle)));
+    result_dict->setHandle(
+        MakeGarbageCollected<MojoHandle>(mojo::MakeScopedHandle(handle)));
   }
+  return result_dict;
 }
 
 }  // namespace blink

@@ -8,7 +8,7 @@
 #include "third_party/blink/renderer/core/layout/api/line_layout_box_model.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
-#include "third_party/blink/renderer/platform/layout_unit.h"
+#include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 
 namespace blink {
 
@@ -29,6 +29,9 @@ class LineLayoutBox : public LineLayoutBoxModel {
   LineLayoutBox() = default;
 
   LayoutPoint Location() const { return ToBox()->Location(); }
+  PhysicalOffset PhysicalLocation() const {
+    return ToBox()->PhysicalLocation();
+  }
 
   LayoutSize Size() const { return ToBox()->Size(); }
 
@@ -44,26 +47,12 @@ class LineLayoutBox : public LineLayoutBoxModel {
     return ToBox()->FlipForWritingMode(unit);
   }
 
-  void FlipForWritingMode(FloatRect& rect) const {
-    ToBox()->FlipForWritingMode(rect);
-  }
-
-  FloatPoint FlipForWritingMode(const FloatPoint& point) const {
-    return ToBox()->FlipForWritingMode(point);
-  }
-
   void FlipForWritingMode(LayoutRect& rect) const {
-    ToBox()->FlipForWritingMode(rect);
+    ToBox()->DeprecatedFlipForWritingMode(rect);
   }
 
   LayoutPoint FlipForWritingMode(const LayoutPoint& point) const {
-    return ToBox()->FlipForWritingMode(point);
-  }
-
-  LayoutPoint FlipForWritingModeForChild(const LineLayoutBox& child,
-                                         LayoutPoint child_point) const {
-    return ToBox()->FlipForWritingModeForChild(
-        ToLayoutBox(child.GetLayoutObject()), child_point);
+    return ToBox()->DeprecatedFlipForWritingMode(point);
   }
 
   void MoveWithEdgeOfInlineContainerIfNecessary(bool is_horizontal) {
@@ -74,7 +63,8 @@ class LineLayoutBox : public LineLayoutBoxModel {
     ToBox()->Move(width, height);
   }
 
-  bool HasOverflowModel() const { return ToBox()->HasOverflowModel(); }
+  bool HasLayoutOverflow() const { return ToBox()->HasLayoutOverflow(); }
+  bool HasVisualOverflow() const { return ToBox()->HasVisualOverflow(); }
   LayoutRect LogicalVisualOverflowRectForPropagation() const {
     return ToBox()->LogicalVisualOverflowRectForPropagation();
   }
@@ -88,7 +78,7 @@ class LineLayoutBox : public LineLayoutBoxModel {
 
   void SetSize(const LayoutSize& size) { return ToBox()->SetSize(size); }
 
-  IntSize ScrolledContentOffset() const {
+  LayoutSize ScrolledContentOffset() const {
     return ToBox()->ScrolledContentOffset();
   }
 
@@ -100,13 +90,12 @@ class LineLayoutBox : public LineLayoutBoxModel {
     return ToBox()->SetInlineBoxWrapper(box);
   }
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
 
   void ShowLineTreeAndMark(const InlineBox* marked_box1,
                            const char* marked_label1) const {
-    if (GetLayoutObject()->IsLayoutBlockFlow())
-      ToLayoutBlockFlow(GetLayoutObject())
-          ->ShowLineTreeAndMark(marked_box1, marked_label1);
+    if (auto* layout_block_flow = DynamicTo<LayoutBlockFlow>(GetLayoutObject()))
+      layout_block_flow->ShowLineTreeAndMark(marked_box1, marked_label1);
   }
 
 #endif

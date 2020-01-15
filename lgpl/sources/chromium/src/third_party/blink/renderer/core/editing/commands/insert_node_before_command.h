@@ -32,23 +32,13 @@ namespace blink {
 
 class InsertNodeBeforeCommand final : public SimpleEditCommand {
  public:
-  static InsertNodeBeforeCommand* Create(
-      Node* child_to_insert,
-      Node* child_to_insert_before,
-      ShouldAssumeContentIsAlwaysEditable
-          should_assume_content_is_always_editable) {
-    return new InsertNodeBeforeCommand(
-        child_to_insert, child_to_insert_before,
-        should_assume_content_is_always_editable);
-  }
-
-  void Trace(blink::Visitor*) override;
-
- private:
   InsertNodeBeforeCommand(Node* child_to_insert,
                           Node* child_to_insert_before,
                           ShouldAssumeContentIsAlwaysEditable);
 
+  void Trace(Visitor*) override;
+
+ private:
   void DoApply(EditingState*) override;
   void DoUnapply() override;
 

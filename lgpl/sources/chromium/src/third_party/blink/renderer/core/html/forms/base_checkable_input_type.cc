@@ -31,18 +31,20 @@
 
 #include "third_party/blink/renderer/core/html/forms/base_checkable_input_type.h"
 
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/form_controller.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-void BaseCheckableInputType::Trace(blink::Visitor* visitor) {
+void BaseCheckableInputType::Trace(Visitor* visitor) {
   InputTypeView::Trace(visitor);
   InputType::Trace(visitor);
 }
@@ -95,7 +97,7 @@ void BaseCheckableInputType::AccessKeyAction(bool send_mouse_events) {
 }
 
 bool BaseCheckableInputType::MatchesDefaultPseudoClass() {
-  return GetElement().FastHasAttribute(checkedAttr);
+  return GetElement().FastHasAttribute(kCheckedAttr);
 }
 
 InputType::ValueMode BaseCheckableInputType::GetValueMode() const {
@@ -106,7 +108,7 @@ void BaseCheckableInputType::SetValue(const String& sanitized_value,
                                       bool,
                                       TextFieldEventBehavior,
                                       TextControlSetValueSelection) {
-  GetElement().setAttribute(valueAttr, AtomicString(sanitized_value));
+  GetElement().setAttribute(kValueAttr, AtomicString(sanitized_value));
 }
 
 void BaseCheckableInputType::ReadingChecked() const {

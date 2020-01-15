@@ -28,20 +28,21 @@
 
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css/selector_checker.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/shadow_root_v0.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-DEFINE_NODE_FACTORY(HTMLContentElement);
-
-inline HTMLContentElement::HTMLContentElement(Document& document)
-    : V0InsertionPoint(contentTag, document),
+HTMLContentElement::HTMLContentElement(Document& document)
+    : V0InsertionPoint(kContentTag, document),
       should_parse_select_(false),
       is_valid_selector_(true) {
   UseCounter::Count(document, WebFeature::kHTMLContentElement);
@@ -49,7 +50,7 @@ inline HTMLContentElement::HTMLContentElement(Document& document)
 
 HTMLContentElement::~HTMLContentElement() = default;
 
-void HTMLContentElement::Trace(blink::Visitor* visitor) {
+void HTMLContentElement::Trace(Visitor* visitor) {
   V0InsertionPoint::Trace(visitor);
 }
 
@@ -57,7 +58,7 @@ void HTMLContentElement::ParseSelect() {
   DCHECK(should_parse_select_);
 
   selector_list_ = CSSParser::ParseSelector(
-      CSSParserContext::Create(GetDocument()), nullptr, select_);
+      MakeGarbageCollected<CSSParserContext>(GetDocument()), nullptr, select_);
   should_parse_select_ = false;
   is_valid_selector_ = ValidateSelect();
   if (!is_valid_selector_)
@@ -66,7 +67,7 @@ void HTMLContentElement::ParseSelect() {
 
 void HTMLContentElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  if (params.name == selectAttr) {
+  if (params.name == kSelectAttr) {
     if (ShadowRoot* root = ContainingShadowRoot()) {
       if (!root->IsV1())
         root->V0().WillAffectSelector();

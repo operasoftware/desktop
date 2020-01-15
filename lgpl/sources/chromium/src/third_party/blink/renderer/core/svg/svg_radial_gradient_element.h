@@ -33,7 +33,7 @@ class SVGRadialGradientElement final : public SVGGradientElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(SVGRadialGradientElement);
+  explicit SVGRadialGradientElement(Document&);
 
   bool CollectGradientAttributes(RadialGradientAttributes&);
 
@@ -47,11 +47,9 @@ class SVGRadialGradientElement final : public SVGGradientElement {
   void Trace(blink::Visitor*) override;
 
  private:
-  explicit SVGRadialGradientElement(Document&);
-
   void SvgAttributeChanged(const QualifiedName&) override;
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 
   bool SelfHasRelativeLengths() const override;
 

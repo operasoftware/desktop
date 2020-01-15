@@ -6,14 +6,19 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_PEERCONNECTION_RTC_STATS_REPORT_H_
 
 #include "third_party/blink/public/platform/web_rtc_stats.h"
+#include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/renderer/bindings/core/v8/maplike.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-
-#include <map>
+#include "third_party/webrtc/api/stats/rtc_stats.h"
 
 namespace blink {
+
+// Returns the group ids for non-standardized members which should be exposed
+// based on what Origin Trials are running.
+WebVector<webrtc::NonStandardGroupId> GetExposedGroupIds(
+    const ScriptState* script_state);
 
 // https://w3c.github.io/webrtc-pc/#rtcstatsreport-object
 class RTCStatsReport final : public ScriptWrappable,
@@ -23,7 +28,7 @@ class RTCStatsReport final : public ScriptWrappable,
  public:
   RTCStatsReport(std::unique_ptr<WebRTCStatsReport>);
 
-  size_t size() const { return report_->Size(); }
+  uint32_t size() const;
 
   // Maplike<String, v8::Local<v8::Value>>
   PairIterable<String, v8::Local<v8::Value>>::IterationSource* StartIteration(

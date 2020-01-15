@@ -6,10 +6,11 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PARSER_CSS_PARSER_H_
 
 #include <memory>
+#include "third_party/blink/public/platform/web_color_scheme.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
-#include "third_party/blink/renderer/core/css_property_names.h"
 
 namespace blink {
 
@@ -69,7 +70,6 @@ class CORE_EXPORT CSSParser {
   static MutableCSSPropertyValueSet::SetResult ParseValueForCustomProperty(
       MutableCSSPropertyValueSet*,
       const AtomicString& property_name,
-      const PropertyRegistry*,
       const String& value,
       bool important,
       SecureContextMode,
@@ -88,6 +88,8 @@ class CORE_EXPORT CSSParser {
   static ImmutableCSSPropertyValueSet* ParseInlineStyleDeclaration(
       const String&,
       Element*);
+  static ImmutableCSSPropertyValueSet*
+  ParseInlineStyleDeclaration(const String&, CSSParserMode, SecureContextMode);
 
   static std::unique_ptr<Vector<double>> ParseKeyframeKeyList(const String&);
   static StyleRuleKeyframe* ParseKeyframeRule(const CSSParserContext*,
@@ -98,7 +100,9 @@ class CORE_EXPORT CSSParser {
   // The color will only be changed when string contains a valid CSS color, so
   // callers can set it to a default color and ignore the boolean result.
   static bool ParseColor(Color&, const String&, bool strict = false);
-  static bool ParseSystemColor(Color&, const String&);
+  static bool ParseSystemColor(Color&,
+                               const String&,
+                               WebColorScheme color_scheme);
 
   static void ParseSheetForInspector(const CSSParserContext*,
                                      StyleSheetContents*,

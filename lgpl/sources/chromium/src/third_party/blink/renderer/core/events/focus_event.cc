@@ -28,11 +28,12 @@
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
 #include "third_party/blink/renderer/core/dom/events/event_path.h"
+#include "third_party/blink/renderer/core/event_interface_names.h"
 
 namespace blink {
 
 const AtomicString& FocusEvent::InterfaceName() const {
-  return EventNames::FocusEvent;
+  return event_interface_names::kFocusEvent;
 }
 
 bool FocusEvent::IsFocusEvent() const {
@@ -51,17 +52,17 @@ FocusEvent::FocusEvent(const AtomicString& type,
               bubbles,
               Cancelable::kNo,
               ComposedMode::kComposed,
-              CurrentTimeTicks(),
+              base::TimeTicks::Now(),
               view,
               detail,
               source_capabilities),
       related_target_(related_target) {}
 
 FocusEvent::FocusEvent(const AtomicString& type,
-                       const FocusEventInit& initializer)
+                       const FocusEventInit* initializer)
     : UIEvent(type, initializer) {
-  if (initializer.hasRelatedTarget())
-    related_target_ = initializer.relatedTarget();
+  if (initializer->hasRelatedTarget())
+    related_target_ = initializer->relatedTarget();
 }
 
 void FocusEvent::Trace(blink::Visitor* visitor) {

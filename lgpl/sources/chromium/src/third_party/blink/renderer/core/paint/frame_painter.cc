@@ -11,8 +11,6 @@
 #include "third_party/blink/renderer/core/paint/frame_paint_timing.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_painter.h"
-#include "third_party/blink/renderer/core/paint/scrollbar_painter.h"
-#include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
@@ -25,25 +23,25 @@ bool FramePainter::in_paint_contents_ = false;
 
 void FramePainter::Paint(GraphicsContext& context,
                          const GlobalPaintFlags global_paint_flags,
-                         const CullRect& rect) {
+                         const CullRect& cull_rect) {
   if (GetFrameView().ShouldThrottleRendering())
     return;
 
   GetFrameView().NotifyPageThatContentAreaWillPaint();
 
-  IntRect document_dirty_rect(rect.Rect());
-  document_dirty_rect.Intersect(GetFrameView().FrameRect());
-  document_dirty_rect.MoveBy(-GetFrameView().Location());
+  CullRect document_cull_rect(
+      Intersection(cull_rect.Rect(), GetFrameView().FrameRect()));
+  document_cull_rect.MoveBy(-GetFrameView().Location());
 
-  if (document_dirty_rect.IsEmpty())
+  if (document_cull_rect.Rect().IsEmpty())
     return;
 
-  PaintContents(context, global_paint_flags, document_dirty_rect);
+  PaintContents(context, global_paint_flags, document_cull_rect);
 }
 
 void FramePainter::PaintContents(GraphicsContext& context,
                                  const GlobalPaintFlags global_paint_flags,
-                                 const IntRect& rect) {
+                                 const CullRect& cull_rect) {
   Document* document = GetFrameView().GetFrame().GetDocument();
 
   if (GetFrameView().ShouldThrottleRendering() || !document->IsActive())
@@ -66,26 +64,20 @@ void FramePainter::PaintContents(GraphicsContext& context,
          DocumentLifecycle::kCompositingClean);
 
   FramePaintTiming frame_paint_timing(context, &GetFrameView().GetFrame());
-  TRACE_EVENT1(
-      "devtools.timeline,rail", "Paint", "data",
-      InspectorPaintEvent::Data(layout_view, LayoutRect(rect), nullptr));
+  TRACE_EVENT1("devtools.timeline,rail", "Paint", "data",
+               inspector_paint_event::Data(
+                   layout_view, PhysicalRect(cull_rect.Rect()), nullptr));
 
   bool is_top_level_painter = !in_paint_contents_;
   in_paint_contents_ = true;
 
   FontCachePurgePreventer font_cache_purge_preventer;
 
-  // TODO(jchaffraix): GlobalPaintFlags should be const during a paint
-  // phase. Thus we should set this flag upfront (crbug.com/510280).
-  GlobalPaintFlags updated_global_paint_flags = global_paint_flags;
   PaintLayerFlags root_layer_paint_flags = 0;
-  if (document->Printing()) {
-    updated_global_paint_flags |=
-        kGlobalPaintFlattenCompositingLayers | kGlobalPaintPrinting;
-    // This will prevent clipping the root PaintLayer to its visible content
-    // rect when root layer scrolling is enabled.
+  // This will prevent clipping the root PaintLayer to its visible content
+  // rect when root layer scrolling is enabled.
+  if (document->Printing())
     root_layer_paint_flags = kPaintLayerPaintingOverflowContents;
-  }
 
   PaintLayer* root_layer = layout_view->Layer();
 
@@ -101,13 +93,8 @@ void FramePainter::PaintContents(GraphicsContext& context,
       root_layer->GetLayoutObject().GetFrame());
   context.SetDeviceScaleFactor(device_scale_factor);
 
-  layer_painter.Paint(context, LayoutRect(rect), updated_global_paint_flags,
+  layer_painter.Paint(context, cull_rect, global_paint_flags,
                       root_layer_paint_flags);
-
-  if (root_layer->ContainsDirtyOverlayScrollbars()) {
-    layer_painter.PaintOverlayScrollbars(context, LayoutRect(rect),
-                                         updated_global_paint_flags);
-  }
 
   // Regions may have changed as a result of the visibility/z-index of element
   // changing.
@@ -120,8 +107,6 @@ void FramePainter::PaintContents(GraphicsContext& context,
     GetMemoryCache()->UpdateFramePaintTimestamp();
     in_paint_contents_ = false;
   }
-
-  probe::didPaint(layout_view->GetFrame(), nullptr, context, LayoutRect(rect));
 }
 
 const LocalFrameView& FramePainter::GetFrameView() {

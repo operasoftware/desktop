@@ -25,13 +25,12 @@
 #include "third_party/blink/renderer/core/style/svg_computed_style.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/platform/graphics/filters/fe_flood.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
-inline SVGFEFloodElement::SVGFEFloodElement(Document& document)
-    : SVGFilterPrimitiveStandardAttributes(SVGNames::feFloodTag, document) {}
-
-DEFINE_NODE_FACTORY(SVGFEFloodElement)
+SVGFEFloodElement::SVGFEFloodElement(Document& document)
+    : SVGFilterPrimitiveStandardAttributes(svg_names::kFEFloodTag, document) {}
 
 bool SVGFEFloodElement::SetFilterEffectAttribute(
     FilterEffect* effect,
@@ -39,11 +38,11 @@ bool SVGFEFloodElement::SetFilterEffectAttribute(
   const ComputedStyle& style = ComputedStyleRef();
 
   FEFlood* flood = static_cast<FEFlood*>(effect);
-  if (attr_name == SVGNames::flood_colorAttr) {
+  if (attr_name == svg_names::kFloodColorAttr) {
     return flood->SetFloodColor(
         style.VisitedDependentColor(GetCSSPropertyFloodColor()));
   }
-  if (attr_name == SVGNames::flood_opacityAttr)
+  if (attr_name == svg_names::kFloodOpacityAttr)
     return flood->SetFloodOpacity(style.SvgStyle().FloodOpacity());
 
   return SVGFilterPrimitiveStandardAttributes::SetFilterEffectAttribute(
@@ -58,7 +57,15 @@ FilterEffect* SVGFEFloodElement::Build(SVGFilterBuilder*, Filter* filter) {
   Color color = style->VisitedDependentColor(GetCSSPropertyFloodColor());
   float opacity = style->SvgStyle().FloodOpacity();
 
-  return FEFlood::Create(filter, color, opacity);
+  return MakeGarbageCollected<FEFlood>(filter, color, opacity);
+}
+
+bool SVGFEFloodElement::TaintsOrigin() const {
+  const ComputedStyle* style = GetComputedStyle();
+  // TaintsOrigin() is only called after a successful call to Build()
+  // (see above), so we should have a ComputedStyle here.
+  DCHECK(style);
+  return style->SvgStyle().FloodColor().IsCurrentColor();
 }
 
 }  // namespace blink

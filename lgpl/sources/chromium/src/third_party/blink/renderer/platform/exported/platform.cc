@@ -32,60 +32,108 @@
 
 #include <memory>
 
+#include "base/allocator/partition_allocator/memory_reclaimer.h"
 #include "base/single_thread_task_runner.h"
-#include "base/synchronization/waitable_event.h"
+#include "base/threading/thread_checker.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/interface_provider.h"
-#include "third_party/blink/public/platform/modules/webmidi/web_midi_accessor.h"
-#include "third_party/blink/public/platform/scheduler/child/webthread_base.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
-#include "third_party/blink/public/platform/web_canvas_capture_handler.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
-#include "third_party/blink/public/platform/web_image_capture_frame_grabber.h"
-#include "third_party/blink/public/platform/web_media_recorder_handler.h"
-#include "third_party/blink/public/platform/web_media_stream_center.h"
 #include "third_party/blink/public/platform/web_prerendering_support.h"
-#include "third_party/blink/public/platform/web_rtc_certificate_generator.h"
 #include "third_party/blink/public/platform/web_rtc_peer_connection_handler.h"
-#include "third_party/blink/public/platform/web_storage_namespace.h"
 #include "third_party/blink/public/platform/websocket_handshake_throttle.h"
-#include "third_party/blink/renderer/platform/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/bindings/parkable_string_manager.h"
 #include "third_party/blink/renderer/platform/font_family_names.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache_memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/heap/blink_gc_memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/heap/gc_task_runner.h"
-#include "third_party/blink/renderer/platform/histogram.h"
-#include "third_party/blink/renderer/platform/instance_counters_memory_dump_provider.h"
+#include "third_party/blink/renderer/platform/instrumentation/instance_counters_memory_dump_provider.h"
+#include "third_party/blink/renderer/platform/instrumentation/memory_pressure_listener.h"
+#include "third_party/blink/renderer/platform/instrumentation/partition_alloc_memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/renderer_resource_coordinator.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/memory_cache_dump_provider.h"
 #include "third_party/blink/renderer/platform/language.h"
-#include "third_party/blink/renderer/platform/memory_coordinator.h"
-#include "third_party/blink/renderer/platform/partition_alloc_memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/scheduler/common/simple_thread_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
-#include "third_party/blink/renderer/platform/web_task_runner.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/webrtc/api/rtpparameters.h"
+#include "third_party/webrtc/api/async_resolver_factory.h"
+#include "third_party/webrtc/api/rtp_parameters.h"
+#include "third_party/webrtc/p2p/base/port_allocator.h"
 
 namespace blink {
 
 namespace {
 
-class DefaultConnector {
- public:
-  DefaultConnector() {
-    service_manager::mojom::ConnectorRequest request;
-    connector_ = service_manager::Connector::Create(&request);
-  }
+class DefaultInterfaceProvider : public InterfaceProvider {
+  USING_FAST_MALLOC(DefaultInterfaceProvider);
 
-  service_manager::Connector* Get() { return connector_.get(); }
+ public:
+  DefaultInterfaceProvider() = default;
+  ~DefaultInterfaceProvider() = default;
+
+  // InterfaceProvider implementation:
+  void GetInterface(const char* interface_name,
+                    mojo::ScopedMessagePipeHandle interface_pipe) override {
+    Platform::Current()->GetBrowserInterfaceBrokerProxy()->GetInterface(
+        mojo::GenericPendingReceiver(interface_name,
+                                     std::move(interface_pipe)));
+  }
+};
+
+class DefaultBrowserInterfaceBrokerProxy
+    : public ThreadSafeBrowserInterfaceBrokerProxy {
+  USING_FAST_MALLOC(DefaultBrowserInterfaceBrokerProxy);
+
+ public:
+  DefaultBrowserInterfaceBrokerProxy() = default;
+
+  // ThreadSafeBrowserInterfaceBrokerProxy implementation:
+  void GetInterfaceImpl(mojo::GenericPendingReceiver receiver) override {}
 
  private:
-  std::unique_ptr<service_manager::Connector> connector_;
+  ~DefaultBrowserInterfaceBrokerProxy() override = default;
+};
+
+class IdleDelayedTaskHelper : public base::SingleThreadTaskRunner {
+  USING_FAST_MALLOC(IdleDelayedTaskHelper);
+
+ public:
+  IdleDelayedTaskHelper() = default;
+
+  bool RunsTasksInCurrentSequence() const override { return IsMainThread(); }
+
+  bool PostNonNestableDelayedTask(const base::Location& from_here,
+                                  base::OnceClosure task,
+                                  base::TimeDelta delay) override {
+    NOTIMPLEMENTED();
+    return false;
+  }
+
+  bool PostDelayedTask(const base::Location& from_here,
+                       base::OnceClosure task,
+                       base::TimeDelta delay) override {
+    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+    ThreadScheduler::Current()->PostDelayedIdleTask(
+        from_here, delay,
+        base::BindOnce([](base::OnceClosure task,
+                          base::TimeTicks deadline) { std::move(task).Run(); },
+                       std::move(task)));
+    return true;
+  }
+
+ protected:
+  ~IdleDelayedTaskHelper() override = default;
+
+ private:
+  THREAD_CHECKER(thread_checker_);
+  DISALLOW_COPY_AND_ASSIGN(IdleDelayedTaskHelper);
 };
 
 }  // namespace
@@ -94,27 +142,15 @@ static Platform* g_platform = nullptr;
 
 static GCTaskRunner* g_gc_task_runner = nullptr;
 
-static void MaxObservedSizeFunction(size_t size_in_mb) {
-  const size_t kSupportedMaxSizeInMB = 4 * 1024;
-  if (size_in_mb >= kSupportedMaxSizeInMB)
-    size_in_mb = kSupportedMaxSizeInMB - 1;
-
-  // Send a UseCounter only when we see the highest memory usage
-  // we've ever seen.
-  DEFINE_STATIC_LOCAL(EnumerationHistogram, committed_size_histogram,
-                      ("PartitionAlloc.CommittedSize", kSupportedMaxSizeInMB));
-  committed_size_histogram.Count(size_in_mb);
-}
-
 static void CallOnMainThreadFunction(WTF::MainThreadFunction function,
                                      void* context) {
   PostCrossThreadTask(
-      *Platform::Current()->MainThread()->GetTaskRunner(), FROM_HERE,
-      CrossThreadBind(function, CrossThreadUnretained(context)));
+      *Thread::MainThread()->GetTaskRunner(), FROM_HERE,
+      CrossThreadBindOnce(function, CrossThreadUnretained(context)));
 }
 
-Platform::Platform() : main_thread_(nullptr) {
-  WTF::Partitions::Initialize(MaxObservedSizeFunction);
+Platform::Platform() {
+  WTF::Partitions::Initialize();
 }
 
 Platform::~Platform() = default;
@@ -140,7 +176,6 @@ class SimpleMainThread : public Thread {
   // This function is called from Platform::SetMainThreadTaskRunnerForTesting()
   // and Platform::UnsetMainThreadTaskRunnerForTesting().
 
-  bool IsCurrentThread() const override { return WTF::IsMainThread(); }
   ThreadScheduler* Scheduler() override { return &scheduler_; }
   scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() const override {
     if (main_thread_task_runner_for_testing_)
@@ -170,101 +205,83 @@ void Platform::Initialize(
   DCHECK(!g_platform);
   DCHECK(platform);
   g_platform = platform;
-  g_platform->owned_main_thread_ = main_thread_scheduler->CreateMainThread();
-  g_platform->main_thread_ = g_platform->owned_main_thread_.get();
-  DCHECK(!g_platform->current_thread_slot_.Get());
-  g_platform->current_thread_slot_.Set(g_platform->main_thread_);
-  InitializeCommon(platform);
+  InitializeCommon(platform, main_thread_scheduler->CreateMainThread());
 }
 
 void Platform::CreateMainThreadAndInitialize(Platform* platform) {
   DCHECK(!g_platform);
   DCHECK(platform);
   g_platform = platform;
-  g_platform->owned_main_thread_ = std::make_unique<SimpleMainThread>();
-  g_platform->main_thread_ = g_platform->owned_main_thread_.get();
-  DCHECK(!g_platform->current_thread_slot_.Get());
-  g_platform->current_thread_slot_.Set(g_platform->main_thread_);
-  InitializeCommon(platform);
+  InitializeCommon(platform, std::make_unique<SimpleMainThread>());
 }
 
-void Platform::InitializeCommon(Platform* platform) {
+void Platform::InitializeCommon(Platform* platform,
+                                std::unique_ptr<Thread> main_thread) {
   WTF::Initialize(CallOnMainThreadFunction);
 
+  Thread::SetMainThread(std::move(main_thread));
+
   ProcessHeap::Init();
-  MemoryCoordinator::Initialize();
-  if (base::ThreadTaskRunnerHandle::IsSet()) {
-    base::trace_event::MemoryDumpProvider::Options options;
-    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-        BlinkGCMemoryDumpProvider::Instance(), "BlinkGC",
-        base::ThreadTaskRunnerHandle::Get(), options);
-  }
 
-  ThreadState::AttachMainThread();
+  ThreadState* thread_state = ThreadState::AttachMainThread();
+  new BlinkGCMemoryDumpProvider(
+      thread_state, base::ThreadTaskRunnerHandle::Get(),
+      BlinkGCMemoryDumpProvider::HeapType::kBlinkMainThread);
 
-  // FontFamilyNames are used by platform/fonts and are initialized by core.
+  MemoryPressureListenerRegistry::Initialize();
+
+  // font_family_names are used by platform/fonts and are initialized by core.
   // In case core is not available (like on PPAPI plugins), we need to init
   // them here.
-  FontFamilyNames::init();
+  font_family_names::Init();
   InitializePlatformLanguage();
 
-  // TODO(ssid): remove this check after fixing crbug.com/486782.
-  if (g_platform->main_thread_) {
-    DCHECK(!g_gc_task_runner);
-    g_gc_task_runner = new GCTaskRunner(g_platform->main_thread_);
-    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-        PartitionAllocMemoryDumpProvider::Instance(), "PartitionAlloc",
-        base::ThreadTaskRunnerHandle::Get());
-    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-        FontCacheMemoryDumpProvider::Instance(), "FontCaches",
-        base::ThreadTaskRunnerHandle::Get());
-    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-        MemoryCacheDumpProvider::Instance(), "MemoryCache",
-        base::ThreadTaskRunnerHandle::Get());
-    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-        InstanceCountersMemoryDumpProvider::Instance(), "BlinkObjectCounters",
-        base::ThreadTaskRunnerHandle::Get());
-  }
+  DCHECK(!g_gc_task_runner);
+  g_gc_task_runner = new GCTaskRunner(Thread::MainThread());
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      PartitionAllocMemoryDumpProvider::Instance(), "PartitionAlloc",
+      base::ThreadTaskRunnerHandle::Get());
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      FontCacheMemoryDumpProvider::Instance(), "FontCaches",
+      base::ThreadTaskRunnerHandle::Get());
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      MemoryCacheDumpProvider::Instance(), "MemoryCache",
+      base::ThreadTaskRunnerHandle::Get());
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      InstanceCountersMemoryDumpProvider::Instance(), "BlinkObjectCounters",
+      base::ThreadTaskRunnerHandle::Get());
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      ParkableStringManagerDumpProvider::Instance(), "ParkableStrings",
+      base::ThreadTaskRunnerHandle::Get());
 
-  RendererResourceCoordinator::Initialize();
+  RendererResourceCoordinator::MaybeInitialize();
+  // Use a delayed idle task as this is low priority work that should stop when
+  // the main thread is not doing any work.
+  WTF::Partitions::StartPeriodicReclaim(
+      base::MakeRefCounted<IdleDelayedTaskHelper>());
 }
 
 void Platform::SetCurrentPlatformForTesting(Platform* platform) {
   DCHECK(platform);
-
-  // The overriding platform does not necessarily own the main thread
-  // (owned_main_thread_ may be null), but must have a pointer to a valid
-  // main thread object (which may be from the overridden platform).
-  //
-  // If the new platform's main_thread_ is null, that means we need to
-  // create a new main thread for it. This happens only in
-  // ScopedUnittestsEnvironmentSetup's constructor, which bypasses
-  // Platform::Initialize().
-  if (!platform->main_thread_) {
-    platform->owned_main_thread_ = std::make_unique<SimpleMainThread>();
-    platform->main_thread_ = platform->owned_main_thread_.get();
-  }
-
-  // Set only the main thread to TLS for the new platform. This is OK for the
-  // testing purposes. The TLS slot may already be set when
-  // ScopedTestingPlatformSupport tries to revert to the old platform.
-  if (!platform->current_thread_slot_.Get())
-    platform->current_thread_slot_.Set(platform->main_thread_);
-
   g_platform = platform;
+}
+
+void Platform::CreateMainThreadForTesting() {
+  DCHECK(!Thread::MainThread());
+  Thread::SetMainThread(std::make_unique<SimpleMainThread>());
 }
 
 void Platform::SetMainThreadTaskRunnerForTesting() {
   DCHECK(WTF::IsMainThread());
-  DCHECK(g_platform->main_thread_->IsSimpleMainThread());
-  static_cast<SimpleMainThread*>(g_platform->main_thread_)
+  DCHECK(Thread::MainThread()->IsSimpleMainThread());
+  static_cast<SimpleMainThread*>(Thread::MainThread())
       ->SetMainThreadTaskRunnerForTesting(base::ThreadTaskRunnerHandle::Get());
 }
 
 void Platform::UnsetMainThreadTaskRunnerForTesting() {
   DCHECK(WTF::IsMainThread());
-  DCHECK(g_platform->main_thread_->IsSimpleMainThread());
-  static_cast<SimpleMainThread*>(g_platform->main_thread_)
+  DCHECK(Thread::MainThread()->IsSimpleMainThread());
+  static_cast<SimpleMainThread*>(Thread::MainThread())
       ->SetMainThreadTaskRunnerForTesting(nullptr);
 }
 
@@ -272,95 +289,29 @@ Platform* Platform::Current() {
   return g_platform;
 }
 
-Thread* Platform::MainThread() {
-  return main_thread_;
-}
-
-Thread* Platform::CurrentThread() {
-  return static_cast<Thread*>(current_thread_slot_.Get());
-}
-
-service_manager::Connector* Platform::GetConnector() {
-  DEFINE_STATIC_LOCAL(DefaultConnector, connector, ());
-  return connector.Get();
-}
-
 InterfaceProvider* Platform::GetInterfaceProvider() {
-  return InterfaceProvider::GetEmptyInterfaceProvider();
+  DEFINE_STATIC_LOCAL(DefaultInterfaceProvider, provider, ());
+  return &provider;
 }
 
-std::unique_ptr<WebMIDIAccessor> Platform::CreateMIDIAccessor(
-    WebMIDIAccessorClient*) {
-  return nullptr;
-}
-
-std::unique_ptr<WebStorageNamespace> Platform::CreateLocalStorageNamespace() {
-  return nullptr;
-}
-
-std::unique_ptr<WebStorageNamespace> Platform::CreateSessionStorageNamespace(
-    base::StringPiece namespace_id) {
-  return nullptr;
+ThreadSafeBrowserInterfaceBrokerProxy*
+Platform::GetBrowserInterfaceBrokerProxy() {
+  DEFINE_STATIC_LOCAL(DefaultBrowserInterfaceBrokerProxy, proxy, ());
+  return &proxy;
 }
 
 std::unique_ptr<Thread> Platform::CreateThread(
     const ThreadCreationParams& params) {
-  std::unique_ptr<scheduler::WebThreadBase> thread =
-      scheduler::WebThreadBase::CreateWorkerThread(params);
-  thread->Init();
-  WaitUntilThreadTLSUpdate(thread.get());
-  return std::move(thread);
+  return Thread::CreateThread(params);
 }
 
-std::unique_ptr<Thread> Platform::CreateWebAudioThread() {
-  ThreadCreationParams params(WebThreadType::kWebAudioThread);
-  // WebAudio uses a thread with |DISPLAY| priority to avoid glitch when the
-  // system is under the high pressure. Note that the main browser thread also
-  // runs with same priority. (see: crbug.com/734539)
-  params.thread_options.priority = base::ThreadPriority::DISPLAY;
-  return CreateThread(params);
-}
-
-void Platform::WaitUntilThreadTLSUpdate(Thread* thread) {
-  base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
-                            base::WaitableEvent::InitialState::NOT_SIGNALED);
-  // This cross-thread posting is guaranteed to be safe.
-  PostCrossThreadTask(*thread->GetTaskRunner(), FROM_HERE,
-                      CrossThreadBind(&Platform::UpdateThreadTLS,
-                                      WTF::CrossThreadUnretained(this),
-                                      WTF::CrossThreadUnretained(thread),
-                                      WTF::CrossThreadUnretained(&event)));
-  event.Wait();
-}
-
-void Platform::UpdateThreadTLS(Thread* thread, base::WaitableEvent* event) {
-  DCHECK(!current_thread_slot_.Get());
-  current_thread_slot_.Set(thread);
-  event->Signal();
-}
-
-void Platform::InitializeCompositorThread() {
-  DCHECK(!compositor_thread_);
-
-  ThreadCreationParams params(WebThreadType::kCompositorThread);
-#if defined(OS_ANDROID)
-  params.thread_options.priority = base::ThreadPriority::DISPLAY;
-#endif
-  std::unique_ptr<scheduler::WebThreadBase> compositor_thread =
-      scheduler::WebThreadBase::CreateCompositorThread(params);
-  compositor_thread->Init();
-  WaitUntilThreadTLSUpdate(compositor_thread.get());
-  compositor_thread_ = std::move(compositor_thread);
-  SetDisplayThreadPriority(compositor_thread_->ThreadId());
-}
-
-Thread* Platform::CompositorThread() {
-  return compositor_thread_.get();
+void Platform::CreateAndSetCompositorThread() {
+  Thread::CreateAndSetCompositorThread();
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
 Platform::CompositorThreadTaskRunner() {
-  if (Thread* compositor_thread = CompositorThread())
+  if (Thread* compositor_thread = Thread::CompositorThread())
     return compositor_thread->GetTaskRunner();
   return nullptr;
 }
@@ -391,39 +342,13 @@ Platform::CreateRTCPeerConnectionHandler(
   return nullptr;
 }
 
-std::unique_ptr<WebMediaRecorderHandler> Platform::CreateMediaRecorderHandler(
-    scoped_refptr<base::SingleThreadTaskRunner>) {
+std::unique_ptr<cricket::PortAllocator> Platform::CreateWebRtcPortAllocator(
+    WebLocalFrame* frame) {
   return nullptr;
 }
 
-std::unique_ptr<WebRTCCertificateGenerator>
-Platform::CreateRTCCertificateGenerator() {
-  return nullptr;
-}
-
-std::unique_ptr<WebMediaStreamCenter> Platform::CreateMediaStreamCenter() {
-  return nullptr;
-}
-
-std::unique_ptr<WebCanvasCaptureHandler> Platform::CreateCanvasCaptureHandler(
-    const WebSize&,
-    double,
-    WebMediaStreamTrack*) {
-  return nullptr;
-}
-
-std::unique_ptr<WebImageCaptureFrameGrabber>
-Platform::CreateImageCaptureFrameGrabber() {
-  return nullptr;
-}
-
-std::unique_ptr<webrtc::RtpCapabilities> Platform::GetRtpSenderCapabilities(
-    const WebString& kind) {
-  return nullptr;
-}
-
-std::unique_ptr<webrtc::RtpCapabilities> Platform::GetRtpReceiverCapabilities(
-    const WebString& kind) {
+std::unique_ptr<webrtc::AsyncResolverFactory>
+Platform::CreateWebRtcAsyncResolverFactory() {
   return nullptr;
 }
 

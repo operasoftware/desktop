@@ -47,16 +47,14 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/paint/clip_rects_cache.h"
-
-#include "third_party/blink/renderer/platform/scroll/scroll_types.h"
-
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
+#include "third_party/blink/renderer/platform/graphics/scroll_types.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
 class FragmentData;
 class PaintLayer;
-class PropertyTreeState;
 
 enum ShouldRespectOverflowClipType {
   kIgnoreOverflowClip,
@@ -76,12 +74,12 @@ class ClipRectsContext {
           kIgnorePlatformOverlayScrollbarSize,
       ShouldRespectOverflowClipType root_layer_clip_behavior =
           kRespectOverflowClip,
-      const LayoutSize& accumulation = LayoutSize())
+      const PhysicalOffset& sub_pixel_accumulation = PhysicalOffset())
       : root_layer(root),
         root_fragment(fragment),
         overlay_scrollbar_clip_behavior(overlay_scrollbar_clip_behavior),
         cache_slot_(slot),
-        sub_pixel_accumulation(accumulation),
+        sub_pixel_accumulation(sub_pixel_accumulation),
         respect_overflow_clip(root_layer_clip_behavior) {}
 
   bool UsesCache() const { return cache_slot_ != kUncachedClipRects; }
@@ -98,7 +96,7 @@ class ClipRectsContext {
   friend class PaintLayerClipper;
 
   ClipRectsCacheSlot cache_slot_;
-  LayoutSize sub_pixel_accumulation;
+  PhysicalOffset sub_pixel_accumulation;
   ShouldRespectOverflowClipType respect_overflow_clip;
 };
 
@@ -177,7 +175,7 @@ class CORE_EXPORT PaintLayerClipper {
 
   // Returns the background clip rect of the layer in the local coordinate
   // space. Only looks for clips up to the given ancestor.
-  LayoutRect LocalClipRect(const PaintLayer& ancestor_layer) const;
+  PhysicalRect LocalClipRect(const PaintLayer& ancestor_layer) const;
 
   // Computes the same thing as backgroundRect in calculateRects(), but skips
   // applying CSS clip and the visualOverflowRect() of |m_layer|.
@@ -191,15 +189,15 @@ class CORE_EXPORT PaintLayerClipper {
   // include subpixel accumualation. Otherwise it is set to the offset from
   // |layer_| to |root_layer|, plus |context.sub_pixel_accumuation|.
   // |fragment_data| is only used in kUseGeometryMapper mode.
-  // If |paint_dirty_rect| is provided, intersects |background_rect|
-  // and |foreground_rect| with it.
+  // If |cull_rect| is provided, intersects |background_rect| and
+  // |foreground_rect| with it.
   void CalculateRects(const ClipRectsContext&,
                       const FragmentData*,
-                      const LayoutRect* paint_dirty_rect,
-                      LayoutRect& layer_bounds,
+                      const CullRect* cull_rect,
+                      PhysicalRect& layer_bounds,
                       ClipRect& background_rect,
                       ClipRect& foreground_rect,
-                      const LayoutPoint* offset_from_root = nullptr) const;
+                      const PhysicalOffset* offset_from_root = nullptr) const;
 
  private:
   void ClearCache(ClipRectsCacheSlot);
@@ -222,25 +220,19 @@ class CORE_EXPORT PaintLayerClipper {
       ShouldRespectOverflowClipType should_apply_self_overflow_clip,
       ClipRect& output) const;
 
-  ALWAYS_INLINE void InitializeCommonClipRectState(
-      const ClipRectsContext&,
-      const FragmentData&,
-      PropertyTreeState& source_property_tree_state,
-      PropertyTreeState& destination_property_tree_state) const;
-
   // Same as calculateRects, but using GeometryMapper.
   ALWAYS_INLINE void CalculateRectsWithGeometryMapper(
       const ClipRectsContext&,
       const FragmentData&,
-      const LayoutRect* paint_dirty_rect,
-      LayoutRect& layer_bounds,
+      const CullRect* cull_rect,
+      PhysicalRect& layer_bounds,
       ClipRect& background_rect,
       ClipRect& foreground_rect,
-      const LayoutPoint* offset_from_root = nullptr) const;
+      const PhysicalOffset* offset_from_root = nullptr) const;
 
   // Returns the visual rect of |layer_| in local space. This includes
   // filter effects if needed.
-  ALWAYS_INLINE LayoutRect LocalVisualRect(const ClipRectsContext&) const;
+  ALWAYS_INLINE PhysicalRect LocalVisualRect(const ClipRectsContext&) const;
 
   const PaintLayer& layer_;
   bool use_geometry_mapper_;

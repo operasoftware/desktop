@@ -32,9 +32,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_FILESYSTEM_FILE_WRITER_H_
 
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
-#include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/fileapi/file_error.h"
+#include "third_party/blink/renderer/core/probe/async_task_id.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/filesystem/file_writer_base.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -42,8 +42,10 @@
 namespace blink {
 
 class Blob;
+class DOMException;
 class ExceptionState;
 class ExecutionContext;
+enum class FileErrorCode;
 
 class FileWriter final : public EventTargetWithInlineData,
                          public FileWriterBase,
@@ -54,14 +56,14 @@ class FileWriter final : public EventTargetWithInlineData,
   USING_PRE_FINALIZER(FileWriter, Dispose);
 
  public:
-  static FileWriter* Create(ExecutionContext*);
+  explicit FileWriter(ExecutionContext*);
   ~FileWriter() override;
 
   enum ReadyState { kInit = 0, kWriting = 1, kDone = 2 };
 
   void write(Blob*, ExceptionState&);
-  void seek(long long position, ExceptionState&);
-  void truncate(long long length, ExceptionState&);
+  void seek(int64_t position, ExceptionState&);
+  void truncate(int64_t length, ExceptionState&);
   void abort(ExceptionState&);
   ReadyState getReadyState() const { return ready_state_; }
   DOMException* error() const { return error_.Get(); }
@@ -88,12 +90,12 @@ class FileWriter final : public EventTargetWithInlineData,
     return ContextLifecycleObserver::GetExecutionContext();
   }
 
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(writestart);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(progress);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(write);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(abort);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(writeend);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(writestart, kWritestart)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(progress, kProgress)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(write, kWrite)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(abort, kAbort)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(error, kError)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(writeend, kWriteend)
 
   void Trace(blink::Visitor*) override;
 
@@ -105,8 +107,6 @@ class FileWriter final : public EventTargetWithInlineData,
     kOperationAbort
   };
 
-  explicit FileWriter(ExecutionContext*);
-
   void CompleteAbort();
 
   void DoOperation(Operation);
@@ -115,7 +115,7 @@ class FileWriter final : public EventTargetWithInlineData,
 
   void FireEvent(const AtomicString& type);
 
-  void SetError(FileError::ErrorCode, ExceptionState&);
+  void SetError(FileErrorCode, ExceptionState&);
 
   void Dispose();
 
@@ -123,14 +123,15 @@ class FileWriter final : public EventTargetWithInlineData,
   ReadyState ready_state_;
   Operation operation_in_progress_;
   Operation queued_operation_;
-  long long bytes_written_;
-  long long bytes_to_write_;
-  long long truncate_length_;
-  long long num_aborts_;
-  long long recursion_depth_;
-  double last_progress_notification_time_ms_;
+  uint64_t bytes_written_;
+  uint64_t bytes_to_write_;
+  uint64_t truncate_length_;
+  uint64_t num_aborts_;
+  uint8_t recursion_depth_;
+  base::TimeTicks last_progress_notification_time_;
   Member<Blob> blob_being_written_;
   int request_id_;
+  probe::AsyncTaskId async_task_id_;
 };
 
 }  // namespace blink

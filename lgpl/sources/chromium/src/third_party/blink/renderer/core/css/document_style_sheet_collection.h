@@ -43,9 +43,7 @@ class ViewportStyleResolver;
 class DocumentStyleSheetCollection final
     : public TreeScopeStyleSheetCollection {
  public:
-  static DocumentStyleSheetCollection* Create(TreeScope& tree_scope) {
-    return new DocumentStyleSheetCollection(tree_scope);
-  }
+  explicit DocumentStyleSheetCollection(TreeScope&);
 
   void UpdateActiveStyleSheets(StyleEngine& master_engine);
   void CollectStyleSheets(StyleEngine& master_engine,
@@ -57,8 +55,6 @@ class DocumentStyleSheetCollection final
   }
 
  private:
-  explicit DocumentStyleSheetCollection(TreeScope&);
-
   void CollectStyleSheetsFromCandidates(StyleEngine& master_engine,
                                         DocumentStyleSheetCollector&);
   DISALLOW_COPY_AND_ASSIGN(DocumentStyleSheetCollection);

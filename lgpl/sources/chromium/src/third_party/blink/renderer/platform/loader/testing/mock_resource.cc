@@ -7,6 +7,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
 
@@ -18,7 +19,7 @@ class MockResourceFactory final : public NonTextResourceFactory {
 
   Resource* Create(const ResourceRequest& request,
                    const ResourceLoaderOptions& options) const override {
-    return new MockResource(request, options);
+    return MakeGarbageCollected<MockResource>(request, options);
   }
 };
 
@@ -33,36 +34,30 @@ MockResource* MockResource::Fetch(FetchParameters& params,
       fetcher->RequestResource(params, MockResourceFactory(), client));
 }
 
-// static
-MockResource* MockResource::Create(const ResourceRequest& request) {
-  ResourceLoaderOptions options;
-  return new MockResource(request, options);
-}
-
-MockResource* MockResource::Create(const KURL& url) {
-  ResourceRequest request(url);
-  return Create(request);
-}
-
+MockResource::MockResource(const KURL& url)
+    : MockResource(ResourceRequest(url)) {}
+MockResource::MockResource(const ResourceRequest& request)
+    : MockResource(request, ResourceLoaderOptions()) {}
 MockResource::MockResource(const ResourceRequest& request,
                            const ResourceLoaderOptions& options)
     : Resource(request, ResourceType::kMock, options) {}
 
 CachedMetadataHandler* MockResource::CreateCachedMetadataHandler(
     std::unique_ptr<CachedMetadataSender> send_callback) {
-  return new MockCacheHandler(std::move(send_callback));
+  return MakeGarbageCollected<MockCacheHandler>(std::move(send_callback));
 }
 
-void MockResource::SetSerializedCachedMetadata(const char* data, size_t size) {
-  Resource::SetSerializedCachedMetadata(data, size);
+void MockResource::SetSerializedCachedMetadata(mojo_base::BigBuffer data) {
+  // Resource ignores the cached metadata.
+  Resource::SetSerializedCachedMetadata(mojo_base::BigBuffer());
   MockCacheHandler* cache_handler =
       static_cast<MockCacheHandler*>(Resource::CacheHandler());
   if (cache_handler) {
-    cache_handler->Set(data, size);
+    cache_handler->Set(data.data(), data.size());
   }
 }
 
-void MockResource::SendCachedMetadata(const char* data, size_t size) {
+void MockResource::SendCachedMetadata(const uint8_t* data, size_t size) {
   MockCacheHandler* cache_handler =
       static_cast<MockCacheHandler*>(Resource::CacheHandler());
   if (cache_handler) {
@@ -79,9 +74,9 @@ MockCacheHandler::MockCacheHandler(
     std::unique_ptr<CachedMetadataSender> send_callback)
     : send_callback_(std::move(send_callback)) {}
 
-void MockCacheHandler::Set(const char* data, size_t size) {
+void MockCacheHandler::Set(const uint8_t* data, size_t size) {
   data_.emplace();
-  data_->Append(data, size);
+  data_->Append(data, SafeCast<wtf_size_t>(size));
 }
 
 void MockCacheHandler::ClearCachedMetadata(

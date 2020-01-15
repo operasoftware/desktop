@@ -9,17 +9,16 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "services/network/public/mojom/fetch_api.mojom-blink.h"
-#include "third_party/blink/public/mojom/fetch/fetch_api_response.mojom-blink.h"
-#include "third_party/blink/public/platform/modules/fetch/fetch_api_request.mojom-blink.h"
-#include "third_party/blink/public/platform/modules/service_worker/web_service_worker_request.h"
-#include "third_party/blink/public/platform/web_cors.h"
+#include "services/network/public/mojom/fetch_api.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_response.mojom-blink-forward.h"
+#include "third_party/blink/public/platform/web_http_header_set.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/fetch/body_stream_buffer.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
+
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -27,10 +26,9 @@ namespace blink {
 class ExceptionState;
 class FetchHeaderList;
 class ScriptState;
-class WebServiceWorkerResponse;
 
 class CORE_EXPORT FetchResponseData final
-    : public GarbageCollectedFinalized<FetchResponseData> {
+    : public GarbageCollected<FetchResponseData> {
  public:
   // "A response can have an associated termination reason which is one of
   // end-user abort, fatal, and timeout."
@@ -44,8 +42,13 @@ class CORE_EXPORT FetchResponseData final
   static FetchResponseData* CreateNetworkErrorResponse();
   static FetchResponseData* CreateWithBuffer(BodyStreamBuffer*);
 
+  FetchResponseData(network::mojom::FetchResponseType,
+                    network::mojom::FetchResponseSource,
+                    uint16_t,
+                    AtomicString);
+
   FetchResponseData* CreateBasicFilteredResponse() const;
-  FetchResponseData* CreateCORSFilteredResponse(
+  FetchResponseData* CreateCorsFilteredResponse(
       const WebHTTPHeaderSet& exposed_headers) const;
   FetchResponseData* CreateOpaqueFilteredResponse() const;
   FetchResponseData* CreateOpaqueRedirectFilteredResponse() const;
@@ -58,8 +61,11 @@ class CORE_EXPORT FetchResponseData final
   FetchResponseData* Clone(ScriptState*, ExceptionState& exception_state);
 
   network::mojom::FetchResponseType GetType() const { return type_; }
+  network::mojom::FetchResponseSource ResponseSource() const {
+    return response_source_;
+  }
   const KURL* Url() const;
-  unsigned short Status() const { return status_; }
+  uint16_t Status() const { return status_; }
   AtomicString StatusMessage() const { return status_message_; }
   FetchHeaderList* HeaderList() const { return header_list_.Get(); }
   BodyStreamBuffer* Buffer() const { return buffer_; }
@@ -68,60 +74,63 @@ class CORE_EXPORT FetchResponseData final
   // returns |m_buffer|.
   BodyStreamBuffer* InternalBuffer() const;
   String InternalMIMEType() const;
-  Time ResponseTime() const { return response_time_; }
+  base::Time ResponseTime() const { return response_time_; }
   String CacheStorageCacheName() const { return cache_storage_cache_name_; }
   const WebHTTPHeaderSet& CorsExposedHeaderNames() const {
     return cors_exposed_header_names_;
   }
 
+  void SetResponseSource(network::mojom::FetchResponseSource response_source) {
+    response_source_ = response_source;
+  }
   void SetURLList(const Vector<KURL>&);
   const Vector<KURL>& UrlList() const { return url_list_; }
   const Vector<KURL>& InternalURLList() const;
 
-  void SetStatus(unsigned short status) { status_ = status; }
+  void SetStatus(uint16_t status) { status_ = status; }
   void SetStatusMessage(AtomicString status_message) {
     status_message_ = status_message;
   }
-  void SetMIMEType(const String& type) { mime_type_ = type; }
-  void SetResponseTime(Time response_time) { response_time_ = response_time; }
+  void SetMimeType(const String& type) { mime_type_ = type; }
+  void SetResponseTime(base::Time response_time) {
+    response_time_ = response_time;
+  }
   void SetCacheStorageCacheName(const String& cache_storage_cache_name) {
     cache_storage_cache_name_ = cache_storage_cache_name;
   }
   void SetCorsExposedHeaderNames(const WebHTTPHeaderSet& header_names) {
     cors_exposed_header_names_ = header_names;
   }
+  void SetSideDataBlob(scoped_refptr<BlobDataHandle> blob) {
+    side_data_blob_ = std::move(blob);
+  }
 
-  // If the type is Default, replaces |m_buffer|.
-  // If the type is Basic or CORS, replaces |m_buffer| and
-  // |m_internalResponse->m_buffer|.
+  // If the type is Default, replaces |buffer_|.
+  // If the type is Basic or CORS, replaces |buffer_| and
+  // |internal_response_->buffer_|.
   // If the type is Error or Opaque, does nothing.
-  // Call Response::refreshBody after calling this function.
   void ReplaceBodyStreamBuffer(BodyStreamBuffer*);
 
-  // Does not call response.setBlobDataHandle().
-  void PopulateWebServiceWorkerResponse(
-      WebServiceWorkerResponse& /* response */);
+  // Does not contain the blob response body.
   mojom::blink::FetchAPIResponsePtr PopulateFetchAPIResponse();
 
   void Trace(blink::Visitor*);
 
  private:
-  FetchResponseData(network::mojom::FetchResponseType,
-                    unsigned short,
-                    AtomicString);
-
   network::mojom::FetchResponseType type_;
+  network::mojom::FetchResponseSource response_source_;
   std::unique_ptr<TerminationReason> termination_reason_;
   Vector<KURL> url_list_;
-  unsigned short status_;
+  uint16_t status_;
   AtomicString status_message_;
   Member<FetchHeaderList> header_list_;
-  TraceWrapperMember<FetchResponseData> internal_response_;
-  TraceWrapperMember<BodyStreamBuffer> buffer_;
+  Member<FetchResponseData> internal_response_;
+  Member<BodyStreamBuffer> buffer_;
   String mime_type_;
-  Time response_time_;
+  base::Time response_time_;
   String cache_storage_cache_name_;
   WebHTTPHeaderSet cors_exposed_header_names_;
+  scoped_refptr<BlobDataHandle> side_data_blob_;
 
   DISALLOW_COPY_AND_ASSIGN(FetchResponseData);
 };

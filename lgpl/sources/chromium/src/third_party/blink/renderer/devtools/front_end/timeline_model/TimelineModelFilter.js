@@ -34,12 +34,15 @@ TimelineModel.TimelineVisibleEventsFilter = class extends TimelineModel.Timeline
    * @return {!TimelineModel.TimelineModel.RecordType}
    */
   static _eventType(event) {
-    if (event.hasCategory(TimelineModel.TimelineModel.Category.Console))
+    if (event.hasCategory(TimelineModel.TimelineModel.Category.Console)) {
       return TimelineModel.TimelineModel.RecordType.ConsoleTime;
-    if (event.hasCategory(TimelineModel.TimelineModel.Category.UserTiming))
+    }
+    if (event.hasCategory(TimelineModel.TimelineModel.Category.UserTiming)) {
       return TimelineModel.TimelineModel.RecordType.UserTiming;
-    if (event.hasCategory(TimelineModel.TimelineModel.Category.LatencyInfo))
+    }
+    if (event.hasCategory(TimelineModel.TimelineModel.Category.LatencyInfo)) {
       return TimelineModel.TimelineModel.RecordType.LatencyInfo;
+    }
     return /** @type !TimelineModel.TimelineModel.RecordType */ (event.name);
   }
 };
@@ -79,20 +82,5 @@ TimelineModel.ExclusiveNameFilter = class extends TimelineModel.TimelineModelFil
    */
   accept(event) {
     return !this._excludeNames.has(event.name);
-  }
-};
-
-TimelineModel.ExcludeTopLevelFilter = class extends TimelineModel.TimelineModelFilter {
-  constructor() {
-    super();
-  }
-
-  /**
-   * @override
-   * @param {!SDK.TracingModel.Event} event
-   * @return {boolean}
-   */
-  accept(event) {
-    return !SDK.TracingModel.isTopLevelEvent(event);
   }
 };

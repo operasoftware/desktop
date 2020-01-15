@@ -33,7 +33,7 @@ class SVGLinearGradientElement final : public SVGGradientElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(SVGLinearGradientElement);
+  explicit SVGLinearGradientElement(Document&);
 
   bool CollectGradientAttributes(LinearGradientAttributes&);
 
@@ -45,11 +45,9 @@ class SVGLinearGradientElement final : public SVGGradientElement {
   void Trace(blink::Visitor*) override;
 
  private:
-  explicit SVGLinearGradientElement(Document&);
-
   void SvgAttributeChanged(const QualifiedName&) override;
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 
   bool SelfHasRelativeLengths() const override;
 

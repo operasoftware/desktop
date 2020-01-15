@@ -4,7 +4,8 @@
 
 #include "third_party/blink/renderer/core/inspector/inspector_resource_content_loader.h"
 
-#include "third_party/blink/public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
@@ -28,8 +29,7 @@ namespace blink {
 // resources. Stylesheets can only safely use a RawResourceClient because it has
 // no custom interface and simply uses the base ResourceClient.
 class InspectorResourceContentLoader::ResourceClient final
-    : public GarbageCollectedFinalized<
-          InspectorResourceContentLoader::ResourceClient>,
+    : public GarbageCollected<InspectorResourceContentLoader::ResourceClient>,
       private RawResourceClient {
   USING_GARBAGE_COLLECTED_MIXIN(ResourceClient);
 
@@ -68,7 +68,8 @@ InspectorResourceContentLoader::InspectorResourceContentLoader(
 void InspectorResourceContentLoader::Start() {
   started_ = true;
   HeapVector<Member<Document>> documents;
-  InspectedFrames* inspected_frames = new InspectedFrames(inspected_frame_);
+  InspectedFrames* inspected_frames =
+      MakeGarbageCollected<InspectedFrames>(inspected_frame_);
   for (LocalFrame* frame : *inspected_frames) {
     documents.push_back(frame->GetDocument());
     documents.AppendVector(InspectorPageAgent::ImportsForFrame(frame));
@@ -87,16 +88,33 @@ void InspectorResourceContentLoader::Start() {
       resource_request.SetCacheMode(mojom::FetchCacheMode::kOnlyIfCached);
     }
     resource_request.SetRequestContext(mojom::RequestContextType::INTERNAL);
+    if (document->Loader() &&
+        document->Loader()->GetResponse().WasFetchedViaServiceWorker()) {
+      resource_request.SetCacheMode(mojom::FetchCacheMode::kDefault);
+    }
 
+    ResourceFetcher* fetcher = document->Fetcher();
+    if (base::FeatureList::IsEnabled(
+            features::kHtmlImportsRequestInitiatorLock)) {
+      // For @imports from HTML imported Documents, we use the
+      // context document for getting origin and ResourceFetcher to use the
+      // main Document's origin, while using the element document for
+      // CompleteURL() to use imported Documents' base URLs.
+      if (!document->ContextDocument()) {
+        continue;
+      }
+      fetcher = document->ContextDocument()->Fetcher();
+    }
     if (!resource_request.Url().GetString().IsEmpty()) {
       urls_to_fetch.insert(resource_request.Url().GetString());
       ResourceLoaderOptions options;
-      options.initiator_info.name = FetchInitiatorTypeNames::internal;
+      options.initiator_info.name = fetch_initiator_type_names::kInternal;
       FetchParameters params(resource_request, options);
-      ResourceClient* resource_client = new ResourceClient(this);
+      ResourceClient* resource_client =
+          MakeGarbageCollected<ResourceClient>(this);
       // Prevent garbage collection by holding a reference to this resource.
       resources_.push_back(
-          RawResource::Fetch(params, document->Fetcher(), resource_client));
+          RawResource::Fetch(params, fetcher, resource_client));
       pending_resource_clients_.insert(resource_client);
     }
 
@@ -112,12 +130,13 @@ void InspectorResourceContentLoader::Start() {
       ResourceRequest resource_request(url);
       resource_request.SetRequestContext(mojom::RequestContextType::INTERNAL);
       ResourceLoaderOptions options;
-      options.initiator_info.name = FetchInitiatorTypeNames::internal;
+      options.initiator_info.name = fetch_initiator_type_names::kInternal;
       FetchParameters params(resource_request, options);
-      ResourceClient* resource_client = new ResourceClient(this);
+      ResourceClient* resource_client =
+          MakeGarbageCollected<ResourceClient>(this);
       // Prevent garbage collection by holding a reference to this resource.
-      resources_.push_back(CSSStyleSheetResource::Fetch(
-          params, document->Fetcher(), resource_client));
+      resources_.push_back(
+          CSSStyleSheetResource::Fetch(params, fetcher, resource_client));
       // A cache hit for a css stylesheet will complete synchronously. Don't
       // mark the client as pending if it already finished.
       if (resource_client->GetResource())

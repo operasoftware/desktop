@@ -27,13 +27,7 @@ const int kInvalidChunkIndex = -1;
 
 }  // namespace
 
-// static
-ColdModeSpellCheckRequester* ColdModeSpellCheckRequester::Create(
-    LocalFrame& frame) {
-  return new ColdModeSpellCheckRequester(frame);
-}
-
-void ColdModeSpellCheckRequester::Trace(blink::Visitor* visitor) {
+void ColdModeSpellCheckRequester::Trace(Visitor* visitor) {
   visitor->Trace(frame_);
   visitor->Trace(root_editable_);
   visitor->Trace(remaining_check_range_);
@@ -69,11 +63,10 @@ const Element* ColdModeSpellCheckRequester::CurrentFocusedEditable() const {
   if (position.IsNull())
     return nullptr;
 
-  const ContainerNode* root = HighestEditableRoot(position);
-  if (!root || !root->isConnected() || !root->IsElementNode())
+  const auto* element = DynamicTo<Element>(HighestEditableRoot(position));
+  if (!element || !element->isConnected())
     return nullptr;
 
-  const Element* element = ToElement(root);
   if (!element->IsSpellCheckingEnabled() ||
       !SpellChecker::IsSpellCheckingEnabledAt(position))
     return nullptr;
@@ -153,8 +146,7 @@ void ColdModeSpellCheckRequester::RequestCheckingForNextChunk() {
   // Chromium spellchecker requires complete sentences to be checked. However,
   // EndOfSentence() sometimes returns null or out-of-editable positions, which
   // are corrected here.
-  const Position extended_end =
-      EndOfSentence(CreateVisiblePosition(chunk_end)).DeepEquivalent();
+  const Position extended_end = EndOfSentence(chunk_end).GetPosition();
   const Position check_end =
       extended_end.IsNull() || extended_end < chunk_end
           ? chunk_end

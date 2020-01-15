@@ -32,7 +32,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# usage: rule_bison.py INPUT_FILE OUTPUT_DIR BISON_EXE [DEVELOPER_DIR]
+# usage: rule_bison.py INPUT_FILE OUTPUT_DIR BISON_EXE
 # INPUT_FILE is a path to either XPathGrammar.y.
 # OUTPUT_DIR is where the bison-generated .cpp and .h files should be placed.
 
@@ -42,13 +42,13 @@ import os.path
 import subprocess
 import sys
 
+from blinkbuild.name_style_converter import NameStyleConverter
+
 assert len(sys.argv) == 4 or len(sys.argv) == 5
 
 inputFile = sys.argv[1]
 outputDir = sys.argv[2]
 bisonExe = sys.argv[3]
-if len(sys.argv) > 4:
-    os.environ['DEVELOPER_DIR'] = sys.argv[4]
 
 pathToBison = os.path.split(bisonExe)[0]
 if pathToBison:
@@ -105,9 +105,12 @@ os.unlink(outputHTmp)
 # Rewrite the generated header with #include guards.
 outputH = os.path.join(outputDir, inputRoot + '.h')
 
+outputHInGen = outputH.replace('gen/', '')
+headerGuard = NameStyleConverter(outputHInGen).to_header_guard()
+
 outputHFile = open(outputH, 'w')
-print >>outputHFile, '#ifndef %sH' % inputRoot
-print >>outputHFile, '#define %sH' % inputRoot
+print >>outputHFile, '#ifndef %s' % headerGuard
+print >>outputHFile, '#define %s' % headerGuard
 print >>outputHFile, outputHContents
-print >>outputHFile, '#endif'
+print >>outputHFile, '#endif  // %s' % headerGuard
 outputHFile.close()

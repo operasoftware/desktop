@@ -39,14 +39,12 @@ namespace blink {
 // TODO(yosin): We will rename |SelectionEditor| to appropriate name since
 // it is no longer have a changing selection functionality, it was moved to
 // |SelectionModifier| class.
-class SelectionEditor final : public GarbageCollectedFinalized<SelectionEditor>,
+class SelectionEditor final : public GarbageCollected<SelectionEditor>,
                               public SynchronousMutationObserver {
   USING_GARBAGE_COLLECTED_MIXIN(SelectionEditor);
 
  public:
-  static SelectionEditor* Create(LocalFrame& frame) {
-    return new SelectionEditor(frame);
-  }
+  explicit SelectionEditor(LocalFrame&);
   virtual ~SelectionEditor();
   void Dispose();
 
@@ -56,18 +54,16 @@ class SelectionEditor final : public GarbageCollectedFinalized<SelectionEditor>,
   VisibleSelectionInFlatTree ComputeVisibleSelectionInFlatTree() const;
   void SetSelectionAndEndTyping(const SelectionInDOMTree&);
 
-  void DocumentAttached(Document*);
+  void DidAttachDocument(Document*);
 
   // There functions are exposed for |FrameSelection|.
   void CacheRangeOfDocument(Range*);
   Range* DocumentCachedRange() const;
   void ClearDocumentCachedRange();
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  explicit SelectionEditor(LocalFrame&);
-
   Document& GetDocument() const;
   LocalFrame* GetFrame() const { return frame_.Get(); }
 

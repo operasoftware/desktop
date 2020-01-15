@@ -23,11 +23,19 @@
 #include "cbs.h"
 #include "cbs_av1.h"
 
+enum {
+    PASS,
+    INSERT,
+    REMOVE,
+};
+
 typedef struct AV1MetadataContext {
     const AVClass *class;
 
     CodedBitstreamContext *cbc;
     CodedBitstreamFragment access_unit;
+
+    int td;
 
     int color_primaries;
     int transfer_characteristics;
@@ -38,6 +46,8 @@ typedef struct AV1MetadataContext {
 
     AVRational tick_rate;
     int num_ticks_per_picture;
+
+    int delete_padding;
 } AV1MetadataContext;
 
 
@@ -51,12 +61,7 @@ static int av1_metadata_update_sequence_header(AVBSFContext *bsf,
     if (ctx->color_primaries >= 0          ||
         ctx->transfer_characteristics >= 0 ||
         ctx->matrix_coefficients >= 0) {
-        if (!clc->color_description_present_flag) {
-            clc->color_description_present_flag = 1;
-            clc->color_primaries          = AVCOL_PRI_UNSPECIFIED;
-            clc->transfer_characteristics = AVCOL_TRC_UNSPECIFIED;
-            clc->matrix_coefficients      = AVCOL_SPC_UNSPECIFIED;
-        }
+        clc->color_description_present_flag = 1;
 
         if (ctx->color_primaries >= 0)
             clc->color_primaries = ctx->color_primaries;
@@ -78,13 +83,9 @@ static int av1_metadata_update_sequence_header(AVBSFContext *bsf,
     }
 
     if (ctx->chroma_sample_position >= 0) {
-        if (clc->mono_chrome) {
+        if (clc->mono_chrome || !clc->subsampling_x || !clc->subsampling_y) {
             av_log(bsf, AV_LOG_WARNING, "Warning: chroma_sample_position "
-                   "is not meaningful for monochrome streams.\n");
-        } else if (clc->subsampling_x == 0 &&
-                   clc->subsampling_y == 0) {
-            av_log(bsf, AV_LOG_WARNING, "Warning: chroma_sample_position "
-                   "is not meaningful for non-chroma-subsampled streams.\n");
+                   "can only be set for 4:2:0 streams.\n");
         } else {
             clc->chroma_sample_position = ctx->chroma_sample_position;
         }
@@ -110,21 +111,26 @@ static int av1_metadata_update_sequence_header(AVBSFContext *bsf,
     return 0;
 }
 
-static int av1_metadata_filter(AVBSFContext *bsf, AVPacket *out)
+static int av1_metadata_filter(AVBSFContext *bsf, AVPacket *pkt)
 {
     AV1MetadataContext *ctx = bsf->priv_data;
-    AVPacket *in = NULL;
     CodedBitstreamFragment *frag = &ctx->access_unit;
-    AV1RawOBU *obu;
+    AV1RawOBU td, *obu;
     int err, i;
 
-    err = ff_bsf_get_packet(bsf, &in);
+    err = ff_bsf_get_packet_ref(bsf, pkt);
     if (err < 0)
         return err;
 
-    err = ff_cbs_read_packet(ctx->cbc, frag, in);
+    err = ff_cbs_read_packet(ctx->cbc, frag, pkt);
     if (err < 0) {
         av_log(bsf, AV_LOG_ERROR, "Failed to read packet.\n");
+        goto fail;
+    }
+
+    if (frag->nb_units == 0) {
+        av_log(bsf, AV_LOG_ERROR, "No OBU in packet.\n");
+        err = AVERROR_INVALIDDATA;
         goto fail;
     }
 
@@ -137,23 +143,42 @@ static int av1_metadata_filter(AVBSFContext *bsf, AVPacket *out)
         }
     }
 
-    err = ff_cbs_write_packet(ctx->cbc, out, frag);
+    // If a Temporal Delimiter is present, it must be the first OBU.
+    if (frag->units[0].type == AV1_OBU_TEMPORAL_DELIMITER) {
+        if (ctx->td == REMOVE)
+            ff_cbs_delete_unit(ctx->cbc, frag, 0);
+    } else if (ctx->td == INSERT) {
+        td = (AV1RawOBU) {
+            .header.obu_type = AV1_OBU_TEMPORAL_DELIMITER,
+        };
+
+        err = ff_cbs_insert_unit_content(ctx->cbc, frag, 0, AV1_OBU_TEMPORAL_DELIMITER,
+                                         &td, NULL);
+        if (err < 0) {
+            av_log(bsf, AV_LOG_ERROR, "Failed to insert Temporal Delimiter.\n");
+            goto fail;
+        }
+    }
+
+    if (ctx->delete_padding) {
+        for (i = frag->nb_units - 1; i >= 0; i--) {
+            if (frag->units[i].type == AV1_OBU_PADDING)
+                ff_cbs_delete_unit(ctx->cbc, frag, i);
+        }
+    }
+
+    err = ff_cbs_write_packet(ctx->cbc, pkt, frag);
     if (err < 0) {
         av_log(bsf, AV_LOG_ERROR, "Failed to write packet.\n");
         goto fail;
     }
 
-    err = av_packet_copy_props(out, in);
-    if (err < 0)
-        goto fail;
-
     err = 0;
 fail:
-    ff_cbs_fragment_uninit(ctx->cbc, frag);
+    ff_cbs_fragment_reset(ctx->cbc, frag);
 
     if (err < 0)
-        av_packet_unref(out);
-    av_packet_free(&in);
+        av_packet_unref(pkt);
 
     return err;
 }
@@ -194,19 +219,31 @@ static int av1_metadata_init(AVBSFContext *bsf)
 
     err = 0;
 fail:
-    ff_cbs_fragment_uninit(ctx->cbc, frag);
+    ff_cbs_fragment_reset(ctx->cbc, frag);
     return err;
 }
 
 static void av1_metadata_close(AVBSFContext *bsf)
 {
     AV1MetadataContext *ctx = bsf->priv_data;
+
+    ff_cbs_fragment_free(ctx->cbc, &ctx->access_unit);
     ff_cbs_close(&ctx->cbc);
 }
 
 #define OFFSET(x) offsetof(AV1MetadataContext, x)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_BSF_PARAM)
 static const AVOption av1_metadata_options[] = {
+    { "td", "Temporal Delimiter OBU",
+        OFFSET(td), AV_OPT_TYPE_INT,
+        { .i64 = PASS }, PASS, REMOVE, FLAGS, "td" },
+    { "pass",   NULL, 0, AV_OPT_TYPE_CONST,
+        { .i64 = PASS   }, .flags = FLAGS, .unit = "td" },
+    { "insert", NULL, 0, AV_OPT_TYPE_CONST,
+        { .i64 = INSERT }, .flags = FLAGS, .unit = "td" },
+    { "remove", NULL, 0, AV_OPT_TYPE_CONST,
+        { .i64 = REMOVE }, .flags = FLAGS, .unit = "td" },
+
     { "color_primaries", "Set color primaries (section 6.4.2)",
         OFFSET(color_primaries), AV_OPT_TYPE_INT,
         { .i64 = -1 }, -1, 255, FLAGS },
@@ -241,6 +278,10 @@ static const AVOption av1_metadata_options[] = {
     { "num_ticks_per_picture", "Set display ticks per picture for CFR streams",
         OFFSET(num_ticks_per_picture), AV_OPT_TYPE_INT,
         { .i64 = -1 }, -1, INT_MAX, FLAGS },
+
+    { "delete_padding", "Delete all Padding OBUs",
+        OFFSET(delete_padding), AV_OPT_TYPE_BOOL,
+        { .i64 = 0 }, 0, 1, FLAGS},
 
     { NULL }
 };

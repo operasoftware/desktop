@@ -30,6 +30,7 @@
 
 #include "third_party/blink/public/web/web_security_policy.h"
 
+#include "services/network/public/mojom/referrer_policy.mojom-blink.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
@@ -77,57 +78,56 @@ void WebSecurityPolicy::AddOriginAccessAllowListEntry(
     const WebURL& source_origin,
     const WebString& destination_protocol,
     const WebString& destination_host,
-    bool allow_destination_subdomains,
-    const network::mojom::CORSOriginAccessMatchPriority priority) {
+    const uint16_t destination_port,
+    const network::mojom::CorsDomainMatchMode domain_match_mode,
+    const network::mojom::CorsPortMatchMode port_match_mode,
+    const network::mojom::CorsOriginAccessMatchPriority priority) {
   SecurityPolicy::AddOriginAccessAllowListEntry(
       *SecurityOrigin::Create(source_origin), destination_protocol,
-      destination_host, allow_destination_subdomains, priority);
-}
-
-void WebSecurityPolicy::ClearOriginAccessAllowListForOrigin(
-    const WebURL& source_origin) {
-  SecurityPolicy::ClearOriginAccessAllowListForOrigin(
-      *SecurityOrigin::Create(source_origin));
-}
-
-void WebSecurityPolicy::ClearOriginAccessAllowList() {
-  SecurityPolicy::ClearOriginAccessAllowList();
-}
-
-void WebSecurityPolicy::ClearOriginAccessListForOrigin(
-    const WebURL& source_origin) {
-  scoped_refptr<SecurityOrigin> security_origin =
-      SecurityOrigin::Create(source_origin);
-  SecurityPolicy::ClearOriginAccessAllowListForOrigin(*security_origin);
-  SecurityPolicy::ClearOriginAccessBlockListForOrigin(*security_origin);
+      destination_host, destination_port, domain_match_mode, port_match_mode,
+      priority);
 }
 
 void WebSecurityPolicy::AddOriginAccessBlockListEntry(
     const WebURL& source_origin,
     const WebString& destination_protocol,
     const WebString& destination_host,
-    bool allow_destination_subdomains,
-    const network::mojom::CORSOriginAccessMatchPriority priority) {
+    const uint16_t destination_port,
+    const network::mojom::CorsDomainMatchMode domain_match_mode,
+    const network::mojom::CorsPortMatchMode port_match_mode,
+    const network::mojom::CorsOriginAccessMatchPriority priority) {
   SecurityPolicy::AddOriginAccessBlockListEntry(
       *SecurityOrigin::Create(source_origin), destination_protocol,
-      destination_host, allow_destination_subdomains, priority);
+      destination_host, destination_port, domain_match_mode, port_match_mode,
+      priority);
 }
 
-void WebSecurityPolicy::AddOriginTrustworthyWhiteList(const WebString& origin) {
-  SecurityPolicy::AddOriginTrustworthyWhiteList(origin);
+void WebSecurityPolicy::ClearOriginAccessListForOrigin(
+    const WebURL& source_origin) {
+  scoped_refptr<SecurityOrigin> security_origin =
+      SecurityOrigin::Create(source_origin);
+  SecurityPolicy::ClearOriginAccessListForOrigin(*security_origin);
 }
 
-void WebSecurityPolicy::AddSchemeToBypassSecureContextWhitelist(
+void WebSecurityPolicy::ClearOriginAccessList() {
+  SecurityPolicy::ClearOriginAccessList();
+}
+
+void WebSecurityPolicy::AddOriginToTrustworthySafelist(
+    const WebString& origin) {
+  SecurityPolicy::AddOriginToTrustworthySafelist(origin);
+}
+
+void WebSecurityPolicy::AddSchemeToSecureContextSafelist(
     const WebString& scheme) {
   SchemeRegistry::RegisterURLSchemeBypassingSecureContextCheck(scheme);
 }
 
 WebString WebSecurityPolicy::GenerateReferrerHeader(
-    WebReferrerPolicy referrer_policy,
+    network::mojom::ReferrerPolicy referrer_policy,
     const WebURL& url,
     const WebString& referrer) {
-  return SecurityPolicy::GenerateReferrer(
-             static_cast<ReferrerPolicy>(referrer_policy), url, referrer)
+  return SecurityPolicy::GenerateReferrer(referrer_policy, url, referrer)
       .referrer;
 }
 

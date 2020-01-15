@@ -65,14 +65,16 @@ class CORE_EXPORT SVGAnimationElement : public SVGSMILElement {
   void endElement() { endElementAt(0); }
   void endElementAt(float offset);
 
-  DEFINE_MAPPED_ATTRIBUTE_EVENT_LISTENER(begin, beginEvent);
-  DEFINE_MAPPED_ATTRIBUTE_EVENT_LISTENER(end, endEvent);
-  DEFINE_MAPPED_ATTRIBUTE_EVENT_LISTENER(repeat, repeatEvent);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(begin, kBeginEvent)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(end, kEndEvent)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(repeat, kRepeatEvent)
 
-  virtual bool IsAdditive();
+  virtual bool IsAdditive() const;
   bool IsAccumulated() const;
   AnimationMode GetAnimationMode() const { return animation_mode_; }
   CalcMode GetCalcMode() const { return calc_mode_; }
+
+  bool OverwritesUnderlyingAnimationValue() const override;
 
   template <typename AnimatedType>
   void AnimateDiscreteType(float percentage,
@@ -128,7 +130,10 @@ class CORE_EXPORT SVGAnimationElement : public SVGSMILElement {
   void SetAnimationMode(AnimationMode animation_mode) {
     animation_mode_ = animation_mode;
   }
-  void SetCalcMode(CalcMode calc_mode) { calc_mode_ = calc_mode; }
+  void SetCalcMode(CalcMode calc_mode) {
+    use_paced_key_times_ = false;
+    calc_mode_ = calc_mode;
+  }
 
   // Parses a list of values as specified by SVG, stripping leading
   // and trailing whitespace, and places them in result. If the
@@ -161,7 +166,15 @@ class CORE_EXPORT SVGAnimationElement : public SVGSMILElement {
                                        float& effective_percent,
                                        String& from,
                                        String& to);
+  // Also decides which list is to be used, either key_times_from_attribute_
+  // or key_times_for_paced_ by toggling the flag use_paced_key_times_.
   void CalculateKeyTimesForCalcModePaced();
+
+  Vector<float> const& KeyTimes() const {
+    return use_paced_key_times_ ? key_times_for_paced_
+                                : key_times_from_attribute_;
+  }
+
   float CalculatePercentFromKeyPoints(float percent) const;
   void CurrentValuesFromKeyPoints(float percent,
                                   float& effective_percent,
@@ -174,12 +187,20 @@ class CORE_EXPORT SVGAnimationElement : public SVGSMILElement {
   void SetCalcMode(const AtomicString&);
 
   bool animation_valid_;
+  bool use_paced_key_times_;
 
   Vector<String> values_;
+
   // FIXME: We should probably use doubles for this, but there's no point
   // making such a change unless all SVG logic for sampling animations is
   // changed to use doubles.
-  Vector<float> key_times_;
+
+  // Storing two sets of values to avoid overwriting (or reparsing) when
+  // calc-mode changes. Fix for Issue 231525. What list to use is
+  // decided in CalculateKeyTimesForCalcModePaced.
+  Vector<float> key_times_from_attribute_;
+  Vector<float> key_times_for_paced_;
+
   Vector<float> key_points_;
   Vector<gfx::CubicBezier> key_splines_;
   String last_values_animation_from_;

@@ -12,7 +12,7 @@
 #include "base/optional.h"
 #include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/struct_ptr.h"
-#include "third_party/blink/common/common_export.h"
+#include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/mojom/blob/serialized_blob.mojom.h"
 
 namespace blink {
@@ -48,6 +48,7 @@ struct BLINK_COMMON_EXPORT CloneableMessage {
   uint64_t stack_trace_id = 0;
   int64_t stack_trace_debugger_id_first = 0;
   int64_t stack_trace_debugger_id_second = 0;
+  bool stack_trace_should_pause = false;
 
   // If not null, this message is locked to the given agent cluster ID.
   // See

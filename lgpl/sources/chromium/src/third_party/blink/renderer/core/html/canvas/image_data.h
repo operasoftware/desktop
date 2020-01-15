@@ -43,7 +43,6 @@
 #include "third_party/blink/renderer/platform/graphics/canvas_color_params.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/compiler.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
 
@@ -93,22 +92,24 @@ class CORE_EXPORT ImageData final : public ScriptWrappable,
 
   static ImageData* CreateImageData(unsigned width,
                                     unsigned height,
-                                    const ImageDataColorSettings&,
+                                    const ImageDataColorSettings*,
                                     ExceptionState&);
   static ImageData* CreateImageData(ImageDataArray&,
                                     unsigned width,
                                     unsigned height,
-                                    ImageDataColorSettings&,
+                                    ImageDataColorSettings*,
                                     ExceptionState&);
 
-  void getColorSettings(ImageDataColorSettings& result) {
-    result = color_settings_;
-  }
+  ImageDataColorSettings* getColorSettings() { return color_settings_; }
 
   static ImageData* CreateForTest(const IntSize&);
   static ImageData* CreateForTest(const IntSize&,
                                   DOMArrayBufferView*,
                                   const ImageDataColorSettings* = nullptr);
+
+  ImageData(const IntSize&,
+            DOMArrayBufferView*,
+            const ImageDataColorSettings* = nullptr);
 
   ImageData* CropRect(const IntRect&, bool flip_y = false);
 
@@ -132,7 +133,7 @@ class CORE_EXPORT ImageData final : public ScriptWrappable,
   const DOMUint8ClampedArray* data() const;
   ImageDataArray& dataUnion() { return data_union_; }
   const ImageDataArray& dataUnion() const { return data_union_; }
-  void dataUnion(ImageDataArray& result) { result = data_union_; };
+  void dataUnion(ImageDataArray& result) { result = data_union_; }
 
   DOMArrayBufferBase* BufferBase() const;
   CanvasColorParams GetCanvasColorParams();
@@ -155,9 +156,9 @@ class CORE_EXPORT ImageData final : public ScriptWrappable,
   ScriptPromise CreateImageBitmap(ScriptState*,
                                   EventTarget&,
                                   base::Optional<IntRect> crop_rect,
-                                  const ImageBitmapOptions&) override;
+                                  const ImageBitmapOptions*) override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
   WARN_UNUSED_RESULT v8::Local<v8::Object> AssociateWithWrapper(
       v8::Isolate*,
@@ -174,12 +175,8 @@ class CORE_EXPORT ImageData final : public ScriptWrappable,
       ExceptionState* = nullptr);
 
  private:
-  ImageData(const IntSize&,
-            DOMArrayBufferView*,
-            const ImageDataColorSettings* = nullptr);
-
   IntSize size_;
-  ImageDataColorSettings color_settings_;
+  Member<ImageDataColorSettings> color_settings_;
   ImageDataArray data_union_;
   Member<DOMUint8ClampedArray> data_;
   Member<DOMUint16Array> data_u16_;

@@ -21,26 +21,22 @@
 
 #include "third_party/blink/renderer/platform/graphics/filters/fe_tile.h"
 
-#include "SkTileImageFilter.h"
 #include "third_party/blink/renderer/platform/graphics/filters/filter.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
+#include "third_party/skia/include/effects/SkTileImageFilter.h"
 
 namespace blink {
 
 FETile::FETile(Filter* filter) : FilterEffect(filter) {}
-
-FETile* FETile::Create(Filter* filter) {
-  return new FETile(filter);
-}
 
 FloatRect FETile::MapInputs(const FloatRect& rect) const {
   return AbsoluteBounds();
 }
 
 sk_sp<PaintFilter> FETile::CreateImageFilter() {
-  sk_sp<PaintFilter> input(
-      PaintFilterBuilder::Build(InputEffect(0), OperatingInterpolationSpace()));
+  sk_sp<PaintFilter> input(paint_filter_builder::Build(
+      InputEffect(0), OperatingInterpolationSpace()));
   if (!input)
     return nullptr;
 

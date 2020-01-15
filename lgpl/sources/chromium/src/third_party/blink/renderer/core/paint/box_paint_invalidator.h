@@ -7,13 +7,13 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/graphics/paint_invalidation_reason.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
 class LayoutBox;
-class LayoutRect;
 struct PaintInvalidatorContext;
+struct PhysicalRect;
 
 class CORE_EXPORT BoxPaintInvalidator {
   STACK_ALLOCATED();
@@ -30,15 +30,18 @@ class CORE_EXPORT BoxPaintInvalidator {
  private:
   friend class BoxPaintInvalidatorTest;
 
-  bool BackgroundGeometryDependsOnLayoutOverflowRect() const;
+  bool HasEffectiveBackground();
+  bool BackgroundGeometryDependsOnLayoutOverflowRect();
   bool BackgroundPaintsOntoScrollingContentsLayer();
+  bool BackgroundPaintsOntoMainGraphicsLayer();
   bool ShouldFullyInvalidateBackgroundOnLayoutOverflowChange(
-      const LayoutRect& old_layout_overflow,
-      const LayoutRect& new_layout_overflow) const;
-  bool ViewBackgroundShouldFullyInvalidate() const;
+      const PhysicalRect& old_layout_overflow,
+      const PhysicalRect& new_layout_overflow);
 
   enum BackgroundInvalidationType { kNone = 0, kIncremental, kFull };
-  BackgroundInvalidationType ComputeBackgroundInvalidation();
+  BackgroundInvalidationType ComputeViewBackgroundInvalidation();
+  BackgroundInvalidationType ComputeBackgroundInvalidation(
+      bool& should_invalidate_all_layers);
   void InvalidateBackground();
 
   PaintInvalidationReason ComputePaintInvalidationReason();

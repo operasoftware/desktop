@@ -31,14 +31,10 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_MAC_WEB_SCROLLBAR_THEME_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_MAC_WEB_SCROLLBAR_THEME_H_
 
+#include "base/optional.h"
 #include "third_party/blink/public/platform/web_common.h"
-#include "third_party/blink/public/platform/web_scrollbar_buttons_placement.h"
 
 namespace blink {
-
-#if INSIDE_BLINK
-class WebScrollbarThemeClient;
-#endif
 
 // This enum must match NSScrollerStyle in the 10.7 SDK.
 enum ScrollerStyle { kScrollerStyleLegacy = 0, kScrollerStyleOverlay = 1 };
@@ -55,23 +51,11 @@ class WebScrollbarTheme {
   // |redraw| is true if the update requires a redraw to include the change.
   // |jump_on_track_click| is the current value of AppleScrollerPagingBehavior.
   BLINK_EXPORT static void UpdateScrollbarsWithNSDefaults(
-      float initial_button_delay,
-      float autoscroll_button_delay,
+      base::Optional<float> initial_button_delay,
+      base::Optional<float> autoscroll_button_delay,
       ScrollerStyle preferred_scroller_style,
       bool redraw,
       bool jump_on_track_click);
-
-// Registered clients will receive a callback whenever
-// UpdateScrollbarsWithNSDefaults is called.
-#if INSIDE_BLINK
-  static float InitialButtonDelay();
-  static float AutoscrollButtonDelay();
-  static ScrollerStyle PreferredScrollerStyle();
-  static bool JumpOnTrackClick();
-
-  static void RegisterClient(WebScrollbarThemeClient& client);
-  static void UnregisterClient(WebScrollbarThemeClient& client);
-#endif
 };
 
 }  // namespace blink

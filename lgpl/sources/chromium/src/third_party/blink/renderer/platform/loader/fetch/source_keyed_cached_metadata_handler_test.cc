@@ -4,79 +4,29 @@
 
 #include "third_party/blink/renderer/platform/loader/fetch/source_keyed_cached_metadata_handler.h"
 
-#include <array>
-
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/platform/web_crypto.h"
 #include "third_party/blink/renderer/platform/crypto.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support_with_mock_scheduler.h"
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
 
 namespace {
 
-class MockSha256WebCryptoDigestor : public WebCryptoDigestor {
- public:
-  bool Consume(const unsigned char* data, unsigned data_size) override {
-    String key(data, data_size);
-
-    auto it = kMapOfHashes.find(key);
-
-    if (it != kMapOfHashes.end()) {
-      hash_exists_ = true;
-      hash_ = it->value;
-    }
-
-    return hash_exists_;
-  }
-
-  bool Finish(unsigned char*& result_data,
-              unsigned& result_data_size) override {
-    if (hash_exists_) {
-      result_data = hash_.data();
-      result_data_size = hash_.size();
-    }
-    return hash_exists_;
-  }
-
- private:
-  Vector<unsigned char> hash_;
-  bool hash_exists_;
-
-  HashMap<String, Vector<unsigned char>> kMapOfHashes = {
-      {"source1",
-       Vector<unsigned char>{0xc4, 0xd5, 0xe4, 0x35, 0x74, 0x89, 0x3c, 0x3c,
-                             0xc3, 0xd4, 0xba, 0xba, 0x65, 0x58, 0x92, 0x48,
-                             0x47, 0x9a, 0x9f, 0xbf, 0xaf, 0x1f, 0x60, 0x8e,
-                             0xb1, 0x54, 0x1e, 0xc0, 0xc6, 0xfe, 0x63, 0x6f}},
-      {"source2",
-       Vector<unsigned char>{0x99, 0x2f, 0x4e, 0xb2, 0x41, 0xee, 0x6e, 0xef,
-                             0xe4, 0x92, 0x80, 0x25, 0xa2, 0x74, 0x7d, 0xb0,
-                             0x8b, 0x91, 0x98, 0x34, 0xc9, 0x3c, 0x5f, 0x57,
-                             0x41, 0x72, 0x5f, 0xa2, 0x6b, 0x63, 0x38, 0x41}}};
-};
-
-// Mock WebCrypto implementation for digest calculation.
-class MockDigestWebCrypto : public WebCrypto {
-  std::unique_ptr<WebCryptoDigestor> CreateDigestor(
-      WebCryptoAlgorithmId algorithm_id) override {
-    EXPECT_EQ(algorithm_id, WebCryptoAlgorithmId::kWebCryptoAlgorithmIdSha256);
-    return std::make_unique<MockSha256WebCryptoDigestor>();
-  }
-};
-
 // Structure holding cache metadata sent to the platform.
 struct CacheMetadataEntry {
   CacheMetadataEntry(const WebURL& url,
                      base::Time response_time,
-                     const char* data,
-                     size_t data_size)
+                     const uint8_t* data,
+                     wtf_size_t data_size)
       : url(url), response_time(response_time) {
     this->data.Append(data, data_size);
   }
 
   WebURL url;
   base::Time response_time;
-  Vector<char> data;
+  Vector<uint8_t> data;
 };
 
 // Mock Platform implementation that provides basic crypto and caching.
@@ -86,14 +36,13 @@ class SourceKeyedCachedMetadataHandlerMockPlatform final
   SourceKeyedCachedMetadataHandlerMockPlatform() {}
   ~SourceKeyedCachedMetadataHandlerMockPlatform() override = default;
 
-  WebCrypto* Crypto() override { return &mock_web_crypto_; }
-
   void CacheMetadata(blink::mojom::CodeCacheType cache_type,
                      const WebURL& url,
                      base::Time response_time,
-                     const char* data,
+                     const uint8_t* data,
                      size_t data_size) override {
-    cache_entries_.emplace_back(url, response_time, data, data_size);
+    cache_entries_.emplace_back(url, response_time, data,
+                                SafeCast<wtf_size_t>(data_size));
   }
 
   bool HasCacheMetadataFor(const WebURL& url) {
@@ -116,7 +65,6 @@ class SourceKeyedCachedMetadataHandlerMockPlatform final
   }
 
  private:
-  MockDigestWebCrypto mock_web_crypto_;
   Vector<CacheMetadataEntry> cache_entries_;
 };
 
@@ -125,7 +73,7 @@ class MockCachedMetadataSender final : public CachedMetadataSender {
  public:
   MockCachedMetadataSender(KURL response_url) : response_url_(response_url) {}
 
-  void Send(const char* data, size_t size) override {
+  void Send(const uint8_t* data, size_t size) override {
     Platform::Current()->CacheMetadata(blink::mojom::CodeCacheType::kJavascript,
                                        response_url_, response_time_, data,
                                        size);
@@ -135,19 +83,18 @@ class MockCachedMetadataSender final : public CachedMetadataSender {
 
  private:
   const KURL response_url_;
-  const Time response_time_;
+  const base::Time response_time_;
 };
 
-template <size_t N>
 ::testing::AssertionResult CachedMetadataFailure(
     const char* failure_msg,
     const char* actual_expression,
-    const std::array<char, N>& expected,
+    const Vector<uint8_t>& expected,
     const scoped_refptr<CachedMetadata>& actual) {
   ::testing::Message msg;
   msg << failure_msg << " for " << actual_expression;
-  msg << "\n  Expected: [" << N << "] { ";
-  for (size_t i = 0; i < N; ++i) {
+  msg << "\n  Expected: [" << expected.size() << "] { ";
+  for (size_t i = 0; i < expected.size(); ++i) {
     if (i > 0)
       msg << ", ";
     msg << std::hex << static_cast<int>(expected[i]);
@@ -168,22 +115,21 @@ template <size_t N>
   return testing::AssertionFailure() << msg;
 }
 
-template <size_t N>
 ::testing::AssertionResult CachedMetadataEqual(
     const char* expected_expression,
     const char* actual_expression,
-    const std::array<char, N>& expected,
+    const Vector<uint8_t>& expected,
     const scoped_refptr<CachedMetadata>& actual) {
   if (!actual) {
     return CachedMetadataFailure("Expected non-null data", actual_expression,
                                  expected, actual);
   }
-  if (actual->size() != N) {
+  if (actual->size() != expected.size()) {
     return CachedMetadataFailure("Wrong size", actual_expression, expected,
                                  actual);
   }
-  const char* actual_data = actual->Data();
-  for (size_t i = 0; i < N; ++i) {
+  const uint8_t* actual_data = actual->Data();
+  for (size_t i = 0; i < expected.size(); ++i) {
     if (actual_data[i] != expected[i]) {
       return CachedMetadataFailure("Wrong data", actual_expression, expected,
                                    actual);
@@ -205,7 +151,7 @@ TEST(SourceKeyedCachedMetadataHandlerTest,
 
   KURL url("http://SourceKeyedCachedMetadataHandlerTest.com");
   SourceKeyedCachedMetadataHandler* handler =
-      new SourceKeyedCachedMetadataHandler(
+      MakeGarbageCollected<SourceKeyedCachedMetadataHandler>(
           WTF::TextEncoding(), std::make_unique<MockCachedMetadataSender>(url));
 
   WTF::String source1("source1");
@@ -229,7 +175,7 @@ TEST(SourceKeyedCachedMetadataHandlerTest,
 
   KURL url("http://SourceKeyedCachedMetadataHandlerTest.com");
   SourceKeyedCachedMetadataHandler* handler =
-      new SourceKeyedCachedMetadataHandler(
+      MakeGarbageCollected<SourceKeyedCachedMetadataHandler>(
           WTF::TextEncoding(), std::make_unique<MockCachedMetadataSender>(url));
 
   WTF::String source1("source1");
@@ -240,7 +186,7 @@ TEST(SourceKeyedCachedMetadataHandlerTest,
   SingleCachedMetadataHandler* source2_handler =
       handler->HandlerForSource(source2);
 
-  std::array<char, 3> data1 = {1, 2, 3};
+  Vector<uint8_t> data1 = {1, 2, 3};
   source1_handler->SetCachedMetadata(0xbeef, data1.data(), data1.size());
 
   EXPECT_NE(nullptr, source1_handler);
@@ -256,7 +202,7 @@ TEST(SourceKeyedCachedMetadataHandlerTest, HandlerForSource_BothHandlersSet) {
 
   KURL url("http://SourceKeyedCachedMetadataHandlerTest.com");
   SourceKeyedCachedMetadataHandler* handler =
-      new SourceKeyedCachedMetadataHandler(
+      MakeGarbageCollected<SourceKeyedCachedMetadataHandler>(
           WTF::TextEncoding(), std::make_unique<MockCachedMetadataSender>(url));
 
   WTF::String source1("source1");
@@ -267,10 +213,10 @@ TEST(SourceKeyedCachedMetadataHandlerTest, HandlerForSource_BothHandlersSet) {
   SingleCachedMetadataHandler* source2_handler =
       handler->HandlerForSource(source2);
 
-  std::array<char, 3> data1 = {1, 2, 3};
+  Vector<uint8_t> data1 = {1, 2, 3};
   source1_handler->SetCachedMetadata(0xbeef, data1.data(), data1.size());
 
-  std::array<char, 4> data2 = {3, 4, 5, 6};
+  Vector<uint8_t> data2 = {3, 4, 5, 6};
   source2_handler->SetCachedMetadata(0x5eed, data2.data(), data2.size());
 
   EXPECT_NE(nullptr, source1_handler);
@@ -286,7 +232,7 @@ TEST(SourceKeyedCachedMetadataHandlerTest, Serialize_EmptyClearDoesSend) {
 
   KURL url("http://SourceKeyedCachedMetadataHandlerTest.com");
   SourceKeyedCachedMetadataHandler* handler =
-      new SourceKeyedCachedMetadataHandler(
+      MakeGarbageCollected<SourceKeyedCachedMetadataHandler>(
           WTF::TextEncoding(), std::make_unique<MockCachedMetadataSender>(url));
 
   // Clear and send to the platform
@@ -305,7 +251,7 @@ TEST(SourceKeyedCachedMetadataHandlerTest, Serialize_EachSetDoesSend) {
 
   KURL url("http://SourceKeyedCachedMetadataHandlerTest.com");
   SourceKeyedCachedMetadataHandler* handler =
-      new SourceKeyedCachedMetadataHandler(
+      MakeGarbageCollected<SourceKeyedCachedMetadataHandler>(
           WTF::TextEncoding(), std::make_unique<MockCachedMetadataSender>(url));
 
   WTF::String source1("source1");
@@ -316,10 +262,10 @@ TEST(SourceKeyedCachedMetadataHandlerTest, Serialize_EachSetDoesSend) {
   SingleCachedMetadataHandler* source2_handler =
       handler->HandlerForSource(source2);
 
-  std::array<char, 3> data1 = {1, 2, 3};
+  Vector<uint8_t> data1 = {1, 2, 3};
   source1_handler->SetCachedMetadata(0xbeef, data1.data(), data1.size());
 
-  std::array<char, 4> data2 = {3, 4, 5, 6};
+  Vector<uint8_t> data2 = {3, 4, 5, 6};
   source2_handler->SetCachedMetadata(0x5eed, data2.data(), data2.size());
 
   // Load from platform
@@ -335,7 +281,7 @@ TEST(SourceKeyedCachedMetadataHandlerTest, Serialize_SetWithNoSendDoesNotSend) {
 
   KURL url("http://SourceKeyedCachedMetadataHandlerTest.com");
   SourceKeyedCachedMetadataHandler* handler =
-      new SourceKeyedCachedMetadataHandler(
+      MakeGarbageCollected<SourceKeyedCachedMetadataHandler>(
           WTF::TextEncoding(), std::make_unique<MockCachedMetadataSender>(url));
 
   WTF::String source1("source1");
@@ -346,11 +292,11 @@ TEST(SourceKeyedCachedMetadataHandlerTest, Serialize_SetWithNoSendDoesNotSend) {
   SingleCachedMetadataHandler* source2_handler =
       handler->HandlerForSource(source2);
 
-  std::array<char, 3> data1 = {1, 2, 3};
+  Vector<uint8_t> data1 = {1, 2, 3};
   source1_handler->SetCachedMetadata(0xbeef, data1.data(), data1.size(),
                                      CachedMetadataHandler::kCacheLocally);
 
-  std::array<char, 4> data2 = {3, 4, 5, 6};
+  Vector<uint8_t> data2 = {3, 4, 5, 6};
   source2_handler->SetCachedMetadata(0x5eed, data2.data(), data2.size());
 
   // Load from platform
@@ -370,7 +316,7 @@ TEST(SourceKeyedCachedMetadataHandlerTest,
   WTF::String source2("source2");
   {
     SourceKeyedCachedMetadataHandler* handler =
-        new SourceKeyedCachedMetadataHandler(
+        MakeGarbageCollected<SourceKeyedCachedMetadataHandler>(
             WTF::TextEncoding(),
             std::make_unique<MockCachedMetadataSender>(url));
 
@@ -387,11 +333,12 @@ TEST(SourceKeyedCachedMetadataHandlerTest,
     CacheMetadataEntry& last_cache_metadata = cache_metadatas[0];
 
     SourceKeyedCachedMetadataHandler* handler =
-        new SourceKeyedCachedMetadataHandler(
+        MakeGarbageCollected<SourceKeyedCachedMetadataHandler>(
             WTF::TextEncoding(),
             std::make_unique<MockCachedMetadataSender>(url));
-    handler->SetSerializedCachedMetadata(last_cache_metadata.data.data(),
-                                         last_cache_metadata.data.size());
+    auto data = base::make_span(last_cache_metadata.data.data(),
+                                last_cache_metadata.data.size());
+    handler->SetSerializedCachedMetadata(mojo_base::BigBuffer(data));
 
     SingleCachedMetadataHandler* source1_handler =
         handler->HandlerForSource(source1);
@@ -414,11 +361,11 @@ TEST(SourceKeyedCachedMetadataHandlerTest,
   KURL url("http://SourceKeyedCachedMetadataHandlerTest.com");
   WTF::String source1("source1");
   WTF::String source2("source2");
-  std::array<char, 3> data1 = {1, 2, 3};
-  std::array<char, 4> data2 = {3, 4, 5, 6};
+  Vector<uint8_t> data1 = {1, 2, 3};
+  Vector<uint8_t> data2 = {3, 4, 5, 6};
   {
     SourceKeyedCachedMetadataHandler* handler =
-        new SourceKeyedCachedMetadataHandler(
+        MakeGarbageCollected<SourceKeyedCachedMetadataHandler>(
             WTF::TextEncoding(),
             std::make_unique<MockCachedMetadataSender>(url));
 
@@ -440,11 +387,12 @@ TEST(SourceKeyedCachedMetadataHandlerTest,
     CacheMetadataEntry& last_cache_metadata = cache_metadatas[1];
 
     SourceKeyedCachedMetadataHandler* handler =
-        new SourceKeyedCachedMetadataHandler(
+        MakeGarbageCollected<SourceKeyedCachedMetadataHandler>(
             WTF::TextEncoding(),
             std::make_unique<MockCachedMetadataSender>(url));
-    handler->SetSerializedCachedMetadata(last_cache_metadata.data.data(),
-                                         last_cache_metadata.data.size());
+    auto data = base::make_span(last_cache_metadata.data.data(),
+                                last_cache_metadata.data.size());
+    handler->SetSerializedCachedMetadata(mojo_base::BigBuffer(data));
 
     SingleCachedMetadataHandler* source1_handler =
         handler->HandlerForSource(source1);

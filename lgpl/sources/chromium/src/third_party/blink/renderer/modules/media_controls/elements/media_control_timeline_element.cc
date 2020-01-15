@@ -6,7 +6,7 @@
 
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_screen_info.h"
-#include "third_party/blink/renderer/core/css/css_style_declaration.h"
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
@@ -14,7 +14,6 @@
 #include "third_party/blink/renderer/core/events/touch_event.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/html_div_element.h"
-#include "third_party/blink/renderer/core/html/html_style_element.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/html/time_ranges.h"
@@ -24,16 +23,18 @@
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
-#include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_current_time_display_element.h"
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_elements_helper.h"
+#include "third_party/blink/renderer/modules/media_controls/elements/media_control_remaining_time_display_element.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
-#include "third_party/blink/renderer/modules/media_controls/media_controls_resource_loader.h"
+#include "third_party/blink/renderer/modules/media_controls/media_controls_shared_helper.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/text/platform_locale.h"
 
 namespace {
 
-const double kCurrentTimeBufferedDelta = 1.0;
+const int kThumbRadius = 6;
 
 // Only respond to main button of primary pointer(s).
 bool IsValidPointerEvent(const blink::Event& event) {
@@ -41,7 +42,7 @@ bool IsValidPointerEvent(const blink::Event& event) {
   const blink::PointerEvent& pointer_event = ToPointerEvent(event);
   return pointer_event.isPrimary() &&
          pointer_event.button() ==
-             static_cast<short>(blink::WebPointerProperties::Button::kLeft);
+             static_cast<int16_t>(blink::WebPointerProperties::Button::kLeft);
 }
 
 }  // namespace.
@@ -53,25 +54,10 @@ namespace blink {
 // MediaControlTimelineElement
 //   (-webkit-media-controls-timeline)
 // +-div#thumb (created by the HTMLSliderElement)
-//
-// +-HTMLStyleElement
 MediaControlTimelineElement::MediaControlTimelineElement(
     MediaControlsImpl& media_controls)
-    : MediaControlSliderElement(media_controls, kMediaSlider) {
+    : MediaControlSliderElement(media_controls) {
   SetShadowPseudoId(AtomicString("-webkit-media-controls-timeline"));
-
-  if (MediaControlsImpl::IsModern()) {
-    Element& track = GetTrackElement();
-
-    // TODO(851144): This stylesheet no longer contains animations, so should
-    // be re-combined with the UA sheet.
-    // This stylesheet element contains rules that cannot be present in the UA
-    // stylesheet (e.g. animations).
-    auto* style = HTMLStyleElement::Create(GetDocument(), CreateElementFlags());
-    style->setTextContent(
-        MediaControlsResourceLoader::GetShadowTimelineStyleSheet());
-    track.ParserAppendChild(style);
-  }
 }
 
 bool MediaControlTimelineElement::WillRespondToMouseClickEvents() {
@@ -80,25 +66,25 @@ bool MediaControlTimelineElement::WillRespondToMouseClickEvents() {
 
 void MediaControlTimelineElement::SetPosition(double current_time) {
   setValue(String::Number(current_time));
-  setAttribute(
-      HTMLNames::aria_valuetextAttr,
-      AtomicString(GetMediaControls().CurrentTimeDisplay().textContent(true)));
+  String aria_label =
+      GetLocale().QueryString(MediaElement().IsHTMLVideoElement()
+                                  ? IDS_AX_MEDIA_VIDEO_SLIDER_HELP
+                                  : IDS_AX_MEDIA_AUDIO_SLIDER_HELP) +
+      " " + GetMediaControls().CurrentTimeDisplay().textContent(true) + " " +
+      GetMediaControls().RemainingTimeDisplay().textContent(true);
+  setAttribute(html_names::kAriaLabelAttr, AtomicString(aria_label));
+
+  setAttribute(html_names::kAriaValuetextAttr,
+               AtomicString(GetLocale().QueryString(
+                   IDS_AX_MEDIA_CURRENT_TIME_DISPLAY,
+                   GetMediaControls().CurrentTimeDisplay().textContent(true))));
   RenderBarSegments();
 }
 
 void MediaControlTimelineElement::SetDuration(double duration) {
-  SetFloatingPointAttribute(HTMLNames::maxAttr,
-                            std::isfinite(duration) ? duration : 0);
+  double duration_value = std::isfinite(duration) ? duration : 0;
+  SetFloatingPointAttribute(html_names::kMaxAttr, duration_value);
   RenderBarSegments();
-}
-
-void MediaControlTimelineElement::OnPlaying() {
-  Frame* frame = GetDocument().GetFrame();
-  if (!frame)
-    return;
-  metrics_.RecordPlaying(
-      frame->GetChromeClient().GetScreenInfo().orientation_type,
-      MediaElement().IsFullscreen(), TrackWidth());
 }
 
 const char* MediaControlTimelineElement::GetNameForHistograms() const {
@@ -116,7 +102,7 @@ void MediaControlTimelineElement::DefaultEventHandler(Event& event) {
         UserMetricsAction("Media.Controls.ScrubbingBegin"));
     GetMediaControls().BeginScrubbing(MediaControlsImpl::IsTouchEvent(&event));
     Element* thumb = UserAgentShadowRoot()->getElementById(
-        ShadowElementNames::SliderThumb());
+        shadow_element_names::SliderThumb());
     bool started_from_thumb = thumb && thumb == event.target()->ToNode();
     metrics_.StartGesture(started_from_thumb);
   } else if (EndScrubbingEvent(event)) {
@@ -126,10 +112,10 @@ void MediaControlTimelineElement::DefaultEventHandler(Event& event) {
     metrics_.RecordEndGesture(TrackWidth(), MediaElement().duration());
   }
 
-  if (event.type() == EventTypeNames::keydown) {
+  if (event.type() == event_type_names::kKeydown) {
     metrics_.StartKey();
   }
-  if (event.type() == EventTypeNames::keyup && event.IsKeyboardEvent()) {
+  if (event.type() == event_type_names::kKeyup && event.IsKeyboardEvent()) {
     metrics_.RecordEndKey(TrackWidth(), ToKeyboardEvent(event).keyCode());
   }
 
@@ -141,7 +127,7 @@ void MediaControlTimelineElement::DefaultEventHandler(Event& event) {
   }
 
   // Update the value based on the touchmove event.
-  if (is_touching_ && event.type() == EventTypeNames::touchmove) {
+  if (is_touching_ && event.type() == event_type_names::kTouchmove) {
     auto& touch_event = ToTouchEvent(event);
     if (touch_event.touches()->length() != 1)
       return;
@@ -150,7 +136,7 @@ void MediaControlTimelineElement::DefaultEventHandler(Event& event) {
     double position =
         max(0.0, fmin(1.0, touch->clientX() / TrackWidth() * ZoomFactor()));
     SetPosition(position * MediaElement().duration());
-  } else if (event.type() != EventTypeNames::input) {
+  } else if (event.type() != event_type_names::kInput) {
     return;
   }
 
@@ -198,55 +184,39 @@ void MediaControlTimelineElement::RenderBarSegments() {
   }
 
   double current_position = current_time / duration;
+
+  // Transform the current_position to always align with the center of thumb
+  // At time 0, the thumb's center is 6px away from beginning of progress bar
+  // At the end of video, thumb's center is -6px away from end of progress bar
+  // Convert 6px into ratio respect to progress bar width since
+  // current_position is range from 0 to 1
+  double width = TrackWidth() / ZoomFactor();
+  if (width != 0 && current_position != 0 && !MediaElement().ended()) {
+    double offset = kThumbRadius / width;
+    current_position += offset - (2 * offset * current_position);
+  }
+
   MediaControlSliderElement::Position before_segment(0, 0);
   MediaControlSliderElement::Position after_segment(0, 0);
 
   // The before segment (i.e. what has been played) should be purely be based on
-  // the current time in the modern controls.
-  if (MediaControlsImpl::IsModern())
-    before_segment.width = current_position;
+  // the current time.
+  before_segment.width = current_position;
 
-  // Calculate the size of the after segment (i.e. what has been buffered).
-  for (unsigned i = 0; i < buffered_time_ranges->length(); ++i) {
-    float start = buffered_time_ranges->start(i, ASSERT_NO_EXCEPTION);
-    float end = buffered_time_ranges->end(i, ASSERT_NO_EXCEPTION);
-    // The delta is there to avoid corner cases when buffered
-    // ranges is out of sync with current time because of
-    // asynchronous media pipeline and current time caching in
-    // HTMLMediaElement.
-    // This is related to https://www.w3.org/Bugs/Public/show_bug.cgi?id=28125
-    // FIXME: Remove this workaround when WebMediaPlayer
-    // has an asynchronous pause interface.
-    if (std::isnan(start) || std::isnan(end) ||
-        start > current_time + kCurrentTimeBufferedDelta ||
-        end < current_time) {
-      continue;
-    }
+  base::Optional<unsigned> current_buffered_time_range =
+      MediaControlsSharedHelpers::GetCurrentBufferedTimeRange(MediaElement());
 
-    double start_position = start / duration;
+  if (current_buffered_time_range) {
+    float end = buffered_time_ranges->end(current_buffered_time_range.value(),
+                                          ASSERT_NO_EXCEPTION);
+
     double end_position = end / duration;
 
-    if (MediaControlsImpl::IsModern()) {
-      // Draw dark grey highlight to show what we have loaded.
-      after_segment.left = current_position;
-      after_segment.width = end_position - current_position;
-    } else {
-      // Draw highlight to show what we have played.
-      if (current_position > start_position) {
-        after_segment.left = start_position;
-        after_segment.width = current_position - start_position;
-      }
-
-      // Draw dark grey highlight to show what we have loaded.
-      if (end_position > current_position) {
-        before_segment.left = current_position;
-        before_segment.width = end_position - current_position;
-      }
-    }
-
-    // Break out of the loop since we've drawn the only buffered range
-    // we're going to draw.
-    break;
+    // Draw dark grey highlight to show what we have loaded. This just uses a
+    // width since it just starts at zero just like the before segment.
+    // We use |std::max()| here because |current_position| has an offset added
+    // to it and can therefore be greater than |end_position| in some cases.
+    after_segment.width = std::max(current_position, end_position);
   }
 
   // Update the positions of the segments.
@@ -259,11 +229,11 @@ void MediaControlTimelineElement::Trace(blink::Visitor* visitor) {
 }
 
 bool MediaControlTimelineElement::BeginScrubbingEvent(Event& event) {
-  if (event.type() == EventTypeNames::touchstart) {
+  if (event.type() == event_type_names::kTouchstart) {
     is_touching_ = true;
     return true;
   }
-  if (event.type() == EventTypeNames::pointerdown)
+  if (event.type() == event_type_names::kPointerdown)
     return IsValidPointerEvent(event);
 
   return false;
@@ -274,22 +244,24 @@ void MediaControlTimelineElement::OnControlsHidden() {
 
   // End scrubbing state.
   is_touching_ = false;
+  MediaControlSliderElement::OnControlsHidden();
 }
 
 void MediaControlTimelineElement::OnControlsShown() {
   controls_hidden_ = false;
+  MediaControlSliderElement::OnControlsShown();
 }
 
 bool MediaControlTimelineElement::EndScrubbingEvent(Event& event) {
   if (is_touching_) {
-    if (event.type() == EventTypeNames::touchend ||
-        event.type() == EventTypeNames::touchcancel ||
-        event.type() == EventTypeNames::change) {
+    if (event.type() == event_type_names::kTouchend ||
+        event.type() == event_type_names::kTouchcancel ||
+        event.type() == event_type_names::kChange) {
       is_touching_ = false;
       return true;
     }
-  } else if (event.type() == EventTypeNames::pointerup ||
-             event.type() == EventTypeNames::pointercancel) {
+  } else if (event.type() == event_type_names::kPointerup ||
+             event.type() == event_type_names::kPointercancel) {
     return IsValidPointerEvent(event);
   }
 

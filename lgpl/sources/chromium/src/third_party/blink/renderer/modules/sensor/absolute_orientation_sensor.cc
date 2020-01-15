@@ -4,28 +4,31 @@
 
 #include "third_party/blink/renderer/modules/sensor/absolute_orientation_sensor.h"
 
+#include "third_party/blink/public/mojom/feature_policy/feature_policy_feature.mojom-blink.h"
+
 using device::mojom::blink::SensorType;
 
 namespace blink {
 
 AbsoluteOrientationSensor* AbsoluteOrientationSensor::Create(
     ExecutionContext* execution_context,
-    const SpatialSensorOptions& options,
+    const SpatialSensorOptions* options,
     ExceptionState& exception_state) {
-  return new AbsoluteOrientationSensor(execution_context, options,
-                                       exception_state);
+  return MakeGarbageCollected<AbsoluteOrientationSensor>(
+      execution_context, options, exception_state);
 }
 
 // static
 AbsoluteOrientationSensor* AbsoluteOrientationSensor::Create(
     ExecutionContext* execution_context,
     ExceptionState& exception_state) {
-  return Create(execution_context, SpatialSensorOptions(), exception_state);
+  return Create(execution_context, SpatialSensorOptions::Create(),
+                exception_state);
 }
 
 AbsoluteOrientationSensor::AbsoluteOrientationSensor(
     ExecutionContext* execution_context,
-    const SpatialSensorOptions& options,
+    const SpatialSensorOptions* options,
     ExceptionState& exception_state)
     : OrientationSensor(execution_context,
                         options,

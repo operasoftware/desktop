@@ -10,10 +10,9 @@
 #include "gpu/config/gpu_feature_info.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
-#include "third_party/blink/renderer/platform/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
-#include "third_party/blink/renderer/platform/waitable_event.h"
-#include "third_party/blink/renderer/platform/web_task_runner.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
 
@@ -52,12 +51,16 @@ static void CreateContextProviderOnMainThread(
     bool only_if_gpu_compositing,
     bool* gpu_compositing_disabled,
     std::unique_ptr<WebGraphicsContext3DProviderWrapper>* wrapper,
-    WaitableEvent* waitable_event) {
+    base::WaitableEvent* waitable_event) {
   DCHECK(IsMainThread());
 
   Platform::ContextAttributes context_attributes;
   context_attributes.enable_raster_interface = true;
   context_attributes.support_grcontext = true;
+
+  // The shared GPU context should not trigger a switch to the high-performance
+  // GPU.
+  context_attributes.prefer_low_power_gpu = true;
 
   *gpu_compositing_disabled = Platform::Current()->IsGpuCompositingDisabled();
   if (*gpu_compositing_disabled && only_if_gpu_compositing) {
@@ -122,16 +125,16 @@ void SharedGpuContext::CreateContextProviderIfNeeded(
     // This synchronous round-trip to the main thread is the reason why
     // SharedGpuContext encasulates the context provider: so we only have to do
     // this once per thread.
-    WaitableEvent waitable_event;
+    base::WaitableEvent waitable_event;
     scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-        Platform::Current()->MainThread()->GetTaskRunner();
+        Thread::MainThread()->GetTaskRunner();
     PostCrossThreadTask(
         *task_runner, FROM_HERE,
-        CrossThreadBind(&CreateContextProviderOnMainThread,
-                        only_if_gpu_compositing,
-                        CrossThreadUnretained(&is_gpu_compositing_disabled_),
-                        CrossThreadUnretained(&context_provider_wrapper_),
-                        CrossThreadUnretained(&waitable_event)));
+        CrossThreadBindOnce(
+            &CreateContextProviderOnMainThread, only_if_gpu_compositing,
+            CrossThreadUnretained(&is_gpu_compositing_disabled_),
+            CrossThreadUnretained(&context_provider_wrapper_),
+            CrossThreadUnretained(&waitable_event)));
     waitable_event.Wait();
     if (context_provider_wrapper_ &&
         !context_provider_wrapper_->ContextProvider()->BindToCurrentThread())

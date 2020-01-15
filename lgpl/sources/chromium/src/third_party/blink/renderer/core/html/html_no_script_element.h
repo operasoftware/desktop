@@ -39,11 +39,9 @@ namespace blink {
 // so HTMLElement's layoutObjectIsNeeded doesn't need to know about it.
 class HTMLNoScriptElement final : public HTMLElement {
  public:
-  DECLARE_NODE_FACTORY(HTMLNoScriptElement);
-
- private:
   explicit HTMLNoScriptElement(Document&);
 
+ private:
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override;
 };
 

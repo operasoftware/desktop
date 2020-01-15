@@ -37,10 +37,7 @@ class Element;
 
 class CORE_EXPORT FormatBlockCommand final : public ApplyBlockElementCommand {
  public:
-  static FormatBlockCommand* Create(Document& document,
-                                    const QualifiedName& tag_name) {
-    return new FormatBlockCommand(document, tag_name);
-  }
+  FormatBlockCommand(Document&, const QualifiedName& tag_name);
 
   bool PreservesTypingStyle() const override { return true; }
 
@@ -48,8 +45,6 @@ class CORE_EXPORT FormatBlockCommand final : public ApplyBlockElementCommand {
   bool DidApply() const { return did_apply_; }
 
  private:
-  FormatBlockCommand(Document&, const QualifiedName& tag_name);
-
   void FormatSelection(const VisiblePosition& start_of_selection,
                        const VisiblePosition& end_of_selection,
                        EditingState*) override;

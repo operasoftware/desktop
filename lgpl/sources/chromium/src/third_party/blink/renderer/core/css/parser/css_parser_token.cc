@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/css/css_markup.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_property_parser.h"
+#include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -85,9 +86,10 @@ double CSSParserToken::NumericValue() const {
   return numeric_value_;
 }
 
-CSSPropertyID CSSParserToken::ParseAsUnresolvedCSSPropertyID() const {
+CSSPropertyID CSSParserToken::ParseAsUnresolvedCSSPropertyID(
+    CSSParserMode mode) const {
   DCHECK_EQ(type_, static_cast<unsigned>(kIdentToken));
-  return UnresolvedCSSPropertyID(Value());
+  return UnresolvedCSSPropertyID(Value(), mode);
 }
 
 AtRuleDescriptorID CSSParserToken::ParseAsAtRuleDescriptorID() const {
@@ -97,17 +99,17 @@ AtRuleDescriptorID CSSParserToken::ParseAsAtRuleDescriptorID() const {
 
 CSSValueID CSSParserToken::Id() const {
   if (type_ != kIdentToken)
-    return CSSValueInvalid;
+    return CSSValueID::kInvalid;
   if (id_ < 0)
-    id_ = CssValueKeywordID(Value());
+    id_ = static_cast<int>(CssValueKeywordID(Value()));
   return static_cast<CSSValueID>(id_);
 }
 
 CSSValueID CSSParserToken::FunctionId() const {
   if (type_ != kFunctionToken)
-    return CSSValueInvalid;
+    return CSSValueID::kInvalid;
   if (id_ < 0)
-    id_ = CssValueKeywordID(Value());
+    id_ = static_cast<int>(CssValueKeywordID(Value()));
   return static_cast<CSSValueID>(id_);
 }
 
@@ -131,11 +133,11 @@ bool CSSParserToken::ValueDataCharRawEqual(const CSSParserToken& other) const {
     return false;
 
   if (value_data_char_raw_ == other.value_data_char_raw_ &&
-      value_is8_bit_ == other.value_is8_bit_)
+      value_is_8bit_ == other.value_is_8bit_)
     return true;
 
-  if (value_is8_bit_) {
-    return other.value_is8_bit_
+  if (value_is_8bit_) {
+    return other.value_is_8bit_
                ? Equal(static_cast<const LChar*>(value_data_char_raw_),
                        static_cast<const LChar*>(other.value_data_char_raw_),
                        value_length_)
@@ -143,7 +145,7 @@ bool CSSParserToken::ValueDataCharRawEqual(const CSSParserToken& other) const {
                        static_cast<const UChar*>(other.value_data_char_raw_),
                        value_length_);
   } else {
-    return other.value_is8_bit_
+    return other.value_is_8bit_
                ? Equal(static_cast<const UChar*>(value_data_char_raw_),
                        static_cast<const LChar*>(other.value_data_char_raw_),
                        value_length_)

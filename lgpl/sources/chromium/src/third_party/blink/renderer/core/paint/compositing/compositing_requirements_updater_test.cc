@@ -14,38 +14,14 @@ namespace blink {
 class CompositingRequirementsUpdaterTest : public RenderingTest {
  public:
   CompositingRequirementsUpdaterTest()
-      : RenderingTest(SingleChildLocalFrameClient::Create()) {}
+      : RenderingTest(MakeGarbageCollected<SingleChildLocalFrameClient>()) {}
 
   void SetUp() final;
 };
 
 void CompositingRequirementsUpdaterTest::SetUp() {
-  RenderingTest::SetUp();
   EnableCompositing();
-}
-
-TEST_F(CompositingRequirementsUpdaterTest, FixedPosOverlap) {
-  SetBodyInnerHTML(R"HTML(
-    <div style="position: relative; width: 500px; height: 300px;
-        will-change: transform"></div>
-    <div id=fixed style="position: fixed; width: 500px; height: 300px;
-        top: 300px"></div>
-    <div style="width: 200px; height: 3000px"></div>
-  )HTML");
-
-  LayoutBoxModelObject* fixed =
-      ToLayoutBoxModelObject(GetLayoutObjectByElementId("fixed"));
-
-  EXPECT_EQ(
-      CompositingReason::kOverlap | CompositingReason::kSquashingDisallowed,
-      fixed->Layer()->GetCompositingReasons());
-
-  GetDocument().View()->LayoutViewport()->ScrollBy(ScrollOffset(0, 100),
-                                                   kUserScroll);
-  GetDocument().View()->UpdateAllLifecyclePhases();
-
-  // No longer overlaps the first div.
-  EXPECT_EQ(CompositingReason::kNone, fixed->Layer()->GetCompositingReasons());
+  RenderingTest::SetUp();
 }
 
 TEST_F(CompositingRequirementsUpdaterTest,
@@ -69,38 +45,11 @@ TEST_F(CompositingRequirementsUpdaterTest,
   EXPECT_FALSE(target->GetCompositingReasons());
 
   // Now make |target| self-painting.
-  GetDocument().getElementById("target")->setAttribute(HTMLNames::styleAttr,
+  GetDocument().getElementById("target")->setAttribute(html_names::kStyleAttr,
                                                        "position: relative");
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   EXPECT_EQ(CompositingReason::kOverlap, target->GetCompositingReasons());
-}
-
-TEST_F(CompositingRequirementsUpdaterTest,
-       NoAssumedOverlapReasonForNonSelfPaintingLayer) {
-  SetBodyInnerHTML(R"HTML(
-    <style>
-      #target {
-       overflow: auto;
-       width: 100px;
-       height: 100px;
-     }
-    </style>
-    <div style="position: relative; width: 500px; height: 300px;
-        transform: translateZ(0)"></div>
-    <div id=target></div>
-  )HTML");
-
-  PaintLayer* target =
-      ToLayoutBoxModelObject(GetLayoutObjectByElementId("target"))->Layer();
-  EXPECT_FALSE(target->GetCompositingReasons());
-
-  // Now make |target| self-painting.
-  GetDocument().getElementById("target")->setAttribute(HTMLNames::styleAttr,
-                                                       "position: relative");
-  GetDocument().View()->UpdateAllLifecyclePhases();
-  EXPECT_EQ(CompositingReason::kAssumedOverlap,
-            target->GetCompositingReasons());
 }
 
 TEST_F(CompositingRequirementsUpdaterTest,
@@ -123,9 +72,9 @@ TEST_F(CompositingRequirementsUpdaterTest,
   EXPECT_FALSE(target->GetCompositingReasons());
 
   // Now make |target| self-painting.
-  GetDocument().getElementById("target")->setAttribute(HTMLNames::styleAttr,
+  GetDocument().getElementById("target")->setAttribute(html_names::kStyleAttr,
                                                        "position: relative");
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
   EXPECT_EQ(CompositingReason::kClipsCompositingDescendants,
             target->GetCompositingReasons());
 }
@@ -160,9 +109,9 @@ TEST_F(CompositingRequirementsUpdaterTest,
 
   GetDocument().View()->SetTracksPaintInvalidations(true);
 
-  GetDocument().getElementById("target")->setAttribute(HTMLNames::styleAttr,
+  GetDocument().getElementById("target")->setAttribute(html_names::kStyleAttr,
                                                        "display: none");
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   EXPECT_EQ(kNotComposited, squashed->GetCompositingState());
   auto* tracking = GetDocument()
@@ -174,6 +123,46 @@ TEST_F(CompositingRequirementsUpdaterTest,
   EXPECT_TRUE(tracking->HasInvalidations());
 
   EXPECT_EQ(IntRect(0, 0, 100, 100), tracking->Invalidations()[0].rect);
+}
+
+TEST_F(CompositingRequirementsUpdaterTest,
+       DontPromotePerspectiveOnlyTransform) {
+  ScopedCSSIndependentTransformPropertiesForTest feature_scope(true);
+
+  SetBodyInnerHTML(R"HTML(
+    <!DOCTYPE html>
+    <div id="perspective-no-3d-descendant"
+        style="transform:perspective(1px) scale(2)">
+      <div id="transform2d" style="transform:translate(1px, 2px);"></div>
+    </div>
+    <div id="perspective-with-3d-descendant"
+        style="transform:perspective(1px) scale(2)">
+      <div id="3d-descendant" style="rotate: 0 1 0 1deg;"></div>
+    </div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  // Perspective with descendant with only a 2d transform should not be layered
+  // (neither should the descendant).
+  EXPECT_FALSE(ToLayoutBoxModelObject(
+                   GetLayoutObjectByElementId("perspective-no-3d-descendant"))
+                   ->Layer()
+                   ->GetCompositingState());
+  EXPECT_FALSE(ToLayoutBoxModelObject(GetLayoutObjectByElementId("transform2d"))
+                   ->Layer()
+                   ->GetCompositingReasons());
+
+  // Both the perspective and 3d descendant should be layered, the former for
+  // flattening purposes, as it contains 3d transformed content.
+  EXPECT_EQ(CompositingReason::kPerspectiveWith3DDescendants,
+            ToLayoutBoxModelObject(
+                GetLayoutObjectByElementId("perspective-with-3d-descendant"))
+                ->Layer()
+                ->GetCompositingReasons());
+  EXPECT_EQ(CompositingReason::k3DTransform,
+            ToLayoutBoxModelObject(GetLayoutObjectByElementId("3d-descendant"))
+                ->Layer()
+                ->GetCompositingReasons());
 }
 
 }  // namespace blink

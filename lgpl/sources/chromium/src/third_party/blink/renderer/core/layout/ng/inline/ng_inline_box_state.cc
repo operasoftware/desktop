@@ -4,14 +4,16 @@
 
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_box_state.h"
 
-#include "third_party/blink/renderer/core/layout/ng/geometry/ng_logical_offset.h"
-#include "third_party/blink/renderer/core/layout/ng/geometry/ng_logical_size.h"
+#include "third_party/blink/renderer/core/layout/geometry/logical_offset.h"
+#include "third_party/blink/renderer/core/layout/geometry/logical_size.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_item_result.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_line_box_fragment_builder.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_text_fragment_builder.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_fragment_builder.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_box_fragment_builder.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_result.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/platform/fonts/shaping/shape_result_view.h"
 
 namespace blink {
 
@@ -67,7 +69,7 @@ void NGInlineBoxState::EnsureTextMetrics(const ComputedStyle& style,
     ComputeTextMetrics(style, baseline_type);
 }
 
-void NGInlineBoxState::AccumulateUsedFonts(const ShapeResult* shape_result,
+void NGInlineBoxState::AccumulateUsedFonts(const ShapeResultView* shape_result,
                                            FontBaseline baseline_type) {
   HashSet<const SimpleFontData*> fallback_fonts;
   shape_result->FallbackFonts(&fallback_fonts);
@@ -78,6 +80,15 @@ void NGInlineBoxState::AccumulateUsedFonts(const ShapeResult* shape_result,
         fallback_font->GetFontMetrics().FixedLineSpacing());
     metrics.Unite(fallback_metrics);
   }
+}
+
+LayoutUnit NGInlineBoxState::TextTop(FontBaseline baseline_type) const {
+  if (!text_metrics.IsEmpty())
+    return text_top;
+  if (const SimpleFontData* font_data = style->GetFont().PrimaryFont())
+    return -font_data->GetFontMetrics().FixedAscent(baseline_type);
+  NOTREACHED();
+  return LayoutUnit();
 }
 
 bool NGInlineBoxState::CanAddTextOfStyle(
@@ -91,22 +102,8 @@ bool NGInlineBoxState::CanAddTextOfStyle(
   return false;
 }
 
-LayoutObject*
-NGInlineLayoutStateStack::ContainingLayoutObjectForAbsolutePositionObjects()
-    const {
-  for (unsigned i = stack_.size(); i-- > 1;) {
-    const NGInlineBoxState& box = stack_[i];
-    DCHECK(box.style);
-    if (box.style->CanContainAbsolutePositionObjects()) {
-      DCHECK(box.item->GetLayoutObject());
-      return box.item->GetLayoutObject();
-    }
-  }
-  return nullptr;
-}
-
 NGInlineBoxState* NGInlineLayoutStateStack::OnBeginPlaceItems(
-    const ComputedStyle* line_style,
+    const ComputedStyle& line_style,
     FontBaseline baseline_type,
     bool line_height_quirk) {
   if (stack_.IsEmpty()) {
@@ -137,14 +134,14 @@ NGInlineBoxState* NGInlineLayoutStateStack::OnBeginPlaceItems(
 
   // Initialize the box state for the line box.
   NGInlineBoxState& line_box = LineBoxState();
-  if (line_box.style != line_style) {
-    line_box.style = line_style;
+  if (line_box.style != &line_style) {
+    line_box.style = &line_style;
 
     // Use a "strut" (a zero-width inline box with the element's font and
     // line height properties) as the initial metrics for the line box.
     // https://drafts.csswg.org/css2/visudet.html#strut
     if (!line_height_quirk)
-      line_box.ComputeTextMetrics(*line_style, baseline_type);
+      line_box.ComputeTextMetrics(line_style, baseline_type);
   }
 
   return &stack_.back();
@@ -158,10 +155,8 @@ NGInlineBoxState* NGInlineLayoutStateStack::OnOpenTag(
   NGInlineBoxState* box = OnOpenTag(*item.Style(), line_box);
   box->item = &item;
 
-  if (item.ShouldCreateBoxFragment()) {
-    box->SetNeedsBoxFragment(
-        ContainingLayoutObjectForAbsolutePositionObjects());
-  }
+  if (item.ShouldCreateBoxFragment())
+    box->SetNeedsBoxFragment();
 
   // Compute box properties regardless of needs_box_fragment since close tag may
   // also set needs_box_fragment.
@@ -208,6 +203,16 @@ void NGInlineLayoutStateStack::OnEndPlaceItems(
       box->has_end_edge = true;
     EndBoxState(box, line_box, baseline_type);
   }
+
+  // Up to this point, the offset of inline boxes are stored in placeholder so
+  // that |ApplyBaselineShift()| can compute offset for both children and boxes.
+  // Copy the final offset to |box_data_list_|.
+  for (BoxData& box_data : box_data_list_) {
+    const NGLineBoxFragmentBuilder::Child& placeholder =
+        (*line_box)[box_data.fragment_end];
+    DCHECK(!placeholder.HasFragment());
+    box_data.offset = placeholder.offset;
+  }
 }
 
 void NGInlineLayoutStateStack::EndBoxState(
@@ -232,13 +237,10 @@ void NGInlineLayoutStateStack::EndBoxState(
     parent_box.metrics.Unite(box->metrics);
 }
 
-void NGInlineBoxState::SetNeedsBoxFragment(
-    const LayoutObject* inline_container) {
+void NGInlineBoxState::SetNeedsBoxFragment() {
   DCHECK(item);
   DCHECK(!needs_box_fragment);
   needs_box_fragment = true;
-  DCHECK(!this->inline_container);
-  this->inline_container = inline_container;
 }
 
 // Crete a placeholder for a box fragment.
@@ -250,30 +252,30 @@ void NGInlineLayoutStateStack::AddBoxFragmentPlaceholder(
     NGLineBoxFragmentBuilder::ChildList* line_box,
     FontBaseline baseline_type) {
   DCHECK(box->needs_box_fragment);
-
-  // The inline box should have the height of the font metrics without the
-  // line-height property. Compute from style because |box->metrics| includes
-  // the line-height property.
   DCHECK(box->style);
   const ComputedStyle& style = *box->style;
-  NGLineHeightMetrics metrics(style, baseline_type);
 
-  // Extend the block direction of the box by borders and paddings. Inline
-  // direction is already included into positions in NGLineBreaker.
-  NGLogicalOffset offset(
-      LayoutUnit(),
-      -metrics.ascent - (box->borders.line_over + box->padding.line_over));
-  NGLogicalSize size(
-      LayoutUnit(),
-      metrics.LineHeight() + box->borders.BlockSum() + box->padding.BlockSum());
+  LogicalOffset offset;
+  LogicalSize size;
+  if (!is_empty_line_) {
+    // The inline box should have the height of the font metrics without the
+    // line-height property. Compute from style because |box->metrics| includes
+    // the line-height property.
+    NGLineHeightMetrics metrics(style, baseline_type);
+
+    // Extend the block direction of the box by borders and paddings. Inline
+    // direction is already included into positions in NGLineBreaker.
+    offset.block_offset =
+        -metrics.ascent - (box->borders.line_over + box->padding.line_over);
+    size.block_size = metrics.LineHeight() + box->borders.BlockSum() +
+                      box->padding.BlockSum();
+  }
 
   unsigned fragment_end = line_box->size();
   DCHECK(box->item);
-  box_data_list_.push_back(
-      BoxData{box->fragment_start, fragment_end, box->item, size});
-  BoxData& box_data = box_data_list_.back();
+  BoxData& box_data = box_data_list_.emplace_back(
+      box->fragment_start, fragment_end, box->item, size);
   box_data.padding = box->padding;
-  box_data.inline_container = box->inline_container;
   if (box->has_start_edge) {
     box_data.has_line_left_edge = true;
     box_data.margin_line_left = box->margin_inline_start;
@@ -317,13 +319,31 @@ void NGInlineLayoutStateStack::AddBoxFragmentPlaceholder(
     box_data.size.inline_size =
         advance - box_data.margin_line_left - box_data.margin_line_right;
     line_box->AddChild(box_data.CreateBoxFragment(line_box), offset, advance,
-                       0);
+                       /* bidi_level */ 0);
     box_data_list_.pop_back();
+  }
+}
+
+void NGInlineLayoutStateStack::ChildInserted(unsigned index) {
+  for (NGInlineBoxState& state : stack_) {
+    if (state.fragment_start >= index)
+      ++state.fragment_start;
+    DCHECK(state.pending_descendants.IsEmpty());
+  }
+  for (BoxData& box_data : box_data_list_) {
+    if (box_data.fragment_start >= index)
+      ++box_data.fragment_start;
+    if (box_data.fragment_end >= index)
+      ++box_data.fragment_end;
   }
 }
 
 void NGInlineLayoutStateStack::PrepareForReorder(
     NGLineBoxFragmentBuilder::ChildList* line_box) {
+  // There's nothing to do if no boxes.
+  if (box_data_list_.IsEmpty())
+    return;
+
   // Set indexes of BoxData to the children of the line box.
   unsigned box_data_index = 0;
   for (const BoxData& box_data : box_data_list_) {
@@ -341,43 +361,29 @@ void NGInlineLayoutStateStack::PrepareForReorder(
     const NGLineBoxFragmentBuilder::Child& placeholder =
         (*line_box)[box_data.fragment_end];
     DCHECK(!placeholder.HasFragment());
-    box_data.offset = placeholder.offset;
-    box_data.box_data_index = placeholder.box_data_index;
+    box_data.parent_box_data_index = placeholder.box_data_index;
   }
 }
 
 void NGInlineLayoutStateStack::UpdateAfterReorder(
     NGLineBoxFragmentBuilder::ChildList* line_box) {
+  // There's nothing to do if no boxes.
+  if (box_data_list_.IsEmpty())
+    return;
+
   // Compute start/end of boxes from the children of the line box.
+  // Clear start/end first.
   for (BoxData& box_data : box_data_list_)
     box_data.fragment_start = box_data.fragment_end = 0;
-  for (unsigned i = 0; i < line_box->size(); i++) {
-    const NGLineBoxFragmentBuilder::Child& child = (*line_box)[i];
-    if (child.IsPlaceholder())
-      continue;
-    if (unsigned box_data_index = child.box_data_index) {
-      BoxData& box_data = box_data_list_[box_data_index - 1];
-      if (!box_data.fragment_end)
-        box_data.fragment_start = i;
-      box_data.fragment_end = i + 1;
-    }
-  }
 
-  // Extend start/end of boxes when they are nested.
-  for (BoxData& box_data : box_data_list_) {
-    if (box_data.box_data_index) {
-      BoxData& parent_box_data = box_data_list_[box_data.box_data_index - 1];
-      if (!parent_box_data.fragment_end) {
-        parent_box_data.fragment_start = box_data.fragment_start;
-        parent_box_data.fragment_end = box_data.fragment_end;
-      } else {
-        parent_box_data.fragment_start =
-            std::min(box_data.fragment_start, parent_box_data.fragment_start);
-        parent_box_data.fragment_end =
-            std::max(box_data.fragment_end, parent_box_data.fragment_end);
-      }
-    }
-  }
+  // Scan children and update start/end from their box_data_index.
+  unsigned box_count = box_data_list_.size();
+  for (unsigned index = 0; index < line_box->size();)
+    index = UpdateBoxDataFragmentRange(line_box, index);
+
+  // If any inline fragmentation due to BiDi reorder, adjust box edges.
+  if (box_count != box_data_list_.size())
+    UpdateFragmentedBoxDataEdges();
 
 #if DCHECK_IS_ON()
   // Check all BoxData have ranges.
@@ -385,7 +391,98 @@ void NGInlineLayoutStateStack::UpdateAfterReorder(
     DCHECK_NE(box_data.fragment_end, 0u);
     DCHECK_GT(box_data.fragment_end, box_data.fragment_start);
   }
+  // Check all |box_data_index| were migrated to BoxData.
+  for (const NGLineBoxFragmentBuilder::Child& child : *line_box) {
+    DCHECK_EQ(child.box_data_index, 0u);
+  }
 #endif
+}
+
+unsigned NGInlineLayoutStateStack::UpdateBoxDataFragmentRange(
+    NGLineBoxFragmentBuilder::ChildList* line_box,
+    unsigned index) {
+  // Find the first line box item that should create a box fragment.
+  for (; index < line_box->size(); index++) {
+    NGLineBoxFragmentBuilder::Child* start = &(*line_box)[index];
+    const unsigned box_data_index = start->box_data_index;
+    if (!box_data_index)
+      continue;
+    // |box_data_list_[box_data_index - 1]| is the box for |start| child.
+    // Avoid keeping a pointer to the |BoxData| because it maybe invalidated as
+    // we add to |box_data_list_|.
+
+    // As |box_data_index| is converted to start/end of BoxData, update
+    // |box_data_index| to the parent box, or to 0 if no parent boxes.
+    // This allows including this box to the nested parent box.
+    start->box_data_index =
+        box_data_list_[box_data_index - 1].parent_box_data_index;
+
+    // Find the end line box item.
+    const unsigned start_index = index;
+    for (index++; index < line_box->size(); index++) {
+      NGLineBoxFragmentBuilder::Child* end = &(*line_box)[index];
+
+      // If we found another box that maybe included in this box, update it
+      // first. Updating will change |end->box_data_index| so that we can
+      // determine if it should be included into this box or not.
+      // It also changes other BoxData, but not the one we're dealing with here
+      // because the update is limited only when its |box_data_index| is lower.
+      while (end->box_data_index && end->box_data_index < box_data_index) {
+        UpdateBoxDataFragmentRange(line_box, index);
+      }
+
+      if (box_data_index != end->box_data_index)
+        break;
+      end->box_data_index =
+          box_data_list_[box_data_index - 1].parent_box_data_index;
+    }
+
+    // If this is the first range for this BoxData, set it.
+    if (!box_data_list_[box_data_index - 1].fragment_end) {
+      box_data_list_[box_data_index - 1].SetFragmentRange(start_index, index);
+    } else {
+      // This box is fragmented by BiDi reordering. Add a new BoxData for the
+      // fragmented range.
+      box_data_list_[box_data_index - 1].fragmented_box_data_index =
+          box_data_list_.size();
+      // Do not use `emplace_back()` here because adding to |box_data_list_| may
+      // reallocate the buffer, but the `BoxData` ctor must run before the
+      // reallocation. Create a new instance and |push_back()| instead.
+      BoxData fragmented_box_data(box_data_list_[box_data_index - 1],
+                                  start_index, index);
+      box_data_list_.push_back(fragmented_box_data);
+    }
+    // If this box has parent boxes, we need to process it again.
+    if (box_data_list_[box_data_index - 1].parent_box_data_index)
+      return start_index;
+    return index;
+  }
+  return index;
+}
+
+void NGInlineLayoutStateStack::UpdateFragmentedBoxDataEdges() {
+  for (BoxData& box_data : box_data_list_) {
+    if (box_data.fragmented_box_data_index)
+      box_data.UpdateFragmentEdges(box_data_list_);
+  }
+}
+
+void NGInlineLayoutStateStack::BoxData::UpdateFragmentEdges(
+    Vector<BoxData, 4>& list) {
+  DCHECK(fragmented_box_data_index);
+
+  // If this box has the right edge, move it to the last fragment.
+  if (has_line_right_edge) {
+    BoxData& last = list[fragmented_box_data_index];
+    last.has_line_right_edge = true;
+    last.margin_line_right = margin_line_right;
+    last.margin_border_padding_line_right = margin_border_padding_line_right;
+    last.padding.inline_end = padding.inline_end;
+
+    has_line_right_edge = false;
+    margin_line_right = margin_border_padding_line_right = padding.inline_end =
+        LayoutUnit();
+  }
 }
 
 LayoutUnit NGInlineLayoutStateStack::ComputeInlinePositions(
@@ -394,6 +491,7 @@ LayoutUnit NGInlineLayoutStateStack::ComputeInlinePositions(
   // origins at (0, 0). Accumulate inline offset from left to right.
   LayoutUnit position;
   for (NGLineBoxFragmentBuilder::Child& child : *line_box) {
+    child.margin_line_left = child.offset.inline_offset;
     child.offset.inline_offset += position;
     // Box margins/boders/paddings will be processed later.
     // TODO(kojii): we could optimize this if the reordering did not occur.
@@ -439,7 +537,8 @@ LayoutUnit NGInlineLayoutStateStack::ComputeInlinePositions(
     // boxes, while accumulating its margin/border/padding.
     unsigned start = box_data.fragment_start;
     NGLineBoxFragmentBuilder::Child& start_child = (*line_box)[start];
-    LayoutUnit line_left_offset = start_child.offset.inline_offset;
+    LayoutUnit line_left_offset =
+        start_child.offset.inline_offset - start_child.margin_line_left;
     LinePadding& start_padding = accumulated_padding[start];
     start_padding.line_left += box_data.margin_border_padding_line_left;
     line_left_offset -= start_padding.line_left - box_data.margin_line_left;
@@ -447,8 +546,9 @@ LayoutUnit NGInlineLayoutStateStack::ComputeInlinePositions(
     DCHECK_GT(box_data.fragment_end, start);
     unsigned last = box_data.fragment_end - 1;
     NGLineBoxFragmentBuilder::Child& last_child = (*line_box)[last];
-    LayoutUnit line_right_offset =
-        last_child.offset.inline_offset + last_child.inline_size;
+    LayoutUnit line_right_offset = last_child.offset.inline_offset -
+                                   last_child.margin_line_left +
+                                   last_child.inline_size;
     LinePadding& last_padding = accumulated_padding[last];
     last_padding.line_right += box_data.margin_border_padding_line_right;
     line_right_offset += last_padding.line_right - box_data.margin_line_right;
@@ -468,34 +568,48 @@ void NGInlineLayoutStateStack::CreateBoxFragments(
     unsigned start = box_data.fragment_start;
     unsigned end = box_data.fragment_end;
     DCHECK_GT(end, start);
-    NGLineBoxFragmentBuilder::Child& start_child = (*line_box)[start];
+    NGLineBoxFragmentBuilder::Child* child = &(*line_box)[start];
 
-    scoped_refptr<NGLayoutResult> box_fragment =
+    scoped_refptr<const NGLayoutResult> box_fragment =
         box_data.CreateBoxFragment(line_box);
-    if (!start_child.HasFragment()) {
-      start_child.layout_result = std::move(box_fragment);
-      start_child.offset = box_data.offset;
+    if (!child->HasFragment()) {
+      child->layout_result = std::move(box_fragment);
+      child->offset = box_data.offset;
+      child->children_count = end - start;
     } else {
       // In most cases, |start_child| is moved to the children of the box, and
       // is empty. It's not empty when it's out-of-flow. Insert in such case.
+      // TODO(kojii): With |NGFragmentItem|, all cases hit this code. Consider
+      // creating an empty item beforehand to avoid inserting.
       line_box->InsertChild(start, std::move(box_fragment), box_data.offset,
                             LayoutUnit(), 0);
+      ChildInserted(start + 1);
+      child = &(*line_box)[start];
+      child->children_count = end - start + 1;
     }
   }
 
   box_data_list_.clear();
 }
 
-scoped_refptr<NGLayoutResult>
+scoped_refptr<const NGLayoutResult>
 NGInlineLayoutStateStack::BoxData::CreateBoxFragment(
     NGLineBoxFragmentBuilder::ChildList* line_box) {
   DCHECK(item);
   DCHECK(item->Style());
   const ComputedStyle& style = *item->Style();
+
+  NGFragmentGeometry fragment_geometry;
+  fragment_geometry.border_box_size = {size.inline_size.ClampNegativeToZero(),
+                                       size.block_size};
+  fragment_geometry.padding =
+      NGBoxStrut(padding, IsFlippedLinesWritingMode(style.GetWritingMode()));
+
   // Because children are already in the visual order, use LTR for the
   // fragment builder so that it should not transform the coordinates for RTL.
-  NGFragmentBuilder box(item->GetLayoutObject(), &style, style.GetWritingMode(),
-                        TextDirection::kLtr);
+  NGBoxFragmentBuilder box(item->GetLayoutObject(), &style,
+                           style.GetWritingMode(), TextDirection::kLtr);
+  box.SetInitialFragmentGeometry(fragment_geometry);
   box.SetBoxType(NGPhysicalFragment::kInlineBox);
   box.SetStyleVariant(item->StyleVariant());
 
@@ -503,23 +617,45 @@ NGInlineLayoutStateStack::BoxData::CreateBoxFragment(
   // was fragmented. Fragmenting a line box in block direction is not
   // supported today.
   box.SetBorderEdges({true, has_line_right_edge, true, has_line_left_edge});
-  box.SetInlineSize(size.inline_size.ClampNegativeToZero());
-  box.SetBlockSize(size.block_size);
-  box.SetPadding(padding);
 
   for (unsigned i = fragment_start; i < fragment_end; i++) {
     NGLineBoxFragmentBuilder::Child& child = (*line_box)[i];
+    if (child.out_of_flow_positioned_box) {
+      DCHECK(item->GetLayoutObject()->IsLayoutInline());
+      NGBlockNode oof_box(ToLayoutBox(child.out_of_flow_positioned_box));
+
+      // child.offset is the static position wrt. the linebox. As we are adding
+      // this as a child of an inline level fragment, we adjust the static
+      // position to be relative to this fragment.
+      LogicalOffset static_offset = child.offset - offset;
+
+      box.AddOutOfFlowChildCandidate(oof_box, static_offset,
+                                     child.container_direction);
+      child.out_of_flow_positioned_box = nullptr;
+      continue;
+    }
+
+    if (RuntimeEnabledFeatures::LayoutNGFragmentItemEnabled()) {
+      // |NGFragmentItems| has a flat list of all descendants, except OOF
+      // objects. Still creates |NGPhysicalBoxFragment|, but don't add children
+      // to it and keep them in the flat list.
+      continue;
+    }
+
     if (child.layout_result) {
-      box.AddChild(*child.layout_result, child.offset - offset);
+      box.AddChild(child.layout_result->PhysicalFragment(),
+                   child.offset - offset);
       child.layout_result.reset();
     } else if (child.fragment) {
       box.AddChild(std::move(child.fragment), child.offset - offset);
     }
-    // Leave out-of-flow fragments. They need to be at the top level so that
-    // NGInlineLayoutAlgorithm can handle them later.
-    DCHECK(!child.HasInFlowFragment());
   }
-  box.MoveOutOfFlowDescendantCandidatesToDescendants(inline_container);
+
+  // Inline boxes that produce DisplayItemClient should do full paint
+  // invalidations.
+  item->GetLayoutObject()->SetShouldDoFullPaintInvalidation();
+
+  box.MoveOutOfFlowDescendantCandidatesToDescendants();
   return box.ToInlineBoxFragment();
 }
 
@@ -533,18 +669,14 @@ NGInlineLayoutStateStack::ApplyBaselineShift(
   // |pending_descendants|.
   LayoutUnit baseline_shift;
   if (!box->pending_descendants.IsEmpty()) {
-    NGLineHeightMetrics max = box->MetricsForTopAndBottomAlign();
+    bool has_top_or_bottom = false;
     for (NGPendingPositions& child : box->pending_descendants) {
       // In quirks mode, metrics is empty if no content.
       if (child.metrics.IsEmpty())
         child.metrics = NGLineHeightMetrics::Zero();
       switch (child.vertical_align) {
         case EVerticalAlign::kTextTop:
-          DCHECK(!box->text_metrics.IsEmpty());
-          baseline_shift = child.metrics.ascent + box->text_top;
-          break;
-        case EVerticalAlign::kTop:
-          baseline_shift = child.metrics.ascent - max.ascent;
+          baseline_shift = child.metrics.ascent + box->TextTop(baseline_type);
           break;
         case EVerticalAlign::kTextBottom:
           if (const SimpleFontData* font_data =
@@ -555,10 +687,11 @@ NGInlineLayoutStateStack::ApplyBaselineShift(
             break;
           }
           NOTREACHED();
-          FALLTHROUGH;
-        case EVerticalAlign::kBottom:
-          baseline_shift = max.descent - child.metrics.descent;
           break;
+        case EVerticalAlign::kTop:
+        case EVerticalAlign::kBottom:
+          has_top_or_bottom = true;
+          continue;
         default:
           NOTREACHED();
           continue;
@@ -567,6 +700,32 @@ NGInlineLayoutStateStack::ApplyBaselineShift(
       box->metrics.Unite(child.metrics);
       line_box->MoveInBlockDirection(baseline_shift, child.fragment_start,
                                      child.fragment_end);
+    }
+    // `top` and `bottom` need to be applied after all other values are applied,
+    // because they align to the maximum metrics, but the maximum metrics may
+    // depend on other pending descendants for this box.
+    if (has_top_or_bottom) {
+      NGLineHeightMetrics max = MetricsForTopAndBottomAlign(*box, *line_box);
+      for (NGPendingPositions& child : box->pending_descendants) {
+        switch (child.vertical_align) {
+          case EVerticalAlign::kTop:
+            baseline_shift = child.metrics.ascent - max.ascent;
+            break;
+          case EVerticalAlign::kBottom:
+            baseline_shift = max.descent - child.metrics.descent;
+            break;
+          case EVerticalAlign::kTextTop:
+          case EVerticalAlign::kTextBottom:
+            continue;
+          default:
+            NOTREACHED();
+            continue;
+        }
+        child.metrics.Move(baseline_shift);
+        box->metrics.Unite(child.metrics);
+        line_box->MoveInBlockDirection(baseline_shift, child.fragment_start,
+                                       child.fragment_end);
+      }
     }
     box->pending_descendants.clear();
   }
@@ -646,30 +805,58 @@ NGInlineLayoutStateStack::ApplyBaselineShift(
   return kPositionNotPending;
 }
 
-NGLineHeightMetrics NGInlineBoxState::MetricsForTopAndBottomAlign() const {
+NGLineHeightMetrics NGInlineLayoutStateStack::MetricsForTopAndBottomAlign(
+    const NGInlineBoxState& box,
+    const NGLineBoxFragmentBuilder::ChildList& line_box) const {
+  DCHECK(!box.pending_descendants.IsEmpty());
+
   // |metrics| is the bounds of "aligned subtree", that is, bounds of
   // descendants that are not 'vertical-align: top' nor 'bottom'.
   // https://drafts.csswg.org/css2/visudet.html#propdef-vertical-align
-  NGLineHeightMetrics box = metrics;
+  NGLineHeightMetrics metrics = box.metrics;
+
+  // BoxData contains inline boxes to be created later. Take them into account.
+  for (const BoxData& box_data : box_data_list_) {
+    // Except when the box has `vertical-align: top` or `bottom`.
+    DCHECK(box_data.item->Style());
+    const ComputedStyle& style = *box_data.item->Style();
+    EVerticalAlign vertical_align = style.VerticalAlign();
+    if (vertical_align == EVerticalAlign::kTop ||
+        vertical_align == EVerticalAlign::kBottom)
+      continue;
+
+    // |block_offset| is the top position when the baseline is at 0.
+    LayoutUnit box_ascent =
+        -line_box[box_data.fragment_end].offset.block_offset;
+    NGLineHeightMetrics box_metrics(box_ascent,
+                                    box_data.size.block_size - box_ascent);
+    // The top/bottom of inline boxes should not include their paddings.
+    box_metrics.ascent -= box_data.padding.line_over;
+    box_metrics.descent -= box_data.padding.line_under;
+    // Include the line-height property. The inline box has the height of the
+    // font metrics without the line-height included.
+    box_metrics.AddLeading(style.ComputedLineHeightAsFixed());
+    metrics.Unite(box_metrics);
+  }
 
   // In quirks mode, metrics is empty if no content.
-  if (box.IsEmpty())
-    box = NGLineHeightMetrics::Zero();
+  if (metrics.IsEmpty())
+    metrics = NGLineHeightMetrics::Zero();
 
   // If the height of a box that has 'vertical-align: top' or 'bottom' exceeds
   // the height of the "aligned subtree", align the edge to the "aligned
   // subtree" and extend the other edge.
-  NGLineHeightMetrics max = box;
-  for (const NGPendingPositions& child : pending_descendants) {
+  NGLineHeightMetrics max = metrics;
+  for (const NGPendingPositions& child : box.pending_descendants) {
     if ((child.vertical_align == EVerticalAlign::kTop ||
          child.vertical_align == EVerticalAlign::kBottom) &&
         child.metrics.LineHeight() > max.LineHeight()) {
       if (child.vertical_align == EVerticalAlign::kTop) {
-        max = NGLineHeightMetrics(box.ascent,
-                                  child.metrics.LineHeight() - box.ascent);
+        max = NGLineHeightMetrics(metrics.ascent,
+                                  child.metrics.LineHeight() - metrics.ascent);
       } else if (child.vertical_align == EVerticalAlign::kBottom) {
-        max = NGLineHeightMetrics(child.metrics.LineHeight() - box.descent,
-                                  box.descent);
+        max = NGLineHeightMetrics(child.metrics.LineHeight() - metrics.descent,
+                                  metrics.descent);
       }
     }
   }
@@ -693,7 +880,6 @@ void NGInlineBoxState::CheckSame(const NGInlineBoxState& other) const {
   DCHECK_EQ(fragment_start, other.fragment_start);
   DCHECK_EQ(item, other.item);
   DCHECK_EQ(style, other.style);
-  DCHECK_EQ(inline_container, other.inline_container);
 
   DCHECK_EQ(metrics, other.metrics);
   DCHECK_EQ(text_metrics, other.text_metrics);

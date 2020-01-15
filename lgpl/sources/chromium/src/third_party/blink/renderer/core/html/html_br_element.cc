@@ -22,22 +22,20 @@
 
 #include "third_party/blink/renderer/core/html/html_br_element.h"
 
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/layout_br.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-inline HTMLBRElement::HTMLBRElement(Document& document)
-    : HTMLElement(brTag, document) {}
-
-DEFINE_NODE_FACTORY(HTMLBRElement)
+HTMLBRElement::HTMLBRElement(Document& document)
+    : HTMLElement(kBrTag, document) {}
 
 bool HTMLBRElement::IsPresentationAttribute(const QualifiedName& name) const {
-  if (name == clearAttr)
+  if (name == kClearAttr)
     return true;
   return HTMLElement::IsPresentationAttribute(name);
 }
@@ -46,25 +44,28 @@ void HTMLBRElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
     MutableCSSPropertyValueSet* style) {
-  if (name == clearAttr) {
+  if (name == kClearAttr) {
     // If the string is empty, then don't add the clear property.
     // <br clear> and <br clear=""> are just treated like <br> by Gecko, Mac IE,
     // etc. -dwh
     if (!value.IsEmpty()) {
-      if (DeprecatedEqualIgnoringCase(value, "all"))
-        AddPropertyToPresentationAttributeStyle(style, CSSPropertyClear,
-                                                CSSValueBoth);
-      else
-        AddPropertyToPresentationAttributeStyle(style, CSSPropertyClear, value);
+      if (DeprecatedEqualIgnoringCase(value, "all")) {
+        AddPropertyToPresentationAttributeStyle(style, CSSPropertyID::kClear,
+                                                CSSValueID::kBoth);
+      } else {
+        AddPropertyToPresentationAttributeStyle(style, CSSPropertyID::kClear,
+                                                value);
+      }
     }
   } else {
     HTMLElement::CollectStyleForPresentationAttribute(name, value, style);
   }
 }
 
-LayoutObject* HTMLBRElement::CreateLayoutObject(const ComputedStyle& style) {
+LayoutObject* HTMLBRElement::CreateLayoutObject(const ComputedStyle& style,
+                                                LegacyLayout legacy) {
   if (style.HasContent())
-    return LayoutObject::CreateObject(this, style);
+    return LayoutObject::CreateObject(this, style, legacy);
   return new LayoutBR(this);
 }
 

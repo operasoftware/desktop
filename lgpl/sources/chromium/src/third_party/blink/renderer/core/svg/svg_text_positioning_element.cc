@@ -24,6 +24,7 @@
 #include "third_party/blink/renderer/core/svg/svg_length_list.h"
 #include "third_party/blink/renderer/core/svg/svg_number_list.h"
 #include "third_party/blink/renderer/core/svg_names.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
@@ -31,23 +32,25 @@ SVGTextPositioningElement::SVGTextPositioningElement(
     const QualifiedName& tag_name,
     Document& document)
     : SVGTextContentElement(tag_name, document),
-      x_(SVGAnimatedLengthList::Create(
+      x_(MakeGarbageCollected<SVGAnimatedLengthList>(
           this,
-          SVGNames::xAttr,
-          SVGLengthList::Create(SVGLengthMode::kWidth))),
-      y_(SVGAnimatedLengthList::Create(
+          svg_names::kXAttr,
+          MakeGarbageCollected<SVGLengthList>(SVGLengthMode::kWidth))),
+      y_(MakeGarbageCollected<SVGAnimatedLengthList>(
           this,
-          SVGNames::yAttr,
-          SVGLengthList::Create(SVGLengthMode::kHeight))),
-      dx_(SVGAnimatedLengthList::Create(
+          svg_names::kYAttr,
+          MakeGarbageCollected<SVGLengthList>(SVGLengthMode::kHeight))),
+      dx_(MakeGarbageCollected<SVGAnimatedLengthList>(
           this,
-          SVGNames::dxAttr,
-          SVGLengthList::Create(SVGLengthMode::kWidth))),
-      dy_(SVGAnimatedLengthList::Create(
+          svg_names::kDxAttr,
+          MakeGarbageCollected<SVGLengthList>(SVGLengthMode::kWidth))),
+      dy_(MakeGarbageCollected<SVGAnimatedLengthList>(
           this,
-          SVGNames::dyAttr,
-          SVGLengthList::Create(SVGLengthMode::kHeight))),
-      rotate_(SVGAnimatedNumberList::Create(this, SVGNames::rotateAttr)) {
+          svg_names::kDyAttr,
+          MakeGarbageCollected<SVGLengthList>(SVGLengthMode::kHeight))),
+      rotate_(
+          MakeGarbageCollected<SVGAnimatedNumberList>(this,
+                                                      svg_names::kRotateAttr)) {
   AddToPropertyMap(x_);
   AddToPropertyMap(y_);
   AddToPropertyMap(dx_);
@@ -67,13 +70,13 @@ void SVGTextPositioningElement::Trace(blink::Visitor* visitor) {
 void SVGTextPositioningElement::SvgAttributeChanged(
     const QualifiedName& attr_name) {
   bool update_relative_lengths =
-      attr_name == SVGNames::xAttr || attr_name == SVGNames::yAttr ||
-      attr_name == SVGNames::dxAttr || attr_name == SVGNames::dyAttr;
+      attr_name == svg_names::kXAttr || attr_name == svg_names::kYAttr ||
+      attr_name == svg_names::kDxAttr || attr_name == svg_names::kDyAttr;
 
   if (update_relative_lengths)
     UpdateRelativeLengthsInformation();
 
-  if (update_relative_lengths || attr_name == SVGNames::rotateAttr) {
+  if (update_relative_lengths || attr_name == svg_names::kRotateAttr) {
     SVGElement::InvalidationGuard invalidation_guard(this);
 
     LayoutObject* layout_object = GetLayoutObject();

@@ -42,9 +42,7 @@ class CORE_EXPORT TextTrackList final : public EventTargetWithInlineData {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static TextTrackList* Create(HTMLMediaElement* owner) {
-    return new TextTrackList(owner);
-  }
+  explicit TextTrackList(HTMLMediaElement*);
   ~TextTrackList() override;
 
   unsigned length() const;
@@ -61,9 +59,9 @@ class CORE_EXPORT TextTrackList final : public EventTargetWithInlineData {
   const AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
 
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(addtrack);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(change);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(removetrack);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(addtrack, kAddtrack)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(change, kChange)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(removetrack, kRemovetrack)
 
   HTMLMediaElement* Owner() const;
 
@@ -72,11 +70,9 @@ class CORE_EXPORT TextTrackList final : public EventTargetWithInlineData {
 
   bool HasShowingTracks();
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  explicit TextTrackList(HTMLMediaElement*);
-
   void ScheduleTrackEvent(const AtomicString& event_name, TextTrack*);
 
   void ScheduleAddTrackEvent(TextTrack*);
@@ -86,9 +82,9 @@ class CORE_EXPORT TextTrackList final : public EventTargetWithInlineData {
 
   Member<HTMLMediaElement> owner_;
 
-  HeapVector<TraceWrapperMember<TextTrack>> add_track_tracks_;
-  HeapVector<TraceWrapperMember<TextTrack>> element_tracks_;
-  HeapVector<TraceWrapperMember<TextTrack>> inband_tracks_;
+  HeapVector<Member<TextTrack>> add_track_tracks_;
+  HeapVector<Member<TextTrack>> element_tracks_;
+  HeapVector<Member<TextTrack>> inband_tracks_;
 };
 
 }  // namespace blink

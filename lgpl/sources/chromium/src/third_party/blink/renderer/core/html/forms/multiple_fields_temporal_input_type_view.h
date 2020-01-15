@@ -44,7 +44,7 @@ class BaseTemporalInputType;
 struct DateTimeChooserParameters;
 
 class MultipleFieldsTemporalInputTypeView final
-    : public GarbageCollectedFinalized<MultipleFieldsTemporalInputTypeView>,
+    : public GarbageCollected<MultipleFieldsTemporalInputTypeView>,
       public InputTypeView,
       protected DateTimeEditElement::EditControlOwner,
       protected PickerIndicatorElement::PickerIndicatorOwner,
@@ -53,15 +53,12 @@ class MultipleFieldsTemporalInputTypeView final
   USING_GARBAGE_COLLECTED_MIXIN(MultipleFieldsTemporalInputTypeView);
 
  public:
-  static MultipleFieldsTemporalInputTypeView* Create(HTMLInputElement&,
-                                                     BaseTemporalInputType&);
-  ~MultipleFieldsTemporalInputTypeView() override;
-  void Trace(blink::Visitor*) override;
-
- private:
   MultipleFieldsTemporalInputTypeView(HTMLInputElement&,
                                       BaseTemporalInputType&);
+  ~MultipleFieldsTemporalInputTypeView() override;
+  void Trace(Visitor*) override;
 
+ private:
   // DateTimeEditElement::EditControlOwner functions
   void DidBlurFromControl(WebFocusType) final;
   void DidFocusOnControl(WebFocusType) final;

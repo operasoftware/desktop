@@ -7,7 +7,7 @@
 #include <memory>
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/layout/api/line_layout_text.h"
@@ -24,7 +24,7 @@ class TextPainterTest : public RenderingTest {
  public:
   TextPainterTest()
       : layout_text_(nullptr),
-        paint_controller_(PaintController::Create()),
+        paint_controller_(std::make_unique<PaintController>()),
         context_(*paint_controller_) {}
 
  protected:
@@ -38,10 +38,13 @@ class TextPainterTest : public RenderingTest {
         is_printing ? kGlobalPaintPrinting : kGlobalPaintNormalPhase, 0);
   }
 
- private:
+ protected:
   void SetUp() override {
     RenderingTest::SetUp();
     SetBodyInnerHTML("Hello world");
+    UpdateLayoutText();
+  }
+  void UpdateLayoutText() {
     layout_text_ =
         ToLayoutText(GetDocument().body()->firstChild()->GetLayoutObject());
     ASSERT_TRUE(layout_text_);
@@ -54,8 +57,9 @@ class TextPainterTest : public RenderingTest {
 };
 
 TEST_F(TextPainterTest, TextPaintingStyle_Simple) {
-  GetDocument().body()->SetInlineStyleProperty(CSSPropertyColor, CSSValueBlue);
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  GetDocument().body()->SetInlineStyleProperty(CSSPropertyID::kColor,
+                                               CSSValueID::kBlue);
+  UpdateAllLifecyclePhasesForTest();
 
   TextPaintStyle text_style = TextPainter::TextPaintingStyle(
       GetLineLayoutText().GetDocument(), GetLineLayoutText().StyleRef(),
@@ -68,18 +72,18 @@ TEST_F(TextPainterTest, TextPaintingStyle_Simple) {
 }
 
 TEST_F(TextPainterTest, TextPaintingStyle_AllProperties) {
-  GetDocument().body()->SetInlineStyleProperty(CSSPropertyWebkitTextFillColor,
-                                               CSSValueRed);
-  GetDocument().body()->SetInlineStyleProperty(CSSPropertyWebkitTextStrokeColor,
-                                               CSSValueLime);
   GetDocument().body()->SetInlineStyleProperty(
-      CSSPropertyWebkitTextEmphasisColor, CSSValueBlue);
+      CSSPropertyID::kWebkitTextFillColor, CSSValueID::kRed);
   GetDocument().body()->SetInlineStyleProperty(
-      CSSPropertyWebkitTextStrokeWidth, 4,
+      CSSPropertyID::kWebkitTextStrokeColor, CSSValueID::kLime);
+  GetDocument().body()->SetInlineStyleProperty(
+      CSSPropertyID::kWebkitTextEmphasisColor, CSSValueID::kBlue);
+  GetDocument().body()->SetInlineStyleProperty(
+      CSSPropertyID::kWebkitTextStrokeWidth, 4,
       CSSPrimitiveValue::UnitType::kPixels);
-  GetDocument().body()->SetInlineStyleProperty(CSSPropertyTextShadow,
+  GetDocument().body()->SetInlineStyleProperty(CSSPropertyID::kTextShadow,
                                                "1px 2px 3px yellow");
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   TextPaintStyle text_style = TextPainter::TextPaintingStyle(
       GetLineLayoutText().GetDocument(), GetLineLayoutText().StyleRef(),
@@ -98,18 +102,18 @@ TEST_F(TextPainterTest, TextPaintingStyle_AllProperties) {
 }
 
 TEST_F(TextPainterTest, TextPaintingStyle_UsesTextAsClip) {
-  GetDocument().body()->SetInlineStyleProperty(CSSPropertyWebkitTextFillColor,
-                                               CSSValueRed);
-  GetDocument().body()->SetInlineStyleProperty(CSSPropertyWebkitTextStrokeColor,
-                                               CSSValueLime);
   GetDocument().body()->SetInlineStyleProperty(
-      CSSPropertyWebkitTextEmphasisColor, CSSValueBlue);
+      CSSPropertyID::kWebkitTextFillColor, CSSValueID::kRed);
   GetDocument().body()->SetInlineStyleProperty(
-      CSSPropertyWebkitTextStrokeWidth, 4,
+      CSSPropertyID::kWebkitTextStrokeColor, CSSValueID::kLime);
+  GetDocument().body()->SetInlineStyleProperty(
+      CSSPropertyID::kWebkitTextEmphasisColor, CSSValueID::kBlue);
+  GetDocument().body()->SetInlineStyleProperty(
+      CSSPropertyID::kWebkitTextStrokeWidth, 4,
       CSSPrimitiveValue::UnitType::kPixels);
-  GetDocument().body()->SetInlineStyleProperty(CSSPropertyTextShadow,
+  GetDocument().body()->SetInlineStyleProperty(CSSPropertyID::kTextShadow,
                                                "1px 2px 3px yellow");
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   TextPaintStyle text_style = TextPainter::TextPaintingStyle(
       GetLineLayoutText().GetDocument(), GetLineLayoutText().StyleRef(),
@@ -123,18 +127,21 @@ TEST_F(TextPainterTest, TextPaintingStyle_UsesTextAsClip) {
 
 TEST_F(TextPainterTest,
        TextPaintingStyle_ForceBackgroundToWhite_NoAdjustmentNeeded) {
-  GetDocument().body()->SetInlineStyleProperty(CSSPropertyWebkitTextFillColor,
-                                               CSSValueRed);
-  GetDocument().body()->SetInlineStyleProperty(CSSPropertyWebkitTextStrokeColor,
-                                               CSSValueLime);
   GetDocument().body()->SetInlineStyleProperty(
-      CSSPropertyWebkitTextEmphasisColor, CSSValueBlue);
+      CSSPropertyID::kWebkitTextFillColor, CSSValueID::kRed);
   GetDocument().body()->SetInlineStyleProperty(
-      CSSPropertyWebkitPrintColorAdjust, CSSValueEconomy);
+      CSSPropertyID::kWebkitTextStrokeColor, CSSValueID::kLime);
+  GetDocument().body()->SetInlineStyleProperty(
+      CSSPropertyID::kWebkitTextEmphasisColor, CSSValueID::kBlue);
+  GetDocument().body()->SetInlineStyleProperty(
+      CSSPropertyID::kWebkitPrintColorAdjust, CSSValueID::kEconomy);
   GetDocument().GetSettings()->SetShouldPrintBackgrounds(false);
   FloatSize page_size(500, 800);
   GetFrame().StartPrinting(page_size, page_size, 1);
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
+  // In LayoutNG, printing currently forces layout tree reattachment,
+  // so we need to re-get layout_text_.
+  UpdateLayoutText();
 
   TextPaintStyle text_style = TextPainter::TextPaintingStyle(
       GetLineLayoutText().GetDocument(), GetLineLayoutText().StyleRef(),
@@ -145,18 +152,21 @@ TEST_F(TextPainterTest,
 }
 
 TEST_F(TextPainterTest, TextPaintingStyle_ForceBackgroundToWhite_Darkened) {
-  GetDocument().body()->SetInlineStyleProperty(CSSPropertyWebkitTextFillColor,
-                                               "rgb(255, 220, 220)");
-  GetDocument().body()->SetInlineStyleProperty(CSSPropertyWebkitTextStrokeColor,
-                                               "rgb(220, 255, 220)");
   GetDocument().body()->SetInlineStyleProperty(
-      CSSPropertyWebkitTextEmphasisColor, "rgb(220, 220, 255)");
+      CSSPropertyID::kWebkitTextFillColor, "rgb(255, 220, 220)");
   GetDocument().body()->SetInlineStyleProperty(
-      CSSPropertyWebkitPrintColorAdjust, CSSValueEconomy);
+      CSSPropertyID::kWebkitTextStrokeColor, "rgb(220, 255, 220)");
+  GetDocument().body()->SetInlineStyleProperty(
+      CSSPropertyID::kWebkitTextEmphasisColor, "rgb(220, 220, 255)");
+  GetDocument().body()->SetInlineStyleProperty(
+      CSSPropertyID::kWebkitPrintColorAdjust, CSSValueID::kEconomy);
   GetDocument().GetSettings()->SetShouldPrintBackgrounds(false);
   FloatSize page_size(500, 800);
   GetFrame().StartPrinting(page_size, page_size, 1);
   GetDocument().View()->UpdateLifecyclePhasesForPrinting();
+  // In LayoutNG, printing currently forces layout tree reattachment,
+  // so we need to re-get layout_text_.
+  UpdateLayoutText();
 
   TextPaintStyle text_style = TextPainter::TextPaintingStyle(
       GetLineLayoutText().GetDocument(), GetLineLayoutText().StyleRef(),

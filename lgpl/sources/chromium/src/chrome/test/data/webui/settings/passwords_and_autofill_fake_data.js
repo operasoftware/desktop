@@ -6,7 +6,6 @@
  * Used to create fake data for both passwords and autofill.
  * These sections are related, so it made sense to share this.
  */
-
 function FakeDataMaker() {}
 
 /**
@@ -14,46 +13,44 @@ function FakeDataMaker() {}
  * @param {string=} url
  * @param {string=} username
  * @param {number=} passwordLength
- * @param {number=} index
+ * @param {number=} id
  * @return {chrome.passwordsPrivate.PasswordUiEntry}
  */
-FakeDataMaker.passwordEntry = function(url, username, passwordLength, index) {
+FakeDataMaker.passwordEntry = function(url, username, passwordLength, id) {
   // Generate fake data if param is undefined.
   url = url || FakeDataMaker.patternMaker_('www.xxxxxx.com', 16);
   username = username || FakeDataMaker.patternMaker_('user_xxxxx', 16);
   passwordLength = passwordLength || Math.floor(Math.random() * 15) + 3;
-  index = index || 0;
+  id = id || 0;
 
-  return {
-    loginPair: {
-      urls: {
-        origin: 'http://' + url + '/login',
-        shown: url,
-        link: 'http://' + url + '/login',
-      },
-      username: username,
-    },
-    numCharactersInPassword: passwordLength,
-    index: index,
-  };
-};
-
-/**
- * Creates a single item for the list of password exceptions.
- * @param {string=} url
- * @param {number=} index
- * @return {chrome.passwordsPrivate.ExceptionEntry}
- */
-FakeDataMaker.exceptionEntry = function(url, index) {
-  url = url || FakeDataMaker.patternMaker_('www.xxxxxx.com', 16);
-  index = index || 0;
   return {
     urls: {
       origin: 'http://' + url + '/login',
       shown: url,
       link: 'http://' + url + '/login',
     },
-    index: index,
+    username: username,
+    numCharactersInPassword: passwordLength,
+    id: id,
+  };
+};
+
+/**
+ * Creates a single item for the list of password exceptions.
+ * @param {string=} url
+ * @param {number=} id
+ * @return {chrome.passwordsPrivate.ExceptionEntry}
+ */
+FakeDataMaker.exceptionEntry = function(url, id) {
+  url = url || FakeDataMaker.patternMaker_('www.xxxxxx.com', 16);
+  id = id || 0;
+  return {
+    urls: {
+      origin: 'http://' + url + '/login',
+      shown: url,
+      link: 'http://' + url + '/login',
+    },
+    id: id,
   };
 };
 
@@ -143,6 +140,100 @@ FakeDataMaker.patternMaker_ = function(pattern, base) {
   });
 };
 
+
+/**
+ * Helper class for creating password-section sub-element from fake data and
+ * appending them to the document.
+ */
+class PasswordSectionElementFactory {
+  /**
+   * @param {HTMLDocument} document The test's |document| object.
+   */
+  constructor(document) {
+    this.document = document;
+  }
+
+  /**
+   * Helper method used to create a password section for the given lists.
+   * @param {!PasswordManagerProxy} passwordManager
+   * @param {!Array<!chrome.passwordsPrivate.PasswordUiEntry>} passwordList
+   * @param {!Array<!chrome.passwordsPrivate.ExceptionEntry>} exceptionList
+   * @return {!Object}
+   */
+  createPasswordsSection(passwordManager, passwordList, exceptionList) {
+    // Override the PasswordManagerProxy data for testing.
+    passwordManager.data.passwords = passwordList;
+    passwordManager.data.exceptions = exceptionList;
+
+    // Create a passwords-section to use for testing.
+    const passwordsSection = this.document.createElement('passwords-section');
+    passwordsSection.prefs = {
+      credentials_enable_service: {},
+      profile: {
+        password_manager_leak_detection: {
+          value: true,
+        }
+      },
+    };
+    this.document.body.appendChild(passwordsSection);
+    Polymer.dom.flush();
+    return passwordsSection;
+  }
+
+  /**
+   * Helper method used to create a password list item.
+   * @param {!chrome.passwordsPrivate.PasswordUiEntry} passwordEntry
+   * @return {!Object}
+   */
+  createPasswordListItem(passwordEntry) {
+    const passwordListItem = this.document.createElement('password-list-item');
+    passwordListItem.item = {entry: passwordEntry, password: ''};
+    this.document.body.appendChild(passwordListItem);
+    Polymer.dom.flush();
+    return passwordListItem;
+  }
+
+  /**
+   * Helper method used to create a password editing dialog.
+   * @param {!chrome.passwordsPrivate.PasswordUiEntry} passwordEntry
+   * @return {!Object}
+   */
+  createPasswordEditDialog(passwordEntry) {
+    const passwordDialog = this.document.createElement('password-edit-dialog');
+    passwordDialog.item = {entry: passwordEntry, password: ''};
+    this.document.body.appendChild(passwordDialog);
+    Polymer.dom.flush();
+    return passwordDialog;
+  }
+
+  /**
+   * Helper method used to create an export passwords dialog.
+   * @return {!Object}
+   */
+  createExportPasswordsDialog(passwordManager) {
+    passwordManager.requestExportProgressStatus = callback => {
+      callback(chrome.passwordsPrivate.ExportProgressStatus.NOT_STARTED);
+    };
+    passwordManager.addPasswordsFileExportProgressListener = callback => {
+      passwordManager.progressCallback = callback;
+    };
+    passwordManager.removePasswordsFileExportProgressListener = () => {};
+    passwordManager.exportPasswords = (callback) => {
+      callback();
+    };
+
+    const dialog = this.document.createElement('passwords-export-dialog');
+    this.document.body.appendChild(dialog);
+    Polymer.dom.flush();
+
+    if (cr.isChromeOS) {
+      dialog.tokenRequestManager = new settings.BlockingRequestManager();
+    }
+
+    return dialog;
+  }
+}
+
 /** @constructor */
 function PasswordManagerExpectations() {
   this.requested = {
@@ -161,106 +252,6 @@ function PasswordManagerExpectations() {
     exceptions: 0,
   };
 }
-
-/**
- * Test implementation
- * @implements {PasswordManager}
- * @constructor
- */
-function TestPasswordManager() {
-  this.actual_ = new PasswordManagerExpectations();
-
-  // Set these to have non-empty data.
-  this.data = {
-    passwords: [],
-    exceptions: [],
-  };
-
-  // Holds the last callbacks so they can be called when needed/
-  this.lastCallback = {
-    addSavedPasswordListChangedListener: null,
-    addExceptionListChangedListener: null,
-    getPlaintextPassword: null,
-  };
-}
-
-TestPasswordManager.prototype = {
-  /** @override */
-  addSavedPasswordListChangedListener: function(listener) {
-    this.actual_.listening.passwords++;
-    this.lastCallback.addSavedPasswordListChangedListener = listener;
-  },
-
-  /** @override */
-  removeSavedPasswordListChangedListener: function(listener) {
-    this.actual_.listening.passwords--;
-  },
-
-  /** @override */
-  getSavedPasswordList: function(callback) {
-    this.actual_.requested.passwords++;
-    callback(this.data.passwords);
-  },
-
-  /** @override */
-  removeSavedPassword: function(index) {
-    this.actual_.removed.passwords++;
-
-    if (this.onRemoveSavedPassword)
-      this.onRemoveSavedPassword(index);
-  },
-
-  /** @override */
-  addExceptionListChangedListener: function(listener) {
-    this.actual_.listening.exceptions++;
-    this.lastCallback.addExceptionListChangedListener = listener;
-  },
-
-  /** @override */
-  removeExceptionListChangedListener: function(listener) {
-    this.actual_.listening.exceptions--;
-  },
-
-  /** @override */
-  getExceptionList: function(callback) {
-    this.actual_.requested.exceptions++;
-    callback(this.data.exceptions);
-  },
-
-  /** @override */
-  removeException: function(index) {
-    this.actual_.removed.exceptions++;
-
-    if (this.onRemoveException)
-      this.onRemoveException(index);
-  },
-
-  /** @override */
-  getPlaintextPassword: function(index, callback) {
-    this.actual_.requested.plaintextPassword++;
-    this.lastCallback.getPlaintextPassword = callback;
-  },
-
-  /**
-   * Verifies expectations.
-   * @param {!PasswordManagerExpectations} expected
-   */
-  assertExpectations: function(expected) {
-    const actual = this.actual_;
-
-    assertEquals(expected.requested.passwords, actual.requested.passwords);
-    assertEquals(expected.requested.exceptions, actual.requested.exceptions);
-    assertEquals(
-        expected.requested.plaintextPassword,
-        actual.requested.plaintextPassword);
-
-    assertEquals(expected.removed.passwords, actual.removed.passwords);
-    assertEquals(expected.removed.exceptions, actual.removed.exceptions);
-
-    assertEquals(expected.listening.passwords, actual.listening.passwords);
-    assertEquals(expected.listening.exceptions, actual.listening.exceptions);
-  },
-};
 
 /** Helper class to track AutofillManager expectations. */
 class AutofillManagerExpectations {
@@ -285,19 +276,19 @@ function TestAutofillManager() {
 
   // Holds the last callbacks so they can be called when needed.
   this.lastCallback = {
-    addAddressListChangedListener: null,
+    setPersonalDataManagerListener: null,
   };
 }
 
 TestAutofillManager.prototype = {
   /** @override */
-  addAddressListChangedListener: function(listener) {
+  setPersonalDataManagerListener: function(listener) {
     this.actual_.listeningAddresses++;
-    this.lastCallback.addAddressListChangedListener = listener;
+    this.lastCallback.setPersonalDataManagerListener = listener;
   },
 
   /** @override */
-  removeAddressListChangedListener: function(listener) {
+  removePersonalDataManagerListener: function(listener) {
     this.actual_.listeningAddresses--;
   },
 
@@ -341,19 +332,19 @@ function TestPaymentsManager() {
 
   // Holds the last callbacks so they can be called when needed.
   this.lastCallback = {
-    addCreditCardListChangedListener: null,
+    setPersonalDataManagerListener: null,
   };
 }
 
 TestPaymentsManager.prototype = {
   /** @override */
-  addCreditCardListChangedListener: function(listener) {
+  setPersonalDataManagerListener: function(listener) {
     this.actual_.listeningCreditCards++;
-    this.lastCallback.addCreditCardListChangedListener = listener;
+    this.lastCallback.setPersonalDataManagerListener = listener;
   },
 
   /** @override */
-  removeCreditCardListChangedListener: function(listener) {
+  removePersonalDataManagerListener: function(listener) {
     this.actual_.listeningCreditCards--;
   },
 

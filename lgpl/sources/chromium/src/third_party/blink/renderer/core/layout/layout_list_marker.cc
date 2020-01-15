@@ -36,7 +36,7 @@ namespace blink {
 
 const int kCMarkerPaddingPx = 7;
 
-// TODO(glebl): Move to WebKit/Source/core/css/html.css after
+// TODO(glebl): Move to core/html/resources/html.css after
 // Blink starts to support ::marker crbug.com/457718
 // Recommended UA margin for list markers.
 const int kCUAMarkerMarginEm = 1;
@@ -84,9 +84,13 @@ void LayoutListMarker::StyleWillChange(StyleDifference diff,
                                        const ComputedStyle& new_style) {
   if (Style() &&
       (new_style.ListStylePosition() != StyleRef().ListStylePosition() ||
-       new_style.ListStyleType() != StyleRef().ListStyleType()))
+       new_style.ListStyleType() != StyleRef().ListStyleType() ||
+       (new_style.ListStyleType() == EListStyleType::kString &&
+        new_style.ListStyleStringValue() !=
+            StyleRef().ListStyleStringValue()))) {
     SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
-        LayoutInvalidationReason::kStyleChange);
+        layout_invalidation_reason::kStyleChange);
+  }
 
   LayoutBox::StyleWillChange(diff, new_style);
 }
@@ -149,8 +153,8 @@ void LayoutListMarker::UpdateLayout() {
   SetMarginStart(LayoutUnit());
   SetMarginEnd(LayoutUnit());
 
-  Length start_margin = StyleRef().MarginStart();
-  Length end_margin = StyleRef().MarginEnd();
+  const Length& start_margin = StyleRef().MarginStart();
+  const Length& end_margin = StyleRef().MarginEnd();
   if (start_margin.IsFixed())
     SetMarginStart(LayoutUnit(start_margin.Value()));
   if (end_margin.IsFixed())
@@ -166,11 +170,12 @@ void LayoutListMarker::ImageChanged(WrappedImagePtr o, CanDeferInvalidation) {
     return;
 
   LayoutSize image_size = IsImage() ? ImageBulletSize() : LayoutSize();
-  if (Size() != image_size || image_->ErrorOccurred())
+  if (Size() != image_size || image_->ErrorOccurred()) {
     SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
-        LayoutInvalidationReason::kImageChanged);
-  else
+        layout_invalidation_reason::kImageChanged);
+  } else {
     SetShouldDoFullPaintInvalidation();
+  }
 }
 
 void LayoutListMarker::UpdateMarginsAndContent() {
@@ -199,21 +204,31 @@ void LayoutListMarker::UpdateContent() {
       text_ = list_marker_text::GetText(StyleRef().ListStyleType(),
                                         list_item_->Value());
       break;
+    case ListStyleCategory::kStaticString:
+      text_ = StyleRef().ListStyleStringValue();
+      break;
   }
 }
 
 String LayoutListMarker::TextAlternative() const {
+  if (GetListStyleCategory() == ListStyleCategory::kStaticString)
+    return text_;
   UChar suffix =
       list_marker_text::Suffix(StyleRef().ListStyleType(), list_item_->Value());
   // Return suffix after the marker text, even in RTL, reflecting speech order.
   return text_ + suffix + ' ';
 }
 
-LayoutUnit LayoutListMarker::GetWidthOfTextWithSuffix() const {
+LayoutUnit LayoutListMarker::GetWidthOfText(ListStyleCategory category) const {
+  // TODO(crbug.com/1012289): this code doesn't support bidi algorithm.
   if (text_.IsEmpty())
     return LayoutUnit();
   const Font& font = StyleRef().GetFont();
   LayoutUnit item_width = LayoutUnit(font.Width(TextRun(text_)));
+  if (category == ListStyleCategory::kStaticString) {
+    // Don't add a suffix.
+    return item_width;
+  }
   // TODO(wkorman): Look into constructing a text run for both text and suffix
   // and painting them together.
   UChar suffix[2] = {
@@ -240,14 +255,16 @@ void LayoutListMarker::ComputePreferredLogicalWidths() {
   }
 
   LayoutUnit logical_width;
-  switch (GetListStyleCategory()) {
+  ListStyleCategory category = GetListStyleCategory();
+  switch (category) {
     case ListStyleCategory::kNone:
       break;
     case ListStyleCategory::kSymbol:
       logical_width = WidthOfSymbol(StyleRef());
       break;
     case ListStyleCategory::kLanguage:
-      logical_width = GetWidthOfTextWithSuffix();
+    case ListStyleCategory::kStaticString:
+      logical_width = GetWidthOfText(category);
       break;
   }
 
@@ -280,8 +297,8 @@ void LayoutListMarker::UpdateMargins() {
         InlineMarginsForOutside(style, IsImage(), MinPreferredLogicalWidth());
   }
 
-  Length start_length(margin_start, kFixed);
-  Length end_length(margin_end, kFixed);
+  Length start_length = Length::Fixed(margin_start);
+  Length end_length = Length::Fixed(margin_end);
 
   if (start_length != style.MarginStart() || end_length != style.MarginEnd()) {
     scoped_refptr<ComputedStyle> new_style = ComputedStyle::Clone(style);
@@ -393,6 +410,8 @@ LayoutListMarker::ListStyleCategory LayoutListMarker::GetListStyleCategory(
   switch (type) {
     case EListStyleType::kNone:
       return ListStyleCategory::kNone;
+    case EListStyleType::kString:
+      return ListStyleCategory::kStaticString;
     case EListStyleType::kDisc:
     case EListStyleType::kCircle:
     case EListStyleType::kSquare:
@@ -466,18 +485,20 @@ LayoutRect LayoutListMarker::GetRelativeMarkerRect() const {
     return LayoutRect(LayoutPoint(), ImageBulletSize());
 
   LayoutRect relative_rect;
-  switch (GetListStyleCategory()) {
+  ListStyleCategory category = GetListStyleCategory();
+  switch (category) {
     case ListStyleCategory::kNone:
       return LayoutRect();
     case ListStyleCategory::kSymbol:
       return RelativeSymbolMarkerRect(StyleRef(), Size().Width());
-    case ListStyleCategory::kLanguage: {
+    case ListStyleCategory::kLanguage:
+    case ListStyleCategory::kStaticString: {
       const SimpleFontData* font_data = StyleRef().GetFont().PrimaryFont();
       DCHECK(font_data);
       if (!font_data)
         return relative_rect;
       relative_rect =
-          LayoutRect(LayoutUnit(), LayoutUnit(), GetWidthOfTextWithSuffix(),
+          LayoutRect(LayoutUnit(), LayoutUnit(), GetWidthOfText(category),
                      LayoutUnit(font_data->GetFontMetrics().Height()));
       break;
     }

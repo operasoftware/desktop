@@ -25,7 +25,7 @@ NavigatorMediaSession& NavigatorMediaSession::From(Navigator& navigator) {
   NavigatorMediaSession* supplement =
       Supplement<Navigator>::From<NavigatorMediaSession>(navigator);
   if (!supplement) {
-    supplement = new NavigatorMediaSession(navigator);
+    supplement = MakeGarbageCollected<NavigatorMediaSession>(navigator);
     ProvideTo(navigator, supplement);
   }
   return *supplement;
@@ -34,8 +34,10 @@ NavigatorMediaSession& NavigatorMediaSession::From(Navigator& navigator) {
 MediaSession* NavigatorMediaSession::mediaSession(ScriptState* script_state,
                                                   Navigator& navigator) {
   NavigatorMediaSession& self = NavigatorMediaSession::From(navigator);
-  if (!self.session_)
-    self.session_ = MediaSession::Create(ExecutionContext::From(script_state));
+  if (!self.session_) {
+    self.session_ = MakeGarbageCollected<MediaSession>(
+        ExecutionContext::From(script_state));
+  }
   return self.session_.Get();
 }
 

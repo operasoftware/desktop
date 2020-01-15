@@ -24,29 +24,28 @@
 
 #include "third_party/blink/renderer/core/html/html_table_cell_element.h"
 
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/html_table_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html/table_constants.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/layout_table_cell.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-inline HTMLTableCellElement::HTMLTableCellElement(const QualifiedName& tag_name,
-                                                  Document& document)
+HTMLTableCellElement::HTMLTableCellElement(const QualifiedName& tag_name,
+                                           Document& document)
     : HTMLTablePartElement(tag_name, document) {}
 
-DEFINE_ELEMENT_FACTORY_WITH_TAGNAME(HTMLTableCellElement)
-
 unsigned HTMLTableCellElement::colSpan() const {
-  const AtomicString& col_span_value = FastGetAttribute(colspanAttr);
+  const AtomicString& col_span_value = FastGetAttribute(kColspanAttr);
   unsigned value = 0;
   if (!ParseHTMLClampedNonNegativeInteger(col_span_value, kMinColSpan,
                                           kMaxColSpan, value))
@@ -64,7 +63,7 @@ unsigned HTMLTableCellElement::colSpan() const {
 }
 
 unsigned HTMLTableCellElement::rowSpan() const {
-  const AtomicString& row_span_value = FastGetAttribute(rowspanAttr);
+  const AtomicString& row_span_value = FastGetAttribute(kRowspanAttr);
   unsigned value = 0;
   if (!ParseHTMLClampedNonNegativeInteger(row_span_value, kMinRowSpan,
                                           kMaxRowSpan, value))
@@ -88,7 +87,7 @@ int HTMLTableCellElement::cellIndex() const {
 
 bool HTMLTableCellElement::IsPresentationAttribute(
     const QualifiedName& name) const {
-  if (name == nowrapAttr || name == widthAttr || name == heightAttr)
+  if (name == kNowrapAttr || name == kWidthAttr || name == kHeightAttr)
     return true;
   return HTMLTablePartElement::IsPresentationAttribute(name);
 }
@@ -97,21 +96,21 @@ void HTMLTableCellElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
     MutableCSSPropertyValueSet* style) {
-  if (name == nowrapAttr) {
-    AddPropertyToPresentationAttributeStyle(style, CSSPropertyWhiteSpace,
-                                            CSSValueWebkitNowrap);
-  } else if (name == widthAttr) {
+  if (name == kNowrapAttr) {
+    AddPropertyToPresentationAttributeStyle(style, CSSPropertyID::kWhiteSpace,
+                                            CSSValueID::kWebkitNowrap);
+  } else if (name == kWidthAttr) {
     if (!value.IsEmpty()) {
       int width_int = value.ToInt();
       if (width_int > 0)  // width="0" is ignored for compatibility with WinIE.
-        AddHTMLLengthToStyle(style, CSSPropertyWidth, value);
+        AddHTMLLengthToStyle(style, CSSPropertyID::kWidth, value);
     }
-  } else if (name == heightAttr) {
+  } else if (name == kHeightAttr) {
     if (!value.IsEmpty()) {
       int height_int = value.ToInt();
       if (height_int >
           0)  // height="0" is ignored for compatibility with WinIE.
-        AddHTMLLengthToStyle(style, CSSPropertyHeight, value);
+        AddHTMLLengthToStyle(style, CSSPropertyID::kHeight, value);
     }
   } else {
     HTMLTablePartElement::CollectStyleForPresentationAttribute(name, value,
@@ -121,9 +120,11 @@ void HTMLTableCellElement::CollectStyleForPresentationAttribute(
 
 void HTMLTableCellElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  if (params.name == rowspanAttr || params.name == colspanAttr) {
-    if (GetLayoutObject() && GetLayoutObject()->IsTableCell())
-      ToLayoutTableCell(GetLayoutObject())->ColSpanOrRowSpanChanged();
+  if (params.name == kRowspanAttr || params.name == kColspanAttr) {
+    if (GetLayoutObject() && GetLayoutObject()->IsTableCell()) {
+      ToInterface<LayoutNGTableCellInterface>(GetLayoutObject())
+          ->ColSpanOrRowSpanChanged();
+    }
   } else {
     HTMLTablePartElement::ParseAttribute(params);
   }
@@ -137,39 +138,39 @@ HTMLTableCellElement::AdditionalPresentationAttributeStyle() {
 }
 
 bool HTMLTableCellElement::IsURLAttribute(const Attribute& attribute) const {
-  return attribute.GetName() == backgroundAttr ||
+  return attribute.GetName() == kBackgroundAttr ||
          HTMLTablePartElement::IsURLAttribute(attribute);
 }
 
 bool HTMLTableCellElement::HasLegalLinkAttribute(
     const QualifiedName& name) const {
-  return (HasTagName(tdTag) && name == backgroundAttr) ||
+  return (HasTagName(kTdTag) && name == kBackgroundAttr) ||
          HTMLTablePartElement::HasLegalLinkAttribute(name);
 }
 
 const QualifiedName& HTMLTableCellElement::SubResourceAttributeName() const {
-  return HasTagName(tdTag) ? backgroundAttr
-                           : HTMLTablePartElement::SubResourceAttributeName();
+  return HasTagName(kTdTag) ? kBackgroundAttr
+                            : HTMLTablePartElement::SubResourceAttributeName();
 }
 
 const AtomicString& HTMLTableCellElement::Abbr() const {
-  return FastGetAttribute(abbrAttr);
+  return FastGetAttribute(kAbbrAttr);
 }
 
 const AtomicString& HTMLTableCellElement::Axis() const {
-  return FastGetAttribute(axisAttr);
+  return FastGetAttribute(kAxisAttr);
 }
 
 void HTMLTableCellElement::setColSpan(unsigned n) {
-  SetUnsignedIntegralAttribute(colspanAttr, n, kDefaultColSpan);
+  SetUnsignedIntegralAttribute(kColspanAttr, n, kDefaultColSpan);
 }
 
 const AtomicString& HTMLTableCellElement::Headers() const {
-  return FastGetAttribute(headersAttr);
+  return FastGetAttribute(kHeadersAttr);
 }
 
 void HTMLTableCellElement::setRowSpan(unsigned n) {
-  SetUnsignedIntegralAttribute(rowspanAttr, n, kDefaultRowSpan);
+  SetUnsignedIntegralAttribute(kRowspanAttr, n, kDefaultRowSpan);
 }
 
 }  // namespace blink

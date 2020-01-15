@@ -87,8 +87,8 @@ typedef struct AV1RawSequenceHeader {
     uint8_t  seq_level_idx[AV1_MAX_OPERATING_POINTS];
     uint8_t  seq_tier[AV1_MAX_OPERATING_POINTS];
     uint8_t  decoder_model_present_for_this_op[AV1_MAX_OPERATING_POINTS];
-    uint8_t  decoder_buffer_delay[AV1_MAX_OPERATING_POINTS];
-    uint8_t  encoder_buffer_delay[AV1_MAX_OPERATING_POINTS];
+    uint32_t decoder_buffer_delay[AV1_MAX_OPERATING_POINTS];
+    uint32_t encoder_buffer_delay[AV1_MAX_OPERATING_POINTS];
     uint8_t  low_delay_mode_flag[AV1_MAX_OPERATING_POINTS];
     uint8_t  initial_display_delay_present_for_this_op[AV1_MAX_OPERATING_POINTS];
     uint8_t  initial_display_delay_minus_1[AV1_MAX_OPERATING_POINTS];
@@ -161,7 +161,7 @@ typedef struct AV1RawFrameHeader {
     uint8_t  render_width_minus_1;
     uint8_t  render_height_minus_1;
 
-    uint8_t found_ref;
+    uint8_t found_ref[AV1_REFS_PER_FRAME];
 
     uint8_t refresh_frame_flags;
     uint8_t allow_intrabc;
@@ -170,7 +170,7 @@ typedef struct AV1RawFrameHeader {
     uint8_t last_frame_idx;
     uint8_t golden_frame_idx;
     int8_t  ref_frame_idx[AV1_REFS_PER_FRAME];
-    uint8_t delta_frame_id_minus1;
+    uint32_t delta_frame_id_minus1[AV1_REFS_PER_FRAME];
 
     uint8_t allow_high_precision_mv;
     uint8_t is_filter_switchable;
@@ -210,7 +210,7 @@ typedef struct AV1RawFrameHeader {
     uint8_t segmentation_temporal_update;
     uint8_t segmentation_update_data;
     uint8_t feature_enabled[AV1_MAX_SEGMENTS][AV1_SEG_LVL_MAX];
-    uint8_t feature_value[AV1_MAX_SEGMENTS][AV1_SEG_LVL_MAX];
+    int16_t feature_value[AV1_MAX_SEGMENTS][AV1_SEG_LVL_MAX];
 
     uint8_t delta_q_present;
     uint8_t delta_q_res;
@@ -325,7 +325,20 @@ typedef struct AV1RawMetadataHDRMDCV {
 
 typedef struct AV1RawMetadataScalability {
     uint8_t scalability_mode_idc;
-    // TODO: more stuff.
+    uint8_t spatial_layers_cnt_minus_1;
+    uint8_t spatial_layer_dimensions_present_flag;
+    uint8_t spatial_layer_description_present_flag;
+    uint8_t temporal_group_description_present_flag;
+    uint8_t scalability_structure_reserved_3bits;
+    uint16_t spatial_layer_max_width[4];
+    uint16_t spatial_layer_max_height[4];
+    uint8_t spatial_layer_ref_id[4];
+    uint8_t temporal_group_size;
+    uint8_t temporal_group_temporal_id[255];
+    uint8_t temporal_group_temporal_switching_up_point_flag[255];
+    uint8_t temporal_group_spatial_switching_up_point_flag[255];
+    uint8_t temporal_group_ref_cnt[255];
+    uint8_t temporal_group_ref_pic_diff[255][7];
 } AV1RawMetadataScalability;
 
 typedef struct AV1RawMetadataITUTT35 {
@@ -364,6 +377,12 @@ typedef struct AV1RawMetadata {
     } metadata;
 } AV1RawMetadata;
 
+typedef struct AV1RawPadding {
+    uint8_t     *payload;
+    size_t       payload_size;
+    AVBufferRef *payload_ref;
+} AV1RawPadding;
+
 
 typedef struct AV1RawOBU {
     AV1RawOBUHeader header;
@@ -377,6 +396,7 @@ typedef struct AV1RawOBU {
         AV1RawTileGroup      tile_group;
         AV1RawTileList       tile_list;
         AV1RawMetadata       metadata;
+        AV1RawPadding        padding;
     } obu;
 } AV1RawOBU;
 
@@ -399,7 +419,10 @@ typedef struct CodedBitstreamAV1Context {
     AV1RawSequenceHeader *sequence_header;
     AVBufferRef          *sequence_header_ref;
 
-    int seen_frame_header;
+    int     seen_frame_header;
+    AVBufferRef *frame_header_ref;
+    uint8_t     *frame_header;
+    size_t       frame_header_size;
 
     int temporal_id;
     int spatial_id;

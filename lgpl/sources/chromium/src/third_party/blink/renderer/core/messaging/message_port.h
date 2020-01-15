@@ -37,9 +37,9 @@
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
+#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -57,16 +57,16 @@ class CORE_EXPORT MessagePort : public EventTargetWithInlineData,
   USING_GARBAGE_COLLECTED_MIXIN(MessagePort);
 
  public:
-  static MessagePort* Create(ExecutionContext&);
+  explicit MessagePort(ExecutionContext&);
   ~MessagePort() override;
 
   void postMessage(ScriptState*,
                    const ScriptValue& message,
-                   Vector<ScriptValue>& transfer,
+                   HeapVector<ScriptValue>& transfer,
                    ExceptionState&);
   void postMessage(ScriptState*,
                    const ScriptValue& message,
-                   const PostMessageOptions&,
+                   const PostMessageOptions*,
                    ExceptionState&);
 
   void start();
@@ -103,19 +103,19 @@ class CORE_EXPORT MessagePort : public EventTargetWithInlineData,
   void ContextDestroyed(ExecutionContext*) override { close(); }
 
   void setOnmessage(EventListener* listener) {
-    SetAttributeEventListener(EventTypeNames::message, listener);
+    SetAttributeEventListener(event_type_names::kMessage, listener);
     start();
   }
   EventListener* onmessage() {
-    return GetAttributeEventListener(EventTypeNames::message);
+    return GetAttributeEventListener(event_type_names::kMessage);
   }
 
   void setOnmessageerror(EventListener* listener) {
-    SetAttributeEventListener(EventTypeNames::messageerror, listener);
+    SetAttributeEventListener(event_type_names::kMessageerror, listener);
     start();
   }
   EventListener* onmessageerror() {
-    return GetAttributeEventListener(EventTypeNames::messageerror);
+    return GetAttributeEventListener(event_type_names::kMessageerror);
   }
 
   // A port starts out its life entangled, and remains entangled until it is
@@ -130,9 +130,6 @@ class CORE_EXPORT MessagePort : public EventTargetWithInlineData,
   ::MojoHandle EntangledHandleForTesting() const;
 
   void Trace(blink::Visitor*) override;
-
- protected:
-  explicit MessagePort(ExecutionContext&);
 
  private:
   // mojo::MessageReceiver implementation.

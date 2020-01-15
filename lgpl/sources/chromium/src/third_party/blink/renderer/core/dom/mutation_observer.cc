@@ -36,10 +36,12 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_mutation_callback.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/mutation_observer_init.h"
+#include "third_party/blink/renderer/core/dom/mutation_observer_notifier.h"
 #include "third_party/blink/renderer/core/dom/mutation_observer_registration.h"
 #include "third_party/blink/renderer/core/dom/mutation_record.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/execution_context/window_agent.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -55,8 +57,12 @@ class MutationObserver::V8DelegateImpl final
  public:
   static V8DelegateImpl* Create(V8MutationCallback* callback,
                                 ExecutionContext* execution_context) {
-    return new V8DelegateImpl(callback, execution_context);
+    return MakeGarbageCollected<V8DelegateImpl>(callback, execution_context);
   }
+
+  V8DelegateImpl(V8MutationCallback* callback,
+                 ExecutionContext* execution_context)
+      : ContextClient(execution_context), callback_(callback) {}
 
   ExecutionContext* GetExecutionContext() const override {
     return ContextClient::GetExecutionContext();
@@ -69,89 +75,80 @@ class MutationObserver::V8DelegateImpl final
     callback_->InvokeAndReportException(&observer, records, &observer);
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) override {
     visitor->Trace(callback_);
     MutationObserver::Delegate::Trace(visitor);
     ContextClient::Trace(visitor);
   }
 
  private:
-  V8DelegateImpl(V8MutationCallback* callback,
-                 ExecutionContext* execution_context)
-      : ContextClient(execution_context), callback_(callback) {}
-
-  TraceWrapperMember<V8MutationCallback> callback_;
-};
-
-static unsigned g_observer_priority = 0;
-
-struct MutationObserver::ObserverLessThan {
-  bool operator()(const Member<MutationObserver>& lhs,
-                  const Member<MutationObserver>& rhs) {
-    return lhs->priority_ < rhs->priority_;
-  }
+  Member<V8MutationCallback> callback_;
 };
 
 MutationObserver* MutationObserver::Create(Delegate* delegate) {
   DCHECK(IsMainThread());
-  return new MutationObserver(delegate->GetExecutionContext(), delegate);
+  return MakeGarbageCollected<MutationObserver>(delegate->GetExecutionContext(),
+                                                delegate);
 }
 
 MutationObserver* MutationObserver::Create(ScriptState* script_state,
                                            V8MutationCallback* callback) {
   DCHECK(IsMainThread());
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
-  return new MutationObserver(
+  return MakeGarbageCollected<MutationObserver>(
       execution_context, V8DelegateImpl::Create(callback, execution_context));
 }
 
 MutationObserver::MutationObserver(ExecutionContext* execution_context,
                                    Delegate* delegate)
-    : ContextClient(execution_context),
-      delegate_(delegate),
-      priority_(g_observer_priority++) {}
-
-MutationObserver::~MutationObserver() {
-  CancelInspectorAsyncTasks();
+    : ContextClient(execution_context), delegate_(delegate) {
+  priority_ = GetDocument()
+                  ->GetWindowAgent()
+                  .GetMutationObserverNotifier()
+                  .NextObserverPriority();
 }
 
+MutationObserver::~MutationObserver() = default;
+
 void MutationObserver::observe(Node* node,
-                               const MutationObserverInit& observer_init,
+                               const MutationObserverInit* observer_init,
                                ExceptionState& exception_state) {
   DCHECK(node);
 
   MutationObserverOptions options = 0;
 
-  if (observer_init.hasAttributeOldValue() && observer_init.attributeOldValue())
+  if (observer_init->hasAttributeOldValue() &&
+      observer_init->attributeOldValue())
     options |= kAttributeOldValue;
 
   HashSet<AtomicString> attribute_filter;
-  if (observer_init.hasAttributeFilter()) {
-    for (const auto& name : observer_init.attributeFilter())
+  if (observer_init->hasAttributeFilter()) {
+    for (const auto& name : observer_init->attributeFilter())
       attribute_filter.insert(AtomicString(name));
     options |= kAttributeFilter;
   }
 
-  bool attributes = observer_init.hasAttributes() && observer_init.attributes();
-  if (attributes || (!observer_init.hasAttributes() &&
-                     (observer_init.hasAttributeOldValue() ||
-                      observer_init.hasAttributeFilter())))
+  bool attributes =
+      observer_init->hasAttributes() && observer_init->attributes();
+  if (attributes || (!observer_init->hasAttributes() &&
+                     (observer_init->hasAttributeOldValue() ||
+                      observer_init->hasAttributeFilter())))
     options |= kMutationTypeAttributes;
 
-  if (observer_init.hasCharacterDataOldValue() &&
-      observer_init.characterDataOldValue())
+  if (observer_init->hasCharacterDataOldValue() &&
+      observer_init->characterDataOldValue())
     options |= kCharacterDataOldValue;
 
   bool character_data =
-      observer_init.hasCharacterData() && observer_init.characterData();
-  if (character_data || (!observer_init.hasCharacterData() &&
-                         observer_init.hasCharacterDataOldValue()))
+      observer_init->hasCharacterData() && observer_init->characterData();
+  if (character_data || (!observer_init->hasCharacterData() &&
+                         observer_init->hasCharacterDataOldValue()))
     options |= kMutationTypeCharacterData;
 
-  if (observer_init.childList())
+  if (observer_init->childList())
     options |= kMutationTypeChildList;
 
-  if (observer_init.subtree())
+  if (observer_init->subtree())
     options |= kSubtree;
 
   if (!(options & kMutationTypeAttributes)) {
@@ -218,66 +215,43 @@ void MutationObserver::ObservationEnded(
   registrations_.erase(registration);
 }
 
-static MutationObserverSet& ActiveMutationObservers() {
-  DEFINE_STATIC_LOCAL(Persistent<MutationObserverSet>, active_observers,
-                      (new MutationObserverSet));
-  return *active_observers;
-}
-
-using SlotChangeList = HeapVector<Member<HTMLSlotElement>>;
-
-// TODO(hayato): We should have a SlotChangeList for each unit of related
-// similar-origin browsing context.
-// https://html.spec.whatwg.org/multipage/browsers.html#unit-of-related-similar-origin-browsing-contexts
-static SlotChangeList& ActiveSlotChangeList() {
-  DEFINE_STATIC_LOCAL(Persistent<SlotChangeList>, slot_change_list,
-                      (new SlotChangeList));
-  return *slot_change_list;
-}
-
-static MutationObserverSet& SuspendedMutationObservers() {
-  DEFINE_STATIC_LOCAL(Persistent<MutationObserverSet>, suspended_observers,
-                      (new MutationObserverSet));
-  return *suspended_observers;
-}
-
-static void EnsureEnqueueMicrotask() {
-  if (ActiveMutationObservers().IsEmpty() && ActiveSlotChangeList().IsEmpty())
-    Microtask::EnqueueMicrotask(WTF::Bind(&MutationObserver::DeliverMutations));
-}
-
+// static
 void MutationObserver::EnqueueSlotChange(HTMLSlotElement& slot) {
   DCHECK(IsMainThread());
-  EnsureEnqueueMicrotask();
-  ActiveSlotChangeList().push_back(&slot);
+  slot.GetDocument()
+      .GetWindowAgent()
+      .GetMutationObserverNotifier()
+      .EnqueueSlotChange(slot);
 }
 
+// static
 void MutationObserver::CleanSlotChangeList(Document& document) {
-  SlotChangeList kept;
-  kept.ReserveCapacity(ActiveSlotChangeList().size());
-  for (auto& slot : ActiveSlotChangeList()) {
-    if (slot->GetDocument() != document)
-      kept.push_back(slot);
-  }
-  ActiveSlotChangeList().swap(kept);
+  document.GetWindowAgent().GetMutationObserverNotifier().CleanSlotChangeList(
+      document);
 }
 
-static void ActivateObserver(MutationObserver* observer) {
-  EnsureEnqueueMicrotask();
-  ActiveMutationObservers().insert(observer);
+void MutationObserver::Activate() {
+  GetDocument()
+      ->GetWindowAgent()
+      .GetMutationObserverNotifier()
+      .ActivateObserver(this);
 }
 
 void MutationObserver::EnqueueMutationRecord(MutationRecord* mutation) {
   DCHECK(IsMainThread());
+  ExecutionContext* execution_context = delegate_->GetExecutionContext();
+  // This might get called when the execution context is gone. crbug.com/982850
+  if (!execution_context)
+    return;
   records_.push_back(mutation);
-  ActivateObserver(this);
-  probe::AsyncTaskScheduled(delegate_->GetExecutionContext(), mutation->type(),
-                            mutation);
+  Activate();
+  probe::AsyncTaskScheduled(execution_context, mutation->type(),
+                            mutation->async_task_id());
 }
 
 void MutationObserver::SetHasTransientRegistration() {
   DCHECK(IsMainThread());
-  ActivateObserver(this);
+  Activate();
 }
 
 HeapHashSet<Member<Node>> MutationObserver::GetObservedNodes() const {
@@ -293,8 +267,10 @@ bool MutationObserver::ShouldBeSuspended() const {
 }
 
 void MutationObserver::CancelInspectorAsyncTasks() {
-  for (auto& record : records_)
-    probe::AsyncTaskCanceled(delegate_->GetExecutionContext(), record);
+  for (auto& record : records_) {
+    probe::AsyncTaskCanceled(delegate_->GetExecutionContext(),
+                             record->async_task_id());
+  }
 }
 
 void MutationObserver::Deliver() {
@@ -319,57 +295,11 @@ void MutationObserver::Deliver() {
 
   // Report the first (earliest) stack as the async cause.
   probe::AsyncTask async_task(delegate_->GetExecutionContext(),
-                              records.front());
+                              records.front()->async_task_id());
   delegate_->Deliver(records, *this);
 }
 
-void MutationObserver::ResumeSuspendedObservers() {
-  DCHECK(IsMainThread());
-  if (SuspendedMutationObservers().IsEmpty())
-    return;
-
-  MutationObserverVector suspended;
-  CopyToVector(SuspendedMutationObservers(), suspended);
-  for (const auto& observer : suspended) {
-    if (!observer->ShouldBeSuspended()) {
-      SuspendedMutationObservers().erase(observer);
-      ActivateObserver(observer);
-    }
-  }
-}
-
-void MutationObserver::DeliverMutations() {
-  // These steps are defined in DOM Standard's "notify mutation observers".
-  // https://dom.spec.whatwg.org/#notify-mutation-observers
-  DCHECK(IsMainThread());
-
-  MutationObserverVector observers;
-  CopyToVector(ActiveMutationObservers(), observers);
-  ActiveMutationObservers().clear();
-
-  SlotChangeList slots;
-  slots.swap(ActiveSlotChangeList());
-  for (const auto& slot : slots)
-    slot->ClearSlotChangeEventEnqueued();
-
-  std::sort(observers.begin(), observers.end(), ObserverLessThan());
-  for (const auto& observer : observers) {
-    if (!observer->GetExecutionContext()) {
-      // The observer's execution context is already gone, as active observers
-      // intentionally do not hold their execution context. Do nothing then.
-      continue;
-    }
-
-    if (observer->ShouldBeSuspended())
-      SuspendedMutationObservers().insert(observer);
-    else
-      observer->Deliver();
-  }
-  for (const auto& slot : slots)
-    slot->DispatchSlotChangeEvent();
-}
-
-void MutationObserver::Trace(blink::Visitor* visitor) {
+void MutationObserver::Trace(Visitor* visitor) {
   visitor->Trace(delegate_);
   visitor->Trace(records_);
   visitor->Trace(registrations_);

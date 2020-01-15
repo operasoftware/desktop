@@ -30,7 +30,7 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/inspector/inspector_base_agent.h"
 #include "third_party/blink/renderer/core/inspector/protocol/ApplicationCache.h"
-#include "third_party/blink/renderer/core/loader/appcache/application_cache_host.h"
+#include "third_party/blink/renderer/core/loader/appcache/application_cache_host_for_frame.h"
 
 namespace blink {
 
@@ -42,8 +42,11 @@ class CORE_EXPORT InspectorApplicationCacheAgent final
  public:
   static InspectorApplicationCacheAgent* Create(
       InspectedFrames* inspected_frames) {
-    return new InspectorApplicationCacheAgent(inspected_frames);
+    return MakeGarbageCollected<InspectorApplicationCacheAgent>(
+        inspected_frames);
   }
+
+  explicit InspectorApplicationCacheAgent(InspectedFrames*);
   ~InspectorApplicationCacheAgent() override = default;
   void Trace(blink::Visitor*) override;
 
@@ -71,18 +74,18 @@ class CORE_EXPORT InspectorApplicationCacheAgent final
   // Unconditionally enables the agent, even if |enabled_.Get()==true|.
   // For idempotence, call enable().
   void InnerEnable();
-  explicit InspectorApplicationCacheAgent(InspectedFrames*);
 
   std::unique_ptr<protocol::ApplicationCache::ApplicationCache>
-  BuildObjectForApplicationCache(const ApplicationCacheHost::ResourceInfoList&,
-                                 const ApplicationCacheHost::CacheInfo&);
+  BuildObjectForApplicationCache(
+      const Vector<mojom::blink::AppCacheResourceInfo>&,
+      const ApplicationCacheHost::CacheInfo&);
   std::unique_ptr<
       protocol::Array<protocol::ApplicationCache::ApplicationCacheResource>>
   BuildArrayForApplicationCacheResources(
-      const ApplicationCacheHost::ResourceInfoList&);
+      const Vector<mojom::blink::AppCacheResourceInfo>&);
   std::unique_ptr<protocol::ApplicationCache::ApplicationCacheResource>
   BuildObjectForApplicationCacheResource(
-      const ApplicationCacheHost::ResourceInfo&);
+      const mojom::blink::AppCacheResourceInfo&);
 
   protocol::Response AssertFrameWithDocumentLoader(String frame_id,
                                                    DocumentLoader*&);

@@ -2,13 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/** @const {string} Path to root from chrome/test/data/webui/extensions/a11y. */
-const ROOT_PATH = '../../../../../../';
-
 // Polymer BrowserTest fixture and aXe-core accessibility audit.
 GEN_INCLUDE([
-  ROOT_PATH + 'chrome/test/data/webui/a11y/accessibility_test.js',
-  ROOT_PATH + 'chrome/test/data/webui/polymer_browser_test_base.js',
+  '//chrome/test/data/webui/a11y/accessibility_test.js',
+  '//chrome/test/data/webui/polymer_browser_test_base.js',
 ]);
 GEN('#include "chrome/browser/ui/webui/extensions/' +
     'extension_settings_browsertest.h"');
@@ -18,15 +15,11 @@ GEN('#include "chrome/browser/ui/webui/extensions/' +
  * @constructor
  * @extends {PolymerTest}
  */
-CrExtensionsA11yTest = class extends PolymerTest {
+// eslint-disable-next-line no-var
+var CrExtensionsA11yTest = class extends PolymerTest {
   /** @override */
   get browsePreload() {
     return 'chrome://extensions/';
-  }
-
-  // Include files that define the mocha tests.
-  get extraLibraries() {
-    return PolymerTest.getLibraries(ROOT_PATH);
   }
 
   // Default accessibility audit options. Specify in test definition to use.
@@ -63,6 +56,16 @@ CrExtensionsA11yTest = class extends PolymerTest {
         return parentNode && parentNode.host &&
             parentNode.host.tagName == 'CR-TOGGLE';
       },
+
+      // TODO(crbug.com/1002620): this filter can be removed after
+      // addressing the bug
+      'heading-order': function(nodeResult) {
+        // Filter out 'Heading levels do not increase by one' error when
+        // enumerating extensions
+        const expectedMarkup = '<div id="name" role="heading" aria-level="3" \
+class="clippable-flex-text">My extension 1</div>';
+        return nodeResult['html'] === expectedMarkup;
+      },
     };
   }
 
@@ -78,8 +81,9 @@ CrExtensionsA11yTest = class extends PolymerTest {
    * @private
    */
   static hasAncestor_(node, type) {
-    if (!node.parentElement)
+    if (!node.parentElement) {
       return false;
+    }
 
     return (node.parentElement.tagName.toLocaleLowerCase() == type) ||
         CrExtensionsA11yTest.hasAncestor_(node.parentElement, type);
@@ -91,7 +95,13 @@ AccessibilityTest.define('CrExtensionsA11yTest', {
   name: 'NoExtensions',
 
   /** @override */
-  axeOptions: CrExtensionsA11yTest.axeOptions,
+  // TODO(crbug.com/1002627): when bug is addressed, this should be replaced
+  // with axeOptions: CrExtensionsA11yTest.axeOptions,
+  axeOptions: Object.assign({}, CrExtensionsA11yTest.axeOptions, {
+    'rules': Object.assign({}, CrExtensionsA11yTest.axeOptions.rules, {
+      'link-in-text-block': {enabled: false},
+    })
+  }),
 
   /** @override */
   violationFilter: CrExtensionsA11yTest.violationFilter,

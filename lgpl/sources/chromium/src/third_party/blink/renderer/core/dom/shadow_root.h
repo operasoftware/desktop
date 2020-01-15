@@ -34,8 +34,7 @@
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/tree_scope.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable_visitor.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -55,9 +54,7 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   USING_GARBAGE_COLLECTED_MIXIN(ShadowRoot);
 
  public:
-  static ShadowRoot* Create(Document& document, ShadowRootType type) {
-    return new ShadowRoot(document, type);
-  }
+  ShadowRoot(Document&, ShadowRootType);
 
   // Disambiguate between Node and TreeScope hierarchies; TreeScope's
   // implementation is simpler.
@@ -70,7 +67,7 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
 
   Element& host() const {
     DCHECK(ParentOrShadowHostNode());
-    return *ToElement(ParentOrShadowHostNode());
+    return *To<Element>(ParentOrShadowHostNode());
   }
   ShadowRootType GetType() const { return static_cast<ShadowRootType>(type_); }
   String mode() const {
@@ -105,9 +102,6 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   }
   bool IsUserAgent() const { return GetType() == ShadowRootType::kUserAgent; }
 
-  void AttachLayoutTree(AttachContext&) override;
-  void DetachLayoutTree(const AttachContext& = AttachContext()) override;
-
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void RemovedFrom(ContainerNode&) override;
 
@@ -119,7 +113,7 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   // For Internals, don't use this.
   unsigned ChildShadowRootCount() const { return child_shadow_root_count_; }
 
-  void RecalcStyle(StyleRecalcChange);
+  void RecalcStyle(const StyleRecalcChange);
   void RebuildLayoutTree(WhitespaceAttacher&);
 
   void RegisterScopedHTMLStyleChild();
@@ -129,6 +123,8 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
     DCHECK(slot_assignment_);
     return *slot_assignment_;
   }
+
+  bool HasSlotAssignment() { return slot_assignment_; }
 
   HTMLSlotElement* AssignedSlotFor(const Node&);
   void DidAddSlot(HTMLSlotElement&);
@@ -159,8 +155,7 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
 
   void SetSlotting(ShadowRootSlotting slotting);
   bool IsManualSlotting() {
-    return slotting_ ==
-           static_cast<unsigned short>(ShadowRootSlotting::kManual);
+    return slotting_ == static_cast<unsigned>(ShadowRootSlotting::kManual);
   }
 
   bool ContainsShadowRoots() const { return child_shadow_root_count_; }
@@ -170,10 +165,9 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
     style_sheet_list_ = style_sheet_list;
   }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  ShadowRoot(Document&, ShadowRootType);
   ~ShadowRoot() override;
 
   void ChildrenChanged(const ChildrenChange&) override;
@@ -187,16 +181,16 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   }
   void Distribute();
 
-  TraceWrapperMember<StyleSheetList> style_sheet_list_;
+  Member<StyleSheetList> style_sheet_list_;
   Member<SlotAssignment> slot_assignment_;
   Member<ShadowRootV0> shadow_root_v0_;
-  unsigned short child_shadow_root_count_;
-  unsigned short type_ : 2;
-  unsigned short registered_with_parent_shadow_root_ : 1;
-  unsigned short delegates_focus_ : 1;
-  unsigned short slotting_ : 1;
-  unsigned short needs_distribution_recalc_ : 1;
-  unsigned short unused_ : 10;
+  unsigned child_shadow_root_count_ : 16;
+  unsigned type_ : 2;
+  unsigned registered_with_parent_shadow_root_ : 1;
+  unsigned delegates_focus_ : 1;
+  unsigned slotting_ : 1;
+  unsigned needs_distribution_recalc_ : 1;
+  unsigned unused_ : 10;
 
   DISALLOW_COPY_AND_ASSIGN(ShadowRoot);
 };
@@ -216,9 +210,10 @@ inline void ShadowRoot::DistributeIfNeeded() {
 }
 
 inline ShadowRoot* Node::GetShadowRoot() const {
-  if (!IsElementNode())
+  auto* this_element = DynamicTo<Element>(this);
+  if (!this_element)
     return nullptr;
-  return ToElement(this)->GetShadowRoot();
+  return this_element->GetShadowRoot();
 }
 
 inline ShadowRoot* Element::ShadowRootIfV1() const {
@@ -234,13 +229,14 @@ inline ShadowRootV0& ShadowRoot::V0() const {
   return *shadow_root_v0_;
 }
 
-DEFINE_NODE_TYPE_CASTS(ShadowRoot, IsShadowRoot());
-DEFINE_TYPE_CASTS(ShadowRoot,
-                  TreeScope,
-                  treeScope,
-                  treeScope->RootNode().IsShadowRoot(),
-                  treeScope.RootNode().IsShadowRoot());
-DEFINE_TYPE_CASTS(TreeScope, ShadowRoot, shadowRoot, true, true);
+template <>
+struct DowncastTraits<ShadowRoot> {
+  static bool AllowFrom(const Node& node) { return node.IsShadowRoot(); }
+
+  static bool AllowFrom(const TreeScope& tree_scope) {
+    return tree_scope.RootNode().IsShadowRoot();
+  }
+};
 
 CORE_EXPORT std::ostream& operator<<(std::ostream&, const ShadowRootType&);
 

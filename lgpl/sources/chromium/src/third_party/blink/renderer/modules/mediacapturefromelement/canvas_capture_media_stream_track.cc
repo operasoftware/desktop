@@ -9,28 +9,9 @@
 #include "third_party/blink/renderer/modules/mediacapturefromelement/auto_canvas_draw_listener.h"
 #include "third_party/blink/renderer/modules/mediacapturefromelement/on_request_canvas_draw_listener.h"
 #include "third_party/blink/renderer/modules/mediacapturefromelement/timed_canvas_draw_listener.h"
-#include "third_party/blink/renderer/platform/mediastream/media_stream_center.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_utils.h"
 
 namespace blink {
-
-CanvasCaptureMediaStreamTrack* CanvasCaptureMediaStreamTrack::Create(
-    MediaStreamComponent* component,
-    HTMLCanvasElement* element,
-    ExecutionContext* context,
-    std::unique_ptr<WebCanvasCaptureHandler> handler) {
-  return new CanvasCaptureMediaStreamTrack(component, element, context,
-                                           std::move(handler));
-}
-
-CanvasCaptureMediaStreamTrack* CanvasCaptureMediaStreamTrack::Create(
-    MediaStreamComponent* component,
-    HTMLCanvasElement* element,
-    ExecutionContext* context,
-    std::unique_ptr<WebCanvasCaptureHandler> handler,
-    double frame_rate) {
-  return new CanvasCaptureMediaStreamTrack(component, element, context,
-                                           std::move(handler), frame_rate);
-}
 
 HTMLCanvasElement* CanvasCaptureMediaStreamTrack::canvas() const {
   return canvas_element_.Get();
@@ -44,8 +25,9 @@ CanvasCaptureMediaStreamTrack* CanvasCaptureMediaStreamTrack::clone(
     ScriptState* script_state) {
   MediaStreamComponent* cloned_component = Component()->Clone();
   CanvasCaptureMediaStreamTrack* cloned_track =
-      new CanvasCaptureMediaStreamTrack(*this, cloned_component);
-  MediaStreamCenter::Instance().DidCreateMediaStreamTrack(cloned_component);
+      MakeGarbageCollected<CanvasCaptureMediaStreamTrack>(*this,
+                                                          cloned_component);
+  MediaStreamUtils::DidCreateMediaStreamTrack(cloned_component);
   return cloned_track;
 }
 
@@ -68,9 +50,10 @@ CanvasCaptureMediaStreamTrack::CanvasCaptureMediaStreamTrack(
     MediaStreamComponent* component,
     HTMLCanvasElement* element,
     ExecutionContext* context,
-    std::unique_ptr<WebCanvasCaptureHandler> handler)
+    std::unique_ptr<CanvasCaptureHandler> handler)
     : MediaStreamTrack(context, component), canvas_element_(element) {
-  draw_listener_ = AutoCanvasDrawListener::Create(std::move(handler));
+  draw_listener_ =
+      MakeGarbageCollected<AutoCanvasDrawListener>(std::move(handler));
   canvas_element_->AddListener(draw_listener_.Get());
 }
 
@@ -78,11 +61,12 @@ CanvasCaptureMediaStreamTrack::CanvasCaptureMediaStreamTrack(
     MediaStreamComponent* component,
     HTMLCanvasElement* element,
     ExecutionContext* context,
-    std::unique_ptr<WebCanvasCaptureHandler> handler,
+    std::unique_ptr<CanvasCaptureHandler> handler,
     double frame_rate)
     : MediaStreamTrack(context, component), canvas_element_(element) {
   if (frame_rate == 0) {
-    draw_listener_ = OnRequestCanvasDrawListener::Create(std::move(handler));
+    draw_listener_ =
+        MakeGarbageCollected<OnRequestCanvasDrawListener>(std::move(handler));
   } else {
     draw_listener_ = TimedCanvasDrawListener::Create(std::move(handler),
                                                      frame_rate, context);

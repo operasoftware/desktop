@@ -29,28 +29,26 @@
 
 namespace blink {
 
-class LabelableElement;
-
 class CORE_EXPORT HTMLLabelElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static HTMLLabelElement* Create(Document&);
-  LabelableElement* control() const;
+  explicit HTMLLabelElement(Document&);
+
+  HTMLElement* control() const;
   HTMLFormElement* form() const;
 
   bool WillRespondToMouseClickEvents() override;
 
  private:
-  explicit HTMLLabelElement(Document&);
   bool IsInInteractiveContent(Node*) const;
 
   bool IsInteractiveContent() const override;
   void AccessKeyAction(bool send_mouse_events) override;
 
   // Overridden to update the hover/active state of the corresponding control.
-  void SetActive(bool = true) override;
-  void SetHovered(bool = true) override;
+  void SetActive(bool active) override;
+  void SetHovered(bool hovered) override;
 
   // Overridden to either click() or focus() the corresponding control.
   void DefaultEventHandler(Event&) override;

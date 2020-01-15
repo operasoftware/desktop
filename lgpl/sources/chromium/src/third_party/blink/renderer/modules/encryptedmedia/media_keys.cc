@@ -42,7 +42,7 @@
 #include "third_party/blink/renderer/modules/encryptedmedia/media_keys_policy.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
-#include "third_party/blink/renderer/platform/instance_counters.h"
+#include "third_party/blink/renderer/platform/instrumentation/instance_counters.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/timer.h"
 
@@ -52,7 +52,7 @@ namespace blink {
 
 // A class holding a pending action.
 class MediaKeys::PendingAction final
-    : public GarbageCollectedFinalized<MediaKeys::PendingAction> {
+    : public GarbageCollected<MediaKeys::PendingAction> {
  public:
   enum class Type { kSetServerCertificate, kGetStatusForPolicy };
 
@@ -77,17 +77,23 @@ class MediaKeys::PendingAction final
       DOMArrayBuffer* server_certificate) {
     DCHECK(result);
     DCHECK(server_certificate);
-    return new PendingAction(Type::kSetServerCertificate, result,
-                             server_certificate, String());
+    return MakeGarbageCollected<PendingAction>(
+        Type::kSetServerCertificate, result, server_certificate, String());
   }
 
   static PendingAction* CreatePendingGetStatusForPolicy(
       ContentDecryptionModuleResult* result,
       const String& min_hdcp_version) {
     DCHECK(result);
-    return new PendingAction(Type::kGetStatusForPolicy, result, nullptr,
-                             min_hdcp_version);
+    return MakeGarbageCollected<PendingAction>(
+        Type::kGetStatusForPolicy, result, nullptr, min_hdcp_version);
   }
+
+  PendingAction(Type type,
+                ContentDecryptionModuleResult* result,
+                DOMArrayBuffer* data,
+                const String& string_data)
+      : type_(type), result_(result), data_(data), string_data_(string_data) {}
 
   void Trace(blink::Visitor* visitor) {
     visitor->Trace(result_);
@@ -95,12 +101,6 @@ class MediaKeys::PendingAction final
   }
 
  private:
-  PendingAction(Type type,
-                ContentDecryptionModuleResult* result,
-                DOMArrayBuffer* data,
-                const String& string_data)
-      : type_(type), result_(result), data_(data), string_data_(string_data) {}
-
   const Type type_;
   const Member<ContentDecryptionModuleResult> result_;
   const Member<DOMArrayBuffer> data_;
@@ -135,7 +135,7 @@ class SetCertificateResultPromise
   }
 
   void CompleteWithError(WebContentDecryptionModuleException exception_code,
-                         unsigned long system_code,
+                         uint32_t system_code,
                          const WebString& error_message) override {
     if (!IsValidToFulfillPromise())
       return;
@@ -199,13 +199,6 @@ class GetStatusForPolicyResultPromise
   // the promise is pending.
   Member<MediaKeys> media_keys_;
 };
-
-MediaKeys* MediaKeys::Create(
-    ExecutionContext* context,
-    const WebVector<WebEncryptedMediaSessionType>& supported_session_types,
-    std::unique_ptr<WebContentDecryptionModule> cdm) {
-  return new MediaKeys(context, supported_session_types, std::move(cdm));
-}
 
 MediaKeys::MediaKeys(
     ExecutionContext* context,
@@ -272,7 +265,8 @@ MediaKeySession* MediaKeys::createSession(ScriptState* script_state,
   //    follows:
   //    (Initialization is performed in the constructor.)
   // 4. Return session.
-  return MediaKeySession::Create(script_state, this, session_type);
+  return MakeGarbageCollected<MediaKeySession>(script_state, this,
+                                               session_type);
 }
 
 ScriptPromise MediaKeys::setServerCertificate(
@@ -303,15 +297,16 @@ ScriptPromise MediaKeys::setServerCertificate(
       server_certificate.Data(), server_certificate.ByteLength());
 
   // 4. Let promise be a new promise.
-  SetCertificateResultPromise* result = new SetCertificateResultPromise(
-      script_state, this, "MediaKeys", "setServerCertificate");
+  SetCertificateResultPromise* result =
+      MakeGarbageCollected<SetCertificateResultPromise>(
+          script_state, this, "MediaKeys", "setServerCertificate");
   ScriptPromise promise = result->Promise();
 
   // 5. Run the following steps asynchronously. See SetServerCertificateTask().
   pending_actions_.push_back(PendingAction::CreatePendingSetServerCertificate(
       result, server_certificate_buffer));
   if (!timer_.IsActive())
-    timer_.StartOneShot(TimeDelta(), FROM_HERE);
+    timer_.StartOneShot(base::TimeDelta(), FROM_HERE);
 
   // 6. Return promise.
   return promise;
@@ -338,21 +333,22 @@ void MediaKeys::SetServerCertificateTask(
 
 ScriptPromise MediaKeys::getStatusForPolicy(
     ScriptState* script_state,
-    const MediaKeysPolicy& media_keys_policy) {
+    const MediaKeysPolicy* media_keys_policy) {
   // TODO(xhwang): Pass MediaKeysPolicy classes all the way to Chromium when
   // we have more than one policy to check.
-  String min_hdcp_version = media_keys_policy.minHdcpVersion();
+  String min_hdcp_version = media_keys_policy->minHdcpVersion();
 
   // Let promise be a new promise.
-  GetStatusForPolicyResultPromise* result = new GetStatusForPolicyResultPromise(
-      script_state, this, "MediaKeys", "getStatusForPolicy");
+  GetStatusForPolicyResultPromise* result =
+      MakeGarbageCollected<GetStatusForPolicyResultPromise>(
+          script_state, this, "MediaKeys", "getStatusForPolicy");
   ScriptPromise promise = result->Promise();
 
   // Run the following steps asynchronously. See GetStatusForPolicyTask().
   pending_actions_.push_back(
       PendingAction::CreatePendingGetStatusForPolicy(result, min_hdcp_version));
   if (!timer_.IsActive())
-    timer_.StartOneShot(TimeDelta(), FROM_HERE);
+    timer_.StartOneShot(base::TimeDelta(), FROM_HERE);
 
   // Return promise.
   return promise;

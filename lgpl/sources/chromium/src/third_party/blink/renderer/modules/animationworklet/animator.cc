@@ -4,66 +4,97 @@
 
 #include "third_party/blink/renderer/modules/animationworklet/animator.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
-#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "base/stl_util.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_animate_callback.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_state_callback.h"
+#include "third_party/blink/renderer/bindings/modules/v8/worklet_animation_effect_or_worklet_group_effect.h"
 #include "third_party/blink/renderer/modules/animationworklet/animator_definition.h"
-#include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/bindings/to_v8.h"
-#include "third_party/blink/renderer/platform/bindings/v8_binding.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "v8/include/v8.h"
 
 namespace blink {
 
 Animator::Animator(v8::Isolate* isolate,
                    AnimatorDefinition* definition,
-                   v8::Local<v8::Value> instance)
+                   v8::Local<v8::Value> instance,
+                   const String& name,
+                   WorkletAnimationOptions options,
+                   const Vector<base::Optional<base::TimeDelta>>& local_times,
+                   const Vector<Timing>& timings)
     : definition_(definition),
       instance_(isolate, instance),
-      effect_(new EffectProxy()) {}
+      name_(name),
+      options_(options),
+      group_effect_(
+          MakeGarbageCollected<WorkletGroupEffect>(local_times, timings)) {
+  DCHECK_GE(local_times.size(), 1u);
+}
 
 Animator::~Animator() = default;
 
 void Animator::Trace(blink::Visitor* visitor) {
   visitor->Trace(definition_);
-  visitor->Trace(effect_);
   visitor->Trace(instance_);
+  visitor->Trace(group_effect_);
 }
 
 bool Animator::Animate(
-    ScriptState* script_state,
+    v8::Isolate* isolate,
     double current_time,
     AnimationWorkletDispatcherOutput::AnimationState* output) {
-  v8::Isolate* isolate = script_state->GetIsolate();
+  DCHECK(!std::isnan(current_time));
 
   v8::Local<v8::Value> instance = instance_.NewLocal(isolate);
-  v8::Local<v8::Function> animate = definition_->AnimateLocal(isolate);
-
-  if (IsUndefinedOrNull(instance) || IsUndefinedOrNull(animate))
+  if (IsUndefinedOrNull(instance))
     return false;
 
-  ScriptState::Scope scope(script_state);
-  v8::TryCatch block(isolate);
-  block.SetVerbose(true);
+  WorkletAnimationEffectOrWorkletGroupEffect effect;
+  if (group_effect_->getChildren().size() == 1) {
+    effect.SetWorkletAnimationEffect(group_effect_->getChildren()[0]);
+  } else {
+    effect.SetWorkletGroupEffect(group_effect_);
+  }
 
-  // Prepare arguments (i.e., current time and effect) and pass them to animate
-  // callback.
-  v8::Local<v8::Value> v8_effect =
-      ToV8(effect_, script_state->GetContext()->Global(), isolate);
-
-  v8::Local<v8::Value> v8_current_time =
-      ToV8(current_time, script_state->GetContext()->Global(), isolate);
-
-  v8::Local<v8::Value> argv[] = {v8_current_time, v8_effect};
-
-  V8ScriptRunner::CallFunction(animate, ExecutionContext::From(script_state),
-                               instance, arraysize(argv), argv, isolate);
-
-  // The animate function may have produced an error!
-  // TODO(majidvp): We should probably just throw here.
-  if (block.HasCaught())
+  v8::TryCatch try_catch(isolate);
+  try_catch.SetVerbose(true);
+  if (definition_->AnimateFunction()
+          ->Invoke(instance, current_time, effect)
+          .IsNothing()) {
     return false;
+  }
 
-  output->local_time = effect_->local_time();
+  GetLocalTimes(output->local_times);
   return true;
+}
+
+Vector<Timing> Animator::GetTimings() const {
+  Vector<Timing> timings;
+  timings.ReserveInitialCapacity(group_effect_->getChildren().size());
+  for (const auto& effect : group_effect_->getChildren()) {
+    timings.push_back(effect->SpecifiedTiming());
+  }
+  return timings;
+}
+
+bool Animator::IsStateful() const {
+  return definition_->IsStateful();
+}
+
+v8::Local<v8::Value> Animator::State(v8::Isolate* isolate,
+                                     ExceptionState& exception_state) {
+  if (!IsStateful())
+    return v8::Undefined(isolate);
+
+  v8::Local<v8::Value> instance = instance_.NewLocal(isolate);
+  DCHECK(!IsUndefinedOrNull(instance));
+
+  v8::TryCatch try_catch(isolate);
+  v8::Maybe<ScriptValue> state = definition_->StateFunction()->Invoke(instance);
+  if (try_catch.HasCaught()) {
+    exception_state.RethrowV8Exception(try_catch.Exception());
+    return v8::Undefined(isolate);
+  }
+  return state.ToChecked().V8Value();
 }
 
 }  // namespace blink

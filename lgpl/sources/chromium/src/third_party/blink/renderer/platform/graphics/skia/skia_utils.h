@@ -42,11 +42,13 @@
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkPoint.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkScalar.h"
 
 namespace blink {
+class LayoutRect;
 
 /**** constants ****/
 
@@ -56,8 +58,8 @@ enum {
   // maximum dimensions, in exchange for a smaller maximum canvas size.
   kMaxCanvasArea = 32768 * 8192,  // Maximum canvas area in CSS pixels
 
-  // In Skia, we will also limit width/height to 32767.
-  kMaxSkiaDim = 32767  // Maximum width/height in CSS pixels.
+  // In Skia, we will also limit width/height to 65535.
+  kMaxSkiaDim = 65535  // Maximum width/height in CSS pixels.
 };
 
 bool PLATFORM_EXPORT IsValidImageSize(const IntSize&);
@@ -73,13 +75,11 @@ BlendMode PLATFORM_EXPORT BlendModeFromSkBlendMode(SkBlendMode);
 // alpha is in the range [0, 1].
 SkColor PLATFORM_EXPORT ScaleAlpha(SkColor, float);
 
-// Convert a SkColorSpace to a gfx::ColorSpace
-gfx::ColorSpace PLATFORM_EXPORT
-SkColorSpaceToGfxColorSpace(const sk_sp<SkColorSpace>);
-
 bool PLATFORM_EXPORT
 ApproximatelyEqualSkColorSpaces(sk_sp<SkColorSpace> src_color_space,
                                 sk_sp<SkColorSpace> dst_color_space);
+
+SkRect PLATFORM_EXPORT LayoutRectToSkRect(const blink::LayoutRect& rect);
 
 // Skia has problems when passed infinite, etc floats, filter them to 0.
 inline SkScalar WebCoreFloatToSkScalar(float f) {
@@ -126,13 +126,18 @@ InterpolationQuality ComputeInterpolationQuality(float src_width,
                                                  float dest_height,
                                                  bool is_data_complete = true);
 
-// This replicates the old skia behavior when it used to take radius for blur.
-// Now it takes sigma.
-inline SkScalar SkBlurRadiusToSigma(SkScalar radius) {
-  SkASSERT(radius >= 0);
-  if (radius == 0)
-    return 0.0f;
-  return 0.288675f * radius + 0.5f;
+// Technically, this is driven by the CSS/Canvas2D specs and unrelated to Skia.
+// It should probably live in the CSS layer, but the notion of a "blur radius"
+// leaks into platform/graphics currently (ideally we should only deal with
+// sigma at this level).
+// TODO(fmalita): find a better home for this helper.
+inline float BlurRadiusToStdDev(float radius) {
+  DCHECK_GE(radius, 0);
+
+  // Per spec, sigma is exactly half the blur radius:
+  // https://www.w3.org/TR/css-backgrounds-3/#shadow-blur
+  // https://html.spec.whatwg.org/C/#when-shadows-are-drawn
+  return radius * 0.5f;
 }
 
 template <typename PrimitiveType>
@@ -148,6 +153,11 @@ WebCoreClampingModeToSkiaRectConstraint(Image::ImageClampingMode clamp_mode) {
              ? cc::PaintCanvas::kStrict_SrcRectConstraint
              : cc::PaintCanvas::kFast_SrcRectConstraint;
 }
+
+// Attempts to allocate an SkData on the PartitionAlloc buffer partition.
+// If this fails (e.g. due to low memory), returns a null sk_sp<SkData> instead.
+// Otherwise, the returned buffer is guaranteed to be zero-filled.
+PLATFORM_EXPORT sk_sp<SkData> TryAllocateSkData(size_t size);
 
 // Skia's smart pointer APIs are preferable over their legacy raw pointer
 // counterparts.

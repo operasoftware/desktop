@@ -21,6 +21,7 @@
  *
  */
 
+#include "base/containers/span.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
@@ -55,7 +56,7 @@ class ExpansionOpportunities {
     unsigned opportunities_in_run;
     if (text.Is8Bit()) {
       opportunities_in_run = Character::ExpansionOpportunityCount(
-          text.Characters8() + run.start_, run.stop_ - run.start_,
+          {text.Characters8() + run.start_, run.stop_ - run.start_},
           run.box_->Direction(), is_after_expansion, text_justify);
     } else if (run.line_layout_item_.IsCombineText()) {
       // Justfication applies to before and after the combined text as if
@@ -65,7 +66,7 @@ class ExpansionOpportunities {
       is_after_expansion = true;
     } else {
       opportunities_in_run = Character::ExpansionOpportunityCount(
-          text.Characters16() + run.start_, run.stop_ - run.start_,
+          {text.Characters16() + run.start_, run.stop_ - run.start_},
           run.box_->Direction(), is_after_expansion, text_justify);
     }
     runs_with_expansions_.push_back(opportunities_in_run);
@@ -195,16 +196,17 @@ InlineFlowBox* LayoutBlockFlow::CreateLineBoxes(LineLayoutItem line_layout_item,
       line_layout_item = LineLayoutItem(this);
     }
 
-    SECURITY_DCHECK(line_layout_item.IsLayoutInline() ||
-                    line_layout_item.IsEqual(this));
-
-    LineLayoutInline inline_flow(
-        !line_layout_item.IsEqual(this) ? line_layout_item : nullptr);
-
     // Get the last box we made for this layout object.
-    parent_box = inline_flow
-                     ? inline_flow.LastLineBox()
-                     : LineLayoutBlockFlow(line_layout_item).LastLineBox();
+    bool allowed_to_construct_new_box;
+    if (line_layout_item.IsLayoutInline()) {
+      LineLayoutInline inline_flow(line_layout_item);
+      parent_box = inline_flow.LastLineBox();
+      allowed_to_construct_new_box = inline_flow.AlwaysCreateLineBoxes();
+    } else {
+      DCHECK(line_layout_item.IsEqual(this));
+      parent_box = LineLayoutBlockFlow(line_layout_item).LastLineBox();
+      allowed_to_construct_new_box = true;
+    }
 
     // If this box or its ancestor is constructed then it is from a previous
     // line, and we need to make a new box for our line.  If this box or its
@@ -213,8 +215,6 @@ InlineFlowBox* LayoutBlockFlow::CreateLineBoxes(LineLayoutItem line_layout_item,
     // inline has actually been split in two on the same line (this can happen
     // with very fancy language mixtures).
     bool constructed_new_box = false;
-    bool allowed_to_construct_new_box =
-        !inline_flow || inline_flow.AlwaysCreateLineBoxes();
     bool can_use_existing_parent_box =
         parent_box && !ParentIsConstructedOrHaveNext(parent_box);
     if (allowed_to_construct_new_box && !can_use_existing_parent_box) {
@@ -1081,9 +1081,9 @@ void LayoutBlockFlow::LayoutRunsAndFloatsInRange(
   VerticalPositionCache vertical_position_cache;
 
   // Pagination may require us to delete and re-create a line due to floats.
-  // When this happens,
-  // we need to store the pagination strut in the meantime.
-  LayoutUnit pagination_strut_from_deleted_line;
+  // When this happens, we need to know the old offset of the line, to calculate
+  // the correct pagination strut.
+  LayoutUnit deleted_line_old_offset = LayoutUnit::Min();
 
   LineBreaker line_breaker(LineLayoutBlockFlow(this));
 
@@ -1139,7 +1139,7 @@ void LayoutBlockFlow::LayoutRunsAndFloatsInRange(
 
     // This is a short-cut for empty lines.
     if (layout_state.GetLineInfo().IsEmpty()) {
-      DCHECK(!pagination_strut_from_deleted_line);
+      DCHECK_EQ(deleted_line_old_offset, LayoutUnit::Min());
       if (LastRootBox())
         LastRootBox()->SetLineBreakInfo(end_of_line.GetLineLayoutItem(),
                                         end_of_line.Offset(),
@@ -1201,60 +1201,74 @@ void LayoutBlockFlow::LayoutRunsAndFloatsInRange(
 
       // If we decided to re-create the line due to pagination, we better have a
       // new line now.
-      DCHECK(line_box || !pagination_strut_from_deleted_line);
+      DCHECK(line_box || deleted_line_old_offset == LayoutUnit::Min());
 
       if (line_box) {
         line_box->SetLineBreakInfo(end_of_line.GetLineLayoutItem(),
                                    end_of_line.Offset(), resolver.Status());
         if (recalculate_struts) {
-          if (pagination_strut_from_deleted_line) {
-            // This is a line that got re-created because it got pushed to the
-            // next fragmentainer, and there were floats in the vicinity that
-            // affected the available width.
-            // Restore the pagination info for this line.
-            line_box->SetIsFirstAfterPageBreak(true);
-            line_box->SetPaginationStrut(pagination_strut_from_deleted_line);
-            pagination_strut_from_deleted_line = LayoutUnit();
-          } else {
-            LayoutUnit adjustment;
-            AdjustLinePositionForPagination(*line_box, adjustment);
-            if (adjustment) {
-              LayoutUnit old_line_width = AvailableLogicalWidthForLine(
-                  old_logical_height, layout_state.GetLineInfo().IsFirstLine()
-                                          ? kIndentText
-                                          : kDoNotIndentText);
-              line_box->MoveInBlockDirection(adjustment);
-              if (AvailableLogicalWidthForLine(
-                      old_logical_height + adjustment,
-                      layout_state.GetLineInfo().IsFirstLine()
-                          ? kIndentText
-                          : kDoNotIndentText) != old_line_width) {
-                // We have to delete this line, remove all floats that got
-                // added, and let line layout re-run. We had just calculated the
-                // pagination strut for this line, and we need to stow it away,
-                // so that we can re-apply it when the new line has been
-                // created.
-                pagination_strut_from_deleted_line =
-                    line_box->PaginationStrut();
-                DCHECK(pagination_strut_from_deleted_line);
-                // We're also going to assume that we're right after a page
-                // break when re-creating this line, so it better be so.
-                DCHECK(line_box->IsFirstAfterPageBreak());
-                line_box->DeleteLine();
-                end_of_line = RestartLayoutRunsAndFloatsInRange(
-                    old_logical_height, old_logical_height + adjustment,
-                    last_float_from_previous_line, resolver,
-                    previous_endof_line);
-              } else {
-                SetLogicalHeight(line_box->LineBottomWithLeading());
-              }
+          LayoutUnit adjustment;
+          AdjustLinePositionForPagination(*line_box, adjustment);
+          if (adjustment) {
+            DCHECK_GT(adjustment, LayoutUnit());
+            IndentTextOrNot indent = layout_state.GetLineInfo().IsFirstLine()
+                                         ? kIndentText
+                                         : kDoNotIndentText;
+            LayoutUnit old_line_width =
+                AvailableLogicalWidthForLine(old_logical_height, indent);
+            LayoutUnit old_logical_top = line_box->LogicalTop();
+            line_box->MoveInBlockDirection(adjustment);
+            if (AvailableLogicalWidthForLine(old_logical_height + adjustment,
+                                             indent) != old_line_width) {
+              // We have to delete this line, remove all floats that got added,
+              // and let line layout re-run. Store the offset, so that when we
+              // eventually get to a location where the line can fit, we
+              // calculate the correct pagination strut. Store the offset the
+              // first time this happens for a line; it may happen several
+              // times. Example: a line is too tall to fit in the current
+              // fragmentainer, so we attempt to lay it out into the next
+              // one. In the next fragmentainer there may be a float that's too
+              // wide to fit anything beside it, so the line will have to go
+              // below it. But there may not be enough space to fit the line
+              // below the float, so we'll have to skip to the fragmentainer
+              // after that, and retry *again* there. And so on.
+              if (deleted_line_old_offset == LayoutUnit::Min())
+                deleted_line_old_offset = old_logical_top;
+              DCHECK_NE(deleted_line_old_offset, LayoutUnit::Min());
+              // We're also going to assume that we're right after a page
+              // break when re-creating this line, so it better be so.
+              DCHECK(line_box->IsFirstAfterPageBreak());
+              line_box->DeleteLine();
+              line_box = nullptr;
+              end_of_line = RestartLayoutRunsAndFloatsInRange(
+                  old_logical_height, old_logical_height + adjustment,
+                  last_float_from_previous_line, resolver, previous_endof_line);
             }
+          }
+          if (line_box &&
+              (adjustment || deleted_line_old_offset != LayoutUnit::Min())) {
+            if (deleted_line_old_offset != LayoutUnit::Min()) {
+              // This is a line that got re-created because it got pushed to the
+              // next fragmentainer, and there were floats in the vicinity that
+              // affected the available width, so we had to re-lay out and
+              // re-paginate. We've finally got to a place where the line
+              // fits. Calculate a new pagination strut.
+              LayoutUnit strut =
+                  line_box->LogicalTop() - deleted_line_old_offset;
+              line_box->SetIsFirstAfterPageBreak(true);
+              line_box->SetPaginationStrut(strut);
+              deleted_line_old_offset = LayoutUnit::Min();
+            }
+            // If the line got adjusted (just now, or in a previous run), we
+            // need to encompass its logical bottom in the logical height of the
+            // block.
+            SetLogicalHeight(line_box->LineBottomWithLeading());
           }
         }
       }
     }
 
-    if (!pagination_strut_from_deleted_line) {
+    if (deleted_line_old_offset == LayoutUnit::Min()) {
       for (const auto& positioned_object : line_breaker.PositionedObjects()) {
         if (positioned_object.StyleRef().IsOriginalDisplayInlineType()) {
           // Auto-positioned "inline" out-of-flow objects have already been
@@ -1569,8 +1583,8 @@ static inline void AdjustMarginForInlineReplaced(LayoutObject* child,
                                                  LayoutUnit& child_max) {
   // Inline replaced elts add in their margins to their min/max values.
   const ComputedStyle& child_style = child->StyleRef();
-  Length start_margin = child_style.MarginStart();
-  Length end_margin = child_style.MarginEnd();
+  const Length& start_margin = child_style.MarginStart();
+  const Length& end_margin = child_style.MarginEnd();
   LayoutUnit margins;
   if (start_margin.IsFixed())
     margins += AdjustFloatForSubPixelLayout(start_margin.Value());
@@ -1591,9 +1605,6 @@ void LayoutBlockFlow::ComputeInlinePreferredLogicalWidths(
   LayoutUnit inline_min;
 
   const ComputedStyle& style_to_use = StyleRef();
-  LayoutBlock* containing_block = ContainingBlock();
-  LayoutUnit cw =
-      containing_block ? containing_block->ContentLogicalWidth() : LayoutUnit();
 
   // If we are at the start of a line, we want to ignore all white-space.
   // Also strip spaces if we previously had text that ended in a trailing space.
@@ -1618,7 +1629,9 @@ void LayoutBlockFlow::ComputeInlinePreferredLogicalWidths(
   // Signals the text indent was more negative than the min preferred width
   bool has_remaining_negative_text_indent = false;
 
-  LayoutUnit text_indent = MinimumValueForLength(style_to_use.TextIndent(), cw);
+  // Always resolve percentages to 0 when calculating preferred logical widths.
+  LayoutUnit text_indent =
+      MinimumValueForLength(style_to_use.TextIndent(), LayoutUnit());
   LayoutObject* prev_float = nullptr;
   bool is_prev_child_inline_flow = false;
   bool should_break_line_after_text = false;
@@ -1704,15 +1717,17 @@ void LayoutBlockFlow::ComputeInlinePreferredLogicalWidths(
 
         bool clear_previous_float;
         if (child->IsFloating()) {
-          const ComputedStyle& child_style = child->StyleRef();
-          clear_previous_float =
-              (prev_float &&
-               ((prev_float->StyleRef().Floating() == EFloat::kLeft &&
-                 (child_style.Clear() == EClear::kBoth ||
-                  child_style.Clear() == EClear::kLeft)) ||
-                (prev_float->StyleRef().Floating() == EFloat::kRight &&
-                 (child_style.Clear() == EClear::kBoth ||
-                  child_style.Clear() == EClear::kRight))));
+          if (prev_float) {
+            EFloat f = prev_float->StyleRef().Floating(style_to_use);
+            EClear c = child->StyleRef().Clear(style_to_use);
+            clear_previous_float =
+                ((f == EFloat::kLeft &&
+                  (c == EClear::kBoth || c == EClear::kLeft)) ||
+                 (f == EFloat::kRight &&
+                  (c == EClear::kBoth || c == EClear::kRight)));
+          } else {
+            clear_previous_float = false;
+          }
           prev_float = child;
         } else {
           clear_previous_float = false;
@@ -1941,6 +1956,12 @@ void LayoutBlockFlow::LayoutInlineChildren(bool relayout_children,
   }
 
   if (FirstChild()) {
+    // In full layout mode, clear the line boxes of children upfront. Otherwise,
+    // siblings can run into stale root lineboxes during layout. Then layout
+    // the replaced elements later. In partial layout mode, line boxes are not
+    // deleted and only dirtied. In that case, we can layout the replaced
+    // elements at the same time.
+    Vector<LayoutBox*> atomic_inline_children;
     for (InlineWalker walker(LineLayoutBlockFlow(this)); !walker.AtEnd();
          walker.Advance()) {
       LayoutObject* o = walker.Current().GetLayoutObject();
@@ -1973,21 +1994,52 @@ void LayoutBlockFlow::LayoutInlineChildren(bool relayout_children,
           }
         } else if (is_full_layout || o->NeedsLayout()) {
           // Atomic inline.
+          DCHECK(o->IsAtomicInlineLevel());
           box->DirtyLineBoxes(is_full_layout);
-          o->LayoutIfNeeded();
+          // In full layout mode, defer laying out inline chlidren (adding any
+          // |InlineBox|es to |LineBoxes()|) to after all calls to
+          // |DirtyLineBoxesForObject()| is done.
+          if (is_full_layout)
+            atomic_inline_children.push_back(box);
+          else
+            o->LayoutIfNeeded();
         }
       } else if (o->IsText() ||
                  (o->IsLayoutInline() && !walker.AtEndOfInline())) {
         if (!o->IsText())
           ToLayoutInline(o)->UpdateAlwaysCreateLineBoxes(
               layout_state.IsFullLayout());
-        if (layout_state.IsFullLayout() || o->SelfNeedsLayout())
+        if (layout_state.IsFullLayout() || o->SelfNeedsLayout()) {
+          // In full layout mode, line boxes are deleted at the beginning of
+          // this function. It is critical to keep them empty here, because
+          // |DirtyLineBoxesForObject()| can destroy |InlineTextBox| without
+          // unlinking them from |LineBoxes()|.
+          DCHECK(!is_full_layout || !LineBoxes()->First());
           DirtyLineBoxesForObject(o, layout_state.IsFullLayout());
+        }
         o->ClearNeedsLayout();
       }
 
       if (IsInlineWithOutlineAndContinuation(*o))
         SetContainsInlineWithOutlineAndContinuation(true);
+    }
+
+    // Now all |DirtyLineBoxesForObject()| is done. We can safely start
+    // adding |InlineBox|es to |LineBoxes()|.
+    DCHECK(!is_full_layout || !LineBoxes()->First());
+    for (LayoutBox* atomic_inline_child : atomic_inline_children) {
+      atomic_inline_child->LayoutIfNeeded();
+#if DCHECK_IS_ON()
+      // |LayoutIfNeeded| should not mark itself and its ancestors to
+      // |NeedsLayout|.
+      for (const LayoutObject* parent = atomic_inline_child;
+           parent && parent != this; parent = parent->Parent()) {
+        DCHECK(!parent->SelfNeedsLayout());
+        DCHECK(!parent->NeedsLayout() ||
+               parent->LayoutBlockedByDisplayLock(
+                   DisplayLockLifecycleTarget::kChildren));
+      }
+#endif
     }
 
     LayoutRunsAndFloats(layout_state);
@@ -2075,8 +2127,7 @@ RootInlineBox* LayoutBlockFlow::DetermineStartPosition(
     // force us to issue paint invalidations.
     if (layout_state.HasInlineChild() && !SelfNeedsLayout()) {
       SetNeedsLayoutAndFullPaintInvalidation(
-          LayoutInvalidationReason::kFloatDescendantChanged, kMarkOnlyThis);
-      SetShouldDoFullPaintInvalidation();
+          layout_invalidation_reason::kFloatDescendantChanged, kMarkOnlyThis);
     }
 
     DeleteLineBoxTree();
@@ -2170,7 +2221,7 @@ bool LayoutBlockFlow::LineBoxHasBRWithClearance(RootInlineBox* curr) {
                             ? curr->LastLeafChild()
                             : curr->FirstLeafChild();
   return last_box && last_box->GetLineLayoutItem().IsBR() &&
-         last_box->GetLineLayoutItem().StyleRef().Clear() != EClear::kNone;
+         last_box->GetLineLayoutItem().StyleRef().HasClear();
 }
 
 void LayoutBlockFlow::DetermineEndPosition(LineLayoutState& layout_state,
@@ -2179,15 +2230,25 @@ void LayoutBlockFlow::DetermineEndPosition(LineLayoutState& layout_state,
                                            BidiStatus& clean_line_bidi_status) {
   DCHECK(!layout_state.EndLine());
   RootInlineBox* last = nullptr;
+  bool previous_was_clean = false;
   for (RootInlineBox* curr = start_line->NextRootBox(); curr;
        curr = curr->NextRootBox()) {
     if (!curr->IsDirty() && LineBoxHasBRWithClearance(curr))
       return;
 
-    if (curr->IsDirty())
+    // A line is considered clean when it's not marked dirty, AND it either
+    // doesn't contain floats, or follows another clean line. The legacy line
+    // layout engine has issues with handling floats at line boundaries,
+    // potentially resulting in a float belonging to two different lines,
+    // causing all kinds of misery.
+    if (curr->IsDirty() || (curr->FloatsPtr() && !previous_was_clean)) {
       last = nullptr;
-    else if (!last)
-      last = curr;
+      previous_was_clean = false;
+    } else {
+      if (!last)
+        last = curr;
+      previous_was_clean = true;
+    }
   }
 
   if (!last)
@@ -2272,10 +2333,11 @@ bool LayoutBlockFlow::MatchedEndLine(LineLayoutState& layout_state,
 
   // The first clean line doesn't match, but we can check a handful of following
   // lines to try to match back up.
-  static int num_lines = 8;  // The # of lines we're willing to match against.
+  // The # of lines we're willing to match against.
+  constexpr int kNumLines = 8;
   RootInlineBox* original_end_line = layout_state.EndLine();
   RootInlineBox* line = original_end_line;
-  for (int i = 0; i < num_lines && line; i++, line = line->NextRootBox()) {
+  for (int i = 0; i < kNumLines && line; i++, line = line->NextRootBox()) {
     if (line->LineBreakObj() == resolver.GetPosition().GetLineLayoutItem() &&
         line->LineBreakPos() == resolver.GetPosition().Offset()) {
       // We have a match.
@@ -2319,10 +2381,24 @@ void LayoutBlockFlow::AddVisualOverflowFromInlineChildren() {
   if (HasOverflowClip() && !end_padding && GetNode() &&
       IsRootEditableElement(*GetNode()) && StyleRef().IsLeftToRightDirection())
     end_padding = LayoutUnit(1);
-  for (RootInlineBox* curr = FirstRootBox(); curr; curr = curr->NextRootBox()) {
-    LayoutRect visual_overflow =
-        curr->VisualOverflowRect(curr->LineTop(), curr->LineBottom());
-    AddContentsVisualOverflow(visual_overflow);
+
+  if (const NGPaintFragment* paint_fragment = PaintFragment()) {
+    for (const NGPaintFragment* child : paint_fragment->Children()) {
+      if (child->HasSelfPaintingLayer())
+        continue;
+      PhysicalRect child_rect = child->InkOverflow();
+      if (!child_rect.IsEmpty()) {
+        child_rect.offset += child->Offset();
+        AddContentsVisualOverflow(child_rect);
+      }
+    }
+  } else {
+    for (RootInlineBox* curr = FirstRootBox(); curr;
+         curr = curr->NextRootBox()) {
+      LayoutRect visual_overflow =
+          curr->VisualOverflowRect(curr->LineTop(), curr->LineBottom());
+      AddContentsVisualOverflow(visual_overflow);
+    }
   }
 
   if (!ContainsInlineWithOutlineAndContinuation())
@@ -2330,19 +2406,19 @@ void LayoutBlockFlow::AddVisualOverflowFromInlineChildren() {
 
   // Add outline rects of continuations of descendant inlines into visual
   // overflow of this block.
-  LayoutRect outline_bounds_of_all_continuations;
+  PhysicalRect outline_bounds_of_all_continuations;
   for (InlineWalker walker(LineLayoutBlockFlow(this)); !walker.AtEnd();
        walker.Advance()) {
     const LayoutObject& o = *walker.Current().GetLayoutObject();
     if (!IsInlineWithOutlineAndContinuation(o))
       continue;
 
-    Vector<LayoutRect> outline_rects;
+    Vector<PhysicalRect> outline_rects;
     ToLayoutInline(o).AddOutlineRectsForContinuations(
-        outline_rects, LayoutPoint(),
+        outline_rects, PhysicalOffset(),
         o.OutlineRectsShouldIncludeBlockVisualOverflow());
     if (!outline_rects.IsEmpty()) {
-      LayoutRect outline_bounds = UnionRectEvenIfEmpty(outline_rects);
+      PhysicalRect outline_bounds = UnionRectEvenIfEmpty(outline_rects);
       outline_bounds.Inflate(LayoutUnit(o.StyleRef().OutlineOutsetExtent()));
       outline_bounds_of_all_continuations.Unite(outline_bounds);
     }
@@ -2466,8 +2542,7 @@ void LayoutBlockFlow::CheckLinesForTextOverflow() {
         LogicalRightOffsetForLine(curr->LineTop(), indent_text);
     LayoutUnit block_left_edge =
         LogicalLeftOffsetForLine(curr->LineTop(), indent_text);
-    LayoutUnit line_box_edge = ltr ? curr->LogicalRightLayoutOverflow()
-                                   : curr->LogicalLeftLayoutOverflow();
+    LayoutUnit line_box_edge = ltr ? curr->LogicalRight() : curr->LogicalLeft();
     if ((ltr && line_box_edge > block_right_edge) ||
         (!ltr && line_box_edge < block_left_edge)) {
       // This line spills out of our box in the appropriate direction. Now we
@@ -2656,8 +2731,8 @@ LayoutUnit LayoutBlockFlow::StartAlignedOffsetForLine(
 void LayoutBlockFlow::SetShouldDoFullPaintInvalidationForFirstLine() {
   DCHECK(ChildrenInline());
   if (RootInlineBox* first_root_box = FirstRootBox())
-    first_root_box->SetShouldDoFullPaintInvalidationRecursively();
-  else if (NGPaintFragment* paint_fragment = PaintFragment())
+    first_root_box->SetShouldDoFullPaintInvalidationForFirstLine();
+  else if (const NGPaintFragment* paint_fragment = PaintFragment())
     paint_fragment->SetShouldDoFullPaintInvalidationForFirstLine();
 }
 

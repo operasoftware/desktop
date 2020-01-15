@@ -5,15 +5,17 @@
 #include "third_party/blink/renderer/core/fetch/form_data_bytes_consumer.h"
 
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fetch/blob_bytes_consumer.h"
-#include "third_party/blink/renderer/core/fetch/bytes_consumer_for_data_consumer_handle.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/file_metadata.h"
+#include "third_party/blink/renderer/platform/loader/fetch/data_pipe_bytes_consumer.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 #include "third_party/blink/renderer/platform/network/form_data_encoder.h"
+#include "third_party/blink/renderer/platform/network/wrapped_data_pipe_getter.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_codec.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
@@ -91,7 +93,7 @@ class SimpleFormDataBytesConsumer : public BytesConsumer {
     Vector<char> data;
     form_data_->Flatten(data);
     form_data_ = nullptr;
-    std::unique_ptr<BlobData> blob_data = BlobData::Create();
+    auto blob_data = std::make_unique<BlobData>();
     blob_data->AppendBytes(data.data(), data.size());
     auto length = blob_data->length();
     state_ = PublicState::kClosed;
@@ -159,8 +161,8 @@ class DataPipeAndDataBytesConsumer final : public BytesConsumer {
       if (!simple_consumer_) {
         scoped_refptr<EncodedFormData> simple_data =
             EncodedFormData::Create(iter_->data_);
-        simple_consumer_ =
-            new SimpleFormDataBytesConsumer(std::move(simple_data));
+        simple_consumer_ = MakeGarbageCollected<SimpleFormDataBytesConsumer>(
+            std::move(simple_data));
         if (client_)
           simple_consumer_->SetClient(client_);
       }
@@ -183,8 +185,8 @@ class DataPipeAndDataBytesConsumer final : public BytesConsumer {
     if (iter_->type_ == FormDataElement::kDataPipe) {
       // Create the data pipe consumer if there isn't one yet.
       if (!data_pipe_consumer_) {
-        network::mojom::blink::DataPipeGetterPtr* data_pipe_getter =
-            iter_->data_pipe_getter_->GetPtr();
+        network::mojom::blink::DataPipeGetter* data_pipe_getter =
+            iter_->data_pipe_getter_->GetDataPipeGetter();
 
         mojo::ScopedDataPipeProducerHandle pipe_producer_handle;
         mojo::ScopedDataPipeConsumerHandle pipe_consumer_handle;
@@ -194,16 +196,16 @@ class DataPipeAndDataBytesConsumer final : public BytesConsumer {
           return Result::kError;
         }
 
-        (*data_pipe_getter)
-            ->Read(
-                std::move(pipe_producer_handle),
-                WTF::Bind(&DataPipeAndDataBytesConsumer::DataPipeGetterCallback,
-                          WrapWeakPersistent(this)));
-        std::unique_ptr<WebDataConsumerHandle> consumer_handle =
-            Platform::Current()->CreateDataConsumerHandle(
-                std::move(pipe_consumer_handle));
-        data_pipe_consumer_ = new BytesConsumerForDataConsumerHandle(
-            execution_context_, std::move(consumer_handle));
+        data_pipe_getter->Read(
+            std::move(pipe_producer_handle),
+            WTF::Bind(&DataPipeAndDataBytesConsumer::DataPipeGetterCallback,
+                      WrapWeakPersistent(this)));
+        DataPipeBytesConsumer::CompletionNotifier* completion_notifier =
+            nullptr;
+        data_pipe_consumer_ = MakeGarbageCollected<DataPipeBytesConsumer>(
+            execution_context_->GetTaskRunner(TaskType::kNetworking),
+            std::move(pipe_consumer_handle), &completion_notifier);
+        completion_notifier_ = completion_notifier;
         if (client_)
           data_pipe_consumer_->SetClient(client_);
       }
@@ -216,14 +218,9 @@ class DataPipeAndDataBytesConsumer final : public BytesConsumer {
       }
 
       if (result == Result::kDone) {
-        // We've finished reading from the data pipe, but we're not done
-        // until we get the DataPipeGetterCallback signalling success.
-        if (!was_data_pipe_getter_callback_called_)
-          return Result::kShouldWait;
-
         // We're done. Move on to the next element.
-        was_data_pipe_getter_callback_called_ = false;
         data_pipe_consumer_ = nullptr;
+        completion_notifier_ = nullptr;
         ++iter_;
         return BeginRead(buffer, available);
       }
@@ -321,6 +318,7 @@ class DataPipeAndDataBytesConsumer final : public BytesConsumer {
     visitor->Trace(client_);
     visitor->Trace(simple_consumer_);
     visitor->Trace(data_pipe_consumer_);
+    visitor->Trace(completion_notifier_);
     BytesConsumer::Trace(visitor);
   }
 
@@ -328,22 +326,26 @@ class DataPipeAndDataBytesConsumer final : public BytesConsumer {
   void DataPipeGetterCallback(int32_t status, uint64_t size) {
     switch (state_) {
       case PublicState::kErrored:
+        // The error should have already been propagated to the notifier.
+        DCHECK(!completion_notifier_);
+        DCHECK(!data_pipe_consumer_);
         return;
       case PublicState::kClosed:
+        // The data_pipe_consumer_ should already be cleaned up.
+        DCHECK(!completion_notifier_);
+        DCHECK(!data_pipe_consumer_);
         return;
       case PublicState::kReadableOrWaiting:
         break;
     }
 
-    DCHECK(data_pipe_consumer_);
-    auto client = client_;
-    if (status != 0)  // 0 is net::OK.
-      SetError();
-    else
-      was_data_pipe_getter_callback_called_ = true;
-
-    if (client)
-      client->OnStateChange();
+    DCHECK(completion_notifier_);
+    if (status != 0) {
+      // 0 is net::OK.
+      completion_notifier_->SignalError(Error("error"));
+    } else {
+      completion_notifier_->SignalComplete();
+    }
   }
 
   void Close() {
@@ -353,7 +355,11 @@ class DataPipeAndDataBytesConsumer final : public BytesConsumer {
     state_ = PublicState::kClosed;
     ClearClient();
     simple_consumer_ = nullptr;
-    data_pipe_consumer_ = nullptr;
+    if (data_pipe_consumer_) {
+      data_pipe_consumer_->Cancel();
+      data_pipe_consumer_ = nullptr;
+      completion_notifier_ = nullptr;
+    }
   }
 
   void SetError() {
@@ -364,7 +370,11 @@ class DataPipeAndDataBytesConsumer final : public BytesConsumer {
     error_ = Error("error");
     ClearClient();
     simple_consumer_ = nullptr;
-    data_pipe_consumer_ = nullptr;
+    if (completion_notifier_) {
+      completion_notifier_->SignalError(error_);
+      completion_notifier_ = nullptr;
+      data_pipe_consumer_ = nullptr;
+    }
   }
 
   Member<ExecutionContext> execution_context_;
@@ -374,8 +384,8 @@ class DataPipeAndDataBytesConsumer final : public BytesConsumer {
   Error error_;
   Member<BytesConsumer::Client> client_;
   Member<SimpleFormDataBytesConsumer> simple_consumer_;
-  Member<BytesConsumerForDataConsumerHandle> data_pipe_consumer_;
-  bool was_data_pipe_getter_callback_called_ = false;
+  Member<DataPipeBytesConsumer> data_pipe_consumer_;
+  Member<DataPipeBytesConsumer::CompletionNotifier> completion_notifier_;
 };
 
 class ComplexFormDataBytesConsumer final : public BytesConsumer {
@@ -389,7 +399,7 @@ class ComplexFormDataBytesConsumer final : public BytesConsumer {
       return;
     }
 
-    std::unique_ptr<BlobData> blob_data = BlobData::Create();
+    auto blob_data = std::make_unique<BlobData>();
     for (const auto& element : form_data_->Elements()) {
       switch (element.type_) {
         case FormDataElement::kData:
@@ -426,7 +436,7 @@ class ComplexFormDataBytesConsumer final : public BytesConsumer {
     blob_data->SetContentType(AtomicString("multipart/form-data; boundary=") +
                               form_data_->Boundary().data());
     auto size = blob_data->length();
-    blob_bytes_consumer_ = new BlobBytesConsumer(
+    blob_bytes_consumer_ = MakeGarbageCollected<BlobBytesConsumer>(
         execution_context, BlobDataHandle::Create(std::move(blob_data), size));
   }
 
@@ -476,14 +486,15 @@ class ComplexFormDataBytesConsumer final : public BytesConsumer {
 
  private:
   scoped_refptr<EncodedFormData> form_data_;
-  TraceWrapperMember<BytesConsumer> blob_bytes_consumer_;
+  Member<BytesConsumer> blob_bytes_consumer_;
 };
 
 }  // namespace
 
 FormDataBytesConsumer::FormDataBytesConsumer(const String& string)
-    : impl_(new SimpleFormDataBytesConsumer(EncodedFormData::Create(
-          UTF8Encoding().Encode(string, WTF::kNoUnencodables)))) {}
+    : impl_(MakeGarbageCollected<SimpleFormDataBytesConsumer>(
+          EncodedFormData::Create(
+              UTF8Encoding().Encode(string, WTF::kNoUnencodables)))) {}
 
 FormDataBytesConsumer::FormDataBytesConsumer(DOMArrayBuffer* buffer)
     : FormDataBytesConsumer(buffer->Data(), buffer->ByteLength()) {}
@@ -491,8 +502,8 @@ FormDataBytesConsumer::FormDataBytesConsumer(DOMArrayBuffer* buffer)
 FormDataBytesConsumer::FormDataBytesConsumer(DOMArrayBufferView* view)
     : FormDataBytesConsumer(view->BaseAddress(), view->byteLength()) {}
 
-FormDataBytesConsumer::FormDataBytesConsumer(const void* data, size_t size)
-    : impl_(new SimpleFormDataBytesConsumer(
+FormDataBytesConsumer::FormDataBytesConsumer(const void* data, wtf_size_t size)
+    : impl_(MakeGarbageCollected<SimpleFormDataBytesConsumer>(
           EncodedFormData::Create(data, size))) {}
 
 FormDataBytesConsumer::FormDataBytesConsumer(
@@ -516,13 +527,14 @@ BytesConsumer* FormDataBytesConsumer::GetImpl(
   DCHECK(form_data);
   switch (GetType(form_data.get())) {
     case FormDataType::kSimple:
-      return new SimpleFormDataBytesConsumer(std::move(form_data));
+      return MakeGarbageCollected<SimpleFormDataBytesConsumer>(
+          std::move(form_data));
     case FormDataType::kComplex:
-      return new ComplexFormDataBytesConsumer(
+      return MakeGarbageCollected<ComplexFormDataBytesConsumer>(
           execution_context, std::move(form_data), consumer_for_testing);
     case FormDataType::kDataPipeAndDataOnly:
-      return new DataPipeAndDataBytesConsumer(execution_context,
-                                              form_data.get());
+      return MakeGarbageCollected<DataPipeAndDataBytesConsumer>(
+          execution_context, form_data.get());
   }
   return nullptr;
 }

@@ -17,6 +17,7 @@
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/gpu/GrContext.h"
+#include "v8/include/v8.h"
 
 namespace blink {
 
@@ -40,27 +41,10 @@ scoped_refptr<StaticBitmapImage> StaticBitmapImage::Create(PaintImage image) {
 }
 
 scoped_refptr<StaticBitmapImage> StaticBitmapImage::Create(
-    scoped_refptr<Uint8Array>&& image_pixels,
+    sk_sp<SkData> data,
     const SkImageInfo& info) {
-  SkPixmap pixmap(info, image_pixels->Data(), info.minRowBytes());
-
-  Uint8Array* pixels = image_pixels.get();
-  if (pixels) {
-    pixels->AddRef();
-    image_pixels = nullptr;
-  }
-
-  return Create(SkImage::MakeFromRaster(
-      pixmap,
-      [](const void*, void* p) { static_cast<Uint8Array*>(p)->Release(); },
-      pixels));
-}
-
-scoped_refptr<StaticBitmapImage> StaticBitmapImage::Create(
-    WTF::ArrayBufferContents& contents,
-    const SkImageInfo& info) {
-  SkPixmap pixmap(info, contents.Data(), info.minRowBytes());
-  return Create(SkImage::MakeFromRaster(pixmap, nullptr, nullptr));
+  return Create(
+      SkImage::MakeRasterData(info, std::move(data), info.minRowBytes()));
 }
 
 void StaticBitmapImage::DrawHelper(cc::PaintCanvas* canvas,
@@ -84,43 +68,18 @@ scoped_refptr<StaticBitmapImage> StaticBitmapImage::ConvertToColorSpace(
     SkColorType color_type) {
   DCHECK(color_space);
   sk_sp<SkImage> skia_image = PaintImageForCurrentFrame().GetSkImage();
+
   // If we don't need to change the color type, use SkImage::makeColorSpace()
   if (skia_image->colorType() == color_type) {
     skia_image = skia_image->makeColorSpace(color_space);
-    return StaticBitmapImage::Create(skia_image, skia_image->isTextureBacked()
-                                                     ? ContextProviderWrapper()
-                                                     : nullptr);
-  }
-
-  // Otherwise, create a surface and draw on that to avoid GPU readback.
-  sk_sp<SkColorSpace> src_color_space = skia_image->refColorSpace();
-  if (!src_color_space.get())
-    src_color_space = SkColorSpace::MakeSRGB();
-  sk_sp<SkColorSpace> dst_color_space = color_space;
-  if (!dst_color_space.get())
-    dst_color_space = SkColorSpace::MakeSRGB();
-
-  SkImageInfo info =
-      SkImageInfo::Make(skia_image->width(), skia_image->height(), color_type,
-                        skia_image->alphaType(), dst_color_space);
-  sk_sp<SkSurface> surface = nullptr;
-  if (skia_image->isTextureBacked()) {
-    GrContext* gr = ContextProviderWrapper()->ContextProvider()->GetGrContext();
-    surface = SkSurface::MakeRenderTarget(gr, SkBudgeted::kNo, info);
   } else {
-      surface = SkSurface::MakeRaster(info);
+    skia_image =
+        skia_image->makeColorTypeAndColorSpace(color_type, color_space);
   }
-  SkPaint paint;
-  surface->getCanvas()->drawImage(skia_image, 0, 0, &paint);
-  sk_sp<SkImage> converted_skia_image = surface->makeImageSnapshot();
 
-  DCHECK(converted_skia_image.get());
-  DCHECK(skia_image.get() != converted_skia_image.get());
-
-  return StaticBitmapImage::Create(converted_skia_image,
-                                   converted_skia_image->isTextureBacked()
-                                       ? ContextProviderWrapper()
-                                       : nullptr);
+  return StaticBitmapImage::Create(skia_image, skia_image->isTextureBacked()
+                                                   ? ContextProviderWrapper()
+                                                   : nullptr);
 }
 
 bool StaticBitmapImage::ConvertToArrayBufferContents(
@@ -136,14 +95,16 @@ bool StaticBitmapImage::ConvertToArrayBufferContents(
       data_size.ValueOrDie() > v8::TypedArray::kMaxLength)
     return false;
 
-  size_t alloc_size_in_bytes = rect.Size().Area() * bytes_per_pixel;
+  int alloc_size_in_bytes = data_size.ValueOrDie();
   if (!src_image) {
-    auto data = WTF::ArrayBufferContents::CreateDataHandle(
-        alloc_size_in_bytes, WTF::ArrayBufferContents::kZeroInitialize);
-    if (!data)
+    WTF::ArrayBufferContents result(alloc_size_in_bytes, 1,
+                                    WTF::ArrayBufferContents::kNotShared,
+                                    WTF::ArrayBufferContents::kZeroInitialize);
+
+    // Check if the ArrayBuffer backing store was allocated correctly.
+    if (result.DataLength() != static_cast<size_t>(alloc_size_in_bytes)) {
       return false;
-    WTF::ArrayBufferContents result(std::move(data),
-                                    WTF::ArrayBufferContents::kNotShared);
+    }
     result.Transfer(dest_contents);
     return true;
   }
@@ -156,12 +117,14 @@ bool StaticBitmapImage::ConvertToArrayBufferContents(
   WTF::ArrayBufferContents::InitializationPolicy initialization_policy =
       may_have_stray_area ? WTF::ArrayBufferContents::kZeroInitialize
                           : WTF::ArrayBufferContents::kDontInitialize;
-  auto data = WTF::ArrayBufferContents::CreateDataHandle(alloc_size_in_bytes,
-                                                         initialization_policy);
-  if (!data)
+
+  WTF::ArrayBufferContents result(alloc_size_in_bytes, 1,
+                                  WTF::ArrayBufferContents::kNotShared,
+                                  initialization_policy);
+  // Check if the ArrayBuffer backing store was allocated correctly.
+  if (result.DataLength() != static_cast<size_t>(alloc_size_in_bytes)) {
     return false;
-  WTF::ArrayBufferContents result(std::move(data),
-                                  WTF::ArrayBufferContents::kNotShared);
+  }
 
   SkColorType color_type =
       (color_params.GetSkColorType() == kRGBA_F16_SkColorType)
@@ -171,6 +134,8 @@ bool StaticBitmapImage::ConvertToArrayBufferContents(
       rect.Width(), rect.Height(), color_type, kUnpremul_SkAlphaType,
       color_params.GetSkColorSpaceForSkSurfaces());
   sk_sp<SkImage> sk_image = src_image->PaintImageForCurrentFrame().GetSkImage();
+  if (!sk_image)
+    return false;
   bool read_pixels_successful = sk_image->readPixels(
       info, result.Data(), info.minRowBytes(), rect.X(), rect.Y());
   DCHECK(read_pixels_successful ||

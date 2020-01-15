@@ -33,22 +33,23 @@ from blinkpy.web_tests.models import test_expectations
 from blinkpy.web_tests.models import test_failures
 from blinkpy.web_tests.models import test_results
 from blinkpy.web_tests.models import test_run_results
-
+from blinkpy.web_tests.port.driver import DriverOutput
 
 def get_result(test_name, result_type=test_expectations.PASS, run_time=0):
     failures = []
+    dummy_1, dummy_2 = DriverOutput(None, None, None, None), DriverOutput(None, None, None, None)
     if result_type == test_expectations.TIMEOUT:
-        failures = [test_failures.FailureTimeout()]
+        failures = [test_failures.FailureTimeout(dummy_1)]
     elif result_type == test_expectations.AUDIO:
-        failures = [test_failures.FailureAudioMismatch()]
+        failures = [test_failures.FailureAudioMismatch(dummy_1, dummy_2)]
     elif result_type == test_expectations.TEXT:
-        failures = [test_failures.FailureTextMismatch()]
+        failures = [test_failures.FailureTextMismatch(dummy_1, dummy_2)]
     elif result_type == test_expectations.IMAGE:
-        failures = [test_failures.FailureImageHashMismatch()]
+        failures = [test_failures.FailureImageHashMismatch(dummy_1, dummy_2)]
     elif result_type == test_expectations.CRASH:
-        failures = [test_failures.FailureCrash()]
+        failures = [test_failures.FailureCrash(dummy_1)]
     elif result_type == test_expectations.LEAK:
-        failures = [test_failures.FailureLeak()]
+        failures = [test_failures.FailureLeak(dummy_1)]
     return test_results.TestResult(test_name, failures=failures, test_run_time=run_time)
 
 
@@ -157,7 +158,6 @@ def summarized_results(port, expected, passing, flaky, only_include_failing=Fals
 
     return test_run_results.summarize_results(
         port, initial_results.expectations, initial_results, all_retry_results,
-        enabled_pixel_tests_in_retry=False,
         only_include_failing=only_include_failing)
 
 
@@ -166,22 +166,34 @@ class InterpretTestFailuresTest(unittest.TestCase):
     def setUp(self):
         host = MockHost()
         self.port = host.port_factory.get(port_name='test')
+        self._actual_output = DriverOutput(None, None, None, None)
+        self._expected_output = DriverOutput(None, None, None, None)
 
     def test_interpret_test_failures(self):
         test_dict = test_run_results._interpret_test_failures(
-            [test_failures.FailureReftestMismatchDidNotOccur(self.port.abspath_for_test('foo/reftest-expected-mismatch.html'))])
+            [test_failures.FailureReftestMismatchDidNotOccur(
+                self._actual_output, self._expected_output,
+                self.port.abspath_for_test('foo/reftest-expected-mismatch.html'))])
         self.assertEqual(len(test_dict), 0)
 
-        test_dict = test_run_results._interpret_test_failures([test_failures.FailureMissingAudio()])
+        test_dict = test_run_results._interpret_test_failures(
+            [test_failures.FailureMissingAudio(
+                self._actual_output, self._expected_output)])
         self.assertIn('is_missing_audio', test_dict)
 
-        test_dict = test_run_results._interpret_test_failures([test_failures.FailureMissingResult()])
+        test_dict = test_run_results._interpret_test_failures(
+            [test_failures.FailureMissingResult(
+                self._actual_output, self._expected_output)])
         self.assertIn('is_missing_text', test_dict)
 
-        test_dict = test_run_results._interpret_test_failures([test_failures.FailureMissingImage()])
+        test_dict = test_run_results._interpret_test_failures(
+            [test_failures.FailureMissingImage(
+                self._actual_output, self._expected_output)])
         self.assertIn('is_missing_image', test_dict)
 
-        test_dict = test_run_results._interpret_test_failures([test_failures.FailureMissingImageHash()])
+        test_dict = test_run_results._interpret_test_failures(
+            [test_failures.FailureMissingImageHash(
+                self._actual_output, self._expected_output)])
         self.assertIn('is_missing_image', test_dict)
 
 
@@ -331,8 +343,7 @@ class SummarizedResultsTest(unittest.TestCase):
         all_retry_results[1].add(get_result(test_name, test_expectations.PASS, run_time=0.1), False, False)
         all_retry_results[2].add(get_result(test_name, test_expectations.PASS, run_time=0.1), False, False)
         summary = test_run_results.summarize_results(
-            self.port, expectations, initial_results, all_retry_results,
-            enabled_pixel_tests_in_retry=True)
+            self.port, expectations, initial_results, all_retry_results)
         self.assertIn('is_unexpected', summary['tests']['failures']['expected']['text.html'])
         self.assertEquals(summary['tests']['failures']['expected']['text.html']['expected'], 'FAIL')
         self.assertEquals(summary['tests']['failures']['expected']['text.html']['actual'], 'TIMEOUT LEAK PASS PASS')
@@ -381,8 +392,7 @@ class SummarizedResultsTest(unittest.TestCase):
         all_retry_results[1].add(get_result(test_name, test_expectations.PASS), True, False)
         all_retry_results[2].add(get_result(test_name, test_expectations.PASS), True, False)
         summary = test_run_results.summarize_results(
-            self.port, expectations, initial_results, all_retry_results,
-            enabled_pixel_tests_in_retry=True)
+            self.port, expectations, initial_results, all_retry_results)
         self.assertTrue('is_unexpected' not in summary['tests']['passes']['text.html'])
         self.assertEquals(summary['tests']['passes']['text.html']['expected'], 'PASS')
         self.assertEquals(summary['tests']['passes']['text.html']['actual'], 'CRASH TIMEOUT PASS PASS')
@@ -402,9 +412,7 @@ class SummarizedResultsTest(unittest.TestCase):
         all_retry_results[0].add(get_result(test_name, test_expectations.LEAK), False, False)
 
         summary = test_run_results.summarize_results(
-            self.port, expectations, initial_results, all_retry_results,
-            enabled_pixel_tests_in_retry=True)
-        print summary
+            self.port, expectations, initial_results, all_retry_results)
         self.assertEquals(summary['tests']['passes']['text.html']['expected'], 'PASS')
         self.assertEquals(summary['tests']['passes']['text.html']['actual'], 'CRASH IMAGE TIMEOUT TEXT LEAK')
         self.assertEquals(summary['num_flaky'], 0)

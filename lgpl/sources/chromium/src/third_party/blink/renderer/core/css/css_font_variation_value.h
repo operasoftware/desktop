@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_FONT_VARIATION_VALUE_H_
 
 #include "third_party/blink/renderer/core/css/css_value.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -13,9 +14,7 @@ namespace cssvalue {
 
 class CSSFontVariationValue : public CSSValue {
  public:
-  static CSSFontVariationValue* Create(const AtomicString& tag, float value) {
-    return new CSSFontVariationValue(tag, value);
-  }
+  CSSFontVariationValue(const AtomicString& tag, float value);
 
   const AtomicString& Tag() const { return tag_; }
   float Value() const { return value_; }
@@ -28,15 +27,19 @@ class CSSFontVariationValue : public CSSValue {
   }
 
  private:
-  CSSFontVariationValue(const AtomicString& tag, float value);
-
   AtomicString tag_;
   const float value_;
 };
 
-DEFINE_CSS_VALUE_TYPE_CASTS(CSSFontVariationValue, IsFontVariationValue());
-
 }  // namespace cssvalue
+
+template <>
+struct DowncastTraits<cssvalue::CSSFontVariationValue> {
+  static bool AllowFrom(const CSSValue& value) {
+    return value.IsFontVariationValue();
+  }
+};
+
 }  // namespace blink
 
 #endif

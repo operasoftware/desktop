@@ -47,8 +47,9 @@ WebUIBrowserAsyncGenTest.prototype = {
 
   /** @inheritDoc */
   preLoad: function() {
-    if (window.preLoadCount === undefined)
+    if (window.preLoadCount === undefined) {
       window.preLoadCount = 0;
+    }
     assertEquals(0, Number(window.preLoadCount++));
   },
 };
@@ -189,24 +190,6 @@ function setTestRanTrue() {
   testRan = true;
 }
 
-// Test overriding globals.
-TEST_F('WebUIBrowserAsyncGenTest', 'TestRegisterMockGlobals', function() {
-  this.makeAndRegisterMockGlobals(['setTestRanTrue']);
-
-  // Mock the setTestRanTrue global function.
-  this.mockGlobals.expects(once()).setTestRanTrue().will(runAllActionsAsync(
-      WhenTestDone.ALWAYS, callGlobalWithSavedArgs(null, 'setTestRanTrue'),
-      callFunction(function() {
-        assertTrue(testRan);
-      })));
-
-  // Cause setTestRanTrue to be invoked asynchronously.
-  chrome.send('callJS', ['setTestRanTrue']);
-
-  // In case the global isn't called, call testDone to collect the results.
-  chrome.send('callJS', ['testDone']);
-});
-
 /**
  * Will be set to the runTest continuation by the following test fixture.
  * @type {Function}
@@ -257,31 +240,3 @@ WebUIBrowserAsyncGenDeferredTest.prototype = {
 TEST_F('WebUIBrowserAsyncGenDeferredTest', 'TestDeferRunTest', function() {
   this.ranTest_ = true;
 });
-
-/**
- * Test fixture for testing async tests are deferred until global is called.
- * @constructor
- */
-function WebUIBrowserAsyncGenDeferredToGlobalTest() {}
-
-WebUIBrowserAsyncGenDeferredToGlobalTest.prototype = {
-  __proto__: WebUIBrowserAsyncGenDeferredTest.prototype,
-
-  /** @inheritDoc */
-  setUp: function() {
-    this.makeAndRegisterMockGlobals(['setTestRanTrue']);
-    this.mockGlobals.expects(once()).setTestRanTrue().will(runAllActionsAsync(
-        WhenTestDone.ALWAYS, callGlobalWithSavedArgs(null, 'setTestRanTrue'),
-        callFunction(deferRunTest)));
-
-    // Cause setTestRanTrue to be invoked asynchronously.
-    chrome.send('callJS', ['setTestRanTrue']);
-  },
-};
-
-TEST_F(
-    'WebUIBrowserAsyncGenDeferredToGlobalTest', 'TestDeferRunTestToGlobal',
-    function() {
-      this.ranTest_ = true;
-      assertTrue(testRan);
-    });

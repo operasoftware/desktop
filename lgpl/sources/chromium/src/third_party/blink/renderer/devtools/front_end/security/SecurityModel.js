@@ -48,8 +48,9 @@ Security.SecurityModel = class extends SDK.SDKModel {
         // and so that failed/cancelled requests appear at the bottom of the origins list.
         Protocol.Security.SecurityState.Unknown
       ];
-      for (let i = 0; i < ordering.length; i++)
+      for (let i = 0; i < ordering.length; i++) {
         securityStateMap.set(ordering[i], i + 1);
+      }
       Security.SecurityModel._symbolicToNumericSecurityState = securityStateMap;
     }
     const aScore = securityStateMap.get(a) || 0;
@@ -73,16 +74,12 @@ Security.SecurityModel.Events = {
 Security.PageSecurityState = class {
   /**
    * @param {!Protocol.Security.SecurityState} securityState
-   * @param {boolean} schemeIsCryptographic
    * @param {!Array<!Protocol.Security.SecurityStateExplanation>} explanations
-   * @param {?Protocol.Security.InsecureContentStatus} insecureContentStatus
    * @param {?string} summary
    */
-  constructor(securityState, schemeIsCryptographic, explanations, insecureContentStatus, summary) {
+  constructor(securityState, explanations, summary) {
     this.securityState = securityState;
-    this.schemeIsCryptographic = schemeIsCryptographic;
     this.explanations = explanations;
-    this.insecureContentStatus = insecureContentStatus;
     this.summary = summary;
   }
 };
@@ -105,11 +102,16 @@ Security.SecurityDispatcher = class {
    * @param {?string=} summary
    */
   securityStateChanged(securityState, schemeIsCryptographic, explanations, insecureContentStatus, summary) {
-    const pageSecurityState = new Security.PageSecurityState(
-        securityState, schemeIsCryptographic, explanations, insecureContentStatus, summary || null);
+    const pageSecurityState = new Security.PageSecurityState(securityState, explanations, summary || null);
     this._model.dispatchEventToListeners(Security.SecurityModel.Events.SecurityStateChanged, pageSecurityState);
   }
 
+  /**
+   * @override
+   * @param {!Protocol.Security.VisibleSecurityState} visibleSecurityState
+   */
+  visibleSecurityStateChanged(visibleSecurityState) {
+  }
 
   /**
    * @override

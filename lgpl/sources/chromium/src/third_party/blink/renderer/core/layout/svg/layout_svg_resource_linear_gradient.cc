@@ -21,13 +21,15 @@
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_linear_gradient.h"
 
 #include "third_party/blink/renderer/core/svg/svg_linear_gradient_element.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
 LayoutSVGResourceLinearGradient::LayoutSVGResourceLinearGradient(
     SVGLinearGradientElement* node)
     : LayoutSVGResourceGradient(node),
-      attributes_wrapper_(LinearGradientAttributesWrapper::Create()) {}
+      attributes_wrapper_(
+          MakeGarbageCollected<LinearGradientAttributesWrapper>()) {}
 
 LayoutSVGResourceLinearGradient::~LayoutSVGResourceLinearGradient() = default;
 
@@ -57,7 +59,8 @@ scoped_refptr<Gradient> LayoutSVGResourceLinearGradient::BuildGradient() const {
   scoped_refptr<Gradient> gradient = Gradient::CreateLinear(
       StartPoint(attributes), EndPoint(attributes),
       PlatformSpreadMethodFromSVGType(attributes.SpreadMethod()),
-      Gradient::ColorInterpolation::kUnpremultiplied);
+      Gradient::ColorInterpolation::kUnpremultiplied,
+      Gradient::DegenerateHandling::kAllow);
   gradient->AddColorStops(attributes.Stops());
   return gradient;
 }

@@ -33,9 +33,12 @@
 
 #include <stdint.h>
 #include "base/memory/scoped_refptr.h"
+#include "mojo/public/cpp/base/big_buffer.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -50,44 +53,62 @@ constexpr size_t kCachedMetaDataStart = kCacheDataTypeStart + sizeof(uint32_t);
 // Serialized data is NOT portable across architectures. However, reading the
 // data type ID will reject data generated with a different byte-order.
 class PLATFORM_EXPORT CachedMetadata : public RefCounted<CachedMetadata> {
+  USING_FAST_MALLOC(CachedMetadata);
+
  public:
   static scoped_refptr<CachedMetadata> Create(uint32_t data_type_id,
-                                              const char* data,
+                                              const uint8_t* data,
                                               size_t size) {
-    return base::AdoptRef(new CachedMetadata(data_type_id, data, size));
+    return base::AdoptRef(
+        new CachedMetadata(data_type_id, data, SafeCast<wtf_size_t>(size)));
   }
 
   static scoped_refptr<CachedMetadata> CreateFromSerializedData(
-      const char* data,
+      const uint8_t* data,
       size_t);
+  static scoped_refptr<CachedMetadata> CreateFromSerializedData(
+      Vector<uint8_t> data);
+  static scoped_refptr<CachedMetadata> CreateFromSerializedData(
+      mojo_base::BigBuffer data);
 
   ~CachedMetadata() = default;
 
-  const Vector<char>& SerializedData() const { return serialized_data_; }
+  base::span<const uint8_t> SerializedData() {
+    return base::make_span(RawData(), RawSize());
+  }
 
   uint32_t DataTypeID() const {
-    DCHECK_GE(serialized_data_.size(), kCachedMetaDataStart);
+    DCHECK_GE(RawSize(), kCachedMetaDataStart);
     return *reinterpret_cast_ptr<uint32_t*>(
-        const_cast<char*>(serialized_data_.data() + kCacheDataTypeStart));
+        const_cast<uint8_t*>(RawData() + kCacheDataTypeStart));
   }
 
-  const char* Data() const {
-    DCHECK_GE(serialized_data_.size(), kCachedMetaDataStart);
-    return serialized_data_.data() + kCachedMetaDataStart;
+  const uint8_t* Data() const {
+    DCHECK_GE(RawSize(), kCachedMetaDataStart);
+    return RawData() + kCachedMetaDataStart;
   }
 
-  size_t size() const {
-    DCHECK_GE(serialized_data_.size(), kCachedMetaDataStart);
-    return serialized_data_.size() - kCachedMetaDataStart;
+  uint32_t size() const {
+    DCHECK_GE(RawSize(), kCachedMetaDataStart);
+    return RawSize() - kCachedMetaDataStart;
   }
 
  private:
-  CachedMetadata(const char* data, size_t);
-  CachedMetadata(uint32_t data_type_id, const char* data, size_t);
+  explicit CachedMetadata(Vector<uint8_t> data);
+  CachedMetadata(uint32_t data_type_id, const uint8_t* data, wtf_size_t);
+  explicit CachedMetadata(mojo_base::BigBuffer data);
+
+  const uint8_t* RawData() const {
+    return buffer_.size() ? buffer_.data() : vector_.data();
+  }
+  uint32_t RawSize() const {
+    return buffer_.size() ? SafeCast<uint32_t>(buffer_.size()) : vector_.size();
+  }
 
   // Since the serialization format supports random access, storing it in
   // serialized form avoids need for a copy during serialization.
-  Vector<char> serialized_data_;
+  Vector<uint8_t> vector_;
+  mojo_base::BigBuffer buffer_;
 };
 
 }  // namespace blink

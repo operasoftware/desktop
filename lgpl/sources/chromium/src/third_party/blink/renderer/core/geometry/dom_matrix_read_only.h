@@ -36,41 +36,60 @@ class CORE_EXPORT DOMMatrixReadOnly : public ScriptWrappable {
                                              ExceptionState&);
   static DOMMatrixReadOnly* fromFloat64Array(NotShared<DOMFloat64Array>,
                                              ExceptionState&);
-  static DOMMatrixReadOnly* fromMatrix(DOMMatrixInit&, ExceptionState&);
-  static DOMMatrixReadOnly* fromMatrix2D(DOMMatrix2DInit&, ExceptionState&);
+  static DOMMatrixReadOnly* fromMatrix(DOMMatrixInit*, ExceptionState&);
+  static DOMMatrixReadOnly* fromMatrix2D(DOMMatrix2DInit*, ExceptionState&);
   static DOMMatrixReadOnly* CreateForSerialization(double[], int size);
+
+  DOMMatrixReadOnly() = default;
+  DOMMatrixReadOnly(const String&, ExceptionState&);
+  DOMMatrixReadOnly(const TransformationMatrix&, bool is2d = true);
+
+  template <typename T>
+  DOMMatrixReadOnly(T sequence, int size) {
+    if (size == 6) {
+      matrix_.SetMatrix(sequence[0], sequence[1], sequence[2], sequence[3],
+                        sequence[4], sequence[5]);
+      is2d_ = true;
+    } else if (size == 16) {
+      matrix_.SetMatrix(sequence[0], sequence[1], sequence[2], sequence[3],
+                        sequence[4], sequence[5], sequence[6], sequence[7],
+                        sequence[8], sequence[9], sequence[10], sequence[11],
+                        sequence[12], sequence[13], sequence[14], sequence[15]);
+      is2d_ = false;
+    } else {
+      NOTREACHED();
+    }
+  }
   ~DOMMatrixReadOnly() override;
-  // Used by Canvas2D, not defined on the IDL.
-  static DOMMatrixReadOnly* fromMatrix2D(DOMMatrix2DInit&);
 
-  double a() const { return matrix_->M11(); }
-  double b() const { return matrix_->M12(); }
-  double c() const { return matrix_->M21(); }
-  double d() const { return matrix_->M22(); }
-  double e() const { return matrix_->M41(); }
-  double f() const { return matrix_->M42(); }
+  double a() const { return matrix_.M11(); }
+  double b() const { return matrix_.M12(); }
+  double c() const { return matrix_.M21(); }
+  double d() const { return matrix_.M22(); }
+  double e() const { return matrix_.M41(); }
+  double f() const { return matrix_.M42(); }
 
-  double m11() const { return matrix_->M11(); }
-  double m12() const { return matrix_->M12(); }
-  double m13() const { return matrix_->M13(); }
-  double m14() const { return matrix_->M14(); }
-  double m21() const { return matrix_->M21(); }
-  double m22() const { return matrix_->M22(); }
-  double m23() const { return matrix_->M23(); }
-  double m24() const { return matrix_->M24(); }
-  double m31() const { return matrix_->M31(); }
-  double m32() const { return matrix_->M32(); }
-  double m33() const { return matrix_->M33(); }
-  double m34() const { return matrix_->M34(); }
-  double m41() const { return matrix_->M41(); }
-  double m42() const { return matrix_->M42(); }
-  double m43() const { return matrix_->M43(); }
-  double m44() const { return matrix_->M44(); }
+  double m11() const { return matrix_.M11(); }
+  double m12() const { return matrix_.M12(); }
+  double m13() const { return matrix_.M13(); }
+  double m14() const { return matrix_.M14(); }
+  double m21() const { return matrix_.M21(); }
+  double m22() const { return matrix_.M22(); }
+  double m23() const { return matrix_.M23(); }
+  double m24() const { return matrix_.M24(); }
+  double m31() const { return matrix_.M31(); }
+  double m32() const { return matrix_.M32(); }
+  double m33() const { return matrix_.M33(); }
+  double m34() const { return matrix_.M34(); }
+  double m41() const { return matrix_.M41(); }
+  double m42() const { return matrix_.M42(); }
+  double m43() const { return matrix_.M43(); }
+  double m44() const { return matrix_.M44(); }
 
   bool is2D() const;
   bool isIdentity() const;
 
-  DOMMatrix* multiply(DOMMatrixInit&, ExceptionState&);
+  DOMMatrix* multiply(DOMMatrixInit*, ExceptionState&);
   DOMMatrix* translate(double tx = 0, double ty = 0, double tz = 0);
   DOMMatrix* scale(double sx = 1);
   DOMMatrix* scale(double sx,
@@ -79,6 +98,7 @@ class CORE_EXPORT DOMMatrixReadOnly : public ScriptWrappable {
                    double ox = 0,
                    double oy = 0,
                    double oz = 0);
+  DOMMatrix* scaleNonUniform(double sx = 1, double sy = 1);
   DOMMatrix* scale3d(double scale = 1,
                      double ox = 0,
                      double oy = 0,
@@ -97,7 +117,7 @@ class CORE_EXPORT DOMMatrixReadOnly : public ScriptWrappable {
   DOMMatrix* flipY();
   DOMMatrix* inverse();
 
-  DOMPoint* transformPoint(const DOMPointInit&);
+  DOMPoint* transformPoint(const DOMPointInit*);
 
   NotShared<DOMFloat32Array> toFloat32Array() const;
   NotShared<DOMFloat64Array> toFloat64Array() const;
@@ -106,7 +126,7 @@ class CORE_EXPORT DOMMatrixReadOnly : public ScriptWrappable {
 
   ScriptValue toJSONForBinding(ScriptState*) const;
 
-  const TransformationMatrix& Matrix() const { return *matrix_; }
+  const TransformationMatrix& Matrix() const { return matrix_; }
 
   AffineTransform GetAffineTransform() const;
 
@@ -115,40 +135,13 @@ class CORE_EXPORT DOMMatrixReadOnly : public ScriptWrappable {
   }
 
  protected:
-  DOMMatrixReadOnly() = default;
-  DOMMatrixReadOnly(const String&, ExceptionState&);
-  DOMMatrixReadOnly(const TransformationMatrix&, bool is2d = true);
-
-  template <typename T>
-  DOMMatrixReadOnly(T sequence, int size) {
-    if (size == 6) {
-      matrix_ =
-          TransformationMatrix::Create(sequence[0], sequence[1], sequence[2],
-                                       sequence[3], sequence[4], sequence[5]);
-      is2d_ = true;
-    } else if (size == 16) {
-      matrix_ = TransformationMatrix::Create(
-          sequence[0], sequence[1], sequence[2], sequence[3], sequence[4],
-          sequence[5], sequence[6], sequence[7], sequence[8], sequence[9],
-          sequence[10], sequence[11], sequence[12], sequence[13], sequence[14],
-          sequence[15]);
-      is2d_ = false;
-    } else {
-      NOTREACHED();
-    }
-  }
-
   void SetMatrixValueFromString(const ExecutionContext*,
                                 const String&,
                                 ExceptionState&);
 
-  static bool ValidateAndFixup2D(DOMMatrix2DInit&);
-  static bool ValidateAndFixup(DOMMatrixInit&, ExceptionState&);
-  // TransformationMatrix needs to be 16-byte aligned. PartitionAlloc
-  // supports 16-byte alignment but Oilpan doesn't. So we use an std::unique_ptr
-  // to allocate TransformationMatrix on PartitionAlloc.
-  // TODO(oilpan): Oilpan should support 16-byte aligned allocations.
-  std::unique_ptr<TransformationMatrix> matrix_;
+  static bool ValidateAndFixup2D(DOMMatrix2DInit*);
+  static bool ValidateAndFixup(DOMMatrixInit*, ExceptionState&);
+  TransformationMatrix matrix_;
   bool is2d_;
 };
 

@@ -40,12 +40,9 @@ class SVGStringListTearOff : public SVGPropertyTearOff<SVGStringListBase> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SVGStringListTearOff* Create(
-      SVGStringListBase* target,
-      SVGAnimatedPropertyBase* binding,
-      PropertyIsAnimValType property_is_anim_val) {
-    return new SVGStringListTearOff(target, binding, property_is_anim_val);
-  }
+  SVGStringListTearOff(SVGStringListBase*,
+                       SVGAnimatedPropertyBase* binding,
+                       PropertyIsAnimValType);
 
   // SVGStringList DOM interface:
 
@@ -125,11 +122,6 @@ class SVGStringListTearOff : public SVGPropertyTearOff<SVGStringListBase> {
     CommitChange();
     return item;
   }
-
- protected:
-  SVGStringListTearOff(SVGStringListBase*,
-                       SVGAnimatedPropertyBase* binding,
-                       PropertyIsAnimValType);
 };
 
 }  // namespace blink

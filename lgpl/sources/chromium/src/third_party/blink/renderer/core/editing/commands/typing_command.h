@@ -28,12 +28,13 @@
 
 #include "third_party/blink/renderer/core/editing/commands/composite_edit_command.h"
 #include "third_party/blink/renderer/core/editing/text_granularity.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
 class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
  public:
-  enum ETypingCommand {
+  enum CommandType {
     kDeleteSelection,
     kDeleteKey,
     kForwardDeleteKey,
@@ -89,6 +90,13 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
   static void UpdateSelectionIfDifferentFromCurrentSelection(TypingCommand*,
                                                              LocalFrame*);
 
+  TypingCommand(Document&,
+                CommandType,
+                const String& text,
+                Options,
+                TextGranularity,
+                TextCompositionType);
+
   void InsertTextRunWithoutNewlines(const String& text,
                                     EditingState*);
   void InsertLineBreak(EditingState*);
@@ -106,7 +114,7 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
       const wtf_size_t text_length,
       EditingState*);
 
-  ETypingCommand CommandTypeOfOpenCommand() const { return command_type_; }
+  CommandType CommandTypeOfOpenCommand() const { return command_type_; }
   TextCompositionType CompositionType() const { return composition_type_; }
   // |TypingCommand| may contain multiple |InsertTextCommand|, should return
   // |textDataForInputEvent()| of the last one.
@@ -115,29 +123,23 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
  private:
   static TypingCommand* Create(
       Document& document,
-      ETypingCommand command,
+      CommandType command,
       const String& text = "",
       Options options = 0,
       TextGranularity granularity = TextGranularity::kCharacter) {
-    return new TypingCommand(document, command, text, options, granularity,
-                             kTextCompositionNone);
+    return MakeGarbageCollected<TypingCommand>(
+        document, command, text, options, granularity, kTextCompositionNone);
   }
 
   static TypingCommand* Create(Document& document,
-                               ETypingCommand command,
+                               CommandType command,
                                const String& text,
                                Options options,
                                TextCompositionType composition_type) {
-    return new TypingCommand(document, command, text, options,
-                             TextGranularity::kCharacter, composition_type);
+    return MakeGarbageCollected<TypingCommand>(document, command, text, options,
+                                               TextGranularity::kCharacter,
+                                               composition_type);
   }
-
-  TypingCommand(Document&,
-                ETypingCommand,
-                const String& text,
-                Options,
-                TextGranularity,
-                TextCompositionType);
 
   void SetSmartDelete(bool smart_delete) { smart_delete_ = smart_delete; }
   bool IsOpenForMoreTyping() const { return open_for_more_typing_; }
@@ -152,12 +154,12 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
   bool IsTypingCommand() const override;
   bool PreservesTypingStyle() const override { return preserves_typing_style_; }
 
-  void UpdatePreservesTypingStyle(ETypingCommand);
-  void TypingAddedToOpenCommand(ETypingCommand);
+  void UpdatePreservesTypingStyle(CommandType);
+  void TypingAddedToOpenCommand(CommandType);
   bool MakeEditableRootEmpty(EditingState*);
 
-  void UpdateCommandTypeOfOpenCommand(ETypingCommand typing_command) {
-    command_type_ = typing_command;
+  void UpdateCommandTypeOfOpenCommand(CommandType command_type) {
+    command_type_ = command_type;
   }
 
   bool IsIncrementalInsertion() const { return is_incremental_insertion_; }
@@ -176,7 +178,7 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
       bool kill_ring,
       EditingState*);
 
-  ETypingCommand command_type_;
+  CommandType command_type_;
   String text_to_insert_;
   bool open_for_more_typing_;
   const bool select_inserted_text_;
@@ -196,11 +198,12 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
   InputEvent::InputType input_type_;
 };
 
-DEFINE_TYPE_CASTS(TypingCommand,
-                  CompositeEditCommand,
-                  command,
-                  command->IsTypingCommand(),
-                  command.IsTypingCommand());
+template <>
+struct DowncastTraits<TypingCommand> {
+  static bool AllowFrom(const CompositeEditCommand& command) {
+    return command.IsTypingCommand();
+  }
+};
 
 }  // namespace blink
 

@@ -30,32 +30,43 @@
 
 #include "third_party/blink/renderer/core/events/error_event.h"
 
-#include <memory>
-
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/core/event_interface_names.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
+ErrorEvent* ErrorEvent::CreateSanitizedError(ScriptState* script_state) {
+  // "6. If script's muted errors is true, then set message to "Script error.",
+  // urlString to the empty string, line and col to 0, and errorValue to null."
+  // https://html.spec.whatwg.org/C/#runtime-script-errors:muted-errors
+  DCHECK(script_state);
+  return MakeGarbageCollected<ErrorEvent>(
+      "Script error.",
+      std::make_unique<SourceLocation>(String(), 0, 0, nullptr),
+      ScriptValue::CreateNull(script_state->GetIsolate()),
+      &script_state->World());
+}
+
 ErrorEvent::ErrorEvent()
     : sanitized_message_(),
-      location_(SourceLocation::Create(String(), 0, 0, nullptr)),
+      location_(std::make_unique<SourceLocation>(String(), 0, 0, nullptr)),
       world_(&DOMWrapperWorld::Current(v8::Isolate::GetCurrent())) {}
 
 ErrorEvent::ErrorEvent(ScriptState* script_state,
                        const AtomicString& type,
-                       const ErrorEventInit& initializer)
+                       const ErrorEventInit* initializer)
     : Event(type, initializer),
       sanitized_message_(),
       world_(&script_state->World()) {
-  if (initializer.hasMessage())
-    sanitized_message_ = initializer.message();
-  location_ = SourceLocation::Create(
-      initializer.hasFilename() ? initializer.filename() : String(),
-      initializer.hasLineno() ? initializer.lineno() : 0,
-      initializer.hasColno() ? initializer.colno() : 0, nullptr);
-  if (initializer.hasError()) {
-    error_.Set(initializer.error().GetIsolate(), initializer.error().V8Value());
+  if (initializer->hasMessage())
+    sanitized_message_ = initializer->message();
+  location_ = std::make_unique<SourceLocation>(
+      initializer->hasFilename() ? initializer->filename() : String(),
+      initializer->hasLineno() ? initializer->lineno() : 0,
+      initializer->hasColno() ? initializer->colno() : 0, nullptr);
+  if (initializer->hasError()) {
+    error_.Set(script_state->GetIsolate(), initializer->error().V8Value());
   }
 }
 
@@ -63,7 +74,7 @@ ErrorEvent::ErrorEvent(const String& message,
                        std::unique_ptr<SourceLocation> location,
                        ScriptValue error,
                        DOMWrapperWorld* world)
-    : Event(EventTypeNames::error, Bubbles::kNo, Cancelable::kYes),
+    : Event(event_type_names::kError, Bubbles::kNo, Cancelable::kYes),
       sanitized_message_(message),
       location_(std::move(location)),
       world_(world) {
@@ -79,7 +90,7 @@ void ErrorEvent::SetUnsanitizedMessage(const String& message) {
 ErrorEvent::~ErrorEvent() = default;
 
 const AtomicString& ErrorEvent::InterfaceName() const {
-  return EventNames::ErrorEvent;
+  return event_interface_names::kErrorEvent;
 }
 
 bool ErrorEvent::IsErrorEvent() const {
@@ -91,15 +102,15 @@ bool ErrorEvent::CanBeDispatchedInWorld(const DOMWrapperWorld& world) const {
 }
 
 ScriptValue ErrorEvent::error(ScriptState* script_state) const {
-  // Don't return |m_error| when we are in the different worlds to avoid
+  // Don't return |error_| when we are in the different worlds to avoid
   // leaking a V8 value.
   // We do not clone Error objects (exceptions), for 2 reasons:
   // 1) Errors carry a reference to the isolated world's global object, and
   //    thus passing it around would cause leakage.
   // 2) Errors cannot be cloned (or serialized):
   if (World() != &script_state->World() || error_.IsEmpty())
-    return ScriptValue();
-  return ScriptValue(script_state, error_.NewLocal(script_state->GetIsolate()));
+    return ScriptValue::CreateNull(script_state->GetIsolate());
+  return ScriptValue(script_state->GetIsolate(), error_.Get(script_state));
 }
 
 void ErrorEvent::Trace(blink::Visitor* visitor) {

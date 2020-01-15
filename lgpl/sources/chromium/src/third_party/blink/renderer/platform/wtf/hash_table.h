@@ -26,10 +26,10 @@
 #include <memory>
 
 #include "base/numerics/checked_math.h"
-#include "third_party/blink/renderer/platform/wtf/alignment.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partition_allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
+#include "third_party/blink/renderer/platform/wtf/conditional_destructor.h"
 #include "third_party/blink/renderer/platform/wtf/construct_traits.h"
 #include "third_party/blink/renderer/platform/wtf/hash_traits.h"
 
@@ -42,7 +42,7 @@
 #endif
 
 #if DUMP_HASHTABLE_STATS
-#include "third_party/blink/renderer/platform/wtf/atomics.h"
+#include <atomic>
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 #endif
 
@@ -59,17 +59,19 @@
   HashTableStats::instance().recordCollisionAtCount(probeCount); \
   ++perTableProbeCount;                                          \
   stats_->recordCollisionAtCount(perTableProbeCount)
-#define UPDATE_ACCESS_COUNTS()                              \
-  AtomicIncrement(&HashTableStats::instance().numAccesses); \
-  int probeCount = 0;                                       \
-  ++stats_->numAccesses;                                    \
+#define UPDATE_ACCESS_COUNTS()                                                 \
+  HashTableStats::instance().numAccesses.fetch_add(1,                          \
+                                                   std::memory_order_relaxed); \
+  int probeCount = 0;                                                          \
+  stats_->numAccesses.fetch_add(1, std::memory_order_relaxed);                 \
   int perTableProbeCount = 0
 #else
 #define UPDATE_PROBE_COUNTS() \
   ++probeCount;               \
   HashTableStats::instance().recordCollisionAtCount(probeCount)
-#define UPDATE_ACCESS_COUNTS()                              \
-  AtomicIncrement(&HashTableStats::instance().numAccesses); \
+#define UPDATE_ACCESS_COUNTS()                                                 \
+  HashTableStats::instance().numAccesses.fetch_add(1,                          \
+                                                   std::memory_order_relaxed); \
   int probeCount = 0
 #endif
 #else
@@ -77,8 +79,8 @@
 #define UPDATE_PROBE_COUNTS() \
   ++perTableProbeCount;       \
   stats_->recordCollisionAtCount(perTableProbeCount)
-#define UPDATE_ACCESS_COUNTS() \
-  ++stats_->numAccesses;       \
+#define UPDATE_ACCESS_COUNTS()                                 \
+  stats_->numAccesses.fetch_add(1, std::memory_order_relaxed); \
   int perTableProbeCount = 0
 #else
 #define UPDATE_PROBE_COUNTS() \
@@ -117,10 +119,10 @@ struct WTF_EXPORT HashTableStats {
         collisionGraph() {}
 
   // The following variables are all atomically incremented when modified.
-  int numAccesses;
-  int numRehashes;
-  int numRemoves;
-  int numReinserts;
+  std::atomic_int numAccesses;
+  std::atomic_int numRehashes;
+  std::atomic_int numRemoves;
+  std::atomic_int numReinserts;
 
   // The following variables are only modified in the recordCollisionAtCount
   // method within a mutex.
@@ -693,7 +695,15 @@ template <typename Key,
           typename Traits,
           typename KeyTraits,
           typename Allocator>
-class HashTable final {
+class HashTable final
+    : public ConditionalDestructor<HashTable<Key,
+                                             Value,
+                                             Extractor,
+                                             HashFunctions,
+                                             Traits,
+                                             KeyTraits,
+                                             Allocator>,
+                                   Allocator::kIsGarbageCollected> {
   DISALLOW_NEW();
 
  public:
@@ -725,14 +735,10 @@ class HashTable final {
 
   HashTable();
 
-  // For design of the destructor, please refer to
-  // [here](https://docs.google.com/document/d/1AoGTvb3tNLx2tD1hNqAfLRLmyM59GM0O-7rCHTT_7_U/)
-  ~HashTable() {
+  void Finalize() {
+    static_assert(!Allocator::kIsGarbageCollected,
+                  "GCed collections can't be finalized.");
     if (LIKELY(!table_))
-      return;
-    // If this is called during sweeping, it must not touch other heap objects
-    // such as the backing.
-    if (Allocator::IsSweepForbidden())
       return;
     EnterAccessForbiddenScope();
     DeleteAllBucketsAndDeallocate(table_, table_size_);
@@ -887,7 +893,6 @@ class HashTable final {
     // expensive.
     return key_count_ * kMinLoad < table_size_ &&
            table_size_ > KeyTraits::kMinimumTableSize &&
-           !Allocator::IsObjectResurrectionForbidden() &&
            Allocator::IsAllocationAllowed();
   }
   ValueType* Expand(ValueType* entry = nullptr);
@@ -1441,10 +1446,11 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
   DCHECK(
       !IsDeletedBucket(*(LookupForWriting(Extractor::Extract(entry)).first)));
 #if DUMP_HASHTABLE_STATS
-  AtomicIncrement(&HashTableStats::instance().numReinserts);
+  HashTableStats::instance().numReinserts.fetch_add(1,
+                                                    std::memory_order_relaxed);
 #endif
 #if DUMP_HASHTABLE_STATS_PER_TABLE
-  ++stats_->numReinserts;
+  stats_->numReinserts.fetch_add(1, std::memory_order_relaxed);
 #endif
   Value* new_entry = LookupForWriting(Extractor::Extract(entry)).first;
   Mover<ValueType, Allocator, Traits,
@@ -1536,10 +1542,10 @@ void HashTable<Key,
                Allocator>::erase(const ValueType* pos) {
   RegisterModification();
 #if DUMP_HASHTABLE_STATS
-  AtomicIncrement(&HashTableStats::instance().numRemoves);
+  HashTableStats::instance().numRemoves.fetch_add(1, std::memory_order_relaxed);
 #endif
 #if DUMP_HASHTABLE_STATS_PER_TABLE
-  ++stats_->numRemoves;
+  stats_->numRemoves.fetch_add(1, std::memory_order_relaxed);
 #endif
 
   EnterAccessForbiddenScope();
@@ -1651,7 +1657,7 @@ void HashTable<Key,
                KeyTraits,
                Allocator>::DeleteAllBucketsAndDeallocate(ValueType* table,
                                                          unsigned size) {
-  if (!IsTriviallyDestructible<ValueType>::value) {
+  if (!std::is_trivially_destructible<ValueType>::value) {
     for (unsigned i = 0; i < size; ++i) {
       // This code is called when the hash table is cleared or resized. We
       // have allocated a new backing store and we need to run the
@@ -1708,7 +1714,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
     ExpandBuffer(unsigned new_table_size, Value* entry, bool& success) {
   success = false;
   DCHECK_LT(table_size_, new_table_size);
-  CHECK(!Allocator::IsObjectResurrectionForbidden());
+  CHECK(Allocator::IsAllocationAllowed());
   if (!Allocator::ExpandHashTableBacking(table_,
                                          new_table_size * sizeof(ValueType)))
     return nullptr;
@@ -1738,7 +1744,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
     }
   }
   table_ = temporary_table;
-  Allocator::BackingWriteBarrier(table_);
+  Allocator::template BackingWriteBarrierForHashTable<HashTable>(table_);
 
   if (Traits::kEmptyValueIsZero) {
     memset(original_table, 0, new_table_size * sizeof(ValueType));
@@ -1769,17 +1775,19 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
   ValueType* old_table = table_;
 
 #if DUMP_HASHTABLE_STATS
-  if (old_table_size != 0)
-    AtomicIncrement(&HashTableStats::instance().numRehashes);
+  if (old_table_size != 0) {
+    HashTableStats::instance().numRehashes.fetch_add(1,
+                                                     std::memory_order_relaxed);
+  }
 #endif
 
 #if DUMP_HASHTABLE_STATS_PER_TABLE
   if (old_table_size != 0)
-    ++stats_->numRehashes;
+    stats_->numRehashes.fetch_add(1, std::memory_order_relaxed);
 #endif
 
   table_ = new_table;
-  Allocator::BackingWriteBarrier(table_);
+  Allocator::template BackingWriteBarrierForHashTable<HashTable>(table_);
   table_size_ = new_table_size;
 
   Value* new_entry = nullptr;
@@ -1823,13 +1831,15 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
   ValueType* old_table = table_;
 
 #if DUMP_HASHTABLE_STATS
-  if (old_table_size != 0)
-    AtomicIncrement(&HashTableStats::instance().numRehashes);
+  if (old_table_size != 0) {
+    HashTableStats::instance().numRehashes.fetch_add(1,
+                                                     std::memory_order_relaxed);
+  }
 #endif
 
 #if DUMP_HASHTABLE_STATS_PER_TABLE
   if (old_table_size != 0)
-    ++stats_->numRehashes;
+    stats_->numRehashes.fetch_add(1, std::memory_order_relaxed);
 #endif
 
   // The Allocator::kIsGarbageCollected check is not needed.  The check is just
@@ -1954,8 +1964,8 @@ void HashTable<Key,
                Allocator>::swap(HashTable& other) {
   DCHECK(!AccessForbidden());
   std::swap(table_, other.table_);
-  Allocator::BackingWriteBarrier(table_);
-  Allocator::BackingWriteBarrier(other.table_);
+  Allocator::template BackingWriteBarrierForHashTable<HashTable>(table_);
+  Allocator::template BackingWriteBarrierForHashTable<HashTable>(other.table_);
   std::swap(table_size_, other.table_size_);
   std::swap(key_count_, other.key_count_);
   // std::swap does not work for bit fields.

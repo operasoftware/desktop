@@ -6,27 +6,32 @@
 #include <third_party/blink/renderer/modules/storage/storage_controller.h>
 
 #include "base/task/post_task.h"
-#include "base/test/scoped_feature_list.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/platform/scheduler/test/fake_renderer_scheduler.h"
+#include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/renderer/modules/storage/testing/fake_area_source.h"
-#include "third_party/blink/renderer/platform/cross_thread_functional.h"
-#include "third_party/blink/renderer/platform/uuid.h"
-#include "third_party/blink/renderer/platform/web_task_runner.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/wtf/uuid.h"
+
+#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace blink {
 namespace {
 class NoopStoragePartitionService
     : public mojom::blink::StoragePartitionService {
  public:
-  void OpenLocalStorage(const scoped_refptr<const SecurityOrigin>& origin,
-                        mojom::blink::StorageAreaRequest request) override {}
+  void OpenLocalStorage(
+      const scoped_refptr<const SecurityOrigin>& origin,
+      mojo::PendingReceiver<mojom::blink::StorageArea> receiver) override {}
 
   void OpenSessionStorage(
       const String& namespace_id,
-      mojom::blink::SessionStorageNamespaceRequest request) override {}
+      mojo::PendingReceiver<mojom::blink::SessionStorageNamespace> receiver)
+      override {}
 };
 
 }  // namespace
@@ -35,12 +40,8 @@ class StorageNamespaceTest : public testing::Test {
  public:
   const size_t kTestCacheLimit = 100;
 
-  StorageNamespaceTest() {
-    features_.InitAndEnableFeature(features::kOnionSoupDOMStorage);
-  }
+  StorageNamespaceTest() {}
   ~StorageNamespaceTest() override {}
-
-  base::test::ScopedFeatureList features_;
 };
 
 TEST_F(StorageNamespaceTest, BasicStorageAreas) {
@@ -53,27 +54,31 @@ TEST_F(StorageNamespaceTest, BasicStorageAreas) {
   const String kValue("value");
   const String kSessionStorageNamespace("abcd");
   const KURL kPageUrl("http://dom_storage/page");
-  Persistent<FakeAreaSource> source_area = new FakeAreaSource(kPageUrl);
+  Persistent<FakeAreaSource> source_area =
+      MakeGarbageCollected<FakeAreaSource>(kPageUrl);
 
-  blink::scheduler::FakeRendererScheduler renderer_scheduler;
-
-  mojom::blink::StoragePartitionServicePtr storage_partition_service_ptr;
+  mojo::PendingRemote<mojom::blink::StoragePartitionService>
+      storage_partition_service_remote;
   PostCrossThreadTask(
-      *base::CreateSequencedTaskRunnerWithTraits({}), FROM_HERE,
-      CrossThreadBind(
-          [](mojom::blink::StoragePartitionServiceRequest request) {
-            mojo::MakeStrongBinding(
+      *base::CreateSequencedTaskRunner({base::ThreadPool()}), FROM_HERE,
+      CrossThreadBindOnce(
+          [](mojo::PendingReceiver<mojom::blink::StoragePartitionService>
+                 receiver) {
+            mojo::MakeSelfOwnedReceiver(
                 std::make_unique<NoopStoragePartitionService>(),
-                std::move(request));
+                std::move(receiver));
           },
-          WTF::Passed(MakeRequest(&storage_partition_service_ptr))));
+          WTF::Passed(storage_partition_service_remote
+                          .InitWithNewPipeAndPassReceiver())));
 
-  StorageController controller(renderer_scheduler.IPCTaskRunner(),
-                               std::move(storage_partition_service_ptr),
+  StorageController controller(scheduler::GetSingleThreadTaskRunnerForTesting(),
+                               std::move(storage_partition_service_remote),
                                kTestCacheLimit);
-  StorageNamespace* localStorage = new StorageNamespace(&controller);
-  StorageNamespace* sessionStorage =
-      new StorageNamespace(&controller, kSessionStorageNamespace);
+
+  StorageNamespace* localStorage =
+      MakeGarbageCollected<StorageNamespace>(&controller);
+  StorageNamespace* sessionStorage = MakeGarbageCollected<StorageNamespace>(
+      &controller, kSessionStorageNamespace);
 
   EXPECT_FALSE(localStorage->IsSessionStorage());
   EXPECT_TRUE(sessionStorage->IsSessionStorage());

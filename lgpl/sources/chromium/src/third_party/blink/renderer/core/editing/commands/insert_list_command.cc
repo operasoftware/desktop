@@ -42,10 +42,11 @@
 #include "third_party/blink/renderer/core/html/html_ulist_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 static Node* EnclosingListChild(Node* node, Node* list_node) {
   Node* list_child = EnclosingListChild(node);
@@ -57,7 +58,7 @@ static Node* EnclosingListChild(Node* node, Node* list_node) {
 HTMLUListElement* InsertListCommand::FixOrphanedListChild(
     Node* node,
     EditingState* editing_state) {
-  HTMLUListElement* list_element = HTMLUListElement::Create(GetDocument());
+  auto* list_element = MakeGarbageCollected<HTMLUListElement>(GetDocument());
   InsertNodeBefore(list_element, node, editing_state);
   if (editing_state->IsAborted())
     return nullptr;
@@ -76,7 +77,7 @@ HTMLElement* InsertListCommand::MergeWithNeighboringLists(
   DCHECK(passed_list);
   HTMLElement* list = passed_list;
   Element* previous_list = ElementTraversal::PreviousSibling(*list);
-  GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+  GetDocument().UpdateStyleAndLayout();
   if (previous_list && CanMergeLists(*previous_list, *list)) {
     MergeIdenticalElements(previous_list, list, editing_state);
     if (editing_state->IsAborted())
@@ -87,11 +88,11 @@ HTMLElement* InsertListCommand::MergeWithNeighboringLists(
     return nullptr;
 
   Element* next_sibling = ElementTraversal::NextSibling(*list);
-  if (!next_sibling || !next_sibling->IsHTMLElement())
+  auto* next_list = DynamicTo<HTMLElement>(next_sibling);
+  if (!next_list)
     return list;
 
-  HTMLElement* next_list = ToHTMLElement(next_sibling);
-  GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+  GetDocument().UpdateStyleAndLayout();
   if (CanMergeLists(*list, *next_list)) {
     MergeIdenticalElements(list, next_list, editing_state);
     if (editing_state->IsAborted())
@@ -177,7 +178,7 @@ void InsertListCommand::DoApply(EditingState* editing_state) {
       return;
   }
 
-  const HTMLQualifiedName& list_tag = (type_ == kOrderedList) ? olTag : ulTag;
+  const HTMLQualifiedName& list_tag = (type_ == kOrderedList) ? kOlTag : kUlTag;
   if (EndingSelection().IsRange()) {
     bool force_list_creation = false;
     VisibleSelection selection =
@@ -244,7 +245,7 @@ void InsertListCommand::DoApply(EditingState* editing_state) {
         if (!single_paragraph_result)
           break;
 
-        GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+        GetDocument().UpdateStyleAndLayout();
 
         // Make |visibleEndOfSelection| valid again.
         if (!end_of_selection.IsConnected() ||
@@ -280,7 +281,7 @@ void InsertListCommand::DoApply(EditingState* editing_state) {
     if (editing_state->IsAborted())
       return;
 
-    GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+    GetDocument().UpdateStyleAndLayout();
 
     // Fetch the end of the selection, for the reason mentioned above.
     if (!end_of_selection.IsConnected()) {
@@ -358,7 +359,7 @@ bool InsertListCommand::DoApplyForSingleParagraph(
       list_element = MergeWithNeighboringLists(list_element, editing_state);
       if (editing_state->IsAborted())
         return false;
-      GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+      GetDocument().UpdateStyleAndLayout();
     }
     DCHECK(HasEditableStyle(*list_element));
     DCHECK(HasEditableStyle(*list_element->parentNode()));
@@ -378,11 +379,13 @@ bool InsertListCommand::DoApplyForSingleParagraph(
         IsNodeVisiblyContainedWithin(*list_element,
                                      EphemeralRange(&current_selection))) {
       bool range_start_is_in_list =
-          VisiblePositionBeforeNode(*list_element).DeepEquivalent() ==
+          CreateVisiblePosition(PositionBeforeNode(*list_element))
+              .DeepEquivalent() ==
           CreateVisiblePosition(current_selection.StartPosition())
               .DeepEquivalent();
       bool range_end_is_in_list =
-          VisiblePositionAfterNode(*list_element).DeepEquivalent() ==
+          CreateVisiblePosition(PositionAfterNode(*list_element))
+              .DeepEquivalent() ==
           CreateVisiblePosition(current_selection.EndPosition())
               .DeepEquivalent();
 
@@ -391,7 +394,7 @@ bool InsertListCommand::DoApplyForSingleParagraph(
       if (editing_state->IsAborted())
         return false;
 
-      GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+      GetDocument().UpdateStyleAndLayout();
       Node* first_child_in_list =
           EnclosingListChild(VisiblePosition::FirstPositionInNode(*list_element)
                                  .DeepEquivalent()
@@ -399,7 +402,7 @@ bool InsertListCommand::DoApplyForSingleParagraph(
                              list_element);
       Element* outer_block =
           first_child_in_list && IsBlockFlowElement(*first_child_in_list)
-              ? ToElement(first_child_in_list)
+              ? To<Element>(first_child_in_list)
               : list_element;
 
       MoveParagraphWithClones(
@@ -447,7 +450,7 @@ bool InsertListCommand::DoApplyForSingleParagraph(
                        list_child_node, editing_state);
     if (editing_state->IsAborted())
       return false;
-    GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+    GetDocument().UpdateStyleAndLayout();
   }
 
   if (!list_child_node || switch_list_type || force_create_list) {
@@ -471,7 +474,7 @@ void InsertListCommand::UnlistifyParagraph(
   VisiblePosition start;
   VisiblePosition end;
   DCHECK(list_child_node);
-  if (IsHTMLLIElement(*list_child_node)) {
+  if (IsA<HTMLLIElement>(*list_child_node)) {
     start = VisiblePosition::FirstPositionInNode(*list_child_node);
     end = VisiblePosition::LastPositionInNode(*list_child_node);
     next_list_child = list_child_node->nextSibling();
@@ -497,12 +500,12 @@ void InsertListCommand::UnlistifyParagraph(
 
   // When removing a list, we must always create a placeholder to act as a point
   // of insertion for the list content being removed.
-  HTMLBRElement* placeholder = HTMLBRElement::Create(GetDocument());
+  auto* placeholder = MakeGarbageCollected<HTMLBRElement>(GetDocument());
   HTMLElement* element_to_insert = placeholder;
   // If the content of the list item will be moved into another list, put it in
   // a list item so that we don't create an orphaned list child.
   if (EnclosingList(list_element)) {
-    element_to_insert = HTMLLIElement::Create(GetDocument());
+    element_to_insert = MakeGarbageCollected<HTMLLIElement>(GetDocument());
     AppendNode(placeholder, element_to_insert, editing_state);
     if (editing_state->IsAborted())
       return;
@@ -536,7 +539,7 @@ void InsertListCommand::UnlistifyParagraph(
   if (editing_state->IsAborted())
     return;
 
-  GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+  GetDocument().UpdateStyleAndLayout();
 
   // Make |start| and |end| valid again.
   start = CreateVisiblePosition(start_position);
@@ -587,7 +590,8 @@ void InsertListCommand::ListifyParagraph(const VisiblePosition& original_start,
       start, NextPositionOf(end, kCannotCrossEditingBoundary), list_tag);
   if (previous_list || next_list) {
     // Place list item into adjoining lists.
-    HTMLLIElement* list_item_element = HTMLLIElement::Create(GetDocument());
+    auto* list_item_element =
+        MakeGarbageCollected<HTMLLIElement>(GetDocument());
     if (previous_list)
       AppendNode(list_item_element, previous_list, editing_state);
     else
@@ -601,7 +605,7 @@ void InsertListCommand::ListifyParagraph(const VisiblePosition& original_start,
     if (editing_state->IsAborted())
       return;
 
-    GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+    GetDocument().UpdateStyleAndLayout();
     if (previous_list && next_list && CanMergeLists(*previous_list, *next_list))
       MergeIdenticalElements(previous_list, next_list, editing_state);
 
@@ -623,7 +627,7 @@ void InsertListCommand::ListifyParagraph(const VisiblePosition& original_start,
     start_pos = Position::BeforeNode(*placeholder);
   }
 
-  GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+  GetDocument().UpdateStyleAndLayout();
 
   // Insert the list at a position visually equivalent to start of the
   // paragraph that is being moved into the list.
@@ -644,14 +648,14 @@ void InsertListCommand::ListifyParagraph(const VisiblePosition& original_start,
   }
   // Also avoid the containing list item.
   Node* const list_child = EnclosingListChild(insertion_pos.AnchorNode());
-  if (IsHTMLLIElement(list_child))
+  if (IsA<HTMLLIElement>(list_child))
     insertion_pos = Position::InParentBeforeNode(*list_child);
 
   HTMLElement* list_element = CreateHTMLElement(GetDocument(), list_tag);
   InsertNodeAt(list_element, insertion_pos, editing_state);
   if (editing_state->IsAborted())
     return;
-  HTMLLIElement* list_item_element = HTMLLIElement::Create(GetDocument());
+  auto* list_item_element = MakeGarbageCollected<HTMLLIElement>(GetDocument());
   AppendNode(list_item_element, list_element, editing_state);
   if (editing_state->IsAborted())
     return;
@@ -666,7 +670,7 @@ void InsertListCommand::ListifyParagraph(const VisiblePosition& original_start,
     MoveParagraphOverPositionIntoEmptyListItem(
         original_start, list_item_element, editing_state);
   } else {
-    GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+    GetDocument().UpdateStyleAndLayout();
     MoveParagraphOverPositionIntoEmptyListItem(
         CreateVisiblePosition(start_pos), list_item_element, editing_state);
   }
@@ -683,13 +687,13 @@ void InsertListCommand::MoveParagraphOverPositionIntoEmptyListItem(
     HTMLLIElement* list_item_element,
     EditingState* editing_state) {
   DCHECK(!list_item_element->HasChildren());
-  HTMLBRElement* placeholder = HTMLBRElement::Create(GetDocument());
+  auto* placeholder = MakeGarbageCollected<HTMLBRElement>(GetDocument());
   AppendNode(placeholder, list_item_element, editing_state);
   if (editing_state->IsAborted())
     return;
   // Inserting list element and list item list may change start of pargraph
   // to move. We calculate start of paragraph again.
-  GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+  GetDocument().UpdateStyleAndLayout();
   const VisiblePosition& valid_pos =
       CreateVisiblePosition(pos.ToPositionWithAffinity());
   const VisiblePosition& start =
@@ -699,11 +703,38 @@ void InsertListCommand::MoveParagraphOverPositionIntoEmptyListItem(
   const VisiblePosition& end =
       EndOfParagraph(valid_pos, kCanSkipOverEditingBoundary);
   ABORT_EDITING_COMMAND_IF(end.IsNull());
-  MoveParagraph(start, end, VisiblePosition::BeforeNode(*placeholder),
-                editing_state, kPreserveSelection);
+  Node* const outer_block = HighestEnclosingNodeOfType(
+      start.DeepEquivalent(), &IsInline, kCannotCrossEditingBoundary, nullptr);
+  MoveParagraphWithClones(
+      start, end, list_item_element,
+      outer_block ? outer_block : start.DeepEquivalent().AnchorNode(),
+      editing_state);
+  if (editing_state->IsAborted())
+    return;
+
+  RemoveNode(placeholder, editing_state);
+  if (editing_state->IsAborted())
+    return;
+
+  // Manually remove block_element because moveParagraphWithClones sometimes
+  // leaves it behind in the document. See the bug 33668 and
+  // editing/execCommand/insert-list-orphaned-item-with-nested-lists.html.
+  // FIXME: This might be a bug in moveParagraphWithClones or
+  // deleteSelection.
+  Node* const start_of_paragaph = start.DeepEquivalent().AnchorNode();
+  if (start_of_paragaph && start_of_paragaph->isConnected()) {
+    RemoveNode(start_of_paragaph, editing_state);
+    if (editing_state->IsAborted())
+      return;
+  }
+
+  SetEndingSelection(SelectionForUndoStep::From(
+      SelectionInDOMTree::Builder()
+          .Collapse(Position::FirstPositionInNode(*list_item_element))
+          .Build()));
 }
 
-void InsertListCommand::Trace(blink::Visitor* visitor) {
+void InsertListCommand::Trace(Visitor* visitor) {
   CompositeEditCommand::Trace(visitor);
 }
 

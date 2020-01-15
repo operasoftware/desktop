@@ -3,7 +3,6 @@
         {
             "type": "setting",
             "category": "Network",
-            "storageType": "session",
             "title": "Preserve log",
             "settingName": "network_log.preserve-log",
             "settingType": "boolean",
@@ -21,7 +20,9 @@
             ]
         }
     ],
-    "scripts": [
+    "scripts": [],
+    "modules": [
+        "browser_sdk.js",
         "LogManager.js"
     ],
     "dependencies": [

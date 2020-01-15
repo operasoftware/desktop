@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/frame/find_in_page.h"
 
+#include "base/bind.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/frame/find_in_page.mojom-blink.h"
 #include "third_party/blink/renderer/core/editing/finder/text_finder.h"
@@ -32,7 +33,7 @@ class FindInPageTest : public testing::Test {
   TextFinder& GetTextFinder() const;
 
  private:
-  FrameTestHelpers::WebViewHelper web_view_helper_;
+  frame_test_helpers::WebViewHelper web_view_helper_;
   Persistent<Document> document_;
   Persistent<FindInPage> find_in_page_;
 };

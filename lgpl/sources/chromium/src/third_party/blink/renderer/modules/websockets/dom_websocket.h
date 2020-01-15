@@ -37,13 +37,14 @@
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
-#include "third_party/blink/renderer/core/dom/pausable_object.h"
+#include "third_party/blink/renderer/core/execution_context/context_lifecycle_state_observer.h"
 #include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/websockets/websocket_channel.h"
 #include "third_party/blink/renderer/modules/websockets/websocket_channel_client.h"
 #include "third_party/blink/renderer/modules/websockets/websocket_channel_impl.h"
+#include "third_party/blink/renderer/modules/websockets/websocket_common.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/timer.h"
@@ -63,12 +64,18 @@ class StringOrStringSequence;
 
 class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
                                     public ActiveScriptWrappable<DOMWebSocket>,
-                                    public PausableObject,
+                                    public ContextLifecycleStateObserver,
                                     public WebSocketChannelClient {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(DOMWebSocket);
 
  public:
+  // These definitions are required by V8DOMWebSocket.
+  static constexpr auto kConnecting = WebSocketCommon::kConnecting;
+  static constexpr auto kOpen = WebSocketCommon::kOpen;
+  static constexpr auto kClosing = WebSocketCommon::kClosing;
+  static constexpr auto kClosed = WebSocketCommon::kClosed;
+
   // DOMWebSocket instances must be used with a wrapper since this class's
   // lifetime management is designed assuming the V8 holds a ref on it while
   // hasPendingActivity() returns true.
@@ -79,9 +86,9 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
                               const String& url,
                               const StringOrStringSequence& protocols,
                               ExceptionState&);
-  ~DOMWebSocket() override;
 
-  enum State { kConnecting = 0, kOpen = 1, kClosing = 2, kClosed = 3 };
+  explicit DOMWebSocket(ExecutionContext*);
+  ~DOMWebSocket() override;
 
   void Connect(const String& url,
                const Vector<String>& protocols,
@@ -97,12 +104,12 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
   // Optional=DefaultIsUndefined in the IDL file doesn't help for now since
   // it's bound to a value of 0 which is indistinguishable from the case 0
   // is passed as code parameter.
-  void close(unsigned short code, const String& reason, ExceptionState&);
+  void close(uint16_t code, const String& reason, ExceptionState&);
   void close(ExceptionState&);
-  void close(unsigned short code, ExceptionState&);
+  void close(uint16_t code, ExceptionState&);
 
   const KURL& url() const;
-  State readyState() const;
+  WebSocketCommon::State readyState() const;
   uint64_t bufferedAmount() const;
 
   String protocol() const;
@@ -111,19 +118,18 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
   String binaryType() const;
   void setBinaryType(const String&);
 
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(open);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(message);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(close);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(open, kOpen)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(message, kMessage)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(error, kError)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(close, kClose)
 
   // EventTarget functions.
   const AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
 
-  // PausableObject functions.
+  // ContextLifecycleStateObserver functions.
   void ContextDestroyed(ExecutionContext*) override;
-  void Pause() override;
-  void Unpause() override;
+  void ContextLifecycleStateChanged(mojom::FrameLifecycleState) override;
 
   // ScriptWrappable functions.
   // Prevent this instance from being collected while it's not in CLOSED
@@ -133,28 +139,26 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
   // WebSocketChannelClient functions.
   void DidConnect(const String& subprotocol, const String& extensions) override;
   void DidReceiveTextMessage(const String& message) override;
-  void DidReceiveBinaryMessage(std::unique_ptr<Vector<char>>) override;
+  void DidReceiveBinaryMessage(
+      const Vector<base::span<const char>>& data) override;
   void DidError() override;
   void DidConsumeBufferedAmount(uint64_t) override;
   void DidStartClosingHandshake() override;
   void DidClose(ClosingHandshakeCompletionStatus,
-                unsigned short code,
+                uint16_t code,
                 const String& reason) override;
 
   void Trace(blink::Visitor*) override;
 
-  static bool IsValidSubprotocolString(const String&);
-
- protected:
-  explicit DOMWebSocket(ExecutionContext*);
-
  private:
   // FIXME: This should inherit blink::EventQueue.
-  class EventQueue final : public GarbageCollectedFinalized<EventQueue> {
+  class EventQueue final : public GarbageCollected<EventQueue> {
    public:
     static EventQueue* Create(EventTarget* target) {
-      return new EventQueue(target);
+      return MakeGarbageCollected<EventQueue>(target);
     }
+
+    explicit EventQueue(EventTarget*);
     ~EventQueue();
 
     // Dispatches the event if this queue is active.
@@ -179,8 +183,6 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
       kUnpausePosted,
       kStopped,
     };
-
-    explicit EventQueue(EventTarget*);
 
     // Dispatches queued events if this queue is active.
     // Does nothing otherwise.
@@ -248,9 +250,8 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
 
   Member<WebSocketChannel> channel_;
 
-  State state_;
+  WebSocketCommon common_;
 
-  KURL url_;
   String origin_string_;
 
   uint64_t buffered_amount_;
@@ -266,8 +267,6 @@ class MODULES_EXPORT DOMWebSocket : public EventTargetWithInlineData,
   Member<EventQueue> event_queue_;
 
   bool buffered_amount_update_task_pending_;
-
-  bool was_autoupgraded_to_wss_;
 };
 
 }  // namespace blink

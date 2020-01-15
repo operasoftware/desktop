@@ -17,14 +17,11 @@ class ModuleScriptLoader;
 class CORE_EXPORT ModuleScriptLoaderRegistry final
     : public GarbageCollected<ModuleScriptLoaderRegistry> {
  public:
-  static ModuleScriptLoaderRegistry* Create() {
-    return new ModuleScriptLoaderRegistry;
-  }
+  ModuleScriptLoaderRegistry() = default;
+
   void Trace(blink::Visitor*);
 
  private:
-  ModuleScriptLoaderRegistry() = default;
-
   friend class ModuleScriptLoader;
   void AddLoader(ModuleScriptLoader*);
   void ReleaseFinishedLoader(ModuleScriptLoader*);

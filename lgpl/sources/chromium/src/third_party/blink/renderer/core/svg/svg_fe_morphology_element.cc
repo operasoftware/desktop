@@ -20,31 +20,35 @@
 #include "third_party/blink/renderer/core/svg/svg_fe_morphology_element.h"
 
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
+#include "third_party/blink/renderer/core/svg/svg_enumeration_map.h"
 #include "third_party/blink/renderer/core/svg_names.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
 template <>
-const SVGEnumerationStringEntries&
-GetStaticStringEntries<MorphologyOperatorType>() {
-  DEFINE_STATIC_LOCAL(SVGEnumerationStringEntries, entries, ());
-  if (entries.IsEmpty()) {
-    entries.push_back(std::make_pair(FEMORPHOLOGY_OPERATOR_ERODE, "erode"));
-    entries.push_back(std::make_pair(FEMORPHOLOGY_OPERATOR_DILATE, "dilate"));
-  }
+const SVGEnumerationMap& GetEnumerationMap<MorphologyOperatorType>() {
+  static const SVGEnumerationMap::Entry enum_items[] = {
+      {FEMORPHOLOGY_OPERATOR_ERODE, "erode"},
+      {FEMORPHOLOGY_OPERATOR_DILATE, "dilate"},
+  };
+  static const SVGEnumerationMap entries(enum_items);
   return entries;
 }
 
-inline SVGFEMorphologyElement::SVGFEMorphologyElement(Document& document)
-    : SVGFilterPrimitiveStandardAttributes(SVGNames::feMorphologyTag, document),
-      radius_(SVGAnimatedNumberOptionalNumber::Create(this,
-                                                      SVGNames::radiusAttr,
-                                                      0.0f)),
-      in1_(SVGAnimatedString::Create(this, SVGNames::inAttr)),
-      svg_operator_(SVGAnimatedEnumeration<MorphologyOperatorType>::Create(
+SVGFEMorphologyElement::SVGFEMorphologyElement(Document& document)
+    : SVGFilterPrimitiveStandardAttributes(svg_names::kFEMorphologyTag,
+                                           document),
+      radius_(MakeGarbageCollected<SVGAnimatedNumberOptionalNumber>(
           this,
-          SVGNames::operatorAttr,
-          FEMORPHOLOGY_OPERATOR_ERODE)) {
+          svg_names::kRadiusAttr,
+          0.0f)),
+      in1_(MakeGarbageCollected<SVGAnimatedString>(this, svg_names::kInAttr)),
+      svg_operator_(
+          MakeGarbageCollected<SVGAnimatedEnumeration<MorphologyOperatorType>>(
+              this,
+              svg_names::kOperatorAttr,
+              FEMORPHOLOGY_OPERATOR_ERODE)) {
   AddToPropertyMap(radius_);
   AddToPropertyMap(in1_);
   AddToPropertyMap(svg_operator_);
@@ -57,16 +61,14 @@ void SVGFEMorphologyElement::Trace(blink::Visitor* visitor) {
   SVGFilterPrimitiveStandardAttributes::Trace(visitor);
 }
 
-DEFINE_NODE_FACTORY(SVGFEMorphologyElement)
-
 bool SVGFEMorphologyElement::SetFilterEffectAttribute(
     FilterEffect* effect,
     const QualifiedName& attr_name) {
   FEMorphology* morphology = static_cast<FEMorphology*>(effect);
-  if (attr_name == SVGNames::operatorAttr)
+  if (attr_name == svg_names::kOperatorAttr)
     return morphology->SetMorphologyOperator(
         svg_operator_->CurrentValue()->EnumValue());
-  if (attr_name == SVGNames::radiusAttr) {
+  if (attr_name == svg_names::kRadiusAttr) {
     // Both setRadius functions should be evaluated separately.
     bool is_radius_x_changed =
         morphology->SetRadiusX(radiusX()->CurrentValue()->Value());
@@ -80,14 +82,14 @@ bool SVGFEMorphologyElement::SetFilterEffectAttribute(
 
 void SVGFEMorphologyElement::SvgAttributeChanged(
     const QualifiedName& attr_name) {
-  if (attr_name == SVGNames::operatorAttr ||
-      attr_name == SVGNames::radiusAttr) {
+  if (attr_name == svg_names::kOperatorAttr ||
+      attr_name == svg_names::kRadiusAttr) {
     SVGElement::InvalidationGuard invalidation_guard(this);
     PrimitiveAttributeChanged(attr_name);
     return;
   }
 
-  if (attr_name == SVGNames::inAttr) {
+  if (attr_name == svg_names::kInAttr) {
     SVGElement::InvalidationGuard invalidation_guard(this);
     Invalidate();
     return;
@@ -111,7 +113,7 @@ FilterEffect* SVGFEMorphologyElement::Build(SVGFilterBuilder* filter_builder,
   // (This is handled by FEMorphology)
   float x_radius = radiusX()->CurrentValue()->Value();
   float y_radius = radiusY()->CurrentValue()->Value();
-  FilterEffect* effect = FEMorphology::Create(
+  auto* effect = MakeGarbageCollected<FEMorphology>(
       filter, svg_operator_->CurrentValue()->EnumValue(), x_radius, y_radius);
   effect->InputEffects().push_back(input1);
   return effect;

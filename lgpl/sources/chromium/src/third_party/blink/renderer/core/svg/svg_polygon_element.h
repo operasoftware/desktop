@@ -29,12 +29,9 @@ class SVGPolygonElement final : public SVGPolyElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(SVGPolygonElement);
+  explicit SVGPolygonElement(Document&);
 
   Path AsPath() const override;
-
- private:
-  explicit SVGPolygonElement(Document&);
 };
 
 }  // namespace blink

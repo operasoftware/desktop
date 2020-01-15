@@ -37,9 +37,7 @@ class RTCLegacyStatsReport final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static RTCLegacyStatsReport* Create(const String& id,
-                                      const String& type,
-                                      double timestamp);
+  RTCLegacyStatsReport(const String& id, const String& type, double timestamp);
 
   double timestamp() const { return timestamp_; }
   String id() { return id_; }
@@ -50,8 +48,6 @@ class RTCLegacyStatsReport final : public ScriptWrappable {
   void AddStatistic(const String& name, const String& value);
 
  private:
-  RTCLegacyStatsReport(const String& id, const String& type, double timestamp);
-
   String id_;
   String type_;
   double timestamp_;

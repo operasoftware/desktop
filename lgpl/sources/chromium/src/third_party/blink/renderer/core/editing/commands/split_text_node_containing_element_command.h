@@ -33,15 +33,11 @@ namespace blink {
 class SplitTextNodeContainingElementCommand final
     : public CompositeEditCommand {
  public:
-  static SplitTextNodeContainingElementCommand* Create(Text* node, int offset) {
-    return new SplitTextNodeContainingElementCommand(node, offset);
-  }
-
-  void Trace(blink::Visitor*) override;
-
- private:
   SplitTextNodeContainingElementCommand(Text*, int offset);
 
+  void Trace(Visitor*) override;
+
+ private:
   void DoApply(EditingState*) override;
 
   Member<Text> text_;

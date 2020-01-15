@@ -19,6 +19,7 @@
 #include "third_party/blink/renderer/core/layout/svg/svg_resources_cache.h"
 #include "third_party/blink/renderer/core/paint/inline_text_box_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
+#include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/paint/selection_painting_utils.h"
 #include "third_party/blink/renderer/core/paint/svg_object_painter.h"
 #include "third_party/blink/renderer/core/style/applied_text_decoration.h"
@@ -93,15 +94,13 @@ void SVGInlineTextBoxPainter::Paint(const PaintInfo& paint_info,
   if (!TextShouldBePainted(text_layout_object))
     return;
 
-  DisplayItem::Type display_item_type =
-      DisplayItem::PaintPhaseToDrawingType(paint_info.phase);
   if (!DrawingRecorder::UseCachedDrawingIfPossible(
-          paint_info.context, svg_inline_text_box_, display_item_type)) {
+          paint_info.context, svg_inline_text_box_, paint_info.phase)) {
     LayoutObject& parent_layout_object = ParentInlineLayoutObject();
     const ComputedStyle& style = parent_layout_object.StyleRef();
 
     DrawingRecorder recorder(paint_info.context, svg_inline_text_box_,
-                             display_item_type);
+                             paint_info.phase);
     InlineTextBoxPainter text_painter(svg_inline_text_box_);
     const DocumentMarkerVector& markers_to_paint =
         text_painter.ComputeMarkersToPaint();
@@ -131,7 +130,7 @@ void SVGInlineTextBoxPainter::PaintTextFragments(
   bool should_paint_selection = ShouldPaintSelection(paint_info);
   if (should_paint_selection) {
     selection_style =
-        parent_layout_object.GetCachedPseudoStyle(kPseudoIdSelection);
+        parent_layout_object.GetCachedPseudoElementStyle(kPseudoIdSelection);
     if (selection_style) {
       const SVGComputedStyle& svg_selection_style = selection_style->SvgStyle();
 
@@ -453,13 +452,11 @@ void SVGInlineTextBoxPainter::PaintText(const PaintInfo& paint_info,
   DCHECK(scaling_factor);
 
   FloatPoint text_origin(fragment.x, fragment.y);
-  FloatSize text_size(fragment.width, fragment.height);
 
   GraphicsContext& context = paint_info.context;
   GraphicsContextStateSaver state_saver(context, false);
   if (scaling_factor != 1) {
     text_origin.Scale(scaling_factor, scaling_factor);
-    text_size.Scale(scaling_factor);
     state_saver.Save();
     context.Scale(1 / scaling_factor, 1 / scaling_factor);
   }
@@ -468,19 +465,16 @@ void SVGInlineTextBoxPainter::PaintText(const PaintInfo& paint_info,
   text_run_paint_info.from = start_position;
   text_run_paint_info.to = end_position;
 
-  const SimpleFontData* font_data = scaled_font.PrimaryFont();
-  DCHECK(font_data);
-  if (!font_data)
-    return;
-  float baseline = font_data->GetFontMetrics().FloatAscent();
-  text_run_paint_info.bounds =
-      FloatRect(text_origin.X(), text_origin.Y() - baseline, text_size.Width(),
-                text_size.Height());
-
-  context.DrawText(scaled_font, text_run_paint_info, text_origin, flags);
+  context.DrawText(scaled_font, text_run_paint_info, text_origin, flags,
+                   text_layout_object.EnsureNodeId());
   // TODO(npm): Check that there are non-whitespace characters. See
   // crbug.com/788444.
   context.GetPaintController().SetTextPainted();
+
+  if (!scaled_font.ShouldSkipDrawing()) {
+    PaintTimingDetector::NotifyTextPaint(
+        InlineLayoutObject().FragmentsVisualRectBoundingBox());
+  }
 }
 
 void SVGInlineTextBoxPainter::PaintText(
@@ -553,11 +547,13 @@ Vector<SVGTextFragmentWithRange> SVGInlineTextBoxPainter::CollectTextMatches(
   const Vector<SVGTextFragmentWithRange> empty_text_match_list;
 
   // SVG does not support grammar or spellcheck markers, so skip anything but
-  // TextMatch.
-  if (marker.GetType() != DocumentMarker::kTextMatch)
+  // TextMarkerBase types.
+  if (marker.GetType() != DocumentMarker::kTextMatch &&
+      marker.GetType() != DocumentMarker::kTextFragment)
     return empty_text_match_list;
 
-  if (!InlineLayoutObject()
+  if (marker.GetType() == DocumentMarker::kTextMatch &&
+      !InlineLayoutObject()
            .GetFrame()
            ->GetEditor()
            .MarkedTextMatchesAreHighlighted())
@@ -593,10 +589,10 @@ SVGInlineTextBoxPainter::CollectFragmentsInRange(int start_position,
   return fragment_info_list;
 }
 
-void SVGInlineTextBoxPainter::PaintTextMatchMarkerForeground(
+void SVGInlineTextBoxPainter::PaintTextMarkerForeground(
     const PaintInfo& paint_info,
     const LayoutPoint& point,
-    const TextMatchMarker& marker,
+    const TextMarkerBase& marker,
     const ComputedStyle& style,
     const Font& font) {
   const Vector<SVGTextFragmentWithRange> text_match_info_list =
@@ -604,8 +600,12 @@ void SVGInlineTextBoxPainter::PaintTextMatchMarkerForeground(
   if (text_match_info_list.IsEmpty())
     return;
 
-  Color text_color =
-      LayoutTheme::GetTheme().PlatformTextSearchColor(marker.IsActiveMatch());
+  Color text_color = LayoutTheme::GetTheme().PlatformTextSearchColor(
+      marker.IsActiveMatch(),
+      svg_inline_text_box_.GetLineLayoutItem()
+          .GetDocument()
+          .InForcedColorsMode(),
+      style.UsedColorScheme());
 
   PaintFlags fill_flags;
   fill_flags.setColor(text_color.Rgb());
@@ -636,10 +636,10 @@ void SVGInlineTextBoxPainter::PaintTextMatchMarkerForeground(
   }
 }
 
-void SVGInlineTextBoxPainter::PaintTextMatchMarkerBackground(
+void SVGInlineTextBoxPainter::PaintTextMarkerBackground(
     const PaintInfo& paint_info,
     const LayoutPoint& point,
-    const TextMatchMarker& marker,
+    const TextMarkerBase& marker,
     const ComputedStyle& style,
     const Font& font) {
   const Vector<SVGTextFragmentWithRange> text_match_info_list =
@@ -648,7 +648,11 @@ void SVGInlineTextBoxPainter::PaintTextMatchMarkerBackground(
     return;
 
   Color color = LayoutTheme::GetTheme().PlatformTextSearchHighlightColor(
-      marker.IsActiveMatch());
+      marker.IsActiveMatch(),
+      svg_inline_text_box_.GetLineLayoutItem()
+          .GetDocument()
+          .InForcedColorsMode(),
+      style.UsedColorScheme());
   for (const SVGTextFragmentWithRange& text_match_info : text_match_info_list) {
     const SVGTextFragment& fragment = text_match_info.fragment;
 

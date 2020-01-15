@@ -206,21 +206,17 @@ def activity_logging_world_check(member):
 
 # [CallWith]
 CALL_WITH_ARGUMENTS = {
-    'ScriptState': 'scriptState',
-    'ExecutionContext': 'executionContext',
-    'ScriptArguments': 'scriptArguments',
-    'CurrentWindow': 'CurrentDOMWindow(info.GetIsolate())',
-    'EnteredWindow': 'EnteredDOMWindow(info.GetIsolate())',
+    'Isolate': 'info.GetIsolate()',
+    'ScriptState': 'script_state',
+    'ExecutionContext': 'execution_context',
     'Document': 'document',
-    'ThisValue': 'ScriptValue(scriptState, info.Holder())',
+    'ThisValue': 'ScriptValue(info.GetIsolate(), info.Holder())',
 }
 # List because key order matters, as we want arguments in deterministic order
 CALL_WITH_VALUES = [
+    'Isolate',
     'ScriptState',
     'ExecutionContext',
-    'ScriptArguments',
-    'CurrentWindow',
-    'EnteredWindow',
     'Document',
     'ThisValue',
 ]
@@ -304,12 +300,12 @@ class ExposureSet:
 
     @staticmethod
     def _code(exposure):
-        exposed = ('executionContext->%s()' %
+        condition = ('execution_context->%s()' %
                    EXPOSED_EXECUTION_CONTEXT_METHOD[exposure.exposed])
         if exposure.runtime_enabled is not None:
             runtime_enabled = (runtime_enabled_function(exposure.runtime_enabled))
-            return '({0} && {1})'.format(exposed, runtime_enabled)
-        return exposed
+            return '({0} && {1})'.format(condition, runtime_enabled)
+        return condition
 
     def code(self):
         if len(self.exposures) == 0:
@@ -350,16 +346,29 @@ def exposed(member, interface):
 # [SecureContext]
 def secure_context(member, interface):
     """Returns C++ code that checks whether an interface/method/attribute/etc. is exposed
-    to the current context. Requires that the surrounding code defines an 'isSecureContext'
+    to the current context. Requires that the surrounding code defines an |is_secure_context|
     variable prior to this check."""
-    if 'SecureContext' in member.extended_attributes or 'SecureContext' in interface.extended_attributes:
-        conditions = ['isSecureContext']
-        if 'SecureContext' in member.extended_attributes and member.extended_attributes['SecureContext'] is not None:
-            conditions.append('!%s' % runtime_enabled_function(member.extended_attributes['SecureContext']))
-        if 'SecureContext' in interface.extended_attributes and interface.extended_attributes['SecureContext'] is not None:
-            conditions.append('!%s' % runtime_enabled_function(interface.extended_attributes['SecureContext']))
-        return ' || '.join(conditions)
-    return None
+    member_is_secure_context = 'SecureContext' in member.extended_attributes
+    interface_is_secure_context = ((member.defined_in is None or
+                                    member.defined_in == interface.name) and
+                                   'SecureContext' in interface.extended_attributes)
+
+    if not (member_is_secure_context or interface_is_secure_context):
+        return None
+
+    conditions = ['is_secure_context']
+
+    if member_is_secure_context:
+        conditional = member.extended_attributes['SecureContext']
+        if conditional:
+            conditions.append('!{}'.format(runtime_enabled_function(conditional)))
+
+    if interface_is_secure_context:
+        conditional = interface.extended_attributes['SecureContext']
+        if conditional:
+            conditions.append('!{}'.format(runtime_enabled_function(conditional)))
+
+    return ' || '.join(conditions)
 
 
 # [ImplementedAs]
@@ -391,10 +400,12 @@ def cpp_name_or_partial(interface):
 def measure_as(definition_or_member, interface):
     extended_attributes = definition_or_member.extended_attributes
     if 'MeasureAs' in extended_attributes:
-        includes.add('core/frame/use_counter.h')
+        includes.add('core/frame/web_feature.h')
+        includes.add('platform/instrumentation/use_counter.h')
         return lambda suffix: extended_attributes['MeasureAs']
     if 'Measure' in extended_attributes:
-        includes.add('core/frame/use_counter.h')
+        includes.add('core/frame/web_feature.h')
+        includes.add('platform/instrumentation/use_counter.h')
         measure_as_name = capitalize(definition_or_member.name)
         if interface is not None:
             measure_as_name = '%s_%s' % (capitalize(interface.name), measure_as_name)
@@ -402,31 +413,40 @@ def measure_as(definition_or_member, interface):
     return None
 
 
-# [OriginTrialEnabled]
-def origin_trial_feature_name(definition_or_member):
-    """Returns the name of the feature for the OriginTrialEnabled attribute.
+# [HighEntropy]
+def high_entropy(definition_or_member):
+    extended_attributes = definition_or_member.extended_attributes
+    if 'HighEntropy' in extended_attributes:
+        includes.add('core/frame/dactyloscoper.h')
+        if not ('Measure' in extended_attributes or 'MeasureAs' in extended_attributes):
+            raise Exception('%s specified [HighEntropy], but does not include '
+                            'either [Measure] or [MeasureAs]'
+                            % definition_or_member.name)
+        return True
+    return False
 
-    An exception is raised if OriginTrialEnabled is used in conjunction with any
-    of the following (which must be mutually exclusive with origin trials):
-      - RuntimeEnabled
 
-    If the OriginTrialEnabled extended attribute is found, the includes are
-    also updated as a side-effect.
+# [RuntimeEnabled]
+def _is_origin_trial_feature(feature_name, runtime_features):
+    assert feature_name in runtime_features, feature_name + ' is not a runtime feature.'
+    feature = runtime_features[feature_name]
+    return feature['in_origin_trial']
+
+
+def origin_trial_feature_name(definition_or_member, runtime_features):
+    """
+    Returns the name of the origin trial feature if found, None otherwise.
+    Looks for origin trial feature specified by the RuntimeEnabled attribute.
     """
     extended_attributes = definition_or_member.extended_attributes
-    feature_name = extended_attributes.get('OriginTrialEnabled')
-
-    if feature_name and 'RuntimeEnabled' in extended_attributes:
-        raise Exception('[OriginTrialEnabled] and [RuntimeEnabled] must '
-                        'not be specified on the same definition: %s'
-                        % definition_or_member.name)
-
-    return feature_name
+    feature_name = extended_attributes.get('RuntimeEnabled')
+    if feature_name and _is_origin_trial_feature(feature_name, runtime_features):
+        return feature_name
 
 
 def origin_trial_function_call(feature_name, execution_context=None):
     """Returns a function call to determine if an origin trial is enabled."""
-    return 'OriginTrials::{feature_name}Enabled({context})'.format(
+    return 'RuntimeEnabledFeatures::{feature_name}Enabled({context})'.format(
         feature_name=feature_name,
         context=execution_context if execution_context else "execution_context")
 
@@ -447,12 +467,12 @@ def rcs_counter_name(member, generic_counter_name):
 
 
 # [RuntimeEnabled]
-def runtime_enabled_feature_name(definition_or_member):
+def runtime_enabled_feature_name(definition_or_member, runtime_features):
     extended_attributes = definition_or_member.extended_attributes
-    if 'RuntimeEnabled' not in extended_attributes:
-        return None
-    includes.add('platform/runtime_enabled_features.h')
-    return extended_attributes['RuntimeEnabled']
+    feature_name = extended_attributes.get('RuntimeEnabled')
+    if feature_name and not _is_origin_trial_feature(feature_name, runtime_features):
+        includes.add('platform/runtime_enabled_features.h')
+        return feature_name
 
 
 # [Unforgeable]
@@ -460,20 +480,14 @@ def is_unforgeable(member):
     return 'Unforgeable' in member.extended_attributes
 
 
-# [LegacyInterfaceTypeChecking]
-def is_legacy_interface_type_checking(interface, member):
-    return ('LegacyInterfaceTypeChecking' in interface.extended_attributes or
-            'LegacyInterfaceTypeChecking' in member.extended_attributes)
-
-
-# [Unforgeable], [Global], [PrimaryGlobal]
+# [Unforgeable], [Global]
 def on_instance(interface, member):
     """Returns True if the interface's member needs to be defined on every
     instance object.
 
     The following members must be defined on an instance object.
     - [Unforgeable] members
-    - regular members of [Global] or [PrimaryGlobal] interfaces
+    - regular members of [Global] interfaces
     """
     if member.is_static:
         return False
@@ -488,8 +502,7 @@ def on_instance(interface, member):
     if is_constructor_attribute(member):
         return True
 
-    if ('PrimaryGlobal' in interface.extended_attributes or
-            'Global' in interface.extended_attributes or
+    if ('Global' in interface.extended_attributes or
             'Unforgeable' in member.extended_attributes):
         return True
     return False
@@ -503,8 +516,8 @@ def on_prototype(interface, member):
     follows.
     - static members (optional)
     - [Unforgeable] members
-    - members of [Global] or [PrimaryGlobal] interfaces
-    - named properties of [Global] or [PrimaryGlobal] interfaces
+    - members of [Global] interfaces
+    - named properties of [Global] interfaces
     """
     if member.is_static:
         return False
@@ -519,8 +532,7 @@ def on_prototype(interface, member):
     if is_constructor_attribute(member):
         return False
 
-    if ('PrimaryGlobal' in interface.extended_attributes or
-            'Global' in interface.extended_attributes or
+    if ('Global' in interface.extended_attributes or
             'Unforgeable' in member.extended_attributes):
         return False
     return True

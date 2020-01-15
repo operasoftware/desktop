@@ -417,8 +417,8 @@ static int FUNC(frame_size_with_refs)(CodedBitstreamContext *ctx, RWContext *rw,
     int i, err;
 
     for (i = 0; i < AV1_REFS_PER_FRAME; i++) {
-        flag(found_ref);
-        if (current->found_ref) {
+        flags(found_ref[i], 1, i);
+        if (current->found_ref[i]) {
             AV1ReferenceFrameState *ref =
                 &priv->ref[current->ref_frame_idx[i]];
 
@@ -439,7 +439,7 @@ static int FUNC(frame_size_with_refs)(CodedBitstreamContext *ctx, RWContext *rw,
         }
     }
 
-    if (current->found_ref == 0) {
+    if (i >= AV1_REFS_PER_FRAME) {
         CHECK(FUNC(frame_size)(ctx, rw, current));
         CHECK(FUNC(render_size)(ctx, rw, current));
     } else {
@@ -1323,8 +1323,8 @@ static int FUNC(uncompressed_header)(CodedBitstreamContext *ctx, RWContext *rw,
             if (!current->frame_refs_short_signaling)
                 fbs(3, ref_frame_idx[i], 1, i);
             if (seq->frame_id_numbers_present_flag) {
-                fb(seq->delta_frame_id_length_minus_2 + 2,
-                   delta_frame_id_minus1);
+                fbs(seq->delta_frame_id_length_minus_2 + 2,
+                    delta_frame_id_minus1[i], 1, i);
             }
         }
 
@@ -1463,17 +1463,49 @@ static int FUNC(uncompressed_header)(CodedBitstreamContext *ctx, RWContext *rw,
 }
 
 static int FUNC(frame_header_obu)(CodedBitstreamContext *ctx, RWContext *rw,
-                                  AV1RawFrameHeader *current)
+                                  AV1RawFrameHeader *current, int redundant,
+                                  AVBufferRef *rw_buffer_ref)
 {
     CodedBitstreamAV1Context *priv = ctx->priv_data;
-    int err;
-
-    HEADER("Frame Header");
+    int start_pos, fh_bits, fh_bytes, err;
+    uint8_t *fh_start;
 
     if (priv->seen_frame_header) {
-        // Nothing to do.
+        if (!redundant) {
+            av_log(ctx->log_ctx, AV_LOG_ERROR, "Invalid repeated "
+                   "frame header OBU.\n");
+            return AVERROR_INVALIDDATA;
+        } else {
+            GetBitContext fh;
+            size_t i, b;
+            uint32_t val;
+
+            HEADER("Redundant Frame Header");
+
+            av_assert0(priv->frame_header_ref && priv->frame_header);
+
+            init_get_bits(&fh, priv->frame_header,
+                          priv->frame_header_size);
+            for (i = 0; i < priv->frame_header_size; i += 8) {
+                b = FFMIN(priv->frame_header_size - i, 8);
+                val = get_bits(&fh, b);
+                xf(b, frame_header_copy[i],
+                   val, val, val, 1, i / 8);
+            }
+        }
     } else {
+        if (redundant)
+            HEADER("Redundant Frame Header (used as Frame Header)");
+        else
+            HEADER("Frame Header");
+
         priv->seen_frame_header = 1;
+
+#ifdef READ
+        start_pos = get_bits_count(rw);
+#else
+        start_pos = put_bits_count(rw);
+#endif
 
         CHECK(FUNC(uncompressed_header)(ctx, rw, current));
 
@@ -1481,6 +1513,40 @@ static int FUNC(frame_header_obu)(CodedBitstreamContext *ctx, RWContext *rw,
             priv->seen_frame_header = 0;
         } else {
             priv->seen_frame_header = 1;
+
+            av_buffer_unref(&priv->frame_header_ref);
+
+#ifdef READ
+            fh_bits  = get_bits_count(rw) - start_pos;
+            fh_start = (uint8_t*)rw->buffer + start_pos / 8;
+#else
+            // Need to flush the bitwriter so that we can copy its output,
+            // but use a copy so we don't affect the caller's structure.
+            {
+                PutBitContext tmp = *rw;
+                flush_put_bits(&tmp);
+            }
+
+            fh_bits  = put_bits_count(rw) - start_pos;
+            fh_start = rw->buf + start_pos / 8;
+#endif
+            fh_bytes = (fh_bits + 7) / 8;
+
+            priv->frame_header_size = fh_bits;
+
+            if (rw_buffer_ref) {
+                priv->frame_header_ref = av_buffer_ref(rw_buffer_ref);
+                if (!priv->frame_header_ref)
+                    return AVERROR(ENOMEM);
+                priv->frame_header = fh_start;
+            } else {
+                priv->frame_header_ref =
+                    av_buffer_alloc(fh_bytes + AV_INPUT_BUFFER_PADDING_SIZE);
+                if (!priv->frame_header_ref)
+                    return AVERROR(ENOMEM);
+                priv->frame_header = priv->frame_header_ref->data;
+                memcpy(priv->frame_header, fh_start, fh_bytes);
+            }
         }
     }
 
@@ -1524,11 +1590,13 @@ static int FUNC(tile_group_obu)(CodedBitstreamContext *ctx, RWContext *rw,
 }
 
 static int FUNC(frame_obu)(CodedBitstreamContext *ctx, RWContext *rw,
-                           AV1RawFrame *current)
+                           AV1RawFrame *current,
+                           AVBufferRef *rw_buffer_ref)
 {
     int err;
 
-    CHECK(FUNC(frame_header_obu)(ctx, rw, &current->header));
+    CHECK(FUNC(frame_header_obu)(ctx, rw, &current->header,
+                                 0, rw_buffer_ref));
 
     CHECK(FUNC(byte_alignment)(ctx, rw));
 
@@ -1569,15 +1637,65 @@ static int FUNC(metadata_hdr_mdcv)(CodedBitstreamContext *ctx, RWContext *rw,
     int err, i;
 
     for (i = 0; i < 3; i++) {
-        fcs(16, primary_chromaticity_x[i], 0, 50000, 1, i);
-        fcs(16, primary_chromaticity_y[i], 0, 50000, 1, i);
+        fbs(16, primary_chromaticity_x[i], 1, i);
+        fbs(16, primary_chromaticity_y[i], 1, i);
     }
 
-    fc(16, white_point_chromaticity_x, 0, 50000);
-    fc(16, white_point_chromaticity_y, 0, 50000);
+    fb(16, white_point_chromaticity_x);
+    fb(16, white_point_chromaticity_y);
 
     fc(32, luminance_max, 1, MAX_UINT_BITS(32));
-    fc(32, luminance_min, 0, current->luminance_max >> 6);
+    // luminance_min must be lower than luminance_max. Convert luminance_max from
+    // 24.8 fixed point to 18.14 fixed point in order to compare them.
+    fc(32, luminance_min, 0, FFMIN(((uint64_t)current->luminance_max << 6) - 1,
+                                   MAX_UINT_BITS(32)));
+
+    return 0;
+}
+
+static int FUNC(scalability_structure)(CodedBitstreamContext *ctx, RWContext *rw,
+                                       AV1RawMetadataScalability *current)
+{
+    CodedBitstreamAV1Context *priv = ctx->priv_data;
+    const AV1RawSequenceHeader *seq;
+    int err, i, j;
+
+    if (!priv->sequence_header) {
+        av_log(ctx->log_ctx, AV_LOG_ERROR, "No sequence header available: "
+               "unable to parse scalability metadata.\n");
+        return AVERROR_INVALIDDATA;
+    }
+    seq = priv->sequence_header;
+
+    fb(2, spatial_layers_cnt_minus_1);
+    flag(spatial_layer_dimensions_present_flag);
+    flag(spatial_layer_description_present_flag);
+    flag(temporal_group_description_present_flag);
+    fc(3, scalability_structure_reserved_3bits, 0, 0);
+    if (current->spatial_layer_dimensions_present_flag) {
+        for (i = 0; i <= current->spatial_layers_cnt_minus_1; i++) {
+            fcs(16, spatial_layer_max_width[i],
+                0, seq->max_frame_width_minus_1 + 1, 1, i);
+            fcs(16, spatial_layer_max_height[i],
+                0, seq->max_frame_height_minus_1 + 1, 1, i);
+        }
+    }
+    if (current->spatial_layer_description_present_flag) {
+        for (i = 0; i <= current->spatial_layers_cnt_minus_1; i++)
+            fbs(8, spatial_layer_ref_id[i], 1, i);
+    }
+    if (current->temporal_group_description_present_flag) {
+        fb(8, temporal_group_size);
+        for (i = 0; i < current->temporal_group_size; i++) {
+            fbs(3, temporal_group_temporal_id[i], 1, i);
+            flags(temporal_group_temporal_switching_up_point_flag[i], 1, i);
+            flags(temporal_group_spatial_switching_up_point_flag[i], 1, i);
+            fbs(3, temporal_group_ref_cnt[i], 1, i);
+            for (j = 0; j < current->temporal_group_ref_cnt[i]; j++) {
+                fbs(8, temporal_group_ref_pic_diff[i][j], 2, i, j);
+            }
+        }
+    }
 
     return 0;
 }
@@ -1585,9 +1703,14 @@ static int FUNC(metadata_hdr_mdcv)(CodedBitstreamContext *ctx, RWContext *rw,
 static int FUNC(metadata_scalability)(CodedBitstreamContext *ctx, RWContext *rw,
                                       AV1RawMetadataScalability *current)
 {
-    // TODO: scalability metadata.
+    int err;
 
-    return AVERROR_PATCHWELCOME;
+    fb(8, scalability_mode_idc);
+
+    if (current->scalability_mode_idc == AV1_SCALABILITY_SS)
+        CHECK(FUNC(scalability_structure)(ctx, rw, current));
+
+    return 0;
 }
 
 static int FUNC(metadata_itut_t35)(CodedBitstreamContext *ctx, RWContext *rw,
@@ -1603,15 +1726,7 @@ static int FUNC(metadata_itut_t35)(CodedBitstreamContext *ctx, RWContext *rw,
 #ifdef READ
     // The payload runs up to the start of the trailing bits, but there might
     // be arbitrarily many trailing zeroes so we need to read through twice.
-    {
-        GetBitContext tmp = *rw;
-        current->payload_size = 0;
-        for (i = 0; get_bits_left(rw) >= 8; i++) {
-            if (get_bits(rw, 8))
-                current->payload_size = i;
-        }
-        *rw = tmp;
-    }
+    current->payload_size = cbs_av1_get_payload_bytes_left(rw);
 
     current->payload_ref = av_buffer_alloc(current->payload_size);
     if (!current->payload_ref)
@@ -1638,19 +1753,19 @@ static int FUNC(metadata_timecode)(CodedBitstreamContext *ctx, RWContext *rw,
     fb(9, n_frames);
 
     if (current->full_timestamp_flag) {
-        fb(6, seconds_value);
-        fb(6, minutes_value);
-        fb(5, hours_value);
+        fc(6, seconds_value, 0, 59);
+        fc(6, minutes_value, 0, 59);
+        fc(5, hours_value,   0, 23);
     } else {
         flag(seconds_flag);
         if (current->seconds_flag) {
-            fb(6, seconds_value);
+            fc(6, seconds_value, 0, 59);
             flag(minutes_flag);
             if (current->minutes_flag) {
-                fb(6, minutes_value);
+                fc(6, minutes_value, 0, 59);
                 flag(hours_flag);
                 if (current->hours_flag)
-                    fb(5, hours_value);
+                    fc(5, hours_value, 0, 23);
             }
         }
     }
@@ -1658,6 +1773,8 @@ static int FUNC(metadata_timecode)(CodedBitstreamContext *ctx, RWContext *rw,
     fb(5, time_offset_length);
     if (current->time_offset_length > 0)
         fb(current->time_offset_length, time_offset_value);
+    else
+        infer(time_offset_length, 0);
 
     return 0;
 }
@@ -1689,6 +1806,30 @@ static int FUNC(metadata_obu)(CodedBitstreamContext *ctx, RWContext *rw,
         // Unknown metadata type.
         return AVERROR_PATCHWELCOME;
     }
+
+    return 0;
+}
+
+static int FUNC(padding_obu)(CodedBitstreamContext *ctx, RWContext *rw,
+                             AV1RawPadding *current)
+{
+    int i, err;
+
+    HEADER("Padding");
+
+#ifdef READ
+    // The payload runs up to the start of the trailing bits, but there might
+    // be arbitrarily many trailing zeroes so we need to read through twice.
+    current->payload_size = cbs_av1_get_payload_bytes_left(rw);
+
+    current->payload_ref = av_buffer_alloc(current->payload_size);
+    if (!current->payload_ref)
+        return AVERROR(ENOMEM);
+    current->payload = current->payload_ref->data;
+#endif
+
+    for (i = 0; i < current->payload_size; i++)
+        xf(8, obu_padding_byte[i], current->payload[i], 0x00, 0xff, 1, i);
 
     return 0;
 }

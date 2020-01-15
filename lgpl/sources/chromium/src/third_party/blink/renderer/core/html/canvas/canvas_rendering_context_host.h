@@ -32,15 +32,23 @@ class CORE_EXPORT CanvasRenderingContextHost : public CanvasResourceHost,
                                                public CanvasImageSource,
                                                public GarbageCollectedMixin {
  public:
-  CanvasRenderingContextHost();
+  enum HostType {
+    kNone,
+    kCanvasHost,
+    kOffscreenCanvasHost,
+  };
+  CanvasRenderingContextHost(HostType host_type);
+
+  void RecordCanvasSizeToUMA(const IntSize&);
 
   virtual void DetachContext() = 0;
 
   virtual void DidDraw(const FloatRect& rect) = 0;
   virtual void DidDraw() = 0;
 
-  virtual void FinalizeFrame() = 0;
-  virtual void PushFrame(scoped_refptr<CanvasResource> frame,
+  virtual void PreFinalizeFrame() = 0;
+  virtual void PostFinalizeFrame() = 0;
+  virtual bool PushFrame(scoped_refptr<CanvasResource> frame,
                          const SkIRect& damage_rect) = 0;
   virtual bool OriginClean() const = 0;
   virtual void SetOriginTainted() = 0;
@@ -70,6 +78,7 @@ class CORE_EXPORT CanvasRenderingContextHost : public CanvasResourceHost,
 
   virtual void Commit(scoped_refptr<CanvasResource> canvas_resource,
                       const SkIRect& damage_rect);
+  virtual void SetNeedsMatrixClipRestore() {}
 
   bool IsPaintable() const;
 
@@ -88,9 +97,14 @@ class CORE_EXPORT CanvasRenderingContextHost : public CanvasResourceHost,
   bool Is2d() const;
   CanvasColorParams ColorParams() const;
 
+  // For deferred canvases this will have the side effect of drawing recorded
+  // commands in order to finalize the frame.
   ScriptPromise convertToBlob(ScriptState*,
-                              const ImageEncodeOptions&,
-                              ExceptionState&) const;
+                              const ImageEncodeOptions*,
+                              ExceptionState&);
+
+  // blink::CanvasImageSource
+  bool IsOffscreenCanvas() const override;
 
  protected:
   ~CanvasRenderingContextHost() override {}
@@ -98,6 +112,8 @@ class CORE_EXPORT CanvasRenderingContextHost : public CanvasResourceHost,
   scoped_refptr<StaticBitmapImage> CreateTransparentImage(const IntSize&) const;
 
   bool did_fail_to_create_resource_provider_ = false;
+  bool did_record_canvas_size_to_uma_ = false;
+  HostType host_type_ = kNone;
 };
 
 }  // namespace blink

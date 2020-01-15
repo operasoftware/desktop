@@ -13,9 +13,9 @@
 #include "base/optional.h"
 #include "base/strings/nullable_string16.h"
 #include "base/strings/string16.h"
-#include "third_party/blink/common/common_export.h"
-#include "third_party/blink/public/common/manifest/web_display_mode.h"
+#include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/screen_orientation/web_screen_orientation_lock_type.h"
+#include "third_party/blink/public/mojom/manifest/display_mode.mojom.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
@@ -32,7 +32,8 @@ struct BLINK_COMMON_EXPORT Manifest {
     enum class Purpose {
       ANY = 0,
       BADGE,
-      IMAGE_RESOURCE_PURPOSE_LAST = BADGE,
+      MASKABLE,
+      IMAGE_RESOURCE_PURPOSE_LAST = MASKABLE,
     };
 
     ImageResource();
@@ -55,10 +56,14 @@ struct BLINK_COMMON_EXPORT Manifest {
     // The special value "any" is represented by gfx::Size(0, 0).
     std::vector<gfx::Size> sizes;
 
-    // Empty if the field was not present or not of type "string". Defaults to
-    // a vector with a single value, IconPurpose::ANY, for all other parsing
-    // exceptions.
+    // Never empty. Defaults to a vector with a single value, IconPurpose::ANY,
+    // if not explicitly specified in the manifest.
     std::vector<Purpose> purpose;
+  };
+
+  struct BLINK_COMMON_EXPORT FileFilter {
+    base::string16 name;
+    std::vector<base::string16> accept;
   };
 
   // Structure representing a Web Share target's query parameter keys.
@@ -69,17 +74,42 @@ struct BLINK_COMMON_EXPORT Manifest {
     base::NullableString16 title;
     base::NullableString16 text;
     base::NullableString16 url;
+    std::vector<FileFilter> files;
   };
 
   // Structure representing how a Web Share target handles an incoming share.
   struct BLINK_COMMON_EXPORT ShareTarget {
+    enum class Method {
+      kGet,
+      kPost,
+    };
+
+    enum class Enctype {
+      kFormUrlEncoded,
+      kMultipartFormData,
+    };
+
     ShareTarget();
     ~ShareTarget();
 
     // The URL used for sharing. Query parameters are added to this comprised of
     // keys from |params| and values from the shared data.
     GURL action;
+
+    // The HTTP request method for the web share target.
+    Method method;
+
+    // The way that share data is encoded in "POST" request.
+    Enctype enctype;
+
     ShareTargetParams params;
+  };
+
+  // Structure representing a File Handler.
+  struct BLINK_COMMON_EXPORT FileHandler {
+    // The URL which will be opened when the file handler is invoked.
+    GURL action;
+    std::vector<FileFilter> files;
   };
 
   // Structure representing a related application.
@@ -119,9 +149,9 @@ struct BLINK_COMMON_EXPORT Manifest {
   // Empty if the parsing failed or the field was not present.
   GURL start_url;
 
-  // Set to WebDisplayModeUndefined if the parsing failed or the field was not
+  // Set to DisplayMode::kUndefined if the parsing failed or the field was not
   // present.
-  blink::WebDisplayMode display;
+  blink::mojom::DisplayMode display;
 
   // Set to blink::WebScreenOrientationLockDefault if the parsing failed or the
   // field was not present.
@@ -132,11 +162,13 @@ struct BLINK_COMMON_EXPORT Manifest {
   std::vector<ImageResource> icons;
 
   // Null if parsing failed or the field was not present.
-  // TODO(constantina): This field is non-standard and part of a Chrome
-  // experiment. See:
-  // https://github.com/WICG/web-share-target/blob/master/docs/interface.md
-  // As such, this field should not be exposed to web contents.
   base::Optional<ShareTarget> share_target;
+
+  // Null if parsing failed or the field was not present.
+  // TODO(harrisjay): This field is non-standard and part of a Chrome
+  // experiment. See:
+  // https://github.com/WICG/file-handling/blob/master/explainer.md
+  base::Optional<FileHandler> file_handler;
 
   // Empty if the parsing failed, the field was not present, empty or all the
   // applications inside the array were invalid. The order of the array
@@ -154,16 +186,14 @@ struct BLINK_COMMON_EXPORT Manifest {
   // Null if field is not present or parsing failed.
   base::Optional<SkColor> background_color;
 
-  // A URL of the HTML splash screen.
-  // Empty if the parsing failed or the field was not present.
-  GURL splash_screen_url;
-
   // This is a proprietary extension of the web Manifest, double-check that it
   // is okay to use this entry.
   // Null if parsing failed or the field was not present.
   base::NullableString16 gcm_sender_id;
 
-  // Empty if the parsing failed or the field was not present.
+  // Empty if the parsing failed. Otherwise defaults to the start URL (or
+  // document URL if start URL isn't present) with filename, query, and fragment
+  // removed.
   GURL scope;
 };
 

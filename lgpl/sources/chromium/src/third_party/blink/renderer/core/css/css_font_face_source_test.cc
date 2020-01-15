@@ -18,8 +18,8 @@ class DummyFontFaceSource : public CSSFontFaceSource {
   scoped_refptr<SimpleFontData> CreateFontData(
       const FontDescription&,
       const FontSelectionCapabilities&) override {
-    return SimpleFontData::Create(FontPlatformData(SkTypeface::MakeDefault(),
-                                                   CString(), 0, false, false));
+    return SimpleFontData::Create(FontPlatformData(
+        SkTypeface::MakeDefault(), std::string(), 0, false, false));
   }
 
   DummyFontFaceSource() = default;
@@ -42,17 +42,19 @@ unsigned SimulateHashCalculation(float size) {
   FontDescription font_description;
   font_description.SetSizeAdjust(size);
   font_description.SetAdjustedSize(size);
-  return font_description.CacheKey(FontFaceCreationParams()).GetHash();
+  bool is_unique_match = false;
+  return font_description.CacheKey(FontFaceCreationParams(), is_unique_match)
+      .GetHash();
 }
 }
 
 TEST(CSSFontFaceSourceTest, HashCollision) {
   DummyFontFaceSource font_face_source;
   // Even if the hash value collide, fontface cache should return different
-  // value for different fonts.
-  EXPECT_EQ(SimulateHashCalculation(527), SimulateHashCalculation(3099));
-  EXPECT_NE(font_face_source.GetFontDataForSize(527),
-            font_face_source.GetFontDataForSize(3099));
+  // value for different fonts, values determined experimentally.
+  EXPECT_EQ(SimulateHashCalculation(10280), SimulateHashCalculation(9875));
+  EXPECT_NE(font_face_source.GetFontDataForSize(10280),
+            font_face_source.GetFontDataForSize(9875));
 }
 
 // Exercises the size font_data_table_ assertions in CSSFontFaceSource.

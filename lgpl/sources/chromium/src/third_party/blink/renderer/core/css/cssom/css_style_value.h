@@ -8,8 +8,8 @@
 #include "base/macros.h"
 #include "base/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
-#include "third_party/blink/renderer/core/css_property_names.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -31,7 +31,6 @@ class CORE_EXPORT CSSStyleValue : public ScriptWrappable {
   // This enum ordering is significant for CSSStyleValue::IsNumericValue.
   enum StyleValueType {
     kUnknownType,
-    kShorthandType,
     kUnparsedType,
     kKeywordType,
     // Start of CSSNumericValue subclasses
@@ -46,6 +45,7 @@ class CORE_EXPORT CSSStyleValue : public ScriptWrappable {
     kTransformType,
     kPositionType,
     kURLImageType,
+    kUnsupportedColorType,
   };
 
   static CSSStyleValue* parse(const ExecutionContext*,

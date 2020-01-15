@@ -7,26 +7,22 @@
 
 #include "base/test/test_simple_task_runner.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/core/dom/events/event_listener.h"
+#include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/test/mock_ice_transport_adapter.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_ice_transport.h"
 
 namespace blink {
 
-class MockEventListener final : public EventListener {
+class V8TestingScope;
+
+class MockEventListener final : public NativeEventListener {
  public:
-  MockEventListener() : EventListener(ListenerType::kCPPEventListenerType) {}
-
-  bool operator==(const EventListener& other) const final {
-    return this == &other;
-  }
-
-  MOCK_METHOD2(handleEvent, void(ExecutionContext*, Event*));
+  MOCK_METHOD2(Invoke, void(ExecutionContext*, Event*));
 };
 
 class RTCIceTransportTest : public testing::Test {
  public:
-  static RTCIceParameters CreateRemoteRTCIceParameters1();
+  static RTCIceParameters* CreateRemoteRTCIceParameters1();
 
   RTCIceTransportTest();
   ~RTCIceTransportTest() override;
@@ -57,10 +53,10 @@ class RTCIceTransportTest : public testing::Test {
   // letting it pass.
   MockEventListener* CreateMockEventListener();
 
- private:
+ protected:
   scoped_refptr<base::TestSimpleTaskRunner> main_thread_;
   scoped_refptr<base::TestSimpleTaskRunner> worker_thread_;
-  std::vector<Persistent<MockEventListener>> mock_event_listeners_;
+  Vector<Persistent<MockEventListener>> mock_event_listeners_;
 };
 
 }  // namespace blink

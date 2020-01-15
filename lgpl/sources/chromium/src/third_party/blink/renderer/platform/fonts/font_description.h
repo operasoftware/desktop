@@ -26,11 +26,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_FONT_DESCRIPTION_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_FONT_DESCRIPTION_H_
 
-#include "SkFontStyle.h"
+#include <unicode/uscript.h>
+
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/font_family_names.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache_key.h"
 #include "third_party/blink/renderer/platform/fonts/font_family.h"
+#include "third_party/blink/renderer/platform/fonts/font_optical_sizing.h"
 #include "third_party/blink/renderer/platform/fonts/font_orientation.h"
 #include "third_party/blink/renderer/platform/fonts/font_selection_types.h"
 #include "third_party/blink/renderer/platform/fonts/font_smoothing_mode.h"
@@ -41,10 +43,9 @@
 #include "third_party/blink/renderer/platform/fonts/text_rendering_mode.h"
 #include "third_party/blink/renderer/platform/fonts/typesetting_features.h"
 #include "third_party/blink/renderer/platform/text/layout_locale.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
-
-#include <unicode/uscript.h>
+#include "third_party/skia/include/core/SkFontStyle.h"
 
 namespace blink {
 
@@ -179,7 +180,7 @@ class PLATFORM_EXPORT FontDescription {
   // family is "monospace"
   bool IsMonospace() const {
     return GenericFamily() == kMonospaceFamily && !Family().Next() &&
-           Family().Family() == FontFamilyNames::webkit_monospace;
+           Family().Family() == font_family_names::kWebkitMonospace;
   }
   Kerning GetKerning() const { return static_cast<Kerning>(fields_.kerning_); }
   FontVariantEastAsian VariantEastAsian() const {
@@ -189,7 +190,7 @@ class PLATFORM_EXPORT FontDescription {
   VariantLigatures GetVariantLigatures() const;
   FontVariantNumeric VariantNumeric() const {
     return FontVariantNumeric::InitializeFromUnsigned(fields_.variant_numeric_);
-  };
+  }
   LigaturesState CommonLigaturesState() const {
     return static_cast<LigaturesState>(fields_.common_ligatures_state_);
   }
@@ -205,6 +206,9 @@ class PLATFORM_EXPORT FontDescription {
   unsigned KeywordSize() const { return fields_.keyword_size_; }
   FontSmoothingMode FontSmoothing() const {
     return static_cast<FontSmoothingMode>(fields_.font_smoothing_);
+  }
+  OpticalSizing FontOpticalSizing() const {
+    return static_cast<OpticalSizing>(fields_.font_optical_sizing_);
   }
   TextRenderingMode TextRendering() const {
     return static_cast<TextRenderingMode>(fields_.text_rendering_);
@@ -252,6 +256,7 @@ class PLATFORM_EXPORT FontDescription {
       const;  // Returns either the computedSize or the computedPixelSize
   FontCacheKey CacheKey(
       const FontFaceCreationParams&,
+      bool is_unique_match,
       const FontSelectionRequest& = FontSelectionRequest()) const;
 
   void SetFamily(const FontFamily& family) { family_list_ = family; }
@@ -280,6 +285,9 @@ class PLATFORM_EXPORT FontDescription {
   void SetKeywordSize(unsigned s) { fields_.keyword_size_ = s; }
   void SetFontSmoothing(FontSmoothingMode smoothing) {
     fields_.font_smoothing_ = smoothing;
+  }
+  void SetFontOpticalSizing(OpticalSizing font_optical_sizing) {
+    fields_.font_optical_sizing_ = font_optical_sizing;
   }
   void SetTextRendering(TextRenderingMode rendering) {
     fields_.text_rendering_ = rendering;
@@ -341,6 +349,8 @@ class PLATFORM_EXPORT FontDescription {
   }
 
   SkFontStyle SkiaFontStyle() const;
+
+  void UpdateFromSkiaFontStyle(const SkFontStyle& font_style);
 
   int MinimumPrefixWidthToHyphenate() const;
 
@@ -412,6 +422,7 @@ class PLATFORM_EXPORT FontDescription {
     unsigned variant_numeric_ : 8;
     unsigned variant_east_asian_ : 6;
     mutable unsigned subpixel_ascent_descent_ : 1;
+    unsigned font_optical_sizing_ : 1;
   };
 
   static_assert(sizeof(BitFields) == sizeof(FieldsAsUnsignedType),

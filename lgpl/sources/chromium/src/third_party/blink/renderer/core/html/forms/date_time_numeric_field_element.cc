@@ -25,7 +25,7 @@
 
 #include "third_party/blink/renderer/core/html/forms/date_time_numeric_field_element.h"
 
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/platform/fonts/font.h"
@@ -47,11 +47,12 @@ bool DateTimeNumericFieldElement::Range::IsInRange(int value) const {
 DateTimeNumericFieldElement::DateTimeNumericFieldElement(
     Document& document,
     FieldOwner& field_owner,
+    DateTimeField type,
     const Range& range,
     const Range& hard_limits,
     const String& placeholder,
     const DateTimeNumericFieldElement::Step& step)
-    : DateTimeFieldElement(document, field_owner),
+    : DateTimeFieldElement(document, field_owner, type),
       placeholder_(placeholder),
       range_(range),
       hard_limits_(hard_limits),
@@ -65,13 +66,14 @@ DateTimeNumericFieldElement::DateTimeNumericFieldElement(
   // We show a direction-neutral string such as "--" as a placeholder. It
   // should follow the direction of numeric values.
   if (LocaleForOwner().IsRTL()) {
-    WTF::Unicode::CharDirection dir =
-        WTF::Unicode::Direction(FormatValue(Maximum())[0]);
-    if (dir == WTF::Unicode::kLeftToRight ||
-        dir == WTF::Unicode::kEuropeanNumber ||
-        dir == WTF::Unicode::kArabicNumber) {
-      SetInlineStyleProperty(CSSPropertyUnicodeBidi, CSSValueBidiOverride);
-      SetInlineStyleProperty(CSSPropertyDirection, CSSValueLtr);
+    WTF::unicode::CharDirection dir =
+        WTF::unicode::Direction(FormatValue(Maximum())[0]);
+    if (dir == WTF::unicode::kLeftToRight ||
+        dir == WTF::unicode::kEuropeanNumber ||
+        dir == WTF::unicode::kArabicNumber) {
+      SetInlineStyleProperty(CSSPropertyID::kUnicodeBidi,
+                             CSSValueID::kBidiOverride);
+      SetInlineStyleProperty(CSSPropertyID::kDirection, CSSValueID::kLtr);
     }
   }
 }
@@ -95,10 +97,10 @@ int DateTimeNumericFieldElement::DefaultValueForStepUp() const {
 void DateTimeNumericFieldElement::SetFocused(bool value,
                                              WebFocusType focus_type) {
   if (!value) {
-    int value = TypeAheadValue();
+    int type_ahead_value = TypeAheadValue();
     type_ahead_buffer_.Clear();
-    if (value >= 0)
-      SetValueAsInteger(value, kDispatchEvent);
+    if (type_ahead_value >= 0)
+      SetValueAsInteger(type_ahead_value, kDispatchEvent);
   }
   DateTimeFieldElement::SetFocused(value, focus_type);
 }
@@ -115,7 +117,7 @@ String DateTimeNumericFieldElement::FormatValue(int value) const {
 void DateTimeNumericFieldElement::HandleKeyboardEvent(
     KeyboardEvent& keyboard_event) {
   DCHECK(!IsDisabled());
-  if (keyboard_event.type() != EventTypeNames::keypress)
+  if (keyboard_event.type() != event_type_names::kKeypress)
     return;
 
   UChar char_code = static_cast<UChar>(keyboard_event.charCode());

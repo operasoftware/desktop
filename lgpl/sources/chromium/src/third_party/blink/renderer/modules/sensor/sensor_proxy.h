@@ -5,12 +5,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_SENSOR_SENSOR_PROXY_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_SENSOR_SENSOR_PROXY_H_
 
+#include "base/macros.h"
 #include "services/device/public/cpp/generic_sensor/sensor_reading.h"
 #include "services/device/public/cpp/generic_sensor/sensor_reading_shared_buffer_reader.h"
-#include "services/device/public/mojom/sensor.mojom-blink.h"
+#include "services/device/public/mojom/sensor.mojom-blink-forward.h"
 #include "services/device/public/mojom/sensor_provider.mojom-blink.h"
 #include "third_party/blink/renderer/core/page/focus_changed_observer.h"
 #include "third_party/blink/renderer/core/page/page_visibility_observer.h"
+#include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/exception_code.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
@@ -20,10 +22,9 @@ class SensorProviderProxy;
 
 // This class wraps 'Sensor' mojo interface and used by multiple
 // JS sensor instances of the same type (within a single frame).
-class SensorProxy : public GarbageCollectedFinalized<SensorProxy>,
-                    public PageVisibilityObserver,
-                    public FocusChangedObserver {
-  WTF_MAKE_NONCOPYABLE(SensorProxy);
+class MODULES_EXPORT SensorProxy : public GarbageCollected<SensorProxy>,
+                                   public PageVisibilityObserver,
+                                   public FocusChangedObserver {
   USING_GARBAGE_COLLECTED_MIXIN(SensorProxy);
 
  public:
@@ -94,8 +95,6 @@ class SensorProxy : public GarbageCollectedFinalized<SensorProxy>,
   device::SensorReading reading_;
   mutable device::SensorReading remapped_reading_;
 
-  using ReadingBuffer = device::SensorReadingSharedBuffer;
-
  private:
   // PageVisibilityObserver overrides.
   void PageVisibilityChanged() override;
@@ -110,9 +109,11 @@ class SensorProxy : public GarbageCollectedFinalized<SensorProxy>,
   bool detached_ = false;
 
   static_assert(
-      sizeof(ReadingBuffer) ==
+      sizeof(device::SensorReadingSharedBuffer) ==
           device::mojom::blink::SensorInitParams::kReadBufferSizeForTests,
       "Check reading buffer size for tests");
+
+  DISALLOW_COPY_AND_ASSIGN(SensorProxy);
 };
 
 }  // namespace blink

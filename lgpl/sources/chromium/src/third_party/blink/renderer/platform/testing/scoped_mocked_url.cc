@@ -14,14 +14,14 @@ namespace test {
 ScopedMockedURL::ScopedMockedURL(const WebURL& url) : url_(url) {}
 
 ScopedMockedURL::~ScopedMockedURL() {
-  Platform::Current()->GetURLLoaderMockFactory()->UnregisterURL(url_);
+  url_test_helpers::RegisterMockedURLUnregister(url_);
 }
 
 ScopedMockedURLLoad::ScopedMockedURLLoad(const WebURL& full_url,
                                          const WebString& file_path,
                                          const WebString& mime_type)
     : ScopedMockedURL(full_url) {
-  URLTestHelpers::RegisterMockedURLLoad(full_url, file_path, mime_type);
+  url_test_helpers::RegisterMockedURLLoad(full_url, file_path, mime_type);
 }
 
 }  // namespace test

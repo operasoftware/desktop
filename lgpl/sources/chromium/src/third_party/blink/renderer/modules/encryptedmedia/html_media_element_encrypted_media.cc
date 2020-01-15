@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/modules/encryptedmedia/html_media_element_encrypted_media.h"
 
+#include "base/macros.h"
+#include "media/base/eme_constants.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
@@ -19,6 +21,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/content_decryption_module_result.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -28,16 +31,15 @@ namespace blink {
 
 // This class allows MediaKeys to be set asynchronously.
 class SetMediaKeysHandler : public ScriptPromiseResolver {
-  WTF_MAKE_NONCOPYABLE(SetMediaKeysHandler);
-
  public:
   static ScriptPromise Create(ScriptState*, HTMLMediaElement&, MediaKeys*);
+
+  SetMediaKeysHandler(ScriptState*, HTMLMediaElement&, MediaKeys*);
   ~SetMediaKeysHandler() override;
 
   void Trace(blink::Visitor*) override;
 
  private:
-  SetMediaKeysHandler(ScriptState*, HTMLMediaElement&, MediaKeys*);
   void TimerFired(TimerBase*);
 
   void ClearExistingMediaKeys();
@@ -54,6 +56,8 @@ class SetMediaKeysHandler : public ScriptPromiseResolver {
   Member<MediaKeys> new_media_keys_;
   bool made_reservation_;
   TaskRunnerTimer<SetMediaKeysHandler> timer_;
+
+  DISALLOW_COPY_AND_ASSIGN(SetMediaKeysHandler);
 };
 
 typedef base::OnceCallback<void()> SuccessCallback;
@@ -100,7 +104,7 @@ class SetContentDecryptionModuleResult final
   }
 
   void CompleteWithError(WebContentDecryptionModuleException code,
-                         unsigned long system_code,
+                         uint32_t system_code,
                          const WebString& message) override {
     // Non-zero |systemCode| is appended to the |message|. If the |message|
     // is empty, we'll report "Rejected with system code (systemCode)".
@@ -129,9 +133,8 @@ class SetContentDecryptionModuleResult final
 ScriptPromise SetMediaKeysHandler::Create(ScriptState* script_state,
                                           HTMLMediaElement& element,
                                           MediaKeys* media_keys) {
-  SetMediaKeysHandler* handler =
-      new SetMediaKeysHandler(script_state, element, media_keys);
-  handler->PauseIfNeeded();
+  SetMediaKeysHandler* handler = MakeGarbageCollected<SetMediaKeysHandler>(
+      script_state, element, media_keys);
   handler->KeepAliveWhilePending();
   return handler->Promise();
 }
@@ -150,7 +153,7 @@ SetMediaKeysHandler::SetMediaKeysHandler(ScriptState* script_state,
   DVLOG(EME_LOG_LEVEL) << __func__;
 
   // 5. Run the following steps in parallel.
-  timer_.StartOneShot(TimeDelta(), FROM_HERE);
+  timer_.StartOneShot(base::TimeDelta(), FROM_HERE);
 }
 
 SetMediaKeysHandler::~SetMediaKeysHandler() = default;
@@ -200,8 +203,8 @@ void SetMediaKeysHandler::ClearExistingMediaKeys() {
       FailureCallback failure_callback =
           WTF::Bind(&SetMediaKeysHandler::ClearFailed, WrapPersistent(this));
       ContentDecryptionModuleResult* result =
-          new SetContentDecryptionModuleResult(std::move(success_callback),
-                                               std::move(failure_callback));
+          MakeGarbageCollected<SetContentDecryptionModuleResult>(
+              std::move(success_callback), std::move(failure_callback));
       media_player->SetContentDecryptionModule(nullptr, result->Result());
 
       // Don't do anything more until |result| is resolved (or rejected).
@@ -231,8 +234,8 @@ void SetMediaKeysHandler::SetNewMediaKeys() {
       FailureCallback failure_callback =
           WTF::Bind(&SetMediaKeysHandler::SetFailed, WrapPersistent(this));
       ContentDecryptionModuleResult* result =
-          new SetContentDecryptionModuleResult(std::move(success_callback),
-                                               std::move(failure_callback));
+          MakeGarbageCollected<SetContentDecryptionModuleResult>(
+              std::move(success_callback), std::move(failure_callback));
       element_->GetWebMediaPlayer()->SetContentDecryptionModule(
           new_media_keys_->ContentDecryptionModule(), result->Result());
 
@@ -343,7 +346,7 @@ HTMLMediaElementEncryptedMedia& HTMLMediaElementEncryptedMedia::From(
       Supplement<HTMLMediaElement>::From<HTMLMediaElementEncryptedMedia>(
           element);
   if (!supplement) {
-    supplement = new HTMLMediaElementEncryptedMedia(element);
+    supplement = MakeGarbageCollected<HTMLMediaElementEncryptedMedia>(element);
     ProvideTo(element, supplement);
   }
   return *supplement;
@@ -372,7 +375,8 @@ ScriptPromise HTMLMediaElementEncryptedMedia::setMediaKeys(
   //    promise rejected with an InvalidStateError.
   if (this_element.is_attaching_media_keys_) {
     return ScriptPromise::RejectWithDOMException(
-        script_state, DOMException::Create(DOMExceptionCode::kInvalidStateError,
+        script_state,
+        MakeGarbageCollected<DOMException>(DOMExceptionCode::kInvalidStateError,
                                            "Another request is in progress."));
   }
 
@@ -389,36 +393,36 @@ ScriptPromise HTMLMediaElementEncryptedMedia::setMediaKeys(
 }
 
 // Create a MediaEncryptedEvent for WD EME.
-static Event* CreateEncryptedEvent(WebEncryptedMediaInitDataType init_data_type,
+static Event* CreateEncryptedEvent(media::EmeInitDataType init_data_type,
                                    const unsigned char* init_data,
                                    unsigned init_data_length) {
-  MediaEncryptedEventInit initializer;
-  initializer.setInitDataType(
+  MediaEncryptedEventInit* initializer = MediaEncryptedEventInit::Create();
+  initializer->setInitDataType(
       EncryptedMediaUtils::ConvertFromInitDataType(init_data_type));
-  initializer.setInitData(DOMArrayBuffer::Create(init_data, init_data_length));
-  initializer.setBubbles(false);
-  initializer.setCancelable(false);
+  initializer->setInitData(DOMArrayBuffer::Create(init_data, init_data_length));
+  initializer->setBubbles(false);
+  initializer->setCancelable(false);
 
-  return MediaEncryptedEvent::Create(EventTypeNames::encrypted, initializer);
+  return MakeGarbageCollected<MediaEncryptedEvent>(event_type_names::kEncrypted,
+                                                   initializer);
 }
 
 void HTMLMediaElementEncryptedMedia::Encrypted(
-    WebEncryptedMediaInitDataType init_data_type,
+    media::EmeInitDataType init_data_type,
     const unsigned char* init_data,
     unsigned init_data_length) {
   DVLOG(EME_LOG_LEVEL) << __func__;
 
   Event* event;
-  if (media_element_->IsMediaDataCORSSameOrigin(
-          media_element_->GetExecutionContext()->GetSecurityOrigin())) {
+  if (media_element_->IsMediaDataCorsSameOrigin()) {
     event = CreateEncryptedEvent(init_data_type, init_data, init_data_length);
   } else {
     // Current page is not allowed to see content from the media file,
     // so don't return the initData. However, they still get an event.
-    event = CreateEncryptedEvent(WebEncryptedMediaInitDataType::kUnknown,
-                                 nullptr, 0);
+    event = CreateEncryptedEvent(media::EmeInitDataType::UNKNOWN, nullptr, 0);
     media_element_->GetExecutionContext()->AddConsoleMessage(
-        ConsoleMessage::Create(kJSMessageSource, kWarningMessageLevel,
+        ConsoleMessage::Create(mojom::ConsoleMessageSource::kJavaScript,
+                               mojom::ConsoleMessageLevel::kWarning,
                                "Media element must be CORS-same-origin with "
                                "the embedding page. If cross-origin, you "
                                "should use the `crossorigin` attribute and "
@@ -442,7 +446,7 @@ void HTMLMediaElementEncryptedMedia::DidBlockPlaybackWaitingForKey() {
   // 2. If the media element's waiting for key value is false, queue a task
   //    to fire a simple event named waitingforkey at the media element.
   if (!is_waiting_for_key_) {
-    Event* event = Event::Create(EventTypeNames::waitingforkey);
+    Event* event = Event::Create(event_type_names::kWaitingforkey);
     event->SetTarget(media_element_);
     media_element_->ScheduleEvent(event);
   }

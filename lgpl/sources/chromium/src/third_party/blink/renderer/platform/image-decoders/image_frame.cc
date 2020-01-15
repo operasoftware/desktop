@@ -46,17 +46,6 @@ ImageFrame::ImageFrame()
       pixels_changed_(false),
       required_previous_frame_index_(kNotFound) {}
 
-ImageFrame::ImageFrame(SkBitmap bitmap)
-    : bitmap_(bitmap),
-      allocator_(0),
-      has_alpha_(!bitmap.isOpaque()),
-      status_(kFrameComplete),
-      disposal_method_(kDisposeNotSpecified),
-      alpha_blend_source_(kBlendAtopBgcolor),
-      premultiply_alpha_(true),
-      pixels_changed_(false),
-      required_previous_frame_index_(kNotFound) {}
-
 ImageFrame& ImageFrame::operator=(const ImageFrame& other) {
   if (this == &other)
     return *this;
@@ -133,6 +122,10 @@ bool ImageFrame::AllocatePixelData(int new_width,
                                    sk_sp<SkColorSpace> color_space) {
   // AllocatePixelData() should only be called once.
   DCHECK(!Width() && !Height());
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+  if (new_width > 1000 || new_height > 1000)
+    return false;
+#endif
 
   SkImageInfo info = SkImageInfo::MakeN32(
       new_width, new_height,

@@ -9,7 +9,12 @@ cr.define('extension_manager_tests', function() {
     ChangePages: 'change pages',
     ItemListVisibility: 'item list visibility',
     SplitItems: 'split items',
+    PageTitleUpdate: 'updates the title based on current route',
     UrlNavigationToDetails: 'url navigation to details',
+    UrlNavigationToActivityLogFail:
+        'url navigation to activity log without flag set',
+    UrlNavigationToActivityLogSuccess:
+        'url navigation to activity log with flag set',
   };
 
   function getDataByName(list, name) {
@@ -26,11 +31,17 @@ cr.define('extension_manager_tests', function() {
 
     /** @param {string} viewElement */
     function assertViewActive(tagName) {
-      expectTrue(!!manager.$.viewManager.querySelector(`${tagName}.active`));
+      assertTrue(!!manager.$.viewManager.querySelector(`${tagName}.active`));
     }
 
     setup(function() {
       manager = document.querySelector('extensions-manager');
+      // Wait for the first view to be active before starting tests, if one is
+      // not active already. Sometimes, on Mac with native HTML imports
+      // disabled, no views are active at this point.
+      return manager.$.viewManager.querySelector('.active') ?
+          Promise.resolve() :
+          test_util.eventToPromise('view-enter-start', manager);
     });
 
     test(assert(TestNames.ItemListVisibility), function() {
@@ -100,6 +111,23 @@ cr.define('extension_manager_tests', function() {
       assertViewActive('extensions-item-list');
     });
 
+    test(assert(TestNames.PageTitleUpdate), function() {
+      expectEquals('Extensions', document.title);
+
+      // Open details view with a valid ID.
+      extensions.navigation.navigateTo({
+        page: extensions.Page.DETAILS,
+        extensionId: 'ldnnhddmnhbkjipkidpdiheffobcpfmf'
+      });
+      Polymer.dom.flush();
+      expectEquals('Extensions - My extension 1', document.title);
+
+      // Navigate back to the list view and check the page title.
+      extensions.navigation.navigateTo({page: extensions.Page.LIST});
+      Polymer.dom.flush();
+      expectEquals('Extensions', document.title);
+    });
+
     test(assert(TestNames.UrlNavigationToDetails), function() {
       assertViewActive('extensions-detail-view');
       const detailsView = manager.$$('extensions-detail-view');
@@ -107,18 +135,63 @@ cr.define('extension_manager_tests', function() {
 
       // Try to open detail view for invalid ID.
       extensions.navigation.navigateTo(
-          {page: Page.DETAILS, extensionId: 'z'.repeat(32)});
+          {page: extensions.Page.DETAILS, extensionId: 'z'.repeat(32)});
       Polymer.dom.flush();
       // Should be re-routed to the main page.
       assertViewActive('extensions-item-list');
 
       // Try to open detail view with a valid ID.
       extensions.navigation.navigateTo({
-        page: Page.DETAILS,
+        page: extensions.Page.DETAILS,
         extensionId: 'ldnnhddmnhbkjipkidpdiheffobcpfmf'
       });
       Polymer.dom.flush();
       assertViewActive('extensions-detail-view');
+    });
+
+    test(assert(TestNames.UrlNavigationToActivityLogFail), function() {
+      expectFalse(manager.showActivityLog);
+
+      // Try to open activity log with a valid ID.
+      extensions.navigation.navigateTo({
+        page: extensions.Page.ACTIVITY_LOG,
+        extensionId: 'ldnnhddmnhbkjipkidpdiheffobcpfmf'
+      });
+      Polymer.dom.flush();
+
+      // Should be re-routed to details page with showActivityLog set to false.
+      assertViewActive('extensions-detail-view');
+      const detailsView = manager.$$('extensions-detail-view');
+      expectFalse(detailsView.showActivityLog);
+
+      // Try to open activity log with an invalid ID.
+      extensions.navigation.navigateTo(
+          {page: extensions.Page.ACTIVITY_LOG, extensionId: 'z'.repeat(32)});
+      Polymer.dom.flush();
+      // Should be re-routed to the main page.
+      assertViewActive('extensions-item-list');
+    });
+
+    test(assert(TestNames.UrlNavigationToActivityLogSuccess), function() {
+      expectTrue(manager.showActivityLog);
+
+      // Try to open activity log with a valid ID.
+      extensions.navigation.navigateTo({
+        page: extensions.Page.ACTIVITY_LOG,
+        extensionId: 'ldnnhddmnhbkjipkidpdiheffobcpfmf'
+      });
+      Polymer.dom.flush();
+
+      // Should be on activity log page.
+      assertViewActive('extensions-activity-log');
+
+      // Try to open activity log with an invalid ID.
+      extensions.navigation.navigateTo(
+          {page: extensions.Page.ACTIVITY_LOG, extensionId: 'z'.repeat(32)});
+      Polymer.dom.flush();
+      // Should also be on activity log page. See |changePage_| in manager.js
+      // for the use case.
+      assertViewActive('extensions-activity-log');
     });
   });
 

@@ -22,6 +22,7 @@
 
 #include "third_party/blink/renderer/core/layout/layout_text_control.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/html/forms/text_control_element.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
@@ -52,18 +53,18 @@ void LayoutTextControl::StyleDidChange(StyleDifference diff,
   if (!inner_editor)
     return;
   LayoutBlock* inner_editor_layout_object =
-      ToLayoutBlock(inner_editor->GetLayoutObject());
+      To<LayoutBlock>(inner_editor->GetLayoutObject());
   if (inner_editor_layout_object) {
     inner_editor->SetNeedsStyleRecalc(
         kSubtreeStyleChange,
-        StyleChangeReasonForTracing::Create(StyleChangeReason::kControl));
+        StyleChangeReasonForTracing::Create(style_change_reason::kControl));
 
     // The inner editor element uses the LayoutTextControl's ::selection style
     // (see: GetUncachedSelectionStyle in SelectionPaintingUtils.cpp) so ensure
     // the inner editor selection is invalidated anytime style changes and a
     // ::selection style is or was present on LayoutTextControl.
-    if (StyleRef().HasPseudoStyle(kPseudoIdSelection) ||
-        (old_style && old_style->HasPseudoStyle(kPseudoIdSelection))) {
+    if (StyleRef().HasPseudoElementStyle(kPseudoIdSelection) ||
+        (old_style && old_style->HasPseudoElementStyle(kPseudoIdSelection))) {
       inner_editor_layout_object->InvalidateSelectedChildrenOnStyleChange();
     }
   }
@@ -125,19 +126,16 @@ void LayoutTextControl::ComputeLogicalHeight(
 
 void LayoutTextControl::HitInnerEditorElement(
     HitTestResult& result,
-    const LayoutPoint& point_in_container,
-    const LayoutPoint& accumulated_offset) {
+    const HitTestLocation& hit_test_location,
+    const PhysicalOffset& accumulated_offset) {
   HTMLElement* inner_editor = InnerEditorElement();
   if (!inner_editor->GetLayoutObject())
     return;
 
-  LayoutPoint adjusted_location = accumulated_offset + Location();
-  LayoutPoint local_point =
-      point_in_container -
-      ToLayoutSize(adjusted_location +
-                   inner_editor->GetLayoutBox()->Location());
-  if (HasOverflowClip())
-    local_point += ScrolledContentOffset();
+  PhysicalOffset local_point =
+      hit_test_location.Point() - accumulated_offset -
+      inner_editor->GetLayoutObject()->LocalToAncestorPoint(PhysicalOffset(),
+                                                            this);
   result.SetNodeAndPosition(inner_editor, local_point);
 }
 
@@ -204,7 +202,7 @@ bool LayoutTextControl::HasValidAvgCharWidth(const SimpleFontData* font_data,
   if (!font_families_with_invalid_char_width_map) {
     font_families_with_invalid_char_width_map = new HashSet<AtomicString>;
 
-    for (size_t i = 0; i < arraysize(kFontFamiliesWithInvalidCharWidth); ++i)
+    for (size_t i = 0; i < base::size(kFontFamiliesWithInvalidCharWidth); ++i)
       font_families_with_invalid_char_width_map->insert(
           AtomicString(kFontFamiliesWithInvalidCharWidth[i]));
   }
@@ -299,10 +297,10 @@ void LayoutTextControl::ComputePreferredLogicalWidths() {
   ClearPreferredLogicalWidthsDirty();
 }
 
-void LayoutTextControl::AddOutlineRects(Vector<LayoutRect>& rects,
-                                        const LayoutPoint& additional_offset,
+void LayoutTextControl::AddOutlineRects(Vector<PhysicalRect>& rects,
+                                        const PhysicalOffset& additional_offset,
                                         NGOutlineType) const {
-  rects.push_back(LayoutRect(additional_offset, Size()));
+  rects.emplace_back(additional_offset, Size());
 }
 
 LayoutObject* LayoutTextControl::LayoutSpecialExcludedChild(
@@ -319,6 +317,9 @@ LayoutObject* LayoutTextControl::LayoutSpecialExcludedChild(
 }
 
 LayoutUnit LayoutTextControl::FirstLineBoxBaseline() const {
+  if (ShouldApplyLayoutContainment())
+    return LayoutUnit(-1);
+
   LayoutUnit result = LayoutBlock::FirstLineBoxBaseline();
   if (result != -1)
     return result;
@@ -330,7 +331,7 @@ LayoutUnit LayoutTextControl::FirstLineBoxBaseline() const {
     return LayoutUnit(-1);
 
   LayoutBlock* inner_editor_layout_object =
-      ToLayoutBlock(inner_editor->GetLayoutObject());
+      To<LayoutBlock>(inner_editor->GetLayoutObject());
   const SimpleFontData* font_data =
       inner_editor_layout_object->Style(true)->GetFont().PrimaryFont();
   DCHECK(font_data);

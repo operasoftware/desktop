@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/core/paint/scoped_paint_state.h"
 #include "third_party/blink/renderer/core/paint/table_cell_painter.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
+#include "third_party/blink/renderer/platform/graphics/paint/hit_test_display_item.h"
 
 namespace blink {
 
@@ -62,26 +63,30 @@ void TableRowPainter::HandleChangedPartialPaint(
       dirtied_columns ==
               layout_table_row_.Section()->FullTableEffectiveColumnSpan()
           ? kFullyPainted
-          : kMayBeClippedByPaintDirtyRect;
+          : kMayBeClippedByCullRect;
   layout_table_row_.GetMutableForPainting().UpdatePaintResult(
       paint_result, paint_info.GetCullRect());
 }
 
 void TableRowPainter::RecordHitTestData(const PaintInfo& paint_info,
-                                        const LayoutPoint& paint_offset) {
+                                        const PhysicalOffset& paint_offset) {
   // Hit test display items are only needed for compositing. This flag is used
   // for for printing and drag images which do not need hit testing.
   if (paint_info.GetGlobalPaintFlags() & kGlobalPaintFlattenCompositingLayers)
     return;
 
-  auto touch_action = layout_table_row_.EffectiveWhitelistedTouchAction();
+  // If an object is not visible, it does not participate in hit testing.
+  if (layout_table_row_.StyleRef().Visibility() != EVisibility::kVisible)
+    return;
+
+  auto touch_action = layout_table_row_.EffectiveAllowedTouchAction();
   if (touch_action == TouchAction::kTouchActionAuto)
     return;
 
-  auto rect = layout_table_row_.BorderBoxRect();
-  rect.MoveBy(paint_offset);
-  HitTestData::RecordHitTestRect(paint_info.context, layout_table_row_,
-                                 HitTestRect(rect, touch_action));
+  auto rect = layout_table_row_.PhysicalBorderBoxRect();
+  rect.offset += paint_offset;
+  HitTestDisplayItem::Record(paint_info.context, layout_table_row_,
+                             HitTestRect(rect.ToLayoutRect(), touch_action));
 }
 
 void TableRowPainter::PaintBoxDecorationBackground(
@@ -90,8 +95,7 @@ void TableRowPainter::PaintBoxDecorationBackground(
   ScopedPaintState paint_state(layout_table_row_, paint_info);
   const auto& local_paint_info = paint_state.GetPaintInfo();
   auto paint_offset = paint_state.PaintOffset();
-  if (RuntimeEnabledFeatures::PaintTouchActionRectsEnabled())
-    RecordHitTestData(local_paint_info, paint_offset);
+  RecordHitTestData(local_paint_info, paint_offset);
 
   bool has_background = layout_table_row_.StyleRef().HasBackground();
   bool has_box_shadow = layout_table_row_.StyleRef().BoxShadow();
@@ -107,7 +111,7 @@ void TableRowPainter::PaintBoxDecorationBackground(
 
   DrawingRecorder recorder(local_paint_info.context, layout_table_row_,
                            DisplayItem::kBoxDecorationBackground);
-  LayoutRect paint_rect(paint_offset, layout_table_row_.Size());
+  PhysicalRect paint_rect(paint_offset, layout_table_row_.Size());
 
   if (has_box_shadow) {
     BoxPainterBase::PaintNormalBoxShadow(local_paint_info, paint_rect,

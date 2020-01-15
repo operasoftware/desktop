@@ -12,11 +12,13 @@
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/iterators/character_iterator.h"
 #include "third_party/blink/renderer/core/editing/iterators/text_iterator.h"
+#include "third_party/blink/renderer/core/editing/iterators/text_iterator_behavior.h"
 #include "third_party/blink/renderer/core/editing/position.h"
 #include "third_party/blink/renderer/core/editing/position_with_affinity.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_layout_object.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_object.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_object_cache_impl.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
@@ -24,19 +26,28 @@ namespace blink {
 const AXPosition AXPosition::CreatePositionBeforeObject(
     const AXObject& child,
     const AXPositionAdjustmentBehavior adjustment_behavior) {
-  if (child.IsDetached())
+  if (child.IsDetached() || !child.AccessibilityIsIncludedInTree())
     return {};
 
-  // If |child| is a text object, make behavior the same as
-  // |CreateFirstPositionInObject| so that equality would hold.
+  // If |child| is a text object, but not a text control, make behavior the same
+  // as |CreateFirstPositionInObject| so that equality would hold. Text controls
+  // behave differently because you should be able to set a position before the
+  // text control in case you want to e.g. select it as a whole.
   if (child.IsTextObject())
     return CreateFirstPositionInObject(child, adjustment_behavior);
 
-  const AXObject* parent = child.ParentObjectUnignored();
+  const AXObject* parent = child.ParentObjectIncludedInTree();
+
+  if (!parent || parent->IsDetached())
+    return {};
+
   DCHECK(parent);
   AXPosition position(*parent);
   position.text_offset_or_child_index_ = child.IndexInParent();
-  DCHECK(position.IsValid());
+#if DCHECK_IS_ON()
+  String failure_reason;
+  DCHECK(position.IsValid(&failure_reason)) << failure_reason;
+#endif
   return position.AsUnignoredPosition(adjustment_behavior);
 }
 
@@ -44,19 +55,28 @@ const AXPosition AXPosition::CreatePositionBeforeObject(
 const AXPosition AXPosition::CreatePositionAfterObject(
     const AXObject& child,
     const AXPositionAdjustmentBehavior adjustment_behavior) {
-  if (child.IsDetached())
+  if (child.IsDetached() || !child.AccessibilityIsIncludedInTree())
     return {};
 
-  // If |child| is a text object, make behavior the same as
-  // |CreateLastPositionInObject| so that equality would hold.
+  // If |child| is a text object, but not a text control, make behavior the same
+  // as |CreateLastPositionInObject| so that equality would hold. Text controls
+  // behave differently because you should be able to set a position after the
+  // text control in case you want to e.g. select it as a whole.
   if (child.IsTextObject())
     return CreateLastPositionInObject(child, adjustment_behavior);
 
-  const AXObject* parent = child.ParentObjectUnignored();
+  const AXObject* parent = child.ParentObjectIncludedInTree();
+
+  if (!parent || parent->IsDetached())
+    return {};
+
   DCHECK(parent);
   AXPosition position(*parent);
   position.text_offset_or_child_index_ = child.IndexInParent() + 1;
-  DCHECK(position.IsValid());
+#if DCHECK_IS_ON()
+  String failure_reason;
+  DCHECK(position.IsValid(&failure_reason)) << failure_reason;
+#endif
   return position.AsUnignoredPosition(adjustment_behavior);
 }
 
@@ -67,20 +87,30 @@ const AXPosition AXPosition::CreateFirstPositionInObject(
   if (container.IsDetached())
     return {};
 
-  if (container.IsTextObject()) {
+  if (container.IsTextObject() || container.IsNativeTextControl()) {
     AXPosition position(container);
     position.text_offset_or_child_index_ = 0;
-    DCHECK(position.IsValid());
+#if DCHECK_IS_ON()
+    String failure_reason;
+    DCHECK(position.IsValid(&failure_reason)) << failure_reason;
+#endif
     return position.AsUnignoredPosition(adjustment_behavior);
   }
 
-  const AXObject* unignored_container = container.AccessibilityIsIgnored()
-                                            ? container.ParentObjectUnignored()
-                                            : &container;
+  // If the container is not a text object, creating a position inside an
+  // ignored container might result in an invalid position, because child count
+  // is inaccurate.
+  const AXObject* unignored_container =
+      !container.AccessibilityIsIncludedInTree()
+          ? container.ParentObjectIncludedInTree()
+          : &container;
   DCHECK(unignored_container);
   AXPosition position(*unignored_container);
   position.text_offset_or_child_index_ = 0;
-  DCHECK(position.IsValid());
+#if DCHECK_IS_ON()
+  String failure_reason;
+  DCHECK(position.IsValid(&failure_reason)) << failure_reason;
+#endif
   return position.AsUnignoredPosition(adjustment_behavior);
 }
 
@@ -91,20 +121,30 @@ const AXPosition AXPosition::CreateLastPositionInObject(
   if (container.IsDetached())
     return {};
 
-  if (container.IsTextObject()) {
+  if (container.IsTextObject() || container.IsNativeTextControl()) {
     AXPosition position(container);
     position.text_offset_or_child_index_ = position.MaxTextOffset();
-    DCHECK(position.IsValid());
+#if DCHECK_IS_ON()
+    String failure_reason;
+    DCHECK(position.IsValid(&failure_reason)) << failure_reason;
+#endif
     return position.AsUnignoredPosition(adjustment_behavior);
   }
 
-  const AXObject* unignored_container = container.AccessibilityIsIgnored()
-                                            ? container.ParentObjectUnignored()
-                                            : &container;
+  // If the container is not a text object, creating a position inside an
+  // ignored container might result in an invalid position, because child count
+  // is inaccurate.
+  const AXObject* unignored_container =
+      !container.AccessibilityIsIncludedInTree()
+          ? container.ParentObjectIncludedInTree()
+          : &container;
   DCHECK(unignored_container);
   AXPosition position(*unignored_container);
   position.text_offset_or_child_index_ = unignored_container->ChildCount();
-  DCHECK(position.IsValid());
+#if DCHECK_IS_ON()
+  String failure_reason;
+  DCHECK(position.IsValid(&failure_reason)) << failure_reason;
+#endif
   return position.AsUnignoredPosition(adjustment_behavior);
 }
 
@@ -114,13 +154,18 @@ const AXPosition AXPosition::CreatePositionInTextObject(
     const int offset,
     const TextAffinity affinity,
     const AXPositionAdjustmentBehavior adjustment_behavior) {
-  if (container.IsDetached() || !container.IsTextObject())
+  if (container.IsDetached() ||
+      !(container.IsTextObject() || container.IsTextControl())) {
     return {};
+  }
 
   AXPosition position(container);
   position.text_offset_or_child_index_ = offset;
   position.affinity_ = affinity;
-  DCHECK(position.IsValid());
+#if DCHECK_IS_ON()
+  String failure_reason;
+  DCHECK(position.IsValid(&failure_reason)) << failure_reason;
+#endif
   return position.AsUnignoredPosition(adjustment_behavior);
 }
 
@@ -149,7 +194,7 @@ const AXPosition AXPosition::FromPosition(
     return {};
 
   if (container_node->IsTextNode()) {
-    if (container->AccessibilityIsIgnored()) {
+    if (!container->AccessibilityIsIncludedInTree()) {
       // Find the closest DOM sibling that is unignored in the accessibility
       // tree.
       switch (adjustment_behavior) {
@@ -164,10 +209,10 @@ const AXPosition AXPosition::FromPosition(
 
           // Do the next best thing by moving up to the unignored parent if it
           // exists.
-          if (!container || !container->ParentObjectUnignored())
+          if (!container || !container->ParentObjectIncludedInTree())
             return {};
-          return CreateLastPositionInObject(*container->ParentObjectUnignored(),
-                                            adjustment_behavior);
+          return CreateLastPositionInObject(
+              *container->ParentObjectIncludedInTree(), adjustment_behavior);
         }
 
         case AXPositionAdjustmentBehavior::kMoveLeft: {
@@ -181,10 +226,10 @@ const AXPosition AXPosition::FromPosition(
 
           // Do the next best thing by moving up to the unignored parent if it
           // exists.
-          if (!container || !container->ParentObjectUnignored())
+          if (!container || !container->ParentObjectIncludedInTree())
             return {};
           return CreateFirstPositionInObject(
-              *container->ParentObjectUnignored(), adjustment_behavior);
+              *container->ParentObjectIncludedInTree(), adjustment_behavior);
         }
       }
     }
@@ -194,25 +239,31 @@ const AXPosition AXPosition::FromPosition(
     // character offset.
     // TODO(nektar): Use LayoutNG offset mapping instead of
     // |TextIterator|.
+    TextIteratorBehavior::Builder iterator_builder;
+    const TextIteratorBehavior text_iterator_behavior =
+        iterator_builder.SetDoesNotEmitSpaceBeyondRangeEnd(true).Build();
     const auto first_position = Position::FirstPositionInNode(*container_node);
-    int offset =
-        TextIterator::RangeLength(first_position, parent_anchored_position);
+    int offset = TextIterator::RangeLength(
+        first_position, parent_anchored_position, text_iterator_behavior);
     ax_position.text_offset_or_child_index_ = offset;
     ax_position.affinity_ = affinity;
-    DCHECK(ax_position.IsValid());
+#if DCHECK_IS_ON()
+    String failure_reason;
+    DCHECK(ax_position.IsValid(&failure_reason)) << failure_reason;
+#endif
     return ax_position;
   }
 
   DCHECK(container_node->IsContainerNode());
-  if (container->AccessibilityIsIgnored()) {
-    container = container->ParentObjectUnignored();
-    // |container_node| could potentially become nullptr if the unignored parent
-    // is an anonymous layout block.
+  if (!container->AccessibilityIsIncludedInTree()) {
+    container = container->ParentObjectIncludedInTree();
+    if (!container)
+      return {};
+
+    // |container_node| could potentially become nullptr if the unignored
+    // parent is an anonymous layout block.
     container_node = container->GetNode();
   }
-
-  if (!container)
-    return {};
 
   AXPosition ax_position(*container);
   // |ComputeNodeAfterPosition| returns nullptr for "after children"
@@ -224,16 +275,17 @@ const AXPosition AXPosition::FromPosition(
     } else {
       const AXObject* ax_child =
           ax_object_cache_impl->GetOrCreate(node_after_position);
-      DCHECK(ax_child);
-
-      if (ax_child->AccessibilityIsIgnored()) {
-        // Find the closest DOM sibling that is unignored in the accessibility
-        // tree.
+      // |ax_child| might be nullptr because not all DOM nodes can have AX
+      // objects. For example, the "head" element has no corresponding AX
+      // object.
+      if (!ax_child || !ax_child->AccessibilityIsIncludedInTree()) {
+        // Find the closest DOM sibling that is present and unignored in the
+        // accessibility tree.
         switch (adjustment_behavior) {
           case AXPositionAdjustmentBehavior::kMoveRight: {
             const AXObject* next_child = FindNeighboringUnignoredObject(
                 *document, *node_after_position,
-                ToContainerNodeOrNull(container_node), adjustment_behavior);
+                DynamicTo<ContainerNode>(container_node), adjustment_behavior);
             if (next_child) {
               return CreatePositionBeforeObject(*next_child,
                                                 adjustment_behavior);
@@ -245,10 +297,14 @@ const AXPosition AXPosition::FromPosition(
           case AXPositionAdjustmentBehavior::kMoveLeft: {
             const AXObject* previous_child = FindNeighboringUnignoredObject(
                 *document, *node_after_position,
-                ToContainerNodeOrNull(container_node), adjustment_behavior);
+                DynamicTo<ContainerNode>(container_node), adjustment_behavior);
             if (previous_child) {
-              return CreatePositionAfterObject(*previous_child,
-                                               adjustment_behavior);
+              // |CreatePositionAfterObject| cannot be used here because it will
+              // try to create a position before the object that comes after
+              // |previous_child|, which in this case is the ignored object
+              // itself.
+              return CreateLastPositionInObject(*previous_child,
+                                                adjustment_behavior);
             }
 
             return CreateFirstPositionInObject(*container, adjustment_behavior);
@@ -259,6 +315,15 @@ const AXPosition AXPosition::FromPosition(
       if (!container->Children().Contains(ax_child)) {
         // The |ax_child| is aria-owned by another object.
         return CreatePositionBeforeObject(*ax_child, adjustment_behavior);
+      }
+
+      if (ax_child->IsTextObject()) {
+        // The |ax_child| is a text object. In order that equality between
+        // seemingly identical positions would hold, i.e. a "before object"
+        // position before the text object and a "text position" before the
+        // first character of the text object, we would need to convert to the
+        // deep equivalent position.
+        return CreateFirstPositionInObject(*ax_child, adjustment_behavior);
       }
 
       ax_position.text_offset_or_child_index_ = ax_child->IndexInParent();
@@ -325,6 +390,9 @@ int AXPosition::MaxTextOffset() const {
     return 0;
   }
 
+  if (container_object_->IsNativeTextControl())
+    return container_object_->StringValue().length();
+
   if (container_object_->IsAXInlineTextBox() || !container_object_->GetNode()) {
     // 1. The |Node| associated with an inline text box contains all the text in
     // the static text object parent, whilst the inline text box might contain
@@ -336,31 +404,73 @@ int AXPosition::MaxTextOffset() const {
   }
 
   // TODO(nektar): Use LayoutNG offset mapping instead of |TextIterator|.
+  TextIteratorBehavior::Builder iterator_builder;
+  const TextIteratorBehavior text_iterator_behavior =
+      iterator_builder.SetDoesNotEmitSpaceBeyondRangeEnd(true).Build();
   const auto first_position =
       Position::FirstPositionInNode(*container_object_->GetNode());
   const auto last_position =
       Position::LastPositionInNode(*container_object_->GetNode());
-  return TextIterator::RangeLength(first_position, last_position);
+  return TextIterator::RangeLength(first_position, last_position,
+                                   text_iterator_behavior);
 }
 
-bool AXPosition::IsValid() const {
-  if (!container_object_ || container_object_->IsDetached())
+TextAffinity AXPosition::Affinity() const {
+  if (!IsTextPosition()) {
+    NOTREACHED() << *this << " should be a text position.";
+    return TextAffinity::kDownstream;
+  }
+
+  return affinity_;
+}
+
+bool AXPosition::IsValid(String* failure_reason) const {
+  if (!container_object_) {
+    if (failure_reason)
+      *failure_reason = "\nPosition invalid: no container object.";
     return false;
-  if (!container_object_->GetDocument())
+  }
+  if (container_object_->IsDetached()) {
+    if (failure_reason)
+      *failure_reason = "\nPosition invalid: detached container object.";
     return false;
+  }
+  if (!container_object_->GetDocument()) {
+    if (failure_reason) {
+      *failure_reason = "\nPosition invalid: no document for container object.";
+    }
+    return false;
+  }
+
   // Some container objects, such as those for CSS "::before" and "::after"
   // text, don't have associated DOM nodes.
   if (container_object_->GetNode() &&
       !container_object_->GetNode()->isConnected()) {
+    if (failure_reason) {
+      *failure_reason =
+          "\nPosition invalid: container object node is disconnected.";
+    }
     return false;
   }
 
   if (IsTextPosition()) {
-    if (text_offset_or_child_index_ > MaxTextOffset())
+    if (text_offset_or_child_index_ > MaxTextOffset()) {
+      if (failure_reason) {
+        *failure_reason = String::Format(
+            "\nPosition invalid: text offset too large.\n%d vs. %d",
+            text_offset_or_child_index_, MaxTextOffset());
+      }
       return false;
+    }
   } else {
-    if (text_offset_or_child_index_ > container_object_->ChildCount())
+    if (text_offset_or_child_index_ > container_object_->ChildCount()) {
+      if (failure_reason) {
+        *failure_reason = String::Format(
+            "\nPosition invalid: child index too large.\n%d vs. %d",
+            text_offset_or_child_index_, container_object_->ChildCount());
+      }
       return false;
+    }
   }
 
   DCHECK(container_object_->GetDocument()->IsActive());
@@ -377,7 +487,8 @@ bool AXPosition::IsTextPosition() const {
   // We don't call |IsValid| from here because |IsValid| uses this method.
   if (!container_object_)
     return false;
-  return container_object_->IsTextObject();
+  return container_object_->IsTextObject() ||
+         container_object_->IsNativeTextControl();
 }
 
 const AXPosition AXPosition::CreateNextPosition() const {
@@ -394,15 +505,21 @@ const AXPosition AXPosition::CreateNextPosition() const {
   // after the last character.
   const AXObject* child = ChildAfterTreePosition();
   if (!child) {
-    const AXObject* next_in_order = container_object_->NextInTreeObject();
-    if (!next_in_order || !next_in_order->ParentObjectUnignored())
+    // If this is a static text object, we should not descend into its inline
+    // text boxes when present, because we'll just be creating a text position
+    // in the same piece of text.
+    const AXObject* next_in_order =
+        container_object_->ChildCount()
+            ? container_object_->DeepestLastChild()->NextInTreeObject()
+            : container_object_->NextInTreeObject();
+    if (!next_in_order || !next_in_order->ParentObjectIncludedInTree())
       return {};
 
     return CreatePositionBeforeObject(*next_in_order,
                                       AXPositionAdjustmentBehavior::kMoveRight);
   }
 
-  if (!child->ParentObjectUnignored())
+  if (!child->ParentObjectIncludedInTree())
     return {};
 
   return CreatePositionAfterObject(*child,
@@ -424,10 +541,13 @@ const AXPosition AXPosition::CreatePreviousPosition() const {
   // Handles both an "after children" position, or a text position that is
   // before the first character.
   if (!child) {
-    if (container_object_->ChildCount()) {
+    // If this is a static text object, we should not descend into its inline
+    // text boxes when present, because we'll just be creating a text position
+    // in the same piece of text.
+    if (!container_object_->IsTextObject() && container_object_->ChildCount()) {
       const AXObject* last_child = container_object_->LastChild();
       // Dont skip over any intervening text.
-      if (last_child->IsTextObject()) {
+      if (last_child->IsTextObject() || last_child->IsNativeTextControl()) {
         return CreatePositionAfterObject(
             *last_child, AXPositionAdjustmentBehavior::kMoveLeft);
       }
@@ -442,12 +562,13 @@ const AXPosition AXPosition::CreatePreviousPosition() const {
   }
 
   if (!object_before_position ||
-      !object_before_position->ParentObjectUnignored()) {
+      !object_before_position->ParentObjectIncludedInTree()) {
     return {};
   }
 
   // Dont skip over any intervening text.
-  if (object_before_position->IsTextObject()) {
+  if (object_before_position->IsTextObject() ||
+      object_before_position->IsNativeTextControl()) {
     return CreatePositionAfterObject(*object_before_position,
                                      AXPositionAdjustmentBehavior::kMoveLeft);
   }
@@ -461,7 +582,7 @@ const AXPosition AXPosition::AsUnignoredPosition(
   if (!IsValid())
     return {};
 
-  // There are four possibilities:
+  // There are five possibilities:
   //
   // 1. The container object is ignored and this is not a text position or an
   // "after children" position. Try to find the equivalent position in the
@@ -472,10 +593,17 @@ const AXPosition AXPosition::AsUnignoredPosition(
   // container's unignored parent.
   //
   // 3. The container object is ignored and this is an "after children"
-  // position. Find the next object in the tree and recurse.
+  // position. Find the previous or the next object in the tree and recurse.
   //
   // 4. The child after a tree position is ignored, but the container object is
-  // not. Return an "after children" position.
+  // not. Return a "before children" or an "after children" position.
+  //
+  // 5. We arbitrarily decided to ignore positions that are anchored to before a
+  // text object. We move such positions to before the first character of the
+  // text object. This is in an effort to ensure that two positions, one a
+  // "before object" position anchored to a text object, and one a "text
+  // position" anchored to before the first character of the same text object,
+  // compare as equivalent.
 
   const AXObject* container = container_object_;
   const AXObject* child = ChildAfterTreePosition();
@@ -483,17 +611,17 @@ const AXPosition AXPosition::AsUnignoredPosition(
   // Case 1.
   // Neither text positions nor "after children" positions have a |child|
   // object.
-  if (container->AccessibilityIsIgnored() && child) {
+  if (!container->AccessibilityIsIncludedInTree() && child) {
     // |CreatePositionBeforeObject| already finds the unignored parent before
     // creating the new position, so we don't need to replicate the logic here.
     return CreatePositionBeforeObject(*child, adjustment_behavior);
   }
 
   // Cases 2 and 3.
-  if (container->AccessibilityIsIgnored()) {
+  if (!container->AccessibilityIsIncludedInTree()) {
     // Case 2.
     if (IsTextPosition()) {
-      if (!container->ParentObjectUnignored())
+      if (!container->ParentObjectIncludedInTree())
         return {};
 
       // Calling |CreateNextPosition| or |CreatePreviousPosition| is not
@@ -502,11 +630,11 @@ const AXPosition AXPosition::AsUnignoredPosition(
       // any unignored siblings.
       switch (adjustment_behavior) {
         case AXPositionAdjustmentBehavior::kMoveRight:
-          return CreateLastPositionInObject(*container->ParentObjectUnignored(),
-                                            adjustment_behavior);
+          return CreateLastPositionInObject(
+              *container->ParentObjectIncludedInTree(), adjustment_behavior);
         case AXPositionAdjustmentBehavior::kMoveLeft:
           return CreateFirstPositionInObject(
-              *container->ParentObjectUnignored(), adjustment_behavior);
+              *container->ParentObjectIncludedInTree(), adjustment_behavior);
       }
     }
 
@@ -521,8 +649,18 @@ const AXPosition AXPosition::AsUnignoredPosition(
   }
 
   // Case 4.
-  if (child && child->AccessibilityIsIgnored())
-    return CreateLastPositionInObject(*container);
+  if (child && !child->AccessibilityIsIncludedInTree()) {
+    switch (adjustment_behavior) {
+      case AXPositionAdjustmentBehavior::kMoveRight:
+        return CreateLastPositionInObject(*container);
+      case AXPositionAdjustmentBehavior::kMoveLeft:
+        return CreateFirstPositionInObject(*container);
+    }
+  }
+
+  // Case 5.
+  if (child && child->IsTextObject())
+    return CreateFirstPositionInObject(*child);
 
   // The position is not ignored.
   return *this;
@@ -583,20 +721,30 @@ const AXPosition AXPosition::AsValidDOMPosition(
          "node should have an associated layout object.";
   const Node* container_node =
       ToAXLayoutObject(container)->GetNodeOrContainingBlockNode();
-  DCHECK(container_node)
-      << "All anonymous layout objects should have a containing block element.";
+  DCHECK(container_node) << "All anonymous layout objects and list markers "
+                            "should have a containing block element.";
   DCHECK(!container->IsDetached());
   auto& ax_object_cache_impl = container->AXObjectCache();
   const AXObject* new_container =
       ax_object_cache_impl.GetOrCreate(container_node);
   DCHECK(new_container);
   AXPosition position(*new_container);
-  if (new_container == container->ParentObjectUnignored()) {
+  if (new_container == container->ParentObjectIncludedInTree()) {
     position.text_offset_or_child_index_ = container->IndexInParent();
   } else {
-    position.text_offset_or_child_index_ = 0;
+    switch (adjustment_behavior) {
+      case AXPositionAdjustmentBehavior::kMoveRight:
+        position.text_offset_or_child_index_ = new_container->ChildCount();
+        break;
+      case AXPositionAdjustmentBehavior::kMoveLeft:
+        position.text_offset_or_child_index_ = 0;
+        break;
+    }
   }
-  DCHECK(position.IsValid());
+#if DCHECK_IS_ON()
+  String failure_reason;
+  DCHECK(position.IsValid(&failure_reason)) << failure_reason;
+#endif
   return position.AsValidDOMPosition(adjustment_behavior);
 }
 
@@ -607,7 +755,8 @@ const PositionWithAffinity AXPosition::ToPositionWithAffinity(
     return {};
 
   const Node* container_node = adjusted_position.container_object_->GetNode();
-  DCHECK(container_node);
+  DCHECK(container_node) << "AX positions that are valid DOM positions should "
+                            "always be connected to their DOM nodes.";
   if (!adjusted_position.IsTextPosition()) {
     // AX positions that are unumbiguously at the start or end of a container,
     // should convert to the corresponding DOM positions at the start or end of
@@ -622,7 +771,7 @@ const PositionWithAffinity AXPosition::ToPositionWithAffinity(
       DCHECK(child_node) << "AX objects used in AX positions that are valid "
                             "DOM positions should always be connected to their "
                             "DOM nodes.";
-      if (child_node->NodeIndex() == 0) {
+      if (!child_node->previousSibling()) {
         // Creates a |PositionAnchorType::kBeforeChildren| position.
         container_node = child_node->parentNode();
         DCHECK(container_node);
@@ -644,8 +793,7 @@ const PositionWithAffinity AXPosition::ToPositionWithAffinity(
                                  "connected to their DOM nodes.";
 
       // Check if this is an "after children" position in the DOM as well.
-      if ((last_child_node->NodeIndex() + 1) ==
-          container_node->CountChildren()) {
+      if (!last_child_node->nextSibling()) {
         // Creates a |PositionAnchorType::kAfterChildren| position.
         container_node = last_child_node->parentNode();
         DCHECK(container_node);
@@ -667,12 +815,34 @@ const PositionWithAffinity AXPosition::ToPositionWithAffinity(
   }
 
   // TODO(nektar): Use LayoutNG offset mapping instead of |TextIterator|.
+  TextIteratorBehavior::Builder iterator_builder;
+  const TextIteratorBehavior text_iterator_behavior =
+      iterator_builder.SetDoesNotEmitSpaceBeyondRangeEnd(true).Build();
   const auto first_position = Position::FirstPositionInNode(*container_node);
   const auto last_position = Position::LastPositionInNode(*container_node);
-  CharacterIterator character_iterator(first_position, last_position);
+  CharacterIterator character_iterator(first_position, last_position,
+                                       text_iterator_behavior);
   const EphemeralRange range = character_iterator.CalculateCharacterSubrange(
       0, adjusted_position.text_offset_or_child_index_);
   return PositionWithAffinity(range.EndPosition(), affinity_);
+}
+
+String AXPosition::ToString() const {
+  if (!IsValid())
+    return "Invalid AXPosition";
+
+  StringBuilder builder;
+  if (IsTextPosition()) {
+    builder.Append("AX text position in ");
+    builder.Append(container_object_->ToString());
+    builder.AppendFormat(", %d", TextOffset());
+    return builder.ToString();
+  }
+
+  builder.Append("AX object anchored position in ");
+  builder.Append(container_object_->ToString());
+  builder.AppendFormat(", %d", ChildIndex());
+  return builder.ToString();
 }
 
 // static
@@ -693,7 +863,7 @@ const AXObject* AXPosition::FindNeighboringUnignoredObject(
                   *next_node, container_node))) {
         const AXObject* next_object =
             ax_object_cache_impl->GetOrCreate(next_node);
-        if (next_object && !next_object->AccessibilityIsIgnored())
+        if (next_object && next_object->AccessibilityIsIncludedInTree())
           return next_object;
       }
       return nullptr;
@@ -705,7 +875,7 @@ const AXObject* AXPosition::FindNeighboringUnignoredObject(
                   *previous_node, container_node))) {
         const AXObject* previous_object =
             ax_object_cache_impl->GetOrCreate(previous_node);
-        if (previous_object && !previous_object->AccessibilityIsIgnored())
+        if (previous_object && previous_object->AccessibilityIsIncludedInTree())
           return previous_object;
       }
       return nullptr;
@@ -714,7 +884,11 @@ const AXObject* AXPosition::FindNeighboringUnignoredObject(
 }
 
 bool operator==(const AXPosition& a, const AXPosition& b) {
-  DCHECK(a.IsValid() && b.IsValid());
+#if DCHECK_IS_ON()
+  String failure_reason;
+  DCHECK(a.IsValid(&failure_reason) && b.IsValid(&failure_reason))
+      << failure_reason;
+#endif
   if (*a.ContainerObject() != *b.ContainerObject())
     return false;
   if (a.IsTextPosition() && b.IsTextPosition())
@@ -731,7 +905,11 @@ bool operator!=(const AXPosition& a, const AXPosition& b) {
 }
 
 bool operator<(const AXPosition& a, const AXPosition& b) {
-  DCHECK(a.IsValid() && b.IsValid());
+#if DCHECK_IS_ON()
+  String failure_reason;
+  DCHECK(a.IsValid(&failure_reason) && b.IsValid(&failure_reason))
+      << failure_reason;
+#endif
 
   if (a.ContainerObject() == b.ContainerObject()) {
     if (a.IsTextPosition() && b.IsTextPosition())
@@ -768,7 +946,11 @@ bool operator<=(const AXPosition& a, const AXPosition& b) {
 }
 
 bool operator>(const AXPosition& a, const AXPosition& b) {
-  DCHECK(a.IsValid() && b.IsValid());
+#if DCHECK_IS_ON()
+  String failure_reason;
+  DCHECK(a.IsValid(&failure_reason) && b.IsValid(&failure_reason))
+      << failure_reason;
+#endif
 
   if (a.ContainerObject() == b.ContainerObject()) {
     if (a.IsTextPosition() && b.IsTextPosition())
@@ -805,15 +987,7 @@ bool operator>=(const AXPosition& a, const AXPosition& b) {
 }
 
 std::ostream& operator<<(std::ostream& ostream, const AXPosition& position) {
-  if (!position.IsValid())
-    return ostream << "Invalid AXPosition";
-  if (position.IsTextPosition()) {
-    return ostream << "AX text position in " << *position.ContainerObject()
-                   << ", " << position.TextOffset();
-  }
-  return ostream << "AX object anchored position in "
-                 << *position.ContainerObject() << ", "
-                 << position.ChildIndex();
+  return ostream << position.ToString().Utf8();
 }
 
 }  // namespace blink

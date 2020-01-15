@@ -48,7 +48,7 @@ class CORE_EXPORT ScrollbarThemeOverlay : public ScrollbarTheme {
 
   bool ShouldRepaintAllPartsOnInvalidation() const override;
 
-  ScrollbarPart InvalidateOnThumbPositionChange(
+  ScrollbarPart PartsToInvalidateOnThumbPositionChange(
       const Scrollbar&,
       float old_position,
       float new_position) const override;
@@ -56,21 +56,17 @@ class CORE_EXPORT ScrollbarThemeOverlay : public ScrollbarTheme {
   int ScrollbarThickness(ScrollbarControlSize) override;
   int ScrollbarMargin() const override;
   bool UsesOverlayScrollbars() const override;
-  TimeDelta OverlayScrollbarFadeOutDelay() const override;
-  TimeDelta OverlayScrollbarFadeOutDuration() const override;
+  base::TimeDelta OverlayScrollbarFadeOutDelay() const override;
+  base::TimeDelta OverlayScrollbarFadeOutDuration() const override;
 
   int ThumbLength(const Scrollbar&) override;
 
   bool HasButtons(const Scrollbar&) override { return false; }
   bool HasThumb(const Scrollbar&) override;
 
-  IntRect BackButtonRect(const Scrollbar&,
-                         ScrollbarPart,
-                         bool painting = false) override;
-  IntRect ForwardButtonRect(const Scrollbar&,
-                            ScrollbarPart,
-                            bool painting = false) override;
-  IntRect TrackRect(const Scrollbar&, bool painting = false) override;
+  IntRect BackButtonRect(const Scrollbar&, ScrollbarPart) override;
+  IntRect ForwardButtonRect(const Scrollbar&, ScrollbarPart) override;
+  IntRect TrackRect(const Scrollbar&) override;
   int ThumbThickness(const Scrollbar&) override;
   int ThumbThickness() { return thumb_thickness_; }
 
@@ -84,6 +80,8 @@ class CORE_EXPORT ScrollbarThemeOverlay : public ScrollbarTheme {
   int MinimumThumbLength(const Scrollbar&) override;
 
   bool IsMobileTheme() const;
+
+  bool AllowsHitTest() const override;
 
   static ScrollbarThemeOverlay& MobileTheme();
 

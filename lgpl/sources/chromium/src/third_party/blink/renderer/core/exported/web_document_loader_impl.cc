@@ -34,8 +34,11 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/mojom/loader/mhtml_load_result.mojom-blink.h"
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_network_provider.h"
 #include "third_party/blink/public/platform/web_document_subresource_filter.h"
+#include "third_party/blink/public/platform/web_loading_hints_provider.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_url_error.h"
 #include "third_party/blink/public/platform/web_vector.h"
@@ -48,24 +51,34 @@
 
 namespace blink {
 
-WebDocumentLoaderImpl* WebDocumentLoaderImpl::Create(
-    LocalFrame* frame,
-    const ResourceRequest& request,
-    const SubstituteData& data,
-    ClientRedirectPolicy client_redirect_policy,
-    const base::UnguessableToken& devtools_navigation_token) {
-  DCHECK(frame);
-
-  return new WebDocumentLoaderImpl(frame, request, data, client_redirect_policy,
-                                   devtools_navigation_token);
+// static
+bool WebDocumentLoader::WillLoadUrlAsEmpty(const WebURL& url) {
+  return DocumentLoader::WillLoadUrlAsEmpty(url);
 }
 
-const WebURLRequest& WebDocumentLoaderImpl::OriginalRequest() const {
-  return original_request_wrapper_;
+WebURL WebDocumentLoaderImpl::OriginalUrl() const {
+  return DocumentLoader::OriginalUrl();
 }
 
-const WebURLRequest& WebDocumentLoaderImpl::GetRequest() const {
-  return request_wrapper_;
+WebString WebDocumentLoaderImpl::OriginalReferrer() const {
+  return DocumentLoader::OriginalReferrer().referrer;
+}
+
+WebURL WebDocumentLoaderImpl::GetUrl() const {
+  return DocumentLoader::Url();
+}
+
+WebString WebDocumentLoaderImpl::HttpMethod() const {
+  return DocumentLoader::HttpMethod();
+}
+
+WebString WebDocumentLoaderImpl::Referrer() const {
+  return DocumentLoader::GetReferrer().referrer;
+}
+
+network::mojom::ReferrerPolicy WebDocumentLoaderImpl::GetReferrerPolicy()
+    const {
+  return DocumentLoader::GetReferrer().referrer_policy;
 }
 
 const WebURLResponse& WebDocumentLoaderImpl::GetResponse() const {
@@ -78,10 +91,6 @@ bool WebDocumentLoaderImpl::HasUnreachableURL() const {
 
 WebURL WebDocumentLoaderImpl::UnreachableURL() const {
   return DocumentLoader::UnreachableURL();
-}
-
-void WebDocumentLoaderImpl::AppendRedirect(const WebURL& url) {
-  DocumentLoader::AppendRedirect(url);
 }
 
 void WebDocumentLoaderImpl::RedirectChain(WebVector<WebURL>& result) const {
@@ -111,17 +120,9 @@ void WebDocumentLoaderImpl::SetExtraData(
 
 WebDocumentLoaderImpl::WebDocumentLoaderImpl(
     LocalFrame* frame,
-    const ResourceRequest& request,
-    const SubstituteData& data,
-    ClientRedirectPolicy client_redirect_policy,
-    const base::UnguessableToken& devtools_navigation_token)
-    : DocumentLoader(frame,
-                     request,
-                     data,
-                     client_redirect_policy,
-                     devtools_navigation_token),
-      original_request_wrapper_(DocumentLoader::OriginalRequest()),
-      request_wrapper_(DocumentLoader::GetRequest()),
+    WebNavigationType navigation_type,
+    std::unique_ptr<WebNavigationParams> navigation_params)
+    : DocumentLoader(frame, navigation_type, std::move(navigation_params)),
       response_wrapper_(DocumentLoader::GetResponse()) {}
 
 WebDocumentLoaderImpl::~WebDocumentLoaderImpl() {
@@ -140,6 +141,13 @@ void WebDocumentLoaderImpl::SetSubresourceFilter(
       *GetFrame()->GetDocument(), base::WrapUnique(subresource_filter)));
 }
 
+void WebDocumentLoaderImpl::SetLoadingHintsProvider(
+    std::unique_ptr<blink::WebLoadingHintsProvider> loading_hints_provider) {
+  DocumentLoader::SetPreviewsResourceLoadingHints(
+      PreviewsResourceLoadingHints::CreateFromLoadingHintsProvider(
+          *GetFrame()->GetDocument(), std::move(loading_hints_provider)));
+}
+
 void WebDocumentLoaderImpl::SetServiceWorkerNetworkProvider(
     std::unique_ptr<WebServiceWorkerNetworkProvider> provider) {
   DocumentLoader::SetServiceWorkerNetworkProvider(std::move(provider));
@@ -150,10 +158,6 @@ WebDocumentLoaderImpl::GetServiceWorkerNetworkProvider() {
   return DocumentLoader::GetServiceWorkerNetworkProvider();
 }
 
-void WebDocumentLoaderImpl::ResetSourceLocation() {
-  DocumentLoader::ResetSourceLocation();
-}
-
 void WebDocumentLoaderImpl::BlockParser() {
   DocumentLoader::BlockParser();
 }
@@ -162,17 +166,29 @@ void WebDocumentLoaderImpl::ResumeParser() {
   DocumentLoader::ResumeParser();
 }
 
-bool WebDocumentLoaderImpl::IsArchive() const {
-  return Fetcher()->Archive();
+bool WebDocumentLoaderImpl::HasBeenLoadedAsWebArchive() const {
+  return archive_ || (archive_load_result_ != mojom::MHTMLLoadResult::kSuccess);
+}
+
+WebURLRequest::PreviewsState WebDocumentLoaderImpl::GetPreviewsState() const {
+  return DocumentLoader::GetPreviewsState();
 }
 
 WebArchiveInfo WebDocumentLoaderImpl::GetArchiveInfo() const {
-  const MHTMLArchive* archive = Fetcher()->Archive();
-  return {archive->MainResource()->Url(), archive->Date()};
+  if (archive_) {
+    DCHECK(archive_->MainResource());
+    return {archive_load_result_, archive_->MainResource()->Url(),
+            archive_->Date()};
+  }
+  return {archive_load_result_, WebURL(), base::Time()};
 }
 
 bool WebDocumentLoaderImpl::HadUserGesture() const {
-  return DocumentLoader::had_transient_activation();
+  return DocumentLoader::HadTransientActivation();
+}
+
+bool WebDocumentLoaderImpl::IsListingFtpDirectory() const {
+  return DocumentLoader::IsListingFtpDirectory();
 }
 
 void WebDocumentLoaderImpl::Trace(blink::Visitor* visitor) {

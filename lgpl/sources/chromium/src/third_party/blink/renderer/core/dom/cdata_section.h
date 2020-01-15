@@ -24,6 +24,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_CDATA_SECTION_H_
 
 #include "third_party/blink/renderer/core/dom/text.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -33,15 +34,20 @@ class CDATASection final : public Text {
  public:
   static CDATASection* Create(Document&, const String&);
 
- private:
   CDATASection(Document&, const String&);
 
+ private:
   String nodeName() const override;
   NodeType getNodeType() const override;
   Text* CloneWithData(Document&, const String&) const override;
 };
 
-DEFINE_NODE_TYPE_CASTS(CDATASection, getNodeType() == Node::kCdataSectionNode);
+template <>
+struct DowncastTraits<CDATASection> {
+  static bool AllowFrom(const Node& node) {
+    return node.getNodeType() == Node::kCdataSectionNode;
+  }
+};
 
 }  // namespace blink
 

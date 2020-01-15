@@ -43,10 +43,10 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen_options.h"
 #include "third_party/blink/renderer/core/fullscreen/scoped_allow_fullscreen.h"
+#include "third_party/blink/renderer/core/html/html_body_element.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
 #include "third_party/blink/renderer/core/html_element_type_helpers.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
@@ -55,6 +55,7 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -88,7 +89,7 @@ void FullscreenElementChanged(Document& document,
     // fullscreen element. Hence, it must match :-webkit-full-screen-ancestor.
     if (new_request_type ==
         Fullscreen::RequestType::kPrefixedForCrossProcessDescendant) {
-      DCHECK(IsHTMLIFrameElement(new_element));
+      DCHECK(IsA<HTMLIFrameElement>(new_element));
       new_element->SetContainsFullScreenElement(true);
     }
     new_element->SetContainsFullScreenElementOnAncestorsCrossingFrameBoundaries(
@@ -125,7 +126,7 @@ using ElementRequestTypeMap =
 
 ElementRequestTypeMap& FullscreenFlagMap() {
   DEFINE_STATIC_LOCAL(Persistent<ElementRequestTypeMap>, map,
-                      (new ElementRequestTypeMap));
+                      (MakeGarbageCollected<ElementRequestTypeMap>()));
   return *map;
 }
 
@@ -204,7 +205,7 @@ void Unfullscreen(Document& document) {
     Unfullscreen(*element);
 }
 
-// https://html.spec.whatwg.org/multipage/embedded-content.html#allowed-to-use
+// https://html.spec.whatwg.org/C/#allowed-to-use
 bool AllowedToUseFullscreen(const Document& document,
                             ReportOptions report_on_failure) {
   // To determine whether a Document object |document| is allowed to use the
@@ -225,7 +226,9 @@ bool AllowedToRequestFullscreen(Document& document) {
   // true:
 
   //  The algorithm is triggered by a user activation.
-  if (LocalFrame::HasTransientUserActivation(document.GetFrame()))
+  // We are doing experiment to see if there is any webpage breaking after we
+  // only allow one fullscreen when the user activation state is active.
+  if (LocalFrame::ConsumeTransientUserActivation(document.GetFrame()))
     return true;
 
   //  The algorithm is triggered by a user generated orientation change.
@@ -236,11 +239,25 @@ bool AllowedToRequestFullscreen(Document& document) {
     return true;
   }
 
+  if (document.IsImmersiveArOverlay()) {
+    // This is a workaround for lack of a user activation when an immersive-ar
+    // session is starting. If the app sets an element fullscreen in the "Enter
+    // AR" button click, that gets unfullscreened when the browser shows its AR
+    // session consent prompt. By the time the session starts, the 5-second
+    // timer for the initial user activation is likely to have expired. This
+    // also allows switching the active fullscreen element during the session.
+    // Note that exiting the immersive-ar session does FullyExitFullscreen to
+    // ensure a consistent post-session state.
+    DVLOG(1) << __func__ << ": allowing fullscreen immersive-ar DOM overlay";
+    return true;
+  }
+
   String message = ExceptionMessages::FailedToExecute(
       "requestFullscreen", "Element",
       "API can only be initiated by a user gesture.");
   document.AddConsoleMessage(
-      ConsoleMessage::Create(kJSMessageSource, kWarningMessageLevel, message));
+      ConsoleMessage::Create(mojom::ConsoleMessageSource::kJavaScript,
+                             mojom::ConsoleMessageLevel::kWarning, message));
 
   return false;
 }
@@ -283,7 +300,7 @@ bool RequestFullscreenConditionsMet(Element& pending, Document& document) {
     return false;
 
   // |pending| is not a dialog element.
-  if (IsHTMLDialogElement(pending))
+  if (IsA<HTMLDialogElement>(pending))
     return false;
 
   // The fullscreen element ready check for |pending| returns false.
@@ -332,8 +349,8 @@ LocalFrame* NextLocalAncestor(Frame& frame) {
   Frame* parent = frame.Tree().Parent();
   if (!parent)
     return nullptr;
-  if (parent->IsLocalFrame())
-    return ToLocalFrame(parent);
+  if (auto* parent_local_frame = DynamicTo<LocalFrame>(parent))
+    return parent_local_frame;
   return NextLocalAncestor(*parent);
 }
 
@@ -440,14 +457,14 @@ void FireEvent(const AtomicString& type, Element* element, Document* document) {
 
 const AtomicString& AdjustEventType(const AtomicString& type,
                                     Fullscreen::RequestType request_type) {
-  DCHECK(type == EventTypeNames::fullscreenchange ||
-         type == EventTypeNames::fullscreenerror);
+  DCHECK(type == event_type_names::kFullscreenchange ||
+         type == event_type_names::kFullscreenerror);
 
   if (request_type == Fullscreen::RequestType::kUnprefixed)
     return type;
-  return type == EventTypeNames::fullscreenchange
-             ? EventTypeNames::webkitfullscreenchange
-             : EventTypeNames::webkitfullscreenerror;
+  return type == event_type_names::kFullscreenchange
+             ? event_type_names::kWebkitfullscreenchange
+             : event_type_names::kWebkitfullscreenerror;
 }
 
 void EnqueueEvent(const AtomicString& type,
@@ -472,7 +489,7 @@ const char Fullscreen::kSupplementName[] = "Fullscreen";
 Fullscreen& Fullscreen::From(Document& document) {
   Fullscreen* fullscreen = FromIfExists(document);
   if (!fullscreen) {
-    fullscreen = new Fullscreen(document);
+    fullscreen = MakeGarbageCollected<Fullscreen>(document);
     ProvideTo(document, fullscreen);
   }
   return *fullscreen;
@@ -501,12 +518,13 @@ Element* Fullscreen::FullscreenElementFrom(Document& document) {
 // https://fullscreen.spec.whatwg.org/#fullscreen-element
 Element* Fullscreen::FullscreenElementForBindingFrom(TreeScope& scope) {
   Element* element = FullscreenElementFrom(scope.GetDocument());
-  if (!element || !RuntimeEnabledFeatures::FullscreenUnprefixedEnabled())
+  if (!element)
     return element;
 
   // TODO(kochi): Once V0 code is removed, we can use the same logic for
   // Document and ShadowRoot.
-  if (!scope.RootNode().IsShadowRoot()) {
+  auto* shadow_root = DynamicTo<ShadowRoot>(scope.RootNode());
+  if (!shadow_root) {
     // For Shadow DOM V0 compatibility: We allow returning an element in V0
     // shadow tree, even though it leaks the Shadow DOM.
     if (element->IsInV0ShadowTree()) {
@@ -514,7 +532,7 @@ Element* Fullscreen::FullscreenElementForBindingFrom(TreeScope& scope) {
                         WebFeature::kDocumentFullscreenElementInV0Shadow);
       return element;
     }
-  } else if (!ToShadowRoot(scope.RootNode()).IsV1()) {
+  } else if (!shadow_root->IsV1()) {
     return nullptr;
   }
   return scope.AdjustedElement(*element);
@@ -544,13 +562,13 @@ void Fullscreen::ContextDestroyed(ExecutionContext*) {
 void Fullscreen::RequestFullscreen(Element& pending) {
   // TODO(foolip): Make RequestType::Unprefixed the default when the unprefixed
   // API is enabled. https://crbug.com/383813
-  FullscreenOptions options;
-  options.setNavigationUI("hide");
+  FullscreenOptions* options = FullscreenOptions::Create();
+  options->setNavigationUI("hide");
   RequestFullscreen(pending, options, RequestType::kPrefixed);
 }
 
 ScriptPromise Fullscreen::RequestFullscreen(Element& pending,
-                                            const FullscreenOptions& options,
+                                            const FullscreenOptions* options,
                                             RequestType request_type,
                                             ScriptState* script_state) {
   RequestFullscreenScope scope;
@@ -577,7 +595,7 @@ ScriptPromise Fullscreen::RequestFullscreen(Element& pending,
   if (script_state) {
     // We should only be creating promises for unprefixed variants.
     DCHECK_EQ(Fullscreen::RequestType::kUnprefixed, request_type);
-    resolver = ScriptPromiseResolver::Create(script_state);
+    resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   }
 
   bool for_cross_process_descendant =
@@ -620,7 +638,7 @@ ScriptPromise Fullscreen::RequestFullscreen(Element& pending,
     }
 
     From(document).pending_requests_.push_back(
-        new PendingRequest(&pending, request_type, resolver));
+        MakeGarbageCollected<PendingRequest>(&pending, request_type, resolver));
     LocalFrame& frame = *document.GetFrame();
     frame.GetChromeClient().EnterFullscreen(frame, options);
   } else {
@@ -673,12 +691,12 @@ void Fullscreen::ContinueRequestFullscreen(Document& document,
   if (error) {
     // 10.1. Append (fullscreenerror, |pending|) to |pendingDoc|'s list of
     // pending fullscreen events.
-    EnqueueEvent(EventTypeNames::fullscreenerror, pending, document,
+    EnqueueEvent(event_type_names::kFullscreenerror, pending, document,
                  request_type);
 
     // 10.2. Reject |promise| with a TypeError exception and terminate these
     // steps.
-    if (resolver) {
+    if (resolver && resolver->GetScriptState()->ContextIsValid()) {
       ScriptState::Scope scope(resolver->GetScriptState());
       // TODO(dtapuska): Change error to be something useful instead of just a
       // boolean and return this to the user.
@@ -705,9 +723,9 @@ void Fullscreen::ContinueRequestFullscreen(Document& document,
   // and processed after the IPC that dispatches fullscreenchange.
   for (Frame* frame = pending.GetDocument().GetFrame(); frame;
        frame = frame->Tree().Parent()) {
-    if (!frame->Owner() || !frame->Owner()->IsLocal())
+    Element* element = DynamicTo<HTMLFrameOwnerElement>(frame->Owner());
+    if (!element)
       continue;
-    Element* element = ToHTMLFrameOwnerElement(frame->Owner());
     fullscreen_elements.push_back(element);
   }
 
@@ -730,7 +748,8 @@ void Fullscreen::ContinueRequestFullscreen(Document& document,
 
     // 13.5. Append (fullscreenchange, |element|) to |doc|'s list of pending
     // fullscreen events.
-    EnqueueEvent(EventTypeNames::fullscreenchange, *element, doc, request_type);
+    EnqueueEvent(event_type_names::kFullscreenchange, *element, doc,
+                 request_type);
   }
 
   // 14. Resolve |promise| with undefined.
@@ -787,7 +806,7 @@ ScriptPromise Fullscreen::ExitFullscreen(Document& doc,
   }
 
   if (script_state)
-    resolver = ScriptPromiseResolver::Create(script_state);
+    resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
 
   // 3. Let |resize| be false.
   bool resize = false;
@@ -823,7 +842,8 @@ ScriptPromise Fullscreen::ExitFullscreen(Document& doc,
 
     // 7.1. Append (fullscreenchange, |doc|'s fullscreen element) to
     // |doc|'s list of pending fullscreen events.
-    EnqueueEvent(EventTypeNames::fullscreenchange, *element, doc, request_type);
+    EnqueueEvent(event_type_names::kFullscreenchange, *element, doc,
+                 request_type);
 
     // 7.2. Unfullscreen |element|.
     Unfullscreen(*element);
@@ -904,11 +924,12 @@ void Fullscreen::ContinueExitFullscreen(Document* doc,
   HeapVector<Member<Document>> descendant_docs;
   for (Frame* descendant = doc->GetFrame()->Tree().FirstChild(); descendant;
        descendant = descendant->Tree().TraverseNext(doc->GetFrame())) {
-    if (!descendant->IsLocalFrame())
+    auto* descendant_local_frame = DynamicTo<LocalFrame>(descendant);
+    if (!descendant_local_frame)
       continue;
-    DCHECK(ToLocalFrame(descendant)->GetDocument());
-    if (FullscreenElementFrom(*ToLocalFrame(descendant)->GetDocument()))
-      descendant_docs.push_back(ToLocalFrame(descendant)->GetDocument());
+    DCHECK(descendant_local_frame->GetDocument());
+    if (FullscreenElementFrom(*descendant_local_frame->GetDocument()))
+      descendant_docs.push_back(descendant_local_frame->GetDocument());
   }
 
   // 12. For each |exitDoc| in |exitDocs|:
@@ -919,7 +940,7 @@ void Fullscreen::ContinueExitFullscreen(Document* doc,
 
     // 12.1. Append (fullscreenchange, |exitDoc|'s fullscreen element) to
     // |exitDoc|'s list of pending fullscreen events.
-    EnqueueEvent(EventTypeNames::fullscreenchange, *exit_element, *exit_doc,
+    EnqueueEvent(event_type_names::kFullscreenchange, *exit_element, *exit_doc,
                  request_type);
 
     // 12.2. If |resize| is true, unfullscreen |exitDoc|.
@@ -938,7 +959,7 @@ void Fullscreen::ContinueExitFullscreen(Document* doc,
 
     // 13.1. Append (fullscreenchange, |descendantDoc|'s fullscreen element) to
     // |descendantDoc|'s list of pending fullscreen events.
-    EnqueueEvent(EventTypeNames::fullscreenchange, *descendant_element,
+    EnqueueEvent(event_type_names::kFullscreenchange, *descendant_element,
                  *descendant_doc, request_type);
 
     // 13.2. Unfullscreen |descendantDoc|.
@@ -967,7 +988,7 @@ void Fullscreen::DidUpdateSize(Element& element) {
   // bit surprising.
   element.SetNeedsStyleRecalc(
       kLocalStyleChange,
-      StyleChangeReasonForTracing::Create(StyleChangeReason::kFullscreen));
+      StyleChangeReasonForTracing::Create(style_change_reason::kFullscreen));
 }
 
 void Fullscreen::ElementRemoved(Element& node) {

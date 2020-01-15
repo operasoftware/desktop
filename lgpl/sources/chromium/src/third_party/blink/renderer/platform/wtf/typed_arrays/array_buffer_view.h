@@ -28,6 +28,7 @@
 
 #include <limits.h>
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/typed_arrays/array_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_export.h"
@@ -35,6 +36,8 @@
 namespace WTF {
 
 class WTF_EXPORT ArrayBufferView : public RefCounted<ArrayBufferView> {
+  USING_FAST_MALLOC(ArrayBuffer);
+
  public:
   enum ViewType {
     kTypeInt8,
@@ -66,8 +69,8 @@ class WTF_EXPORT ArrayBufferView : public RefCounted<ArrayBufferView> {
   virtual unsigned ByteLength() const = 0;
   virtual unsigned TypeSize() const = 0;
 
-  void SetNeuterable(bool flag) { is_neuterable_ = flag; }
-  bool IsNeuterable() const { return is_neuterable_; }
+  void SetDetachable(bool flag) { is_detachable_ = flag; }
+  bool IsDetachable() const { return is_detachable_; }
   bool IsShared() const { return buffer_ ? buffer_->IsShared() : false; }
 
   virtual ~ArrayBufferView();
@@ -90,19 +93,19 @@ class WTF_EXPORT ArrayBufferView : public RefCounted<ArrayBufferView> {
     if (byte_offset > buffer->ByteLength())
       return false;
     unsigned remaining_elements =
-        (buffer->ByteLength() - byte_offset) / sizeof(T);
+        static_cast<unsigned>((buffer->ByteLength() - byte_offset) / sizeof(T));
     if (num_elements > remaining_elements)
       return false;
     return true;
   }
 
-  virtual void Neuter();
+  virtual void Detach();
 
   // This is the address of the ArrayBuffer's storage, plus the byte offset.
   void* base_address_;
 
   unsigned byte_offset_ : 31;
-  unsigned is_neuterable_ : 1;
+  unsigned is_detachable_ : 1;
 
  private:
   friend class ArrayBuffer;

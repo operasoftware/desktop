@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/core/fileapi/blob.h"
 #include "third_party/blink/renderer/modules/filesystem/file_system_dispatcher.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
 
@@ -45,7 +46,7 @@ void FileWriterSync::write(Blob* data, ExceptionState& exception_state) {
   Write(position(), data->Uuid());
   DCHECK(complete_);
   if (error_) {
-    FileError::ThrowDOMException(exception_state, error_);
+    file_error::ThrowDOMException(exception_state, error_);
     return;
   }
   SetPosition(position() + data->size());
@@ -53,24 +54,23 @@ void FileWriterSync::write(Blob* data, ExceptionState& exception_state) {
     SetLength(position());
 }
 
-void FileWriterSync::seek(long long position, ExceptionState& exception_state) {
+void FileWriterSync::seek(int64_t position, ExceptionState& exception_state) {
   DCHECK(complete_);
   SeekInternal(position);
 }
 
-void FileWriterSync::truncate(long long offset,
-                              ExceptionState& exception_state) {
+void FileWriterSync::truncate(int64_t offset, ExceptionState& exception_state) {
   DCHECK(complete_);
   if (offset < 0) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
-                                      FileError::kInvalidStateErrorMessage);
+                                      file_error::kInvalidStateErrorMessage);
     return;
   }
   PrepareForWrite();
   Truncate(offset);
   DCHECK(complete_);
   if (error_) {
-    FileError::ThrowDOMException(exception_state, error_);
+    file_error::ThrowDOMException(exception_state, error_);
     return;
   }
   if (offset < position())

@@ -43,18 +43,13 @@ void InlineCSSStyleDeclaration::DidMutate(MutationType type) {
   parent_element_->ClearMutableInlineStyleIfEmpty();
   parent_element_->SetNeedsStyleRecalc(
       kLocalStyleChange, StyleChangeReasonForTracing::Create(
-                             StyleChangeReason::kInlineCSSStyleMutated));
+                             style_change_reason::kInlineCSSStyleMutated));
   parent_element_->InvalidateStyleAttribute();
   StyleAttributeMutationScope(this).DidInvalidateStyleAttr();
 }
 
 CSSStyleSheet* InlineCSSStyleDeclaration::ParentStyleSheet() const {
   return parent_element_ ? &parent_element_->GetDocument().ElementSheet()
-                         : nullptr;
-}
-
-PropertyRegistry* InlineCSSStyleDeclaration::GetPropertyRegistry() const {
-  return parent_element_ ? parent_element_->GetDocument().GetPropertyRegistry()
                          : nullptr;
 }
 

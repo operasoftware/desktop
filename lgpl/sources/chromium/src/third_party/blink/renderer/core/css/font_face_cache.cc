@@ -51,8 +51,10 @@ void FontFaceCache::AddFontFace(FontFace* font_face, bool css_connected) {
   SegmentedFacesByFamily::AddResult capabilities_result =
       segmented_faces_.insert(font_face->family(), nullptr);
 
-  if (capabilities_result.is_new_entry)
-    capabilities_result.stored_value->value = new CapabilitiesSet();
+  if (capabilities_result.is_new_entry) {
+    capabilities_result.stored_value->value =
+        MakeGarbageCollected<CapabilitiesSet>();
+  }
 
   DCHECK(font_face->GetFontSelectionCapabilities().IsValid() &&
          !font_face->GetFontSelectionCapabilities().IsHashTableDeletedValue());
@@ -62,7 +64,8 @@ void FontFaceCache::AddFontFace(FontFace* font_face, bool css_connected) {
           font_face->GetFontSelectionCapabilities(), nullptr);
   if (segmented_font_face_result.is_new_entry) {
     segmented_font_face_result.stored_value->value =
-        CSSSegmentedFontFace::Create(font_face->GetFontSelectionCapabilities());
+        MakeGarbageCollected<CSSSegmentedFontFace>(
+            font_face->GetFontSelectionCapabilities());
   }
 
   segmented_font_face_result.stored_value->value->AddFontFace(font_face,
@@ -151,13 +154,18 @@ CSSSegmentedFontFace* FontFaceCache::Get(
       segmented_faces_for_family->value->IsEmpty())
     return nullptr;
 
+  // TODO(crbug.com/1021568): Prevent `system-ui` from matching. Per spec,
+  // generic family names should not match web fonts unless they are quoted.
+  if (family == font_family_names::kSystemUi)
+    return nullptr;
+
   auto family_faces = segmented_faces_for_family->value;
 
   // Either add or retrieve a cache entry in the selection query cache for the
   // specified family.
   FontSelectionQueryCache::AddResult cache_entry_for_family_add =
-      font_selection_query_cache_.insert(family,
-                                         new FontSelectionQueryResult());
+      font_selection_query_cache_.insert(
+          family, MakeGarbageCollected<FontSelectionQueryResult>());
   auto cache_entry_for_family = cache_entry_for_family_add.stored_value->value;
 
   const FontSelectionRequest& request =

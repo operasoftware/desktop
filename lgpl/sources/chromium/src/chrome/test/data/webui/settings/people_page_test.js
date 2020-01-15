@@ -3,6 +3,20 @@
 // found in the LICENSE file.
 
 cr.define('settings_people_page', function() {
+  /** @implements {settings.PeopleBrowserProxy} */
+  class TestPeopleBrowserProxy extends TestBrowserProxy {
+    constructor() {
+      super([
+        'openURL',
+      ]);
+    }
+
+    /** @override */
+    openURL(url) {
+      this.methodCalled('openURL', url);
+    }
+  }
+
   suite('ProfileInfoTests', function() {
     /** @type {SettingsPeoplePageElement} */
     let peoplePage = null;
@@ -13,17 +27,21 @@ cr.define('settings_people_page', function() {
 
     suiteSetup(function() {
       loadTimeData.overrideValues({
-        // Force easy unlock off. Those have their own ChromeOS-only tests.
-        easyUnlockAllowed: false,
         // Force Dice off. Dice is tested in the DiceUITest suite.
         diceEnabled: false,
         // Force Unified Consent off. Unified Consent is tested in the
         // UnifiedConsentUITest suite.
         unifiedConsentEnabled: false,
       });
+      if (cr.isChromeOS) {
+        loadTimeData.overrideValues({
+          // Account Manager is tested in the Chrome OS-specific section below.
+          isAccountManagerEnabled: false,
+        });
+      }
     });
 
-    setup(function() {
+    setup(async function() {
       browserProxy = new TestProfileInfoBrowserProxy();
       settings.ProfileInfoBrowserProxyImpl.instance_ = browserProxy;
 
@@ -32,16 +50,12 @@ cr.define('settings_people_page', function() {
 
       PolymerTest.clearBody();
       peoplePage = document.createElement('settings-people-page');
+      peoplePage.pageVisibility = settings.pageVisibility;
       document.body.appendChild(peoplePage);
 
-      return Promise
-          .all([
-            browserProxy.whenCalled('getProfileInfo'),
-            syncBrowserProxy.whenCalled('getSyncStatus')
-          ])
-          .then(function() {
-            Polymer.dom.flush();
-          });
+      await syncBrowserProxy.whenCalled('getSyncStatus');
+      await browserProxy.whenCalled('getProfileInfo');
+      Polymer.dom.flush();
     });
 
     teardown(function() {
@@ -88,13 +102,6 @@ cr.define('settings_people_page', function() {
       /** @type {settings.ProfileInfoBrowserProxy} */
       let profileInfoBrowserProxy = null;
 
-      suiteSetup(function() {
-        // Force easy unlock off. Those have their own ChromeOS-only tests.
-        loadTimeData.overrideValues({
-          easyUnlockAllowed: false,
-        });
-      });
-
       setup(function() {
         browserProxy = new TestSyncBrowserProxy();
         settings.SyncBrowserProxyImpl.instance_ = browserProxy;
@@ -105,6 +112,7 @@ cr.define('settings_people_page', function() {
 
         PolymerTest.clearBody();
         peoplePage = document.createElement('settings-people-page');
+        peoplePage.pageVisibility = settings.pageVisibility;
         document.body.appendChild(peoplePage);
       });
 
@@ -120,7 +128,7 @@ cr.define('settings_people_page', function() {
 
       // This makes sure UI meant for DICE-enabled profiles are not leaked to
       // non-dice profiles.
-      // TODO(scottchen): This should be removed once all profiles are fully
+      // TODO(tangltom): This should be removed once all profiles are fully
       // migrated.
       test('NoManageProfileRow', function() {
         assertFalse(!!peoplePage.$$('#edit-profile'));
@@ -400,6 +408,7 @@ cr.define('settings_people_page', function() {
 
         PolymerTest.clearBody();
         peoplePage = document.createElement('settings-people-page');
+        peoplePage.pageVisibility = settings.pageVisibility;
         document.body.appendChild(peoplePage);
 
         Polymer.dom.flush();
@@ -435,14 +444,80 @@ cr.define('settings_people_page', function() {
             syncSystemEnabled: true,
           });
           assertEquals(
-              window.getComputedStyle(accountControl)['display'], 'none');
+              'none', window.getComputedStyle(accountControl)['display']);
 
           sync_test_util.simulateSyncStatus({
             signinAllowed: true,
             syncSystemEnabled: false,
           });
           assertEquals(
-              window.getComputedStyle(accountControl)['display'], 'none');
+              'none', window.getComputedStyle(accountControl)['display']);
+
+          const manageGoogleAccount = peoplePage.$$('#manage-google-account');
+
+          // Do not show Google Account when stored accounts or sync status
+          // could not be retrieved.
+          sync_test_util.simulateStoredAccounts(undefined);
+          sync_test_util.simulateSyncStatus(undefined);
+          assertEquals(
+              'none', window.getComputedStyle(manageGoogleAccount)['display']);
+
+          sync_test_util.simulateStoredAccounts([]);
+          sync_test_util.simulateSyncStatus(undefined);
+          assertEquals(
+              'none', window.getComputedStyle(manageGoogleAccount)['display']);
+
+          sync_test_util.simulateStoredAccounts(undefined);
+          sync_test_util.simulateSyncStatus({});
+          assertEquals(
+              'none', window.getComputedStyle(manageGoogleAccount)['display']);
+
+          sync_test_util.simulateStoredAccounts([]);
+          sync_test_util.simulateSyncStatus({});
+          assertEquals(
+              'none', window.getComputedStyle(manageGoogleAccount)['display']);
+
+          // A stored account with sync off but no error should result in the
+          // Google Account being shown.
+          sync_test_util.simulateStoredAccounts([{email: 'foo@foo.com'}]);
+          sync_test_util.simulateSyncStatus({
+            signedIn: false,
+            hasError: false,
+          });
+          assertTrue(
+              window.getComputedStyle(manageGoogleAccount)['display'] !=
+              'none');
+
+          // A stored account with sync off and error should not result in the
+          // Google Account being shown.
+          sync_test_util.simulateStoredAccounts([{email: 'foo@foo.com'}]);
+          sync_test_util.simulateSyncStatus({
+            signedIn: false,
+            hasError: true,
+          });
+          assertEquals(
+              'none', window.getComputedStyle(manageGoogleAccount)['display']);
+
+          // A stored account with sync on but no error should result in the
+          // Google Account being shown.
+          sync_test_util.simulateStoredAccounts([{email: 'foo@foo.com'}]);
+          sync_test_util.simulateSyncStatus({
+            signedIn: true,
+            hasError: false,
+          });
+          assertTrue(
+              window.getComputedStyle(manageGoogleAccount)['display'] !=
+              'none');
+
+          // A stored account with sync on but with error should not result in
+          // the Google Account being shown.
+          sync_test_util.simulateStoredAccounts([{email: 'foo@foo.com'}]);
+          sync_test_util.simulateSyncStatus({
+            signedIn: true,
+            hasError: true,
+          });
+          assertEquals(
+              'none', window.getComputedStyle(manageGoogleAccount)['display']);
         });
       });
 
@@ -484,6 +559,7 @@ cr.define('settings_people_page', function() {
 
       PolymerTest.clearBody();
       peoplePage = document.createElement('settings-people-page');
+      peoplePage.pageVisibility = settings.pageVisibility;
       document.body.appendChild(peoplePage);
 
       Polymer.dom.flush();
@@ -510,4 +586,350 @@ cr.define('settings_people_page', function() {
       assertEquals(settings.getCurrentRoute(), settings.routes.SYNC);
     });
   });
+
+  if (cr.isChromeOS) {
+    /** @implements {settings.AccountManagerBrowserProxy} */
+    class TestAccountManagerBrowserProxy extends TestBrowserProxy {
+      constructor() {
+        super([
+          'getAccounts',
+          'addAccount',
+          'reauthenticateAccount',
+          'removeAccount',
+          'showWelcomeDialogIfRequired',
+        ]);
+      }
+
+      /** @override */
+      getAccounts() {
+        this.methodCalled('getAccounts');
+        return Promise.resolve([{
+          id: '123',
+          accountType: 1,
+          isDeviceAccount: false,
+          isSignedIn: true,
+          unmigrated: false,
+          fullName: 'Primary Account',
+          email: 'user@gmail.com',
+          pic: 'data:image/png;base64,primaryAccountPicData',
+        }]);
+      }
+
+      /** @override */
+      addAccount() {
+        this.methodCalled('addAccount');
+      }
+
+      /** @override */
+      reauthenticateAccount(account_email) {
+        this.methodCalled('reauthenticateAccount', account_email);
+      }
+
+      /** @override */
+      removeAccount(account) {
+        this.methodCalled('removeAccount', account);
+      }
+
+      /** @override */
+      showWelcomeDialogIfRequired() {
+        this.methodCalled('showWelcomeDialogIfRequired');
+      }
+    }
+
+    suite('Chrome OS', function() {
+      /** @type {SettingsPeoplePageElement} */
+      let peoplePage = null;
+      /** @type {settings.SyncBrowserProxy} */
+      let browserProxy = null;
+      /** @type {settings.ProfileInfoBrowserProxy} */
+      let profileInfoBrowserProxy = null;
+      /** @type {settings.AccountManagerBrowserProxy} */
+      let accountManagerBrowserProxy = null;
+
+      suiteSetup(function() {
+        loadTimeData.overrideValues({
+          // Simulate SplitSettings (OS settings in their own surface).
+          showOSSettings: false,
+          // Simulate ChromeOSAccountManager (Google Accounts support).
+          isAccountManagerEnabled: true,
+          // Simulate parental controls.
+          showParentalControls: true,
+        });
+      });
+
+      setup(async function() {
+        browserProxy = new TestSyncBrowserProxy();
+        settings.SyncBrowserProxyImpl.instance_ = browserProxy;
+
+        profileInfoBrowserProxy = new TestProfileInfoBrowserProxy();
+        settings.ProfileInfoBrowserProxyImpl.instance_ =
+            profileInfoBrowserProxy;
+
+        accountManagerBrowserProxy = new TestAccountManagerBrowserProxy();
+        settings.AccountManagerBrowserProxyImpl.instance_ =
+            accountManagerBrowserProxy;
+
+        PolymerTest.clearBody();
+        peoplePage = document.createElement('settings-people-page');
+        // Preferences should exist for embedded 'personalization_options.html'.
+        // We don't perform tests on them.
+        peoplePage.prefs = {
+          profile: {password_manager_leak_detection: {value: true}},
+          safebrowsing:
+              {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+        };
+        peoplePage.pageVisibility = settings.pageVisibility;
+        document.body.appendChild(peoplePage);
+
+        await accountManagerBrowserProxy.whenCalled('getAccounts');
+        await browserProxy.whenCalled('getSyncStatus');
+        Polymer.dom.flush();
+      });
+
+      teardown(function() {
+        peoplePage.remove();
+      });
+
+      test('GAIA name and picture', async () => {
+        chai.assert.include(
+            peoplePage.$$('#profile-icon').style.backgroundImage,
+            'data:image/png;base64,primaryAccountPicData');
+        assertEquals(
+            'Primary Account',
+            peoplePage.$$('#profile-name').textContent.trim());
+      });
+
+      test('profile row is actionable', () => {
+        // Simulate a signed-in user.
+        sync_test_util.simulateSyncStatus({
+          signedIn: true,
+        });
+
+        // Profile row opens account manager, so the row is actionable.
+        const profileIcon = assert(peoplePage.$$('#profile-icon'));
+        assertTrue(profileIcon.hasAttribute('actionable'));
+        const profileRow = assert(peoplePage.$$('#profile-row'));
+        assertTrue(profileRow.hasAttribute('actionable'));
+        const subpageArrow = assert(peoplePage.$$('#profile-subpage-arrow'));
+        assertFalse(subpageArrow.hidden);
+      });
+
+      test('parental controls page is shown when enabled', () => {
+        // Setup button is shown and enabled.
+        const parentalControlsItem =
+            assert(peoplePage.$$('settings-parental-controls-page'));
+      });
+    });
+
+    suite('Chrome OS with account manager disabled', function() {
+      let peoplePage = null;
+      let syncBrowserProxy = null;
+      let profileInfoBrowserProxy = null;
+
+      suiteSetup(function() {
+        loadTimeData.overrideValues({
+          // Simulate SplitSettings (OS settings in their own surface).
+          showOSSettings: false,
+          // Disable ChromeOSAccountManager (Google Accounts support).
+          isAccountManagerEnabled: false,
+        });
+      });
+
+      setup(async function() {
+        syncBrowserProxy = new TestSyncBrowserProxy();
+        settings.SyncBrowserProxyImpl.instance_ = syncBrowserProxy;
+
+        profileInfoBrowserProxy = new TestProfileInfoBrowserProxy();
+        settings.ProfileInfoBrowserProxyImpl.instance_ =
+            profileInfoBrowserProxy;
+
+        PolymerTest.clearBody();
+        peoplePage = document.createElement('settings-people-page');
+        // Preferences should exist for embedded 'personalization_options.html'.
+        // We don't perform tests on them.
+        peoplePage.prefs = {
+          profile: {password_manager_leak_detection: {value: true}},
+          safebrowsing:
+              {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+        };
+        peoplePage.pageVisibility = settings.pageVisibility;
+        document.body.appendChild(peoplePage);
+
+        await syncBrowserProxy.whenCalled('getSyncStatus');
+        Polymer.dom.flush();
+      });
+
+      teardown(function() {
+        peoplePage.remove();
+      });
+
+      test('profile row is not actionable', () => {
+        // Simulate a signed-in user.
+        sync_test_util.simulateSyncStatus({
+          signedIn: true,
+        });
+
+        // Account manager isn't available, so the row isn't actionable.
+        const profileIcon = assert(peoplePage.$$('#profile-icon'));
+        assertFalse(profileIcon.hasAttribute('actionable'));
+        const profileRow = assert(peoplePage.$$('#profile-row'));
+        assertFalse(profileRow.hasAttribute('actionable'));
+        const subpageArrow = assert(peoplePage.$$('#profile-subpage-arrow'));
+        assertTrue(subpageArrow.hidden);
+
+        // Clicking on profile icon doesn't navigate to a new route.
+        const oldRoute = settings.getCurrentRoute();
+        profileIcon.click();
+        assertEquals(oldRoute, settings.getCurrentRoute());
+      });
+    });
+
+    /** @implements {parental_controls.ParentalControlsBrowserProxy} */
+    class TestParentalControlsBrowserProxy extends TestBrowserProxy {
+      constructor() {
+        super([
+          'showAddSupervisionDialog',
+          'launchFamilyLinkSettings',
+        ]);
+      }
+
+      /** @override */
+      launchFamilyLinkSettings() {
+        this.methodCalled('launchFamilyLinkSettings');
+      }
+
+      /** @override */
+      showAddSupervisionDialog() {
+        this.methodCalled('showAddSupervisionDialog');
+      }
+    }
+
+    suite('Chrome OS parental controls page setup item tests', function() {
+      /** @type {ParentalControlsPage} */
+      let parentalControlsPage = null;
+
+      /** @type {TestParentalControlsBrowserProxy} */
+      let parentalControlsBrowserProxy = null;
+
+      suiteSetup(function() {
+        loadTimeData.overrideValues({
+          // Simulate parental controls.
+          showParentalControls: true,
+        });
+      });
+
+      setup(function() {
+        parentalControlsBrowserProxy = new TestParentalControlsBrowserProxy();
+        parental_controls.BrowserProxyImpl.instance_ =
+            parentalControlsBrowserProxy;
+
+        PolymerTest.clearBody();
+        parentalControlsPage =
+            document.createElement('settings-parental-controls-page');
+        parentalControlsPage.pageVisibility = settings.pageVisibility;
+        document.body.appendChild(parentalControlsPage);
+        Polymer.dom.flush();
+      });
+
+      teardown(function() {
+        parentalControlsPage.remove();
+      });
+
+      test('parental controls page enabled when online', () => {
+        // Setup button is shown and enabled.
+        const setupButton = assert(
+            parentalControlsPage.$$('#parental-controls-item cr-button'));
+
+        setupButton.click();
+
+        // Ensure that the request to launch the add supervision flow went
+        // through.
+        assertEquals(
+            parentalControlsBrowserProxy.getCallCount(
+                'showAddSupervisionDialog'),
+            1);
+      });
+
+      test('parental controls page disabled when offline', () => {
+        // Simulate going offline
+        window.dispatchEvent(new CustomEvent('offline'));
+        // Setup button is shown but disabled.
+        const setupButton = assert(
+            parentalControlsPage.$$('#parental-controls-item cr-button'));
+        assertTrue(setupButton.disabled);
+
+        setupButton.click();
+
+        // Ensure that the request to launch the add supervision flow does not
+        // go through.
+        assertEquals(
+            parentalControlsBrowserProxy.getCallCount(
+                'showAddSupervisionDialog'),
+            0);
+      });
+
+      test(
+          'parental controls page re-enabled when it comes back online', () => {
+            // Simulate going offline
+            window.dispatchEvent(new CustomEvent('offline'));
+            // Setup button is shown but disabled.
+            const setupButton = assert(
+                parentalControlsPage.$$('#parental-controls-item cr-button'));
+            assertTrue(setupButton.disabled);
+
+            // Come back online.
+            window.dispatchEvent(new CustomEvent('online'));
+            // Setup button is shown and re-enabled.
+            assertFalse(setupButton.disabled);
+          });
+    });
+
+
+    suite('Chrome OS parental controls page child account tests', function() {
+      /** @type {ParentalControlsPage} */
+      let parentalControlsPage = null;
+
+      /** @type {TestParentalControlsBrowserProxy} */
+      let parentalControlsBrowserProxy = null;
+
+      suiteSetup(function() {
+        loadTimeData.overrideValues({
+          // Simulate parental controls.
+          showParentalControls: true,
+          // Simulate child account.
+          isChild: true,
+        });
+      });
+
+      setup(async function() {
+        parentalControlsBrowserProxy = new TestParentalControlsBrowserProxy();
+        parental_controls.BrowserProxyImpl.instance_ =
+            parentalControlsBrowserProxy;
+
+        PolymerTest.clearBody();
+        parentalControlsPage =
+            document.createElement('settings-parental-controls-page');
+        parentalControlsPage.pageVisibility = settings.pageVisibility;
+        document.body.appendChild(parentalControlsPage);
+        Polymer.dom.flush();
+      });
+
+      teardown(function() {
+        parentalControlsPage.remove();
+      });
+
+      test('parental controls page child view shown to child account', () => {
+        // Get the link row.
+        const linkRow = assert(
+            parentalControlsPage.$$('#parental-controls-item cr-link-row'));
+
+        linkRow.click();
+        // Ensure that the request to launch FLH went through.
+        assertEquals(
+            parentalControlsBrowserProxy.getCallCount(
+                'launchFamilyLinkSettings'),
+            1);
+      });
+    });
+  }
 });

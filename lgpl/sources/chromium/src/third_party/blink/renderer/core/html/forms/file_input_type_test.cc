@@ -4,16 +4,19 @@
 
 #include "third_party/blink/renderer/core/html/forms/file_input_type.h"
 
+#include "base/run_loop.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/clipboard/data_object.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/fileapi/file_list.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
+#include "third_party/blink/renderer/core/html/forms/mock_file_chooser.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
 #include "third_party/blink/renderer/core/page/drag_data.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/platform/file_metadata.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
 
 namespace blink {
@@ -22,12 +25,6 @@ namespace {
 
 class WebKitDirectoryChromeClient : public EmptyChromeClient {
  public:
-  void EnumerateChosenDirectory(FileChooser* chooser) override {
-    chooser->AddRef();  // Do same as ChromeClientImpl
-    static_cast<WebFileChooserCompletion*>(chooser)->DidChooseFile(
-        WebVector<WebString>());
-  }
-
   void RegisterPopupOpeningObserver(PopupOpeningObserver*) override {
     NOTREACHED() << "RegisterPopupOpeningObserver should not be called.";
   }
@@ -50,7 +47,7 @@ TEST(FileInputTypeTest, createFileList) {
   files.push_back(CreateFileChooserFileInfoFileSystem(
       url, base::Time::FromJsTime(1.0 * kMsPerDay + 3), 64));
 
-  FileList* list = FileInputType::CreateFileList(files, false);
+  FileList* list = FileInputType::CreateFileList(files, base::FilePath());
   ASSERT_TRUE(list);
   ASSERT_EQ(2u, list->length());
 
@@ -66,9 +63,10 @@ TEST(FileInputTypeTest, createFileList) {
 }
 
 TEST(FileInputTypeTest, ignoreDroppedNonNativeFiles) {
-  Document* document = Document::CreateForTest();
-  auto* input = HTMLInputElement::Create(*document, CreateElementFlags());
-  InputType* file_input = FileInputType::Create(*input);
+  auto* document = MakeGarbageCollected<Document>();
+  auto* input =
+      MakeGarbageCollected<HTMLInputElement>(*document, CreateElementFlags());
+  InputType* file_input = MakeGarbageCollected<FileInputType>(*input);
 
   DataObject* native_file_raw_drag_data = DataObject::Create();
   const DragData native_file_drag_data(native_file_raw_drag_data, FloatPoint(),
@@ -98,9 +96,10 @@ TEST(FileInputTypeTest, ignoreDroppedNonNativeFiles) {
 }
 
 TEST(FileInputTypeTest, setFilesFromPaths) {
-  Document* document = Document::CreateForTest();
-  auto* input = HTMLInputElement::Create(*document, CreateElementFlags());
-  InputType* file_input = FileInputType::Create(*input);
+  auto* document = MakeGarbageCollected<Document>();
+  auto* input =
+      MakeGarbageCollected<HTMLInputElement>(*document, CreateElementFlags());
+  InputType* file_input = MakeGarbageCollected<FileInputType>(*input);
   Vector<String> paths;
   paths.push_back("/native/path");
   paths.push_back("/native/path2");
@@ -117,7 +116,7 @@ TEST(FileInputTypeTest, setFilesFromPaths) {
   EXPECT_EQ(String("/native/path1"), file_input->Files()->item(0)->GetPath());
 
   // Try to upload multiple files with multipleAttr
-  input->SetBooleanAttribute(HTMLNames::multipleAttr, true);
+  input->SetBooleanAttribute(html_names::kMultipleAttr, true);
   paths.clear();
   paths.push_back("/native/real/path1");
   paths.push_back("/native/real/path2");
@@ -132,18 +131,25 @@ TEST(FileInputTypeTest, setFilesFromPaths) {
 TEST(FileInputTypeTest, DropTouchesNoPopupOpeningObserver) {
   Page::PageClients page_clients;
   FillWithEmptyClients(page_clients);
-  auto* chrome_client = new WebKitDirectoryChromeClient;
+  auto* chrome_client = MakeGarbageCollected<WebKitDirectoryChromeClient>();
   page_clients.chrome_client = chrome_client;
-  auto page_holder = DummyPageHolder::Create(IntSize(), &page_clients);
+  auto page_holder =
+      std::make_unique<DummyPageHolder>(IntSize(), &page_clients);
   Document& doc = page_holder->GetDocument();
 
   doc.body()->SetInnerHTMLFromString("<input type=file webkitdirectory>");
   auto& input = *ToHTMLInputElement(doc.body()->firstChild());
 
+  base::RunLoop run_loop;
+  MockFileChooser chooser(doc.GetFrame()->GetBrowserInterfaceBroker(),
+                          run_loop.QuitClosure());
   DragData drag_data(DataObject::Create(), FloatPoint(), FloatPoint(),
                      kDragOperationCopy);
   drag_data.PlatformData()->Add(File::Create("/foo/bar"));
   input.ReceiveDroppedFiles(&drag_data);
+  run_loop.Run();
+
+  chooser.ResponseOnOpenFileChooser(FileChooserFileInfoList());
 
   // The test passes if WebKitDirectoryChromeClient::
   // UnregisterPopupOpeningObserver() was not called.

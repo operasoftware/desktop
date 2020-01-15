@@ -34,7 +34,7 @@ class SVGMaskElement final : public SVGElement, public SVGTests {
   USING_GARBAGE_COLLECTED_MIXIN(SVGMaskElement);
 
  public:
-  DECLARE_NODE_FACTORY(SVGMaskElement);
+  explicit SVGMaskElement(Document&);
 
   SVGAnimatedLength* x() const { return x_.Get(); }
   SVGAnimatedLength* y() const { return y_.Get(); }
@@ -50,8 +50,6 @@ class SVGMaskElement final : public SVGElement, public SVGTests {
   void Trace(blink::Visitor*) override;
 
  private:
-  explicit SVGMaskElement(Document&);
-
   bool IsValid() const override { return SVGTests::IsValid(); }
 
   void CollectStyleForPresentationAttribute(
@@ -61,7 +59,7 @@ class SVGMaskElement final : public SVGElement, public SVGTests {
   void SvgAttributeChanged(const QualifiedName&) override;
   void ChildrenChanged(const ChildrenChange&) override;
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 
   bool SelfHasRelativeLengths() const override;
 

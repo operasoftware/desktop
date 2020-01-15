@@ -37,10 +37,9 @@ namespace blink {
 
 class URLInputType final : public BaseTextInputType {
  public:
-  static InputType* Create(HTMLInputElement&);
+  URLInputType(HTMLInputElement& element) : BaseTextInputType(element) {}
 
  private:
-  URLInputType(HTMLInputElement& element) : BaseTextInputType(element) {}
   void CountUsage() override;
   const AtomicString& FormControlType() const override;
   bool TypeMismatchFor(const String&) const override;

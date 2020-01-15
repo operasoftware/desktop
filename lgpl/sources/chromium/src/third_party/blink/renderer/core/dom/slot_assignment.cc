@@ -5,24 +5,28 @@
 #include "third_party/blink/renderer/core/dom/slot_assignment.h"
 
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
+#include "third_party/blink/renderer/core/dom/flat_tree_traversal_forbidden_scope.h"
 #include "third_party/blink/renderer/core/dom/node.h"
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/slot_assignment_engine.h"
+#include "third_party/blink/renderer/core/dom/slot_assignment_recalc_forbidden_scope.h"
 #include "third_party/blink/renderer/core/html/forms/html_opt_group_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/html/html_details_element.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
+#include "third_party/blink/renderer/core/html/parser/nesting_level_incrementer.h"
 
 namespace blink {
 
 namespace {
 bool ShouldAssignToCustomSlot(const Node& node) {
-  if (IsHTMLDetailsElement(node.parentElement()))
+  if (IsA<HTMLDetailsElement>(node.parentElement()))
     return HTMLDetailsElement::IsFirstSummary(node);
-  if (IsHTMLSelectElement(node.parentElement()))
+  if (IsA<HTMLSelectElement>(node.parentElement()))
     return HTMLSelectElement::CanAssignToSelectSlot(node);
-  if (IsHTMLOptGroupElement(node.parentElement()))
+  if (IsA<HTMLOptGroupElement>(node.parentElement()))
     return HTMLOptGroupElement::CanAssignToOptGroupSlot(node);
   return false;
 }
@@ -150,6 +154,10 @@ void SlotAssignment::DidRemoveSlotInternal(
     if (FindHostChildBySlotName(slot_name)) {
       // |slot| lost assigned nodes
       if (slot_mutation_type == SlotMutationType::kRemoved) {
+        // |slot|'s previously assigned nodes' flat tree node data became
+        // dirty. Call SetNeedsAssignmentRecalc() to clear their flat tree
+        // node data surely in recalc timing.
+        SetNeedsAssignmentRecalc();
         slot.DidSlotChangeAfterRemovedFromShadowTree();
       } else {
         slot.DidSlotChangeAfterRenaming();
@@ -205,7 +213,7 @@ void SlotAssignment::DidChangeHostChildSlotName(const AtomicString& old_value,
 }
 
 SlotAssignment::SlotAssignment(ShadowRoot& owner)
-    : slot_map_(TreeOrderedMap::Create()),
+    : slot_map_(MakeGarbageCollected<TreeOrderedMap>()),
       owner_(&owner),
       needs_collect_slots_(false),
       slot_count_(0) {
@@ -223,13 +231,22 @@ void SlotAssignment::SetNeedsAssignmentRecalc() {
 void SlotAssignment::RecalcAssignment() {
   if (!needs_assignment_recalc_)
     return;
+  NestingLevelIncrementer slot_assignment_recalc_depth(
+      owner_->GetDocument().SlotAssignmentRecalcDepth());
+
 #if DCHECK_IS_ON()
   DCHECK(!owner_->GetDocument().IsSlotAssignmentRecalcForbidden());
 #endif
+  // To detect recursive RecalcAssignment, which shouldn't happen.
+  SlotAssignmentRecalcForbiddenScope forbid_slot_recalc(owner_->GetDocument());
+
+  FlatTreeTraversalForbiddenScope forbid_flat_tree_traversal(
+      owner_->GetDocument());
+
   needs_assignment_recalc_ = false;
 
   for (Member<HTMLSlotElement> slot : Slots())
-    slot->ClearAssignedNodes();
+    slot->WillRecalcAssignedNodes();
 
   const bool is_user_agent = owner_->IsUserAgent();
 
@@ -266,10 +283,12 @@ void SlotAssignment::RecalcAssignment() {
       }
     }
 
-    if (slot)
+    if (slot) {
       slot->AppendAssignedNode(child);
-    else
-      child.LazyReattachIfAttached();
+    } else {
+      child.ClearFlatTreeNodeData();
+      child.RemovedFromFlatTree();
+    }
   }
 
   if (owner_->isConnected()) {
@@ -279,7 +298,7 @@ void SlotAssignment::RecalcAssignment() {
   }
 
   for (auto& slot : Slots())
-    slot->RecalcFlatTreeChildren();
+    slot->DidRecalcAssignedNodes();
 }
 
 const HeapVector<Member<HTMLSlotElement>>& SlotAssignment::Slots() {
@@ -339,12 +358,12 @@ HTMLSlotElement* SlotAssignment::GetCachedFirstSlotWithoutAccessingNodeTree(
     const AtomicString& slot_name) {
   if (Element* slot =
           slot_map_->GetCachedFirstElementWithoutAccessingNodeTree(slot_name)) {
-    return ToHTMLSlotElement(slot);
+    return To<HTMLSlotElement>(slot);
   }
   return nullptr;
 }
 
-void SlotAssignment::Trace(blink::Visitor* visitor) {
+void SlotAssignment::Trace(Visitor* visitor) {
   visitor->Trace(slots_);
   visitor->Trace(slot_map_);
   visitor->Trace(owner_);

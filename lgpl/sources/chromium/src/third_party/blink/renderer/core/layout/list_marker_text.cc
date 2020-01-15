@@ -333,8 +333,14 @@ static String ToCJKIdeographic(int number,
     return String(&table[kDigit0], 1);
 
   const bool negative = number < 0;
-  if (negative)
-    number = -number;
+  if (negative) {
+    // Negating the most negative integer (INT_MIN) doesn't work, since it has
+    // no positive counterpart. Deal with that here, manually.
+    if (UNLIKELY(number == INT_MIN))
+      number = INT_MAX;
+    else
+      number = -number;
+  }
 
   const int kGroupLength =
       9;  // 4 digits, 3 digit markers, group marker of size 2.
@@ -509,6 +515,9 @@ static EListStyleType EffectiveListMarkerType(EListStyleType type, int count) {
     case EListStyleType::kUpperAlpha:
     case EListStyleType::kUpperLatin:
       return (count < 1) ? EListStyleType::kDecimal : type;
+    case EListStyleType::kString:
+      NOTREACHED();
+      break;
   }
 
   NOTREACHED();
@@ -584,6 +593,9 @@ UChar Suffix(EListStyleType type, int count) {
     case EListStyleType::kKoreanHanjaFormal:
     case EListStyleType::kKoreanHanjaInformal:
       return 0x3001;
+    case EListStyleType::kString:
+      NOTREACHED();
+      break;
   }
 
   NOTREACHED();
@@ -918,6 +930,10 @@ String GetText(EListStyleType type, int count) {
       return ToGeorgian(count);
     case EListStyleType::kHebrew:
       return ToHebrew(count);
+
+    case EListStyleType::kString:
+      NOTREACHED();
+      break;
   }
 
   NOTREACHED();

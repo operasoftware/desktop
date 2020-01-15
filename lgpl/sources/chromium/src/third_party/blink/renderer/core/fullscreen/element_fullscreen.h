@@ -9,7 +9,7 @@
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen_options.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -21,16 +21,18 @@ class ElementFullscreen {
  public:
   static ScriptPromise requestFullscreen(ScriptState*,
                                          Element&,
-                                         const FullscreenOptions&);
+                                         const FullscreenOptions*);
 
-  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(fullscreenchange);
-  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(fullscreenerror);
+  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(fullscreenchange, kFullscreenchange)
+  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(fullscreenerror, kFullscreenerror)
 
   static void webkitRequestFullscreen(Element&);
-  static void webkitRequestFullscreen(Element&, const FullscreenOptions&);
+  static void webkitRequestFullscreen(Element&, const FullscreenOptions*);
 
-  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(webkitfullscreenchange);
-  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(webkitfullscreenerror);
+  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(webkitfullscreenchange,
+                                         kWebkitfullscreenchange)
+  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(webkitfullscreenerror,
+                                         kWebkitfullscreenerror)
 };
 
 }  // namespace blink

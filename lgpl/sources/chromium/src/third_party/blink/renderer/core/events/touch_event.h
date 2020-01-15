@@ -45,7 +45,7 @@ class CORE_EXPORT TouchEvent final : public UIEventWithKeyState {
 
   // We only initialize sourceCapabilities when we create TouchEvent from
   // EventHandler, null if it is from JavaScript.
-  static TouchEvent* Create() { return new TouchEvent; }
+  static TouchEvent* Create() { return MakeGarbageCollected<TouchEvent>(); }
   static TouchEvent* Create(const WebCoalescedInputEvent& event,
                             TouchList* touches,
                             TouchList* target_touches,
@@ -53,14 +53,25 @@ class CORE_EXPORT TouchEvent final : public UIEventWithKeyState {
                             const AtomicString& type,
                             AbstractView* view,
                             TouchAction current_touch_action) {
-    return new TouchEvent(event, touches, target_touches, changed_touches, type,
-                          view, current_touch_action);
+    return MakeGarbageCollected<TouchEvent>(event, touches, target_touches,
+                                            changed_touches, type, view,
+                                            current_touch_action);
   }
 
   static TouchEvent* Create(const AtomicString& type,
-                            const TouchEventInit& initializer) {
-    return new TouchEvent(type, initializer);
+                            const TouchEventInit* initializer) {
+    return MakeGarbageCollected<TouchEvent>(type, initializer);
   }
+
+  TouchEvent();
+  TouchEvent(const WebCoalescedInputEvent&,
+             TouchList* touches,
+             TouchList* target_touches,
+             TouchList* changed_touches,
+             const AtomicString& type,
+             AbstractView*,
+             TouchAction current_touch_action);
+  TouchEvent(const AtomicString&, const TouchEventInit*);
 
   TouchList* touches() const { return touches_.Get(); }
   TouchList* targetTouches() const { return target_touches_.Get(); }
@@ -80,8 +91,6 @@ class CORE_EXPORT TouchEvent final : public UIEventWithKeyState {
 
   void preventDefault() override;
 
-  void DoneDispatchingEventAtCurrentTarget() override;
-
   const WebCoalescedInputEvent* NativeEvent() const {
     return native_event_.get();
   }
@@ -91,22 +100,11 @@ class CORE_EXPORT TouchEvent final : public UIEventWithKeyState {
   void Trace(blink::Visitor*) override;
 
  private:
-  TouchEvent();
-  TouchEvent(const WebCoalescedInputEvent&,
-             TouchList* touches,
-             TouchList* target_touches,
-             TouchList* changed_touches,
-             const AtomicString& type,
-             AbstractView*,
-             TouchAction current_touch_action);
-  TouchEvent(const AtomicString&, const TouchEventInit&);
   bool IsTouchStartOrFirstTouchMove() const;
 
   Member<TouchList> touches_;
   Member<TouchList> target_touches_;
   Member<TouchList> changed_touches_;
-
-  bool default_prevented_before_current_target_;
 
   // The current effective touch action computed before each
   // touchstart event is generated. It is used for UMA histograms.

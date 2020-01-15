@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_IMAGE_LIST_PROPERTY_FUNCTIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_IMAGE_LIST_PROPERTY_FUNCTIONS_H_
 
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
@@ -24,10 +24,10 @@ class ImageListPropertyFunctions {
                            StyleImageList* result) {
     const FillLayer* fill_layer = nullptr;
     switch (property.PropertyID()) {
-      case CSSPropertyBackgroundImage:
+      case CSSPropertyID::kBackgroundImage:
         fill_layer = &style.BackgroundLayers();
         break;
-      case CSSPropertyWebkitMaskImage:
+      case CSSPropertyID::kWebkitMaskImage:
         fill_layer = &style.MaskLayers();
         break;
       default:
@@ -47,10 +47,10 @@ class ImageListPropertyFunctions {
                            const StyleImageList* image_list) {
     FillLayer* fill_layer = nullptr;
     switch (property.PropertyID()) {
-      case CSSPropertyBackgroundImage:
+      case CSSPropertyID::kBackgroundImage:
         fill_layer = &style.AccessBackgroundLayers();
         break;
-      case CSSPropertyWebkitMaskImage:
+      case CSSPropertyID::kWebkitMaskImage:
         fill_layer = &style.AccessMaskLayers();
         break;
       default:

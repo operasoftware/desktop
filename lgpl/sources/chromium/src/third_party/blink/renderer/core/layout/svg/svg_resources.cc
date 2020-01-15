@@ -37,18 +37,18 @@
 #include "third_party/blink/renderer/core/svg/svg_uri_reference.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
 #include <stdio.h>
 #endif
 
 namespace blink {
 
-using namespace SVGNames;
+using namespace svg_names;
 
 SVGResources::SVGResources() : linked_resource_(nullptr) {}
 
 SVGResourceClient* SVGResources::GetClient(const LayoutObject& object) {
-  return ToSVGElement(object.GetNode())->GetSVGResourceClient();
+  return To<SVGElement>(object.GetNode())->GetSVGResourceClient();
 }
 
 static HashSet<AtomicString>& ClipperFilterMaskerTags() {
@@ -59,25 +59,26 @@ static HashSet<AtomicString>& ClipperFilterMaskerTags() {
           // http://www.w3.org/TR/SVG11/intro.html#TermContainerElement
           // "graphics elements" :
           // http://www.w3.org/TR/SVG11/intro.html#TermGraphicsElement
-          aTag.LocalName(), circleTag.LocalName(), ellipseTag.LocalName(),
-          gTag.LocalName(), imageTag.LocalName(), lineTag.LocalName(),
-          markerTag.LocalName(), maskTag.LocalName(), pathTag.LocalName(),
-          polygonTag.LocalName(), polylineTag.LocalName(), rectTag.LocalName(),
-          svgTag.LocalName(), textTag.LocalName(), useTag.LocalName(),
+          kATag.LocalName(), kCircleTag.LocalName(), kEllipseTag.LocalName(),
+          kGTag.LocalName(), kImageTag.LocalName(), kLineTag.LocalName(),
+          kMarkerTag.LocalName(), kMaskTag.LocalName(), kPathTag.LocalName(),
+          kPolygonTag.LocalName(), kPolylineTag.LocalName(),
+          kRectTag.LocalName(), kSVGTag.LocalName(), kTextTag.LocalName(),
+          kUseTag.LocalName(),
           // Not listed in the definitions is the clipPath element, the SVG spec
           // says though:
           // The "clipPath" element or any of its children can specify property
           // "clip-path".
-          // So we have to add clipPathTag here, otherwhise clip-path on
+          // So we have to add kClipPathTag here, otherwhise clip-path on
           // clipPath will fail. (Already mailed SVG WG, waiting for a solution)
-          clipPathTag.LocalName(),
+          kClipPathTag.LocalName(),
           // Not listed in the definitions are the text content elements, though
           // filter/clipper/masker on tspan/text/.. is allowed.
           // (Already mailed SVG WG, waiting for a solution)
-          textPathTag.LocalName(), tspanTag.LocalName(),
+          kTextPathTag.LocalName(), kTSpanTag.LocalName(),
           // Not listed in the definitions is the foreignObject element, but
           // clip-path is a supported attribute.
-          foreignObjectTag.LocalName(),
+          kForeignObjectTag.LocalName(),
           // Elements that we ignore, as it doesn't make any sense.
           // defs, pattern, switch (FIXME: Mail SVG WG about these)
           // symbol (is converted to a svg element, when referenced by use, we
@@ -89,8 +90,8 @@ static HashSet<AtomicString>& ClipperFilterMaskerTags() {
 bool SVGResources::SupportsMarkers(const SVGElement& element) {
   DEFINE_STATIC_LOCAL(HashSet<AtomicString>, tag_list,
                       ({
-                          lineTag.LocalName(), pathTag.LocalName(),
-                          polygonTag.LocalName(), polylineTag.LocalName(),
+                          kLineTag.LocalName(), kPathTag.LocalName(),
+                          kPolygonTag.LocalName(), kPolylineTag.LocalName(),
                       }));
   return tag_list.Contains(element.localName());
 }
@@ -99,10 +100,10 @@ static HashSet<AtomicString>& FillAndStrokeTags() {
   DEFINE_STATIC_LOCAL(
       HashSet<AtomicString>, tag_list,
       ({
-          circleTag.LocalName(), ellipseTag.LocalName(), lineTag.LocalName(),
-          pathTag.LocalName(), polygonTag.LocalName(), polylineTag.LocalName(),
-          rectTag.LocalName(), textTag.LocalName(), textPathTag.LocalName(),
-          tspanTag.LocalName(),
+          kCircleTag.LocalName(), kEllipseTag.LocalName(), kLineTag.LocalName(),
+          kPathTag.LocalName(), kPolygonTag.LocalName(),
+          kPolylineTag.LocalName(), kRectTag.LocalName(), kTextTag.LocalName(),
+          kTextPathTag.LocalName(), kTSpanTag.LocalName(),
       }));
   return tag_list;
 }
@@ -158,7 +159,7 @@ std::unique_ptr<SVGResources> SVGResources::BuildResources(
   DCHECK(node);
   SECURITY_DCHECK(node->IsSVGElement());
 
-  SVGElement& element = ToSVGElement(*node);
+  auto& element = To<SVGElement>(*node);
 
   const AtomicString& tag_name = element.localName();
   DCHECK(!tag_name.IsNull());
@@ -171,7 +172,7 @@ std::unique_ptr<SVGResources> SVGResources::BuildResources(
       ClipPathOperation* clip_path_operation = computed_style.ClipPath();
       if (clip_path_operation->GetType() == ClipPathOperation::REFERENCE) {
         const ReferenceClipPathOperation& clip_path_reference =
-            ToReferenceClipPathOperation(*clip_path_operation);
+            To<ReferenceClipPathOperation>(*clip_path_operation);
         EnsureResources(resources).SetClipper(
             CastResource<LayoutSVGResourceClipper>(
                 clip_path_reference.Resource()));
@@ -182,12 +183,11 @@ std::unique_ptr<SVGResources> SVGResources::BuildResources(
       const FilterOperations& filter_operations = computed_style.Filter();
       if (filter_operations.size() == 1) {
         const FilterOperation& filter_operation = *filter_operations.at(0);
-        if (filter_operation.GetType() == FilterOperation::REFERENCE) {
-          const auto& reference_filter_operation =
-              ToReferenceFilterOperation(filter_operation);
+        if (const auto* reference_filter_operation =
+                DynamicTo<ReferenceFilterOperation>(filter_operation)) {
           EnsureResources(resources).SetFilter(
               CastResource<LayoutSVGResourceFilter>(
-                  reference_filter_operation.Resource()));
+                  reference_filter_operation->Resource()));
         }
       }
     }
@@ -464,7 +464,7 @@ void SVGResources::SetClipper(LayoutSVGResourceClipper* clipper) {
   DCHECK_EQ(clipper->ResourceType(), kClipperResourceType);
 
   if (!clipper_filter_masker_data_)
-    clipper_filter_masker_data_ = ClipperFilterMaskerData::Create();
+    clipper_filter_masker_data_ = std::make_unique<ClipperFilterMaskerData>();
 
   clipper_filter_masker_data_->clipper = clipper;
 }
@@ -476,7 +476,7 @@ void SVGResources::SetFilter(LayoutSVGResourceFilter* filter) {
   DCHECK_EQ(filter->ResourceType(), kFilterResourceType);
 
   if (!clipper_filter_masker_data_)
-    clipper_filter_masker_data_ = ClipperFilterMaskerData::Create();
+    clipper_filter_masker_data_ = std::make_unique<ClipperFilterMaskerData>();
 
   clipper_filter_masker_data_->filter = filter;
 }
@@ -488,7 +488,7 @@ void SVGResources::SetMarkerStart(LayoutSVGResourceMarker* marker_start) {
   DCHECK_EQ(marker_start->ResourceType(), kMarkerResourceType);
 
   if (!marker_data_)
-    marker_data_ = MarkerData::Create();
+    marker_data_ = std::make_unique<MarkerData>();
 
   marker_data_->marker_start = marker_start;
 }
@@ -500,7 +500,7 @@ void SVGResources::SetMarkerMid(LayoutSVGResourceMarker* marker_mid) {
   DCHECK_EQ(marker_mid->ResourceType(), kMarkerResourceType);
 
   if (!marker_data_)
-    marker_data_ = MarkerData::Create();
+    marker_data_ = std::make_unique<MarkerData>();
 
   marker_data_->marker_mid = marker_mid;
 }
@@ -512,7 +512,7 @@ void SVGResources::SetMarkerEnd(LayoutSVGResourceMarker* marker_end) {
   DCHECK_EQ(marker_end->ResourceType(), kMarkerResourceType);
 
   if (!marker_data_)
-    marker_data_ = MarkerData::Create();
+    marker_data_ = std::make_unique<MarkerData>();
 
   marker_data_->marker_end = marker_end;
 }
@@ -524,7 +524,7 @@ void SVGResources::SetMasker(LayoutSVGResourceMasker* masker) {
   DCHECK_EQ(masker->ResourceType(), kMaskerResourceType);
 
   if (!clipper_filter_masker_data_)
-    clipper_filter_masker_data_ = ClipperFilterMaskerData::Create();
+    clipper_filter_masker_data_ = std::make_unique<ClipperFilterMaskerData>();
 
   clipper_filter_masker_data_->masker = masker;
 }
@@ -534,7 +534,7 @@ void SVGResources::SetFill(LayoutSVGResourcePaintServer* fill) {
     return;
 
   if (!fill_stroke_data_)
-    fill_stroke_data_ = FillStrokeData::Create();
+    fill_stroke_data_ = std::make_unique<FillStrokeData>();
 
   fill_stroke_data_->fill = fill;
 }
@@ -544,7 +544,7 @@ void SVGResources::SetStroke(LayoutSVGResourcePaintServer* stroke) {
     return;
 
   if (!fill_stroke_data_)
-    fill_stroke_data_ = FillStrokeData::Create();
+    fill_stroke_data_ = std::make_unique<FillStrokeData>();
 
   fill_stroke_data_->stroke = stroke;
 }
@@ -557,7 +557,7 @@ void SVGResources::SetLinkedResource(
   linked_resource_ = linked_resource;
 }
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
 void SVGResources::Dump(const LayoutObject* object) {
   DCHECK(object);
   DCHECK(object->GetNode());
@@ -565,7 +565,8 @@ void SVGResources::Dump(const LayoutObject* object) {
   fprintf(stderr, "-> this=%p, SVGResources(layoutObject=%p, node=%p)\n", this,
           object, object->GetNode());
   fprintf(stderr, " | DOM Tree:\n");
-  fprintf(stderr, "%s", object->GetNode()->ToTreeStringForThis().Utf8().data());
+  fprintf(stderr, "%s",
+          object->GetNode()->ToTreeStringForThis().Utf8().c_str());
 
   fprintf(stderr, "\n | List of resources:\n");
   if (clipper_filter_masker_data_) {
@@ -613,7 +614,7 @@ void SVGResources::UpdateClipPathFilterMask(SVGElement& element,
                                             const ComputedStyle& style) {
   const bool had_client = element.GetSVGResourceClient();
   if (auto* reference_clip =
-          ToReferenceClipPathOperationOrNull(style.ClipPath()))
+          DynamicTo<ReferenceClipPathOperation>(style.ClipPath()))
     reference_clip->AddClient(element.EnsureSVGResourceClient());
   if (style.HasFilter())
     style.Filter().AddClient(element.EnsureSVGResourceClient());
@@ -631,7 +632,7 @@ void SVGResources::ClearClipPathFilterMask(SVGElement& element,
   if (!client)
     return;
   if (auto* old_reference_clip =
-          ToReferenceClipPathOperationOrNull(style->ClipPath()))
+          DynamicTo<ReferenceClipPathOperation>(style->ClipPath()))
     old_reference_clip->RemoveClient(*client);
   if (style->HasFilter())
     style->Filter().RemoveClient(*client);

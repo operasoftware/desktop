@@ -25,6 +25,7 @@
 
 #include <memory>
 #include "third_party/blink/renderer/platform/wtf/allocator/partition_allocator.h"
+#include "third_party/blink/renderer/platform/wtf/conditional_destructor.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 
 namespace WTF {
@@ -76,7 +77,10 @@ template <typename ValueArg,
           typename HashArg = typename DefaultHash<ValueArg>::Hash,
           typename AllocatorArg =
               ListHashSetAllocator<ValueArg, inlineCapacity>>
-class ListHashSet {
+class ListHashSet
+    : public ConditionalDestructor<
+          ListHashSet<ValueArg, inlineCapacity, HashArg, AllocatorArg>,
+          AllocatorArg::kIsGarbageCollected> {
   typedef AllocatorArg Allocator;
   USE_ALLOCATOR(ListHashSet, Allocator);
 
@@ -148,7 +152,7 @@ class ListHashSet {
   ListHashSet(ListHashSet&&);
   ListHashSet& operator=(const ListHashSet&);
   ListHashSet& operator=(ListHashSet&&);
-  ~ListHashSet();
+  void Finalize();
 
   void Swap(ListHashSet&);
 
@@ -386,7 +390,7 @@ struct ListHashSetAllocator : public PartitionAllocator {
 
   Node* free_list_;
   bool is_done_with_initial_free_list_;
-#if defined(MEMORY_SANITIZER_INITIAL_SIZE)
+#if defined(MEMORY_TOOL_REPLACES_ALLOCATOR)
   // The allocation pool for nodes is one big chunk that ASAN has no insight
   // into, so it can cloak errors. Make it as small as possible to force nodes
   // to be allocated individually where ASAN can see them.
@@ -416,7 +420,7 @@ class ListHashSetNode : public ListHashSetNodeBase<ValueArg> {
 
   void SetWasAlreadyDestructed() {
     if (NodeAllocator::kIsGarbageCollected &&
-        !IsTriviallyDestructible<ValueArg>::value)
+        !std::is_trivially_destructible<ValueArg>::value)
       this->prev_ = UnlinkedNodePointer();
   }
 
@@ -427,7 +431,9 @@ class ListHashSetNode : public ListHashSetNodeBase<ValueArg> {
 
   static void Finalize(void* pointer) {
     // No need to waste time calling finalize if it's not needed.
-    DCHECK(!IsTriviallyDestructible<ValueArg>::value);
+    static_assert(
+        !std::is_trivially_destructible<ValueArg>::value,
+        "Finalization of trivially destructible classes should not happen.");
     ListHashSetNode* self = reinterpret_cast_ptr<ListHashSetNode*>(pointer);
 
     // Check whether this node was already destructed before being unlinked
@@ -802,14 +808,10 @@ inline void ListHashSet<T, inlineCapacity, U, V>::Swap(ListHashSet& other) {
   allocator_provider_.Swap(other.allocator_provider_);
 }
 
-// For design of the destructor, please refer to
-// [here](https://docs.google.com/document/d/1AoGTvb3tNLx2tD1hNqAfLRLmyM59GM0O-7rCHTT_7_U/)
 template <typename T, size_t inlineCapacity, typename U, typename V>
-inline ListHashSet<T, inlineCapacity, U, V>::~ListHashSet() {
-  // If this is called during GC sweeping, it must not touch other heap objects
-  // such as the ListHashSetNodes that is touching in DeleteAllNodes().
-  if (Allocator::IsSweepForbidden())
-    return;
+inline void ListHashSet<T, inlineCapacity, U, V>::Finalize() {
+  static_assert(!Allocator::kIsGarbageCollected,
+                "GCed collections can't be finalized");
   DeleteAllNodes();
   allocator_provider_.ReleaseAllocator();
 }

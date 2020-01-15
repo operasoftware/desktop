@@ -31,57 +31,32 @@
  * @implements {InspectorFrontendHostAPI}
  * @unrestricted
  */
-Host.InspectorFrontendHostStub = class {
+export class InspectorFrontendHostStub {
   /**
    * @suppressGlobalPropertiesCheck
    */
   constructor() {
     /**
      * @param {!Event} event
+     * @this {InspectorFrontendHostAPI}
      */
     function stopEventPropagation(event) {
       // Let browser handle Ctrl+/Ctrl- shortcuts in hosted mode.
-      const zoomModifier = Host.isMac() ? event.metaKey : event.ctrlKey;
-      if (zoomModifier && (event.keyCode === 187 || event.keyCode === 189))
+      const zoomModifier = this.platform() === 'mac' ? event.metaKey : event.ctrlKey;
+      if (zoomModifier && (event.keyCode === 187 || event.keyCode === 189)) {
         event.stopPropagation();
+      }
     }
-    document.addEventListener('keydown', stopEventPropagation, true);
+    document.addEventListener('keydown', stopEventPropagation.bind(this), true);
     /**
      * @type {!Map<string, !Array<string>>}
      */
     this._urlsBeingSaved = new Map();
-  }
 
-  /**
-   * @override
-   * @return {string}
-   */
-  getSelectionBackgroundColor() {
-    return '#6e86ff';
-  }
-
-  /**
-   * @override
-   * @return {string}
-   */
-  getSelectionForegroundColor() {
-    return '#ffffff';
-  }
-
-  /**
-   * @override
-   * @return {string}
-   */
-  getInactiveSelectionBackgroundColor() {
-    return '#c9c8c8';
-  }
-
-  /**
-   * @override
-   * @return {string}
-   */
-  getInactiveSelectionForegroundColor() {
-    return '#323232';
+    /**
+     * @type {!Common.EventTarget}
+     */
+    this.events;
   }
 
   /**
@@ -90,11 +65,13 @@ Host.InspectorFrontendHostStub = class {
    */
   platform() {
     let match = navigator.userAgent.match(/Windows NT/);
-    if (match)
+    if (match) {
       return 'windows';
+    }
     match = navigator.userAgent.match(/Mac OS X/);
-    if (match)
+    if (match) {
       return 'mac';
+    }
     return 'linux';
   }
 
@@ -160,10 +137,13 @@ Host.InspectorFrontendHostStub = class {
 
   /**
    * @override
-   * @param {string} text
+   * @param {?(string|undefined)} text
    * @suppressGlobalPropertiesCheck
    */
   copyText(text) {
+    if (text === undefined || text === null) {
+      return;
+    }
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text);
     } else if (document.queryCommandSupported('copy')) {
@@ -207,7 +187,7 @@ Host.InspectorFrontendHostStub = class {
       this._urlsBeingSaved.set(url, buffer);
     }
     buffer.push(content);
-    this.events.dispatchEventToListeners(InspectorFrontendHostAPI.Events.SavedURL, {url, fileSystemPath: url});
+    this.events.dispatchEventToListeners(Host.InspectorFrontendHostAPI.Events.SavedURL, {url, fileSystemPath: url});
   }
 
   /**
@@ -218,7 +198,7 @@ Host.InspectorFrontendHostStub = class {
   append(url, content) {
     const buffer = this._urlsBeingSaved.get(url);
     buffer.push(content);
-    this.events.dispatchEventToListeners(InspectorFrontendHostAPI.Events.AppendedToURL, url);
+    this.events.dispatchEventToListeners(Host.InspectorFrontendHostAPI.Events.AppendedToURL, url);
   }
 
   /**
@@ -254,9 +234,24 @@ Host.InspectorFrontendHostStub = class {
 
   /**
    * @override
+   * @param {string} histogramName
+   * @param {number} duration
+   */
+  recordPerformanceHistogram(histogramName, duration) {
+  }
+
+  /**
+   * @override
+   * @param {string} umaName
+   */
+  recordUserMetricsAction(umaName) {
+  }
+
+  /**
+   * @override
    */
   requestFileSystems() {
-    this.events.dispatchEventToListeners(InspectorFrontendHostAPI.Events.FileSystemsLoaded, []);
+    this.events.dispatchEventToListeners(Host.InspectorFrontendHostAPI.Events.FileSystemsLoaded, []);
   }
 
   /**
@@ -291,7 +286,7 @@ Host.InspectorFrontendHostStub = class {
    * @param {function(!InspectorFrontendHostAPI.LoadNetworkResourceResult)} callback
    */
   loadNetworkResource(url, headers, streamId, callback) {
-    Runtime.loadResourcePromise(url)
+    Root.Runtime.loadResourcePromise(url)
         .then(function(text) {
           Host.ResourceLoader.streamWrite(streamId, text);
           callback({statusCode: 200});
@@ -307,8 +302,9 @@ Host.InspectorFrontendHostStub = class {
    */
   getPreferences(callback) {
     const prefs = {};
-    for (const name in window.localStorage)
+    for (const name in window.localStorage) {
       prefs[name] = window.localStorage[name];
+    }
     callback(prefs);
   }
 
@@ -495,19 +491,33 @@ Host.InspectorFrontendHostStub = class {
   isHostedMode() {
     return true;
   }
-};
+
+  /**
+   * @override
+   * @param {function(!ExtensionDescriptor)} callback
+   */
+  setAddExtensionCallback(callback) {
+    // Extensions are not supported in hosted mode.
+  }
+}
+
+/**
+ * @type {!InspectorFrontendHostStub}
+ */
+let _InspectorFrontendHost = window.InspectorFrontendHost;
 
 /**
  * @unrestricted
  */
-Host.InspectorFrontendAPIImpl = class {
+export class InspectorFrontendAPIImpl {
   constructor() {
     this._debugFrontend =
-        !!Runtime.queryParam('debugFrontend') || (window['InspectorTest'] && window['InspectorTest']['debugTest']);
+        !!Root.Runtime.queryParam('debugFrontend') || (window['InspectorTest'] && window['InspectorTest']['debugTest']);
 
-    const descriptors = InspectorFrontendHostAPI.EventDescriptors;
-    for (let i = 0; i < descriptors.length; ++i)
+    const descriptors = Host.InspectorFrontendHostAPI.EventDescriptors;
+    for (let i = 0; i < descriptors.length; ++i) {
       this[descriptors[i][1]] = this._dispatch.bind(this, descriptors[i][0], descriptors[i][2], descriptors[i][3]);
+    }
   }
 
   /**
@@ -518,26 +528,28 @@ Host.InspectorFrontendAPIImpl = class {
   _dispatch(name, signature, runOnceLoaded) {
     const params = Array.prototype.slice.call(arguments, 3);
 
-    if (this._debugFrontend)
+    if (this._debugFrontend) {
       setImmediate(innerDispatch);
-    else
+    } else {
       innerDispatch();
+    }
 
     function innerDispatch() {
       // Single argument methods get dispatched with the param.
       if (signature.length < 2) {
         try {
-          InspectorFrontendHost.events.dispatchEventToListeners(name, params[0]);
+          _InspectorFrontendHost.events.dispatchEventToListeners(name, params[0]);
         } catch (e) {
           console.error(e + ' ' + e.stack);
         }
         return;
       }
       const data = {};
-      for (let i = 0; i < signature.length; ++i)
+      for (let i = 0; i < signature.length; ++i) {
         data[signature[i]] = params[i];
+      }
       try {
-        InspectorFrontendHost.events.dispatchEventToListeners(name, data);
+        _InspectorFrontendHost.events.dispatchEventToListeners(name, data);
       } catch (e) {
         console.error(e + ' ' + e.stack);
       }
@@ -551,58 +563,69 @@ Host.InspectorFrontendAPIImpl = class {
   streamWrite(id, chunk) {
     Host.ResourceLoader.streamWrite(id, chunk);
   }
-};
+}
 
-/**
- * @type {!InspectorFrontendHostAPI}
- */
-let InspectorFrontendHost = window.InspectorFrontendHost;
 (function() {
 
   function initializeInspectorFrontendHost() {
     let proto;
-    if (!InspectorFrontendHost) {
+    if (!_InspectorFrontendHost) {
       // Instantiate stub for web-hosted mode if necessary.
-      window.InspectorFrontendHost = InspectorFrontendHost = new Host.InspectorFrontendHostStub();
+      window.InspectorFrontendHost = _InspectorFrontendHost = new InspectorFrontendHostStub();
     } else {
       // Otherwise add stubs for missing methods that are declared in the interface.
-      proto = Host.InspectorFrontendHostStub.prototype;
+      proto = InspectorFrontendHostStub.prototype;
       for (const name of Object.getOwnPropertyNames(proto)) {
         const stub = proto[name];
-        if (typeof stub !== 'function' || InspectorFrontendHost[name])
+        if (typeof stub !== 'function' || _InspectorFrontendHost[name]) {
           continue;
+        }
 
         console.error(
-            'Incompatible embedder: method InspectorFrontendHost.' + name + ' is missing. Using stub instead.');
-        InspectorFrontendHost[name] = stub;
+            'Incompatible embedder: method Host.InspectorFrontendHost.' + name + ' is missing. Using stub instead.');
+        _InspectorFrontendHost[name] = stub;
       }
     }
 
     // Attach the events object.
-    InspectorFrontendHost.events = new Common.Object();
+    _InspectorFrontendHost.events = new Common.Object();
   }
 
   // FIXME: This file is included into both apps, since the devtools_app needs the InspectorFrontendHostAPI only,
   // so the host instance should not initialized there.
   initializeInspectorFrontendHost();
-  window.InspectorFrontendAPI = new Host.InspectorFrontendAPIImpl();
+  window.InspectorFrontendAPI = new InspectorFrontendAPIImpl();
 })();
-
-/**
- * @type {!Common.EventTarget}
- */
-InspectorFrontendHost.events;
 
 /**
  * @param {!Object<string, string>=} prefs
  * @return {boolean}
  */
-Host.isUnderTest = function(prefs) {
+export function isUnderTest(prefs) {
   // Integration tests rely on test queryParam.
-  if (Runtime.queryParam('test'))
+  if (Root.Runtime.queryParam('test')) {
     return true;
+  }
   // Browser tests rely on prefs.
-  if (prefs)
+  if (prefs) {
     return prefs['isUnderTest'] === 'true';
+  }
   return Common.settings && Common.settings.createSetting('isUnderTest', false).get();
-};
+}
+
+/* Legacy exported object */
+self.Host = self.Host || {};
+
+/* Legacy exported object */
+Host = Host || {};
+
+/** @type {!InspectorFrontendHostStub} */
+Host.InspectorFrontendHost = _InspectorFrontendHost;
+
+/** @constructor */
+Host.InspectorFrontendHostStub = InspectorFrontendHostStub;
+
+/** @constructor */
+Host.InspectorFrontendAPIImpl = InspectorFrontendAPIImpl;
+
+Host.isUnderTest = isUnderTest;

@@ -35,9 +35,6 @@ class CORE_EXPORT HTMLSpanElement : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(HTMLSpanElement);
-
- protected:
   explicit HTMLSpanElement(Document&);
 };
 

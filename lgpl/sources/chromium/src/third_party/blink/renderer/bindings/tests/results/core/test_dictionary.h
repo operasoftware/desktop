@@ -8,8 +8,8 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#ifndef TestDictionary_h
-#define TestDictionary_h
+#ifndef THIRD_PARTY_BLINK_RENDERER_BINDINGS_TESTS_RESULTS_CORE_TEST_DICTIONARY_H_
+#define THIRD_PARTY_BLINK_RENDERER_BINDINGS_TESTS_RESULTS_CORE_TEST_DICTIONARY_H_
 
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
 #include "third_party/blink/renderer/bindings/core/v8/double_or_double_or_null_sequence.h"
@@ -19,16 +19,17 @@
 #include "third_party/blink/renderer/bindings/core/v8/idl_dictionary_base.h"
 #include "third_party/blink/renderer/bindings/core/v8/long_or_boolean.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/string_treat_null_as_empty_string_or_long.h"
 #include "third_party/blink/renderer/bindings/core/v8/test_enum_or_test_enum_or_null_sequence.h"
 #include "third_party/blink/renderer/bindings/core/v8/test_enum_or_test_enum_sequence.h"
 #include "third_party/blink/renderer/bindings/core/v8/test_interface_2_or_uint8_array.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_treat_non_object_as_null_void_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_void_callback_function.h"
 #include "third_party/blink/renderer/bindings/tests/idls/core/test_interface_2.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/testing/internal_dictionary.h"
 #include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -41,19 +42,18 @@ class TestInterfaceImplementation;
 class Element;
 
 class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
-  DISALLOW_NEW();
  public:
+  static TestDictionary* Create() { return MakeGarbageCollected<TestDictionary>(); }
+
   TestDictionary();
   virtual ~TestDictionary();
-  TestDictionary(const TestDictionary&);
-  TestDictionary& operator=(const TestDictionary&);
 
   bool hasAnyInRecordMember() const { return has_any_in_record_member_; }
-  const Vector<std::pair<String, ScriptValue>>& anyInRecordMember() const {
+  const HeapVector<std::pair<String, ScriptValue>>& anyInRecordMember() const {
     DCHECK(has_any_in_record_member_);
     return any_in_record_member_;
   }
-  void setAnyInRecordMember(const Vector<std::pair<String, ScriptValue>>&);
+  void setAnyInRecordMember(const HeapVector<std::pair<String, ScriptValue>>&);
 
   bool hasAnyMember() const { return !(any_member_.IsEmpty() || any_member_.IsUndefined()); }
   ScriptValue anyMember() const {
@@ -81,12 +81,6 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   }
   inline void setBooleanMember(bool);
 
-  bool hasByteStringMember() const { return !byte_string_member_.IsNull(); }
-  const String& byteStringMember() const {
-    return byte_string_member_;
-  }
-  inline void setByteStringMember(const String&);
-
   bool hasCallbackFunctionMember() const { return callback_function_member_; }
   V8VoidCallbackFunction* callbackFunctionMember() const {
     return callback_function_member_;
@@ -105,6 +99,12 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
     return dictionary_member_;
   }
   void setDictionaryMember(Dictionary);
+
+  bool hasDomStringTreatNullAsEmptyStringMember() const { return !dom_string_treat_null_as_empty_string_member_.IsNull(); }
+  const String& domStringTreatNullAsEmptyStringMember() const {
+    return dom_string_treat_null_as_empty_string_member_;
+  }
+  inline void setDomStringTreatNullAsEmptyStringMember(const String&);
 
   bool hasDoubleOrNullMember() const { return has_double_or_null_member_; }
   double doubleOrNullMember() const {
@@ -202,11 +202,11 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   void setGarbageCollectedRecordMember(const HeapVector<std::pair<String, Member<TestObject>>>&);
 
   bool hasInternalDictionarySequenceMember() const { return has_internal_dictionary_sequence_member_; }
-  const HeapVector<InternalDictionary>& internalDictionarySequenceMember() const {
+  const HeapVector<Member<InternalDictionary>>& internalDictionarySequenceMember() const {
     DCHECK(has_internal_dictionary_sequence_member_);
     return internal_dictionary_sequence_member_;
   }
-  void setInternalDictionarySequenceMember(const HeapVector<InternalDictionary>&);
+  void setInternalDictionarySequenceMember(const HeapVector<Member<InternalDictionary>>&);
 
   bool hasIsPublic() const { return has_is_public_; }
   bool isPublic() const {
@@ -381,6 +381,12 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   }
   void setTestObjectSequenceMember(const HeapVector<Member<TestObject>>&);
 
+  bool hasTreatNonNullObjMember() const { return treat_non_null_obj_member_; }
+  V8TreatNonObjectAsNullVoidFunction* treatNonNullObjMember() const {
+    return treat_non_null_obj_member_;
+  }
+  void setTreatNonNullObjMember(V8TreatNonObjectAsNullVoidFunction*);
+
   bool hasTreatNullAsStringSequenceMember() const { return has_treat_null_as_string_sequence_member_; }
   const Vector<String>& treatNullAsStringSequenceMember() const {
     DCHECK(has_treat_null_as_string_sequence_member_);
@@ -420,6 +426,12 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
     return union_or_null_sequence_member_;
   }
   void setUnionOrNullSequenceMember(const HeapVector<DoubleOrString>&);
+
+  bool hasUnionWithAnnotatedTypeMember() const { return !union_with_annotated_type_member_.IsNull(); }
+  const StringTreatNullAsEmptyStringOrLong& unionWithAnnotatedTypeMember() const {
+    return union_with_annotated_type_member_;
+  }
+  void setUnionWithAnnotatedTypeMember(const StringTreatNullAsEmptyStringOrLong&);
 
   bool hasUnionWithTypedefs() const { return !union_with_typedefs_.IsNull(); }
   const FloatOrBoolean& unionWithTypedefs() const {
@@ -480,15 +492,15 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   bool has_union_or_null_sequence_member_ = false;
   bool has_unrestricted_double_member_ = false;
 
-  Vector<std::pair<String, ScriptValue>> any_in_record_member_;
+  HeapVector<std::pair<String, ScriptValue>> any_in_record_member_;
   ScriptValue any_member_;
   int32_t applicable_to_type_long_member_;
   String applicable_to_type_string_member_;
   bool boolean_member_;
-  String byte_string_member_;
-  TraceWrapperMember<V8VoidCallbackFunction> callback_function_member_;
+  Member<V8VoidCallbackFunction> callback_function_member_;
   bool create_member_;
   Dictionary dictionary_member_;
+  String dom_string_treat_null_as_empty_string_member_;
   double double_or_null_member_;
   DoubleOrDoubleOrNullSequence double_or_null_or_double_or_null_sequence_member_;
   Vector<std::pair<String, base::Optional<double>>> double_or_null_record_member_;
@@ -503,7 +515,7 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   Vector<String> enum_sequence_member_;
   Member<EventTarget> event_target_member_;
   HeapVector<std::pair<String, Member<TestObject>>> garbage_collected_record_member_;
-  HeapVector<InternalDictionary> internal_dictionary_sequence_member_;
+  HeapVector<Member<InternalDictionary>> internal_dictionary_sequence_member_;
   bool is_public_;
   int32_t long_member_;
   bool member_with_hyphen_in_name_;
@@ -513,7 +525,7 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   bool origin_trial_second_member_;
   DoubleOrString other_double_or_string_member_;
   Vector<std::pair<String, int8_t>> record_member_;
-  TraceWrapperMember<V8VoidCallbackFunction> required_callback_function_member_;
+  Member<V8VoidCallbackFunction> required_callback_function_member_;
   double restricted_double_member_;
   bool runtime_member_;
   bool runtime_second_member_;
@@ -530,12 +542,14 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   Member<TestInterfaceImplementation> test_interface_or_null_member_;
   HeapVector<Member<TestInterfaceImplementation>> test_interface_sequence_member_;
   HeapVector<Member<TestObject>> test_object_sequence_member_;
+  Member<V8TreatNonObjectAsNullVoidFunction> treat_non_null_obj_member_;
   Vector<String> treat_null_as_string_sequence_member_;
   Member<DOMUint8Array> uint8_array_member_;
   HeapVector<std::pair<String, LongOrBoolean>> union_in_record_member_;
   DoubleOrDoubleSequence union_member_with_sequence_default_;
   HeapVector<std::pair<String, DoubleOrString>> union_or_null_record_member_;
   HeapVector<DoubleOrString> union_or_null_sequence_member_;
+  StringTreatNullAsEmptyStringOrLong union_with_annotated_type_member_;
   FloatOrBoolean union_with_typedefs_;
   double unrestricted_double_member_;
   String usv_string_or_null_member_;
@@ -557,13 +571,13 @@ void TestDictionary::setBooleanMember(bool value) {
   has_boolean_member_ = true;
 }
 
-void TestDictionary::setByteStringMember(const String& value) {
-  byte_string_member_ = value;
-}
-
 void TestDictionary::setCreateMember(bool value) {
   create_member_ = value;
   has_create_member_ = true;
+}
+
+void TestDictionary::setDomStringTreatNullAsEmptyStringMember(const String& value) {
+  dom_string_treat_null_as_empty_string_member_ = value;
 }
 
 void TestDictionary::setDoubleOrNullMember(double value) {
@@ -686,4 +700,4 @@ void TestDictionary::setUsvStringOrNullMemberToNull() {
 
 }  // namespace blink
 
-#endif  // TestDictionary_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_BINDINGS_TESTS_RESULTS_CORE_TEST_DICTIONARY_H_

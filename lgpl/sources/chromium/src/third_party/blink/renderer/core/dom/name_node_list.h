@@ -33,18 +33,13 @@ namespace blink {
 // NodeList which lists all Nodes in a Element with a given "name" attribute
 class CORE_EXPORT NameNodeList final : public LiveNodeList {
  public:
-  static NameNodeList* Create(ContainerNode& root_node,
-                              CollectionType type,
-                              const AtomicString& name) {
-    DCHECK_EQ(type, kNameNodeListType);
-    return new NameNodeList(root_node, name);
-  }
-
+  NameNodeList(ContainerNode& root_node, const AtomicString& name);
+  NameNodeList(ContainerNode& root_node,
+               CollectionType type,
+               const AtomicString& name);
   ~NameNodeList() override;
 
  private:
-  NameNodeList(ContainerNode& root_node, const AtomicString& name);
-
   bool ElementMatches(const Element&) const override;
 
   AtomicString name_;

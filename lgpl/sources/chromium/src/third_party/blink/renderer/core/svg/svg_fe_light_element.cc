@@ -26,30 +26,49 @@
 #include "third_party/blink/renderer/core/svg/svg_fe_diffuse_lighting_element.h"
 #include "third_party/blink/renderer/core/svg/svg_fe_specular_lighting_element.h"
 #include "third_party/blink/renderer/core/svg_names.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
 SVGFELightElement::SVGFELightElement(const QualifiedName& tag_name,
                                      Document& document)
     : SVGElement(tag_name, document),
-      azimuth_(SVGAnimatedNumber::Create(this, SVGNames::azimuthAttr, 0.0f)),
+      azimuth_(MakeGarbageCollected<SVGAnimatedNumber>(this,
+                                                       svg_names::kAzimuthAttr,
+                                                       0.0f)),
       elevation_(
-          SVGAnimatedNumber::Create(this, SVGNames::elevationAttr, 0.0f)),
-      x_(SVGAnimatedNumber::Create(this, SVGNames::xAttr, 0.0f)),
-      y_(SVGAnimatedNumber::Create(this, SVGNames::yAttr, 0.0f)),
-      z_(SVGAnimatedNumber::Create(this, SVGNames::zAttr, 0.0f)),
+          MakeGarbageCollected<SVGAnimatedNumber>(this,
+                                                  svg_names::kElevationAttr,
+                                                  0.0f)),
+      x_(MakeGarbageCollected<SVGAnimatedNumber>(this,
+                                                 svg_names::kXAttr,
+                                                 0.0f)),
+      y_(MakeGarbageCollected<SVGAnimatedNumber>(this,
+                                                 svg_names::kYAttr,
+                                                 0.0f)),
+      z_(MakeGarbageCollected<SVGAnimatedNumber>(this,
+                                                 svg_names::kZAttr,
+                                                 0.0f)),
       points_at_x_(
-          SVGAnimatedNumber::Create(this, SVGNames::pointsAtXAttr, 0.0f)),
+          MakeGarbageCollected<SVGAnimatedNumber>(this,
+                                                  svg_names::kPointsAtXAttr,
+                                                  0.0f)),
       points_at_y_(
-          SVGAnimatedNumber::Create(this, SVGNames::pointsAtYAttr, 0.0f)),
+          MakeGarbageCollected<SVGAnimatedNumber>(this,
+                                                  svg_names::kPointsAtYAttr,
+                                                  0.0f)),
       points_at_z_(
-          SVGAnimatedNumber::Create(this, SVGNames::pointsAtZAttr, 0.0f)),
-      specular_exponent_(
-          SVGAnimatedNumber::Create(this, SVGNames::specularExponentAttr, 1)),
-      limiting_cone_angle_(
-          SVGAnimatedNumber::Create(this,
-                                    SVGNames::limitingConeAngleAttr,
-                                    0.0f)) {
+          MakeGarbageCollected<SVGAnimatedNumber>(this,
+                                                  svg_names::kPointsAtZAttr,
+                                                  0.0f)),
+      specular_exponent_(MakeGarbageCollected<SVGAnimatedNumber>(
+          this,
+          svg_names::kSpecularExponentAttr,
+          1)),
+      limiting_cone_angle_(MakeGarbageCollected<SVGAnimatedNumber>(
+          this,
+          svg_names::kLimitingConeAngleAttr,
+          0.0f)) {
   AddToPropertyMap(azimuth_);
   AddToPropertyMap(elevation_);
   AddToPropertyMap(x_);
@@ -94,14 +113,15 @@ FloatPoint3D SVGFELightElement::PointsAt() const {
 }
 
 void SVGFELightElement::SvgAttributeChanged(const QualifiedName& attr_name) {
-  if (attr_name == SVGNames::azimuthAttr ||
-      attr_name == SVGNames::elevationAttr || attr_name == SVGNames::xAttr ||
-      attr_name == SVGNames::yAttr || attr_name == SVGNames::zAttr ||
-      attr_name == SVGNames::pointsAtXAttr ||
-      attr_name == SVGNames::pointsAtYAttr ||
-      attr_name == SVGNames::pointsAtZAttr ||
-      attr_name == SVGNames::specularExponentAttr ||
-      attr_name == SVGNames::limitingConeAngleAttr) {
+  if (attr_name == svg_names::kAzimuthAttr ||
+      attr_name == svg_names::kElevationAttr ||
+      attr_name == svg_names::kXAttr || attr_name == svg_names::kYAttr ||
+      attr_name == svg_names::kZAttr ||
+      attr_name == svg_names::kPointsAtXAttr ||
+      attr_name == svg_names::kPointsAtYAttr ||
+      attr_name == svg_names::kPointsAtZAttr ||
+      attr_name == svg_names::kSpecularExponentAttr ||
+      attr_name == svg_names::kLimitingConeAngleAttr) {
     ContainerNode* parent = parentNode();
     if (!parent)
       return;

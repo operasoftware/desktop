@@ -39,14 +39,14 @@ namespace blink {
 class Element;
 
 class V0CustomElementObserver
-    : public GarbageCollectedFinalized<V0CustomElementObserver> {
+    : public GarbageCollected<V0CustomElementObserver> {
  public:
   virtual ~V0CustomElementObserver() = default;
 
   // API for CustomElement to kick off notifications
   static void NotifyElementWasDestroyed(Element*);
 
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) {}
 
  protected:
   V0CustomElementObserver() = default;

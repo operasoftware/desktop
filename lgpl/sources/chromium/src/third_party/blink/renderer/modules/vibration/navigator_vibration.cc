@@ -27,11 +27,11 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/modules/vibration/vibration_controller.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -45,7 +45,7 @@ NavigatorVibration& NavigatorVibration::From(Navigator& navigator) {
   NavigatorVibration* navigator_vibration =
       Supplement<Navigator>::From<NavigatorVibration>(navigator);
   if (!navigator_vibration) {
-    navigator_vibration = new NavigatorVibration(navigator);
+    navigator_vibration = MakeGarbageCollected<NavigatorVibration>(navigator);
     ProvideTo(navigator, navigator_vibration);
   }
   return *navigator_vibration;
@@ -70,7 +70,7 @@ bool NavigatorVibration::vibrate(Navigator& navigator,
   // reference to |window| or |navigator| was retained in another window.
   if (!frame)
     return false;
-  CollectHistogramMetrics(*frame);
+  CollectHistogramMetrics(navigator);
 
   DCHECK(frame->GetDocument());
   DCHECK(frame->GetPage());
@@ -101,13 +101,16 @@ bool NavigatorVibration::vibrate(Navigator& navigator,
 }
 
 // static
-void NavigatorVibration::CollectHistogramMetrics(const LocalFrame& frame) {
+void NavigatorVibration::CollectHistogramMetrics(const Navigator& navigator) {
   NavigatorVibrationType type;
-  bool user_gesture = frame.HasBeenActivated();
-  UseCounter::Count(&frame, WebFeature::kNavigatorVibrate);
-  if (!frame.IsMainFrame()) {
-    UseCounter::Count(&frame, WebFeature::kNavigatorVibrateSubFrame);
-    if (frame.IsCrossOriginSubframe()) {
+  LocalFrame* frame = navigator.GetFrame();
+  bool user_gesture = frame->HasBeenActivated();
+  UseCounter::Count(navigator.DomWindow()->document(),
+                    WebFeature::kNavigatorVibrate);
+  if (!frame->IsMainFrame()) {
+    UseCounter::Count(navigator.DomWindow()->document(),
+                      WebFeature::kNavigatorVibrateSubFrame);
+    if (frame->IsCrossOriginSubframe()) {
       if (user_gesture)
         type = NavigatorVibrationType::kCrossOriginSubFrameWithUserGesture;
       else
@@ -131,7 +134,7 @@ void NavigatorVibration::CollectHistogramMetrics(const LocalFrame& frame) {
 
 VibrationController* NavigatorVibration::Controller(LocalFrame& frame) {
   if (!controller_)
-    controller_ = new VibrationController(frame);
+    controller_ = MakeGarbageCollected<VibrationController>(frame);
 
   return controller_.Get();
 }

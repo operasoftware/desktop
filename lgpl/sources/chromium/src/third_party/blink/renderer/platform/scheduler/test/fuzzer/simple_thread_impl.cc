@@ -7,7 +7,7 @@ namespace base {
 namespace sequence_manager {
 
 SimpleThreadImpl::SimpleThreadImpl(ThreadPoolManager* thread_pool_manager,
-                                   TimeTicks initial_time,
+                                   base::TimeTicks initial_time,
                                    ThreadCallback callback)
     : SimpleThread("TestThread"),
       thread_pool_manager_(thread_pool_manager),
@@ -28,10 +28,6 @@ void SimpleThreadImpl::Run() {
 SimpleThreadImpl::~SimpleThreadImpl() {
   thread_can_shutdown_.Signal();
   Join();
-}
-
-ThreadManager* SimpleThreadImpl::thread_manager() const {
-  return thread_manager_;
 }
 
 }  // namespace sequence_manager

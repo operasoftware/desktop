@@ -40,9 +40,7 @@ class CORE_EXPORT MessageChannel final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static MessageChannel* Create(ExecutionContext* context) {
-    return new MessageChannel(context);
-  }
+  explicit MessageChannel(ExecutionContext*);
 
   MessagePort* port1() const { return port1_; }
   MessagePort* port2() const { return port2_; }
@@ -50,8 +48,6 @@ class CORE_EXPORT MessageChannel final : public ScriptWrappable {
   void Trace(blink::Visitor*) override;
 
  private:
-  explicit MessageChannel(ExecutionContext*);
-
   Member<MessagePort> port1_;
   Member<MessagePort> port2_;
 };

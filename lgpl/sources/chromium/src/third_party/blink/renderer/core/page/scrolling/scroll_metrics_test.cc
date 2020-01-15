@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "cc/input/main_thread_scrolling_reason.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
@@ -10,7 +11,6 @@
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
-#include "third_party/blink/renderer/platform/scroll/main_thread_scrolling_reason.h"
 #include "third_party/blink/renderer/platform/testing/histogram_tester.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
@@ -18,12 +18,12 @@
 #define EXPECT_WHEEL_BUCKET(reason, count)     \
   histogram_tester.ExpectBucketCount(          \
       "Renderer4.MainThreadWheelScrollReason", \
-      GetBucketIndex(MainThreadScrollingReason::reason), count);
+      GetBucketIndex(cc::MainThreadScrollingReason::reason), count);
 
 #define EXPECT_TOUCH_BUCKET(reason, count)       \
   histogram_tester.ExpectBucketCount(            \
       "Renderer4.MainThreadGestureScrollReason", \
-      GetBucketIndex(MainThreadScrollingReason::reason), count);
+      GetBucketIndex(cc::MainThreadScrollingReason::reason), count);
 
 #define EXPECT_WHEEL_TOTAL(count)                                            \
   histogram_tester.ExpectTotalCount("Renderer4.MainThreadWheelScrollReason", \
@@ -41,6 +41,10 @@ class ScrollMetricsTest : public SimTest {
  public:
   void SetUpHtml(const char*);
   void Scroll(Element*, const WebGestureDevice);
+  void UpdateAllLifecyclePhases() {
+    GetDocument().View()->UpdateAllLifecyclePhases(
+        DocumentLifecycle::LifecycleUpdateReason::kTest);
+  }
 };
 
 class NonCompositedMainThreadScrollingReasonRecordTest
@@ -56,7 +60,7 @@ class ScrollBeginEventBuilder : public WebGestureEvent {
                           WebGestureDevice device)
       : WebGestureEvent(WebInputEvent::kGestureScrollBegin,
                         WebInputEvent::kNoModifiers,
-                        CurrentTimeTicks(),
+                        base::TimeTicks::Now(),
                         device) {
     SetPositionInWidget(position);
     SetPositionInScreen(position);
@@ -114,7 +118,7 @@ void ScrollMetricsTest::Scroll(Element* element,
 }
 
 void ScrollMetricsTest::SetUpHtml(const char* html_content) {
-  WebView().Resize(WebSize(800, 600));
+  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(html_content);
@@ -134,23 +138,23 @@ TEST_F(NonCompositedMainThreadScrollingReasonRecordTest,
     </div>
   )HTML");
 
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhases();
 
   Element* box = GetDocument().getElementById("box");
   HistogramTester histogram_tester;
 
   // Test touch scroll.
-  Scroll(box, kWebGestureDeviceTouchscreen);
+  Scroll(box, WebGestureDevice::kTouchscreen);
   EXPECT_TOUCH_BUCKET(kHasOpacityAndLCDText, 1);
   EXPECT_TOUCH_BUCKET(kBackgroundNotOpaqueInRectAndLCDText, 1);
 
-  Scroll(box, kWebGestureDeviceTouchscreen);
+  Scroll(box, WebGestureDevice::kTouchscreen);
   EXPECT_TOUCH_BUCKET(kHasOpacityAndLCDText, 2);
   EXPECT_TOUCH_BUCKET(kBackgroundNotOpaqueInRectAndLCDText, 2);
   EXPECT_TOUCH_TOTAL(4);
 
   // Test wheel scroll.
-  Scroll(box, kWebGestureDeviceTouchpad);
+  Scroll(box, WebGestureDevice::kTouchpad);
   EXPECT_WHEEL_BUCKET(kHasOpacityAndLCDText, 1);
   EXPECT_WHEEL_BUCKET(kBackgroundNotOpaqueInRectAndLCDText, 1);
   EXPECT_WHEEL_TOTAL(2);
@@ -172,19 +176,19 @@ TEST_F(NonCompositedMainThreadScrollingReasonRecordTest,
 
   GetDocument().View()->SetParentVisible(true);
   GetDocument().View()->SetSelfVisible(true);
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhases();
 
   Element* box = GetDocument().getElementById("box");
   HistogramTester histogram_tester;
 
-  Scroll(box, kWebGestureDeviceTouchpad);
+  Scroll(box, WebGestureDevice::kTouchpad);
   EXPECT_WHEEL_BUCKET(kHasOpacityAndLCDText, 1);
   EXPECT_WHEEL_BUCKET(kBackgroundNotOpaqueInRectAndLCDText, 1);
   EXPECT_WHEEL_TOTAL(2);
 
   box->setAttribute("class", "composited translucent box");
-  GetDocument().View()->UpdateAllLifecyclePhases();
-  Scroll(box, kWebGestureDeviceTouchpad);
+  UpdateAllLifecyclePhases();
+  Scroll(box, WebGestureDevice::kTouchpad);
   EXPECT_FALSE(ToLayoutBox(box->GetLayoutObject())
                    ->GetScrollableArea()
                    ->GetNonCompositedMainThreadScrollingReasons());
@@ -206,19 +210,19 @@ TEST_F(NonCompositedMainThreadScrollingReasonRecordTest,
     </div>
   )HTML");
 
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhases();
 
   Element* box = GetDocument().getElementById("box");
   HistogramTester histogram_tester;
 
-  Scroll(box, kWebGestureDeviceTouchpad);
+  Scroll(box, WebGestureDevice::kTouchpad);
   EXPECT_WHEEL_BUCKET(kHasOpacityAndLCDText, 1);
   EXPECT_WHEEL_BUCKET(kBackgroundNotOpaqueInRectAndLCDText, 1);
   EXPECT_WHEEL_TOTAL(2);
 
   box->setAttribute("class", "hidden translucent box");
-  GetDocument().View()->UpdateAllLifecyclePhases();
-  Scroll(box, kWebGestureDeviceTouchpad);
+  UpdateAllLifecyclePhases();
+  Scroll(box, WebGestureDevice::kTouchpad);
   EXPECT_WHEEL_BUCKET(kHasOpacityAndLCDText, 1);
   EXPECT_WHEEL_BUCKET(kBackgroundNotOpaqueInRectAndLCDText, 1);
   EXPECT_WHEEL_TOTAL(2);
@@ -247,12 +251,12 @@ TEST_F(NonCompositedMainThreadScrollingReasonRecordTest, NestedScrollersTest) {
 
   GetDocument().View()->SetParentVisible(true);
   GetDocument().View()->SetSelfVisible(true);
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhases();
 
   Element* box = GetDocument().getElementById("inner");
   HistogramTester histogram_tester;
 
-  Scroll(box, kWebGestureDeviceTouchpad);
+  Scroll(box, WebGestureDevice::kTouchpad);
   // Scrolling the inner box will gather reasons from the scrolling chain. The
   // inner box itself has no reason because it's composited. Other scrollable
   // areas from the chain have corresponding reasons.

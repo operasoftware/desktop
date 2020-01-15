@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/animation/animation_input_helpers.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/core/animation/property_handle.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
@@ -32,13 +33,13 @@ static String RemoveSVGPrefix(const String& property) {
 }
 
 static String CSSPropertyToKeyframeAttribute(const CSSProperty& property) {
-  DCHECK_NE(property.PropertyID(), CSSPropertyInvalid);
-  DCHECK_NE(property.PropertyID(), CSSPropertyVariable);
+  DCHECK_NE(property.PropertyID(), CSSPropertyID::kInvalid);
+  DCHECK_NE(property.PropertyID(), CSSPropertyID::kVariable);
 
   switch (property.PropertyID()) {
-    case CSSPropertyFloat:
+    case CSSPropertyID::kFloat:
       return "cssFloat";
-    case CSSPropertyOffset:
+    case CSSPropertyID::kOffset:
       return "cssOffset";
     default:
       return property.GetJSPropertyName();
@@ -57,23 +58,23 @@ CSSPropertyID AnimationInputHelpers::KeyframeAttributeToCSSProperty(
     const String& property,
     const Document& document) {
   if (CSSVariableParser::IsValidVariableName(property))
-    return CSSPropertyVariable;
+    return CSSPropertyID::kVariable;
 
   // Disallow prefixed properties.
   if (property[0] == '-')
-    return CSSPropertyInvalid;
+    return CSSPropertyID::kInvalid;
   if (IsASCIIUpper(property[0]))
-    return CSSPropertyInvalid;
+    return CSSPropertyID::kInvalid;
   if (property == "cssFloat")
-    return CSSPropertyFloat;
+    return CSSPropertyID::kFloat;
   if (property == "cssOffset")
-    return CSSPropertyOffset;
+    return CSSPropertyID::kOffset;
 
   StringBuilder builder;
   for (wtf_size_t i = 0; i < property.length(); ++i) {
     // Disallow hyphenated properties.
     if (property[i] == '-')
-      return CSSPropertyInvalid;
+      return CSSPropertyID::kInvalid;
     if (IsASCIIUpper(property[i]))
       builder.Append('-');
     builder.Append(property[i]);
@@ -86,14 +87,14 @@ CSSPropertyID AnimationInputHelpers::KeyframeAttributeToPresentationAttribute(
     const Element* element) {
   if (!RuntimeEnabledFeatures::WebAnimationsSVGEnabled() || !element ||
       !element->IsSVGElement() || !IsSVGPrefixed(property))
-    return CSSPropertyInvalid;
+    return CSSPropertyID::kInvalid;
 
   String unprefixed_property = RemoveSVGPrefix(property);
   if (SVGElement::IsAnimatableCSSProperty(QualifiedName(
           g_null_atom, AtomicString(unprefixed_property), g_null_atom)))
     return cssPropertyID(unprefixed_property);
 
-  return CSSPropertyInvalid;
+  return CSSPropertyID::kInvalid;
 }
 
 using AttributeNameMap = HashMap<QualifiedName, const QualifiedName*>;
@@ -104,103 +105,103 @@ const AttributeNameMap& GetSupportedAttributes() {
     // Fill the set for the first use.
     // Animatable attributes from http://www.w3.org/TR/SVG/attindex.html
     const QualifiedName* attributes[] = {
-        &HTMLNames::classAttr,
-        &SVGNames::amplitudeAttr,
-        &SVGNames::azimuthAttr,
-        &SVGNames::baseFrequencyAttr,
-        &SVGNames::biasAttr,
-        &SVGNames::clipPathUnitsAttr,
-        &SVGNames::cxAttr,
-        &SVGNames::cyAttr,
-        &SVGNames::dAttr,
-        &SVGNames::diffuseConstantAttr,
-        &SVGNames::divisorAttr,
-        &SVGNames::dxAttr,
-        &SVGNames::dyAttr,
-        &SVGNames::edgeModeAttr,
-        &SVGNames::elevationAttr,
-        &SVGNames::exponentAttr,
-        &SVGNames::filterUnitsAttr,
-        &SVGNames::fxAttr,
-        &SVGNames::fyAttr,
-        &SVGNames::gradientTransformAttr,
-        &SVGNames::gradientUnitsAttr,
-        &SVGNames::heightAttr,
-        &SVGNames::hrefAttr,
-        &SVGNames::in2Attr,
-        &SVGNames::inAttr,
-        &SVGNames::interceptAttr,
-        &SVGNames::k1Attr,
-        &SVGNames::k2Attr,
-        &SVGNames::k3Attr,
-        &SVGNames::k4Attr,
-        &SVGNames::kernelMatrixAttr,
-        &SVGNames::kernelUnitLengthAttr,
-        &SVGNames::lengthAdjustAttr,
-        &SVGNames::limitingConeAngleAttr,
-        &SVGNames::markerHeightAttr,
-        &SVGNames::markerUnitsAttr,
-        &SVGNames::markerWidthAttr,
-        &SVGNames::maskContentUnitsAttr,
-        &SVGNames::maskUnitsAttr,
-        &SVGNames::methodAttr,
-        &SVGNames::modeAttr,
-        &SVGNames::numOctavesAttr,
-        &SVGNames::offsetAttr,
-        &SVGNames::operatorAttr,
-        &SVGNames::orderAttr,
-        &SVGNames::orientAttr,
-        &SVGNames::pathLengthAttr,
-        &SVGNames::patternContentUnitsAttr,
-        &SVGNames::patternTransformAttr,
-        &SVGNames::patternUnitsAttr,
-        &SVGNames::pointsAtXAttr,
-        &SVGNames::pointsAtYAttr,
-        &SVGNames::pointsAtZAttr,
-        &SVGNames::pointsAttr,
-        &SVGNames::preserveAlphaAttr,
-        &SVGNames::preserveAspectRatioAttr,
-        &SVGNames::primitiveUnitsAttr,
-        &SVGNames::rAttr,
-        &SVGNames::radiusAttr,
-        &SVGNames::refXAttr,
-        &SVGNames::refYAttr,
-        &SVGNames::resultAttr,
-        &SVGNames::rotateAttr,
-        &SVGNames::rxAttr,
-        &SVGNames::ryAttr,
-        &SVGNames::scaleAttr,
-        &SVGNames::seedAttr,
-        &SVGNames::slopeAttr,
-        &SVGNames::spacingAttr,
-        &SVGNames::specularConstantAttr,
-        &SVGNames::specularExponentAttr,
-        &SVGNames::spreadMethodAttr,
-        &SVGNames::startOffsetAttr,
-        &SVGNames::stdDeviationAttr,
-        &SVGNames::stitchTilesAttr,
-        &SVGNames::surfaceScaleAttr,
-        &SVGNames::tableValuesAttr,
-        &SVGNames::targetAttr,
-        &SVGNames::targetXAttr,
-        &SVGNames::targetYAttr,
-        &SVGNames::textLengthAttr,
-        &SVGNames::transformAttr,
-        &SVGNames::typeAttr,
-        &SVGNames::valuesAttr,
-        &SVGNames::viewBoxAttr,
-        &SVGNames::widthAttr,
-        &SVGNames::x1Attr,
-        &SVGNames::x2Attr,
-        &SVGNames::xAttr,
-        &SVGNames::xChannelSelectorAttr,
-        &SVGNames::y1Attr,
-        &SVGNames::y2Attr,
-        &SVGNames::yAttr,
-        &SVGNames::yChannelSelectorAttr,
-        &SVGNames::zAttr,
+        &html_names::kClassAttr,
+        &svg_names::kAmplitudeAttr,
+        &svg_names::kAzimuthAttr,
+        &svg_names::kBaseFrequencyAttr,
+        &svg_names::kBiasAttr,
+        &svg_names::kClipPathUnitsAttr,
+        &svg_names::kCxAttr,
+        &svg_names::kCyAttr,
+        &svg_names::kDAttr,
+        &svg_names::kDiffuseConstantAttr,
+        &svg_names::kDivisorAttr,
+        &svg_names::kDxAttr,
+        &svg_names::kDyAttr,
+        &svg_names::kEdgeModeAttr,
+        &svg_names::kElevationAttr,
+        &svg_names::kExponentAttr,
+        &svg_names::kFilterUnitsAttr,
+        &svg_names::kFxAttr,
+        &svg_names::kFyAttr,
+        &svg_names::kGradientTransformAttr,
+        &svg_names::kGradientUnitsAttr,
+        &svg_names::kHeightAttr,
+        &svg_names::kHrefAttr,
+        &svg_names::kIn2Attr,
+        &svg_names::kInAttr,
+        &svg_names::kInterceptAttr,
+        &svg_names::kK1Attr,
+        &svg_names::kK2Attr,
+        &svg_names::kK3Attr,
+        &svg_names::kK4Attr,
+        &svg_names::kKernelMatrixAttr,
+        &svg_names::kKernelUnitLengthAttr,
+        &svg_names::kLengthAdjustAttr,
+        &svg_names::kLimitingConeAngleAttr,
+        &svg_names::kMarkerHeightAttr,
+        &svg_names::kMarkerUnitsAttr,
+        &svg_names::kMarkerWidthAttr,
+        &svg_names::kMaskContentUnitsAttr,
+        &svg_names::kMaskUnitsAttr,
+        &svg_names::kMethodAttr,
+        &svg_names::kModeAttr,
+        &svg_names::kNumOctavesAttr,
+        &svg_names::kOffsetAttr,
+        &svg_names::kOperatorAttr,
+        &svg_names::kOrderAttr,
+        &svg_names::kOrientAttr,
+        &svg_names::kPathLengthAttr,
+        &svg_names::kPatternContentUnitsAttr,
+        &svg_names::kPatternTransformAttr,
+        &svg_names::kPatternUnitsAttr,
+        &svg_names::kPointsAtXAttr,
+        &svg_names::kPointsAtYAttr,
+        &svg_names::kPointsAtZAttr,
+        &svg_names::kPointsAttr,
+        &svg_names::kPreserveAlphaAttr,
+        &svg_names::kPreserveAspectRatioAttr,
+        &svg_names::kPrimitiveUnitsAttr,
+        &svg_names::kRAttr,
+        &svg_names::kRadiusAttr,
+        &svg_names::kRefXAttr,
+        &svg_names::kRefYAttr,
+        &svg_names::kResultAttr,
+        &svg_names::kRotateAttr,
+        &svg_names::kRxAttr,
+        &svg_names::kRyAttr,
+        &svg_names::kScaleAttr,
+        &svg_names::kSeedAttr,
+        &svg_names::kSlopeAttr,
+        &svg_names::kSpacingAttr,
+        &svg_names::kSpecularConstantAttr,
+        &svg_names::kSpecularExponentAttr,
+        &svg_names::kSpreadMethodAttr,
+        &svg_names::kStartOffsetAttr,
+        &svg_names::kStdDeviationAttr,
+        &svg_names::kStitchTilesAttr,
+        &svg_names::kSurfaceScaleAttr,
+        &svg_names::kTableValuesAttr,
+        &svg_names::kTargetAttr,
+        &svg_names::kTargetXAttr,
+        &svg_names::kTargetYAttr,
+        &svg_names::kTextLengthAttr,
+        &svg_names::kTransformAttr,
+        &svg_names::kTypeAttr,
+        &svg_names::kValuesAttr,
+        &svg_names::kViewBoxAttr,
+        &svg_names::kWidthAttr,
+        &svg_names::kX1Attr,
+        &svg_names::kX2Attr,
+        &svg_names::kXAttr,
+        &svg_names::kXChannelSelectorAttr,
+        &svg_names::kY1Attr,
+        &svg_names::kY2Attr,
+        &svg_names::kYAttr,
+        &svg_names::kYChannelSelectorAttr,
+        &svg_names::kZAttr,
     };
-    for (size_t i = 0; i < arraysize(attributes); i++) {
+    for (size_t i = 0; i < base::size(attributes); i++) {
       DCHECK(!SVGElement::IsAnimatableCSSProperty(*attributes[i]));
       supported_attributes.Set(*attributes[i], attributes[i]);
     }
@@ -216,12 +217,12 @@ QualifiedName SvgAttributeName(const String& property) {
 const QualifiedName* AnimationInputHelpers::KeyframeAttributeToSVGAttribute(
     const String& property,
     Element* element) {
-  if (!RuntimeEnabledFeatures::WebAnimationsSVGEnabled() || !element ||
-      !element->IsSVGElement() || !IsSVGPrefixed(property))
+  auto* svg_element = DynamicTo<SVGElement>(element);
+  if (!RuntimeEnabledFeatures::WebAnimationsSVGEnabled() || !svg_element ||
+      !IsSVGPrefixed(property))
     return nullptr;
 
-  SVGElement* svg_element = ToSVGElement(element);
-  if (IsSVGSMILElement(svg_element))
+  if (IsA<SVGSMILElement>(svg_element))
     return nullptr;
 
   String unprefixed_property = RemoveSVGPrefix(property);
@@ -249,22 +250,21 @@ scoped_refptr<TimingFunction> AnimationInputHelpers::ParseTimingFunction(
   SecureContextMode secure_context_mode =
       document ? document->GetSecureContextMode()
                : SecureContextMode::kInsecureContext;
-  const CSSValue* value =
-      CSSParser::ParseSingleValue(CSSPropertyTransitionTimingFunction, string,
-                                  StrictCSSParserContext(secure_context_mode));
-  if (!value || !value->IsValueList()) {
+  const CSSValue* value = CSSParser::ParseSingleValue(
+      CSSPropertyID::kTransitionTimingFunction, string,
+      StrictCSSParserContext(secure_context_mode));
+  const auto* value_list = DynamicTo<CSSValueList>(value);
+  if (!value_list) {
     DCHECK(!value || value->IsCSSWideKeyword());
     exception_state.ThrowTypeError("'" + string +
                                    "' is not a valid value for easing");
     return nullptr;
   }
-  const CSSValueList* value_list = ToCSSValueList(value);
   if (value_list->length() > 1) {
     exception_state.ThrowTypeError("Easing may not be set to a list of values");
     return nullptr;
   }
-  return CSSToStyleMap::MapAnimationTimingFunction(value_list->Item(0), true,
-                                                   document);
+  return CSSToStyleMap::MapAnimationTimingFunction(value_list->Item(0));
 }
 
 String AnimationInputHelpers::PropertyHandleToKeyframeAttribute(

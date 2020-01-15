@@ -35,21 +35,35 @@
 
 namespace blink {
 
+class KeyboardEvent;
+
 class PasswordInputType final : public BaseTextInputType {
  public:
-  static InputType* Create(HTMLInputElement&);
-
- private:
   explicit PasswordInputType(HTMLInputElement& element)
       : BaseTextInputType(element) {}
+
+ private:
   void CountUsage() override;
   const AtomicString& FormControlType() const override;
   bool ShouldSaveAndRestoreFormControlState() const override;
   FormControlState SaveFormControlState() const override;
   void RestoreFormControlState(const FormControlState&) override;
   bool ShouldRespectListAttribute() override;
-  void OnAttachWithLayoutObject() override;
-  void OnDetachWithLayoutObject() override;
+
+  bool NeedsContainer() const override;
+  void CreateShadowSubtree() override;
+
+  void UpdateView() override;
+  void UpdatePasswordRevealButton();
+  void DidSetValueByUserEdit() override;
+  void DidSetValue(const String&, bool value_changed) override;
+
+  void HandleKeydownEvent(KeyboardEvent&) override;
+  void HandleBeforeTextInsertedEvent(BeforeTextInsertedEvent&) override;
+
+  void HandleBlurEvent() override;
+
+  bool should_show_reveal_button_ = false;
 };
 
 }  // namespace blink

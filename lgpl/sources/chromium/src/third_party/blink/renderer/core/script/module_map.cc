@@ -15,34 +15,32 @@
 namespace blink {
 
 // Entry struct represents a value in "module map" spec object.
-// https://html.spec.whatwg.org/multipage/webappapis.html#module-map
-class ModuleMap::Entry final : public GarbageCollectedFinalized<Entry>,
+// https://html.spec.whatwg.org/C/#module-map
+class ModuleMap::Entry final : public GarbageCollected<Entry>,
                                public NameClient,
                                public ModuleScriptLoaderClient {
   USING_GARBAGE_COLLECTED_MIXIN(ModuleMap::Entry);
 
  public:
-  static Entry* Create(ModuleMap* map) { return new Entry(map); }
+  explicit Entry(ModuleMap*);
   ~Entry() override {}
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
   const char* NameInHeapSnapshot() const override { return "ModuleMap::Entry"; }
 
   // Notify fetched |m_moduleScript| to the client asynchronously.
   void AddClient(SingleModuleClient*);
 
-  // This is only to be used from ScriptModuleResolver implementations.
+  // This is only to be used from ModuleRecordResolver implementations.
   ModuleScript* GetModuleScript() const;
 
  private:
-  explicit Entry(ModuleMap*);
-
   void DispatchFinishedNotificationAsync(SingleModuleClient*);
 
   // Implements ModuleScriptLoaderClient
   void NotifyNewSingleModuleFinished(ModuleScript*) override;
 
-  TraceWrapperMember<ModuleScript> module_script_;
+  Member<ModuleScript> module_script_;
   Member<ModuleMap> map_;
 
   // Correspond to the HTML spec: "fetching" state.
@@ -55,7 +53,7 @@ ModuleMap::Entry::Entry(ModuleMap* map) : map_(map) {
   DCHECK(map_);
 }
 
-void ModuleMap::Entry::Trace(blink::Visitor* visitor) {
+void ModuleMap::Entry::Trace(Visitor* visitor) {
   visitor->Trace(module_script_);
   visitor->Trace(map_);
   visitor->Trace(clients_);
@@ -98,20 +96,20 @@ ModuleScript* ModuleMap::Entry::GetModuleScript() const {
 
 ModuleMap::ModuleMap(Modulator* modulator)
     : modulator_(modulator),
-      loader_registry_(ModuleScriptLoaderRegistry::Create()) {
+      loader_registry_(MakeGarbageCollected<ModuleScriptLoaderRegistry>()) {
   DCHECK(modulator);
 }
 
-void ModuleMap::Trace(blink::Visitor* visitor) {
+void ModuleMap::Trace(Visitor* visitor) {
   visitor->Trace(map_);
   visitor->Trace(modulator_);
   visitor->Trace(loader_registry_);
 }
 
-// https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-single-module-script
+// <specdef href="https://html.spec.whatwg.org/C/#fetch-a-single-module-script">
 void ModuleMap::FetchSingleModuleScript(
     const ModuleScriptFetchRequest& request,
-    FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+    ResourceFetcher* fetch_client_settings_object_fetcher,
     ModuleGraphLevel level,
     ModuleScriptCustomFetchType custom_fetch_type,
     SingleModuleClient* client) {
@@ -124,22 +122,22 @@ void ModuleMap::FetchSingleModuleScript(
   // entry's value changes, then queue a task on the networking task source to
   // proceed with running the following steps.</spec>
   MapImpl::AddResult result = map_.insert(request.Url(), nullptr);
-  TraceWrapperMember<Entry>& entry = result.stored_value->value;
+  Member<Entry>& entry = result.stored_value->value;
   if (result.is_new_entry) {
-    entry = Entry::Create(this);
+    entry = MakeGarbageCollected<Entry>(this);
 
     // Steps 4-9 loads a new single module script.
     // Delegates to ModuleScriptLoader via Modulator.
-    ModuleScriptLoader::Fetch(request, fetch_client_settings_object, level,
-                              modulator_, custom_fetch_type, loader_registry_,
-                              entry);
+    ModuleScriptLoader::Fetch(request, fetch_client_settings_object_fetcher,
+                              level, modulator_, custom_fetch_type,
+                              loader_registry_, entry);
   }
   DCHECK(entry);
 
   // <spec step="3">If moduleMap[url] exists, asynchronously complete this
   // algorithm with moduleMap[url], and abort these steps.</spec>
   //
-  // <spec step="11">Set moduleMap[url] to module script, and asynchronously
+  // <spec step="14">Set moduleMap[url] to module script, and asynchronously
   // complete this algorithm with module script.</spec>
   if (client)
     entry->AddClient(client);

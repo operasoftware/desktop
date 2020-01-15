@@ -283,24 +283,24 @@ scoped_refptr<MediaQuerySet> MediaQueryParser::ParseImpl(
 bool MediaQueryParser::IsMediaFeatureAllowedInMode(
     const String& media_feature) const {
   return mode_ == kUASheetMode ||
-         media_feature != MediaFeatureNames::immersiveMediaFeature;
+         media_feature != media_feature_names::kImmersiveMediaFeature;
 }
 
 MediaQueryData::MediaQueryData()
     : restrictor_(MediaQuery::kNone),
-      media_type_(MediaTypeNames::all),
+      media_type_(media_type_names::kAll),
       media_type_set_(false) {}
 
 void MediaQueryData::Clear() {
   restrictor_ = MediaQuery::kNone;
-  media_type_ = MediaTypeNames::all;
+  media_type_ = media_type_names::kAll;
   media_type_set_ = false;
   media_feature_ = String();
   expressions_.clear();
 }
 
 std::unique_ptr<MediaQuery> MediaQueryData::TakeMediaQuery() {
-  std::unique_ptr<MediaQuery> media_query = MediaQuery::Create(
+  std::unique_ptr<MediaQuery> media_query = std::make_unique<MediaQuery>(
       restrictor_, std::move(media_type_), std::move(expressions_));
   Clear();
   return media_query;

@@ -37,24 +37,8 @@ namespace xpath {
 
 struct EvaluationContext;
 
-class ValueData : public GarbageCollectedFinalized<ValueData> {
+class ValueData final : public GarbageCollected<ValueData> {
  public:
-  static ValueData* Create() { return new ValueData; }
-  static ValueData* Create(const NodeSet& node_set) {
-    return new ValueData(node_set);
-  }
-  static ValueData* Create(NodeSet* node_set) {
-    return new ValueData(node_set);
-  }
-  static ValueData* Create(const String& string) {
-    return new ValueData(string);
-  }
-  void Trace(blink::Visitor*);
-  NodeSet& GetNodeSet() { return *node_set_; }
-
-  String string_;
-
- private:
   ValueData() : node_set_(NodeSet::Create()) {}
   explicit ValueData(const NodeSet& node_set)
       : node_set_(NodeSet::Create(node_set)) {}
@@ -62,6 +46,12 @@ class ValueData : public GarbageCollectedFinalized<ValueData> {
   explicit ValueData(const String& string)
       : string_(string), node_set_(NodeSet::Create()) {}
 
+  void Trace(blink::Visitor*);
+  NodeSet& GetNodeSet() { return *node_set_; }
+
+  String string_;
+
+ private:
   Member<NodeSet> node_set_;
 };
 
@@ -74,30 +64,29 @@ class CORE_EXPORT Value {
   enum Type { kNodeSetValue, kBooleanValue, kNumberValue, kStringValue };
 
   Value(unsigned value) : type_(kNumberValue), bool_(false), number_(value) {}
-  Value(unsigned long value)
-      : type_(kNumberValue), bool_(false), number_(value) {}
+  Value(uint64_t value) : type_(kNumberValue), bool_(false), number_(value) {}
   Value(double value) : type_(kNumberValue), bool_(false), number_(value) {}
 
   Value(const char* value)
       : type_(kStringValue),
         bool_(false),
         number_(0),
-        data_(ValueData::Create(value)) {}
+        data_(MakeGarbageCollected<ValueData>(value)) {}
   Value(const String& value)
       : type_(kStringValue),
         bool_(false),
         number_(0),
-        data_(ValueData::Create(value)) {}
+        data_(MakeGarbageCollected<ValueData>(value)) {}
   Value(const NodeSet& value)
       : type_(kNodeSetValue),
         bool_(false),
         number_(0),
-        data_(ValueData::Create(value)) {}
+        data_(MakeGarbageCollected<ValueData>(value)) {}
   Value(Node* value)
       : type_(kNodeSetValue),
         bool_(false),
         number_(0),
-        data_(ValueData::Create()) {
+        data_(MakeGarbageCollected<ValueData>()) {
     data_->GetNodeSet().Append(value);
   }
   void Trace(blink::Visitor*);
@@ -113,7 +102,7 @@ class CORE_EXPORT Value {
       : type_(kNodeSetValue),
         bool_(false),
         number_(0),
-        data_(ValueData::Create(value)) {}
+        data_(MakeGarbageCollected<ValueData>(value)) {}
 
   Type GetType() const { return type_; }
 

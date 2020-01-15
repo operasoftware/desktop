@@ -53,11 +53,26 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/ng/list/layout_ng_list_item.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_block_node.h"
+#include "third_party/blink/renderer/core/layout/style_retain_scope.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
+#include "third_party/blink/renderer/platform/network/network_utils.h"
 
 namespace blink {
+
+namespace {
+
+inline int GetLayoutInlineSize(const Document& document,
+                               const LocalFrameView& main_frame_view) {
+  IntSize size = main_frame_view.GetLayoutSize();
+  const LayoutView* layout_view = document.GetLayoutView();
+  if (IsHorizontalWritingMode(layout_view->StyleRef().GetWritingMode()))
+    return size.Width();
+  return size.Height();
+}
+
+}  // namespace
 
 static LayoutObject* ParentElementLayoutObject(
     const LayoutObject* layout_object) {
@@ -75,9 +90,9 @@ static LayoutObject* ParentElementLayoutObject(
 
 static bool IsNonTextAreaFormControl(const LayoutObject* layout_object) {
   const Node* node = layout_object ? layout_object->GetNode() : nullptr;
-  if (!node || !node->IsElementNode())
+  const auto* element = DynamicTo<Element>(node);
+  if (!element)
     return false;
-  const Element* element = ToElement(node);
 
   return (element->IsFormControlElement() && !IsHTMLTextAreaElement(element));
 }
@@ -117,7 +132,7 @@ static bool IsIndependentDescendant(const LayoutBlock* layout_object) {
   return layout_object->IsLayoutView() || layout_object->IsFloating() ||
          layout_object->IsOutOfFlowPositioned() ||
          layout_object->IsTableCell() || layout_object->IsTableCaption() ||
-         layout_object->IsFlexibleBoxIncludingDeprecated() ||
+         layout_object->IsFlexibleBoxIncludingDeprecatedAndNG() ||
          (containing_block && containing_block->IsHorizontalWritingMode() !=
                                   layout_object->IsHorizontalWritingMode()) ||
          layout_object->StyleRef().IsDisplayReplacedType() ||
@@ -243,7 +258,8 @@ TextAutosizer::TextAutosizer(const Document* document)
       cluster_stack_(),
       fingerprint_mapper_(),
       page_info_(),
-      update_page_info_deferred_(false) {
+      update_page_info_deferred_(false),
+      did_check_cross_site_use_count_(false) {
 }
 
 TextAutosizer::~TextAutosizer() = default;
@@ -322,9 +338,7 @@ void TextAutosizer::PrepareClusterStack(LayoutObject* layout_object) {
   if (!layout_object)
     return;
   PrepareClusterStack(layout_object->Parent());
-
-  if (layout_object->IsLayoutBlock()) {
-    LayoutBlock* block = ToLayoutBlock(layout_object);
+  if (auto* block = DynamicTo<LayoutBlock>(layout_object)) {
 #if DCHECK_IS_ON()
     blocks_that_have_begun_layout_.insert(block);
 #endif
@@ -345,6 +359,8 @@ void TextAutosizer::BeginLayout(LayoutBlock* block,
     return;
 
   DCHECK(!cluster_stack_.IsEmpty() || block->IsLayoutView());
+  if (cluster_stack_.IsEmpty())
+    did_check_cross_site_use_count_ = false;
 
   if (Cluster* cluster = MaybeCreateCluster(block))
     cluster_stack_.push_back(base::WrapUnique(cluster));
@@ -353,14 +369,18 @@ void TextAutosizer::BeginLayout(LayoutBlock* block,
 
   // Cells in auto-layout tables are handled separately by inflateAutoTable.
   bool is_auto_table_cell =
-      block->IsTableCell() &&
-      !ToLayoutTableCell(block)->Table()->StyleRef().IsFixedTableLayout();
+      block->IsTableCell() && !ToInterface<LayoutNGTableCellInterface>(block)
+                                   ->TableInterface()
+                                   ->ToLayoutObject()
+                                   ->StyleRef()
+                                   .IsFixedTableLayout();
   if (!is_auto_table_cell && !cluster_stack_.IsEmpty())
     Inflate(block, layouter);
 }
 
-void TextAutosizer::InflateAutoTable(LayoutTable* table) {
-  DCHECK(table);
+void TextAutosizer::InflateAutoTable(LayoutNGTableInterface* table_interface) {
+  DCHECK(table_interface);
+  const LayoutBlock* table = To<LayoutBlock>(table_interface->ToLayoutObject());
   DCHECK(!table->StyleRef().IsFixedTableLayout());
   DCHECK(table->ContainingBlock());
 
@@ -374,16 +394,19 @@ void TextAutosizer::InflateAutoTable(LayoutTable* table) {
        section = section->NextSibling()) {
     if (!section->IsTableSection())
       continue;
-    for (LayoutTableRow* row = ToLayoutTableSection(section)->FirstRow(); row;
-         row = row->NextRow()) {
-      for (LayoutTableCell* cell = row->FirstCell(); cell;
-           cell = cell->NextCell()) {
-        if (!cell->NeedsLayout())
+    for (const LayoutNGTableRowInterface* row =
+             ToInterface<LayoutNGTableSectionInterface>(section)
+                 ->FirstRowInterface();
+         row; row = row->NextRowInterface()) {
+      for (LayoutNGTableCellInterface* cell = row->FirstCellInterface(); cell;
+           cell = cell->NextCellInterface()) {
+        LayoutBlock* cell_layout_object =
+            To<LayoutBlock>(cell->ToMutableLayoutObject());
+        if (!cell_layout_object->NeedsLayout())
           continue;
-
-        BeginLayout(cell, nullptr);
-        Inflate(cell, nullptr, kDescendToInnerBlocks);
-        EndLayout(cell);
+        BeginLayout(cell_layout_object, nullptr);
+        Inflate(cell_layout_object, nullptr, kDescendToInnerBlocks);
+        EndLayout(cell_layout_object);
       }
     }
   }
@@ -395,7 +418,6 @@ void TextAutosizer::EndLayout(LayoutBlock* block) {
   if (block == first_block_to_begin_layout_) {
     first_block_to_begin_layout_ = nullptr;
     cluster_stack_.clear();
-    styles_retained_during_layout_.clear();
 #if DCHECK_IS_ON()
     blocks_that_have_begun_layout_.clear();
 #endif
@@ -424,7 +446,7 @@ float TextAutosizer::Inflate(LayoutObject* parent,
     }
   } else if (parent->IsLayoutBlock() &&
              (parent->ChildrenInline() || behavior == kDescendToInnerBlocks)) {
-    child = ToLayoutBlock(parent)->FirstChild();
+    child = To<LayoutBlock>(parent)->FirstChild();
   } else if (parent->IsLayoutInline()) {
     child = ToLayoutInline(parent)->FirstChild();
   }
@@ -434,9 +456,10 @@ float TextAutosizer::Inflate(LayoutObject* parent,
       has_text_child = true;
       // We only calculate this multiplier on-demand to ensure the parent block
       // of this text has entered layout.
-      if (!multiplier)
+      if (!multiplier) {
         multiplier =
             cluster->flags_ & SUPPRESSING ? 1.0f : ClusterMultiplier(cluster);
+      }
       ApplyMultiplier(child, multiplier, layouter);
 
       if (behavior == kDescendToInnerBlocks) {
@@ -449,6 +472,11 @@ float TextAutosizer::Inflate(LayoutObject* parent,
       }
     } else if (child->IsLayoutInline()) {
       multiplier = Inflate(child, layouter, behavior, multiplier);
+      // If this LayoutInline is an anonymous inline that has multiplied
+      // children, apply the multiplifer to the parent too. We compute
+      // ::first-line style from the style of the parent block.
+      if (multiplier && child->IsAnonymous())
+        has_text_child = true;
     } else if (child->IsLayoutBlock() && behavior == kDescendToInnerBlocks &&
                !ClassifyBlock(child,
                               INDEPENDENT | EXPLICIT_WIDTH | SUPPRESSING)) {
@@ -490,7 +518,7 @@ float TextAutosizer::Inflate(LayoutObject* parent,
   }
 
   if (page_info_.has_autosized_)
-    UseCounter::Count(*document_, WebFeature::kTextAutosizing);
+    document_->CountUse(WebFeature::kTextAutosizing);
 
   return multiplier;
 }
@@ -509,10 +537,8 @@ void TextAutosizer::MarkSuperclusterForConsistencyCheck(LayoutObject* object) {
     return;
 
   Supercluster* last_supercluster = nullptr;
-  LayoutBlock* block = nullptr;
   while (object) {
-    if (object->IsLayoutBlock()) {
-      block = ToLayoutBlock(object);
+    if (auto* block = DynamicTo<LayoutBlock>(object)) {
       if (block->IsTableCell() ||
           ClassifyBlock(block, INDEPENDENT | EXPLICIT_WIDTH)) {
         // If supercluster hasn't been created yet, create one.
@@ -543,20 +569,44 @@ void TextAutosizer::MarkSuperclusterForConsistencyCheck(LayoutObject* object) {
   }
 }
 
-void TextAutosizer::UpdatePageInfoInAllFrames() {
-  DCHECK(!document_->GetFrame() || document_->GetFrame()->IsMainFrame());
+bool TextAutosizer::HasLayoutInlineSizeChanged() const {
+  DCHECK(document_->GetFrame()->IsMainFrame());
+  int new_inline_size =
+      GetLayoutInlineSize(*document_, *document_->GetFrame()->View());
+  return new_inline_size != page_info_.shared_info_.main_frame_layout_width;
+}
 
-  for (Frame* frame = document_->GetFrame(); frame;
-       frame = frame->Tree().TraverseNext()) {
-    if (!frame->IsLocalFrame())
+// Static.
+void TextAutosizer::UpdatePageInfoInAllFrames(Frame* main_frame) {
+  DCHECK(main_frame && main_frame == main_frame->Tree().Top());
+  for (Frame* frame = main_frame; frame; frame = frame->Tree().TraverseNext()) {
+    auto* local_frame = DynamicTo<LocalFrame>(frame);
+    if (!local_frame)
       continue;
 
-    Document* document = ToLocalFrame(frame)->GetDocument();
+    Document* document = local_frame->GetDocument();
     // If document is being detached, skip updatePageInfo.
     if (!document || !document->IsActive())
       continue;
-    if (TextAutosizer* text_autosizer = document->GetTextAutosizer())
+    if (TextAutosizer* text_autosizer = document->GetTextAutosizer()) {
       text_autosizer->UpdatePageInfo();
+
+      // Share the page information from the local mainframe with remote ones.
+      // TODO(wjmaclean): Refactor this code into a non-static class function
+      // called UpdateWebTextAutosizerPageInfoIfNecessary().
+      if (frame->IsMainFrame()) {
+        const PageInfo& page_info = text_autosizer->page_info_;
+        const WebTextAutosizerPageInfo& old_page_info =
+            document->GetPage()->TextAutosizerPageInfo();
+        if (page_info.shared_info_ != old_page_info) {
+          document->GetPage()->GetChromeClient().DidUpdateTextAutosizerPageInfo(
+              page_info.shared_info_);
+          // Remember the RemotePageSettings in the mainframe's renderer so we
+          // know when they change.
+          document->GetPage()->SetTextAutosizePageInfo(page_info.shared_info_);
+        }
+      }
+    }
   }
 }
 
@@ -576,63 +626,60 @@ void TextAutosizer::UpdatePageInfo() {
     bool horizontal_writing_mode =
         IsHorizontalWritingMode(layout_view->StyleRef().GetWritingMode());
 
-    // FIXME: With out-of-process iframes, the top frame can be remote and
-    // doesn't have sizing information. Just return if this is the case.
     Frame& frame = document_->GetFrame()->Tree().Top();
-    if (frame.IsRemoteFrame())
-      return;
+    if (frame.IsRemoteFrame()) {
+      // When the frame is remote, the local main frame is responsible for
+      // computing shared_info_ and passing them down to the OOPIF renderers.
+      page_info_.shared_info_ = document_->GetPage()->TextAutosizerPageInfo();
+    } else {
+      LocalFrame& main_frame = To<LocalFrame>(frame);
+      IntSize frame_size =
+          document_->GetSettings()->TextAutosizingWindowSizeOverride();
+      if (frame_size.IsEmpty())
+        frame_size = WindowSize();
 
-    LocalFrame& main_frame = ToLocalFrame(frame);
-    IntSize frame_size =
-        document_->GetSettings()->TextAutosizingWindowSizeOverride();
-    if (frame_size.IsEmpty())
-      frame_size = WindowSize();
+      page_info_.shared_info_.main_frame_width =
+          horizontal_writing_mode ? frame_size.Width() : frame_size.Height();
 
-    page_info_.frame_width_ =
-        horizontal_writing_mode ? frame_size.Width() : frame_size.Height();
+      page_info_.shared_info_.main_frame_layout_width =
+          GetLayoutInlineSize(*document_, *main_frame.View());
 
-    IntSize layout_size = main_frame.View()->GetLayoutSize();
-    page_info_.layout_width_ =
-        horizontal_writing_mode ? layout_size.Width() : layout_size.Height();
-
-    // TODO(pdr): Accessibility should be moved out of the text autosizer. See:
-    // crbug.com/645717.
+      // If the page has a meta viewport or @viewport, don't apply the device
+      // scale adjustment.
+      if (!main_frame.GetDocument()
+               ->GetViewportData()
+               .GetViewportDescription()
+               .IsSpecifiedByAuthor()) {
+        page_info_.shared_info_.device_scale_adjustment =
+            document_->GetSettings()->GetDeviceScaleAdjustment();
+      } else {
+        page_info_.shared_info_.device_scale_adjustment = 1.0f;
+      }
+    }
+    // TODO(pdr): Accessibility should be moved out of the text autosizer.
+    // See: crbug.com/645717.
     page_info_.accessibility_font_scale_factor_ =
         document_->GetSettings()->GetAccessibilityFontScaleFactor();
-
-    // If the page has a meta viewport or @viewport, don't apply the device
-    // scale adjustment.
-    if (!main_frame.GetDocument()
-             ->GetViewportData()
-             .GetViewportDescription()
-             .IsSpecifiedByAuthor()) {
-      page_info_.device_scale_adjustment_ =
-          document_->GetSettings()->GetDeviceScaleAdjustment();
-    } else {
-      page_info_.device_scale_adjustment_ = 1.0f;
-    }
 
     // TODO(pdr): pageNeedsAutosizing should take into account whether
     // text-size-adjust is used anywhere on the page because that also needs to
     // trigger autosizing. See: crbug.com/646237.
     page_info_.page_needs_autosizing_ =
-        !!page_info_.frame_width_ &&
+        !!page_info_.shared_info_.main_frame_width &&
         (page_info_.accessibility_font_scale_factor_ *
-             page_info_.device_scale_adjustment_ *
-             (static_cast<float>(page_info_.layout_width_) /
-              page_info_.frame_width_) >
+             page_info_.shared_info_.device_scale_adjustment *
+             (static_cast<float>(
+                  page_info_.shared_info_.main_frame_layout_width) /
+              page_info_.shared_info_.main_frame_width) >
          1.0f);
   }
 
   if (page_info_.page_needs_autosizing_) {
     // If page info has changed, multipliers may have changed. Force a layout to
     // recompute them.
-    if (page_info_.frame_width_ != previous_page_info.frame_width_ ||
-        page_info_.layout_width_ != previous_page_info.layout_width_ ||
+    if (page_info_.shared_info_ != previous_page_info.shared_info_ ||
         page_info_.accessibility_font_scale_factor_ !=
             previous_page_info.accessibility_font_scale_factor_ ||
-        page_info_.device_scale_adjustment_ !=
-            previous_page_info.device_scale_adjustment_ ||
         page_info_.setting_enabled_ != previous_page_info.setting_enabled_)
       SetAllTextNeedsLayout();
   } else if (previous_page_info.has_autosized_) {
@@ -671,7 +718,8 @@ void TextAutosizer::SetAllTextNeedsLayout(LayoutBlock* container) {
     } else {
       if (object->IsText()) {
         object->SetNeedsLayoutAndFullPaintInvalidation(
-            LayoutInvalidationReason::kTextAutosizing);
+            layout_invalidation_reason::kTextAutosizing);
+        object->SetNeedsCollectInlines();
       }
       object = object->NextInPreOrder(container);
     }
@@ -681,19 +729,18 @@ void TextAutosizer::SetAllTextNeedsLayout(LayoutBlock* container) {
 TextAutosizer::BlockFlags TextAutosizer::ClassifyBlock(
     const LayoutObject* layout_object,
     BlockFlags mask) const {
-  if (!layout_object->IsLayoutBlock())
+  const auto* block = DynamicTo<LayoutBlock>(layout_object);
+  if (!block)
     return 0;
 
-  const LayoutBlock* block = ToLayoutBlock(layout_object);
   BlockFlags flags = 0;
-
   if (IsPotentialClusterRoot(block)) {
     if (mask & POTENTIAL_ROOT)
       flags |= POTENTIAL_ROOT;
 
     LayoutMultiColumnFlowThread* flow_thread = nullptr;
-    if (block->IsLayoutBlockFlow())
-      flow_thread = ToLayoutBlockFlow(block)->MultiColumnFlowThread();
+    if (auto* block_flow = DynamicTo<LayoutBlockFlow>(block))
+      flow_thread = block_flow->MultiColumnFlowThread();
     if ((mask & INDEPENDENT) &&
         (IsIndependentDescendant(block) || block->IsTable() ||
          (flow_thread && flow_thread->ColumnCount() > 1)))
@@ -789,27 +836,26 @@ TextAutosizer::Fingerprint TextAutosizer::GetFingerprint(
 
 TextAutosizer::Fingerprint TextAutosizer::ComputeFingerprint(
     const LayoutObject* layout_object) {
-  Node* node = layout_object->GeneratingNode();
-  if (!node || !node->IsElementNode())
+  auto* element = DynamicTo<Element>(layout_object->GeneratingNode());
+  if (!element)
     return 0;
 
   FingerprintSourceData data;
   if (LayoutObject* parent = ParentElementLayoutObject(layout_object))
     data.parent_hash_ = GetFingerprint(parent);
 
-  data.qualified_name_hash_ =
-      QualifiedNameHash::GetHash(ToElement(node)->TagQName());
+  data.qualified_name_hash_ = QualifiedNameHash::GetHash(element->TagQName());
 
   if (const ComputedStyle* style = layout_object->Style()) {
     data.packed_style_properties_ = static_cast<unsigned>(style->Direction());
     data.packed_style_properties_ |=
         (static_cast<unsigned>(style->GetPosition()) << 1);
     data.packed_style_properties_ |=
-        (static_cast<unsigned>(style->Floating()) << 4);
+        (static_cast<unsigned>(style->UnresolvedFloating()) << 4);
     data.packed_style_properties_ |=
-        (static_cast<unsigned>(style->Display()) << 6);
-    data.packed_style_properties_ |= (style->Width().GetType() << 11);
-    // packedStyleProperties effectively using 15 bits now.
+        (static_cast<unsigned>(style->Display()) << 7);
+    data.packed_style_properties_ |= (style->Width().GetType() << 12);
+    // packedStyleProperties effectively using 16 bits now.
 
     // consider for adding: writing mode, padding.
 
@@ -887,11 +933,12 @@ float TextAutosizer::ClusterMultiplier(Cluster* cluster) {
       cluster->multiplier_ = SuperclusterMultiplier(cluster);
       cluster->supercluster_->inherit_parent_multiplier_ =
           kDontInheritMultiplier;
-    } else if (ClusterHasEnoughTextToAutosize(cluster))
+    } else if (ClusterHasEnoughTextToAutosize(cluster)) {
       cluster->multiplier_ =
           MultiplierFromBlock(ClusterWidthProvider(cluster->root_));
-    else
+    } else {
       cluster->multiplier_ = 1.0f;
+    }
   } else {
     cluster->multiplier_ =
         cluster->parent_ ? ClusterMultiplier(cluster->parent_) : 1.0f;
@@ -986,9 +1033,9 @@ float TextAutosizer::WidthFromBlock(const LayoutBlock* block) const {
   for (; block; block = block->ContainingBlock()) {
     float width;
     Length specified_width =
-        block->IsTableCell()
-            ? ToLayoutTableCell(block)->StyleOrColLogicalWidth()
-            : block->StyleRef().LogicalWidth();
+        block->IsTableCell() ? ToInterface<LayoutNGTableCellInterface>(block)
+                                   ->StyleOrColLogicalWidth()
+                             : block->StyleRef().LogicalWidth();
     if (specified_width.IsFixed()) {
       if ((width = specified_width.Value()) > 0)
         return width;
@@ -1017,12 +1064,15 @@ float TextAutosizer::MultiplierFromBlock(const LayoutBlock* block) {
 #endif
   // Block width, in CSS pixels.
   float block_width = WidthFromBlock(block);
-  float layout_width =
-      std::min(block_width, static_cast<float>(page_info_.layout_width_));
+  float layout_width = std::min(
+      block_width,
+      static_cast<float>(page_info_.shared_info_.main_frame_layout_width));
   float multiplier =
-      page_info_.frame_width_ ? layout_width / page_info_.frame_width_ : 1.0f;
+      page_info_.shared_info_.main_frame_width
+          ? layout_width / page_info_.shared_info_.main_frame_width
+          : 1.0f;
   multiplier *= page_info_.accessibility_font_scale_factor_ *
-                page_info_.device_scale_adjustment_;
+                page_info_.shared_info_.device_scale_adjustment;
   return std::max(multiplier, 1.0f);
 }
 
@@ -1072,8 +1122,8 @@ const LayoutBlock* TextAutosizer::DeepestBlockContainingAllText(
     last_node = last_node->Parent();
   }
 
-  if (first_node->IsLayoutBlock())
-    return ToLayoutBlock(first_node);
+  if (auto* layout_block = DynamicTo<LayoutBlock>(first_node))
+    return layout_block;
 
   // containingBlock() should never leave the cluster, since it only skips
   // ancestors when finding the container of position:absolute/fixed blocks, and
@@ -1119,6 +1169,37 @@ const LayoutObject* TextAutosizer::FindTextLeaf(
   return nullptr;
 }
 
+static bool IsCrossSite(const Frame& frame1, const Frame& frame2) {
+  // Cross-site differs from cross-origin (LocalFrame::IsCrossOriginSubframe).
+  // For example, http://foo.com and http://sub.foo.com are cross-origin but
+  // same-site.  Only cross-site text autosizing is impacted by site isolation
+  // (crbug.com/393285).
+
+  const auto* origin1 = frame1.GetSecurityContext()->GetSecurityOrigin();
+  const auto* origin2 = frame2.GetSecurityContext()->GetSecurityOrigin();
+  if (!origin1 || !origin2 || origin1->CanAccess(origin2))
+    return false;
+
+  if (origin1->Protocol() != origin2->Protocol())
+    return true;
+
+  // Compare eTLD+1.
+  return network_utils::GetDomainAndRegistry(
+             origin1->Host(), network_utils::kIncludePrivateRegistries) !=
+         network_utils::GetDomainAndRegistry(
+             origin2->Host(), network_utils::kIncludePrivateRegistries);
+}
+
+void TextAutosizer::ReportIfCrossSiteFrame() {
+  LocalFrame* frame = document_->GetFrame();
+  LocalFrameView* view = document_->View();
+  if (!frame || !view || !view->IsAttached() || !view->IsVisible() ||
+      view->Size().IsEmpty() || !IsCrossSite(*frame, frame->Tree().Top()))
+    return;
+
+  document_->CountUse(WebFeature::kTextAutosizedCrossSiteIframe);
+}
+
 void TextAutosizer::ApplyMultiplier(LayoutObject* layout_object,
                                     float multiplier,
                                     SubtreeLayoutScope* layouter,
@@ -1146,26 +1227,35 @@ void TextAutosizer::ApplyMultiplier(LayoutObject* layout_object,
   scoped_refptr<ComputedStyle> style = ComputedStyle::Clone(current_style);
   style->SetTextAutosizingMultiplier(multiplier);
 
+  if (multiplier > 1 && !did_check_cross_site_use_count_) {
+    ReportIfCrossSiteFrame();
+    did_check_cross_site_use_count_ = true;
+  }
+
   switch (relayout_behavior) {
     case kAlreadyInLayout:
-      // Don't free currentStyle until the end of the layout pass. This allows
+      // Don't free current_style until the end of the layout pass. This allows
       // other parts of the system to safely hold raw ComputedStyle* pointers
-      // during layout, e.g. BreakingContext::m_currentStyle.
-      styles_retained_during_layout_.push_back(&current_style);
+      // during layout, e.g. BreakingContext::current_style_.
+      if (auto* scope = StyleRetainScope::Current())
+        scope->Retain(current_style);
+      else
+        DCHECK(false);
 
-      layout_object->SetStyleInternal(std::move(style));
+      layout_object->SetModifiedStyleOutsideStyleRecalc(
+          std::move(style), LayoutObject::ApplyStyleChanges::kNo);
       if (layout_object->IsText())
         ToLayoutText(layout_object)->AutosizingMultiplerChanged();
       DCHECK(!layouter || layout_object->IsDescendantOf(&layouter->Root()));
       layout_object->SetNeedsLayoutAndFullPaintInvalidation(
-          LayoutInvalidationReason::kTextAutosizing, kMarkContainerChain,
+          layout_invalidation_reason::kTextAutosizing, kMarkContainerChain,
           layouter);
-      layout_object->MarkContainerNeedsCollectInlines();
       break;
 
     case kLayoutNeeded:
       DCHECK(!layouter);
-      layout_object->SetStyle(std::move(style));
+      layout_object->SetModifiedStyleOutsideStyleRecalc(
+          std::move(style), LayoutObject::ApplyStyleChanges::kYes);
       break;
   }
 
@@ -1201,8 +1291,8 @@ bool TextAutosizer::IsWiderOrNarrowerDescendant(Cluster* cluster) {
   // Clusters with a root that is significantly narrower than the
   // deepestBlockContainingAllText of their parent autosize independently of
   // their parent.
-  static float narrow_width_difference = 200;
-  if (cluster_text_width - content_width > narrow_width_difference)
+  constexpr float kNarrowWidthDifference = 200;
+  if (cluster_text_width - content_width > kNarrowWidthDifference)
     return true;
 
   return false;
@@ -1282,7 +1372,7 @@ bool TextAutosizer::FingerprintMapper::Remove(LayoutObject* layout_object) {
     return false;
 
   BlockSet& blocks = *blocks_iter->value;
-  blocks.erase(ToLayoutBlock(layout_object));
+  blocks.erase(To<LayoutBlock>(layout_object));
   if (blocks.IsEmpty()) {
     blocks_for_fingerprint_.erase(blocks_iter);
 
@@ -1329,8 +1419,8 @@ TextAutosizer::LayoutScope::~LayoutScope() {
     text_autosizer_->EndLayout(block_);
 }
 
-TextAutosizer::TableLayoutScope::TableLayoutScope(LayoutTable* table)
-    : LayoutScope(table) {
+TextAutosizer::TableLayoutScope::TableLayoutScope(LayoutNGTableInterface* table)
+    : LayoutScope(To<LayoutBlock>(table->ToMutableLayoutObject())) {
   if (text_autosizer_) {
     DCHECK(text_autosizer_->ShouldHandleLayout());
     text_autosizer_->InflateAutoTable(table);
@@ -1339,6 +1429,10 @@ TextAutosizer::TableLayoutScope::TableLayoutScope(LayoutTable* table)
 
 TextAutosizer::DeferUpdatePageInfo::DeferUpdatePageInfo(Page* page)
     : main_frame_(page->DeprecatedLocalMainFrame()) {
+  // TODO(wjmaclean): see if we need to try and extend deferred updates to
+  // renderers for remote main frames or not. For now, it's safe to assume
+  // main_frame_ will be local, see WebViewImpl::ResizeViewWhileAnchored().
+  DCHECK(main_frame_);
   if (TextAutosizer* text_autosizer =
           main_frame_->GetDocument()->GetTextAutosizer()) {
     DCHECK(!text_autosizer->update_page_info_deferred_);
@@ -1349,7 +1443,7 @@ TextAutosizer::DeferUpdatePageInfo::DeferUpdatePageInfo(Page* page)
 TextAutosizer::NGLayoutScope::NGLayoutScope(const NGBlockNode& node,
                                             LayoutUnit inline_size)
     : text_autosizer_(node.GetLayoutBox()->GetDocument().GetTextAutosizer()),
-      block_(ToLayoutBlockFlow(node.GetLayoutBox())) {
+      block_(To<LayoutBlockFlow>(node.GetLayoutBox())) {
   if (!text_autosizer_ || !text_autosizer_->ShouldHandleLayout() ||
       block_->IsLayoutNGListMarker()) {
     // Bail if text autosizing isn't enabled, but also if this is a
@@ -1380,7 +1474,7 @@ TextAutosizer::DeferUpdatePageInfo::~DeferUpdatePageInfo() {
           main_frame_->GetDocument()->GetTextAutosizer()) {
     DCHECK(text_autosizer->update_page_info_deferred_);
     text_autosizer->update_page_info_deferred_ = false;
-    text_autosizer->UpdatePageInfoInAllFrames();
+    TextAutosizer::UpdatePageInfoInAllFrames(main_frame_);
   }
 }
 

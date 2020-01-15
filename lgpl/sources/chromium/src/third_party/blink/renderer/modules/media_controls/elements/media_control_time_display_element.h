@@ -16,16 +16,22 @@ class MediaControlTimeDisplayElement : public MediaControlDivElement {
  public:
   // Exported to be used in unit tests.
   MODULES_EXPORT void SetCurrentValue(double);
-  // Exported to be used by modules/accessibility.
   MODULES_EXPORT double CurrentValue() const;
 
+  WebSize GetSizeOrDefault() const override;
+
  protected:
-  MediaControlTimeDisplayElement(MediaControlsImpl&, MediaControlElementType);
+  MediaControlTimeDisplayElement(MediaControlsImpl&, int resource_id);
+
+  virtual int EstimateElementWidth() const;
 
   virtual String FormatTime() const;
 
  private:
+  void SetAriaLabel();
+
   double current_value_ = 0;
+  int localized_resource_id_;
 };
 
 }  // namespace blink

@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 namespace {
@@ -36,7 +37,7 @@ class DetailsTestCase {
 
   ~DetailsTestCase() = default;
 
-  PaymentDetailsInit BuildDetails() const {
+  PaymentDetailsInit* BuildDetails() const {
     return BuildPaymentDetailsInitForTest(detail_, data_, mod_type_,
                                           value_to_use_);
   }
@@ -124,13 +125,9 @@ class PaymentRequestDetailsTest
     : public testing::TestWithParam<DetailsTestCase> {};
 
 TEST_P(PaymentRequestDetailsTest, ValidatesDetails) {
-  V8TestingScope scope;
-  scope.GetDocument().SetSecurityOrigin(
-      SecurityOrigin::Create(KURL("https://www.example.com/")));
-  scope.GetDocument().SetSecureContextStateForTesting(
-      SecureContextState::kSecure);
-  PaymentOptions options;
-  options.setRequestShipping(true);
+  PaymentRequestV8TestingScope scope;
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestShipping(true);
   PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       GetParam().BuildDetails(), options, scope.GetExceptionState());
@@ -143,7 +140,7 @@ TEST_P(PaymentRequestDetailsTest, ValidatesDetails) {
   }
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     EmptyData,
     PaymentRequestDetailsTest,
     testing::Values(DetailsTestCase(kPaymentTestDetailTotal,
@@ -207,7 +204,7 @@ INSTANTIATE_TEST_CASE_P(
                                     "",
                                     false)));
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     ValidCurrencyCodeFormat,
     PaymentRequestDetailsTest,
     testing::Values(DetailsTestCase(kPaymentTestDetailTotal,
@@ -231,7 +228,7 @@ INSTANTIATE_TEST_CASE_P(
                                     kPaymentTestOverwriteValue,
                                     "USD")));
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     ValidValueFormat,
     PaymentRequestDetailsTest,
     testing::Values(DetailsTestCase(kPaymentTestDetailTotal,
@@ -367,7 +364,7 @@ INSTANTIATE_TEST_CASE_P(
                                     kPaymentTestOverwriteValue,
                                     "-012345678901234567890123456789")));
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     ValidValueFormatForModifier,
     PaymentRequestDetailsTest,
     testing::Values(DetailsTestCase(kPaymentTestDetailModifierTotal,
@@ -451,7 +448,7 @@ INSTANTIATE_TEST_CASE_P(
                                     kPaymentTestOverwriteValue,
                                     "-012345678901234567890123456789")));
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     InvalidValueFormat,
     PaymentRequestDetailsTest,
     testing::Values(DetailsTestCase(kPaymentTestDetailTotal,
@@ -689,7 +686,7 @@ INSTANTIATE_TEST_CASE_P(
                                     true,
                                     ESErrorType::kTypeError)));
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     InvalidValueFormatForModifier,
     PaymentRequestDetailsTest,
     testing::Values(DetailsTestCase(kPaymentTestDetailModifierTotal,

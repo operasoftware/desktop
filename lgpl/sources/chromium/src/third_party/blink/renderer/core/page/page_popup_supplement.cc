@@ -38,7 +38,8 @@ PagePopupSupplement::PagePopupSupplement(LocalFrame& frame,
                                          PagePopup& popup,
                                          PagePopupClient* popup_client)
     : Supplement<LocalFrame>(frame),
-      controller_(PagePopupController::Create(popup, popup_client)) {
+      controller_(
+          MakeGarbageCollected<PagePopupController>(popup, popup_client)) {
   DCHECK(popup_client);
 }
 
@@ -63,7 +64,8 @@ void PagePopupSupplement::Install(LocalFrame& frame,
                                   PagePopup& popup,
                                   PagePopupClient* popup_client) {
   DCHECK(popup_client);
-  ProvideTo(frame, new PagePopupSupplement(frame, popup, popup_client));
+  ProvideTo(frame, MakeGarbageCollected<PagePopupSupplement>(frame, popup,
+                                                             popup_client));
 }
 
 void PagePopupSupplement::Uninstall(LocalFrame& frame) {

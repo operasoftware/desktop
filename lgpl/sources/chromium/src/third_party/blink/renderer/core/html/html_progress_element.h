@@ -22,20 +22,21 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_PROGRESS_ELEMENT_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/html/forms/labelable_element.h"
+#include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
 class LayoutProgress;
 
-class CORE_EXPORT HTMLProgressElement final : public LabelableElement {
+class CORE_EXPORT HTMLProgressElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static const double kIndeterminatePosition;
   static const double kInvalidPosition;
 
-  static HTMLProgressElement* Create(Document&);
+  explicit HTMLProgressElement(Document&);
 
   double value() const;
   void setValue(double);
@@ -47,18 +48,16 @@ class CORE_EXPORT HTMLProgressElement final : public LabelableElement {
 
   bool CanContainRangeEndPoint() const override { return false; }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  explicit HTMLProgressElement(Document&);
   ~HTMLProgressElement() override;
 
   bool AreAuthorShadowsAllowed() const override { return false; }
   bool ShouldAppearIndeterminate() const override;
-  bool SupportLabels() const override { return true; }
-  bool ShouldForceLegacyLayout() const final { return true; }
+  bool IsLabelable() const override { return true; }
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
   LayoutProgress* GetLayoutProgress() const;
 
   void ParseAttribute(const AttributeModificationParams&) override;

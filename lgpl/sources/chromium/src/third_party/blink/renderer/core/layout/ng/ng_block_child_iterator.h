@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NGBlockChildIterator_h
-#define NGBlockChildIterator_h
+#ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_BLOCK_CHILD_ITERATOR_H_
+#define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_BLOCK_CHILD_ITERATOR_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_input_node.h"
@@ -12,9 +12,18 @@ namespace blink {
 
 class NGBreakToken;
 class NGBlockBreakToken;
+class NGInlineBreakToken;
 
 // A utility class for block-flow layout which given the first child and a
 // break token will iterate through unfinished children.
+//
+// NextChild() is used to iterate through the children. This will be done in
+// node order. If there are child break tokens, though, their nodes will be
+// processed first, in break token order (which may or may not be the same as
+// node order). When we're through those, we proceed to the next sibling node of
+// that of the last break token - unless we have already seen and started all
+// children (in which case the parent break token will be marked as such;
+// |HasSeenAllChildren()| will return true).
 //
 // This class does not handle modifications to its arguments after it has been
 // constructed.
@@ -31,7 +40,11 @@ class CORE_EXPORT NGBlockChildIterator {
   //    needed as multiple line-boxes can exist within the same parent
   //    fragment, unlike blocks.
   struct Entry;
-  Entry NextChild(const NGBreakToken* previous_inline_break_token = nullptr);
+  Entry NextChild(
+      const NGInlineBreakToken* previous_inline_break_token = nullptr);
+
+  // Return true if there are no more children to process.
+  bool IsAtEnd() const { return !child_; }
 
  private:
   NGLayoutInputNode child_;
@@ -39,9 +52,7 @@ class CORE_EXPORT NGBlockChildIterator {
 
   // An index into break_token_'s ChildBreakTokens() vector. Used for keeping
   // track of the next child break token to inspect.
-  size_t child_token_idx_;
-
-  bool resuming_at_inline_formatting_context_ = false;
+  wtf_size_t child_token_idx_;
 };
 
 struct NGBlockChildIterator::Entry {
@@ -61,4 +72,4 @@ struct NGBlockChildIterator::Entry {
 
 }  // namespace blink
 
-#endif  // NGBlockChildIterator_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_BLOCK_CHILD_ITERATOR_H_

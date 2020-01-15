@@ -34,9 +34,9 @@ OobeWebUITest.prototype = {
   /** @override */
   testGenPreamble: function() {
     // OobeWebUI should run in fullscreen.
-    GEN('  FullscreenNotificationObserver fullscreen_observer;');
-    GEN('  chrome::ToggleFullscreenMode(browser());');
-    GEN('  fullscreen_observer.Wait();');
+    GEN('FullscreenNotificationObserver fullscreen_observer(browser());');
+    GEN('chrome::ToggleFullscreenMode(browser());');
+    GEN('fullscreen_observer.Wait();');
   },
 
   /** @override */
@@ -91,18 +91,6 @@ OobeWebUITest.prototype = {
     this.accessibilityAuditConfig.ignoreSelectors(
       'badAriaAttribute',
       badAriaAttributeSelectors);
-
-    var tabIndexGreaterThanZeroSelectors = [
-      '#user-image-grid',
-      '#discard-photo',
-      '#take-photo',
-    ];
-
-    // Enable when failure is resolved.
-    // AX_FOCUS_03: http://crbug.com/560928
-    this.accessibilityAuditConfig.ignoreSelectors(
-      'tabIndexGreaterThanZero',
-      tabIndexGreaterThanZeroSelectors);
 
     var controlsWithoutLabelSelectors = [
       '#supervised-user-creation-managers-pane',

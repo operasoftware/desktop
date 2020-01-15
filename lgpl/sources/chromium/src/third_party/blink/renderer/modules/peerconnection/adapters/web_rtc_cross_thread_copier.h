@@ -8,12 +8,13 @@
 // This file defines specializations for the CrossThreadCopier that allow WebRTC
 // types to be passed across threads using their copy constructors.
 
-#include <memory>
 #include <set>
-#include <vector>
 
-#include "third_party/blink/renderer/platform/cross_thread_copier.h"
-#include "third_party/webrtc/rtc_base/scoped_ref_ptr.h"
+#include "third_party/blink/public/platform/web_vector.h"
+#include "third_party/blink/renderer/modules/peerconnection/adapters/p2p_quic_transport.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "third_party/webrtc/api/scoped_refptr.h"
 
 namespace cricket {
 class Candidate;
@@ -22,24 +23,21 @@ struct RelayServerConfig;
 }  // namespace cricket
 
 namespace rtc {
-class RTCCertificate;
 class SocketAddress;
+}
+
+namespace webrtc {
+class DtlsTransportInformation;
+class SctpTransportInformation;
 }
 
 namespace blink {
 
-template <>
-struct CrossThreadCopier<std::string>
-    : public CrossThreadCopierPassThrough<std::string> {
-  STATIC_ONLY(CrossThreadCopier);
-};
+struct P2PQuicTransportConfig;
 
-template <typename T, typename Allocator>
-struct CrossThreadCopier<std::vector<std::unique_ptr<T>, Allocator>> {
-  STATIC_ONLY(CrossThreadCopier);
-  using Type = std::vector<std::unique_ptr<T>, Allocator>;
-  static Type Copy(Type vector) { return std::move(vector); }
-};
+}
+
+namespace WTF {
 
 template <>
 struct CrossThreadCopier<cricket::IceParameters>
@@ -54,15 +52,15 @@ struct CrossThreadCopier<std::set<rtc::SocketAddress>>
 };
 
 template <>
-struct CrossThreadCopier<std::vector<cricket::RelayServerConfig>>
+struct CrossThreadCopier<blink::WebVector<cricket::RelayServerConfig>>
     : public CrossThreadCopierPassThrough<
-          std::vector<cricket::RelayServerConfig>> {
+          blink::WebVector<cricket::RelayServerConfig>> {
   STATIC_ONLY(CrossThreadCopier);
 };
 
 template <>
-struct CrossThreadCopier<std::vector<cricket::Candidate>>
-    : public CrossThreadCopierPassThrough<std::vector<cricket::Candidate>> {
+struct CrossThreadCopier<Vector<cricket::Candidate>>
+    : public CrossThreadCopierPassThrough<Vector<cricket::Candidate>> {
   STATIC_ONLY(CrossThreadCopier);
 };
 
@@ -73,19 +71,55 @@ struct CrossThreadCopier<cricket::Candidate>
 };
 
 template <>
-struct CrossThreadCopier<std::vector<rtc::scoped_refptr<rtc::RTCCertificate>>>
-    : public CrossThreadCopierPassThrough<
-          std::vector<rtc::scoped_refptr<rtc::RTCCertificate>>> {
-  STATIC_ONLY(CrossThreadCopier);
-};
-
-template <>
 struct CrossThreadCopier<std::pair<cricket::Candidate, cricket::Candidate>>
     : public CrossThreadCopierPassThrough<
           std::pair<cricket::Candidate, cricket::Candidate>> {
   STATIC_ONLY(CrossThreadCopier);
 };
 
-}  // namespace blink
+template <>
+struct CrossThreadCopier<blink::P2PQuicTransportConfig>
+    : public CrossThreadCopierPassThrough<blink::P2PQuicTransportConfig> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+template <>
+struct CrossThreadCopier<webrtc::DtlsTransportInformation>
+    : public CrossThreadCopierPassThrough<webrtc::DtlsTransportInformation> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+template <>
+struct CrossThreadCopier<webrtc::SctpTransportInformation>
+    : public CrossThreadCopierPassThrough<webrtc::SctpTransportInformation> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+template <>
+struct CrossThreadCopier<blink::P2PQuicTransport::StartConfig>
+    : public CrossThreadCopierPassThrough<
+          blink::P2PQuicTransport::StartConfig> {
+  STATIC_ONLY(CrossThreadCopier);
+  using Type = blink::P2PQuicTransport::StartConfig;
+  static blink::P2PQuicTransport::StartConfig Copy(
+      blink::P2PQuicTransport::StartConfig config) {
+    // This is in fact a move.
+    return config;
+  }
+};
+
+template <>
+struct CrossThreadCopier<blink::P2PQuicTransportStats>
+    : public CrossThreadCopierPassThrough<blink::P2PQuicTransportStats> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+template <>
+struct CrossThreadCopier<blink::P2PQuicNegotiatedParams>
+    : public CrossThreadCopierPassThrough<blink::P2PQuicNegotiatedParams> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+}  // namespace WTF
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_MODULES_PEERCONNECTION_ADAPTERS_WEB_RTC_CROSS_THREAD_COPIER_H_

@@ -35,15 +35,6 @@
 
 namespace blink {
 
-V0CustomElementMicrotaskResolutionStep*
-V0CustomElementMicrotaskResolutionStep::Create(
-    V0CustomElementRegistrationContext* context,
-    Element* element,
-    const V0CustomElementDescriptor& descriptor) {
-  return new V0CustomElementMicrotaskResolutionStep(context, element,
-                                                    descriptor);
-}
-
 V0CustomElementMicrotaskResolutionStep::V0CustomElementMicrotaskResolutionStep(
     V0CustomElementRegistrationContext* context,
     Element* element,
@@ -59,7 +50,7 @@ V0CustomElementMicrotaskResolutionStep::Process() {
   return V0CustomElementMicrotaskStep::kFinishedProcessing;
 }
 
-void V0CustomElementMicrotaskResolutionStep::Trace(blink::Visitor* visitor) {
+void V0CustomElementMicrotaskResolutionStep::Trace(Visitor* visitor) {
   visitor->Trace(context_);
   visitor->Trace(element_);
   V0CustomElementMicrotaskStep::Trace(visitor);

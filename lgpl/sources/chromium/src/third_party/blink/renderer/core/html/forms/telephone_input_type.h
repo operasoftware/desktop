@@ -37,10 +37,10 @@ namespace blink {
 
 class TelephoneInputType final : public BaseTextInputType {
  public:
-  static InputType* Create(HTMLInputElement&);
+  explicit TelephoneInputType(HTMLInputElement& element)
+      : BaseTextInputType(element) {}
 
  private:
-  TelephoneInputType(HTMLInputElement& element) : BaseTextInputType(element) {}
   void CountUsage() override;
   const AtomicString& FormControlType() const override;
 };

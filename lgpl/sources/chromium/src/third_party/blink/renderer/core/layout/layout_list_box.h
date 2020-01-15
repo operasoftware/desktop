@@ -37,7 +37,7 @@ namespace blink {
 
 class HTMLSelectElement;
 
-class LayoutListBox final : public LayoutBlockFlow {
+class CORE_EXPORT LayoutListBox final : public LayoutBlockFlow {
  public:
   explicit LayoutListBox(Element*);
   ~LayoutListBox() override;
@@ -45,7 +45,7 @@ class LayoutListBox final : public LayoutBlockFlow {
   unsigned size() const;
 
   // Unlike scrollRectToVisible this will not scroll parent boxes.
-  void ScrollToRect(const LayoutRect&);
+  void ScrollToRect(const PhysicalRect&);
 
   const char* GetName() const override { return "LayoutListBox"; }
 

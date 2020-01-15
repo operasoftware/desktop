@@ -42,7 +42,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/display_item.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 #include <limits>
@@ -61,8 +61,7 @@ struct CORE_EXPORT PaintInfo {
             GlobalPaintFlags global_paint_flags,
             PaintLayerFlags paint_flags,
             const LayoutBoxModelObject* paint_container = nullptr,
-            LayoutUnit fragment_logical_top_in_flow_thread = LayoutUnit(),
-            bool suppress_painting_descendants = false)
+            LayoutUnit fragment_logical_top_in_flow_thread = LayoutUnit())
       : context(context),
         phase(phase),
         cull_rect_(cull_rect),
@@ -71,7 +70,8 @@ struct CORE_EXPORT PaintInfo {
             fragment_logical_top_in_flow_thread),
         paint_flags_(paint_flags),
         global_paint_flags_(global_paint_flags),
-        suppress_painting_descendants_(suppress_painting_descendants) {}
+        is_painting_scrolling_background_(false),
+        descendant_painting_blocked_(false) {}
 
   PaintInfo(GraphicsContext& new_context,
             const PaintInfo& copy_other_fields_from)
@@ -83,13 +83,20 @@ struct CORE_EXPORT PaintInfo {
             copy_other_fields_from.fragment_logical_top_in_flow_thread_),
         paint_flags_(copy_other_fields_from.paint_flags_),
         global_paint_flags_(copy_other_fields_from.global_paint_flags_),
-        suppress_painting_descendants_(
-            copy_other_fields_from.suppress_painting_descendants_) {}
+        is_painting_scrolling_background_(false),
+        descendant_painting_blocked_(false) {
+    // We should never pass is_painting_scrolling_background_ other PaintInfo.
+    DCHECK(!copy_other_fields_from.is_painting_scrolling_background_);
+  }
 
   // Creates a PaintInfo for painting descendants. See comments about the paint
   // phases in PaintPhase.h for details.
   PaintInfo ForDescendants() const {
     PaintInfo result(*this);
+
+    // We should never start to paint descendant when the flag is set.
+    DCHECK(!result.is_painting_scrolling_background_);
+
     if (phase == PaintPhase::kDescendantOutlinesOnly)
       result.phase = PaintPhase::kOutline;
     else if (phase == PaintPhase::kDescendantBlockBackgroundsOnly)
@@ -104,14 +111,21 @@ struct CORE_EXPORT PaintInfo {
     return paint_flags_ & kPaintLayerPaintingRenderingResourceSubtree;
   }
 
+  // TODO(wangxianzhu): Rename this function to SkipBackground() for CAP.
   bool SkipRootBackground() const {
     return paint_flags_ & kPaintLayerPaintingSkipRootBackground;
   }
+  void SetSkipsBackground(bool b) {
+    DCHECK(RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
+    if (b)
+      paint_flags_ |= kPaintLayerPaintingSkipRootBackground;
+    else
+      paint_flags_ &= ~kPaintLayerPaintingSkipRootBackground;
+  }
 
   bool IsPrinting() const { return global_paint_flags_ & kGlobalPaintPrinting; }
-
-  bool SuppressPaintingDescendants() const {
-    return suppress_painting_descendants_;
+  bool ShouldAddUrlMetadata() const {
+    return global_paint_flags_ & kGlobalPaintAddUrlMetadata;
   }
 
   DisplayItem::Type DisplayItemTypeForClipping() const {
@@ -128,19 +142,16 @@ struct CORE_EXPORT PaintInfo {
 
   const CullRect& GetCullRect() const { return cull_rect_; }
 
-  void ApplyInfiniteCullRect() {
-    cull_rect_ = CullRect(LayoutRect::InfiniteIntRect());
+  bool IntersectsCullRect(
+      const PhysicalRect& rect,
+      const PhysicalOffset& offset = PhysicalOffset()) const {
+    return cull_rect_.Intersects(rect.ToLayoutRect(), offset.ToLayoutPoint());
   }
 
-  void UpdateCullRect(const AffineTransform& local_to_parent_transform) {
-    cull_rect_.UpdateCullRect(local_to_parent_transform);
-  }
+  void ApplyInfiniteCullRect() { cull_rect_ = CullRect::Infinite(); }
 
-  void UpdateCullRectForScrollingContents(
-      const IntRect& overflow_clip_rect,
-      const AffineTransform& local_to_parent_transform) {
-    cull_rect_.UpdateForScrollingContents(overflow_clip_rect,
-                                          local_to_parent_transform);
+  void TransformCullRect(const TransformPaintPropertyNode& transform) {
+    cull_rect_.ApplyTransform(transform);
   }
 
   // Returns the fragment of the current painting object matching the current
@@ -161,8 +172,24 @@ struct CORE_EXPORT PaintInfo {
     fragment_logical_top_in_flow_thread_ = fragment_logical_top;
   }
 
+  bool IsPaintingScrollingBackground() const {
+    DCHECK(RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
+    return is_painting_scrolling_background_;
+  }
+  void SetIsPaintingScrollingBackground(bool b) {
+    DCHECK(RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
+    is_painting_scrolling_background_ = b;
+  }
+
+  bool DescendantPaintingBlocked() const {
+    return descendant_painting_blocked_;
+  }
+  void SetDescendantPaintingBlocked(bool blocked) {
+    descendant_painting_blocked_ = blocked;
+  }
+
   // FIXME: Introduce setters/getters at some point. Requires a lot of changes
-  // throughout layout/.
+  // throughout paint/.
   GraphicsContext& context;
   PaintPhase phase;
 
@@ -176,13 +203,14 @@ struct CORE_EXPORT PaintInfo {
   // which initiated the current painting, in the containing flow thread.
   LayoutUnit fragment_logical_top_in_flow_thread_;
 
-  const PaintLayerFlags paint_flags_;
+  PaintLayerFlags paint_flags_;
   const GlobalPaintFlags global_paint_flags_;
-  const bool suppress_painting_descendants_;
 
-  // TODO(chrishtr): temporary while we implement CullRect everywhere.
-  friend class ScopedSVGPaintState;
-  friend class SVGShapePainter;
+  // For CAP only.
+  bool is_painting_scrolling_background_ : 1;
+
+  // Used by display-locking.
+  bool descendant_painting_blocked_ : 1;
 };
 
 Image::ImageDecodingMode GetImageDecodingMode(Node*);

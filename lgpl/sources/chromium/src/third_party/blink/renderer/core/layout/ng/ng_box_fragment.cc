@@ -16,13 +16,14 @@ NGLineHeightMetrics NGBoxFragment::BaselineMetricsWithoutSynthesize(
     const NGBaselineRequest& request) const {
   // For "leaf" theme objects, let the theme decide what the baseline position
   // is. The theme baseline wins over the propagated baselines.
-  const auto& physical_fragment = ToNGPhysicalBoxFragment(physical_fragment_);
+  const auto& physical_fragment = To<NGPhysicalBoxFragment>(physical_fragment_);
   DCHECK(physical_fragment_.GetLayoutObject());
   const LayoutBox& layout_box =
       ToLayoutBox(*physical_fragment_.GetLayoutObject());
   const ComputedStyle& style = physical_fragment.Style();
-  if (style.HasAppearance() &&
-      !LayoutTheme::GetTheme().IsControlContainer(style.Appearance())) {
+  if (style.HasEffectiveAppearance() &&
+      !LayoutTheme::GetTheme().IsControlContainer(
+          style.EffectiveAppearance())) {
     return NGLineHeightMetrics(
         BlockSize() + layout_box.MarginOver() +
             LayoutTheme::GetTheme().BaselinePositionAdjustment(style),
@@ -30,8 +31,9 @@ NGLineHeightMetrics NGBoxFragment::BaselineMetricsWithoutSynthesize(
   }
 
   // Check if we have a propagated baseline.
-  if (const NGBaseline* baseline = physical_fragment.Baseline(request)) {
-    LayoutUnit ascent = baseline->offset;
+  if (base::Optional<LayoutUnit> baseline =
+          physical_fragment.Baseline(request)) {
+    LayoutUnit ascent = *baseline;
     LayoutUnit descent = BlockSize() - ascent;
 
     // For replaced elements, inline-block elements, and inline-table
@@ -64,7 +66,7 @@ NGLineHeightMetrics NGBoxFragment::BaselineMetrics(
   LayoutUnit block_size = BlockSize();
 
   // If atomic inline, use the margin box. See above.
-  const auto& physical_fragment = ToNGPhysicalBoxFragment(physical_fragment_);
+  const auto& physical_fragment = To<NGPhysicalBoxFragment>(physical_fragment_);
   DCHECK(physical_fragment_.GetLayoutObject());
   const LayoutBox& layout_box =
       ToLayoutBox(*physical_fragment_.GetLayoutObject());
@@ -78,7 +80,7 @@ NGLineHeightMetrics NGBoxFragment::BaselineMetrics(
       block_size += layout_box.MarginLogicalWidth();
   }
 
-  if (request.baseline_type == kAlphabeticBaseline)
+  if (request.BaselineType() == kAlphabeticBaseline)
     return NGLineHeightMetrics(block_size, LayoutUnit());
   return NGLineHeightMetrics(block_size - block_size / 2, block_size / 2);
 }

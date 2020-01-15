@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_VR_VR_FRAME_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_VR_VR_FRAME_DATA_H_
 
-#include "device/vr/public/mojom/vr_service.mojom-blink.h"
+#include "device/vr/public/mojom/vr_service.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -20,7 +20,7 @@ class VRFrameData final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static VRFrameData* Create() { return new VRFrameData(); }
+  static VRFrameData* Create() { return MakeGarbageCollected<VRFrameData>(); }
 
   VRFrameData();
 

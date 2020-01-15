@@ -30,8 +30,9 @@
 #include "base/allocator/partition_allocator/page_allocator.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_export.h"
@@ -56,12 +57,14 @@ class WTF_EXPORT ArrayBufferContents {
     DISALLOW_COPY_AND_ASSIGN(DataHandle);
 
    public:
+    DataHandle() {}
+
     DataHandle(void* data,
                size_t length,
                DataDeleter deleter,
                void* deleter_info)
         : data_(data),
-          data_length_(length),
+          data_length_(data ? length : 0),
           deleter_(deleter),
           deleter_info_(deleter_info) {}
     // Move constructor
@@ -74,6 +77,8 @@ class WTF_EXPORT ArrayBufferContents {
 
     // Move operator
     DataHandle& operator=(DataHandle&& other) {
+      if (data_)
+        deleter_(data_, data_length_, deleter_info_);
       data_ = other.data_;
       data_length_ = other.data_length_;
       deleter_ = other.deleter_;
@@ -82,17 +87,19 @@ class WTF_EXPORT ArrayBufferContents {
       return *this;
     }
 
+    void reset() { *this = DataHandle(); }
+
     void* Data() const { return data_; }
     size_t DataLength() const { return data_length_; }
 
     operator bool() const { return data_; }
 
    private:
-    void* data_;
-    size_t data_length_;
+    void* data_ = nullptr;
+    size_t data_length_ = 0;
 
-    DataDeleter deleter_;
-    void* deleter_info_;
+    DataDeleter deleter_ = nullptr;
+    void* deleter_info_ = nullptr;
   };
 
   enum InitializationPolicy { kZeroInitialize, kDontInitialize };
@@ -103,7 +110,7 @@ class WTF_EXPORT ArrayBufferContents {
   };
 
   ArrayBufferContents();
-  ArrayBufferContents(unsigned num_elements,
+  ArrayBufferContents(size_t num_elements,
                       unsigned element_byte_size,
                       SharingType is_shared,
                       InitializationPolicy);
@@ -115,7 +122,7 @@ class WTF_EXPORT ArrayBufferContents {
 
   ArrayBufferContents& operator=(ArrayBufferContents&&) = default;
 
-  void Neuter();
+  void Detach();
 
   void* Data() const {
     DCHECK(!IsShared());
@@ -131,6 +138,7 @@ class WTF_EXPORT ArrayBufferContents {
 
   void Transfer(ArrayBufferContents& other);
   void ShareWith(ArrayBufferContents& other);
+  void ShareNonSharedForInternalUse(ArrayBufferContents& other);
   void CopyTo(ArrayBufferContents& other);
 
   static void* AllocateMemoryOrNull(size_t, InitializationPolicy);
@@ -160,7 +168,7 @@ class WTF_EXPORT ArrayBufferContents {
   static void DefaultAdjustAmountOfExternalAllocatedMemoryFunction(
       int64_t diff);
 
-  class DataHolder : public ThreadSafeRefCounted<DataHolder> {
+  class WTF_EXPORT DataHolder : public ThreadSafeRefCounted<DataHolder> {
     DISALLOW_COPY_AND_ASSIGN(DataHolder);
 
    public:
@@ -223,6 +231,15 @@ class WTF_EXPORT ArrayBufferContents {
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(ArrayBufferContents);
+};
+
+template <>
+struct CrossThreadCopier<ArrayBufferContents::DataHandle> {
+  STATIC_ONLY(CrossThreadCopier);
+  using Type = ArrayBufferContents::DataHandle;
+  static Type Copy(Type handle) {
+    return handle;  // This is in fact a move.
+  }
 };
 
 }  // namespace WTF

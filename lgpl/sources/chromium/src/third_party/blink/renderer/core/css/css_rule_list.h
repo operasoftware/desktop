@@ -33,6 +33,8 @@ namespace blink {
 class CSSRule;
 class CSSStyleSheet;
 
+using RuleIndexList = HeapVector<std::pair<Member<CSSRule>, int>>;
+
 class CSSRuleList : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
@@ -49,33 +51,10 @@ class CSSRuleList : public ScriptWrappable {
   DISALLOW_COPY_AND_ASSIGN(CSSRuleList);
 };
 
-class StaticCSSRuleList final : public CSSRuleList {
- public:
-  static StaticCSSRuleList* Create() { return new StaticCSSRuleList(); }
-
-  HeapVector<Member<CSSRule>>& Rules() { return rules_; }
-
-  CSSStyleSheet* GetStyleSheet() const override { return nullptr; }
-
-  void Trace(blink::Visitor*) override;
-
- private:
-  StaticCSSRuleList();
-
-  unsigned length() const override { return rules_.size(); }
-  CSSRule* item(unsigned index) const override {
-    return index < rules_.size() ? rules_[index].Get() : nullptr;
-  }
-
-  HeapVector<Member<CSSRule>> rules_;
-};
-
 template <class Rule>
 class LiveCSSRuleList final : public CSSRuleList {
  public:
-  static LiveCSSRuleList* Create(Rule* rule) {
-    return new LiveCSSRuleList(rule);
-  }
+  LiveCSSRuleList(Rule* rule) : rule_(rule) {}
 
   void Trace(blink::Visitor* visitor) override {
     visitor->Trace(rule_);
@@ -83,8 +62,6 @@ class LiveCSSRuleList final : public CSSRuleList {
   }
 
  private:
-  LiveCSSRuleList(Rule* rule) : rule_(rule) {}
-
   unsigned length() const override { return rule_->length(); }
   CSSRule* item(unsigned index) const override { return rule_->Item(index); }
   CSSStyleSheet* GetStyleSheet() const override {

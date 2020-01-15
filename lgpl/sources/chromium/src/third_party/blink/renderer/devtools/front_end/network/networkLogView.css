@@ -42,9 +42,14 @@
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
+    user-select: text;
 }
 
-.network-summary-bar label[is=dt-icon-label] {
+.panel.network .toolbar.network-summary-bar {
+    border-bottom: 0px;
+}
+
+.network-summary-bar span[is=dt-icon-label] {
     margin-right: 6px;
 }
 
@@ -126,10 +131,19 @@
 }
 
 .network-error-row,
-.network-error-row .network-cell-subtitle {
-    color: rgb(230, 0, 0);
+.network-error-row .network-cell-subtitle ,
+.network-log-grid.data-grid tr.selected.network-error-row,
+.network-log-grid.data-grid tr.selected.network-error-row .network-cell-subtitle,
+.network-log-grid.data-grid tr.selected.network-error-row .network-dim-cell {
+    color: rgb(230, 0, 0) !important;
 }
 
+.network-log-grid.data-grid:focus tr.selected.network-error-row,
+.network-log-grid.data-grid:focus tr.selected.network-error-row .network-cell-subtitle,
+.network-log-grid.data-grid:focus tr.selected.network-error-row .network-dim-cell {
+    background: hsl(0, 100%, 97%) !important;
+    color: rgb(230, 0, 0) !important;
+}
 .initiator-column .devtools-link {
     color: inherit;
 }
@@ -264,10 +278,6 @@
     color: grey;
 }
 
-.network-summary-bar .summary-red {
-    color: red;
-}
-
 .network-frame-divider {
     width: 2px;
     background-color: #FCCC49;
@@ -277,14 +287,6 @@
 
 #network-container:not(.brief-mode) .data-container {
     overflow: hidden;
-}
-
-.network-summary-bar .summary-blue {
-    color: blue;
-}
-
-.-theme-with-dark-background .network-summary-bar .summary-blue {
-    color: #03A9F4;
 }
 
 .network-log-grid.data-grid .resources-dividers {

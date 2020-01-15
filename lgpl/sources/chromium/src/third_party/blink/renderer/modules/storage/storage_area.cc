@@ -25,9 +25,10 @@
 
 #include "third_party/blink/renderer/modules/storage/storage_area.h"
 
+#include "base/feature_list.h"
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/public/platform/web_storage_area.h"
-#include "third_party/blink/public/platform/web_storage_namespace.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/modules/storage/dom_window_storage.h"
@@ -42,19 +43,33 @@
 namespace blink {
 
 StorageArea* StorageArea::Create(LocalFrame* frame,
-                                 std::unique_ptr<WebStorageArea> storage_area,
+                                 scoped_refptr<CachedStorageArea> storage_area,
                                  StorageType storage_type) {
-  return new StorageArea(frame, std::move(storage_area), storage_type);
+  return MakeGarbageCollected<StorageArea>(frame, std::move(storage_area),
+                                           storage_type,
+                                           /* should_enqueue_events */ true);
+}
+
+StorageArea* StorageArea::CreateForInspectorAgent(
+    LocalFrame* frame,
+    scoped_refptr<CachedStorageArea> storage_area,
+    StorageType storage_type) {
+  return MakeGarbageCollected<StorageArea>(frame, std::move(storage_area),
+                                           storage_type,
+                                           /* should_enqueue_events */ false);
 }
 
 StorageArea::StorageArea(LocalFrame* frame,
-                         std::unique_ptr<WebStorageArea> storage_area,
-                         StorageType storage_type)
+                         scoped_refptr<CachedStorageArea> storage_area,
+                         StorageType storage_type,
+                         bool should_enqueue_events)
     : ContextClient(frame),
-      storage_area_(std::move(storage_area)),
-      storage_type_(storage_type) {
+      cached_area_(std::move(storage_area)),
+      storage_type_(storage_type),
+      should_enqueue_events_(should_enqueue_events) {
   DCHECK(frame);
-  DCHECK(storage_area_);
+  DCHECK(cached_area_);
+  cached_area_->RegisterSource(this);
 }
 
 unsigned StorageArea::length(ExceptionState& exception_state) const {
@@ -62,7 +77,7 @@ unsigned StorageArea::length(ExceptionState& exception_state) const {
     exception_state.ThrowSecurityError("access is denied for this document.");
     return 0;
   }
-  return storage_area_->length();
+  return cached_area_->GetLength();
 }
 
 String StorageArea::key(unsigned index, ExceptionState& exception_state) const {
@@ -70,11 +85,7 @@ String StorageArea::key(unsigned index, ExceptionState& exception_state) const {
     exception_state.ThrowSecurityError("access is denied for this document.");
     return String();
   }
-  bool did_decrease_iterator = false;
-  String result = storage_area_->Key(index, &did_decrease_iterator);
-  if (did_decrease_iterator)
-    UseCounter::Count(GetFrame(), WebFeature::kReverseIterateDOMStorage);
-  return result;
+  return cached_area_->GetKey(index);
 }
 
 String StorageArea::getItem(const String& key,
@@ -83,7 +94,7 @@ String StorageArea::getItem(const String& key,
     exception_state.ThrowSecurityError("access is denied for this document.");
     return String();
   }
-  return storage_area_->GetItem(key);
+  return cached_area_->GetItem(key);
 }
 
 bool StorageArea::setItem(const String& key,
@@ -93,9 +104,7 @@ bool StorageArea::setItem(const String& key,
     exception_state.ThrowSecurityError("access is denied for this document.");
     return true;
   }
-  WebStorageArea::Result result = WebStorageArea::kResultOK;
-  storage_area_->SetItem(key, value, GetFrame()->GetDocument()->Url(), result);
-  if (result != WebStorageArea::kResultOK) {
+  if (!cached_area_->SetItem(key, value, this)) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kQuotaExceededError,
         "Setting the value of '" + key + "' exceeded the quota.");
@@ -109,7 +118,7 @@ DeleteResult StorageArea::removeItem(const String& key,
     exception_state.ThrowSecurityError("access is denied for this document.");
     return kDeleteSuccess;
   }
-  storage_area_->RemoveItem(key, GetFrame()->GetDocument()->Url());
+  cached_area_->RemoveItem(key, this);
   return kDeleteSuccess;
 }
 
@@ -118,7 +127,7 @@ void StorageArea::clear(ExceptionState& exception_state) {
     exception_state.ThrowSecurityError("access is denied for this document.");
     return;
   }
-  storage_area_->Clear(GetFrame()->GetDocument()->Url());
+  cached_area_->Clear(this);
 }
 
 bool StorageArea::Contains(const String& key,
@@ -127,7 +136,7 @@ bool StorageArea::Contains(const String& key,
     exception_state.ThrowSecurityError("access is denied for this document.");
     return false;
   }
-  return !storage_area_->GetItem(key).IsNull();
+  return !cached_area_->GetItem(key).IsNull();
 }
 
 void StorageArea::NamedPropertyEnumerator(Vector<String>& names,
@@ -174,95 +183,39 @@ bool StorageArea::CanAccessStorage() const {
   return can_access_storage_cached_result_;
 }
 
-namespace {
-Page* FindPageWithSessionStorageNamespace(
-    const WebStorageNamespace& session_namespace) {
-  // Iterate over all pages that have a StorageNamespace supplement.
-  String namespace_str = session_namespace.GetNamespaceId();
-  for (Page* page : Page::OrdinaryPages()) {
-    StorageNamespace* storage_namespace = StorageNamespace::From(page);
-    if (storage_namespace && storage_namespace->namespace_id() == namespace_str)
-      return page;
-  }
-  return nullptr;
+KURL StorageArea::GetPageUrl() const {
+  LocalFrame* frame = GetFrame();
+  if (!frame)
+    return KURL();
+  return GetFrame()->GetDocument()->Url();
 }
 
-bool IsEventSource(StorageArea* storage, WebStorageArea* source_area_instance) {
-  DCHECK(storage);
-  WebStorageArea* web_area = storage->Area();
-  return web_area == source_area_instance;
-}
-}  // namespace
-
-void StorageArea::DispatchLocalStorageEvent(
-    const String& key,
-    const String& old_value,
-    const String& new_value,
-    const SecurityOrigin* security_origin,
-    const KURL& page_url,
-    WebStorageArea* source_area_instance) {
-  // Iterate over all pages that have a LocalStorage area created.
-  for (Page* page : Page::OrdinaryPages()) {
-    for (Frame* frame = page->MainFrame(); frame;
-         frame = frame->Tree().TraverseNext()) {
-      // Remote frames are cross-origin and do not need to be notified of
-      // events.
-      if (!frame->IsLocalFrame())
-        continue;
-      LocalFrame* local_frame = ToLocalFrame(frame);
-      LocalDOMWindow* local_window = local_frame->DomWindow();
-      StorageArea* storage =
-          DOMWindowStorage::From(*local_window).OptionalLocalStorage();
-      if (storage &&
-          local_frame->GetDocument()->GetSecurityOrigin()->IsSameSchemeHostPort(
-              security_origin) &&
-          !IsEventSource(storage, source_area_instance)) {
-        // https://www.w3.org/TR/webstorage/#the-storage-event
-        local_frame->DomWindow()->EnqueueWindowEvent(
-            *StorageEvent::Create(EventTypeNames::storage, key, old_value,
-                                  new_value, page_url, storage),
-            TaskType::kDOMManipulation);
-      }
-    }
-    StorageController::GetInstance()->DidDispatchLocalStorageEvent(
-        security_origin, key, old_value, new_value);
-  }
+bool StorageArea::EnqueueStorageEvent(const String& key,
+                                      const String& old_value,
+                                      const String& new_value,
+                                      const String& url) {
+  if (!should_enqueue_events_)
+    return true;
+  if (!GetExecutionContext())
+    return false;
+  LocalFrame* frame = GetFrame();
+  if (!frame)
+    return true;
+  frame->DomWindow()->EnqueueWindowEvent(
+      *StorageEvent::Create(event_type_names::kStorage, key, old_value,
+                            new_value, url, this),
+      TaskType::kDOMManipulation);
+  return true;
 }
 
-void StorageArea::DispatchSessionStorageEvent(
-    const String& key,
-    const String& old_value,
-    const String& new_value,
-    const SecurityOrigin* security_origin,
-    const KURL& page_url,
-    const WebStorageNamespace& session_namespace,
-    WebStorageArea* source_area_instance) {
-  Page* page = FindPageWithSessionStorageNamespace(session_namespace);
-  if (!page)
-    return;
-
-  for (Frame* frame = page->MainFrame(); frame;
-       frame = frame->Tree().TraverseNext()) {
-    // Remote frames are cross-origin and do not need to be notified of events.
-    if (!frame->IsLocalFrame())
-      continue;
-    LocalFrame* local_frame = ToLocalFrame(frame);
-    LocalDOMWindow* local_window = local_frame->DomWindow();
-    StorageArea* storage =
-        DOMWindowStorage::From(*local_window).OptionalSessionStorage();
-    if (storage &&
-        local_frame->GetDocument()->GetSecurityOrigin()->IsSameSchemeHostPort(
-            security_origin) &&
-        !IsEventSource(storage, source_area_instance)) {
-      // https://www.w3.org/TR/webstorage/#the-storage-event
-      local_frame->DomWindow()->EnqueueWindowEvent(
-          *StorageEvent::Create(EventTypeNames::storage, key, old_value,
-                                new_value, page_url, storage),
-          TaskType::kDOMManipulation);
-    }
-  }
-  StorageNamespace::From(page)->DidDispatchStorageEvent(security_origin, key,
-                                                        old_value, new_value);
+blink::WebScopedVirtualTimePauser StorageArea::CreateWebScopedVirtualTimePauser(
+    const char* name,
+    WebScopedVirtualTimePauser::VirtualTaskDuration duration) {
+  LocalFrame* frame = GetFrame();
+  if (!frame)
+    return blink::WebScopedVirtualTimePauser();
+  return frame->GetFrameScheduler()->CreateWebScopedVirtualTimePauser(name,
+                                                                      duration);
 }
 
 }  // namespace blink

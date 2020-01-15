@@ -30,16 +30,16 @@ class SVGFETileElement final : public SVGFilterPrimitiveStandardAttributes {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(SVGFETileElement);
+  explicit SVGFETileElement(Document&);
+
   SVGAnimatedString* in1() { return in1_.Get(); }
 
   void Trace(blink::Visitor*) override;
 
  private:
-  explicit SVGFETileElement(Document&);
-
   void SvgAttributeChanged(const QualifiedName&) override;
   FilterEffect* Build(SVGFilterBuilder*, Filter*) override;
+  bool TaintsOrigin() const override { return false; }
 
   Member<SVGAnimatedString> in1_;
 };

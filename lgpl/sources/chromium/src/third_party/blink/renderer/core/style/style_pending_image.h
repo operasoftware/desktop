@@ -32,6 +32,7 @@
 #include "third_party/blink/renderer/core/css/css_paint_value.h"
 #include "third_party/blink/renderer/core/style/style_image.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -43,33 +44,32 @@ class ImageResourceObserver;
 // ComputedStyle after it has been returned from the style selector.
 class StylePendingImage final : public StyleImage {
  public:
-  static StylePendingImage* Create(const CSSValue& value) {
-    return new StylePendingImage(value);
+  explicit StylePendingImage(const CSSValue& value)
+      : value_(const_cast<CSSValue*>(&value)) {
+    is_pending_image_ = true;
   }
 
   WrappedImagePtr Data() const override { return value_.Get(); }
 
   CSSValue* CssValue() const override { return value_; }
 
-  CSSValue* ComputedCSSValue() const override {
+  CSSValue* ComputedCSSValue(const ComputedStyle&,
+                             bool allow_visited_style) const override {
     NOTREACHED();
     return nullptr;
   }
 
   CSSImageValue* CssImageValue() const {
-    return value_->IsImageValue() ? ToCSSImageValue(value_.Get()) : nullptr;
+    return DynamicTo<CSSImageValue>(value_.Get());
   }
   CSSPaintValue* CssPaintValue() const {
-    return value_->IsPaintValue() ? ToCSSPaintValue(value_.Get()) : nullptr;
+    return DynamicTo<CSSPaintValue>(value_.Get());
   }
   CSSImageGeneratorValue* CssImageGeneratorValue() const {
-    return value_->IsImageGeneratorValue()
-               ? ToCSSImageGeneratorValue(value_.Get())
-               : nullptr;
+    return DynamicTo<CSSImageGeneratorValue>(value_.Get());
   }
   CSSImageSetValue* CssImageSetValue() const {
-    return value_->IsImageSetValue() ? ToCSSImageSetValue(value_.Get())
-                                     : nullptr;
+    return DynamicTo<CSSImageSetValue>(value_.Get());
   }
 
   FloatSize ImageSize(const Document&,
@@ -77,8 +77,7 @@ class StylePendingImage final : public StyleImage {
                       const LayoutSize& /*defaultObjectSize*/) const override {
     return FloatSize();
   }
-  bool ImageHasRelativeSize() const override { return false; }
-  bool UsesImageContainerSize() const override { return false; }
+  bool HasIntrinsicSize() const override { return true; }
   void AddClient(ImageResourceObserver*) override {}
   void RemoveClient(ImageResourceObserver*) override {}
   scoped_refptr<Image> GetImage(const ImageResourceObserver&,
@@ -98,11 +97,6 @@ class StylePendingImage final : public StyleImage {
   }
 
  private:
-  explicit StylePendingImage(const CSSValue& value)
-      : value_(const_cast<CSSValue*>(&value)) {
-    is_pending_image_ = true;
-  }
-
   bool IsEqual(const StyleImage& other) const override;
 
   // TODO(sashab): Replace this with <const CSSValue> once Member<>
@@ -110,12 +104,17 @@ class StylePendingImage final : public StyleImage {
   Member<CSSValue> value_;
 };
 
-DEFINE_STYLE_IMAGE_TYPE_CASTS(StylePendingImage, IsPendingImage());
+template <>
+struct DowncastTraits<StylePendingImage> {
+  static bool AllowFrom(const StyleImage& styleImage) {
+    return styleImage.IsPendingImage();
+  }
+};
 
 inline bool StylePendingImage::IsEqual(const StyleImage& other) const {
   if (!other.IsPendingImage())
     return false;
-  const auto& other_pending = ToStylePendingImage(other);
+  const auto& other_pending = To<StylePendingImage>(other);
   return value_ == other_pending.value_;
 }
 

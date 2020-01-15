@@ -72,15 +72,8 @@ class MediaList final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static MediaList* Create(scoped_refptr<MediaQuerySet> media_queries,
-                           CSSStyleSheet* parent_sheet) {
-    return new MediaList(std::move(media_queries), parent_sheet);
-  }
-
-  static MediaList* Create(scoped_refptr<MediaQuerySet> media_queries,
-                           CSSRule* parent_rule) {
-    return new MediaList(std::move(media_queries), parent_rule);
-  }
+  MediaList(scoped_refptr<MediaQuerySet>, CSSStyleSheet* parent_sheet);
+  MediaList(scoped_refptr<MediaQuerySet>, CSSRule* parent_rule);
 
   unsigned length() const { return media_queries_->QueryVector().size(); }
   String item(unsigned index) const;
@@ -101,9 +94,6 @@ class MediaList final : public ScriptWrappable {
   void Trace(blink::Visitor*) override;
 
  private:
-  MediaList(scoped_refptr<MediaQuerySet>, CSSStyleSheet* parent_sheet);
-  MediaList(scoped_refptr<MediaQuerySet>, CSSRule* parent_rule);
-
   scoped_refptr<MediaQuerySet> media_queries_;
   Member<CSSStyleSheet> parent_style_sheet_;
   Member<CSSRule> parent_rule_;

@@ -28,7 +28,7 @@ using testing::AnyNumber;
 namespace blink {
 namespace {
 
-class AnimationMockChromeClient : public EmptyChromeClient {
+class AnimationMockChromeClient : public RenderingTestChromeClient {
  public:
   AnimationMockChromeClient() : has_scheduled_animation_(false) {}
 
@@ -42,7 +42,8 @@ class AnimationMockChromeClient : public EmptyChromeClient {
     MockSetToolTip(&frame, tooltip_text, dir);
   }
 
-  void ScheduleAnimation(const LocalFrameView*) override {
+  void ScheduleAnimation(const LocalFrameView*,
+                         base::TimeDelta = base::TimeDelta()) override {
     has_scheduled_animation_ = true;
   }
   bool has_scheduled_animation_;
@@ -51,8 +52,8 @@ class AnimationMockChromeClient : public EmptyChromeClient {
 class LocalFrameViewTest : public RenderingTest {
  protected:
   LocalFrameViewTest()
-      : RenderingTest(SingleChildLocalFrameClient::Create()),
-        chrome_client_(new AnimationMockChromeClient) {
+      : RenderingTest(MakeGarbageCollected<SingleChildLocalFrameClient>()),
+        chrome_client_(MakeGarbageCollected<AnimationMockChromeClient>()) {
     EXPECT_CALL(GetAnimationMockChromeClient(), AttachRootGraphicsLayer(_, _))
         .Times(AnyNumber());
   }
@@ -61,11 +62,13 @@ class LocalFrameViewTest : public RenderingTest {
     testing::Mock::VerifyAndClearExpectations(&GetAnimationMockChromeClient());
   }
 
-  ChromeClient& GetChromeClient() const override { return *chrome_client_; }
+  RenderingTestChromeClient& GetChromeClient() const override {
+    return *chrome_client_;
+  }
 
   void SetUp() override {
-    RenderingTest::SetUp();
     EnableCompositing();
+    RenderingTest::SetUp();
   }
 
   AnimationMockChromeClient& GetAnimationMockChromeClient() const {
@@ -78,10 +81,10 @@ class LocalFrameViewTest : public RenderingTest {
 
 TEST_F(LocalFrameViewTest, SetPaintInvalidationDuringUpdateAllLifecyclePhases) {
   SetBodyInnerHTML("<div id='a' style='color: blue'>A</div>");
-  GetDocument().getElementById("a")->setAttribute(HTMLNames::styleAttr,
+  GetDocument().getElementById("a")->setAttribute(html_names::kStyleAttr,
                                                   "color: green");
   GetAnimationMockChromeClient().has_scheduled_animation_ = false;
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
   EXPECT_FALSE(GetAnimationMockChromeClient().has_scheduled_animation_);
 }
 
@@ -100,7 +103,7 @@ TEST_F(LocalFrameViewTest, SetPaintInvalidationOutOfUpdateAllLifecyclePhases) {
       ->SetShouldDoFullPaintInvalidation();
   EXPECT_TRUE(GetAnimationMockChromeClient().has_scheduled_animation_);
   GetAnimationMockChromeClient().has_scheduled_animation_ = false;
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
   EXPECT_FALSE(GetAnimationMockChromeClient().has_scheduled_animation_);
 }
 
@@ -174,106 +177,22 @@ TEST_F(LocalFrameViewTest, UpdateLifecyclePhasesForPrintingDetachedFrame) {
   EXPECT_TRUE(child_layout_view->FirstFragment().PaintProperties());
 }
 
-class LocalFrameViewSimTest : public SimTest {
-  void SetUp() override {
-    SimTest::SetUp();
-    RuntimeEnabledFeatures::SetCSSFragmentIdentifiersEnabled(true);
-  }
-};
+TEST_F(LocalFrameViewTest, CanHaveScrollbarsIfScrollingAttrEqualsNoChanged) {
+  SetBodyInnerHTML("<iframe scrolling='no'></iframe>");
+  EXPECT_FALSE(ChildDocument().View()->CanHaveScrollbars());
 
-TEST_F(LocalFrameViewSimTest, CSSFragmentIdentifierIsParsed) {
-  SimRequest main_resource("https://example.com/#targetElement=.foobar",
-                           "text/html");
-  LoadURL("https://example.com/#targetElement=.foobar");
-  main_resource.Complete("<div class='foobar' id='target'></div>");
-
-  Element* target = GetDocument().getElementById("target");
-  EXPECT_EQ(target, GetDocument().CssTarget());
-}
-
-TEST_F(LocalFrameViewSimTest, CSSFragmentIdentifierComplexSelector) {
-  SimRequest main_resource(
-      "https://example.com/#targetElement=.outer%3Ediv%3Ep%3Anth-child%282%29",
-      "text/html");
-  LoadURL(
-      "https://example.com/#targetElement=.outer%3Ediv%3Ep%3Anth-child%282%29");
-  main_resource.Complete(R"HTML(
-    <!DOCTYPE html>
-    <html>
-      <head></head>
-      <body>
-        <div class='outer'>
-          <div>
-            <p></p>
-            <p id='target'></p>
-          </div>
-        </div>
-      </body>
-    </html>
-    )HTML");
-
-  Element* target = GetDocument().getElementById("target");
-  EXPECT_EQ(target, GetDocument().CssTarget());
-}
-
-TEST_F(LocalFrameViewSimTest, CSSFragmentIdentifierUsesFirstElementFound) {
-  SimRequest main_resource("https://example.com/#targetElement=.foobar",
-                           "text/html");
-  LoadURL("https://example.com/#targetElement=.foobar");
-  main_resource.Complete(
-      "<div class='foobar' id='target'></div><div class='foobar'></div>");
-
-  Element* target = GetDocument().getElementById("target");
-  EXPECT_EQ(target, GetDocument().CssTarget());
-}
-
-TEST_F(LocalFrameViewSimTest, CSSFragmentIdentifierIneligibleFragments) {
-  SimRequest main_resource("https://example.com/#targetEl=.foobar",
-                           "text/html");
-  LoadURL("https://example.com/#targetEl=.foobar");
-  main_resource.Complete("<div class='foobar' id='target'></div>");
-
-  EXPECT_EQ(nullptr, GetDocument().CssTarget());
-
-  SimRequest main_resource2("https://example.com/#path/fragment", "text/html");
-  LoadURL("https://example.com/#path/fragment");
-  main_resource2.Complete("<div class='foobar' id='target'></div>");
-
-  EXPECT_EQ(nullptr, GetDocument().CssTarget());
-}
-
-TEST_F(LocalFrameViewSimTest, CSSFragmentIdentifierNoMatches) {
-  SimRequest main_resource("https://example.com/#targetElement=.foobar",
-                           "text/html");
-  LoadURL("https://example.com/#targetElement=.foobar");
-  main_resource.Complete("<div class='barbaz' id='target'></div>");
-
-  EXPECT_EQ(nullptr, GetDocument().CssTarget());
-}
-
-TEST_F(LocalFrameViewSimTest, CSSFragmentIdentifierInvalidSelector) {
-  SimRequest main_resource("https://example.com/#targetElement=..foobar",
-                           "text/html");
-  LoadURL("https://example.com/#targetElement=..foobar");
-  main_resource.Complete("<div class='foobar' id='target'></div>");
-
-  EXPECT_EQ(nullptr, GetDocument().CssTarget());
-}
-
-TEST_F(LocalFrameViewSimTest, CSSFragmentIdentifierEmptySelector) {
-  SimRequest main_resource("https://example.com/#targetElement=", "text/html");
-  LoadURL("https://example.com/#targetElement=");
-  main_resource.Complete("<div class='foobar' id='target'></div>");
-
-  EXPECT_EQ(nullptr, GetDocument().CssTarget());
+  ChildDocument().WillChangeFrameOwnerProperties(0, 0, ScrollbarMode::kAlwaysOn,
+                                                 false);
+  EXPECT_TRUE(ChildDocument().View()->CanHaveScrollbars());
 }
 
 // Ensure the fragment navigation "scroll into view and focus" behavior doesn't
 // activate synchronously while rendering is blocked waiting on a stylesheet.
 // See https://crbug.com/851338.
-TEST_F(LocalFrameViewSimTest, FragmentNavChangesFocusWhileRenderingBlocked) {
+TEST_F(SimTest, FragmentNavChangesFocusWhileRenderingBlocked) {
   SimRequest main_resource("https://example.com/test.html", "text/html");
-  SimRequest css_resource("https://example.com/sheet.css", "text/css");
+  SimSubresourceRequest css_resource("https://example.com/sheet.css",
+                                     "text/css");
   LoadURL("https://example.com/test.html");
 
   main_resource.Complete(R"HTML(
@@ -281,7 +200,7 @@ TEST_F(LocalFrameViewSimTest, FragmentNavChangesFocusWhileRenderingBlocked) {
       <link rel="stylesheet" type="text/css" href="sheet.css">
       <a id="anchorlink" href="#bottom">Link to bottom of the page</a>
       <div style="height: 1000px;"></div>
-      <input id="bottom">Bottom of the page</a>
+      <input id="bottom">Bottom of the page</input>
     )HTML");
 
   ScrollableArea* viewport = GetDocument().View()->LayoutViewport();
@@ -289,13 +208,13 @@ TEST_F(LocalFrameViewSimTest, FragmentNavChangesFocusWhileRenderingBlocked) {
 
   // We're still waiting on the stylesheet to load so the load event shouldn't
   // yet dispatch and rendering is deferred.
-  ASSERT_FALSE(GetDocument().IsRenderingReady());
+  ASSERT_FALSE(GetDocument().HaveRenderBlockingResourcesLoaded());
   EXPECT_FALSE(GetDocument().IsLoadCompleted());
 
   // Click on the anchor element. This will cause a synchronous same-document
   //  navigation.
-  HTMLAnchorElement* anchor =
-      ToHTMLAnchorElement(GetDocument().getElementById("anchorlink"));
+  auto* anchor =
+      To<HTMLAnchorElement>(GetDocument().getElementById("anchorlink"));
   anchor->click();
 
   // Even though the navigation is synchronous, the active element shouldn't be
@@ -308,7 +227,7 @@ TEST_F(LocalFrameViewSimTest, FragmentNavChangesFocusWhileRenderingBlocked) {
   // Force a layout.
   anchor->style()->setProperty(&GetDocument(), "display", "block", String(),
                                ASSERT_NO_EXCEPTION);
-  GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+  GetDocument().UpdateStyleAndLayout();
 
   EXPECT_EQ(GetDocument().body(), GetDocument().ActiveElement())
       << "Active element changed due to layout while rendering is blocked";
@@ -319,12 +238,38 @@ TEST_F(LocalFrameViewSimTest, FragmentNavChangesFocusWhileRenderingBlocked) {
   // fragment should be activated at that point.
   css_resource.Complete("");
   RunPendingTasks();
+  Compositor().BeginFrame();
   ASSERT_TRUE(GetDocument().IsLoadCompleted());
   EXPECT_EQ(GetDocument().getElementById("bottom"),
             GetDocument().ActiveElement())
       << "Active element wasn't changed after load completed.";
   EXPECT_NE(ScrollOffset(), viewport->GetScrollOffset())
       << "Scroll offset wasn't changed after load completed.";
+}
+
+TEST_F(SimTest, ForcedLayoutWithIncompleteSVGChildFrame) {
+  SimRequest main_resource("https://example.com/test.html", "text/html");
+  SimRequest svg_resource("https://example.com/file.svg", "image/svg+xml");
+
+  LoadURL("https://example.com/test.html");
+
+  main_resource.Complete(R"HTML(
+      <!DOCTYPE html>
+      <object data="file.svg"></object>
+    )HTML");
+
+  // Write the SVG document so that there is something to layout, but don't let
+  // the resource finish loading.
+  svg_resource.Write(R"SVG(
+      <svg xmlns="http://www.w3.org/2000/svg"></svg>
+    )SVG");
+
+  // Mark the top-level document for layout and then force layout. This will
+  // cause the layout tree in the <object> object to be built.
+  GetDocument().View()->SetNeedsLayout();
+  GetDocument().UpdateStyleAndLayout();
+
+  svg_resource.Finish();
 }
 
 }  // namespace

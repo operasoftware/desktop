@@ -30,34 +30,30 @@
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-inline HTMLStyleElement::HTMLStyleElement(Document& document,
-                                          const CreateElementFlags flags)
-    : HTMLElement(styleTag, document),
+HTMLStyleElement::HTMLStyleElement(Document& document,
+                                   const CreateElementFlags flags)
+    : HTMLElement(kStyleTag, document),
       StyleElement(&document, flags.IsCreatedByParser()),
       fired_load_(false),
       loaded_sheet_(false) {}
 
 HTMLStyleElement::~HTMLStyleElement() = default;
 
-HTMLStyleElement* HTMLStyleElement::Create(Document& document,
-                                           const CreateElementFlags flags) {
-  return new HTMLStyleElement(document, flags);
-}
-
 void HTMLStyleElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  if (params.name == titleAttr && sheet_ && IsInDocumentTree()) {
+  if (params.name == kTitleAttr && sheet_ && IsInDocumentTree()) {
     sheet_->SetTitle(params.new_value);
-  } else if (params.name == mediaAttr && isConnected() &&
+  } else if (params.name == kMediaAttr && isConnected() &&
              GetDocument().IsActive() && sheet_) {
     sheet_->SetMediaQueries(MediaQuerySet::Create(params.new_value));
     GetDocument().GetStyleEngine().MediaQueriesChangedInScope(GetTreeScope());
-  } else if (params.name == typeAttr) {
+  } else if (params.name == kTypeAttr) {
     HTMLElement::ParseAttribute(params);
     StyleElement::ChildrenChanged(*this);
   } else {
@@ -101,11 +97,11 @@ void HTMLStyleElement::ChildrenChanged(const ChildrenChange& change) {
 }
 
 const AtomicString& HTMLStyleElement::media() const {
-  return getAttribute(mediaAttr);
+  return getAttribute(kMediaAttr);
 }
 
 const AtomicString& HTMLStyleElement::type() const {
-  return getAttribute(typeAttr);
+  return getAttribute(kTypeAttr);
 }
 
 void HTMLStyleElement::DispatchPendingEvent(
@@ -113,9 +109,9 @@ void HTMLStyleElement::DispatchPendingEvent(
   if (loaded_sheet_) {
     if (GetDocument().HasListenerType(
             Document::kLoadListenerAtCapturePhaseOrAtStyleElement))
-      DispatchEvent(*Event::Create(EventTypeNames::load));
+      DispatchEvent(*Event::Create(event_type_names::kLoad));
   } else {
-    DispatchEvent(*Event::Create(EventTypeNames::error));
+    DispatchEvent(*Event::Create(event_type_names::kError));
   }
   // Checks Document's load event synchronously here for performance.
   // This is safe because dispatchPendingEvent() is called asynchronously.
@@ -128,13 +124,20 @@ void HTMLStyleElement::NotifyLoadedSheetAndAllCriticalSubresources(
   if (fired_load_ && is_load_event)
     return;
   loaded_sheet_ = is_load_event;
+  // Per the spec this should post on the network task source.
+  // https://html.spec.whatwg.org/multipage/semantics.html#the-style-element
+  // This guarantees that the <style> will be applied before the next <script>
+  // is loaded. Note: this means that for the potential future efforts to
+  // prioritise individual network requests we should ensure that their priority
+  // is lower than of this task.
   GetDocument()
-      .GetTaskRunner(TaskType::kDOMManipulation)
-      ->PostTask(FROM_HERE,
-                 WTF::Bind(&HTMLStyleElement::DispatchPendingEvent,
-                           WrapPersistent(this),
-                           WTF::Passed(IncrementLoadEventDelayCount::Create(
-                               GetDocument()))));
+      .GetTaskRunner(TaskType::kNetworking)
+      ->PostTask(
+          FROM_HERE,
+          WTF::Bind(&HTMLStyleElement::DispatchPendingEvent,
+                    WrapPersistent(this),
+                    WTF::Passed(std::make_unique<IncrementLoadEventDelayCount>(
+                        GetDocument()))));
   fired_load_ = true;
 }
 
@@ -150,7 +153,7 @@ void HTMLStyleElement::setDisabled(bool set_disabled) {
     style_sheet->setDisabled(set_disabled);
 }
 
-void HTMLStyleElement::Trace(blink::Visitor* visitor) {
+void HTMLStyleElement::Trace(Visitor* visitor) {
   StyleElement::Trace(visitor);
   HTMLElement::Trace(visitor);
 }

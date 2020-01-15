@@ -1,4 +1,4 @@
-reillyg@chromium.org
-rockot@chromium.org
+file://chrome/browser/usb/OWNERS
 
 # COMPONENT: Blink>USB
+# TEAM: webusb@chromium.org

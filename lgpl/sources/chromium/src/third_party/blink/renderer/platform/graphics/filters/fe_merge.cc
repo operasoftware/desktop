@@ -23,25 +23,22 @@
 #include "third_party/blink/renderer/platform/graphics/filters/fe_merge.h"
 
 #include <memory>
-#include "SkMergeImageFilter.h"
+
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
+#include "third_party/skia/include/effects/SkMergeImageFilter.h"
 
 namespace blink {
 
 FEMerge::FEMerge(Filter* filter) : FilterEffect(filter) {}
-
-FEMerge* FEMerge::Create(Filter* filter) {
-  return new FEMerge(filter);
-}
 
 sk_sp<PaintFilter> FEMerge::CreateImageFilter() {
   unsigned size = NumberOfEffectInputs();
 
   auto input_refs = std::make_unique<sk_sp<PaintFilter>[]>(size);
   for (unsigned i = 0; i < size; ++i) {
-    input_refs[i] = PaintFilterBuilder::Build(InputEffect(i),
-                                              OperatingInterpolationSpace());
+    input_refs[i] = paint_filter_builder::Build(InputEffect(i),
+                                                OperatingInterpolationSpace());
   }
   PaintFilter::CropRect rect = GetCropRect();
   return sk_make_sp<MergePaintFilter>(input_refs.get(), size, &rect);

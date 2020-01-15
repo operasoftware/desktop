@@ -42,19 +42,20 @@
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/network/form_data_encoder.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 namespace {
 
 // Gets the encoding for the form.
 // TODO(tkent): Use FormDataEncoder::encodingFromAcceptCharset().
 void GetFormEncoding(const HTMLFormElement& form, WTF::TextEncoding* encoding) {
-  String str(form.FastGetAttribute(HTMLNames::accept_charsetAttr));
+  String str(form.FastGetAttribute(html_names::kAcceptCharsetAttr));
   str.Replace(',', ' ');
   Vector<String> charsets;
   str.Split(' ', charsets);
@@ -71,10 +72,10 @@ void GetFormEncoding(const HTMLFormElement& form, WTF::TextEncoding* encoding) {
 // button is returned.
 HTMLFormControlElement* ButtonToActivate(const HTMLFormElement& form) {
   HTMLFormControlElement* first_submit_button = nullptr;
-  for (auto& element : form.ListedElements()) {
-    if (!element->IsFormControlElement())
+  for (ListedElement* element : form.ListedElements()) {
+    auto* control = DynamicTo<HTMLFormControlElement>(element);
+    if (!control)
       continue;
-    HTMLFormControlElement* control = ToHTMLFormControlElement(element);
     if (control->IsActivatedSubmit()) {
       // There's a button that is already activated for submit, return
       // nullptr.
@@ -92,7 +93,7 @@ bool IsSelectInDefaultState(const HTMLSelectElement& select) {
   if (select.IsMultiple() || select.size() > 1) {
     for (auto* const option_element : select.GetOptionList()) {
       if (option_element->Selected() !=
-          option_element->FastHasAttribute(selectedAttr))
+          option_element->FastHasAttribute(kSelectedAttr))
         return false;
     }
     return true;
@@ -102,7 +103,7 @@ bool IsSelectInDefaultState(const HTMLSelectElement& select) {
   // least one item is selected, determine which one.
   HTMLOptionElement* initial_selected = nullptr;
   for (auto* const option_element : select.GetOptionList()) {
-    if (option_element->FastHasAttribute(selectedAttr)) {
+    if (option_element->FastHasAttribute(kSelectedAttr)) {
       // The page specified the option to select.
       initial_selected = option_element;
       break;
@@ -120,10 +121,10 @@ bool IsSelectInDefaultState(const HTMLSelectElement& select) {
 // attribute.
 bool IsInDefaultState(const HTMLFormControlElement& form_element) {
   if (auto* input = ToHTMLInputElementOrNull(form_element)) {
-    if (input->type() == InputTypeNames::checkbox ||
-        input->type() == InputTypeNames::radio)
-      return input->checked() == input->FastHasAttribute(checkedAttr);
-  } else if (auto* select = ToHTMLSelectElementOrNull(form_element)) {
+    if (input->type() == input_type_names::kCheckbox ||
+        input->type() == input_type_names::kRadio)
+      return input->checked() == input->FastHasAttribute(kCheckedAttr);
+  } else if (auto* select = DynamicTo<HTMLSelectElement>(form_element)) {
     return IsSelectInDefaultState(*select);
   }
   return true;
@@ -137,25 +138,24 @@ bool IsInDefaultState(const HTMLFormControlElement& form_element) {
 //  - More than one text field
 HTMLInputElement* FindSuitableSearchInputElement(const HTMLFormElement& form) {
   HTMLInputElement* text_element = nullptr;
-  for (const auto& item : form.ListedElements()) {
-    if (!item->IsFormControlElement())
+  for (ListedElement* item : form.ListedElements()) {
+    auto* control = DynamicTo<HTMLFormControlElement>(item);
+    if (!control)
       continue;
 
-    HTMLFormControlElement& control = ToHTMLFormControlElement(*item);
-
-    if (control.IsDisabledFormControl() || control.GetName().IsNull())
+    if (control->IsDisabledFormControl() || control->GetName().IsNull())
       continue;
 
-    if (!IsInDefaultState(control) || IsHTMLTextAreaElement(control))
+    if (!IsInDefaultState(*control) || IsHTMLTextAreaElement(*control))
       return nullptr;
 
-    if (IsHTMLInputElement(control) && control.willValidate()) {
-      const HTMLInputElement& input = ToHTMLInputElement(control);
+    if (IsHTMLInputElement(*control) && control->willValidate()) {
+      const HTMLInputElement& input = ToHTMLInputElement(*control);
 
       // Return nothing if a file upload field or a password field are
       // found.
-      if (input.type() == InputTypeNames::file ||
-          input.type() == InputTypeNames::password)
+      if (input.type() == input_type_names::kFile ||
+          input.type() == input_type_names::kPassword)
         return nullptr;
 
       if (input.IsTextField()) {
@@ -165,7 +165,7 @@ HTMLInputElement* FindSuitableSearchInputElement(const HTMLFormElement& form) {
           // searchable.
           return nullptr;
         }
-        text_element = ToHTMLInputElement(&control);
+        text_element = ToHTMLInputElement(control);
       }
     }
   }
@@ -183,16 +183,16 @@ bool BuildSearchString(const HTMLFormElement& form,
                        const WTF::TextEncoding& encoding,
                        const HTMLInputElement* text_element) {
   bool is_element_found = false;
-  for (const auto& item : form.ListedElements()) {
-    if (!item->IsFormControlElement())
+  for (ListedElement* item : form.ListedElements()) {
+    auto* control = DynamicTo<HTMLFormControlElement>(item);
+    if (!control)
       continue;
 
-    HTMLFormControlElement& control = ToHTMLFormControlElement(*item);
-    if (control.IsDisabledFormControl() || control.GetName().IsNull())
+    if (control->IsDisabledFormControl() || control->GetName().IsNull())
       continue;
 
-    FormData* form_data = FormData::Create(encoding);
-    control.AppendToFormData(*form_data);
+    auto* form_data = MakeGarbageCollected<FormData>(encoding);
+    control->AppendToFormData(*form_data);
 
     for (const auto& entry : form_data->Entries()) {
       if (!encoded_string->IsEmpty())
@@ -201,7 +201,7 @@ bool BuildSearchString(const HTMLFormElement& form,
                                               form_data->Encode(entry->name()),
                                               FormDataEncoder::kNormalizeCRLF);
       encoded_string->push_back('=');
-      if (&control == text_element) {
+      if (control == text_element) {
         encoded_string->Append("{searchTerms}", 13);
         is_element_found = true;
       } else {
@@ -224,7 +224,7 @@ WebSearchableFormData::WebSearchableFormData(
       static_cast<HTMLInputElement*>(selected_input_element);
 
   bool is_post_form = DeprecatedEqualIgnoringCase(
-      form_element->getAttribute(methodAttr), "post");
+      form_element->getAttribute(kMethodAttr), "post");
 
   if (is_post_form &&
       !WebRuntimeFeatures::IsWebSearchableFormDataPOSTSupportEnabled())

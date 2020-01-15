@@ -22,9 +22,12 @@ class CORE_EXPORT CSSMathInvert : public CSSMathValue {
   }
   // Blink-internal constructor
   static CSSMathInvert* Create(CSSNumericValue* value) {
-    return new CSSMathInvert(
+    return MakeGarbageCollected<CSSMathInvert>(
         value, CSSNumericValueType::NegateExponents(value->Type()));
   }
+
+  CSSMathInvert(CSSNumericValue* value, const CSSNumericValueType& type)
+      : CSSMathValue(type), value_(value) {}
 
   String getOperator() const final { return "invert"; }
 
@@ -50,15 +53,12 @@ class CORE_EXPORT CSSMathInvert : public CSSMathValue {
     return value_->Equals(*other_invert.value_);
   }
 
-  CSSCalcExpressionNode* ToCalcExpressionNode() const final {
+  CSSMathExpressionNode* ToCalcExpressionNode() const final {
     // TODO(crbug.com/782103): Implement.
     return nullptr;
   }
 
  private:
-  CSSMathInvert(CSSNumericValue* value, const CSSNumericValueType& type)
-      : CSSMathValue(type), value_(value) {}
-
   // From CSSNumericValue
   CSSNumericValue* Invert() final { return value_.Get(); }
   base::Optional<CSSNumericSumValue> SumValue() const final;

@@ -30,6 +30,8 @@
 
 #include "third_party/blink/renderer/core/exported/local_frame_client_impl.h"
 
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
@@ -37,8 +39,8 @@
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/core/testing/document_interface_broker_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
-#include "third_party/blink/renderer/platform/wtf/text/cstring.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 using testing::_;
@@ -49,7 +51,7 @@ namespace blink {
 namespace {
 
 class LocalFrameMockWebFrameClient
-    : public FrameTestHelpers::TestWebFrameClient {
+    : public frame_test_helpers::TestWebFrameClient {
  public:
   ~LocalFrameMockWebFrameClient() override = default;
 
@@ -63,10 +65,6 @@ class LocalFrameClientImplTest : public testing::Test {
         .WillByDefault(Return(WebString()));
 
     helper_.Initialize(&web_frame_client_);
-    // FIXME: http://crbug.com/363843. This needs to find a better way to
-    // not create graphics layers.
-    helper_.GetWebView()->GetSettings()->SetAcceleratedCompositingEnabled(
-        false);
   }
 
   void TearDown() override {
@@ -81,8 +79,8 @@ class LocalFrameClientImplTest : public testing::Test {
     // The test always returns the same user agent, regardless of the URL passed
     // in.
     KURL dummy_url("about:blank");
-    WTF::CString user_agent = GetLocalFrameClient().UserAgent(dummy_url).Utf8();
-    return WebString::FromUTF8(user_agent.data(), user_agent.length());
+    std::string user_agent = GetLocalFrameClient().UserAgent(dummy_url).Utf8();
+    return WebString::FromUTF8(user_agent.c_str(), user_agent.length());
   }
 
   WebLocalFrameImpl* MainFrame() { return helper_.LocalMainFrame(); }
@@ -96,7 +94,7 @@ class LocalFrameClientImplTest : public testing::Test {
 
  private:
   LocalFrameMockWebFrameClient web_frame_client_;
-  FrameTestHelpers::WebViewHelper helper_;
+  frame_test_helpers::WebViewHelper helper_;
 };
 
 TEST_F(LocalFrameClientImplTest, UserAgentOverride) {
@@ -113,6 +111,24 @@ TEST_F(LocalFrameClientImplTest, UserAgentOverride) {
   EXPECT_CALL(WebLocalFrameClient(), UserAgentOverride(_))
       .WillOnce(Return(WebString()));
   EXPECT_TRUE(default_user_agent.Equals(UserAgent()));
+}
+
+TEST_F(LocalFrameClientImplTest, TestDocumentInterfaceBrokerOverride) {
+  mojo::PendingRemote<mojom::blink::DocumentInterfaceBroker> doc;
+  FrameHostTestDocumentInterfaceBroker frame_interface_broker(
+      &MainFrame()->GetFrame()->GetDocumentInterfaceBroker(),
+      doc.InitWithNewPipeAndPassReceiver());
+  MainFrame()->GetFrame()->SetDocumentInterfaceBrokerForTesting(doc.PassPipe());
+
+  mojo::Remote<mojom::blink::FrameHostTestInterface> frame_test;
+  MainFrame()
+      ->GetFrame()
+      ->GetDocumentInterfaceBroker()
+      .GetFrameHostTestInterface(frame_test.BindNewPipeAndPassReceiver());
+  frame_test->GetName(base::BindOnce([](const WTF::String& result) {
+    EXPECT_EQ(result, kGetNameTestResponse);
+  }));
+  frame_interface_broker.Flush();
 }
 
 }  // namespace

@@ -66,7 +66,7 @@ class PortTestCase(LoggingTestCase):
 
     def make_port(self, host=None, port_name=None, options=None, os_name=None, os_version=None, **kwargs):
         host = host or MockSystemHost(os_name=(os_name or self.os_name), os_version=(os_version or self.os_version))
-        options = options or optparse.Values({'configuration': 'Release'})
+        options = options or optparse.Values({'configuration': 'Release', 'use_xvfb': True})
         port_name = port_name or self.port_name
         port_name = self.port_maker.determine_full_port_name(host, options, port_name)
         return self.port_maker(host, port_name, options=options, **kwargs)
@@ -249,9 +249,10 @@ class PortTestCase(LoggingTestCase):
         port = self.make_port()
         self.assertEqual(port.expectations_files(), [
             port.path_to_generic_test_expectations_file(),
-            port.host.filesystem.join(port.layout_tests_dir(), 'NeverFixTests'),
-            port.host.filesystem.join(port.layout_tests_dir(), 'StaleTestExpectations'),
-            port.host.filesystem.join(port.layout_tests_dir(), 'SlowTests'),
+            port.path_to_webdriver_expectations_file(),
+            port.host.filesystem.join(port.web_tests_dir(), 'NeverFixTests'),
+            port.host.filesystem.join(port.web_tests_dir(), 'StaleTestExpectations'),
+            port.host.filesystem.join(port.web_tests_dir(), 'SlowTests'),
         ])
 
     def test_expectations_ordering(self):
@@ -298,7 +299,7 @@ class PortTestCase(LoggingTestCase):
         self.assertEqual(port.baseline_search_path()[0], '/tmp/foo')
 
     def test_virtual_test_suites(self):
-        # We test that we can load the real LayoutTests/VirtualTestSuites file properly, so we
+        # We test that we can load the real web_tests/VirtualTestSuites file properly, so we
         # use a real SystemHost(). We don't care what virtual_test_suites() returns as long
         # as it is iterable.
         port = self.make_port(host=SystemHost(), port_name=self.full_port_name)

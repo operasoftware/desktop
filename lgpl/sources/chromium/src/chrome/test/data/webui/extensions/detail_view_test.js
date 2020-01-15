@@ -45,6 +45,7 @@ cr.define('extension_detail_view_tests', function() {
       item.set('delegate', mockDelegate);
       item.set('inDevMode', false);
       item.set('incognitoAvailable', true);
+      item.set('showActivityLog', false);
       document.body.appendChild(item);
     });
 
@@ -53,7 +54,7 @@ cr.define('extension_detail_view_tests', function() {
 
       extension_test_util.testIcons(item);
 
-      const testIsVisible = extension_test_util.isVisible.bind(null, item);
+      const testIsVisible = test_util.isVisible.bind(null, item);
       expectTrue(testIsVisible('#closeButton'));
       expectTrue(testIsVisible('#icon'));
       expectTrue(testIsVisible('#enable-toggle'));
@@ -72,15 +73,15 @@ cr.define('extension_detail_view_tests', function() {
       ];
       const isChecked = id => item.$$(id).checked;
       for (let option of accessOptions) {
-        expectTrue(extension_test_util.isVisible(item, option.id));
+        expectTrue(test_util.isVisible(item, option.id));
         expectFalse(isChecked(option.id), option.id);
         item.set('data.' + option.key + '.isEnabled', false);
         Polymer.dom.flush();
-        expectFalse(extension_test_util.isVisible(item, option.id));
+        expectFalse(test_util.isVisible(item, option.id));
         item.set('data.' + option.key + '.isEnabled', true);
         item.set('data.' + option.key + '.isActive', true);
         Polymer.dom.flush();
-        expectTrue(extension_test_util.isVisible(item, option.id));
+        expectTrue(test_util.isVisible(item, option.id));
         expectTrue(isChecked(option.id));
       }
 
@@ -114,6 +115,11 @@ cr.define('extension_detail_view_tests', function() {
           'chrome-extension://' + extensionData.id + '/options.html';
       item.set('data.optionsPage', {openInTab: true, url: optionsUrl});
       expectTrue(testIsVisible('#extensions-options'));
+
+      expectFalse(testIsVisible('#extensionsActivityLogLink'));
+      item.set('showActivityLog', true);
+      Polymer.dom.flush();
+      expectTrue(testIsVisible('#extensionsActivityLogLink'));
 
       item.set('data.manifestHomePageUrl', 'http://example.com');
       Polymer.dom.flush();
@@ -159,32 +165,81 @@ cr.define('extension_detail_view_tests', function() {
       Polymer.dom.flush();
       expectTrue(testIsVisible('.warning-icon'));
 
+      expectTrue(testIsVisible('#enable-toggle'));
+      expectFalse(testIsVisible('#terminated-reload-button'));
+      item.set('data.state', chrome.developerPrivate.ExtensionState.TERMINATED);
+      Polymer.dom.flush();
+      expectFalse(testIsVisible('#enable-toggle'));
+      expectTrue(testIsVisible('#terminated-reload-button'));
+
+      // Ensure that the runtime warning reload button is not visible if there
+      // are runtime warnings and the extension is terminated.
+      item.set('data.runtimeWarnings', ['Dummy warning']);
+      Polymer.dom.flush();
+      expectFalse(testIsVisible('#warnings-reload-button'));
+      item.set('data.runtimeWarnings', []);
+
+      // Reset item state back to DISABLED.
+      item.set('data.state', chrome.developerPrivate.ExtensionState.DISABLED);
+      Polymer.dom.flush();
+
+      // Ensure that without runtimeHostPermissions data, the sections are
+      // hidden.
+      expectTrue(testIsVisible('#no-site-access'));
+      expectFalse(testIsVisible('extensions-runtime-host-permissions'));
+      expectFalse(testIsVisible('extensions-host-permissions-toggle-list'));
+
       // Adding any runtime host permissions should result in the runtime host
       // controls becoming visible.
-      item.set(
-          'data.permissions.hostAccess',
-          chrome.developerPrivate.HostAccess.ON_CLICK);
+      const allSitesPermissions = {
+        simplePermissions: [],
+        runtimeHostPermissions: {
+          hosts: [{granted: false, host: '<all_urls>'}],
+          hasAllHosts: true,
+          hostAccess: chrome.developerPrivate.HostAccess.ON_CLICK,
+        },
+      };
+      item.set('data.permissions', allSitesPermissions);
       Polymer.dom.flush();
+      expectFalse(testIsVisible('#no-site-access'));
       expectTrue(testIsVisible('extensions-runtime-host-permissions'));
+      expectFalse(testIsVisible('extensions-host-permissions-toggle-list'));
+
+      const someSitesPermissions = {
+        simplePermissions: [],
+        runtimeHostPermissions: {
+          hosts: [
+            {granted: true, host: 'https://chromium.org/*'},
+            {granted: false, host: 'https://example.com/*'}
+          ],
+          hasAllHosts: false,
+          hostAccess: chrome.developerPrivate.HostAccess.ON_SPECIFIC_SITES,
+        },
+      };
+      item.set('data.permissions', someSitesPermissions);
+      Polymer.dom.flush();
+      expectFalse(testIsVisible('#no-site-access'));
+      expectFalse(testIsVisible('extensions-runtime-host-permissions'));
+      expectTrue(testIsVisible('extensions-host-permissions-toggle-list'));
     });
 
     test(assert(TestNames.LayoutSource), function() {
       item.set('data.location', 'FROM_STORE');
       Polymer.dom.flush();
       assertEquals('Chrome Web Store', item.$.source.textContent.trim());
-      assertFalse(extension_test_util.isVisible(item, '#load-path'));
+      assertFalse(test_util.isVisible(item, '#load-path'));
 
       item.set('data.location', 'THIRD_PARTY');
       Polymer.dom.flush();
       assertEquals('Added by a third-party', item.$.source.textContent.trim());
-      assertFalse(extension_test_util.isVisible(item, '#load-path'));
+      assertFalse(test_util.isVisible(item, '#load-path'));
 
       item.set('data.location', 'UNPACKED');
       item.set('data.prettifiedPath', 'foo/bar/baz/');
       Polymer.dom.flush();
       assertEquals('Unpacked extension', item.$.source.textContent.trim());
       // Test whether the load path is displayed for unpacked extensions.
-      assertTrue(extension_test_util.isVisible(item, '#load-path'));
+      assertTrue(test_util.isVisible(item, '#load-path'));
 
       item.set('data.location', 'UNKNOWN');
       item.set('data.prettifiedPath', '');
@@ -192,7 +247,7 @@ cr.define('extension_detail_view_tests', function() {
       item.set('data.locationText', 'Foo');
       Polymer.dom.flush();
       assertEquals('Foo', item.$.source.textContent.trim());
-      assertFalse(extension_test_util.isVisible(item, '#load-path'));
+      assertFalse(test_util.isVisible(item, '#load-path'));
     });
 
     test(assert(TestNames.ClickableElements), function() {
@@ -200,7 +255,28 @@ cr.define('extension_detail_view_tests', function() {
           'chrome-extension://' + extensionData.id + '/options.html';
       item.set('data.optionsPage', {openInTab: true, url: optionsUrl});
       item.set('data.prettifiedPath', 'foo/bar/baz/');
+      item.set('showActivityLog', true);
       Polymer.dom.flush();
+
+      let currentPage = null;
+      extensions.navigation.addListener(newPage => {
+        currentPage = newPage;
+      });
+
+      // Even though the command line flag is not set for activity log, we
+      // still expect to navigate to it after clicking the link as the logic to
+      // redirect the page back to the details view is in manager.js.
+      // Since this behavior does not happen in the testing environment,
+      // we test the behavior in manager_test.js.
+      MockInteractions.tap(item.$$('#extensionsActivityLogLink'));
+      expectDeepEquals(
+          currentPage,
+          {page: extensions.Page.ACTIVITY_LOG, extensionId: extensionData.id});
+
+      // Reset current page and test delegate calls.
+      extensions.navigation.navigateTo(
+          {page: extensions.Page.DETAILS, extensionId: extensionData.id});
+      currentPage = null;
 
       mockDelegate.testClickingCalls(
           item.$$('#allow-incognito').getLabel(), 'setItemAllowedIncognito',
@@ -220,8 +296,15 @@ cr.define('extension_detail_view_tests', function() {
           item.$$('#load-path > a[is=\'action-link\']'), 'showInFolder',
           [extensionData.id]);
       mockDelegate.testClickingCalls(
-          item.$$('#reload-button'), 'reloadItem', [extensionData.id],
+          item.$$('#warnings-reload-button'), 'reloadItem', [extensionData.id],
           Promise.resolve());
+
+      // Terminate the extension so the reload button appears.
+      item.set('data.state', chrome.developerPrivate.ExtensionState.TERMINATED);
+      Polymer.dom.flush();
+      mockDelegate.testClickingCalls(
+          item.$$('#terminated-reload-button'), 'reloadItem',
+          [extensionData.id], Promise.resolve());
     });
 
     test(assert(TestNames.Indicator), function() {
@@ -235,7 +318,7 @@ cr.define('extension_detail_view_tests', function() {
     test(assert(TestNames.Warnings), function() {
       const testWarningVisible = function(id, isVisible) {
         const f = isVisible ? expectTrue : expectFalse;
-        f(extension_test_util.isVisible(item, id));
+        f(test_util.isVisible(item, id));
       };
 
       testWarningVisible('#runtime-warnings', false);

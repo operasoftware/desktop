@@ -34,10 +34,9 @@ class ValidityState final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static ValidityState* Create(ListedElement* control) {
-    return new ValidityState(control);
-  }
-  void Trace(blink::Visitor* visitor) override {
+  explicit ValidityState(ListedElement* control) : control_(control) {}
+
+  void Trace(Visitor* visitor) override {
     visitor->Trace(control_);
     ScriptWrappable::Trace(visitor);
   }
@@ -59,8 +58,6 @@ class ValidityState final : public ScriptWrappable {
   bool valid() const;
 
  private:
-  explicit ValidityState(ListedElement* control) : control_(control) {}
-
   Member<ListedElement> control_;
 
   DISALLOW_COPY_AND_ASSIGN(ValidityState);

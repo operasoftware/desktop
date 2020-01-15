@@ -37,12 +37,10 @@
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-inline HTMLNoEmbedElement::HTMLNoEmbedElement(Document& document)
-    : HTMLElement(noembedTag, document) {}
-
-DEFINE_NODE_FACTORY(HTMLNoEmbedElement)
+HTMLNoEmbedElement::HTMLNoEmbedElement(Document& document)
+    : HTMLElement(kNoembedTag, document) {}
 
 bool HTMLNoEmbedElement::LayoutObjectIsNeeded(
     const ComputedStyle& style) const {

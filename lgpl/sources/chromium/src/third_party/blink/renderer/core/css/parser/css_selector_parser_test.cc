@@ -9,8 +9,10 @@
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
@@ -129,10 +131,10 @@ TEST(CSSSelectorParserTest, ShadowDomPseudoInCompound) {
     CSSParserTokenRange range(tokens);
     CSSSelectorList list = CSSSelectorParser::ParseSelector(
         range,
-        CSSParserContext::Create(kHTMLStandardMode,
-                                 SecureContextMode::kInsecureContext),
+        MakeGarbageCollected<CSSParserContext>(
+            kHTMLStandardMode, SecureContextMode::kInsecureContext),
         nullptr);
-    EXPECT_STREQ(test_case[1], list.SelectorsText().Ascii().data());
+    EXPECT_EQ(test_case[1], list.SelectorsText());
   }
 }
 
@@ -152,8 +154,8 @@ TEST(CSSSelectorParserTest, PseudoElementsInCompoundLists) {
     CSSParserTokenRange range(tokens);
     CSSSelectorList list = CSSSelectorParser::ParseSelector(
         range,
-        CSSParserContext::Create(kHTMLStandardMode,
-                                 SecureContextMode::kInsecureContext),
+        MakeGarbageCollected<CSSParserContext>(
+            kHTMLStandardMode, SecureContextMode::kInsecureContext),
         nullptr);
     EXPECT_FALSE(list.IsValid());
   }
@@ -174,8 +176,8 @@ TEST(CSSSelectorParserTest, ValidSimpleAfterPseudoElementInCompound) {
     CSSParserTokenRange range(tokens);
     CSSSelectorList list = CSSSelectorParser::ParseSelector(
         range,
-        CSSParserContext::Create(kHTMLStandardMode,
-                                 SecureContextMode::kInsecureContext),
+        MakeGarbageCollected<CSSParserContext>(
+            kHTMLStandardMode, SecureContextMode::kInsecureContext),
         nullptr);
     EXPECT_TRUE(list.IsValid());
   }
@@ -208,8 +210,8 @@ TEST(CSSSelectorParserTest, InvalidSimpleAfterPseudoElementInCompound) {
     CSSParserTokenRange range(tokens);
     CSSSelectorList list = CSSSelectorParser::ParseSelector(
         range,
-        CSSParserContext::Create(kHTMLStandardMode,
-                                 SecureContextMode::kInsecureContext),
+        MakeGarbageCollected<CSSParserContext>(
+            kHTMLStandardMode, SecureContextMode::kInsecureContext),
         nullptr);
     EXPECT_FALSE(list.IsValid());
   }
@@ -227,8 +229,8 @@ TEST(CSSSelectorParserTest, WorkaroundForInvalidCustomPseudoInUAStyle) {
     CSSParserTokenRange range(tokens);
     CSSSelectorList list = CSSSelectorParser::ParseSelector(
         range,
-        CSSParserContext::Create(kUASheetMode,
-                                 SecureContextMode::kInsecureContext),
+        MakeGarbageCollected<CSSParserContext>(
+            kUASheetMode, SecureContextMode::kInsecureContext),
         nullptr);
     EXPECT_TRUE(list.IsValid());
   }
@@ -243,8 +245,8 @@ TEST(CSSSelectorParserTest, ValidPseudoElementInNonRightmostCompound) {
     CSSParserTokenRange range(tokens);
     CSSSelectorList list = CSSSelectorParser::ParseSelector(
         range,
-        CSSParserContext::Create(kHTMLStandardMode,
-                                 SecureContextMode::kInsecureContext),
+        MakeGarbageCollected<CSSParserContext>(
+            kHTMLStandardMode, SecureContextMode::kInsecureContext),
         nullptr);
     EXPECT_TRUE(list.IsValid());
   }
@@ -261,8 +263,8 @@ TEST(CSSSelectorParserTest, InvalidPseudoElementInNonRightmostCompound) {
     CSSParserTokenRange range(tokens);
     CSSSelectorList list = CSSSelectorParser::ParseSelector(
         range,
-        CSSParserContext::Create(kHTMLStandardMode,
-                                 SecureContextMode::kInsecureContext),
+        MakeGarbageCollected<CSSParserContext>(
+            kHTMLStandardMode, SecureContextMode::kInsecureContext),
         nullptr);
     EXPECT_FALSE(list.IsValid());
   }
@@ -271,9 +273,9 @@ TEST(CSSSelectorParserTest, InvalidPseudoElementInNonRightmostCompound) {
 TEST(CSSSelectorParserTest, UnresolvedNamespacePrefix) {
   const char* test_cases[] = {"ns|div", "div ns|div", "div ns|div "};
 
-  CSSParserContext* context = CSSParserContext::Create(
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);
-  StyleSheetContents* sheet = StyleSheetContents::Create(context);
+  auto* sheet = MakeGarbageCollected<StyleSheetContents>(context);
 
   for (auto* test_case : test_cases) {
     CSSTokenizer tokenizer(test_case);
@@ -298,9 +300,9 @@ TEST(CSSSelectorParserTest, SerializedUniversal) {
       {"ns|*::-webkit-volume-slider", "ns|*::-webkit-volume-slider"},
       {"ns|*::cue(i)", "ns|*::cue(i)"}};
 
-  CSSParserContext* context = CSSParserContext::Create(
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);
-  StyleSheetContents* sheet = StyleSheetContents::Create(context);
+  auto* sheet = MakeGarbageCollected<StyleSheetContents>(context);
   sheet->ParserAddNamespace("ns", "http://ns.org");
 
   for (auto** test_case : test_cases) {
@@ -311,16 +313,16 @@ TEST(CSSSelectorParserTest, SerializedUniversal) {
     CSSSelectorList list =
         CSSSelectorParser::ParseSelector(range, context, sheet);
     EXPECT_TRUE(list.IsValid());
-    EXPECT_STREQ(test_case[1], list.SelectorsText().Ascii().data());
+    EXPECT_EQ(test_case[1], list.SelectorsText());
   }
 }
 
 TEST(CSSSelectorParserTest, AttributeSelectorUniversalInvalid) {
   const char* test_cases[] = {"[*]", "[*|*]"};
 
-  CSSParserContext* context = CSSParserContext::Create(
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);
-  StyleSheetContents* sheet = StyleSheetContents::Create(context);
+  auto* sheet = MakeGarbageCollected<StyleSheetContents>(context);
 
   for (auto* test_case : test_cases) {
     SCOPED_TRACE(test_case);
@@ -340,6 +342,7 @@ TEST(CSSSelectorParserTest, InternalPseudo) {
                               ":-internal-list-box",
                               ":-internal-shadow-host-has-appearance",
                               ":-internal-spatial-navigation-focus",
+                              ":-internal-spatial-navigation-interest",
                               ":-internal-video-persistent",
                               ":-internal-video-persistent-ancestor"};
   for (auto* test_case : test_cases) {
@@ -350,100 +353,26 @@ TEST(CSSSelectorParserTest, InternalPseudo) {
 
     CSSSelectorList author_list = CSSSelectorParser::ParseSelector(
         range,
-        CSSParserContext::Create(kHTMLStandardMode,
-                                 SecureContextMode::kInsecureContext),
+        MakeGarbageCollected<CSSParserContext>(
+            kHTMLStandardMode, SecureContextMode::kInsecureContext),
         nullptr);
     EXPECT_FALSE(author_list.IsValid());
 
     CSSSelectorList ua_list = CSSSelectorParser::ParseSelector(
         range,
-        CSSParserContext::Create(kUASheetMode,
-                                 SecureContextMode::kInsecureContext),
+        MakeGarbageCollected<CSSParserContext>(
+            kUASheetMode, SecureContextMode::kInsecureContext),
         nullptr);
     EXPECT_TRUE(ua_list.IsValid());
   }
 }
 
-TEST(CSSSelectorParserTest, InvalidNestingPseudoMatches) {
-  // :matches() is currently not supported within these pseudo classes as they
-  // currently do not support complex selector arguments (:matches() does
-  // support this and the expansion of :matches() may provide complex selector
+TEST(CSSSelectorParserTest, InvalidNestingPseudoIs) {
+  // :is() is currently not supported within these pseudo classes as they
+  // currently do not support complex selector arguments (:is() does
+  // support this and the expansion of :is() may provide complex selector
   // arguments to these pseudo classes). Most of these test cases should
   // eventually be removed once they support complex selector arguments.
-  const char* test_cases[] = {":-webkit-any(:matches(.a))",
-                              "::cue(:matches(.a))",
-                              ":cue(:matches(.a))",
-                              ":host(:matches(.a))",
-                              ":host-context(:matches(.a))",
-                              ":lang(:matches(.a))",
-                              ":not(:matches(.a))",
-                              ":nth-child(:matches(.a))",
-                              ":nth-last-child(:matches(.a))",
-                              ":nth-last-of-type(:matches(.a))",
-                              ":nth-of-type(:matches(.a))",
-                              "::slotted(:matches(.a))"};
-
-  CSSParserContext* context = CSSParserContext::Create(
-      kHTMLStandardMode, SecureContextMode::kInsecureContext);
-  StyleSheetContents* sheet = StyleSheetContents::Create(context);
-
-  for (auto* test_case : test_cases) {
-    SCOPED_TRACE(test_case);
-    CSSTokenizer tokenizer(test_case);
-    const auto tokens = tokenizer.TokenizeToEOF();
-    CSSParserTokenRange range(tokens);
-    CSSSelectorList list =
-        CSSSelectorParser::ParseSelector(range, context, sheet);
-    EXPECT_FALSE(list.IsValid());
-  }
-}
-
-TEST(CSSSelectorParserTest, InvalidPseudoMatchesArguments) {
-  // Pseudo-elements are not valid within :matches() as per the spec:
-  // https://drafts.csswg.org/selectors-4/#matches
-  const char* test_cases[] = {":matches(::-webkit-progress-bar)",
-                              ":matches(::-webkit-progress-value)",
-                              ":matches(::-webkit-slider-runnable-track)",
-                              ":matches(::-webkit-slider-thumb)",
-                              ":matches(::after)",
-                              ":matches(::backdrop)",
-                              ":matches(::before)",
-                              ":matches(::cue)",
-                              ":matches(::first-letter)",
-                              ":matches(::first-line)",
-                              ":matches(::grammar-error)",
-                              ":matches(::marker)",
-                              ":matches(::placeholder)",
-                              ":matches(::selection)",
-                              ":matches(::slotted)",
-                              ":matches(::spelling-error)",
-                              ":matches(:after)",
-                              ":matches(:before)",
-                              ":matches(:cue)",
-                              ":matches(:first-letter)",
-                              ":matches(:first-line)"};
-
-  CSSParserContext* context = CSSParserContext::Create(
-      kHTMLStandardMode, SecureContextMode::kInsecureContext);
-  StyleSheetContents* sheet = StyleSheetContents::Create(context);
-
-  for (auto* test_case : test_cases) {
-    SCOPED_TRACE(test_case);
-    CSSTokenizer tokenizer(test_case);
-    const auto tokens = tokenizer.TokenizeToEOF();
-    CSSParserTokenRange range(tokens);
-    CSSSelectorList list =
-        CSSSelectorParser::ParseSelector(range, context, sheet);
-    EXPECT_FALSE(list.IsValid());
-  }
-}
-
-TEST(CSSSelectorParserTest, InvalidNestingPseudoIS) {
-  // :is() is currently not supported within these pseudo classes as they
-  // currently do not support complex selector arguments (:is() does support
-  // this and the expansion of :is() may provide complex selector arguments to
-  // these pseudo classes). Most of these test cases should eventually be
-  // removed once they support complex selector arguments.
   const char* test_cases[] = {":-webkit-any(:is(.a))",
                               "::cue(:is(.a))",
                               ":cue(:is(.a))",
@@ -457,9 +386,83 @@ TEST(CSSSelectorParserTest, InvalidNestingPseudoIS) {
                               ":nth-of-type(:is(.a))",
                               "::slotted(:is(.a))"};
 
-  CSSParserContext* context = CSSParserContext::Create(
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);
-  StyleSheetContents* sheet = StyleSheetContents::Create(context);
+  auto* sheet = MakeGarbageCollected<StyleSheetContents>(context);
+
+  for (auto* test_case : test_cases) {
+    SCOPED_TRACE(test_case);
+    CSSTokenizer tokenizer(test_case);
+    const auto tokens = tokenizer.TokenizeToEOF();
+    CSSParserTokenRange range(tokens);
+    CSSSelectorList list =
+        CSSSelectorParser::ParseSelector(range, context, sheet);
+    EXPECT_FALSE(list.IsValid());
+  }
+}
+
+TEST(CSSSelectorParserTest, InvalidPseudoIsArguments) {
+  // Pseudo-elements are not valid within :is() as per the spec:
+  // https://drafts.csswg.org/selectors-4/#matches
+  const char* test_cases[] = {":is(::-webkit-progress-bar)",
+                              ":is(::-webkit-progress-value)",
+                              ":is(::-webkit-slider-runnable-track)",
+                              ":is(::-webkit-slider-thumb)",
+                              ":is(::after)",
+                              ":is(::backdrop)",
+                              ":is(::before)",
+                              ":is(::cue)",
+                              ":is(::first-letter)",
+                              ":is(::first-line)",
+                              ":is(::grammar-error)",
+                              ":is(::marker)",
+                              ":is(::placeholder)",
+                              ":is(::selection)",
+                              ":is(::slotted)",
+                              ":is(::spelling-error)",
+                              ":is(:after)",
+                              ":is(:before)",
+                              ":is(:cue)",
+                              ":is(:first-letter)",
+                              ":is(:first-line)"};
+
+  auto* context = MakeGarbageCollected<CSSParserContext>(
+      kHTMLStandardMode, SecureContextMode::kInsecureContext);
+  auto* sheet = MakeGarbageCollected<StyleSheetContents>(context);
+
+  for (auto* test_case : test_cases) {
+    SCOPED_TRACE(test_case);
+    CSSTokenizer tokenizer(test_case);
+    const auto tokens = tokenizer.TokenizeToEOF();
+    CSSParserTokenRange range(tokens);
+    CSSSelectorList list =
+        CSSSelectorParser::ParseSelector(range, context, sheet);
+    EXPECT_FALSE(list.IsValid());
+  }
+}
+
+TEST(CSSSelectorParserTest, InvalidNestingPseudoWhere) {
+  // :where() is currently not supported within these pseudo classes as they
+  // currently do not support complex selector arguments (:where() does support
+  // this and the expansion of :where() may provide complex selector arguments
+  // to these pseudo classes). Most of these test cases should eventually be
+  // removed once they support complex selector arguments.
+  const char* test_cases[] = {":-webkit-any(:where(.a))",
+                              "::cue(:where(.a))",
+                              ":cue(:where(.a))",
+                              ":host(:where(.a))",
+                              ":host-context(:where(.a))",
+                              ":lang(:where(.a))",
+                              ":not(:where(.a))",
+                              ":nth-child(:where(.a))",
+                              ":nth-last-child(:where(.a))",
+                              ":nth-last-of-type(:where(.a))",
+                              ":nth-of-type(:where(.a))",
+                              "::slotted(:where(.a))"};
+
+  auto* context = MakeGarbageCollected<CSSParserContext>(
+      kHTMLStandardMode, SecureContextMode::kInsecureContext);
+  auto* sheet = MakeGarbageCollected<StyleSheetContents>(context);
 
   for (const char* test_case : test_cases) {
     SCOPED_TRACE(test_case);
@@ -501,9 +504,9 @@ TEST(CSSSelectorParserTest, ASCIILowerHTMLStrict) {
       {".\\212alass", u"\u212alass", SelectorValue},
       {"#\\212alass", u"\u212alass", SelectorValue}};
 
-  CSSParserContext* context = CSSParserContext::Create(
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);
-  StyleSheetContents* sheet = StyleSheetContents::Create(context);
+  auto* sheet = MakeGarbageCollected<StyleSheetContents>(context);
 
   for (auto test_case : test_cases) {
     SCOPED_TRACE(test_case.input);
@@ -526,9 +529,9 @@ TEST(CSSSelectorParserTest, ASCIILowerHTMLQuirks) {
       {".\\212aLASS", u"\u212alass", SelectorValue},
       {"#\\212aLASS", u"\u212alass", SelectorValue}};
 
-  CSSParserContext* context = CSSParserContext::Create(
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLQuirksMode, SecureContextMode::kInsecureContext);
-  StyleSheetContents* sheet = StyleSheetContents::Create(context);
+  auto* sheet = MakeGarbageCollected<StyleSheetContents>(context);
 
   for (auto test_case : test_cases) {
     SCOPED_TRACE(test_case.input);
@@ -556,33 +559,52 @@ TEST(CSSSelectorParserTest, ShadowPartPseudoElementValid) {
     CSSParserTokenRange range(tokens);
     CSSSelectorList list = CSSSelectorParser::ParseSelector(
         range,
-        CSSParserContext::Create(kHTMLStandardMode,
-                                 SecureContextMode::kInsecureContext),
+        MakeGarbageCollected<CSSParserContext>(
+            kHTMLStandardMode, SecureContextMode::kInsecureContext),
         nullptr);
-    EXPECT_STREQ(test_case, list.SelectorsText().Ascii().data());
+    EXPECT_EQ(test_case, list.SelectorsText());
+  }
+}
+
+TEST(CSSSelectorParserTest, ShadowPartAndBeforeAfterPseudoElementValid) {
+  const char* test_cases[] = {
+      "::part(ident)::before",       "::part(ident)::after",
+      "::part(ident)::placeholder",  "::part(ident)::first-line",
+      "::part(ident)::first-letter", "::part(ident)::selection"};
+
+  for (auto* test_case : test_cases) {
+    SCOPED_TRACE(test_case);
+    CSSTokenizer tokenizer(test_case);
+    const auto tokens = tokenizer.TokenizeToEOF();
+    CSSParserTokenRange range(tokens);
+    CSSSelectorList list = CSSSelectorParser::ParseSelector(
+        range,
+        MakeGarbageCollected<CSSParserContext>(
+            kHTMLStandardMode, SecureContextMode::kInsecureContext),
+        nullptr);
+    EXPECT_EQ(test_case, list.SelectorsText());
   }
 }
 
 TEST(CSSSelectorParserTest, UseCountShadowPseudo) {
-  std::unique_ptr<DummyPageHolder> dummy_holder =
-      DummyPageHolder::Create(IntSize(500, 500));
+  auto dummy_holder = std::make_unique<DummyPageHolder>(IntSize(500, 500));
   Document* doc = &dummy_holder->GetDocument();
   Page::InsertOrdinaryPageForTesting(&dummy_holder->GetPage());
-  CSSParserContext* context = CSSParserContext::Create(
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kSecureContext,
       CSSParserContext::kLiveProfile, doc);
-  StyleSheetContents* sheet = StyleSheetContents::Create(context);
+  auto* sheet = MakeGarbageCollected<StyleSheetContents>(context);
 
   auto ExpectCount = [doc, context, sheet](const char* selector,
                                            WebFeature feature) {
-    EXPECT_FALSE(UseCounter::IsCounted(*doc, feature));
+    EXPECT_FALSE(doc->IsUseCounted(feature));
 
     CSSTokenizer tokenizer(selector);
     const auto tokens = tokenizer.TokenizeToEOF();
     CSSParserTokenRange range(tokens);
     CSSSelectorParser::ParseSelector(range, context, sheet);
 
-    EXPECT_TRUE(UseCounter::IsCounted(*doc, feature));
+    EXPECT_TRUE(doc->IsUseCounted(feature));
   };
 
   ExpectCount("::cue", WebFeature::kCSSSelectorCue);
@@ -698,6 +720,77 @@ TEST(CSSSelectorParserTest, UseCountShadowPseudo) {
               WebFeature::kCSSSelectorWebkitTextfieldDecorationContainer);
   ExpectCount("::-webkit-unrecognized",
               WebFeature::kCSSSelectorWebkitUnknownPseudo);
+}
+
+TEST(CSSSelectorParserTest, ImplicitShadowCrossingCombinators) {
+  struct ShadowCombinatorTest {
+    const char* input;
+    Vector<std::pair<AtomicString, CSSSelector::RelationType>> expectation;
+  };
+
+  const ShadowCombinatorTest test_cases[] = {
+      {
+          "*::placeholder",
+          {
+              {"placeholder", CSSSelector::kShadowPseudo},
+              {g_null_atom, CSSSelector::kSubSelector},
+          },
+      },
+      {
+          "div::slotted(*)",
+          {
+              {"slotted", CSSSelector::kShadowSlot},
+              {"div", CSSSelector::kSubSelector},
+          },
+      },
+      {
+          "::slotted(*)::placeholder",
+          {
+              {"placeholder", CSSSelector::kShadowPseudo},
+              {"slotted", CSSSelector::kShadowSlot},
+              {g_null_atom, CSSSelector::kSubSelector},
+          },
+      },
+      {
+          "span::part(my-part)",
+          {
+              {"part", CSSSelector::kShadowPart},
+              {"span", CSSSelector::kSubSelector},
+          },
+      },
+      {
+          "video::-webkit-media-controls",
+          {
+              {"-webkit-media-controls", CSSSelector::kShadowPseudo},
+              {"video", CSSSelector::kSubSelector},
+          },
+      },
+  };
+
+  auto* context = MakeGarbageCollected<CSSParserContext>(
+      kHTMLStandardMode, SecureContextMode::kInsecureContext);
+  auto* sheet = MakeGarbageCollected<StyleSheetContents>(context);
+
+  for (auto test_case : test_cases) {
+    SCOPED_TRACE(test_case.input);
+    CSSTokenizer tokenizer(test_case.input);
+    const auto tokens = tokenizer.TokenizeToEOF();
+    CSSParserTokenRange range(tokens);
+    CSSSelectorList list =
+        CSSSelectorParser::ParseSelector(range, context, sheet);
+    EXPECT_TRUE(list.IsValid());
+    const CSSSelector* selector = list.First();
+    for (auto sub_expectation : test_case.expectation) {
+      ASSERT_TRUE(selector);
+      AtomicString selector_value = selector->Match() == CSSSelector::kTag
+                                        ? selector->TagQName().LocalName()
+                                        : selector->Value();
+      EXPECT_EQ(sub_expectation.first, selector_value);
+      EXPECT_EQ(sub_expectation.second, selector->Relation());
+      selector = selector->TagHistory();
+    }
+    EXPECT_FALSE(selector);
+  }
 }
 
 }  // namespace blink

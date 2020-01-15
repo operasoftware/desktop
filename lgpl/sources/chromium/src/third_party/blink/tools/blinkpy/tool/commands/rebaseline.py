@@ -36,7 +36,7 @@ from blinkpy.common.path_finder import WEB_TESTS_LAST_COMPONENT
 from blinkpy.common.memoized import memoized
 from blinkpy.common.net.buildbot import Build
 from blinkpy.tool.commands.command import Command
-from blinkpy.web_tests.controllers.test_result_writer import TestResultWriter
+from blinkpy.web_tests.models import test_failures
 from blinkpy.web_tests.models.test_expectations import TestExpectations
 from blinkpy.web_tests.port import base, factory
 
@@ -52,12 +52,15 @@ class AbstractRebaseliningCommand(Command):
     """Base class for rebaseline-related commands."""
     # Not overriding execute() - pylint: disable=abstract-method
 
+    # Generic option groups (list of options):
+    platform_options = factory.platform_options(use_globs=True)
+    wpt_options = factory.wpt_options()
+
     no_optimize_option = optparse.make_option(
         '--no-optimize', dest='optimize', action='store_false', default=True,
         help=('Do not optimize (de-duplicate) the expectations after rebaselining '
               '(default is to de-dupe automatically). You can use "blink_tool.py '
               'optimize-baselines" to optimize separately.'))
-    platform_options = factory.platform_options(use_globs=True)
     results_directory_option = optparse.make_option(
         '--results-directory', help='Local results directory to use.')
     suffixes_option = optparse.make_option(
@@ -98,19 +101,19 @@ class AbstractRebaseliningCommand(Command):
     def _file_name_for_actual_result(self, test_name, suffix):
         # output_filename takes extensions starting with '.'.
         return self._host_port.output_filename(
-            test_name, TestResultWriter.FILENAME_SUFFIX_ACTUAL, '.' + suffix)
+            test_name, test_failures.FILENAME_SUFFIX_ACTUAL, '.' + suffix)
 
     def _file_name_for_expected_result(self, test_name, suffix):
         # output_filename takes extensions starting with '.'.
         return self._host_port.output_filename(
-            test_name, TestResultWriter.FILENAME_SUFFIX_EXPECTED, '.' + suffix)
+            test_name, test_failures.FILENAME_SUFFIX_EXPECTED, '.' + suffix)
 
 
 class ChangeSet(object):
     """A record of TestExpectation lines to remove.
 
-    TODO(qyearsley): Remove this class, track list of lines to remove directly
-    in an attribute of AbstractRebaseliningCommand.
+    Note: This class is probably more complicated than necessary; it is mainly
+    used to track the list of lines that we want to remove from TestExpectations.
     """
 
     def __init__(self, lines_to_remove=None):
@@ -332,7 +335,7 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
                 except ValueError:
                     _log.debug('"%s" is not a JSON object, ignoring', line)
             if not updated:
-                # TODO(qyearsley): This probably should be an error. See http://crbug.com/649412.
+                # TODO(crbug.com/649412): This could be made into an error.
                 _log.debug('Could not add file based off output "%s"', stdout)
         return change_set
 
@@ -351,7 +354,9 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
             if not suffixes:
                 continue
             # FIXME: We should propagate the platform options as well.
-            args = []
+            # Prevent multiple baseline optimizer to race updating the manifest.
+            # The manifest has already been updated when listing tests.
+            args = ['--no-manifest-update']
             if verbose:
                 args.append('--verbose')
             args.extend(['--suffixes', ','.join(suffixes), test])
@@ -412,8 +417,8 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
             test_baseline_set: A TestBaselineSet instance, which represents
                 a set of tests/platform combinations to rebaseline.
         """
-        if self._tool.git().has_working_directory_changes(pathspec=self._layout_tests_dir()):
-            _log.error('There are uncommitted changes in the layout tests directory; aborting.')
+        if self._tool.git().has_working_directory_changes(pathspec=self._web_tests_dir()):
+            _log.error('There are uncommitted changes in the web tests directory; aborting.')
             return
 
         for test in sorted({t for t, _, _ in test_baseline_set}):
@@ -458,12 +463,12 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
         baseline_paths = []
         for test in test_baseline_set.all_tests():
             filenames = [self._file_name_for_expected_result(test, suffix) for suffix in BASELINE_SUFFIX_LIST]
-            baseline_paths += [filesystem.join(self._layout_tests_dir(), filename) for filename in filenames]
+            baseline_paths += [filesystem.join(self._web_tests_dir(), filename) for filename in filenames]
         baseline_paths.sort()
         return baseline_paths
 
-    def _layout_tests_dir(self):
-        return self._tool.port_factory.get().layout_tests_dir()
+    def _web_tests_dir(self):
+        return self._tool.port_factory.get().web_tests_dir()
 
     def _suffixes_for_actual_failures(self, test, build):
         """Gets the baseline suffixes for actual mismatch failures in some results.

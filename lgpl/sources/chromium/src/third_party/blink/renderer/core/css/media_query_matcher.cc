@@ -32,10 +32,6 @@
 
 namespace blink {
 
-MediaQueryMatcher* MediaQueryMatcher::Create(Document& document) {
-  return new MediaQueryMatcher(document);
-}
-
 MediaQueryMatcher::MediaQueryMatcher(Document& document)
     : document_(&document) {
   DCHECK(document_);
@@ -52,7 +48,7 @@ MediaQueryEvaluator* MediaQueryMatcher::CreateEvaluator() const {
   if (!document_ || !document_->GetFrame())
     return nullptr;
 
-  return new MediaQueryEvaluator(document_->GetFrame());
+  return MakeGarbageCollected<MediaQueryEvaluator>(document_->GetFrame());
 }
 
 bool MediaQueryMatcher::Evaluate(const MediaQuerySet* media) {
@@ -76,7 +72,7 @@ MediaQueryList* MediaQueryMatcher::MatchMedia(const String& query) {
     return nullptr;
 
   scoped_refptr<MediaQuerySet> media = MediaQuerySet::Create(query);
-  return MediaQueryList::Create(document_, this, media);
+  return MakeGarbageCollected<MediaQueryList>(document_, this, media);
 }
 
 void MediaQueryMatcher::AddMediaQueryList(MediaQueryList* query) {
@@ -111,7 +107,7 @@ void MediaQueryMatcher::MediaFeaturesChanged() {
   HeapVector<Member<MediaQueryListListener>> listeners_to_notify;
   for (const auto& list : media_lists_) {
     if (list->MediaFeaturesChanged(&listeners_to_notify)) {
-      Event* event = MediaQueryListEvent::Create(list);
+      auto* event = MakeGarbageCollected<MediaQueryListEvent>(list);
       event->SetTarget(list);
       document_->EnqueueUniqueAnimationFrameEvent(event);
     }

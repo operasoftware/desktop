@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_INSTRUMENTATION_TRACING_TRACED_VALUE_H_
 
 #include "base/macros.h"
-#include "base/trace_event/trace_event_argument.h"
+#include "base/trace_event/traced_value.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -16,9 +16,8 @@ namespace blink {
 class PLATFORM_EXPORT TracedValue final
     : public base::trace_event::ConvertableToTraceFormat {
  public:
+  TracedValue();
   ~TracedValue() override;
-
-  static std::unique_ptr<TracedValue> Create();
 
   void EndDictionary();
   void EndArray();
@@ -27,6 +26,7 @@ class PLATFORM_EXPORT TracedValue final
   void SetDouble(const char* name, double value);
   void SetBoolean(const char* name, bool value);
   void SetString(const char* name, const String& value);
+  void SetValue(const char* name, TracedValue* value);
   void BeginArray(const char* name);
   void BeginDictionary(const char* name);
 
@@ -47,11 +47,10 @@ class PLATFORM_EXPORT TracedValue final
   String ToString() const;
 
  private:
-  TracedValue();
-
   // ConvertableToTraceFormat
 
   void AppendAsTraceFormat(std::string*) const final;
+  bool AppendToProto(ProtoAppender* appender) final;
   void EstimateTraceMemoryOverhead(
       base::trace_event::TraceEventMemoryOverhead*) final;
 

@@ -13,11 +13,38 @@
 #include "third_party/blink/renderer/core/editing/testing/editing_test_base.h"
 #include "third_party/blink/renderer/core/editing/visible_selection.h"
 
-using ws::mojom::ImeTextSpanThickness;
+using ui::mojom::ImeTextSpanThickness;
 
 namespace blink {
 
-class TextSuggestionControllerTest : public EditingTestBase {};
+class TextSuggestionControllerTest : public EditingTestBase {
+ public:
+  bool IsTextSuggestionHostAvailable() {
+    return bool(GetDocument()
+                    .GetFrame()
+                    ->GetTextSuggestionController()
+                    .text_suggestion_host_);
+  }
+
+  void ShowSuggestionMenu(
+      const HeapVector<std::pair<Member<const Text>, Member<DocumentMarker>>>&
+          node_suggestion_marker_pairs,
+      size_t max_number_of_suggestions) {
+    GetDocument().GetFrame()->GetTextSuggestionController().ShowSuggestionMenu(
+        node_suggestion_marker_pairs, max_number_of_suggestions);
+  }
+
+  EphemeralRangeInFlatTree ComputeRangeSurroundingCaret(
+      const PositionInFlatTree& caret_position) {
+    const Node* const position_node = caret_position.ComputeContainerNode();
+    const unsigned position_offset_in_node =
+        caret_position.ComputeOffsetInContainerNode();
+    // See ComputeRangeSurroundingCaret() in TextSuggestionController.
+    return EphemeralRangeInFlatTree(
+        PositionInFlatTree(position_node, position_offset_in_node - 1),
+        PositionInFlatTree(position_node, position_offset_in_node + 1));
+  }
+};
 
 TEST_F(TextSuggestionControllerTest, ApplySpellCheckSuggestion) {
   SetBodyContent(
@@ -57,7 +84,7 @@ TEST_F(TextSuggestionControllerTest, ApplyTextSuggestion) {
       "word1 word2 word3 word4"
       "</div>");
   Element* div = GetDocument().QuerySelector("div");
-  Text* text = ToText(div->firstChild());
+  auto* text = To<Text>(div->firstChild());
 
   // Add marker on "word1". This marker should *not* be cleared by the
   // replace operation.
@@ -142,8 +169,7 @@ TEST_F(TextSuggestionControllerTest, ApplyTextSuggestion) {
   EXPECT_EQ(6u, markers[2]->StartOffset());
   EXPECT_EQ(13u, markers[2]->EndOffset());
 
-  const SuggestionMarker* const suggestion_marker =
-      ToSuggestionMarker(markers[2]);
+  const auto* const suggestion_marker = To<SuggestionMarker>(markers[2].Get());
   EXPECT_EQ(1u, suggestion_marker->Suggestions().size());
   EXPECT_EQ(String("word2 word3"), suggestion_marker->Suggestions()[0]);
 
@@ -169,7 +195,7 @@ TEST_F(TextSuggestionControllerTest,
       "mispelled"
       "</div>");
   Element* div = GetDocument().QuerySelector("div");
-  Text* text = ToText(div->firstChild());
+  auto* text = To<Text>(div->firstChild());
 
   // Add marker on "mispelled". This marker should be cleared by the replace
   // operation.
@@ -183,7 +209,8 @@ TEST_F(TextSuggestionControllerTest,
   // Check the tag for the marker that was just added (the current tag value is
   // not reset between test cases).
   int32_t marker_tag =
-      ToSuggestionMarker(GetDocument().Markers().MarkersFor(*text)[0])->Tag();
+      To<SuggestionMarker>(GetDocument().Markers().MarkersFor(*text)[0].Get())
+          ->Tag();
 
   // Select immediately before "mispelled".
   GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
@@ -437,6 +464,85 @@ TEST_F(TextSuggestionControllerTest, CallbackHappensAfterDocumentDestroyed) {
 
   // Shouldn't crash
   frame.GetTextSuggestionController().SuggestionMenuTimeoutCallback(0);
+}
+
+TEST_F(TextSuggestionControllerTest, SuggestionMarkerWithEmptySuggestion) {
+  SetBodyContent(
+      "<div contenteditable>"
+      "hello"
+      "</div>");
+  Element* div = GetDocument().QuerySelector("div");
+  auto* text = To<Text>(div->firstChild());
+
+  // Set suggestion marker with empty suggestion list.
+  GetDocument().Markers().AddSuggestionMarker(
+      EphemeralRange(Position(text, 0), Position(text, 5)),
+      SuggestionMarkerProperties::Builder()
+          .SetSuggestions(Vector<String>())
+          .Build());
+
+  // Set the caret inside the word.
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
+      SelectionInDOMTree::Builder()
+          .SetBaseAndExtent(Position(text, 3), Position(text, 3))
+          .Build());
+
+  // Handle potential suggestion tap on the caret position.
+  GetDocument()
+      .GetFrame()
+      ->GetTextSuggestionController()
+      .HandlePotentialSuggestionTap(PositionInFlatTree(text, 3));
+
+  // We don't trigger menu in this case so there shouldn't be any mojom
+  // connection available.
+  EXPECT_FALSE(IsTextSuggestionHostAvailable());
+
+  const VisibleSelectionInFlatTree& selection =
+      GetFrame().Selection().ComputeVisibleSelectionInFlatTree();
+  EXPECT_FALSE(selection.IsNone());
+
+  const EphemeralRangeInFlatTree& range_to_check =
+      ComputeRangeSurroundingCaret(selection.Start());
+
+  const HeapVector<std::pair<Member<const Text>, Member<DocumentMarker>>>&
+      node_suggestion_marker_pairs =
+          GetFrame().GetDocument()->Markers().MarkersIntersectingRange(
+              range_to_check, DocumentMarker::MarkerTypes::Suggestion());
+  EXPECT_FALSE(node_suggestion_marker_pairs.IsEmpty());
+
+  // Calling ShowSuggestionMenu() shouldn't crash. See crbug.com/901135.
+  // ShowSuggestionMenu() may still get called because of race condition.
+  ShowSuggestionMenu(node_suggestion_marker_pairs, 3);
+}
+
+TEST_F(TextSuggestionControllerTest, SuggestionMarkerWithSuggestion) {
+  SetBodyContent(
+      "<div contenteditable>"
+      "hello"
+      "</div>");
+  Element* div = GetDocument().QuerySelector("div");
+  auto* text = To<Text>(div->firstChild());
+
+  // Set suggestion marker with two suggestions.
+  GetDocument().Markers().AddSuggestionMarker(
+      EphemeralRange(Position(text, 0), Position(text, 5)),
+      SuggestionMarkerProperties::Builder()
+          .SetSuggestions(Vector<String>({"marker1", "marker2"}))
+          .Build());
+
+  // Set the caret inside the word.
+  GetDocument().GetFrame()->Selection().SetSelectionAndEndTyping(
+      SelectionInDOMTree::Builder()
+          .SetBaseAndExtent(Position(text, 3), Position(text, 3))
+          .Build());
+
+  // Handle potential suggestion tap on the caret position.
+  GetDocument()
+      .GetFrame()
+      ->GetTextSuggestionController()
+      .HandlePotentialSuggestionTap(PositionInFlatTree(text, 3));
+
+  EXPECT_TRUE(IsTextSuggestionHostAvailable());
 }
 
 }  // namespace blink

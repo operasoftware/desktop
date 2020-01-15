@@ -14,7 +14,6 @@ namespace blink {
 
 class CullRect;
 class GraphicsContext;
-class IntRect;
 class LocalFrameView;
 
 class CORE_EXPORT FramePainter {
@@ -25,7 +24,7 @@ class CORE_EXPORT FramePainter {
       : frame_view_(&frame_view) {}
 
   void Paint(GraphicsContext&, const GlobalPaintFlags, const CullRect&);
-  void PaintContents(GraphicsContext&, const GlobalPaintFlags, const IntRect&);
+  void PaintContents(GraphicsContext&, const GlobalPaintFlags, const CullRect&);
 
  private:
   const LocalFrameView& GetFrameView();

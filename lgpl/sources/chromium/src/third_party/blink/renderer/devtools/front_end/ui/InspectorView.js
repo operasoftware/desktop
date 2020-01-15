@@ -31,7 +31,7 @@
  * @implements {UI.ViewLocationResolver}
  * @unrestricted
  */
-UI.InspectorView = class extends UI.VBox {
+export default class InspectorView extends UI.VBox {
   constructor() {
     super();
     UI.GlassPane.setContainer(this.element);
@@ -44,7 +44,7 @@ UI.InspectorView = class extends UI.VBox {
     this._drawerSplitWidget.enableShowModeSaving();
     this._drawerSplitWidget.show(this.element);
 
-    if (Runtime.experiments.isEnabled('splitInDrawer')) {
+    if (Root.Runtime.experiments.isEnabled('splitInDrawer')) {
       this._innerDrawerSplitWidget = new UI.SplitWidget(true, true, 'Inspector.drawerSidebarSplitViewState', 200, 200);
       this._drawerSplitWidget.setSidebarWidget(this._innerDrawerSplitWidget);
       this._drawerSidebarTabbedLocation =
@@ -57,7 +57,8 @@ UI.InspectorView = class extends UI.VBox {
     // Create drawer tabbed pane.
     this._drawerTabbedLocation =
         UI.viewManager.createTabbedLocation(this._showDrawer.bind(this, false), 'drawer-view', true, true);
-    this._drawerTabbedLocation.enableMoreTabsButton();
+    const moreTabsButton = this._drawerTabbedLocation.enableMoreTabsButton();
+    moreTabsButton.setTitle(ls`More Tools`);
     this._drawerTabbedPane = this._drawerTabbedLocation.tabbedPane();
     this._drawerTabbedPane.setMinimumSize(0, 27);
     const closeDrawerButton = new UI.ToolbarButton(Common.UIString('Close drawer'), 'largeicon-delete');
@@ -76,23 +77,28 @@ UI.InspectorView = class extends UI.VBox {
 
     // Create main area tabbed pane.
     this._tabbedLocation = UI.viewManager.createTabbedLocation(
-        InspectorFrontendHost.bringToFront.bind(InspectorFrontendHost), 'panel', true, true,
-        Runtime.queryParam('panel'));
+        Host.InspectorFrontendHost.bringToFront.bind(Host.InspectorFrontendHost), 'panel', true, true,
+        Root.Runtime.queryParam('panel'));
 
     this._tabbedPane = this._tabbedLocation.tabbedPane();
     this._tabbedPane.registerRequiredCSS('ui/inspectorViewTabbedPane.css');
     this._tabbedPane.addEventListener(UI.TabbedPane.Events.TabSelected, this._tabSelected, this);
     this._tabbedPane.setAccessibleName(Common.UIString('Panels'));
 
-    if (Host.isUnderTest())
+    // Store the initial selected panel for use in launch histograms
+    Host.userMetrics.setLaunchPanel(this._tabbedPane.selectedTabId);
+
+    if (Host.isUnderTest()) {
       this._tabbedPane.setAutoSelectFirstItemOnShow(false);
+    }
     this._drawerSplitWidget.setMainWidget(this._tabbedPane);
 
     this._keyDownBound = this._keyDown.bind(this);
-    InspectorFrontendHost.events.addEventListener(InspectorFrontendHostAPI.Events.ShowPanel, showPanel.bind(this));
+    Host.InspectorFrontendHost.events.addEventListener(
+        Host.InspectorFrontendHostAPI.Events.ShowPanel, showPanel.bind(this));
 
     /**
-     * @this {UI.InspectorView}
+     * @this {InspectorView}
      * @param {!Common.Event} event
      */
     function showPanel(event) {
@@ -102,10 +108,10 @@ UI.InspectorView = class extends UI.VBox {
   }
 
   /**
-   * @return {!UI.InspectorView}
+   * @return {!InspectorView}
    */
   static instance() {
-    return /** @type {!UI.InspectorView} */ (self.runtime.sharedInstance(UI.InspectorView));
+    return /** @type {!InspectorView} */ (self.runtime.sharedInstance(InspectorView));
   }
 
   /**
@@ -128,18 +134,21 @@ UI.InspectorView = class extends UI.VBox {
    * @return {?UI.ViewLocation}
    */
   resolveLocation(locationName) {
-    if (locationName === 'drawer-view')
+    if (locationName === 'drawer-view') {
       return this._drawerTabbedLocation;
-    if (locationName === 'panel')
+    }
+    if (locationName === 'panel') {
       return this._tabbedLocation;
-    if (locationName === 'drawer-sidebar')
+    }
+    if (locationName === 'drawer-sidebar') {
       return this._drawerSidebarTabbedLocation;
+    }
     return null;
   }
 
   createToolbars() {
-    this._tabbedPane.leftToolbar().appendLocationItems('main-toolbar-left');
-    this._tabbedPane.rightToolbar().appendLocationItems('main-toolbar-right');
+    this._tabbedPane.leftToolbar().appendItemsAtLocation('main-toolbar-left');
+    this._tabbedPane.rightToolbar().appendItemsAtLocation('main-toolbar-right');
   }
 
   /**
@@ -210,13 +219,15 @@ UI.InspectorView = class extends UI.VBox {
    * @param {boolean} focus
    */
   _showDrawer(focus) {
-    if (this._drawerTabbedPane.isShowing())
+    if (this._drawerTabbedPane.isShowing()) {
       return;
+    }
     this._drawerSplitWidget.showBoth();
-    if (focus)
+    if (focus) {
       this._focusRestorer = new UI.WidgetFocusRestorer(this._drawerTabbedPane);
-    else
+    } else {
       this._focusRestorer = null;
+    }
   }
 
   /**
@@ -227,10 +238,12 @@ UI.InspectorView = class extends UI.VBox {
   }
 
   _closeDrawer() {
-    if (!this._drawerTabbedPane.isShowing())
+    if (!this._drawerTabbedPane.isShowing()) {
       return;
-    if (this._focusRestorer)
+    }
+    if (this._focusRestorer) {
       this._focusRestorer.restore();
+    }
     this._drawerSplitWidget.hideSidebar(true);
   }
 
@@ -262,24 +275,27 @@ UI.InspectorView = class extends UI.VBox {
    */
   _keyDown(event) {
     const keyboardEvent = /** @type {!KeyboardEvent} */ (event);
-    if (!UI.KeyboardShortcut.eventHasCtrlOrMeta(keyboardEvent) || event.altKey || event.shiftKey)
+    if (!UI.KeyboardShortcut.eventHasCtrlOrMeta(keyboardEvent) || event.altKey || event.shiftKey) {
       return;
+    }
 
     // Ctrl/Cmd + 1-9 should show corresponding panel.
     const panelShortcutEnabled = Common.moduleSetting('shortcutPanelSwitch').get();
     if (panelShortcutEnabled) {
       let panelIndex = -1;
-      if (event.keyCode > 0x30 && event.keyCode < 0x3A)
+      if (event.keyCode > 0x30 && event.keyCode < 0x3A) {
         panelIndex = event.keyCode - 0x31;
-      else if (
+      } else if (
           event.keyCode > 0x60 && event.keyCode < 0x6A &&
-          keyboardEvent.location === KeyboardEvent.DOM_KEY_LOCATION_NUMPAD)
+          keyboardEvent.location === KeyboardEvent.DOM_KEY_LOCATION_NUMPAD) {
         panelIndex = event.keyCode - 0x61;
+      }
       if (panelIndex !== -1) {
-        const panelName = this._tabbedPane.allTabs()[panelIndex];
+        const panelName = this._tabbedPane.tabIds()[panelIndex];
         if (panelName) {
-          if (!UI.Dialog.hasInstance() && !this._currentPanelLocked)
+          if (!UI.Dialog.hasInstance() && !this._currentPanelLocked) {
             this.showPanel(panelName);
+          }
           event.consume(true);
         }
       }
@@ -328,27 +344,23 @@ UI.InspectorView = class extends UI.VBox {
   }
 
   minimize() {
-    if (this._ownerSplitWidget)
+    if (this._ownerSplitWidget) {
       this._ownerSplitWidget.setSidebarMinimized(true);
+    }
   }
 
   restore() {
-    if (this._ownerSplitWidget)
+    if (this._ownerSplitWidget) {
       this._ownerSplitWidget.setSidebarMinimized(false);
+    }
   }
-};
-
-
-/**
- * @type {!UI.InspectorView}
- */
-UI.inspectorView;
+}
 
 /**
  * @implements {UI.ActionDelegate}
  * @unrestricted
  */
-UI.InspectorView.ActionDelegate = class {
+export class ActionDelegate {
   /**
    * @override
    * @param {!UI.Context} context
@@ -358,10 +370,11 @@ UI.InspectorView.ActionDelegate = class {
   handleAction(context, actionId) {
     switch (actionId) {
       case 'main.toggle-drawer':
-        if (UI.inspectorView.drawerVisible())
+        if (UI.inspectorView.drawerVisible()) {
           UI.inspectorView._closeDrawer();
-        else
+        } else {
           UI.inspectorView._showDrawer(true);
+        }
         return true;
       case 'main.next-tab':
         UI.inspectorView._tabbedPane.selectNextTab();
@@ -374,4 +387,24 @@ UI.InspectorView.ActionDelegate = class {
     }
     return false;
   }
-};
+}
+
+/* Legacy exported object*/
+self.UI = self.UI || {};
+
+/* Legacy exported object*/
+UI = UI || {};
+
+/** @constructor */
+UI.InspectorView = InspectorView;
+
+/**
+ * @implements {UI.ActionDelegate}
+ * @unrestricted
+ */
+UI.InspectorView.ActionDelegate = ActionDelegate;
+
+/**
+ * @type {!InspectorView}
+ */
+UI.inspectorView;

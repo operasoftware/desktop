@@ -6,10 +6,12 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TESTING_TESTING_PLATFORM_SUPPORT_WITH_MOCK_SCHEDULER_H_
 
 #include <memory>
+
+#include "base/macros.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/testing/scoped_main_thread_overrider.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 
 namespace base {
 
@@ -30,11 +32,11 @@ class MainThreadSchedulerImpl;
 // This class adds scheduler and threading support to TestingPlatformSupport.
 // See also ScopedTestingPlatformSupport to use this class correctly.
 class TestingPlatformSupportWithMockScheduler : public TestingPlatformSupport {
-  WTF_MAKE_NONCOPYABLE(TestingPlatformSupportWithMockScheduler);
-
  public:
   TestingPlatformSupportWithMockScheduler();
   ~TestingPlatformSupportWithMockScheduler() override;
+
+  std::unique_ptr<Thread> CreateMainThread();
 
   scoped_refptr<base::TestMockTimeTaskRunner> test_task_runner() {
     return test_task_runner_;
@@ -77,7 +79,10 @@ class TestingPlatformSupportWithMockScheduler : public TestingPlatformSupport {
   std::unique_ptr<scheduler::MainThreadSchedulerImpl> scheduler_;
   base::sequence_manager::SequenceManager*
       sequence_manager_;  // Owned by scheduler_.
-  std::unique_ptr<Thread> thread_;
+  std::unique_ptr<ScopedMainThreadOverrider> main_thread_overrider_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestingPlatformSupportWithMockScheduler);
 };
 
 }  // namespace blink

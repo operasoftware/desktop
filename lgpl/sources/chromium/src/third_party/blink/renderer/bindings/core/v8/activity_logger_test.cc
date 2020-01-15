@@ -17,8 +17,8 @@
 
 namespace blink {
 
-using blink::FrameTestHelpers::WebViewHelper;
-using blink::FrameTestHelpers::PumpPendingRequestsForFrameToLoad;
+using blink::frame_test_helpers::WebViewHelper;
+using blink::frame_test_helpers::PumpPendingRequestsForFrameToLoad;
 
 class TestActivityLogger : public V8DOMActivityLogger {
  public:
@@ -60,8 +60,7 @@ class TestActivityLogger : public V8DOMActivityLogger {
     EXPECT_EQ(expected.size(), logged_activities_.size());
     for (wtf_size_t i = 0;
          i < std::min(expected.size(), logged_activities_.size()); ++i) {
-      EXPECT_STREQ(expected[i].Utf8().data(),
-                   logged_activities_[i].Utf8().data());
+      EXPECT_EQ(expected[i], logged_activities_[i]);
     }
     return logged_activities_ == expected;
   }
@@ -81,8 +80,8 @@ class ActivityLoggerTest : public testing::Test {
                               ->MainFrameImpl()
                               ->GetFrame()
                               ->GetScriptController();
-    FrameTestHelpers::LoadFrame(web_view_helper_.GetWebView()->MainFrameImpl(),
-                                "about:blank");
+    frame_test_helpers::LoadFrame(
+        web_view_helper_.GetWebView()->MainFrameImpl(), "about:blank");
   }
 
   ~ActivityLoggerTest() override { WebCache::Clear(); }
@@ -96,7 +95,8 @@ class ActivityLoggerTest : public testing::Test {
   void ExecuteScriptInIsolatedWorld(const String& script) const {
     v8::HandleScope scope(v8::Isolate::GetCurrent());
     script_controller_->ExecuteScriptInIsolatedWorld(
-        kIsolatedWorldId, ScriptSourceCode(script), KURL(), kOpaqueResource);
+        kIsolatedWorldId, ScriptSourceCode(script), KURL(),
+        SanitizeScriptErrors::kSanitize);
     PumpPendingRequestsForFrameToLoad(web_view_helper_.LocalMainFrame());
   }
 
@@ -374,12 +374,16 @@ TEST_F(ActivityLoggerTest, IFrameSrcAttribute) {
       "blinkRequestResource | Main resource | data:text/html;charset=utf-8,A\n"
       "blinkSetAttribute | iframe | src | data:text/html;charset=utf-8,A | "
       "data:text/html;charset=utf-8,B\n"
+      "blinkRequestResource | Main resource | data:text/html;charset=utf-8,B\n"
       "blinkSetAttribute | iframe | src | data:text/html;charset=utf-8,B | "
       "data:text/html;charset=utf-8,C\n"
+      "blinkRequestResource | Main resource | data:text/html;charset=utf-8,C\n"
       "blinkSetAttribute | iframe | src | data:text/html;charset=utf-8,C | "
       "data:text/html;charset=utf-8,D\n"
+      "blinkRequestResource | Main resource | data:text/html;charset=utf-8,D\n"
       "blinkSetAttribute | iframe | src | data:text/html;charset=utf-8,D | "
-      "data:text/html;charset=utf-8,E";
+      "data:text/html;charset=utf-8,E\n"
+      "blinkRequestResource | Main resource | data:text/html;charset=utf-8,E";
   ExecuteScriptInMainWorld(code);
   ASSERT_TRUE(VerifyActivities(""));
   ExecuteScriptInIsolatedWorld(code);
@@ -543,12 +547,16 @@ TEST_F(ActivityLoggerTest, LocalDOMWindowAttribute) {
   const char* expected_activities =
       "blinkSetAttribute | LocalDOMWindow | url | about:blank | "
       "data:text/html;charset=utf-8,A\n"
+      "blinkRequestResource | Main resource | data:text/html;charset=utf-8,A\n"
       "blinkSetAttribute | LocalDOMWindow | url | about:blank | "
       "data:text/html;charset=utf-8,B\n"
+      "blinkRequestResource | Main resource | data:text/html;charset=utf-8,B\n"
       "blinkSetAttribute | LocalDOMWindow | url | about:blank | "
       "data:text/html;charset=utf-8,C\n"
+      "blinkRequestResource | Main resource | data:text/html;charset=utf-8,C\n"
       "blinkSetAttribute | LocalDOMWindow | url | about:blank | "
       "protocol:blank\n"
+      "blinkRequestResource | Main resource | protocol:blank\n"
       "blinkSetAttribute | LocalDOMWindow | url | about:blank | "
       "about:pathname\n"
       "blinkSetAttribute | LocalDOMWindow | url | about:blank | "

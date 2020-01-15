@@ -38,7 +38,7 @@ class CORE_EXPORT HTMLTableRowElement final : public HTMLTablePartElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(HTMLTableRowElement);
+  explicit HTMLTableRowElement(Document&);
 
   int rowIndex() const;
 
@@ -52,8 +52,6 @@ class CORE_EXPORT HTMLTableRowElement final : public HTMLTablePartElement {
   bool HasNonInBodyInsertionMode() const override { return true; }
 
  private:
-  explicit HTMLTableRowElement(Document&);
-
   bool HasLegalLinkAttribute(const QualifiedName&) const override;
   const QualifiedName& SubResourceAttributeName() const override;
 };

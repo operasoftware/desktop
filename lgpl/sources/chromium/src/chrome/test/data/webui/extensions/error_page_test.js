@@ -87,7 +87,7 @@ cr.define('extension_error_page_tests', function() {
 
       extension_test_util.testIcons(errorPage);
 
-      const testIsVisible = extension_test_util.isVisible.bind(null, errorPage);
+      const testIsVisible = test_util.isVisible.bind(null, errorPage);
       expectTrue(testIsVisible('#closeButton'));
       expectTrue(testIsVisible('#heading'));
       expectTrue(testIsVisible('#errorsList'));
@@ -118,7 +118,7 @@ cr.define('extension_error_page_tests', function() {
       expectTrue(error.querySelector('iron-icon').icon == 'cr:warning');
 
       mockDelegate.testClickingCalls(
-          error.querySelector('.icon-delete-gray button'), 'deleteErrors',
+          error.querySelector('.icon-delete-gray'), 'deleteErrors',
           [extensionId, [manifestError.id]]);
     });
 

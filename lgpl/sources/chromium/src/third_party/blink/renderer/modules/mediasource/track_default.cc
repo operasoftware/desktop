@@ -29,7 +29,7 @@ const AtomicString& TrackDefault::TextKeyword() {
 }
 
 ScriptValue TrackDefault::kinds(ScriptState* script_state) const {
-  return ScriptValue(script_state, ToV8(kinds_, script_state));
+  return ScriptValue(script_state->GetIsolate(), ToV8(kinds_, script_state));
 }
 
 TrackDefault* TrackDefault::Create(const AtomicString& type,
@@ -95,7 +95,8 @@ TrackDefault* TrackDefault::Create(const AtomicString& type,
   // 7. Set the byteStreamTrackID attribute on this new object to
   //    |byteStreamTrackID|.
   // These steps are done as constructor initializers.
-  return new TrackDefault(type, language, label, kinds, byte_stream_track_id);
+  return MakeGarbageCollected<TrackDefault>(type, language, label, kinds,
+                                            byte_stream_track_id);
 }
 
 TrackDefault::~TrackDefault() = default;

@@ -9,8 +9,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/array_buffer_or_array_buffer_view.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
-#include "third_party/blink/renderer/core/streams/retain_wrapper_during_construction.h"
-#include "third_party/blink/renderer/core/streams/transform_stream_default_controller.h"
+#include "third_party/blink/renderer/core/streams/transform_stream_default_controller_interface.h"
 #include "third_party/blink/renderer/core/streams/transform_stream_transformer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/encoding/encoding.h"
@@ -18,7 +17,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/to_v8.h"
-#include "third_party/blink/renderer/platform/wtf/string_extras.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_codec.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding_registry.h"
@@ -40,7 +39,7 @@ class TextDecoderStream::Transformer final : public TransformStreamTransformer {
   // Implements the type conversion part of the "decode and enqueue a chunk"
   // algorithm.
   void Transform(v8::Local<v8::Value> chunk,
-                 TransformStreamDefaultController* controller,
+                 TransformStreamDefaultControllerInterface* controller,
                  ExceptionState& exception_state) override {
     ArrayBufferOrArrayBufferView bufferSource;
     V8ArrayBufferOrArrayBufferView::ToImpl(
@@ -53,38 +52,28 @@ class TextDecoderStream::Transformer final : public TransformStreamTransformer {
     // algorithm (https://heycam.github.io/webidl/#dfn-get-buffer-source-copy).
     if (bufferSource.IsArrayBufferView()) {
       const auto* view = bufferSource.GetAsArrayBufferView().View();
-      // If IsDetachedBuffer(O), then throw a TypeError.
-      if (view->buffer()->IsNeutered()) {
-        exception_state.ThrowTypeError(
-            ExceptionMessages::FailedToConvertJSValue("BufferSource"));
-        return;
-      }
       const char* start = static_cast<const char*>(view->BaseAddress());
-      size_t length = view->byteLength();
+      uint32_t length = view->byteLength();
       DecodeAndEnqueue(start, length, WTF::FlushBehavior::kDoNotFlush,
                        controller, exception_state);
       return;
     }
     DCHECK(bufferSource.IsArrayBuffer());
     const auto* array_buffer = bufferSource.GetAsArrayBuffer();
-    // If IsDetachedBuffer(O), then throw a TypeError.
-    if (array_buffer->IsNeutered()) {
-      exception_state.ThrowTypeError(
-          ExceptionMessages::FailedToConvertJSValue("BufferSource"));
-      return;
-    }
     const char* start = static_cast<const char*>(array_buffer->Data());
-    size_t length = array_buffer->ByteLength();
+    uint32_t length = array_buffer->ByteLength();
     DecodeAndEnqueue(start, length, WTF::FlushBehavior::kDoNotFlush, controller,
                      exception_state);
   }
 
   // Implements the "encode and flush" algorithm.
-  void Flush(TransformStreamDefaultController* controller,
+  void Flush(TransformStreamDefaultControllerInterface* controller,
              ExceptionState& exception_state) override {
     DecodeAndEnqueue(nullptr, 0u, WTF::FlushBehavior::kDataEOF, controller,
                      exception_state);
   }
+
+  ScriptState* GetScriptState() override { return script_state_; }
 
   void Trace(Visitor* visitor) override {
     visitor->Trace(script_state_);
@@ -95,9 +84,9 @@ class TextDecoderStream::Transformer final : public TransformStreamTransformer {
   // Implements the second part of "decode and enqueue a chunk" as well as the
   // "flush and enqueue" algorithm.
   void DecodeAndEnqueue(const char* start,
-                        size_t length,
+                        uint32_t length,
                         WTF::FlushBehavior flush,
-                        TransformStreamDefaultController* controller,
+                        TransformStreamDefaultControllerInterface* controller,
                         ExceptionState& exception_state) {
     const UChar kBOM = 0xFEFF;
 
@@ -144,21 +133,21 @@ class TextDecoderStream::Transformer final : public TransformStreamTransformer {
 
 TextDecoderStream* TextDecoderStream::Create(ScriptState* script_state,
                                              const String& label,
-                                             const TextDecoderOptions& options,
+                                             const TextDecoderOptions* options,
                                              ExceptionState& exception_state) {
   WTF::TextEncoding encoding(
-      label.StripWhiteSpace(&Encoding::IsASCIIWhiteSpace));
+      label.StripWhiteSpace(&encoding::IsASCIIWhiteSpace));
   // The replacement encoding is not valid, but the Encoding API also
   // rejects aliases of the replacement encoding.
   if (!encoding.IsValid() ||
-      strcasecmp(encoding.GetName(), "replacement") == 0) {
+      WTF::EqualIgnoringASCIICase(encoding.GetName(), "replacement")) {
     exception_state.ThrowRangeError("The encoding label provided ('" + label +
                                     "') is invalid.");
     return nullptr;
   }
 
-  return new TextDecoderStream(script_state, encoding, options,
-                               exception_state);
+  return MakeGarbageCollected<TextDecoderStream>(script_state, encoding,
+                                                 options, exception_state);
 }
 
 TextDecoderStream::~TextDecoderStream() = default;
@@ -167,14 +156,12 @@ String TextDecoderStream::encoding() const {
   return String(encoding_.GetName()).LowerASCII();
 }
 
-ScriptValue TextDecoderStream::readable(ScriptState* script_state,
-                                        ExceptionState& exception_state) const {
-  return transform_->Readable(script_state, exception_state);
+ReadableStream* TextDecoderStream::readable() const {
+  return transform_->Readable();
 }
 
-ScriptValue TextDecoderStream::writable(ScriptState* script_state,
-                                        ExceptionState& exception_state) const {
-  return transform_->Writable(script_state, exception_state);
+WritableStream* TextDecoderStream::writable() const {
+  return transform_->Writable();
 }
 
 void TextDecoderStream::Trace(Visitor* visitor) {
@@ -184,18 +171,14 @@ void TextDecoderStream::Trace(Visitor* visitor) {
 
 TextDecoderStream::TextDecoderStream(ScriptState* script_state,
                                      const WTF::TextEncoding& encoding,
-                                     const TextDecoderOptions& options,
+                                     const TextDecoderOptions* options,
                                      ExceptionState& exception_state)
-    : transform_(new TransformStream()),
+    : transform_(MakeGarbageCollected<TransformStream>()),
       encoding_(encoding),
-      fatal_(options.fatal()),
-      ignore_bom_(options.ignoreBOM()) {
-  if (!RetainWrapperDuringConstruction(this, script_state)) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
-                                      "Cannot queue task to retain wrapper");
-    return;
-  }
-  transform_->Init(new Transformer(script_state, encoding, fatal_, ignore_bom_),
+      fatal_(options->fatal()),
+      ignore_bom_(options->ignoreBOM()) {
+  transform_->Init(MakeGarbageCollected<Transformer>(script_state, encoding,
+                                                     fatal_, ignore_bom_),
                    script_state, exception_state);
 }
 

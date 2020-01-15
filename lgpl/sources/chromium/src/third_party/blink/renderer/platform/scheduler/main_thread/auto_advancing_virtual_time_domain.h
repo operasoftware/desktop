@@ -6,8 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_MAIN_THREAD_AUTO_ADVANCING_VIRTUAL_TIME_DOMAIN_H_
 
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/task/sequence_manager/time_domain.h"
+#include "base/task/task_observer.h"
 #include "base/time/time_override.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 
@@ -26,7 +26,7 @@ class SchedulerHelper;
 // |-----------------------------> time
 class PLATFORM_EXPORT AutoAdvancingVirtualTimeDomain
     : public base::sequence_manager::TimeDomain,
-      public base::MessageLoop::TaskObserver {
+      public base::TaskObserver {
  public:
   enum class BaseTimeOverridePolicy { OVERRIDE, DO_NOT_OVERRIDE };
 
@@ -35,19 +35,6 @@ class PLATFORM_EXPORT AutoAdvancingVirtualTimeDomain
                                  SchedulerHelper* helper,
                                  BaseTimeOverridePolicy policy);
   ~AutoAdvancingVirtualTimeDomain() override;
-
-  class PLATFORM_EXPORT Observer {
-   public:
-    Observer();
-    virtual ~Observer();
-
-    // Notification received when the virtual time advances.
-    virtual void OnVirtualTimeAdvanced() = 0;
-  };
-
-  // Note its assumed that |observer| will either remove itself or last at least
-  // as long as this AutoAdvancingVirtualTimeDomain.
-  void SetObserver(Observer* observer);
 
   // Controls whether or not virtual time is allowed to advance, when the
   // SequenceManager runs out of immediate work to do.
@@ -77,6 +64,7 @@ class PLATFORM_EXPORT AutoAdvancingVirtualTimeDomain
   base::TimeTicks Now() const override;
   base::Optional<base::TimeDelta> DelayTillNextTask(
       base::sequence_manager::LazyNow* lazy_now) override;
+  bool MaybeFastForwardToNextTask(bool quit_when_idle_requested) override;
 
  protected:
   const char* GetName() const override;
@@ -101,7 +89,6 @@ class PLATFORM_EXPORT AutoAdvancingVirtualTimeDomain
   int max_task_starvation_count_;
 
   bool can_advance_virtual_time_;
-  Observer* observer_;       // NOT OWNED
   SchedulerHelper* helper_;  // NOT OWNED
 
   // VirtualTime is usually doled out in 100ms intervals using fences and this

@@ -20,32 +20,33 @@ namespace blink {
 class ComputedStyle;
 class Document;
 class FontCachePurgePreventer;
+class HTMLCanvasElement;
 
 class CORE_EXPORT CanvasFontCache final
-    : public GarbageCollectedFinalized<CanvasFontCache>,
+    : public GarbageCollected<CanvasFontCache>,
       public Thread::TaskObserver {
   USING_PRE_FINALIZER(CanvasFontCache, Dispose);
 
  public:
-  static CanvasFontCache* Create(Document& document) {
-    return new CanvasFontCache(document);
-  }
+  explicit CanvasFontCache(Document&);
 
   MutableCSSPropertyValueSet* ParseFont(const String&);
   void PruneAll();
   unsigned size();
 
-  virtual void Trace(blink::Visitor*);
+  virtual void Trace(Visitor*);
 
   static unsigned MaxFonts();
   unsigned HardMaxFonts();
 
   void WillUseCurrentFont() { SchedulePruningIfNeeded(); }
-  bool GetFontUsingDefaultStyle(const String&, Font&);
+  bool GetFontUsingDefaultStyle(HTMLCanvasElement& canvas,
+                                const String&,
+                                Font&);
 
   // TaskObserver implementation
-  void DidProcessTask() override;
-  void WillProcessTask() override {}
+  void DidProcessTask(const base::PendingTask&) override;
+  void WillProcessTask(const base::PendingTask&) override {}
 
   // For testing
   bool IsInCache(const String&);
@@ -53,7 +54,6 @@ class CORE_EXPORT CanvasFontCache final
   ~CanvasFontCache() override;
 
  private:
-  explicit CanvasFontCache(Document&);
   void Dispose();
   void SchedulePruningIfNeeded();
   typedef HeapHashMap<String, Member<MutableCSSPropertyValueSet>>

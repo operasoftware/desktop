@@ -72,7 +72,7 @@ PaintController::DisplayItemListAsJSON::SubsequenceAsJSONObjectRecursive() {
   const auto& subsequence = *current_subsequence_;
   ++current_subsequence_;
 
-  auto json_object = JSONObject::Create();
+  auto json_object = std::make_unique<JSONObject>();
 
   json_object->SetString("subsequence",
                          String::Format("client: %p ", subsequence.client) +
@@ -87,7 +87,7 @@ std::unique_ptr<JSONArray>
 PaintController::DisplayItemListAsJSON::SubsequenceAsJSONArrayRecursive(
     size_t start_item,
     size_t end_item) {
-  std::unique_ptr<JSONArray> array = JSONArray::Create();
+  auto array = std::make_unique<JSONArray>();
   size_t item_index = start_item;
 
   while (current_subsequence_ != subsequences_.end() &&
@@ -115,7 +115,7 @@ void PaintController::DisplayItemListAsJSON::AppendSubsequenceAsJSON(
   DCHECK(end_item > start_item);
   if (current_chunk_ == chunks_.end()) {
     // We are in the middle of painting with incomplete chunks.
-    auto json_object = JSONObject::Create();
+    auto json_object = std::make_unique<JSONObject>();
     json_object->SetString("chunk", "incomplete");
     json_object->SetArray(
         "displayItems", list_.SubsequenceAsJSON(start_item, end_item, flags_));
@@ -127,7 +127,7 @@ void PaintController::DisplayItemListAsJSON::AppendSubsequenceAsJSON(
   while (current_chunk_ != chunks_.end() &&
          current_chunk_->end_index <= end_item) {
     const auto& chunk = *current_chunk_;
-    auto json_object = JSONObject::Create();
+    auto json_object = std::make_unique<JSONObject>();
 
     json_object->SetString(
         "chunk", ClientName(chunk.id.client) + " " + chunk.id.ToString());
@@ -146,20 +146,22 @@ void PaintController::DisplayItemListAsJSON::AppendSubsequenceAsJSON(
 
 String PaintController::DisplayItemListAsJSON::ClientName(
     const DisplayItemClient& client) const {
-  return DisplayItemClient::SafeDebugName(
-      client, flags_ & DisplayItemList::kClientKnownToBeAlive);
+  return client.SafeDebugName(flags_ & DisplayItemList::kClientKnownToBeAlive);
 }
 
 void PaintController::ShowDebugDataInternal(
     DisplayItemList::JsonFlags flags) const {
+  auto current_list_flags = flags;
+  // The clients in the current list are known to be alive before FinishCycle().
+  if (committed_)
+    current_list_flags |= DisplayItemList::kClientKnownToBeAlive;
   LOG(ERROR) << "current display item list: "
              << DisplayItemListAsJSON(
                     current_paint_artifact_->GetDisplayItemList(),
                     current_cached_subsequences_,
-                    current_paint_artifact_->PaintChunks(), flags)
+                    current_paint_artifact_->PaintChunks(), current_list_flags)
                     .ToString()
-                    .Utf8()
-                    .data();
+                    .Utf8();
 
   LOG(ERROR) << "new display item list: "
              << DisplayItemListAsJSON(
@@ -168,15 +170,18 @@ void PaintController::ShowDebugDataInternal(
                     // The clients in new_display_item_list_ are all alive.
                     flags | DisplayItemList::kClientKnownToBeAlive)
                     .ToString()
-                    .Utf8()
-                    .data();
+                    .Utf8();
+}
+
+void PaintController::ShowCompactDebugData() const {
+  ShowDebugDataInternal(DisplayItemList::kCompact);
 }
 
 void PaintController::ShowDebugData() const {
-  return ShowDebugDataInternal(DisplayItemList::kDefault);
+  ShowDebugDataInternal(DisplayItemList::kDefault);
 }
 
-void PaintController::ShowDebugDataWithRecords() const {
+void PaintController::ShowDebugDataWithPaintRecords() const {
   return ShowDebugDataInternal(DisplayItemList::kShowPaintRecords);
 }
 

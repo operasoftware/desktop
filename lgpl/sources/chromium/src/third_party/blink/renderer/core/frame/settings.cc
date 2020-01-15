@@ -31,6 +31,7 @@
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
+#include "third_party/blink/renderer/platform/graphics/dark_mode_settings.h"
 
 namespace blink {
 
@@ -62,12 +63,7 @@ static const bool kDefaultSelectTrailingWhitespaceEnabled = false;
 #endif
 
 Settings::Settings()
-    : text_autosizing_enabled_(false),
-      is_shadow_page_(false) SETTINGS_INITIALIZER_LIST {}
-
-std::unique_ptr<Settings> Settings::Create() {
-  return base::WrapUnique(new Settings);
-}
+    : text_autosizing_enabled_(false) SETTINGS_INITIALIZER_LIST {}
 
 SETTINGS_SETTER_BODIES
 
@@ -107,8 +103,12 @@ bool Settings::MockScrollbarsEnabled() {
   return ScrollbarTheme::MockScrollbarsEnabled();
 }
 
-void Settings::SetIsShadowPage(bool flag) {
-  is_shadow_page_ = flag;
+void Settings::SetForceDarkModeEnabled(bool enabled) {
+  if (force_dark_mode_ == enabled)
+    return;
+  force_dark_mode_ = enabled;
+  SetDarkModeEnabled(force_dark_mode_);
+  Invalidate(SettingsDelegate::kColorSchemeChange);
 }
 
 }  // namespace blink

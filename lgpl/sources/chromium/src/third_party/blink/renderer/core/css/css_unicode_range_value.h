@@ -27,15 +27,16 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_UNICODE_RANGE_VALUE_H_
 
 #include "third_party/blink/renderer/core/css/css_value.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
 
 namespace blink {
+namespace cssvalue {
 
 class CSSUnicodeRangeValue : public CSSValue {
  public:
-  static CSSUnicodeRangeValue* Create(UChar32 from, UChar32 to) {
-    return new CSSUnicodeRangeValue(from, to);
-  }
+  CSSUnicodeRangeValue(UChar32 from, UChar32 to)
+      : CSSValue(kUnicodeRangeClass), from_(from), to_(to) {}
 
   UChar32 From() const { return from_; }
   UChar32 To() const { return to_; }
@@ -49,14 +50,18 @@ class CSSUnicodeRangeValue : public CSSValue {
   }
 
  private:
-  CSSUnicodeRangeValue(UChar32 from, UChar32 to)
-      : CSSValue(kUnicodeRangeClass), from_(from), to_(to) {}
-
   UChar32 from_;
   UChar32 to_;
 };
 
-DEFINE_CSS_VALUE_TYPE_CASTS(CSSUnicodeRangeValue, IsUnicodeRangeValue());
+}  // namespace cssvalue
+
+template <>
+struct DowncastTraits<cssvalue::CSSUnicodeRangeValue> {
+  static bool AllowFrom(const CSSValue& value) {
+    return value.IsUnicodeRangeValue();
+  }
+};
 
 }  // namespace blink
 

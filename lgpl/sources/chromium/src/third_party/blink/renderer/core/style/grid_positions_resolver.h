@@ -7,7 +7,7 @@
 
 #include "base/macros.h"
 #include "third_party/blink/renderer/core/style/grid_position.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -31,10 +31,6 @@ class NamedLineCollection {
                       GridTrackSizingDirection,
                       size_t last_line,
                       size_t auto_repeat_tracks_count);
-
-  static bool IsValidNamedLineOrArea(const String& named_line,
-                                     const ComputedStyle&,
-                                     GridPositionSide);
 
   bool HasNamedLines();
   size_t FirstPosition();
@@ -68,8 +64,7 @@ class GridPositionsResolver {
   static GridPositionSide InitialPositionSide(GridTrackSizingDirection);
   static GridPositionSide FinalPositionSide(GridTrackSizingDirection);
 
-  static size_t SpanSizeForAutoPlacedItem(const ComputedStyle&,
-                                          const LayoutBox&,
+  static size_t SpanSizeForAutoPlacedItem(const LayoutBox&,
                                           GridTrackSizingDirection);
   static GridSpan ResolveGridPositionsFromStyle(
       const ComputedStyle&,

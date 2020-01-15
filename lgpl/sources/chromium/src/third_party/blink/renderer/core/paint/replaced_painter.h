@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_REPLACED_PAINTER_H_
 
 #include "third_party/blink/renderer/platform/geometry/layout_point.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -26,10 +26,8 @@ class ReplacedPainter {
   bool ShouldPaint(const ScopedPaintState&) const;
 
  private:
-  // Paint a hit test display item and record hit test data. This should be
-  // called in the background paint phase even if there is no other painted
-  // content.
-  void RecordHitTestData(const PaintInfo&, const LayoutPoint& paint_offset);
+  bool ShouldPaintBoxDecorationBackground(const PaintInfo&);
+
   const LayoutReplaced& layout_replaced_;
 };
 

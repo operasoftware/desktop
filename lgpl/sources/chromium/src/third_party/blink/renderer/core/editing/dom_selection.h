@@ -30,8 +30,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_DOM_SELECTION_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_DOM_SELECTION_H_
 
-#include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
+#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -39,7 +39,6 @@
 
 namespace blink {
 
-class DOMRect;
 class ExceptionState;
 class Node;
 class Range;
@@ -52,12 +51,9 @@ class CORE_EXPORT DOMSelection final : public ScriptWrappable,
   USING_GARBAGE_COLLECTED_MIXIN(DOMSelection);
 
  public:
-  static DOMSelection* Create(const TreeScope* tree_scope) {
-    return new DOMSelection(tree_scope);
-  }
+  explicit DOMSelection(const TreeScope*);
 
   void ClearTreeScope();
-  DOMRect* GetBoundingRect();
 
   // Safari Selection Object API
   // These methods return the valid equivalents of internal editing positions.
@@ -104,11 +100,9 @@ class CORE_EXPORT DOMSelection final : public ScriptWrappable,
   // Microsoft Selection Object API
   void empty();
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  explicit DOMSelection(const TreeScope*);
-
   bool IsAvailable() const;
 
   void UpdateFrameSelection(const SelectionInDOMTree&,
@@ -124,7 +118,7 @@ class CORE_EXPORT DOMSelection final : public ScriptWrappable,
 
   bool IsValidForPosition(Node*) const;
 
-  void AddConsoleError(const String& message);
+  void AddConsoleWarning(const String& message);
   Range* PrimaryRangeOrNull() const;
   EphemeralRange CreateRangeFromSelectionEditor() const;
 

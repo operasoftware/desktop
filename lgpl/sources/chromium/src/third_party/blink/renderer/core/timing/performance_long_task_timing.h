@@ -20,7 +20,7 @@ class PerformanceLongTaskTiming final : public PerformanceEntry {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static PerformanceLongTaskTiming* Create(
+  PerformanceLongTaskTiming(
       double start_time,
       double end_time,
       const AtomicString& name,
@@ -37,14 +37,6 @@ class PerformanceLongTaskTiming final : public PerformanceEntry {
   void Trace(blink::Visitor*) override;
 
  private:
-  PerformanceLongTaskTiming(
-      double start_time,
-      double end_time,
-      const AtomicString& name,
-      const String& frame_src,
-      const String& frame_id,
-      const String& frame_name,
-      const SubTaskAttribution::EntriesVector& sub_task_attributions);
   ~PerformanceLongTaskTiming() override;
 
   void BuildJSONValue(V8ObjectBuilder&) const override;

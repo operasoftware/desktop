@@ -5,13 +5,18 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_VR_VR_DISPLAY_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_VR_VR_DISPLAY_H_
 
-#include "device/vr/public/mojom/vr_service.mojom-blink.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include <memory>
+#include <utility>
+
+#include "device/vr/public/mojom/vr_service.mojom-blink-forward.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
+#include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_frame_request_callback.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
-#include "third_party/blink/renderer/core/dom/pausable_object.h"
+#include "third_party/blink/renderer/core/execution_context/context_lifecycle_state_observer.h"
 #include "third_party/blink/renderer/modules/vr/vr_display_capabilities.h"
 #include "third_party/blink/renderer/modules/vr/vr_layer_init.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/xr_frame_transport.h"
@@ -41,13 +46,18 @@ class WebGLRenderingContextBase;
 
 // Wrapper class to allow the VRDisplay to distinguish between immersive and
 // non-immersive XRSession events.
-class SessionClientBinding
-    : public GarbageCollectedFinalized<SessionClientBinding>,
-      public device::mojom::blink::XRSessionClient {
+class SessionClientBinding : public GarbageCollected<SessionClientBinding>,
+                             public device::mojom::blink::XRSessionClient {
  public:
-  SessionClientBinding(VRDisplay* display,
-                       bool is_immersive,
-                       device::mojom::blink::XRSessionClientRequest request);
+  enum class SessionBindingType {
+    kImmersive = 0,
+    kNonImmersive = 1,
+  };
+
+  SessionClientBinding(
+      VRDisplay* display,
+      SessionBindingType immersive,
+      mojo::PendingReceiver<device::mojom::blink::XRSessionClient> receiver);
   ~SessionClientBinding() override;
   void Close();
 
@@ -56,27 +66,34 @@ class SessionClientBinding
  private:
   void OnChanged(device::mojom::blink::VRDisplayInfoPtr) override;
   void OnExitPresent() override;
-  void OnBlur() override;
-  void OnFocus() override;
+  void OnVisibilityStateChanged(
+      device::mojom::blink::XRVisibilityState) override;
 
   // VRDisplay keeps all references to SessionClientBinding, so as soon as
   // VRDisplay is destroyed, so is the SessionClientBinding.
   Member<VRDisplay> display_;
   bool is_immersive_;
-  mojo::Binding<device::mojom::blink::XRSessionClient> client_binding_;
+  mojo::Receiver<device::mojom::blink::XRSessionClient> client_receiver_;
 };
 
 enum VREye { kVREyeNone, kVREyeLeft, kVREyeRight };
 
 class VRDisplay final : public EventTargetWithInlineData,
                         public ActiveScriptWrappable<VRDisplay>,
-                        public PausableObject,
+                        public ContextLifecycleStateObserver,
                         public device::mojom::blink::VRDisplayClient {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(VRDisplay);
   USING_PRE_FINALIZER(VRDisplay, Dispose);
 
  public:
+  static VRDisplay* Create(NavigatorVR* navigator) {
+    VRDisplay* display = MakeGarbageCollected<VRDisplay>(navigator);
+    display->UpdateStateIfNeeded();
+    return display;
+  }
+
+  VRDisplay(NavigatorVR*);
   ~VRDisplay() override;
 
   // We hand out at most one VRDisplay, so hardcode displayId to 1.
@@ -85,7 +102,6 @@ class VRDisplay final : public EventTargetWithInlineData,
 
   VRDisplayCapabilities* capabilities() const { return capabilities_; }
   VRStageParameters* stageParameters() const { return stage_parameters_; }
-  device::mojom::blink::XRDevice* device() { return device_ptr_.get(); }
 
   bool isPresenting() const { return is_presenting_; }
   bool canPresent() const { return capabilities_->canPresent(); }
@@ -104,15 +120,15 @@ class VRDisplay final : public EventTargetWithInlineData,
   void cancelAnimationFrame(int id);
 
   ScriptPromise requestPresent(ScriptState*,
-                               const HeapVector<VRLayerInit>& layers);
+                               const HeapVector<Member<VRLayerInit>>& layers);
   ScriptPromise exitPresent(ScriptState*);
 
-  HeapVector<VRLayerInit> getLayers();
+  HeapVector<Member<VRLayerInit>> getLayers();
 
   void submitFrame();
 
   Document* GetDocument();
-  device::mojom::blink::VRDisplayClientPtr GetDisplayClient();
+  mojo::PendingRemote<device::mojom::blink::VRDisplayClient> GetDisplayClient();
 
   // EventTarget overrides:
   ExecutionContext* GetExecutionContext() const override;
@@ -124,9 +140,8 @@ class VRDisplay final : public EventTargetWithInlineData,
   // ScriptWrappable implementation.
   bool HasPendingActivity() const final;
 
-  // PausableObject:
-  void Pause() override;
-  void Unpause() override;
+  // ContextLifecycleStateObserver:
+  void ContextLifecycleStateChanged(mojom::FrameLifecycleState) override;
 
   void OnChanged(device::mojom::blink::VRDisplayInfoPtr, bool is_immersive);
   void OnExitPresent(bool is_immersive);
@@ -135,15 +150,13 @@ class VRDisplay final : public EventTargetWithInlineData,
 
   void FocusChanged();
 
-  void OnNonImmersiveVSync(TimeTicks timestamp);
+  void OnNonImmersiveVSync(base::TimeTicks timestamp);
   int PendingNonImmersiveVSyncId() { return pending_non_immersive_vsync_id_; }
 
   void Trace(blink::Visitor*) override;
 
  protected:
   friend class VRController;
-
-  VRDisplay(NavigatorVR*, device::mojom::blink::XRDevicePtr);
 
   void Update(const device::mojom::blink::VRDisplayInfoPtr&);
 
@@ -156,11 +169,12 @@ class VRDisplay final : public EventTargetWithInlineData,
 
   VRController* Controller();
 
+  void SetNonImmersiveSession(
+      device::mojom::blink::RequestSessionResultPtr result);
+
  private:
   void OnRequestImmersiveSessionReturned(
-      device::mojom::blink::XRSessionPtr session);
-  void OnNonImmersiveSessionRequestReturned(
-      device::mojom::blink::XRSessionPtr session);
+      device::mojom::blink::RequestSessionResultPtr result);
 
   void OnConnected();
   void OnDisconnected();
@@ -182,8 +196,8 @@ class VRDisplay final : public EventTargetWithInlineData,
   bool FocusedOrPresenting();
 
   ScriptedAnimationController& EnsureScriptedAnimationController(Document*);
-  void ProcessScheduledAnimations(TimeTicks timestamp);
-  void ProcessScheduledWindowAnimations(TimeTicks timestamp);
+  void ProcessScheduledAnimations(base::TimeTicks timestamp);
+  void ProcessScheduledWindowAnimations(base::TimeTicks timestamp);
 
   // Request delivery of a VSync event for either magic window mode or
   // presenting mode as applicable. May be called more than once per frame, it
@@ -214,12 +228,12 @@ class VRDisplay final : public EventTargetWithInlineData,
   // VR compositor so that it knows which poses to use, when to apply bounds
   // updates, etc.
   int16_t vr_frame_id_ = -1;
-  VRLayerInit layer_;
+  Member<VRLayerInit> layer_;
   double depth_near_ = 0.01;
   double depth_far_ = 10000.0;
 
   // Current dimensions of the WebVR source canvas. May be different from
-  // the recommended renderWidth/Height if the client overrides dimensions.
+  // the recommended render width/height if the client overrides dimensions.
   int source_width_ = 0;
   int source_height_ = 0;
 
@@ -229,15 +243,14 @@ class VRDisplay final : public EventTargetWithInlineData,
   Member<WebGLRenderingContextBase> rendering_context_;
   Member<XRFrameTransport> frame_transport_;
 
-  TraceWrapperMember<ScriptedAnimationController>
-      scripted_animation_controller_;
+  Member<ScriptedAnimationController> scripted_animation_controller_;
   bool pending_vrdisplay_raf_ = false;
   bool pending_presenting_vsync_ = false;
   bool pending_non_immersive_vsync_ = false;
   int pending_non_immersive_vsync_id_ = -1;
   base::OnceClosure non_immersive_vsync_waiting_for_pose_;
-  WTF::TimeTicks non_immersive_pose_request_time_;
-  WTF::TimeTicks non_immersive_pose_received_time_;
+  base::TimeTicks non_immersive_pose_request_time_;
+  base::TimeTicks non_immersive_pose_received_time_;
   bool in_animation_frame_ = false;
   bool did_submit_this_frame_ = false;
   bool display_blurred_ = false;
@@ -248,17 +261,20 @@ class VRDisplay final : public EventTargetWithInlineData,
   bool did_log_getFrameData_ = false;
   bool did_log_requestPresent_ = false;
 
-  device::mojom::blink::XRFrameDataProviderPtr non_immersive_provider_;
-
-  device::mojom::blink::XRDevicePtr device_ptr_;
+  bool non_immersive_session_initialized_ = false;
+  mojo::Remote<device::mojom::blink::XRFrameDataProvider>
+      non_immersive_provider_;
 
   bool present_image_needs_copy_ = false;
 
   Member<SessionClientBinding> non_immersive_client_binding_;
   Member<SessionClientBinding> immersive_client_binding_;
-  mojo::Binding<device::mojom::blink::VRDisplayClient> display_client_binding_;
-  device::mojom::blink::XRFrameDataProviderPtr vr_presentation_data_provider_;
-  device::mojom::blink::XRPresentationProviderPtr vr_presentation_provider_;
+  mojo::Receiver<device::mojom::blink::VRDisplayClient>
+      display_client_receiver_{this};
+  mojo::Remote<device::mojom::blink::XRFrameDataProvider>
+      vr_presentation_data_provider_;
+  mojo::Remote<device::mojom::blink::XRPresentationProvider>
+      vr_presentation_provider_;
 
   HeapDeque<Member<ScriptPromiseResolver>> pending_present_resolvers_;
 };

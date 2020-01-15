@@ -18,19 +18,20 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
 class ActiveStyleSheetsTest : public PageTestBase {
  protected:
   static CSSStyleSheet* CreateSheet(const String& css_text = String()) {
-    StyleSheetContents* contents =
-        StyleSheetContents::Create(CSSParserContext::Create(
+    auto* contents = MakeGarbageCollected<StyleSheetContents>(
+        MakeGarbageCollected<CSSParserContext>(
             kHTMLStandardMode, SecureContextMode::kInsecureContext));
     contents->ParseString(css_text);
     contents->EnsureRuleSet(MediaQueryEvaluator(),
                             kRuleHasDocumentSecurityOrigin);
-    return CSSStyleSheet::Create(contents);
+    return MakeGarbageCollected<CSSStyleSheet>(contents);
   }
 };
 
@@ -419,7 +420,7 @@ TEST_F(ActiveStyleSheetsTest, CompareActiveStyleSheets_AddRemoveNonMatchingMQ) {
 }
 
 TEST_F(ApplyRulesetsTest, AddUniversalRuleToDocument) {
-  UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   CSSStyleSheet* sheet = CreateSheet("body * { color:red }");
 
@@ -430,7 +431,8 @@ TEST_F(ApplyRulesetsTest, AddUniversalRuleToDocument) {
   GetStyleEngine().ApplyRuleSetChanges(GetDocument(), ActiveStyleSheetVector(),
                                        new_style_sheets);
 
-  EXPECT_EQ(kSubtreeStyleChange, GetDocument().GetStyleChangeType());
+  EXPECT_EQ(kSubtreeStyleChange,
+            GetDocument().documentElement()->GetStyleChangeType());
 }
 
 TEST_F(ApplyRulesetsTest, AddUniversalRuleToShadowTree) {
@@ -440,7 +442,7 @@ TEST_F(ApplyRulesetsTest, AddUniversalRuleToShadowTree) {
 
   ShadowRoot& shadow_root =
       host->AttachShadowRootInternal(ShadowRootType::kOpen);
-  UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   CSSStyleSheet* sheet = CreateSheet("body * { color:red }");
 
@@ -456,7 +458,7 @@ TEST_F(ApplyRulesetsTest, AddUniversalRuleToShadowTree) {
 }
 
 TEST_F(ApplyRulesetsTest, AddFontFaceRuleToDocument) {
-  UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   CSSStyleSheet* sheet =
       CreateSheet("@font-face { font-family: ahum; src: url(ahum.ttf) }");
@@ -468,7 +470,8 @@ TEST_F(ApplyRulesetsTest, AddFontFaceRuleToDocument) {
   GetStyleEngine().ApplyRuleSetChanges(GetDocument(), ActiveStyleSheetVector(),
                                        new_style_sheets);
 
-  EXPECT_EQ(kSubtreeStyleChange, GetDocument().GetStyleChangeType());
+  EXPECT_EQ(kSubtreeStyleChange,
+            GetDocument().documentElement()->GetStyleChangeType());
 }
 
 TEST_F(ApplyRulesetsTest, AddFontFaceRuleToShadowTree) {
@@ -478,7 +481,7 @@ TEST_F(ApplyRulesetsTest, AddFontFaceRuleToShadowTree) {
 
   ShadowRoot& shadow_root =
       host->AttachShadowRootInternal(ShadowRootType::kOpen);
-  UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   CSSStyleSheet* sheet =
       CreateSheet("@font-face { font-family: ahum; src: url(ahum.ttf) }");
@@ -505,7 +508,7 @@ TEST_F(ApplyRulesetsTest, RemoveSheetFromShadowTree) {
       host->AttachShadowRootInternal(ShadowRootType::kOpen);
   shadow_root.SetInnerHTMLFromString(
       "<style>::slotted(#dummy){color:pink}</style>");
-  UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   EXPECT_TRUE(GetStyleEngine().TreeBoundaryCrossingScopes().IsEmpty());
   ASSERT_EQ(1u, shadow_root.StyleSheets().length());
@@ -514,7 +517,7 @@ TEST_F(ApplyRulesetsTest, RemoveSheetFromShadowTree) {
   ASSERT_TRUE(sheet);
   ASSERT_TRUE(sheet->IsCSSStyleSheet());
 
-  CSSStyleSheet* css_sheet = ToCSSStyleSheet(sheet);
+  auto* css_sheet = To<CSSStyleSheet>(sheet);
   ActiveStyleSheetVector old_style_sheets;
   old_style_sheets.push_back(
       std::make_pair(css_sheet, &css_sheet->Contents()->GetRuleSet()));

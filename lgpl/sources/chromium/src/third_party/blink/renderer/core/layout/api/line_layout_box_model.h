@@ -7,7 +7,7 @@
 
 #include "third_party/blink/renderer/core/layout/api/line_layout_item.h"
 #include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
-#include "third_party/blink/renderer/platform/layout_unit.h"
+#include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 
 namespace blink {
 
@@ -115,7 +115,7 @@ class LineLayoutBoxModel : public LineLayoutItem {
     return ToBoxModel()->BorderAndPaddingLogicalHeight();
   }
 
-  LayoutSize OffsetForInFlowPosition() const {
+  PhysicalOffset OffsetForInFlowPosition() const {
     return ToBoxModel()->OffsetForInFlowPosition();
   }
 

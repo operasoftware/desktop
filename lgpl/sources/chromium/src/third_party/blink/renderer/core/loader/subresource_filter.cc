@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -37,7 +38,8 @@ String GetErrorStringForDisallowedLoad(const KURL& url) {
 SubresourceFilter* SubresourceFilter::Create(
     ExecutionContext& execution_context,
     std::unique_ptr<WebDocumentSubresourceFilter> filter) {
-  return new SubresourceFilter(&execution_context, std::move(filter));
+  return MakeGarbageCollected<SubresourceFilter>(&execution_context,
+                                                 std::move(filter));
 }
 
 SubresourceFilter::SubresourceFilter(
@@ -50,7 +52,7 @@ SubresourceFilter::SubresourceFilter(
   // associated with an ad subframe.
   if (auto* document = DynamicTo<Document>(execution_context_.Get())) {
     auto* loader = document->Loader();
-    if (subresource_filter_->GetIsAssociatedWithAdSubframe()) {
+    if (document->GetFrame()->IsAdSubframe()) {
       ReportAdRequestId(loader->GetResponse().RequestId());
     }
   }
@@ -96,9 +98,6 @@ bool SubresourceFilter::AllowWebSocketConnection(const KURL& url) {
 bool SubresourceFilter::IsAdResource(
     const KURL& resource_url,
     mojom::RequestContextType request_context) {
-  if (subresource_filter_->GetIsAssociatedWithAdSubframe())
-    return true;
-
   WebDocumentSubresourceFilter::LoadPolicy load_policy;
   if (last_resource_check_result_.first ==
       std::make_pair(resource_url, request_context)) {
@@ -127,11 +126,12 @@ void SubresourceFilter::ReportLoad(
       // Display console message for actually blocked resource. For a
       // resource with |load_policy| as kWouldDisallow, we will be logging a
       // document wide console message, so no need to log it here.
-      // TODO: Consider logging this as a kInterventionMessageSource for showing
+      // TODO: Consider logging this as a kIntervention for showing
       // warning in Lighthouse.
       if (subresource_filter_->ShouldLogToConsole()) {
         execution_context_->AddConsoleMessage(ConsoleMessage::Create(
-            kOtherMessageSource, kErrorMessageLevel,
+            mojom::ConsoleMessageSource::kOther,
+            mojom::ConsoleMessageLevel::kError,
             GetErrorStringForDisallowedLoad(resource_url)));
       }
       FALLTHROUGH;
@@ -142,7 +142,7 @@ void SubresourceFilter::ReportLoad(
       if (auto* document = DynamicTo<Document>(execution_context_.Get())) {
         if (DocumentLoader* loader = document->Loader()) {
           loader->DidObserveLoadingBehavior(
-              kWebLoadingBehaviorSubresourceFilterMatch);
+              kLoadingBehaviorSubresourceFilterMatch);
         }
       }
       break;

@@ -28,10 +28,13 @@
 
 #include "third_party/blink/renderer/core/layout/layout_image_resource.h"
 
+#include "third_party/blink/public/resources/grit/blink_image_resources.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/layout/layout_image.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image_for_container.h"
+#include "third_party/blink/renderer/platform/graphics/placeholder_image.h"
+#include "ui/base/resource/scale_factor.h"
 
 namespace blink {
 
@@ -88,8 +91,8 @@ void LayoutImageResource::ResetAnimation() {
   layout_object_->SetShouldDoFullPaintInvalidation();
 }
 
-bool LayoutImageResource::ImageHasRelativeSize() const {
-  return cached_image_ && cached_image_->GetImage()->HasRelativeSize();
+bool LayoutImageResource::HasIntrinsicSize() const {
+  return !cached_image_ || cached_image_->GetImage()->HasIntrinsicSize();
 }
 
 FloatSize LayoutImageResource::ImageSize(float multiplier) const {
@@ -97,7 +100,7 @@ FloatSize LayoutImageResource::ImageSize(float multiplier) const {
     return FloatSize();
   FloatSize size(cached_image_->IntrinsicSize(
       LayoutObject::ShouldRespectImageOrientation(layout_object_)));
-  if (multiplier != 1 && !ImageHasRelativeSize()) {
+  if (multiplier != 1 && HasIntrinsicSize()) {
     // Don't let images that have a width/height >= 1 shrink below 1 when
     // zoomed.
     FloatSize minimum_size(size.Width() > 0 ? 1 : 0, size.Height() > 0 ? 1 : 0);
@@ -127,13 +130,14 @@ Image* LayoutImageResource::BrokenImage(float device_scale_factor) {
   // TODO(schenney): Replace static resources with dynamically
   // generated ones, to support a wider range of device scale factors.
   if (device_scale_factor >= 2) {
-    DEFINE_STATIC_REF(Image, broken_image_hi_res,
-                      (Image::LoadPlatformResource("missingImage@2x")));
+    DEFINE_STATIC_REF(
+        Image, broken_image_hi_res,
+        (Image::LoadPlatformResource(IDR_BROKENIMAGE, ui::SCALE_FACTOR_200P)));
     return broken_image_hi_res;
   }
 
   DEFINE_STATIC_REF(Image, broken_image_lo_res,
-                    (Image::LoadPlatformResource("missingImage")));
+                    (Image::LoadPlatformResource(IDR_BROKENIMAGE)));
   return broken_image_lo_res;
 }
 
@@ -143,7 +147,12 @@ void LayoutImageResource::UseBrokenImage() {
 }
 
 scoped_refptr<Image> LayoutImageResource::GetImage(
-    const LayoutSize& container_size) const {
+    const IntSize& container_size) const {
+  return GetImage(FloatSize(container_size));
+}
+
+scoped_refptr<Image> LayoutImageResource::GetImage(
+    const FloatSize& container_size) const {
   if (!cached_image_)
     return Image::NullImage();
 
@@ -154,17 +163,21 @@ scoped_refptr<Image> LayoutImageResource::GetImage(
     return Image::NullImage();
 
   Image* image = cached_image_->GetImage();
+  if (image->IsPlaceholderImage()) {
+    static_cast<PlaceholderImage*>(image)->SetIconAndTextScaleFactor(
+        layout_object_->StyleRef().EffectiveZoom());
+  }
+
   if (!image->IsSVGImage())
     return image;
 
   KURL url;
-  Node* node = layout_object_->GetNode();
-  if (node && node->IsElementNode()) {
-    const AtomicString& url_string = ToElement(node)->ImageSourceURL();
-    url = node->GetDocument().CompleteURL(url_string);
+  if (auto* element = DynamicTo<Element>(layout_object_->GetNode())) {
+    const AtomicString& url_string = element->ImageSourceURL();
+    url = element->GetDocument().CompleteURL(url_string);
   }
   return SVGImageForContainer::Create(
-      ToSVGImage(image), FloatSize(container_size),
+      ToSVGImage(image), container_size,
       layout_object_->StyleRef().EffectiveZoom(), url);
 }
 

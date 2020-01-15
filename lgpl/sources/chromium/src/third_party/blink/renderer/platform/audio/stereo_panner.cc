@@ -17,31 +17,22 @@ namespace blink {
 // Implement equal-power panning algorithm for mono or stereo input.
 // See: http://webaudio.github.io/web-audio-api/#panning-algorithm
 
-std::unique_ptr<StereoPanner> StereoPanner::Create(float sample_rate) {
-  return base::WrapUnique(new StereoPanner(sample_rate));
-}
-
 StereoPanner::StereoPanner(float sample_rate) {}
 
 void StereoPanner::PanWithSampleAccurateValues(const AudioBus* input_bus,
                                                AudioBus* output_bus,
                                                const float* pan_values,
-                                               size_t frames_to_process) {
-  bool is_input_safe = input_bus &&
-                       (input_bus->NumberOfChannels() == 1 ||
-                        input_bus->NumberOfChannels() == 2) &&
-                       frames_to_process <= input_bus->length();
-  DCHECK(is_input_safe);
-  if (!is_input_safe)
-    return;
+                                               uint32_t frames_to_process) {
+  DCHECK(input_bus);
+  DCHECK_LE(frames_to_process, input_bus->length());
+  DCHECK_GE(input_bus->NumberOfChannels(), 1u);
+  DCHECK_LE(input_bus->NumberOfChannels(), 2u);
 
   unsigned number_of_input_channels = input_bus->NumberOfChannels();
 
-  bool is_output_safe = output_bus && output_bus->NumberOfChannels() == 2 &&
-                        frames_to_process <= output_bus->length();
-  DCHECK(is_output_safe);
-  if (!is_output_safe)
-    return;
+  DCHECK(output_bus);
+  DCHECK_EQ(output_bus->NumberOfChannels(), 2u);
+  DCHECK_LE(frames_to_process, output_bus->length());
 
   const float* source_l = input_bus->Channel(0)->Data();
   const float* source_r =
@@ -92,22 +83,17 @@ void StereoPanner::PanWithSampleAccurateValues(const AudioBus* input_bus,
 void StereoPanner::PanToTargetValue(const AudioBus* input_bus,
                                     AudioBus* output_bus,
                                     float pan_value,
-                                    size_t frames_to_process) {
-  bool is_input_safe = input_bus &&
-                       (input_bus->NumberOfChannels() == 1 ||
-                        input_bus->NumberOfChannels() == 2) &&
-                       frames_to_process <= input_bus->length();
-  DCHECK(is_input_safe);
-  if (!is_input_safe)
-    return;
+                                    uint32_t frames_to_process) {
+  DCHECK(input_bus);
+  DCHECK_LE(frames_to_process, input_bus->length());
+  DCHECK_GE(input_bus->NumberOfChannels(), 1u);
+  DCHECK_LE(input_bus->NumberOfChannels(), 2u);
 
   unsigned number_of_input_channels = input_bus->NumberOfChannels();
 
-  bool is_output_safe = output_bus && output_bus->NumberOfChannels() == 2 &&
-                        frames_to_process <= output_bus->length();
-  DCHECK(is_output_safe);
-  if (!is_output_safe)
-    return;
+  DCHECK(output_bus);
+  DCHECK_EQ(output_bus->NumberOfChannels(), 2u);
+  DCHECK_LE(frames_to_process, output_bus->length());
 
   const float* source_l = input_bus->Channel(0)->Data();
   const float* source_r =
@@ -131,7 +117,7 @@ void StereoPanner::PanToTargetValue(const AudioBus* input_bus,
     double gain_l = std::cos(pan_radian);
     double gain_r = std::sin(pan_radian);
 
-    // TODO(rtoy): This can be vectorized using VectorMath::Vsmul
+    // TODO(rtoy): This can be vectorized using vector_math::Vsmul
     while (n--) {
       float input_l = *source_l++;
       *destination_l++ = static_cast<float>(input_l * gain_l);

@@ -36,11 +36,11 @@
 
 namespace blink {
 
-class LocalFrame;
+class FrameSelection;
 
 // Compute coodinates to paint selection handles on touch devices.
 CORE_EXPORT cc::LayerSelection ComputeLayerSelection(
-    LocalFrame& frame);
+    const FrameSelection& frame_selection);
 
 }  // namespace blink
 

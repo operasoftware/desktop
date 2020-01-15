@@ -24,6 +24,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_DOCUMENT_H_
 
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/document_init.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_client.h"
 #include "third_party/blink/renderer/platform/wtf/hash_counted_set.h"
 
@@ -33,8 +34,9 @@ class CORE_EXPORT HTMLDocument : public Document {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static HTMLDocument* Create(const DocumentInit& initializer);
-  static HTMLDocument* CreateForTest();
+  explicit HTMLDocument(
+      const DocumentInit& = DocumentInit::Create(),
+      DocumentClassFlags extended_document_classes = kDefaultDocumentClass);
   ~HTMLDocument() override;
 
   void AddNamedItem(const AtomicString& name);
@@ -44,11 +46,6 @@ class CORE_EXPORT HTMLDocument : public Document {
   static bool IsCaseSensitiveAttribute(const QualifiedName&);
 
   Document* CloneDocumentWithoutChildren() const final;
-
- protected:
-  HTMLDocument(
-      const DocumentInit&,
-      DocumentClassFlags extended_document_classes = kDefaultDocumentClass);
 
  private:
   HashCountedSet<AtomicString> named_item_counts_;

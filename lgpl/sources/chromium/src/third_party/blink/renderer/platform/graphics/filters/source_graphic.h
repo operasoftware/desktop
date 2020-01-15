@@ -29,7 +29,7 @@ namespace blink {
 
 class PLATFORM_EXPORT SourceGraphic final : public FilterEffect {
  public:
-  static SourceGraphic* Create(Filter*);
+  explicit SourceGraphic(Filter*);
   ~SourceGraphic() override;
 
   WTF::TextStream& ExternalRepresentation(WTF::TextStream&,
@@ -38,8 +38,6 @@ class PLATFORM_EXPORT SourceGraphic final : public FilterEffect {
   void SetSourceRect(const IntRect&);
 
  private:
-  explicit SourceGraphic(Filter*);
-
   FilterEffectType GetFilterEffectType() const override {
     return kFilterEffectTypeSourceInput;
   }

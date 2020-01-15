@@ -4,22 +4,12 @@
 
 #include "third_party/blink/renderer/platform/scheduler/main_thread/queueing_time_estimator.h"
 
-#include "third_party/blink/renderer/platform/scheduler/main_thread/frame_scheduler_impl.h"
-#include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
-
 #include <algorithm>
-#include <map>
 
 namespace blink {
 namespace scheduler {
 
 namespace {
-
-using QueueType = MainThreadTaskQueue::QueueType;
-
-#define FRAME_STATUS_PREFIX \
-  "RendererScheduler.ExpectedQueueingTimeByFrameStatus2."
-#define TASK_QUEUE_PREFIX "RendererScheduler.ExpectedQueueingTimeByTaskQueue2."
 
 // On Windows, when a computer sleeps, we may end up getting extremely long
 // tasks or idling. We'll ignore tasks longer than |kInvalidPeriodThreshold|.
@@ -42,8 +32,8 @@ base::TimeDelta ExpectedQueueingTimeFromTask(base::TimeTicks task_start,
   DCHECK_LE(task_start, task_end);
   DCHECK_LE(task_start, step_end);
   DCHECK_LT(step_start, step_end);
-  // Because we skip steps when the renderer is backgrounded, we may have gone
-  // into the future, and in that case we ignore this task completely.
+  // Because we skip steps when disabled, we may have gone into the future, and
+  // in that case we ignore this task completely.
   if (task_end < step_start)
     return base::TimeDelta();
 
@@ -67,21 +57,20 @@ base::TimeDelta ExpectedQueueingTimeFromTask(base::TimeTicks task_start,
 
 QueueingTimeEstimator::QueueingTimeEstimator(Client* client,
                                              base::TimeDelta window_duration,
-                                             int steps_per_window)
+                                             int steps_per_window,
+                                             bool start_disabled)
     : client_(client),
       window_step_width_(window_duration / steps_per_window),
-      renderer_backgrounded_(kLaunchingProcessIsBackgrounded),
+      disabled_(start_disabled),
       calculator_(steps_per_window) {
   DCHECK_GE(steps_per_window, 1);
 }
 
-void QueueingTimeEstimator::OnExecutionStarted(base::TimeTicks now,
-                                               MainThreadTaskQueue* queue) {
+void QueueingTimeEstimator::OnExecutionStarted(base::TimeTicks now) {
   DCHECK(!busy_);
   AdvanceTime(now);
   busy_ = true;
   busy_period_start_time_ = now;
-  calculator_.UpdateStatusFromTaskQueue(queue);
 }
 
 void QueueingTimeEstimator::OnExecutionStopped(base::TimeTicks now) {
@@ -91,13 +80,13 @@ void QueueingTimeEstimator::OnExecutionStopped(base::TimeTicks now) {
   busy_period_start_time_ = base::TimeTicks();
 }
 
-void QueueingTimeEstimator::OnRendererStateChanged(
-    bool backgrounded,
+void QueueingTimeEstimator::OnRecordingStateChanged(
+    bool disabled,
     base::TimeTicks transition_time) {
-  DCHECK_NE(backgrounded, renderer_backgrounded_);
+  DCHECK_NE(disabled, disabled_);
   if (!busy_)
     AdvanceTime(transition_time);
-  renderer_backgrounded_ = backgrounded;
+  disabled_ = disabled;
 }
 
 void QueueingTimeEstimator::AdvanceTime(base::TimeTicks current_time) {
@@ -110,11 +99,10 @@ void QueueingTimeEstimator::AdvanceTime(base::TimeTicks current_time) {
   }
   base::TimeTicks reference_time =
       busy_ ? busy_period_start_time_ : step_start_time_;
-  if (renderer_backgrounded_ ||
-      current_time - reference_time > kInvalidPeriodThreshold) {
-    // Skip steps when the renderer was backgrounded, when a task took too long,
-    // or when we remained idle for too long. May cause |step_start_time_| to go
-    // slightly into the future.
+  if (disabled_ || current_time - reference_time > kInvalidPeriodThreshold) {
+    // Skip steps when we're disabled, when a task took too long, or when we
+    // remained idle for too long. May cause |step_start_time_| to go slightly
+    // into the future.
     // TODO(npm): crbug.com/776013. Base skipping long tasks/idling on a signal
     // that we've been suspended.
     step_start_time_ =
@@ -144,28 +132,15 @@ bool QueueingTimeEstimator::TimePastStepEnd(base::TimeTicks time) {
 }
 
 QueueingTimeEstimator::Calculator::Calculator(int steps_per_window)
-    : steps_per_window_(steps_per_window),
-      step_queueing_times_(steps_per_window) {}
-
-void QueueingTimeEstimator::Calculator::UpdateStatusFromTaskQueue(
-    MainThreadTaskQueue* queue) {
-  current_queue_type_ =
-      queue ? queue->queue_type() : MainThreadTaskQueue::QueueType::kOther;
-  FrameScheduler* scheduler = queue ? queue->GetFrameScheduler() : nullptr;
-  current_frame_status_ =
-      scheduler ? GetFrameStatus(scheduler) : FrameStatus::kNone;
-}
+    : steps_per_window_(steps_per_window), sliding_window_(steps_per_window) {}
 
 void QueueingTimeEstimator::Calculator::AddQueueingTime(
     base::TimeDelta queueing_time) {
   step_expected_queueing_time_ += queueing_time;
-  eqt_by_queue_type_[static_cast<int>(current_queue_type_)] += queueing_time;
-  eqt_by_frame_status_[static_cast<int>(current_frame_status_)] +=
-      queueing_time;
 }
 
 void QueueingTimeEstimator::Calculator::EndStep(Client* client) {
-  step_queueing_times_.Add(step_expected_queueing_time_);
+  sliding_window_.Add(step_expected_queueing_time_);
 
   DCHECK(client);
   // MainThreadSchedulerImpl reports the queueing time once per disjoint window.
@@ -174,87 +149,20 @@ void QueueingTimeEstimator::Calculator::EndStep(Client* client) {
   // Discard:         |-------window EQT------|
   // Discard:                 |-------window EQT------|
   // Report:                          |-------window EQT------|
-  client->OnQueueingTimeForWindowEstimated(step_queueing_times_.GetAverage(),
-                                           step_queueing_times_.IndexIsZero());
+  client->OnQueueingTimeForWindowEstimated(sliding_window_.GetAverage(),
+                                           sliding_window_.IndexIsZero());
   ResetStep();
-  if (!step_queueing_times_.IndexIsZero())
-    return;
-
-// Report splits by task queue type.
-#define REPORT_BY_TASK_QUEUE(queue)                               \
-  client->OnReportFineGrainedExpectedQueueingTime(                \
-      TASK_QUEUE_PREFIX #queue,                                   \
-      eqt_by_queue_type_[static_cast<int>(QueueType::k##queue)] / \
-          steps_per_window_);
-  REPORT_BY_TASK_QUEUE(Default)
-  REPORT_BY_TASK_QUEUE(Unthrottled)
-  REPORT_BY_TASK_QUEUE(FrameLoading)
-  REPORT_BY_TASK_QUEUE(Compositor)
-  REPORT_BY_TASK_QUEUE(FrameThrottleable)
-  REPORT_BY_TASK_QUEUE(FramePausable)
-#undef REPORT_BY_TASK_QUEUE
-  client->OnReportFineGrainedExpectedQueueingTime(
-      TASK_QUEUE_PREFIX "Other",
-      (eqt_by_queue_type_[static_cast<int>(QueueType::kControl)] +
-       eqt_by_queue_type_[static_cast<int>(QueueType::kIdle)] +
-       eqt_by_queue_type_[static_cast<int>(QueueType::kTest)] +
-       eqt_by_queue_type_[static_cast<int>(QueueType::kFrameLoadingControl)] +
-       eqt_by_queue_type_[static_cast<int>(QueueType::kFrameDeferrable)] +
-       eqt_by_queue_type_[static_cast<int>(QueueType::kFrameUnpausable)] +
-       eqt_by_queue_type_[static_cast<int>(QueueType::kV8)] +
-       eqt_by_queue_type_[static_cast<int>(QueueType::kOther)]) /
-          steps_per_window_);
-
-// Report splits by frame status.
-#define REPORT_BY_FRAME_TYPE(frame)                                            \
-  client->OnReportFineGrainedExpectedQueueingTime(                             \
-      FRAME_STATUS_PREFIX #frame "Visible",                                    \
-      (eqt_by_frame_status_[static_cast<int>(                                  \
-           FrameStatus::k##frame##Visible)] +                                  \
-       eqt_by_frame_status_[static_cast<int>(                                  \
-           FrameStatus::k##frame##VisibleService)]) /                          \
-          steps_per_window_);                                                  \
-  client->OnReportFineGrainedExpectedQueueingTime(                             \
-      FRAME_STATUS_PREFIX #frame "Hidden",                                     \
-      (eqt_by_frame_status_[static_cast<int>(FrameStatus::k##frame##Hidden)] + \
-       eqt_by_frame_status_[static_cast<int>(                                  \
-           FrameStatus::k##frame##HiddenService)]) /                           \
-          steps_per_window_);                                                  \
-  client->OnReportFineGrainedExpectedQueueingTime(                             \
-      FRAME_STATUS_PREFIX #frame "Background",                                 \
-      (eqt_by_frame_status_[static_cast<int>(                                  \
-           FrameStatus::k##frame##Background)] +                               \
-       eqt_by_frame_status_[static_cast<int>(                                  \
-           FrameStatus::k##frame##BackgroundExemptSelf)] +                     \
-       eqt_by_frame_status_[static_cast<int>(                                  \
-           FrameStatus::k##frame##BackgroundExemptOther)]) /                   \
-          steps_per_window_);
-  REPORT_BY_FRAME_TYPE(MainFrame)
-  REPORT_BY_FRAME_TYPE(SameOrigin)
-  REPORT_BY_FRAME_TYPE(CrossOrigin)
-#undef REPORT_BY_FRAME_TYPE
-  client->OnReportFineGrainedExpectedQueueingTime(
-      FRAME_STATUS_PREFIX "Other",
-      (eqt_by_frame_status_[static_cast<int>(FrameStatus::kNone)] +
-       eqt_by_frame_status_[static_cast<int>(FrameStatus::kDetached)]) /
-          steps_per_window_);
-  std::fill(eqt_by_queue_type_.begin(), eqt_by_queue_type_.end(),
-            base::TimeDelta());
-  std::fill(eqt_by_frame_status_.begin(), eqt_by_frame_status_.end(),
-            base::TimeDelta());
 }
 
 void QueueingTimeEstimator::Calculator::ResetStep() {
   step_expected_queueing_time_ = base::TimeDelta();
 }
 
-QueueingTimeEstimator::RunningAverage::RunningAverage(int size) {
-  circular_buffer_.resize(size);
-  index_ = 0;
-}
+QueueingTimeEstimator::RunningAverage::RunningAverage(int size)
+    : index_(0), circular_buffer_(size), running_sum_() {}
 
 int QueueingTimeEstimator::RunningAverage::GetStepsPerWindow() const {
-  return circular_buffer_.size();
+  return static_cast<int>(circular_buffer_.size());
 }
 
 void QueueingTimeEstimator::RunningAverage::Add(base::TimeDelta bin_value) {

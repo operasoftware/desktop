@@ -9,9 +9,14 @@ include_rules = [
     "+base",
     "+build",
     "+net",
+    "+media",
     "+mojo",
+    "+services/metrics/public/cpp",
     "+services/network/public/cpp",
-    "+skia/public/interfaces/bitmap_skbitmap_struct_traits.h",
+    "+services/network/public/mojom/url_loader.mojom.h",
+    "+services/network/public/mojom/url_response_head.mojom.h",
+    "+services/network/public/mojom/url_response_head.mojom-forward.h",
+    "+skia/public/mojom/bitmap_skbitmap_mojom_traits.h",
     "+testing/gmock/include/gmock",
     "+testing/gtest/include/gtest",
     "+third_party/blink/common",
@@ -23,5 +28,5 @@ include_rules = [
     "+url",
 ]
 specific_include_rules = {
-  '.*unittest.?.cc': [ "+v8" ],
+  '.*unittest.?.cc': [ "+v8", "+services/network/test" ],
 }

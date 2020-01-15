@@ -29,7 +29,6 @@
  */
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/web/web_console_message.h"
 #include "third_party/blink/public/web/web_frame.h"
@@ -51,14 +50,12 @@
 #include "third_party/blink/renderer/platform/geometry/int_point.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
-#include "third_party/blink/renderer/platform/length.h"
+#include "third_party/blink/renderer/platform/geometry/length.h"
 #include "third_party/blink/renderer/platform/testing/histogram_tester.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 
 namespace blink {
-
-using blink::test::RunPendingTasks;
 
 class ViewportTest : public testing::Test {
  protected:
@@ -66,26 +63,28 @@ class ViewportTest : public testing::Test {
       : base_url_("http://www.test.com/"), chrome_url_("chrome://") {}
 
   ~ViewportTest() override {
-    Platform::Current()
-        ->GetURLLoaderMockFactory()
-        ->UnregisterAllURLsAndClearMemoryCache();
+    url_test_helpers::UnregisterAllURLsAndClearMemoryCache();
   }
 
   void RegisterMockedHttpURLLoad(const std::string& file_name) {
-    URLTestHelpers::RegisterMockedURLLoadFromBase(
+    // TODO(crbug.com/751425): We should use the mock functionality
+    // via the WebViewHelper instance in each test case.
+    url_test_helpers::RegisterMockedURLLoadFromBase(
         WebString::FromUTF8(base_url_), test::CoreTestDataPath(),
         WebString::FromUTF8(file_name));
   }
 
   void RegisterMockedChromeURLLoad(const std::string& file_name) {
-    URLTestHelpers::RegisterMockedURLLoadFromBase(
+    // TODO(crbug.com/751425): We should use the mock functionality
+    // via the WebViewHelper instance in each test case.
+    url_test_helpers::RegisterMockedURLLoadFromBase(
         WebString::FromUTF8(chrome_url_), test::CoreTestDataPath(),
         WebString::FromUTF8(file_name));
   }
 
   void ExecuteScript(WebLocalFrame* frame, const WebString& code) {
     frame->ExecuteScript(WebScriptSource(code));
-    RunPendingTasks();
+    blink::test::RunPendingTasks();
   }
 
   std::string base_url_;
@@ -102,12 +101,12 @@ static PageScaleConstraints RunViewportTest(Page* page,
                                             int initial_width,
                                             int initial_height) {
   IntSize initial_viewport_size(initial_width, initial_height);
-  ToLocalFrame(page->MainFrame())
+  To<LocalFrame>(page->MainFrame())
       ->View()
       ->SetFrameRect(IntRect(IntPoint::Zero(), initial_viewport_size));
   ViewportDescription description = page->GetViewportDescription();
-  PageScaleConstraints constraints = description.Resolve(
-      FloatSize(initial_viewport_size), Length(980, blink::kFixed));
+  PageScaleConstraints constraints =
+      description.Resolve(FloatSize(initial_viewport_size), Length::Fixed(980));
 
   constraints.FitToContentsWidth(constraints.layout_size.Width(),
                                  initial_width);
@@ -118,7 +117,7 @@ static PageScaleConstraints RunViewportTest(Page* page,
 TEST_F(ViewportTest, viewport1) {
   RegisterMockedHttpURLLoad("viewport/viewport-1.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-1.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -137,7 +136,7 @@ TEST_F(ViewportTest, viewport1) {
 TEST_F(ViewportTest, viewport2) {
   RegisterMockedHttpURLLoad("viewport/viewport-2.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-2.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -156,7 +155,7 @@ TEST_F(ViewportTest, viewport2) {
 TEST_F(ViewportTest, viewport3) {
   RegisterMockedHttpURLLoad("viewport/viewport-3.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-3.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -175,7 +174,7 @@ TEST_F(ViewportTest, viewport3) {
 TEST_F(ViewportTest, viewport4) {
   RegisterMockedHttpURLLoad("viewport/viewport-4.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-4.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -194,7 +193,7 @@ TEST_F(ViewportTest, viewport4) {
 TEST_F(ViewportTest, viewport5) {
   RegisterMockedHttpURLLoad("viewport/viewport-5.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-5.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -213,7 +212,7 @@ TEST_F(ViewportTest, viewport5) {
 TEST_F(ViewportTest, viewport6) {
   RegisterMockedHttpURLLoad("viewport/viewport-6.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-6.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -232,7 +231,7 @@ TEST_F(ViewportTest, viewport6) {
 TEST_F(ViewportTest, viewport7) {
   RegisterMockedHttpURLLoad("viewport/viewport-7.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-7.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -251,7 +250,7 @@ TEST_F(ViewportTest, viewport7) {
 TEST_F(ViewportTest, viewport8) {
   RegisterMockedHttpURLLoad("viewport/viewport-8.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-8.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -270,7 +269,7 @@ TEST_F(ViewportTest, viewport8) {
 TEST_F(ViewportTest, viewport9) {
   RegisterMockedHttpURLLoad("viewport/viewport-9.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-9.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -289,7 +288,7 @@ TEST_F(ViewportTest, viewport9) {
 TEST_F(ViewportTest, viewport10) {
   RegisterMockedHttpURLLoad("viewport/viewport-10.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-10.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -308,7 +307,7 @@ TEST_F(ViewportTest, viewport10) {
 TEST_F(ViewportTest, viewport11) {
   RegisterMockedHttpURLLoad("viewport/viewport-11.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-11.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -327,7 +326,7 @@ TEST_F(ViewportTest, viewport11) {
 TEST_F(ViewportTest, viewport12) {
   RegisterMockedHttpURLLoad("viewport/viewport-12.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-12.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -346,7 +345,7 @@ TEST_F(ViewportTest, viewport12) {
 TEST_F(ViewportTest, viewport13) {
   RegisterMockedHttpURLLoad("viewport/viewport-13.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-13.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -365,7 +364,7 @@ TEST_F(ViewportTest, viewport13) {
 TEST_F(ViewportTest, viewport14) {
   RegisterMockedHttpURLLoad("viewport/viewport-14.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-14.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -384,7 +383,7 @@ TEST_F(ViewportTest, viewport14) {
 TEST_F(ViewportTest, viewport15) {
   RegisterMockedHttpURLLoad("viewport/viewport-15.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-15.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -403,7 +402,7 @@ TEST_F(ViewportTest, viewport15) {
 TEST_F(ViewportTest, viewport16) {
   RegisterMockedHttpURLLoad("viewport/viewport-16.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-16.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -422,7 +421,7 @@ TEST_F(ViewportTest, viewport16) {
 TEST_F(ViewportTest, viewport17) {
   RegisterMockedHttpURLLoad("viewport/viewport-17.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-17.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -441,7 +440,7 @@ TEST_F(ViewportTest, viewport17) {
 TEST_F(ViewportTest, viewport18) {
   RegisterMockedHttpURLLoad("viewport/viewport-18.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-18.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -460,7 +459,7 @@ TEST_F(ViewportTest, viewport18) {
 TEST_F(ViewportTest, viewport19) {
   RegisterMockedHttpURLLoad("viewport/viewport-19.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-19.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -479,7 +478,7 @@ TEST_F(ViewportTest, viewport19) {
 TEST_F(ViewportTest, viewport20) {
   RegisterMockedHttpURLLoad("viewport/viewport-20.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-20.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -498,7 +497,7 @@ TEST_F(ViewportTest, viewport20) {
 TEST_F(ViewportTest, viewport21) {
   RegisterMockedHttpURLLoad("viewport/viewport-21.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-21.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -517,7 +516,7 @@ TEST_F(ViewportTest, viewport21) {
 TEST_F(ViewportTest, viewport22) {
   RegisterMockedHttpURLLoad("viewport/viewport-22.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-22.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -536,7 +535,7 @@ TEST_F(ViewportTest, viewport22) {
 TEST_F(ViewportTest, viewport23) {
   RegisterMockedHttpURLLoad("viewport/viewport-23.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-23.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -555,7 +554,7 @@ TEST_F(ViewportTest, viewport23) {
 TEST_F(ViewportTest, viewport24) {
   RegisterMockedHttpURLLoad("viewport/viewport-24.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-24.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -574,7 +573,7 @@ TEST_F(ViewportTest, viewport24) {
 TEST_F(ViewportTest, viewport25) {
   RegisterMockedHttpURLLoad("viewport/viewport-25.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-25.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -593,7 +592,7 @@ TEST_F(ViewportTest, viewport25) {
 TEST_F(ViewportTest, viewport26) {
   RegisterMockedHttpURLLoad("viewport/viewport-26.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-26.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -612,7 +611,7 @@ TEST_F(ViewportTest, viewport26) {
 TEST_F(ViewportTest, viewport27) {
   RegisterMockedHttpURLLoad("viewport/viewport-27.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-27.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -631,7 +630,7 @@ TEST_F(ViewportTest, viewport27) {
 TEST_F(ViewportTest, viewport28) {
   RegisterMockedHttpURLLoad("viewport/viewport-28.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-28.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -650,7 +649,7 @@ TEST_F(ViewportTest, viewport28) {
 TEST_F(ViewportTest, viewport29) {
   RegisterMockedHttpURLLoad("viewport/viewport-29.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-29.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -669,7 +668,7 @@ TEST_F(ViewportTest, viewport29) {
 TEST_F(ViewportTest, viewport30) {
   RegisterMockedHttpURLLoad("viewport/viewport-30.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-30.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -688,7 +687,7 @@ TEST_F(ViewportTest, viewport30) {
 TEST_F(ViewportTest, viewport31) {
   RegisterMockedHttpURLLoad("viewport/viewport-31.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-31.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -707,7 +706,7 @@ TEST_F(ViewportTest, viewport31) {
 TEST_F(ViewportTest, viewport32) {
   RegisterMockedHttpURLLoad("viewport/viewport-32.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-32.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -726,7 +725,7 @@ TEST_F(ViewportTest, viewport32) {
 TEST_F(ViewportTest, viewport33) {
   RegisterMockedHttpURLLoad("viewport/viewport-33.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-33.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -745,7 +744,7 @@ TEST_F(ViewportTest, viewport33) {
 TEST_F(ViewportTest, viewport34) {
   RegisterMockedHttpURLLoad("viewport/viewport-34.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-34.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -764,7 +763,7 @@ TEST_F(ViewportTest, viewport34) {
 TEST_F(ViewportTest, viewport35) {
   RegisterMockedHttpURLLoad("viewport/viewport-35.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-35.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -783,7 +782,7 @@ TEST_F(ViewportTest, viewport35) {
 TEST_F(ViewportTest, viewport36) {
   RegisterMockedHttpURLLoad("viewport/viewport-36.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-36.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -802,7 +801,7 @@ TEST_F(ViewportTest, viewport36) {
 TEST_F(ViewportTest, viewport37) {
   RegisterMockedHttpURLLoad("viewport/viewport-37.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-37.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -821,7 +820,7 @@ TEST_F(ViewportTest, viewport37) {
 TEST_F(ViewportTest, viewport38) {
   RegisterMockedHttpURLLoad("viewport/viewport-38.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-38.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -840,7 +839,7 @@ TEST_F(ViewportTest, viewport38) {
 TEST_F(ViewportTest, viewport39) {
   RegisterMockedHttpURLLoad("viewport/viewport-39.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-39.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -859,7 +858,7 @@ TEST_F(ViewportTest, viewport39) {
 TEST_F(ViewportTest, viewport40) {
   RegisterMockedHttpURLLoad("viewport/viewport-40.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-40.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -878,7 +877,7 @@ TEST_F(ViewportTest, viewport40) {
 TEST_F(ViewportTest, viewport41) {
   RegisterMockedHttpURLLoad("viewport/viewport-41.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-41.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -897,7 +896,7 @@ TEST_F(ViewportTest, viewport41) {
 TEST_F(ViewportTest, viewport42) {
   RegisterMockedHttpURLLoad("viewport/viewport-42.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-42.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -916,7 +915,7 @@ TEST_F(ViewportTest, viewport42) {
 TEST_F(ViewportTest, viewport43) {
   RegisterMockedHttpURLLoad("viewport/viewport-43.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-43.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -935,7 +934,7 @@ TEST_F(ViewportTest, viewport43) {
 TEST_F(ViewportTest, viewport44) {
   RegisterMockedHttpURLLoad("viewport/viewport-44.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-44.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -954,7 +953,7 @@ TEST_F(ViewportTest, viewport44) {
 TEST_F(ViewportTest, viewport45) {
   RegisterMockedHttpURLLoad("viewport/viewport-45.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-45.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -973,7 +972,7 @@ TEST_F(ViewportTest, viewport45) {
 TEST_F(ViewportTest, viewport46) {
   RegisterMockedHttpURLLoad("viewport/viewport-46.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-46.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -992,7 +991,7 @@ TEST_F(ViewportTest, viewport46) {
 TEST_F(ViewportTest, viewport47) {
   RegisterMockedHttpURLLoad("viewport/viewport-47.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-47.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1011,7 +1010,7 @@ TEST_F(ViewportTest, viewport47) {
 TEST_F(ViewportTest, viewport48) {
   RegisterMockedHttpURLLoad("viewport/viewport-48.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-48.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1030,7 +1029,7 @@ TEST_F(ViewportTest, viewport48) {
 TEST_F(ViewportTest, viewport49) {
   RegisterMockedHttpURLLoad("viewport/viewport-49.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-49.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1049,7 +1048,7 @@ TEST_F(ViewportTest, viewport49) {
 TEST_F(ViewportTest, viewport50) {
   RegisterMockedHttpURLLoad("viewport/viewport-50.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-50.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1068,7 +1067,7 @@ TEST_F(ViewportTest, viewport50) {
 TEST_F(ViewportTest, viewport51) {
   RegisterMockedHttpURLLoad("viewport/viewport-51.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-51.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1087,7 +1086,7 @@ TEST_F(ViewportTest, viewport51) {
 TEST_F(ViewportTest, viewport52) {
   RegisterMockedHttpURLLoad("viewport/viewport-52.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-52.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1106,7 +1105,7 @@ TEST_F(ViewportTest, viewport52) {
 TEST_F(ViewportTest, viewport53) {
   RegisterMockedHttpURLLoad("viewport/viewport-53.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-53.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1125,7 +1124,7 @@ TEST_F(ViewportTest, viewport53) {
 TEST_F(ViewportTest, viewport54) {
   RegisterMockedHttpURLLoad("viewport/viewport-54.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-54.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1144,7 +1143,7 @@ TEST_F(ViewportTest, viewport54) {
 TEST_F(ViewportTest, viewport55) {
   RegisterMockedHttpURLLoad("viewport/viewport-55.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-55.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1163,7 +1162,7 @@ TEST_F(ViewportTest, viewport55) {
 TEST_F(ViewportTest, viewport56) {
   RegisterMockedHttpURLLoad("viewport/viewport-56.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-56.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1182,7 +1181,7 @@ TEST_F(ViewportTest, viewport56) {
 TEST_F(ViewportTest, viewport57) {
   RegisterMockedHttpURLLoad("viewport/viewport-57.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-57.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1201,7 +1200,7 @@ TEST_F(ViewportTest, viewport57) {
 TEST_F(ViewportTest, viewport58) {
   RegisterMockedHttpURLLoad("viewport/viewport-58.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-58.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1220,7 +1219,7 @@ TEST_F(ViewportTest, viewport58) {
 TEST_F(ViewportTest, viewport59) {
   RegisterMockedHttpURLLoad("viewport/viewport-59.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-59.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1239,7 +1238,7 @@ TEST_F(ViewportTest, viewport59) {
 TEST_F(ViewportTest, viewport60) {
   RegisterMockedHttpURLLoad("viewport/viewport-60.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-60.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1258,7 +1257,7 @@ TEST_F(ViewportTest, viewport60) {
 TEST_F(ViewportTest, viewport61) {
   RegisterMockedHttpURLLoad("viewport/viewport-61.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-61.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1277,7 +1276,7 @@ TEST_F(ViewportTest, viewport61) {
 TEST_F(ViewportTest, viewport62) {
   RegisterMockedHttpURLLoad("viewport/viewport-62.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-62.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1296,7 +1295,7 @@ TEST_F(ViewportTest, viewport62) {
 TEST_F(ViewportTest, viewport63) {
   RegisterMockedHttpURLLoad("viewport/viewport-63.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-63.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1315,7 +1314,7 @@ TEST_F(ViewportTest, viewport63) {
 TEST_F(ViewportTest, viewport64) {
   RegisterMockedHttpURLLoad("viewport/viewport-64.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-64.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1334,7 +1333,7 @@ TEST_F(ViewportTest, viewport64) {
 TEST_F(ViewportTest, viewport65) {
   RegisterMockedHttpURLLoad("viewport/viewport-65.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-65.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1353,7 +1352,7 @@ TEST_F(ViewportTest, viewport65) {
 TEST_F(ViewportTest, viewport66) {
   RegisterMockedHttpURLLoad("viewport/viewport-66.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-66.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1372,7 +1371,7 @@ TEST_F(ViewportTest, viewport66) {
 TEST_F(ViewportTest, viewport67) {
   RegisterMockedHttpURLLoad("viewport/viewport-67.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-67.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1391,7 +1390,7 @@ TEST_F(ViewportTest, viewport67) {
 TEST_F(ViewportTest, viewport68) {
   RegisterMockedHttpURLLoad("viewport/viewport-68.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-68.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1410,7 +1409,7 @@ TEST_F(ViewportTest, viewport68) {
 TEST_F(ViewportTest, viewport69) {
   RegisterMockedHttpURLLoad("viewport/viewport-69.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-69.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1429,7 +1428,7 @@ TEST_F(ViewportTest, viewport69) {
 TEST_F(ViewportTest, viewport70) {
   RegisterMockedHttpURLLoad("viewport/viewport-70.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-70.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1448,7 +1447,7 @@ TEST_F(ViewportTest, viewport70) {
 TEST_F(ViewportTest, viewport71) {
   RegisterMockedHttpURLLoad("viewport/viewport-71.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-71.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1467,7 +1466,7 @@ TEST_F(ViewportTest, viewport71) {
 TEST_F(ViewportTest, viewport72) {
   RegisterMockedHttpURLLoad("viewport/viewport-72.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-72.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1486,7 +1485,7 @@ TEST_F(ViewportTest, viewport72) {
 TEST_F(ViewportTest, viewport73) {
   RegisterMockedHttpURLLoad("viewport/viewport-73.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-73.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1505,7 +1504,7 @@ TEST_F(ViewportTest, viewport73) {
 TEST_F(ViewportTest, viewport74) {
   RegisterMockedHttpURLLoad("viewport/viewport-74.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-74.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1524,7 +1523,7 @@ TEST_F(ViewportTest, viewport74) {
 TEST_F(ViewportTest, viewport75) {
   RegisterMockedHttpURLLoad("viewport/viewport-75.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-75.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1543,7 +1542,7 @@ TEST_F(ViewportTest, viewport75) {
 TEST_F(ViewportTest, viewport76) {
   RegisterMockedHttpURLLoad("viewport/viewport-76.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-76.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1562,7 +1561,7 @@ TEST_F(ViewportTest, viewport76) {
 TEST_F(ViewportTest, viewport77) {
   RegisterMockedHttpURLLoad("viewport/viewport-77.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-77.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1581,7 +1580,7 @@ TEST_F(ViewportTest, viewport77) {
 TEST_F(ViewportTest, viewport78) {
   RegisterMockedHttpURLLoad("viewport/viewport-78.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-78.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1600,7 +1599,7 @@ TEST_F(ViewportTest, viewport78) {
 TEST_F(ViewportTest, viewport79) {
   RegisterMockedHttpURLLoad("viewport/viewport-79.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-79.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1619,7 +1618,7 @@ TEST_F(ViewportTest, viewport79) {
 TEST_F(ViewportTest, viewport80) {
   RegisterMockedHttpURLLoad("viewport/viewport-80.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-80.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1638,7 +1637,7 @@ TEST_F(ViewportTest, viewport80) {
 TEST_F(ViewportTest, viewport81) {
   RegisterMockedHttpURLLoad("viewport/viewport-81.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-81.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1657,7 +1656,7 @@ TEST_F(ViewportTest, viewport81) {
 TEST_F(ViewportTest, viewport82) {
   RegisterMockedHttpURLLoad("viewport/viewport-82.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-82.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1676,7 +1675,7 @@ TEST_F(ViewportTest, viewport82) {
 TEST_F(ViewportTest, viewport83) {
   RegisterMockedHttpURLLoad("viewport/viewport-83.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-83.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1695,7 +1694,7 @@ TEST_F(ViewportTest, viewport83) {
 TEST_F(ViewportTest, viewport84) {
   RegisterMockedHttpURLLoad("viewport/viewport-84.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-84.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1714,7 +1713,7 @@ TEST_F(ViewportTest, viewport84) {
 TEST_F(ViewportTest, viewport85) {
   RegisterMockedHttpURLLoad("viewport/viewport-85.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-85.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1733,7 +1732,7 @@ TEST_F(ViewportTest, viewport85) {
 TEST_F(ViewportTest, viewport86) {
   RegisterMockedHttpURLLoad("viewport/viewport-86.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-86.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1752,7 +1751,7 @@ TEST_F(ViewportTest, viewport86) {
 TEST_F(ViewportTest, viewport87) {
   RegisterMockedHttpURLLoad("viewport/viewport-87.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-87.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1771,7 +1770,7 @@ TEST_F(ViewportTest, viewport87) {
 TEST_F(ViewportTest, viewport88) {
   RegisterMockedHttpURLLoad("viewport/viewport-88.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-88.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1790,7 +1789,7 @@ TEST_F(ViewportTest, viewport88) {
 TEST_F(ViewportTest, viewport90) {
   RegisterMockedHttpURLLoad("viewport/viewport-90.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-90.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1809,7 +1808,7 @@ TEST_F(ViewportTest, viewport90) {
 TEST_F(ViewportTest, viewport100) {
   RegisterMockedHttpURLLoad("viewport/viewport-100.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-100.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1828,7 +1827,7 @@ TEST_F(ViewportTest, viewport100) {
 TEST_F(ViewportTest, viewport101) {
   RegisterMockedHttpURLLoad("viewport/viewport-101.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-101.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1847,7 +1846,7 @@ TEST_F(ViewportTest, viewport101) {
 TEST_F(ViewportTest, viewport102) {
   RegisterMockedHttpURLLoad("viewport/viewport-102.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-102.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1866,7 +1865,7 @@ TEST_F(ViewportTest, viewport102) {
 TEST_F(ViewportTest, viewport103) {
   RegisterMockedHttpURLLoad("viewport/viewport-103.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-103.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1885,7 +1884,7 @@ TEST_F(ViewportTest, viewport103) {
 TEST_F(ViewportTest, viewport104) {
   RegisterMockedHttpURLLoad("viewport/viewport-104.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-104.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1904,7 +1903,7 @@ TEST_F(ViewportTest, viewport104) {
 TEST_F(ViewportTest, viewport105) {
   RegisterMockedHttpURLLoad("viewport/viewport-105.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-105.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1923,7 +1922,7 @@ TEST_F(ViewportTest, viewport105) {
 TEST_F(ViewportTest, viewport106) {
   RegisterMockedHttpURLLoad("viewport/viewport-106.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-106.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1942,7 +1941,7 @@ TEST_F(ViewportTest, viewport106) {
 TEST_F(ViewportTest, viewport107) {
   RegisterMockedHttpURLLoad("viewport/viewport-107.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-107.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1961,7 +1960,7 @@ TEST_F(ViewportTest, viewport107) {
 TEST_F(ViewportTest, viewport108) {
   RegisterMockedHttpURLLoad("viewport/viewport-108.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-108.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1980,7 +1979,7 @@ TEST_F(ViewportTest, viewport108) {
 TEST_F(ViewportTest, viewport109) {
   RegisterMockedHttpURLLoad("viewport/viewport-109.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-109.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -1999,7 +1998,7 @@ TEST_F(ViewportTest, viewport109) {
 TEST_F(ViewportTest, viewport110) {
   RegisterMockedHttpURLLoad("viewport/viewport-110.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-110.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2018,7 +2017,7 @@ TEST_F(ViewportTest, viewport110) {
 TEST_F(ViewportTest, viewport111) {
   RegisterMockedHttpURLLoad("viewport/viewport-111.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-111.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2037,7 +2036,7 @@ TEST_F(ViewportTest, viewport111) {
 TEST_F(ViewportTest, viewport112) {
   RegisterMockedHttpURLLoad("viewport/viewport-112.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-112.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2056,7 +2055,7 @@ TEST_F(ViewportTest, viewport112) {
 TEST_F(ViewportTest, viewport113) {
   RegisterMockedHttpURLLoad("viewport/viewport-113.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-113.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2075,7 +2074,7 @@ TEST_F(ViewportTest, viewport113) {
 TEST_F(ViewportTest, viewport114) {
   RegisterMockedHttpURLLoad("viewport/viewport-114.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-114.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2094,7 +2093,7 @@ TEST_F(ViewportTest, viewport114) {
 TEST_F(ViewportTest, viewport115) {
   RegisterMockedHttpURLLoad("viewport/viewport-115.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-115.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2113,7 +2112,7 @@ TEST_F(ViewportTest, viewport115) {
 TEST_F(ViewportTest, viewport116) {
   RegisterMockedHttpURLLoad("viewport/viewport-116.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-116.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2132,7 +2131,7 @@ TEST_F(ViewportTest, viewport116) {
 TEST_F(ViewportTest, viewport117) {
   RegisterMockedHttpURLLoad("viewport/viewport-117.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-117.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2151,7 +2150,7 @@ TEST_F(ViewportTest, viewport117) {
 TEST_F(ViewportTest, viewport118) {
   RegisterMockedHttpURLLoad("viewport/viewport-118.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-118.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2170,7 +2169,7 @@ TEST_F(ViewportTest, viewport118) {
 TEST_F(ViewportTest, viewport119) {
   RegisterMockedHttpURLLoad("viewport/viewport-119.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-119.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2189,7 +2188,7 @@ TEST_F(ViewportTest, viewport119) {
 TEST_F(ViewportTest, viewport120) {
   RegisterMockedHttpURLLoad("viewport/viewport-120.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-120.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2208,7 +2207,7 @@ TEST_F(ViewportTest, viewport120) {
 TEST_F(ViewportTest, viewport121) {
   RegisterMockedHttpURLLoad("viewport/viewport-121.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-121.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2227,7 +2226,7 @@ TEST_F(ViewportTest, viewport121) {
 TEST_F(ViewportTest, viewport122) {
   RegisterMockedHttpURLLoad("viewport/viewport-122.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-122.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2246,7 +2245,7 @@ TEST_F(ViewportTest, viewport122) {
 TEST_F(ViewportTest, viewport123) {
   RegisterMockedHttpURLLoad("viewport/viewport-123.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-123.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2265,7 +2264,7 @@ TEST_F(ViewportTest, viewport123) {
 TEST_F(ViewportTest, viewport124) {
   RegisterMockedHttpURLLoad("viewport/viewport-124.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-124.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2284,7 +2283,7 @@ TEST_F(ViewportTest, viewport124) {
 TEST_F(ViewportTest, viewport125) {
   RegisterMockedHttpURLLoad("viewport/viewport-125.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-125.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2303,7 +2302,7 @@ TEST_F(ViewportTest, viewport125) {
 TEST_F(ViewportTest, viewport126) {
   RegisterMockedHttpURLLoad("viewport/viewport-126.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-126.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2322,7 +2321,7 @@ TEST_F(ViewportTest, viewport126) {
 TEST_F(ViewportTest, viewport127) {
   RegisterMockedHttpURLLoad("viewport/viewport-127.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-127.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2341,7 +2340,7 @@ TEST_F(ViewportTest, viewport127) {
 TEST_F(ViewportTest, viewport129) {
   RegisterMockedHttpURLLoad("viewport/viewport-129.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-129.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2360,7 +2359,7 @@ TEST_F(ViewportTest, viewport129) {
 TEST_F(ViewportTest, viewport130) {
   RegisterMockedHttpURLLoad("viewport/viewport-130.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-130.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2379,7 +2378,7 @@ TEST_F(ViewportTest, viewport130) {
 TEST_F(ViewportTest, viewport131) {
   RegisterMockedHttpURLLoad("viewport/viewport-131.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-131.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2398,7 +2397,7 @@ TEST_F(ViewportTest, viewport131) {
 TEST_F(ViewportTest, viewport132) {
   RegisterMockedHttpURLLoad("viewport/viewport-132.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-132.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2417,7 +2416,7 @@ TEST_F(ViewportTest, viewport132) {
 TEST_F(ViewportTest, viewport133) {
   RegisterMockedHttpURLLoad("viewport/viewport-133.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-133.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2436,7 +2435,7 @@ TEST_F(ViewportTest, viewport133) {
 TEST_F(ViewportTest, viewport134) {
   RegisterMockedHttpURLLoad("viewport/viewport-134.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-134.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2455,7 +2454,7 @@ TEST_F(ViewportTest, viewport134) {
 TEST_F(ViewportTest, viewport135) {
   RegisterMockedHttpURLLoad("viewport/viewport-135.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-135.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2474,7 +2473,7 @@ TEST_F(ViewportTest, viewport135) {
 TEST_F(ViewportTest, viewport136) {
   RegisterMockedHttpURLLoad("viewport/viewport-136.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-136.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2493,7 +2492,7 @@ TEST_F(ViewportTest, viewport136) {
 TEST_F(ViewportTest, viewport137) {
   RegisterMockedHttpURLLoad("viewport/viewport-137.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-137.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2512,7 +2511,7 @@ TEST_F(ViewportTest, viewport137) {
 TEST_F(ViewportTest, viewport138) {
   RegisterMockedHttpURLLoad("viewport/viewport-138.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-138.html",
                                     nullptr, nullptr, nullptr,
                                     SetViewportSettings);
@@ -2531,7 +2530,7 @@ TEST_F(ViewportTest, viewport138) {
 TEST_F(ViewportTest, viewportLegacyHandheldFriendly) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-handheldfriendly.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-handheldfriendly.html", nullptr,
       nullptr, nullptr, SetViewportSettings);
@@ -2557,7 +2556,7 @@ static void SetQuirkViewportSettings(WebSettings* settings) {
 TEST_F(ViewportTest, viewportLegacyMergeQuirk1) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-merge-quirk-1.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-merge-quirk-1.html", nullptr,
       nullptr, nullptr, SetQuirkViewportSettings);
@@ -2576,7 +2575,7 @@ TEST_F(ViewportTest, viewportLegacyMergeQuirk1) {
 TEST_F(ViewportTest, viewportLegacyMergeQuirk2) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-merge-quirk-2.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-merge-quirk-2.html", nullptr,
       nullptr, nullptr, SetQuirkViewportSettings);
@@ -2598,7 +2597,7 @@ TEST_F(ViewportTest, viewportLegacyMergeQuirk2) {
 TEST_F(ViewportTest, viewportLegacyMobileOptimizedMetaWithoutContent) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-mobileoptimized.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-mobileoptimized.html", nullptr,
       nullptr, nullptr, SetViewportSettings);
@@ -2618,7 +2617,7 @@ TEST_F(ViewportTest, viewportLegacyMobileOptimizedMetaWithoutContent) {
 TEST_F(ViewportTest, viewportLegacyMobileOptimizedMetaWith0) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-mobileoptimized-2.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-mobileoptimized-2.html", nullptr,
       nullptr, nullptr, SetViewportSettings);
@@ -2638,7 +2637,7 @@ TEST_F(ViewportTest, viewportLegacyMobileOptimizedMetaWith0) {
 TEST_F(ViewportTest, viewportLegacyMobileOptimizedMetaWith400) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-mobileoptimized-2.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-mobileoptimized-2.html", nullptr,
       nullptr, nullptr, SetViewportSettings);
@@ -2658,7 +2657,7 @@ TEST_F(ViewportTest, viewportLegacyMobileOptimizedMetaWith400) {
 TEST_F(ViewportTest, viewportLegacyOrdering2) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-ordering-2.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-ordering-2.html", nullptr, nullptr,
       nullptr, SetViewportSettings);
@@ -2678,7 +2677,7 @@ TEST_F(ViewportTest, viewportLegacyOrdering2) {
 TEST_F(ViewportTest, viewportLegacyOrdering3) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-ordering-3.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-ordering-3.html", nullptr, nullptr,
       nullptr, SetViewportSettings);
@@ -2698,7 +2697,7 @@ TEST_F(ViewportTest, viewportLegacyOrdering3) {
 TEST_F(ViewportTest, viewportLegacyOrdering4) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-ordering-4.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-ordering-4.html", nullptr, nullptr,
       nullptr, SetViewportSettings);
@@ -2718,7 +2717,7 @@ TEST_F(ViewportTest, viewportLegacyOrdering4) {
 TEST_F(ViewportTest, viewportLegacyOrdering5) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-ordering-5.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-ordering-5.html", nullptr, nullptr,
       nullptr, SetViewportSettings);
@@ -2738,7 +2737,7 @@ TEST_F(ViewportTest, viewportLegacyOrdering5) {
 TEST_F(ViewportTest, viewportLegacyOrdering6) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-ordering-6.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-ordering-6.html", nullptr, nullptr,
       nullptr, SetViewportSettings);
@@ -2758,7 +2757,7 @@ TEST_F(ViewportTest, viewportLegacyOrdering6) {
 TEST_F(ViewportTest, viewportLegacyOrdering7) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-ordering-7.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-ordering-7.html", nullptr, nullptr,
       nullptr, SetViewportSettings);
@@ -2778,7 +2777,7 @@ TEST_F(ViewportTest, viewportLegacyOrdering7) {
 TEST_F(ViewportTest, viewportLegacyOrdering8) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-ordering-8.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-ordering-8.html", nullptr, nullptr,
       nullptr, SetViewportSettings);
@@ -2798,7 +2797,7 @@ TEST_F(ViewportTest, viewportLegacyOrdering8) {
 TEST_F(ViewportTest, viewportLegacyEmptyAtViewportDoesntOverrideViewportMeta) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-ordering-10.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-ordering-10.html", nullptr, nullptr,
       nullptr, SetViewportSettings);
@@ -2812,7 +2811,7 @@ TEST_F(ViewportTest, viewportLegacyEmptyAtViewportDoesntOverrideViewportMeta) {
 TEST_F(ViewportTest, viewportLegacyDefaultValueChangedByXHTMLMP) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-xhtmlmp.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-xhtmlmp.html", nullptr, nullptr,
       nullptr, SetViewportSettings);
@@ -2833,7 +2832,7 @@ TEST_F(ViewportTest,
   RegisterMockedHttpURLLoad(
       "viewport/viewport-legacy-xhtmlmp-misplaced-doctype.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-xhtmlmp-misplaced-doctype.html",
       nullptr, nullptr, nullptr, SetViewportSettings);
@@ -2852,7 +2851,7 @@ TEST_F(ViewportTest,
 TEST_F(ViewportTest, viewportLegacyXHTMLMPOrdering) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-xhtmlmp-ordering.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-xhtmlmp-ordering.html", nullptr,
       nullptr, nullptr, SetViewportSettings);
@@ -2871,7 +2870,7 @@ TEST_F(ViewportTest, viewportLegacyXHTMLMPOrdering) {
 TEST_F(ViewportTest, viewportLegacyXHTMLMPRemoveAndAdd) {
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-xhtmlmp.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-xhtmlmp.html", nullptr, nullptr,
       nullptr, SetViewportSettings);
@@ -2916,12 +2915,13 @@ TEST_F(ViewportTest, viewportLimitsAdjustedForNoUserScale) {
   RegisterMockedHttpURLLoad(
       "viewport/viewport-limits-adjusted-for-no-user-scale.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-limits-adjusted-for-no-user-scale.html",
       nullptr, nullptr, nullptr, SetViewportSettings);
 
-  web_view_helper.GetWebView()->UpdateAllLifecyclePhases();
+  web_view_helper.GetWebView()->MainFrameWidget()->UpdateAllLifecyclePhases(
+      WebWidget::LifecycleUpdateReason::kTest);
   Page* page = web_view_helper.GetWebView()->GetPage();
   PageScaleConstraints constraints = RunViewportTest(page, 10, 10);
 
@@ -2934,12 +2934,12 @@ TEST_F(ViewportTest, viewportLimitsAdjustedForUserScale) {
   RegisterMockedHttpURLLoad(
       "viewport/viewport-limits-adjusted-for-user-scale.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-limits-adjusted-for-user-scale.html",
       nullptr, nullptr, nullptr, SetViewportSettings);
-
-  web_view_helper.GetWebView()->UpdateAllLifecyclePhases();
+  web_view_helper.GetWebView()->MainFrameWidget()->UpdateAllLifecyclePhases(
+      WebWidget::LifecycleUpdateReason::kTest);
   Page* page = web_view_helper.GetWebView()->GetPage();
   PageScaleConstraints constraints = RunViewportTest(page, 10, 10);
 
@@ -2948,88 +2948,8 @@ TEST_F(ViewportTest, viewportLimitsAdjustedForUserScale) {
   EXPECT_NEAR(1.0f, constraints.minimum_scale, 0.01f);
 }
 
-TEST_F(ViewportTest, viewportTriggersGpuRasterization) {
-  FrameTestHelpers::WebViewHelper web_view_helper;
-
-  RegisterMockedHttpURLLoad(
-      "viewport/viewport-gpu-rasterization-disabled-without-viewport.html");
-  web_view_helper.InitializeAndLoad(
-      base_url_ +
-          "viewport/viewport-gpu-rasterization-disabled-without-viewport.html",
-      nullptr, nullptr, nullptr, SetViewportSettings);
-  web_view_helper.GetWebView()->Resize(WebSize(640, 480));
-  EXPECT_FALSE(web_view_helper.GetWebView()
-                   ->MatchesHeuristicsForGpuRasterizationForTesting());
-  // Also test that setting enableViewport to false (as on desktop Chrome)
-  // supports GPU raster unconditionally.
-  web_view_helper.InitializeAndLoad(
-      base_url_ +
-      "viewport/viewport-gpu-rasterization-disabled-without-viewport.html");
-  web_view_helper.GetWebView()->Resize(WebSize(640, 480));
-  EXPECT_TRUE(web_view_helper.GetWebView()
-                  ->MatchesHeuristicsForGpuRasterizationForTesting());
-
-  RegisterMockedHttpURLLoad("viewport/viewport-gpu-rasterization.html");
-  web_view_helper.InitializeAndLoad(
-      base_url_ + "viewport/viewport-gpu-rasterization.html", nullptr, nullptr,
-      nullptr, SetViewportSettings);
-  web_view_helper.GetWebView()->Resize(WebSize(640, 480));
-  EXPECT_TRUE(web_view_helper.GetWebView()
-                  ->MatchesHeuristicsForGpuRasterizationForTesting());
-
-  RegisterMockedHttpURLLoad(
-      "viewport/viewport-gpu-rasterization-expanded-heuristics.html");
-  web_view_helper.InitializeAndLoad(
-      base_url_ +
-          "viewport/viewport-gpu-rasterization-expanded-heuristics.html",
-      nullptr, nullptr, nullptr, SetViewportSettings);
-  web_view_helper.GetWebView()->Resize(WebSize(640, 480));
-  EXPECT_TRUE(web_view_helper.GetWebView()
-                  ->MatchesHeuristicsForGpuRasterizationForTesting());
-
-  RegisterMockedHttpURLLoad("viewport/viewport-1.html");
-  web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-1.html",
-                                    nullptr, nullptr, nullptr,
-                                    SetViewportSettings);
-  web_view_helper.GetWebView()->Resize(WebSize(640, 480));
-  EXPECT_TRUE(web_view_helper.GetWebView()
-                  ->MatchesHeuristicsForGpuRasterizationForTesting());
-
-  RegisterMockedHttpURLLoad("viewport/viewport-15.html");
-  web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-15.html",
-                                    nullptr, nullptr, nullptr,
-                                    SetViewportSettings);
-  web_view_helper.GetWebView()->Resize(WebSize(640, 480));
-  EXPECT_TRUE(web_view_helper.GetWebView()
-                  ->MatchesHeuristicsForGpuRasterizationForTesting());
-
-  RegisterMockedHttpURLLoad("viewport/viewport-130.html");
-  web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-130.html",
-                                    nullptr, nullptr, nullptr,
-                                    SetViewportSettings);
-  web_view_helper.GetWebView()->Resize(WebSize(640, 480));
-  EXPECT_TRUE(web_view_helper.GetWebView()
-                  ->MatchesHeuristicsForGpuRasterizationForTesting());
-
-  RegisterMockedHttpURLLoad("viewport/viewport-legacy-handheldfriendly.html");
-  web_view_helper.InitializeAndLoad(
-      base_url_ + "viewport/viewport-legacy-handheldfriendly.html", nullptr,
-      nullptr, nullptr, SetViewportSettings);
-  web_view_helper.GetWebView()->Resize(WebSize(640, 480));
-  EXPECT_TRUE(web_view_helper.GetWebView()
-                  ->MatchesHeuristicsForGpuRasterizationForTesting());
-
-  RegisterMockedHttpURLLoad("viewport/viewport-legacy-mobileoptimized.html");
-  web_view_helper.InitializeAndLoad(
-      base_url_ + "viewport/viewport-legacy-handheldfriendly.html", nullptr,
-      nullptr, nullptr, SetViewportSettings);
-  web_view_helper.GetWebView()->Resize(WebSize(640, 480));
-  EXPECT_TRUE(web_view_helper.GetWebView()
-                  ->MatchesHeuristicsForGpuRasterizationForTesting());
-}
-
 class ConsoleMessageWebFrameClient
-    : public FrameTestHelpers::TestWebFrameClient {
+    : public frame_test_helpers::TestWebFrameClient {
  public:
   void DidAddMessageToConsole(const WebConsoleMessage& msg,
                               const WebString& source_name,
@@ -3046,7 +2966,7 @@ TEST_F(ViewportTest, viewportWarnings1) {
 
   RegisterMockedHttpURLLoad("viewport/viewport-warnings-1.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-warnings-1.html", &web_frame_client,
       nullptr, nullptr, SetViewportSettings);
@@ -3069,7 +2989,7 @@ TEST_F(ViewportTest, viewportWarnings2) {
 
   RegisterMockedHttpURLLoad("viewport/viewport-warnings-2.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-warnings-2.html", &web_frame_client,
       nullptr, nullptr, SetViewportSettings);
@@ -3078,10 +2998,10 @@ TEST_F(ViewportTest, viewportWarnings2) {
   PageScaleConstraints constraints = RunViewportTest(page, 320, 352);
 
   EXPECT_EQ(1U, web_frame_client.messages.size());
-  EXPECT_EQ(WebConsoleMessage::kLevelWarning,
+  EXPECT_EQ(mojom::ConsoleMessageLevel::kWarning,
             web_frame_client.messages[0].level);
-  EXPECT_STREQ("The key \"wwidth\" is not recognized and ignored.",
-               web_frame_client.messages[0].text.Utf8().c_str());
+  EXPECT_EQ("The key \"wwidth\" is not recognized and ignored.",
+            web_frame_client.messages[0].text);
 
   EXPECT_EQ(980, constraints.layout_size.Width());
   EXPECT_EQ(1078, constraints.layout_size.Height());
@@ -3096,7 +3016,7 @@ TEST_F(ViewportTest, viewportWarnings3) {
 
   RegisterMockedHttpURLLoad("viewport/viewport-warnings-3.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-warnings-3.html", &web_frame_client,
       nullptr, nullptr, SetViewportSettings);
@@ -3105,12 +3025,12 @@ TEST_F(ViewportTest, viewportWarnings3) {
   PageScaleConstraints constraints = RunViewportTest(page, 320, 352);
 
   EXPECT_EQ(1U, web_frame_client.messages.size());
-  EXPECT_EQ(WebConsoleMessage::kLevelWarning,
+  EXPECT_EQ(mojom::ConsoleMessageLevel::kWarning,
             web_frame_client.messages[0].level);
-  EXPECT_STREQ(
+  EXPECT_EQ(
       "The value \"unrecognized-width\" for key \"width\" is invalid, and has "
       "been ignored.",
-      web_frame_client.messages[0].text.Utf8().c_str());
+      web_frame_client.messages[0].text);
 
   EXPECT_NEAR(980, constraints.layout_size.Width(), 0.01);
   EXPECT_NEAR(1078, constraints.layout_size.Height(), 0.01);
@@ -3125,7 +3045,7 @@ TEST_F(ViewportTest, viewportWarnings4) {
 
   RegisterMockedHttpURLLoad("viewport/viewport-warnings-4.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-warnings-4.html", &web_frame_client,
       nullptr, nullptr, SetViewportSettings);
@@ -3134,12 +3054,12 @@ TEST_F(ViewportTest, viewportWarnings4) {
   PageScaleConstraints constraints = RunViewportTest(page, 320, 352);
 
   EXPECT_EQ(1U, web_frame_client.messages.size());
-  EXPECT_EQ(WebConsoleMessage::kLevelWarning,
+  EXPECT_EQ(mojom::ConsoleMessageLevel::kWarning,
             web_frame_client.messages[0].level);
-  EXPECT_STREQ(
+  EXPECT_EQ(
       "The value \"123x456\" for key \"width\" was truncated to its numeric "
       "prefix.",
-      web_frame_client.messages[0].text.Utf8().c_str());
+      web_frame_client.messages[0].text);
 
   EXPECT_NEAR(123.0f, constraints.layout_size.Width(), 0.01);
   EXPECT_NEAR(135.3f, constraints.layout_size.Height(), 0.01);
@@ -3154,7 +3074,7 @@ TEST_F(ViewportTest, viewportWarnings5) {
 
   RegisterMockedHttpURLLoad("viewport/viewport-warnings-5.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-warnings-5.html", &web_frame_client,
       nullptr, nullptr, SetViewportSettings);
@@ -3164,12 +3084,12 @@ TEST_F(ViewportTest, viewportWarnings5) {
 
   EXPECT_EQ(1U, web_frame_client.messages.size());
 
-  EXPECT_EQ(WebConsoleMessage::kLevelWarning,
+  EXPECT_EQ(mojom::ConsoleMessageLevel::kWarning,
             web_frame_client.messages[0].level);
-  EXPECT_STREQ(
+  EXPECT_EQ(
       "Error parsing a meta element's content: ';' is not a valid key-value "
       "pair separator. Please use ',' instead.",
-      web_frame_client.messages[0].text.Utf8().c_str());
+      web_frame_client.messages[0].text);
 
   EXPECT_NEAR(320.0f, constraints.layout_size.Width(), 0.01);
   EXPECT_NEAR(352.0f, constraints.layout_size.Height(), 0.01);
@@ -3184,7 +3104,7 @@ TEST_F(ViewportTest, viewportWarnings6) {
 
   RegisterMockedHttpURLLoad("viewport/viewport-warnings-6.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-warnings-6.html", &web_frame_client,
       nullptr, nullptr, SetViewportSettings);
@@ -3193,11 +3113,11 @@ TEST_F(ViewportTest, viewportWarnings6) {
   PageScaleConstraints constraints = RunViewportTest(page, 320, 352);
 
   EXPECT_EQ(1U, web_frame_client.messages.size());
-  EXPECT_EQ(WebConsoleMessage::kLevelWarning,
+  EXPECT_EQ(mojom::ConsoleMessageLevel::kWarning,
             web_frame_client.messages[0].level);
-  EXPECT_STREQ(
+  EXPECT_EQ(
       "The value \"\" for key \"width\" is invalid, and has been ignored.",
-      web_frame_client.messages[0].text.Utf8().c_str());
+      web_frame_client.messages[0].text);
 
   EXPECT_NEAR(980, constraints.layout_size.Width(), 0.01);
   EXPECT_NEAR(1078, constraints.layout_size.Height(), 0.01);
@@ -3212,7 +3132,7 @@ TEST_F(ViewportTest, viewportWarnings7) {
 
   RegisterMockedHttpURLLoad("viewport/viewport-warnings-7.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-warnings-7.html", &web_frame_client,
       nullptr, nullptr, SetViewportSettings);
@@ -3228,7 +3148,7 @@ TEST_F(ViewportTest, viewportWarnings8) {
 
   RegisterMockedHttpURLLoad("viewport/viewport-warnings-8.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-warnings-8.html", &web_frame_client,
       nullptr, nullptr, SetViewportSettings);
@@ -3239,21 +3159,22 @@ TEST_F(ViewportTest, viewportWarnings8) {
   EXPECT_EQ(0U, web_frame_client.messages.size());
 }
 
-class ViewportClient : public FrameTestHelpers::TestWebViewClient {
+class ViewportClient : public frame_test_helpers::TestWebWidgetClient {
  public:
-  ViewportClient() : device_scale_factor_(1.f) {}
+  // WebWidgetClient overrides.
   void ConvertWindowToViewport(WebFloatRect* rect) override {
     rect->x *= device_scale_factor_;
     rect->y *= device_scale_factor_;
     rect->width *= device_scale_factor_;
     rect->height *= device_scale_factor_;
   }
+
   void set_device_scale_factor(float device_scale_factor) {
     device_scale_factor_ = device_scale_factor;
   }
 
  private:
-  float device_scale_factor_;
+  float device_scale_factor_ = 1.f;
 };
 
 TEST_F(ViewportTest, viewportUseZoomForDSF1) {
@@ -3261,10 +3182,10 @@ TEST_F(ViewportTest, viewportUseZoomForDSF1) {
   client.set_device_scale_factor(3);
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-merge-quirk-1.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-merge-quirk-1.html", nullptr,
-      &client, nullptr, SetQuirkViewportSettings);
+      nullptr, &client, SetQuirkViewportSettings);
 
   Page* page = web_view_helper.GetWebView()->GetPage();
   // Initial width and height must be scaled by DSF when --use-zoom-for-dsf
@@ -3288,10 +3209,10 @@ TEST_F(ViewportTest, viewportUseZoomForDSF2) {
   client.set_device_scale_factor(3);
   RegisterMockedHttpURLLoad("viewport/viewport-legacy-merge-quirk-2.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(
       base_url_ + "viewport/viewport-legacy-merge-quirk-2.html", nullptr,
-      &client, nullptr, SetQuirkViewportSettings);
+      nullptr, &client, SetQuirkViewportSettings);
 
   Page* page = web_view_helper.GetWebView()->GetPage();
 
@@ -3318,9 +3239,9 @@ TEST_F(ViewportTest, viewportUseZoomForDSF3) {
   client.set_device_scale_factor(3);
   RegisterMockedHttpURLLoad("viewport/viewport-48.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-48.html",
-                                    nullptr, &client, nullptr,
+                                    nullptr, nullptr, &client,
                                     SetViewportSettings);
 
   Page* page = web_view_helper.GetWebView()->GetPage();
@@ -3343,9 +3264,9 @@ TEST_F(ViewportTest, viewportUseZoomForDSF4) {
   client.set_device_scale_factor(3);
   RegisterMockedHttpURLLoad("viewport/viewport-39.html");
 
-  FrameTestHelpers::WebViewHelper web_view_helper;
+  frame_test_helpers::WebViewHelper web_view_helper;
   web_view_helper.InitializeAndLoad(base_url_ + "viewport/viewport-39.html",
-                                    nullptr, &client, nullptr,
+                                    nullptr, nullptr, &client,
                                     SetViewportSettings);
 
   Page* page = web_view_helper.GetWebView()->GetPage();
@@ -3374,7 +3295,7 @@ class ViewportHistogramsTest : public SimTest {
 
     WebView().GetSettings()->SetViewportEnabled(true);
     WebView().GetSettings()->SetViewportMetaEnabled(true);
-    WebView().Resize(WebSize(500, 600));
+    WebView().MainFrameWidget()->Resize(WebSize(500, 600));
   }
 
   void UseMetaTag(const String& metaTag) {
@@ -3412,7 +3333,7 @@ class ViewportHistogramsTest : public SimTest {
     request.Complete(responseText);
 
     // Pump the task queue so the meta tag gets processed.
-    test::RunPendingTasks();
+    blink::test::RunPendingTasks();
   }
 
   HistogramTester histogram_tester_;

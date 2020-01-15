@@ -9,12 +9,13 @@
 #include "third_party/blink/renderer/core/fileapi/blob.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/loader/ping_loader.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/cors/cors.h"
 
 namespace blink {
@@ -34,7 +35,7 @@ NavigatorBeacon& NavigatorBeacon::From(Navigator& navigator) {
   NavigatorBeacon* supplement =
       Supplement<Navigator>::From<NavigatorBeacon>(navigator);
   if (!supplement) {
-    supplement = new NavigatorBeacon(navigator);
+    supplement = MakeGarbageCollected<NavigatorBeacon>(navigator);
     ProvideTo(navigator, supplement);
   }
   return *supplement;
@@ -88,7 +89,7 @@ bool NavigatorBeacon::SendBeaconImpl(
                                      data.GetAsArrayBufferView().View());
   } else if (data.IsBlob()) {
     Blob* blob = data.GetAsBlob();
-    if (!CORS::IsCORSSafelistedContentType(blob->type())) {
+    if (!cors::IsCorsSafelistedContentType(blob->type())) {
       UseCounter::Count(context,
                         WebFeature::kSendBeaconWithNonSimpleContentType);
       if (RuntimeEnabledFeatures::

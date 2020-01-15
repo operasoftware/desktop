@@ -8,8 +8,7 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "base/optional.h"
-#include "services/network/public/mojom/fetch_api.mojom-blink.h"
-#include "third_party/blink/public/platform/modules/service_worker/web_service_worker_response.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_response.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
 #include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
@@ -17,6 +16,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_array_buffer_view.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_blob.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_form_data.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_readable_stream.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_url_search_params.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fetch/blob_bytes_consumer.h"
@@ -24,15 +24,15 @@
 #include "third_party/blink/renderer/core/fetch/form_data_bytes_consumer.h"
 #include "third_party/blink/renderer/core/fetch/response_init.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
-#include "third_party/blink/renderer/core/streams/readable_stream_operations.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"
 #include "third_party/blink/renderer/core/url/url_search_params.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/cors/cors.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_utils.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
@@ -44,20 +44,20 @@ namespace blink {
 
 namespace {
 
-template <typename CORSHeadersContainer>
-FetchResponseData* FilterResponseData(
+template <typename CorsHeadersContainer>
+FetchResponseData* FilterResponseDataInternal(
     network::mojom::FetchResponseType response_type,
     FetchResponseData* response,
-    CORSHeadersContainer& headers) {
+    CorsHeadersContainer& headers) {
   switch (response_type) {
     case network::mojom::FetchResponseType::kBasic:
       return response->CreateBasicFilteredResponse();
       break;
-    case network::mojom::FetchResponseType::kCORS: {
+    case network::mojom::FetchResponseType::kCors: {
       WebHTTPHeaderSet header_names;
       for (const auto& header : headers)
-        header_names.insert(header.Ascii().data());
-      return response->CreateCORSFilteredResponse(header_names);
+        header_names.insert(header.Ascii());
+      return response->CreateCorsFilteredResponse(header_names);
       break;
     }
     case network::mojom::FetchResponseType::kOpaque:
@@ -80,40 +80,29 @@ FetchResponseData* FilterResponseData(
 FetchResponseData* CreateFetchResponseDataFromFetchAPIResponse(
     ScriptState* script_state,
     mojom::blink::FetchAPIResponse& fetch_api_response) {
-  FetchResponseData* response = nullptr;
-  if (fetch_api_response.status_code > 0)
-    response = FetchResponseData::Create();
-  else
-    response = FetchResponseData::CreateNetworkErrorResponse();
-
-  response->SetURLList(fetch_api_response.url_list);
-  response->SetStatus(fetch_api_response.status_code);
-  response->SetStatusMessage(WTF::AtomicString(fetch_api_response.status_text));
-  response->SetResponseTime(fetch_api_response.response_time);
-  response->SetCacheStorageCacheName(
-      fetch_api_response.cache_storage_cache_name);
-
-  for (const auto& header : fetch_api_response.headers)
-    response->HeaderList()->Append(header.key, header.value);
+  FetchResponseData* response =
+      Response::CreateUnfilteredFetchResponseDataWithoutBody(
+          script_state, fetch_api_response);
 
   if (fetch_api_response.blob) {
-    response->ReplaceBodyStreamBuffer(new BodyStreamBuffer(
+    response->ReplaceBodyStreamBuffer(MakeGarbageCollected<BodyStreamBuffer>(
         script_state,
-        new BlobBytesConsumer(ExecutionContext::From(script_state),
-                              fetch_api_response.blob),
+        MakeGarbageCollected<BlobBytesConsumer>(
+            ExecutionContext::From(script_state), fetch_api_response.blob),
         nullptr /* AbortSignal */));
   }
 
   // Filter the response according to |fetch_api_response|'s ResponseType.
-  response = FilterResponseData(fetch_api_response.response_type, response,
-                                fetch_api_response.cors_exposed_header_names);
+  response =
+      FilterResponseDataInternal(fetch_api_response.response_type, response,
+                                 fetch_api_response.cors_exposed_header_names);
 
   return response;
 }
 
 // Checks whether |status| is a null body status.
 // Spec: https://fetch.spec.whatwg.org/#null-body-status
-bool IsNullBodyStatus(unsigned short status) {
+bool IsNullBodyStatus(uint16_t status) {
   if (status == 101 || status == 204 || status == 205 || status == 304)
     return true;
 
@@ -140,13 +129,13 @@ bool IsValidReasonPhrase(const String& status_text) {
 
 Response* Response::Create(ScriptState* script_state,
                            ExceptionState& exception_state) {
-  return Create(script_state, nullptr, String(), ResponseInit(),
+  return Create(script_state, nullptr, String(), ResponseInit::Create(),
                 exception_state);
 }
 
 Response* Response::Create(ScriptState* script_state,
                            ScriptValue body_value,
-                           const ResponseInit& init,
+                           const ResponseInit* init,
                            ExceptionState& exception_state) {
   v8::Local<v8::Value> body = body_value.V8Value();
   v8::Isolate* isolate = script_state->GetIsolate();
@@ -157,66 +146,64 @@ Response* Response::Create(ScriptState* script_state,
   if (body_value.IsUndefined() || body_value.IsNull()) {
     // Note: The IDL processor cannot handle this situation. See
     // https://crbug.com/335871.
-  } else if (V8Blob::hasInstance(body, isolate)) {
+  } else if (V8Blob::HasInstance(body, isolate)) {
     Blob* blob = V8Blob::ToImpl(body.As<v8::Object>());
-    body_buffer = new BodyStreamBuffer(
+    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
         script_state,
-        new BlobBytesConsumer(execution_context, blob->GetBlobDataHandle()),
+        MakeGarbageCollected<BlobBytesConsumer>(execution_context,
+                                                blob->GetBlobDataHandle()),
         nullptr /* AbortSignal */);
     content_type = blob->type();
   } else if (body->IsArrayBuffer()) {
     // Avoid calling into V8 from the following constructor parameters, which
     // is potentially unsafe.
     DOMArrayBuffer* array_buffer = V8ArrayBuffer::ToImpl(body.As<v8::Object>());
-    body_buffer = new BodyStreamBuffer(script_state,
-                                       new FormDataBytesConsumer(array_buffer),
-                                       nullptr /* AbortSignal */);
+    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
+        script_state, MakeGarbageCollected<FormDataBytesConsumer>(array_buffer),
+        nullptr /* AbortSignal */);
   } else if (body->IsArrayBufferView()) {
     // Avoid calling into V8 from the following constructor parameters, which
     // is potentially unsafe.
     DOMArrayBufferView* array_buffer_view =
         V8ArrayBufferView::ToImpl(body.As<v8::Object>());
-    body_buffer = new BodyStreamBuffer(
-        script_state, new FormDataBytesConsumer(array_buffer_view),
+    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
+        script_state,
+        MakeGarbageCollected<FormDataBytesConsumer>(array_buffer_view),
         nullptr /* AbortSignal */);
-  } else if (V8FormData::hasInstance(body, isolate)) {
+  } else if (V8FormData::HasInstance(body, isolate)) {
     scoped_refptr<EncodedFormData> form_data =
         V8FormData::ToImpl(body.As<v8::Object>())->EncodeMultiPartFormData();
     // Here we handle formData->boundary() as a C-style string. See
     // FormDataEncoder::generateUniqueBoundaryString.
     content_type = AtomicString("multipart/form-data; boundary=") +
                    form_data->Boundary().data();
-    body_buffer = new BodyStreamBuffer(
+    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
         script_state,
-        new FormDataBytesConsumer(execution_context, std::move(form_data)),
+        MakeGarbageCollected<FormDataBytesConsumer>(execution_context,
+                                                    std::move(form_data)),
         nullptr /* AbortSignal */);
-  } else if (V8URLSearchParams::hasInstance(body, isolate)) {
+  } else if (V8URLSearchParams::HasInstance(body, isolate)) {
     scoped_refptr<EncodedFormData> form_data =
         V8URLSearchParams::ToImpl(body.As<v8::Object>())->ToEncodedFormData();
-    body_buffer = new BodyStreamBuffer(
+    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
         script_state,
-        new FormDataBytesConsumer(execution_context, std::move(form_data)),
+        MakeGarbageCollected<FormDataBytesConsumer>(execution_context,
+                                                    std::move(form_data)),
         nullptr /* AbortSignal */);
     content_type = "application/x-www-form-urlencoded;charset=UTF-8";
-  } else if (ReadableStreamOperations::IsReadableStream(
-                 script_state, body_value, exception_state)
-                 .value_or(true)) {
-    if (exception_state.HadException())
-      return nullptr;
+  } else if (V8ReadableStream::HasInstance(body, isolate)) {
     UseCounter::Count(execution_context,
                       WebFeature::kFetchResponseConstructionWithStream);
-    body_buffer =
-        new BodyStreamBuffer(script_state, body_value, exception_state);
-    if (exception_state.HadException())
-      return nullptr;
+    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
+        script_state, V8ReadableStream::ToImpl(body.As<v8::Object>()));
   } else {
     String string = NativeValueTraits<IDLUSVString>::NativeValue(
         isolate, body, exception_state);
     if (exception_state.HadException())
       return nullptr;
-    body_buffer =
-        new BodyStreamBuffer(script_state, new FormDataBytesConsumer(string),
-                             nullptr /* AbortSignal */);
+    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
+        script_state, MakeGarbageCollected<FormDataBytesConsumer>(string),
+        nullptr /* AbortSignal */);
     content_type = "text/plain;charset=UTF-8";
   }
   return Create(script_state, body_buffer, content_type, init, exception_state);
@@ -225,9 +212,9 @@ Response* Response::Create(ScriptState* script_state,
 Response* Response::Create(ScriptState* script_state,
                            BodyStreamBuffer* body,
                            const String& content_type,
-                           const ResponseInit& init,
+                           const ResponseInit* init,
                            ExceptionState& exception_state) {
-  unsigned short status = init.status();
+  uint16_t status = init->status();
 
   // "1. If |init|'s status member is not in the range 200 to 599, inclusive,
   // throw a RangeError."
@@ -241,7 +228,7 @@ Response* Response::Create(ScriptState* script_state,
 
   // "2. If |init|'s statusText member does not match the Reason-Phrase
   // token production, throw a TypeError."
-  if (!IsValidReasonPhrase(init.statusText())) {
+  if (!IsValidReasonPhrase(init->statusText())) {
     exception_state.ThrowTypeError("Invalid statusText");
     return nullptr;
   }
@@ -249,21 +236,22 @@ Response* Response::Create(ScriptState* script_state,
   // "3. Let |r| be a new Response object, associated with a new response.
   // "4. Set |r|'s headers to a new Headers object whose list is
   // |r|'s response's header list, and guard is "response" "
-  Response* r = new Response(ExecutionContext::From(script_state));
+  Response* r =
+      MakeGarbageCollected<Response>(ExecutionContext::From(script_state));
   // "5. Set |r|'s response's status to |init|'s status member."
-  r->response_->SetStatus(init.status());
+  r->response_->SetStatus(init->status());
 
   // "6. Set |r|'s response's status message to |init|'s statusText member."
-  r->response_->SetStatusMessage(AtomicString(init.statusText()));
+  r->response_->SetStatusMessage(AtomicString(init->statusText()));
 
   // "7. If |init|'s headers exists, then fill |r|’s headers with
   // |init|'s headers"
-  if (init.hasHeaders()) {
+  if (init->hasHeaders()) {
     // "1. Empty |r|'s response's header list."
     r->response_->HeaderList()->ClearList();
     // "2. Fill |r|'s Headers object with |init|'s headers member. Rethrow
     // any exceptions."
-    r->headers_->FillWith(init.headers(), exception_state);
+    r->headers_->FillWith(init->headers(), exception_state);
     if (exception_state.HadException())
       return nullptr;
   }
@@ -310,7 +298,7 @@ Response* Response::Create(ScriptState* script_state,
 
   // "9. Set |r|'s MIME type to the result of extracting a MIME type
   // from |r|'s response's header list."
-  r->response_->SetMIMEType(r->response_->HeaderList()->ExtractMIMEType());
+  r->response_->SetMimeType(r->response_->HeaderList()->ExtractMIMEType());
 
   // "10. Set |r|'s response’s HTTPS state to current settings object's"
   // HTTPS state."
@@ -322,29 +310,29 @@ Response* Response::Create(ScriptState* script_state,
 
 Response* Response::Create(ExecutionContext* context,
                            FetchResponseData* response) {
-  return new Response(context, response);
+  return MakeGarbageCollected<Response>(context, response);
 }
 
 Response* Response::Create(ScriptState* script_state,
                            mojom::blink::FetchAPIResponse& response) {
   auto* fetch_response_data =
       CreateFetchResponseDataFromFetchAPIResponse(script_state, response);
-  return new Response(ExecutionContext::From(script_state),
-                      fetch_response_data);
+  return MakeGarbageCollected<Response>(ExecutionContext::From(script_state),
+                                        fetch_response_data);
 }
 
 Response* Response::error(ScriptState* script_state) {
   FetchResponseData* response_data =
       FetchResponseData::CreateNetworkErrorResponse();
-  Response* r =
-      new Response(ExecutionContext::From(script_state), response_data);
+  Response* r = MakeGarbageCollected<Response>(
+      ExecutionContext::From(script_state), response_data);
   r->headers_->SetGuard(Headers::kImmutableGuard);
   return r;
 }
 
 Response* Response::redirect(ScriptState* script_state,
                              const String& url,
-                             unsigned short status,
+                             uint16_t status,
                              ExceptionState& exception_state) {
   KURL parsed_url = ExecutionContext::From(script_state)->CompleteURL(url);
   if (!parsed_url.IsValid()) {
@@ -352,12 +340,13 @@ Response* Response::redirect(ScriptState* script_state,
     return nullptr;
   }
 
-  if (!NetworkUtils::IsRedirectResponseCode(status)) {
+  if (!network_utils::IsRedirectResponseCode(status)) {
     exception_state.ThrowRangeError("Invalid status code");
     return nullptr;
   }
 
-  Response* r = new Response(ExecutionContext::From(script_state));
+  Response* r =
+      MakeGarbageCollected<Response>(ExecutionContext::From(script_state));
   r->headers_->SetGuard(Headers::kImmutableGuard);
   r->response_->SetStatus(status);
   r->response_->HeaderList()->Set("Location", parsed_url);
@@ -365,12 +354,51 @@ Response* Response::redirect(ScriptState* script_state,
   return r;
 }
 
+FetchResponseData* Response::CreateUnfilteredFetchResponseDataWithoutBody(
+    ScriptState* script_state,
+    mojom::blink::FetchAPIResponse& fetch_api_response) {
+  FetchResponseData* response = nullptr;
+  if (fetch_api_response.status_code > 0)
+    response = FetchResponseData::Create();
+  else
+    response = FetchResponseData::CreateNetworkErrorResponse();
+
+  response->SetResponseSource(fetch_api_response.response_source);
+  response->SetURLList(fetch_api_response.url_list);
+  response->SetStatus(fetch_api_response.status_code);
+  response->SetStatusMessage(WTF::AtomicString(fetch_api_response.status_text));
+  response->SetResponseTime(fetch_api_response.response_time);
+  response->SetCacheStorageCacheName(
+      fetch_api_response.cache_storage_cache_name);
+  response->SetSideDataBlob(fetch_api_response.side_data_blob);
+
+  for (const auto& header : fetch_api_response.headers)
+    response->HeaderList()->Append(header.key, header.value);
+
+  // TODO(wanderview): This sets the mime type of the Response based on the
+  // current headers.  This should be correct for most cases, but technically
+  // the mime type should really be frozen at the initial Response
+  // construction.  We should plumb the value through the cache_storage
+  // persistence layer and include the explicit mime type in FetchAPIResponse
+  // to set here. See: crbug.com/938939
+  response->SetMimeType(response->HeaderList()->ExtractMIMEType());
+
+  return response;
+}
+
+FetchResponseData* Response::FilterResponseData(
+    network::mojom::FetchResponseType response_type,
+    FetchResponseData* response,
+    WTF::Vector<WTF::String>& headers) {
+  return FilterResponseDataInternal(response_type, response, headers);
+}
+
 String Response::type() const {
   // "The type attribute's getter must return response's type."
   switch (response_->GetType()) {
     case network::mojom::FetchResponseType::kBasic:
       return "basic";
-    case network::mojom::FetchResponseType::kCORS:
+    case network::mojom::FetchResponseType::kCors:
       return "cors";
     case network::mojom::FetchResponseType::kDefault:
       return "default";
@@ -403,7 +431,7 @@ bool Response::redirected() const {
   return response_->UrlList().size() > 1;
 }
 
-unsigned short Response::status() const {
+uint16_t Response::status() const {
   // "The status attribute's getter must return response's status."
   return response_->Status();
 }
@@ -411,7 +439,7 @@ unsigned short Response::status() const {
 bool Response::ok() const {
   // "The ok attribute's getter must return true
   // if response's status is in the range 200 to 299, and false otherwise."
-  return CORS::IsOkStatus(status());
+  return cors::IsOkStatus(status());
 }
 
 String Response::statusText() const {
@@ -441,7 +469,8 @@ Response* Response::clone(ScriptState* script_state,
     return nullptr;
   Headers* headers = Headers::Create(response->HeaderList());
   headers->SetGuard(headers_->GetGuard());
-  return new Response(GetExecutionContext(), response, headers);
+  return MakeGarbageCollected<Response>(GetExecutionContext(), response,
+                                        headers);
 }
 
 bool Response::HasPendingActivity() const {
@@ -452,11 +481,6 @@ bool Response::HasPendingActivity() const {
   if (InternalBodyBuffer()->HasPendingActivity())
     return true;
   return Body::HasPendingActivity();
-}
-
-void Response::PopulateWebServiceWorkerResponse(
-    WebServiceWorkerResponse& response) {
-  response_->PopulateWebServiceWorkerResponse(response);
 }
 
 mojom::blink::FetchAPIResponsePtr Response::PopulateFetchAPIResponse() {
@@ -498,7 +522,7 @@ String Response::MimeType() const {
 
 String Response::ContentType() const {
   String result;
-  response_->HeaderList()->Get(HTTPNames::Content_Type, result);
+  response_->HeaderList()->Get(http_names::kContentType, result);
   return result;
 }
 
@@ -516,9 +540,9 @@ void Response::Trace(blink::Visitor* visitor) {
   visitor->Trace(headers_);
 }
 
-bool Response::IsBodyUsedForDCheck() {
+bool Response::IsBodyUsedForDCheck(ExceptionState& exception_state) {
   return InternalBodyBuffer() &&
-         InternalBodyBuffer()->IsStreamDisturbedForDCheck();
+         InternalBodyBuffer()->IsStreamDisturbedForDCheck(exception_state);
 }
 
 }  // namespace blink

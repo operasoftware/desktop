@@ -30,7 +30,6 @@
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 
 namespace blink {
 
@@ -38,7 +37,7 @@ class ComputedStyle;
 class StyleResolverState;
 
 class CachedMatchedProperties final
-    : public GarbageCollectedFinalized<CachedMatchedProperties> {
+    : public GarbageCollected<CachedMatchedProperties> {
  public:
   HeapVector<MatchedProperties> matched_properties;
   scoped_refptr<ComputedStyle> computed_style;

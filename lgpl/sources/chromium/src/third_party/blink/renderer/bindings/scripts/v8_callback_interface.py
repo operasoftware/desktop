@@ -41,12 +41,14 @@ import v8_utilities
 
 CALLBACK_INTERFACE_H_INCLUDES = frozenset([
     'platform/bindings/callback_interface_base.h',
+    'platform/bindings/v8_value_or_script_wrappable_adapter.h',
 ])
 CALLBACK_INTERFACE_CPP_INCLUDES = frozenset([
     'bindings/core/v8/generated_code_helper.h',
     'bindings/core/v8/v8_binding_for_core.h',
     'core/execution_context/execution_context.h',
     'platform/bindings/exception_messages.h',
+    'platform/bindings/script_forbidden_scope.h',
 ])
 LEGACY_CALLBACK_INTERFACE_H_INCLUDES = frozenset([
     'platform/bindings/dom_wrapper_world.h',
@@ -57,13 +59,12 @@ LEGACY_CALLBACK_INTERFACE_CPP_INCLUDES = frozenset([
 ])
 
 
-def cpp_type(idl_type):
+def _cpp_type(idl_type):
     # FIXME: remove this function by making callback types consistent
     # (always use usual v8_types.cpp_type)
-    idl_type_name = idl_type.name
-    if idl_type_name == 'String' or idl_type.is_enum:
+    if idl_type.is_string_type or idl_type.is_enum:
         return 'const String&'
-    if idl_type_name == 'void':
+    if idl_type.name == 'void':
         return 'void'
     # Callbacks use raw pointers, so raw_type=True
     raw_cpp_type = idl_type.cpp_type_args(raw_type=True)
@@ -72,10 +73,10 @@ def cpp_type(idl_type):
         return 'const %s&' % raw_cpp_type
     return raw_cpp_type
 
-IdlTypeBase.callback_cpp_type = property(cpp_type)
+IdlTypeBase.callback_cpp_type = property(_cpp_type)
 
 
-def callback_interface_context(callback_interface, _):
+def callback_interface_context(callback_interface, _, component_info):
     is_legacy_callback_interface = len(callback_interface.constants) > 0
 
     includes.clear()
@@ -102,7 +103,7 @@ def callback_interface_context(callback_interface, _):
                 break
 
     return {
-        'constants': [constant_context(constant, callback_interface)
+        'constants': [constant_context(constant, callback_interface, component_info)
                       for constant in callback_interface.constants],
         'cpp_class': callback_interface.name,
         'do_not_check_constants': 'DoNotCheckConstants' in callback_interface.extended_attributes,
@@ -123,6 +124,8 @@ def forward_declarations(callback_interface):
             return idl_type.implemented_as
         elif idl_type.is_array_or_sequence_type:
             return find_forward_declaration(idl_type.element_type)
+        elif idl_type.is_nullable:
+            return find_forward_declaration(idl_type.inner_type)
         return None
 
     declarations = set()
@@ -162,12 +165,11 @@ def arguments_context(arguments):
             'cpp_value_to_v8_value': argument.idl_type.cpp_value_to_v8_value(
                 argument.name, isolate='GetIsolate()',
                 creation_context='argument_creation_context'),
-            'handle': '%sHandle' % argument.name,
             'name': argument.name,
             'v8_name': 'v8_' + argument.name,
         }
 
-    argument_declarations = ['ScriptWrappable* callback_this_value']
+    argument_declarations = ['bindings::V8ValueOrScriptWrappableAdapter callback_this_value']
     argument_declarations.extend(
         '%s %s' % (argument.idl_type.callback_cpp_type, argument.name)
         for argument in arguments)

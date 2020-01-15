@@ -38,9 +38,9 @@ GainHandler::GainHandler(AudioNode& node,
     : AudioHandler(kNodeTypeGain, node, sample_rate),
       gain_(&gain),
       sample_accurate_gain_values_(
-          AudioUtilities::kRenderQuantumFrames)  // FIXME: can probably
-                                                 // share temp buffer
-                                                 // in context
+          audio_utilities::kRenderQuantumFrames)  // FIXME: can probably
+                                                  // share temp buffer
+                                                  // in context
 {
   AddInput();
   AddOutput(1);
@@ -54,7 +54,7 @@ scoped_refptr<GainHandler> GainHandler::Create(AudioNode& node,
   return base::AdoptRef(new GainHandler(node, sample_rate, gain));
 }
 
-void GainHandler::Process(size_t frames_to_process) {
+void GainHandler::Process(uint32_t frames_to_process) {
   // FIXME: for some cases there is a nice optimization to avoid processing
   // here, and let the gain change happen in the summing junction input of the
   // AudioNode we're connected to.  Then we can avoid all of the following:
@@ -71,12 +71,10 @@ void GainHandler::Process(size_t frames_to_process) {
       // Apply sample-accurate gain scaling for precise envelopes, grain
       // windows, etc.
       DCHECK_LE(frames_to_process, sample_accurate_gain_values_.size());
-      if (frames_to_process <= sample_accurate_gain_values_.size()) {
-        float* gain_values = sample_accurate_gain_values_.Data();
-        gain_->CalculateSampleAccurateValues(gain_values, frames_to_process);
-        output_bus->CopyWithSampleAccurateGainValuesFrom(
-            *input_bus, gain_values, frames_to_process);
-      }
+      float* gain_values = sample_accurate_gain_values_.Data();
+      gain_->CalculateSampleAccurateValues(gain_values, frames_to_process);
+      output_bus->CopyWithSampleAccurateGainValuesFrom(*input_bus, gain_values,
+                                                       frames_to_process);
     } else {
       // Apply the gain.
       if (gain_->Value() == 0) {
@@ -89,11 +87,11 @@ void GainHandler::Process(size_t frames_to_process) {
   }
 }
 
-void GainHandler::ProcessOnlyAudioParams(size_t frames_to_process) {
+void GainHandler::ProcessOnlyAudioParams(uint32_t frames_to_process) {
   DCHECK(Context()->IsAudioThread());
-  DCHECK_LE(frames_to_process, AudioUtilities::kRenderQuantumFrames);
+  DCHECK_LE(frames_to_process, audio_utilities::kRenderQuantumFrames);
 
-  float values[AudioUtilities::kRenderQuantumFrames];
+  float values[audio_utilities::kRenderQuantumFrames];
 
   gain_->CalculateSampleAccurateValues(values, frames_to_process);
 }
@@ -111,8 +109,6 @@ void GainHandler::CheckNumberOfChannelsForInput(AudioNodeInput* input) {
 
   DCHECK(input);
   DCHECK_EQ(input, &this->Input(0));
-  if (input != &this->Input(0))
-    return;
 
   unsigned number_of_channels = input->NumberOfChannels();
 
@@ -137,7 +133,8 @@ GainNode::GainNode(BaseAudioContext& context)
     : AudioNode(context),
       gain_(AudioParam::Create(
           context,
-          kParamTypeGainGain,
+          Uuid(),
+          AudioParamHandler::kParamTypeGainGain,
           1.0,
           AudioParamHandler::AutomationRate::kAudio,
           AudioParamHandler::AutomationRateMode::kVariable)) {
@@ -149,16 +146,11 @@ GainNode* GainNode::Create(BaseAudioContext& context,
                            ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
-  if (context.IsContextClosed()) {
-    context.ThrowExceptionForClosedState(exception_state);
-    return nullptr;
-  }
-
-  return new GainNode(context);
+  return MakeGarbageCollected<GainNode>(context);
 }
 
 GainNode* GainNode::Create(BaseAudioContext* context,
-                           const GainOptions& options,
+                           const GainOptions* options,
                            ExceptionState& exception_state) {
   GainNode* node = Create(*context, exception_state);
 
@@ -167,7 +159,7 @@ GainNode* GainNode::Create(BaseAudioContext* context,
 
   node->HandleChannelOptions(options, exception_state);
 
-  node->gain()->setValue(options.gain());
+  node->gain()->setValue(options->gain());
 
   return node;
 }
@@ -179,6 +171,16 @@ AudioParam* GainNode::gain() const {
 void GainNode::Trace(blink::Visitor* visitor) {
   visitor->Trace(gain_);
   AudioNode::Trace(visitor);
+}
+
+void GainNode::ReportDidCreate() {
+  GraphTracer().DidCreateAudioNode(this);
+  GraphTracer().DidCreateAudioParam(gain_);
+}
+
+void GainNode::ReportWillBeDestroyed() {
+  GraphTracer().WillDestroyAudioParam(gain_);
+  GraphTracer().WillDestroyAudioNode(this);
 }
 
 }  // namespace blink

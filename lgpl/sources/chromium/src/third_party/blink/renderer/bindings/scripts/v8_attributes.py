@@ -35,6 +35,12 @@ Extends IdlType with property |constructor_type_name|.
 Design doc: http://www.chromium.org/developers/design-documents/idl-compiler
 """
 
+import os
+import sys
+
+sys.path.append(os.path.join(os.path.dirname(__file__),
+                             '..', '..', 'build', 'scripts'))
+from blinkbuild.name_style_converter import NameStyleConverter
 import idl_types
 from idl_types import inherits_interface
 from v8_globals import includes
@@ -42,11 +48,10 @@ import v8_types
 import v8_utilities
 from v8_utilities import (cpp_name_or_partial, capitalize, cpp_name, has_extended_attribute,
                           has_extended_attribute_value, scoped_name, strip_suffix,
-                          uncapitalize, extended_attribute_value_as_list, is_unforgeable,
-                          is_legacy_interface_type_checking)
+                          uncapitalize, extended_attribute_value_as_list, is_unforgeable)
 
 
-def attribute_context(interface, attribute, interfaces):
+def attribute_context(interface, attribute, interfaces, component_info):
     """Creates a Jinja template context for an attribute of an interface.
 
     Args:
@@ -54,6 +59,7 @@ def attribute_context(interface, attribute, interfaces):
         attribute: An attribute to create the context for
         interfaces: A dict which maps an interface name to the definition
             which can be referred if needed
+        component_info: A dict containing component wide information
 
     Returns:
         A Jinja template context for |attribute|
@@ -77,10 +83,11 @@ def attribute_context(interface, attribute, interfaces):
     if is_check_security_for_receiver or is_check_security_for_return_value:
         includes.add('bindings/core/v8/binding_security.h')
     if is_check_security_for_return_value:
-        includes.add('core/frame/use_counter.h')
+        includes.add('core/frame/web_feature.h')
+        includes.add('platform/instrumentation/use_counter.h')
     # [CrossOrigin]
     if has_extended_attribute_value(attribute, 'CrossOrigin', 'Setter'):
-        includes.add('platform/bindings/v8_cross_origin_setter_info.h')
+        includes.add('platform/bindings/v8_cross_origin_callback_info.h')
     # [Constructor]
     # TODO(yukishiino): Constructors are much like methods although constructors
     # are not methods.  Constructors must be data-type properties, and we can
@@ -123,20 +130,27 @@ def attribute_context(interface, attribute, interfaces):
     deprecate_as = v8_utilities.deprecate_as(attribute)
     measure_as = v8_utilities.measure_as(attribute, interface)
 
+    # [HighEntropy]
+    high_entropy = v8_utilities.high_entropy(attribute)
+
     is_lazy_data_attribute = \
         (constructor_type and not (measure_as or deprecate_as)) or \
         (str(idl_type) == 'Window' and attribute.name in ('frames', 'self', 'window'))
+
+    runtime_features = component_info['runtime_enabled_features']
 
     context = {
         'activity_logging_world_list_for_getter': v8_utilities.activity_logging_world_list(attribute, 'Getter'),  # [ActivityLogging]
         'activity_logging_world_list_for_setter': v8_utilities.activity_logging_world_list(attribute, 'Setter'),  # [ActivityLogging]
         'activity_logging_world_check': v8_utilities.activity_logging_world_check(attribute),  # [ActivityLogging]
         'cached_attribute_validation_method': cached_attribute_validation_method,
+        'camel_case_name': NameStyleConverter(attribute.name).to_upper_camel_case(),
         'constructor_type': constructor_type,
         'context_enabled_feature_name': v8_utilities.context_enabled_feature_name(attribute),
         'cpp_name': cpp_name(attribute),
         'cpp_type': idl_type.cpp_type,
         'cpp_type_initializer': idl_type.cpp_type_initializer,
+        'high_entropy': high_entropy,
         'deprecate_as': deprecate_as,
         'enum_type': idl_type.enum_type,
         'enum_values': idl_type.enum_values,
@@ -184,7 +198,8 @@ def attribute_context(interface, attribute, interfaces):
         'on_instance': v8_utilities.on_instance(interface, attribute),
         'on_interface': v8_utilities.on_interface(interface, attribute),
         'on_prototype': v8_utilities.on_prototype(interface, attribute),
-        'origin_trial_feature_name': v8_utilities.origin_trial_feature_name(attribute),  # [OriginTrialEnabled]
+        'origin_trial_feature_name':
+            v8_utilities.origin_trial_feature_name(attribute, runtime_features),  # [RuntimeEnabled] for origin trial
         'use_output_parameter_for_result': idl_type.use_output_parameter_for_result,
         'measure_as': measure_as,
         'name': attribute.name,
@@ -193,7 +208,8 @@ def attribute_context(interface, attribute, interfaces):
         'reflect_invalid': extended_attributes.get('ReflectInvalid', ''),
         'reflect_missing': extended_attributes.get('ReflectMissing'),
         'reflect_only': extended_attribute_value_as_list(attribute, 'ReflectOnly'),
-        'runtime_enabled_feature_name': v8_utilities.runtime_enabled_feature_name(attribute),  # [RuntimeEnabled]
+        'runtime_enabled_feature_name':
+            v8_utilities.runtime_enabled_feature_name(attribute, runtime_features),  # [RuntimeEnabled] if not in origin trial
         'secure_context_test': v8_utilities.secure_context(attribute, interface),  # [SecureContext]
         'cached_accessor_name': '%s%sCachedAccessor' % (interface.name, attribute.name.capitalize()),
         'world_suffixes': (
@@ -306,11 +322,11 @@ def getter_context(interface, attribute, context):
             context['is_keep_alive_for_gc'] or
             context['is_getter_raises_exception']):
         context['cpp_value_original'] = cpp_value
-        cpp_value = 'cppValue'
+        cpp_value = 'cpp_value'
 
     def v8_set_return_value_statement(for_main_world=False):
         if context['is_keep_alive_for_gc'] or 'CachedAttribute' in extended_attributes:
-            return 'V8SetReturnValue(info, v8Value)'
+            return 'V8SetReturnValue(info, v8_value)'
         return idl_type.v8_set_return_value(
             cpp_value, extended_attributes=extended_attributes, script_wrappable='impl',
             for_main_world=for_main_world, is_static=attribute.is_static)
@@ -343,9 +359,9 @@ def getter_expression(interface, attribute, context):
             not attribute.is_static):
         arguments.append('*impl')
     if attribute.idl_type.is_explicit_nullable:
-        arguments.append('isNull')
+        arguments.append('is_null')
     if context['is_getter_raises_exception']:
-        arguments.append('exceptionState')
+        arguments.append('exception_state')
     if attribute.idl_type.use_output_parameter_for_result:
         arguments.append('result')
 
@@ -362,6 +378,7 @@ CONTENT_ATTRIBUTE_GETTER_NAMES = {
     'boolean': 'FastHasAttribute',
     'long': 'GetIntegralAttribute',
     'unsigned long': 'GetUnsignedIntegralAttribute',
+    'Element': 'GetElementAttribute',
 }
 
 
@@ -385,6 +402,9 @@ def getter_base_name(interface, attribute, arguments):
         return CONTENT_ATTRIBUTE_GETTER_NAMES[base_idl_type]
     if 'URL' in attribute.extended_attributes:
         return 'GetURLAttribute'
+    idl_type = attribute.idl_type
+    if idl_type.is_frozen_array:
+        return 'Get%sArrayAttribute' % idl_type.element_type
     return 'FastGetAttribute'
 
 
@@ -434,9 +454,13 @@ def setter_context(interface, attribute, interfaces, context):
         return
 
     if ('Replaceable' in attribute.extended_attributes):
+        # Create the property, and early-return if an exception is thrown.
+        # Subsequent cleanup code may not be prepared to handle a pending
+        # exception.
         context['cpp_setter'] = (
-            'V8CallBoolean(info.Holder()->CreateDataProperty(' +
-            'info.GetIsolate()->GetCurrentContext(), propertyName, v8Value))')
+            'if (info.Holder()->CreateDataProperty(' +
+            'info.GetIsolate()->GetCurrentContext(), property_name, v8_value).IsNothing())' +
+            '\n  return')
         return
 
     extended_attributes = attribute.extended_attributes
@@ -446,10 +470,22 @@ def setter_context(interface, attribute, interfaces, context):
     is_setter_raises_exception = (
         'RaisesException' in extended_attributes and
         extended_attributes['RaisesException'] in [None, 'Setter'])
-    # [LegacyInterfaceTypeChecking]
-    has_type_checking_interface = (
-        not is_legacy_interface_type_checking(interface, attribute) and
-        idl_type.is_wrapper_type)
+
+    has_type_checking_interface = idl_type.is_wrapper_type
+
+    use_common_reflection_setter = False
+    # Enable use_common_reflection_setter if
+    #  * extended_attributes is [CEReactions, Reflect] or
+    #    [CEReactions, Reflect, RuntimeEnabled],
+    #  * the type is boolean, DOMString, or DOMString?, and
+    #  * the interface inherits from 'Element'.
+    if ('Reflect' in extended_attributes and
+            'CEReactions' in extended_attributes and
+            str(idl_type) in ('boolean', 'DOMString', 'DOMString?') and
+            inherits_interface(interface.name, 'Element')):
+        if (len(extended_attributes) == 2 or
+                (len(extended_attributes) == 3 and 'RuntimeEnabled' in extended_attributes)):
+            use_common_reflection_setter = True
 
     context.update({
         'has_setter_exception_state':
@@ -461,8 +497,9 @@ def setter_context(interface, attribute, interfaces, context):
         'is_setter_call_with_script_state': has_extended_attribute_value(
             attribute, 'SetterCallWith', 'ScriptState'),
         'is_setter_raises_exception': is_setter_raises_exception,
+        'use_common_reflection_setter': use_common_reflection_setter,
         'v8_value_to_local_cpp_value': idl_type.v8_value_to_local_cpp_value(
-            extended_attributes, 'v8Value', 'cppValue'),
+            extended_attributes, 'v8_value', 'cpp_value'),
     })
 
     # setter_expression() depends on context values we set above.
@@ -486,27 +523,36 @@ def setter_expression(interface, attribute, context):
         arguments.append('*impl')
     idl_type = attribute.idl_type
     if idl_type.base_type == 'EventHandler':
-        getter_name = scoped_name(interface, attribute, cpp_name(attribute))
-        context['event_handler_getter_expression'] = '%s(%s)' % (
-            getter_name, ', '.join(arguments))
         handler_type = 'kEventHandler'
         if attribute.name == 'onerror':
             handler_type = 'kOnErrorEventHandler'
         elif attribute.name == 'onbeforeunload':
             handler_type = 'kOnBeforeUnloadEventHandler'
         arguments.append(
-            'V8EventListenerHelper::GetEventHandler(' +
-            'ScriptState::ForRelevantRealm(info), v8Value, ' +
+            'JSEventHandler::CreateOrNull(' +
+            'v8_value, ' +
             'JSEventHandler::HandlerType::' + handler_type +
-            ', kListenerFindOrCreate)')
+            ')')
     elif idl_type.base_type == 'SerializedScriptValue':
-        arguments.append('std::move(cppValue)')
+        arguments.append('std::move(cpp_value)')
     else:
-        arguments.append('cppValue')
+        arguments.append('cpp_value')
     if idl_type.is_explicit_nullable:
-        arguments.append('isNull')
+        arguments.append('is_null')
     if context['is_setter_raises_exception']:
-        arguments.append('exceptionState')
+        arguments.append('exception_state')
+    if context['use_common_reflection_setter']:
+        attr_name = scoped_content_attribute_name(interface, attribute)
+        if idl_type.base_type == 'boolean':
+            setter_name = 'V8SetReflectedBooleanAttribute'
+            arguments = ['info', '"%s"' % interface.name,
+                         '"%s"' % attribute.name, attr_name]
+        elif idl_type.base_type == 'DOMString':
+            if idl_type.is_nullable:
+                setter_name = 'V8SetReflectedNullableDOMStringAttribute'
+            else:
+                setter_name = 'V8SetReflectedDOMStringAttribute'
+            arguments = ['info', attr_name]
 
     return '%s(%s)' % (setter_name, ', '.join(arguments))
 
@@ -515,6 +561,7 @@ CONTENT_ATTRIBUTE_SETTER_NAMES = {
     'boolean': 'SetBooleanAttribute',
     'long': 'SetIntegralAttribute',
     'unsigned long': 'SetUnsignedIntegralAttribute',
+    'Element': 'SetElementAttribute',
 }
 
 
@@ -526,18 +573,22 @@ def setter_base_name(interface, attribute, arguments):
     base_idl_type = attribute.idl_type.base_type
     if base_idl_type in CONTENT_ATTRIBUTE_SETTER_NAMES:
         return CONTENT_ATTRIBUTE_SETTER_NAMES[base_idl_type]
+    idl_type = attribute.idl_type
+    if idl_type.is_frozen_array:
+        return 'Set%sArrayAttribute' % idl_type.element_type
     return 'setAttribute'
 
 
 def scoped_content_attribute_name(interface, attribute):
     content_attribute_name = attribute.extended_attributes['Reflect'] or attribute.name.lower()
+    symbol_name = 'k' + NameStyleConverter(content_attribute_name).to_upper_camel_case()
     if interface.name.startswith('SVG'):
-        namespace = 'SVGNames'
+        namespace = 'svg_names'
         includes.add('core/svg_names.h')
     else:
-        namespace = 'HTMLNames'
+        namespace = 'html_names'
         includes.add('core/html_names.h')
-    return '%s::%sAttr' % (namespace, content_attribute_name)
+    return '%s::%sAttr' % (namespace, symbol_name)
 
 
 ################################################################################

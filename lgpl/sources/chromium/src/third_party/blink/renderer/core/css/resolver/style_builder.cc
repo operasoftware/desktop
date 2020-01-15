@@ -42,7 +42,10 @@
 #include <utility>
 
 #include "third_party/blink/renderer/core/animation/css/css_animations.h"
+#include "third_party/blink/renderer/core/css/css_property_name.h"
+#include "third_party/blink/renderer/core/css/properties/css_property_ref.h"
 #include "third_party/blink/renderer/core/css/properties/longhand.h"
+#include "third_party/blink/renderer/core/css/properties/longhands/variable.h"
 #include "third_party/blink/renderer/core/css/resolver/css_variable_resolver.h"
 #include "third_party/blink/renderer/core/css/resolver/style_builder.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
@@ -50,13 +53,25 @@
 
 namespace blink {
 
+void StyleBuilder::ApplyProperty(const CSSPropertyName& name,
+                                 StyleResolverState& state,
+                                 const CSSValue& value) {
+  CSSPropertyRef ref(name, state.GetDocument());
+  DCHECK(ref.IsValid());
+
+  ApplyProperty(ref.GetProperty(), state, value);
+}
+
 void StyleBuilder::ApplyProperty(const CSSProperty& property,
                                  StyleResolverState& state,
                                  const CSSValue& value) {
+  DCHECK(!Variable::IsStaticInstance(property))
+      << "Please use a CustomProperty instance to apply custom properties";
+
   CSSPropertyID id = property.PropertyID();
   bool is_inherited = property.IsInherited();
-  if (id != CSSPropertyVariable && (value.IsVariableReferenceValue() ||
-                                    value.IsPendingSubstitutionValue())) {
+  if (id != CSSPropertyID::kVariable && (value.IsVariableReferenceValue() ||
+                                         value.IsPendingSubstitutionValue())) {
     bool omit_animation_tainted =
         CSSAnimations::IsAnimationAffectingProperty(property);
     const CSSValue* resolved_value =
@@ -71,7 +86,8 @@ void StyleBuilder::ApplyProperty(const CSSProperty& property,
   }
 
   DCHECK(!property.IsShorthand())
-      << "Shorthand property id = " << id << " wasn't expanded at parsing time";
+      << "Shorthand property id = " << static_cast<int>(id)
+      << " wasn't expanded at parsing time";
 
   bool is_inherit = state.ParentNode() && value.IsInheritedValue();
   bool is_initial = value.IsInitialValue() ||
@@ -81,14 +97,6 @@ void StyleBuilder::ApplyProperty(const CSSProperty& property,
   DCHECK(!is_inherit || !is_initial);
   // isInherit => (state.parentNode() && state.parentStyle())
   DCHECK(!is_inherit || (state.ParentNode() && state.ParentStyle()));
-
-  if (!state.ApplyPropertyToRegularStyle() &&
-      (!state.ApplyPropertyToVisitedLinkStyle() ||
-       !property.IsValidForVisitedLink())) {
-    // Limit the properties that can be applied to only the ones honored by
-    // :visited.
-    return;
-  }
 
   if (is_inherit && !state.ParentStyle()->HasExplicitlyInheritedProperties() &&
       !is_inherited) {
@@ -101,16 +109,12 @@ void StyleBuilder::ApplyProperty(const CSSProperty& property,
       is_initial = true;
   }
 
-  // CSSPropertyVariable currently handles initial/inherit inside ApplyValue.
-  DCHECK(id != CSSPropertyVariable || !is_initial);
-  DCHECK(id != CSSPropertyVariable || !is_inherit);
-
   if (is_initial)
-    ToLonghand(property).ApplyInitial(state);
+    To<Longhand>(property).ApplyInitial(state);
   else if (is_inherit)
-    ToLonghand(property).ApplyInherit(state);
+    To<Longhand>(property).ApplyInherit(state);
   else
-    ToLonghand(property).ApplyValue(state, value);
+    To<Longhand>(property).ApplyValue(state, value);
 }
 
 }  // namespace blink

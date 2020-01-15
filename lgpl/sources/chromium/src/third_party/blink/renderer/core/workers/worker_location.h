@@ -39,9 +39,7 @@ class WorkerLocation final : public ScriptWrappable,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static WorkerLocation* Create(const KURL& url) {
-    return new WorkerLocation(url);
-  }
+  explicit WorkerLocation(const KURL& url) : url_(url) {}
 
   KURL Url() const override { return url_; }
   String Input() const override {
@@ -50,8 +48,6 @@ class WorkerLocation final : public ScriptWrappable,
   }
 
  private:
-  explicit WorkerLocation(const KURL& url) : url_(url) {}
-
   KURL url_;
 };
 

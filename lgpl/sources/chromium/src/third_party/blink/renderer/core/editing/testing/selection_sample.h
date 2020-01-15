@@ -8,7 +8,7 @@
 #include <string>
 
 #include "third_party/blink/renderer/core/editing/forward.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -19,7 +19,7 @@ class HTMLElement;
 // |SelectionSample| provides parsing HTML text with selection markers and
 // serializes DOM tree with selection markers.
 // Selection markers are represents by "^" for selection base and "|" for
-// selection extent like "assert_selection.js" in layout test.
+// selection extent like "assert_selection.js" in web test.
 //
 // To set selection at before children or after children instead of start or
 // end of |Text| node, we should use selection marker only |Comment| node like:

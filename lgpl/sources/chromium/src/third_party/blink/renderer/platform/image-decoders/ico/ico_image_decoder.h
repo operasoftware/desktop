@@ -32,6 +32,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_IMAGE_DECODERS_ICO_ICO_IMAGE_DECODER_H_
 
 #include <memory>
+
 #include "third_party/blink/renderer/platform/image-decoders/bmp/bmp_image_reader.h"
 #include "third_party/blink/renderer/platform/image-decoders/fast_shared_buffer_reader.h"
 
@@ -41,8 +42,6 @@ class PNGImageDecoder;
 
 // This class decodes the ICO and CUR image formats.
 class PLATFORM_EXPORT ICOImageDecoder final : public ImageDecoder {
-  WTF_MAKE_NONCOPYABLE(ICOImageDecoder);
-
  public:
   ICOImageDecoder(AlphaOption, const ColorBehavior&, size_t max_decoded_bytes);
   ~ICOImageDecoder() override;
@@ -148,12 +147,12 @@ class PLATFORM_EXPORT ICOImageDecoder final : public ImageDecoder {
   // if the type could be determined.
   ImageType ImageTypeAtIndex(size_t);
 
-  FastSharedBufferReader fast_reader_;
+  FastSharedBufferReader fast_reader_{nullptr};
 
   // An index into |data_| representing how much we've already decoded.
   // Note that this only tracks data _this_ class decodes; once the
   // BMPImageReader takes over this will not be updated further.
-  size_t decoded_offset_;
+  size_t decoded_offset_ = 0;
 
   // Which type of file (ICO/CUR) this is.
   FileType file_type_;
@@ -165,7 +164,7 @@ class PLATFORM_EXPORT ICOImageDecoder final : public ImageDecoder {
   // Count of directory entries is parsed from header before initializing
   // dir_entries_. dir_entries_ is populated only when full header
   // information including directory entries is available.
-  size_t dir_entries_count_;
+  size_t dir_entries_count_ = 0;
 
   // The image decoders for the various frames.
   typedef Vector<std::unique_ptr<BMPImageReader>> BMPReaders;
@@ -177,8 +176,7 @@ class PLATFORM_EXPORT ICOImageDecoder final : public ImageDecoder {
   // for the particular entry being decoded.
   IntSize frame_size_;
 
-  // Used to pass on to an internally created PNG decoder.
-  const ColorBehavior color_behavior_;
+  DISALLOW_COPY_AND_ASSIGN(ICOImageDecoder);
 };
 
 }  // namespace blink

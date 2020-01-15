@@ -42,10 +42,10 @@ class HTMLTrackElement final : public HTMLElement,
   USING_GARBAGE_COLLECTED_MIXIN(HTMLTrackElement);
 
  public:
-  DECLARE_NODE_FACTORY(HTMLTrackElement);
+  explicit HTMLTrackElement(Document&);
 
   // Returns attributes that should be checked against Trusted Types
-  const HashSet<AtomicString>& GetCheckedAttributeNames() const override;
+  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override;
 
   const AtomicString& kind();
   void setKind(const AtomicString&);
@@ -56,10 +56,9 @@ class HTMLTrackElement final : public HTMLElement,
 
   TextTrack* track();
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  explicit HTMLTrackElement(Document&);
   ~HTMLTrackElement() override;
 
   void ParseAttribute(const AttributeModificationParams&) override;

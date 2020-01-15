@@ -40,7 +40,7 @@ class CORE_EXPORT DOMStringList final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static DOMStringList* Create() { return new DOMStringList(); }
+  explicit DOMStringList() = default;
 
   bool IsEmpty() const { return strings_.IsEmpty(); }
   void clear() { strings_.clear(); }
@@ -56,8 +56,6 @@ class CORE_EXPORT DOMStringList final : public ScriptWrappable {
   operator const Vector<String>&() const { return strings_; }
 
  private:
-  explicit DOMStringList() = default;
-
   Vector<String> strings_;
 };
 

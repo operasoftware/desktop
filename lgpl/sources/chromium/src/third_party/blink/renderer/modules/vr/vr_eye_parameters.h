@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_VR_VR_EYE_PARAMETERS_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_VR_VR_EYE_PARAMETERS_H_
 
-#include "device/vr/public/mojom/vr_service.mojom-blink.h"
+#include "device/vr/public/mojom/vr_service.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/vr/vr_field_of_view.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -22,18 +22,19 @@ class VREyeParameters final : public ScriptWrappable {
   explicit VREyeParameters(const device::mojom::blink::VREyeParametersPtr&,
                            double render_scale);
 
-  DOMFloat32Array* offset() const { return offset_; }
+  DOMFloat32Array* offset() const;
+  DOMFloat32Array* offsetInternal() const { return offset_; }
   VRFieldOfView* FieldOfView() const { return field_of_view_; }
-  unsigned long renderWidth() const { return render_width_; }
-  unsigned long renderHeight() const { return render_height_; }
+  uint32_t renderWidth() const { return render_width_; }
+  uint32_t renderHeight() const { return render_height_; }
 
   void Trace(blink::Visitor*) override;
 
  private:
   Member<DOMFloat32Array> offset_;
   Member<VRFieldOfView> field_of_view_;
-  unsigned long render_width_;
-  unsigned long render_height_;
+  uint32_t render_width_;
+  uint32_t render_height_;
 };
 
 }  // namespace blink

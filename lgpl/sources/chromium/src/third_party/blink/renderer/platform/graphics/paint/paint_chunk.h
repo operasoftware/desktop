@@ -7,13 +7,13 @@
 
 #include <iosfwd>
 #include <memory>
-#include "third_party/blink/renderer/platform/geometry/float_rect.h"
+#include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/display_item.h"
 #include "third_party/blink/renderer/platform/graphics/paint/hit_test_data.h"
 #include "third_party/blink/renderer/platform/graphics/paint/raster_invalidation_tracking.h"
 #include "third_party/blink/renderer/platform/graphics/paint/ref_counted_property_tree_state.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -36,11 +36,8 @@ struct PLATFORM_EXPORT PaintChunk {
         end_index(end),
         id(id),
         properties(props),
-        outset_for_raster_effects(0),
-        known_to_be_opaque(false),
         is_cacheable(id.client.IsCacheable()),
-        client_is_just_created(id.client.IsJustCreated()),
-        hit_test_data(nullptr) {}
+        client_is_just_created(id.client.IsJustCreated()) {}
 
   size_t size() const {
     DCHECK_GE(end_index, begin_index);
@@ -66,14 +63,6 @@ struct PLATFORM_EXPORT PaintChunk {
     return !client_is_just_created;
   }
 
-  HitTestData& EnsureHitTestData() {
-    if (!hit_test_data)
-      hit_test_data = std::make_unique<HitTestData>();
-    return *hit_test_data.get();
-  }
-
-  HitTestData* GetHitTestData() const { return hit_test_data.get(); }
-
   size_t MemoryUsageInBytes() const {
     size_t total_size = sizeof(*this);
     if (hit_test_data) {
@@ -83,6 +72,8 @@ struct PLATFORM_EXPORT PaintChunk {
     }
     return total_size;
   }
+
+  String ToString() const;
 
   // Index of the first drawing in this chunk.
   size_t begin_index;
@@ -99,37 +90,30 @@ struct PLATFORM_EXPORT PaintChunk {
   // The paint properties which apply to this chunk.
   RefCountedPropertyTreeState properties;
 
+  // The following fields are not initialized when the chunk is created because
+  // they depend on the display items in this chunk. They are updated by the
+  // constructor of PaintArtifact.
+
+  std::unique_ptr<HitTestData> hit_test_data;
+
   // The total bounds of this paint chunk's contents, in the coordinate space of
   // the containing transform node.
-  FloatRect bounds;
+  IntRect bounds;
 
   // Some raster effects can exceed |bounds| in the rasterization space. This
   // is the maximum DisplayItemClient::VisualRectOutsetForRasterEffects() of
   // all clients of items in this chunk.
-  float outset_for_raster_effects;
+  float outset_for_raster_effects = 0;
+
+  SkColor safe_opaque_background_color = 0;
 
   // True if the bounds are filled entirely with opaque contents.
-  bool known_to_be_opaque : 1;
+  bool known_to_be_opaque = false;
 
-  bool is_cacheable : 1;
-
-  bool client_is_just_created : 1;
-
-  String ToString() const;
-
-  bool operator==(const PaintChunk& rhs) const {
-    return begin_index == rhs.begin_index && end_index == rhs.end_index &&
-           id == rhs.id && properties == rhs.properties &&
-           is_cacheable == rhs.is_cacheable &&
-           ((!hit_test_data && !rhs.hit_test_data) ||
-            (hit_test_data && rhs.hit_test_data &&
-             *hit_test_data == *rhs.hit_test_data));
-  }
-
-  bool operator!=(const PaintChunk& rhs) const { return !(*this == rhs); }
-
- private:
-  std::unique_ptr<HitTestData> hit_test_data;
+  // End of derived data.
+  // The following fields are put here to avoid memory gap.
+  bool is_cacheable;
+  bool client_is_just_created;
 };
 
 inline bool ChunkLessThanIndex(const PaintChunk& chunk, size_t index) {

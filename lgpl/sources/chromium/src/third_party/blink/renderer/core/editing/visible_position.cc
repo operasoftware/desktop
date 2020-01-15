@@ -31,17 +31,18 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
+#include "third_party/blink/renderer/core/editing/local_caret_rect.h"
+#include "third_party/blink/renderer/core/editing/ng_flat_tree_shorthands.h"
 #include "third_party/blink/renderer/core/editing/text_affinity.h"
 #include "third_party/blink/renderer/core/editing/visible_units.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/layout/layout_object.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_offset_mapping.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/geometry/float_quad.h"
-#include "third_party/blink/renderer/platform/wtf/text/cstring.h"
 
 namespace blink {
-
-using namespace HTMLNames;
 
 template <typename Strategy>
 VisiblePositionTemplate<Strategy>::VisiblePositionTemplate()
@@ -65,7 +66,7 @@ VisiblePositionTemplate<Strategy>::VisiblePositionTemplate(
 }
 
 template <typename Strategy>
-void VisiblePositionTemplate<Strategy>::Trace(blink::Visitor* visitor) {
+void VisiblePositionTemplate<Strategy>::Trace(Visitor* visitor) {
   visitor->Trace(position_with_affinity_);
 }
 
@@ -89,6 +90,20 @@ VisiblePositionTemplate<Strategy> VisiblePositionTemplate<Strategy>::Create(
       deep_position);
   if (position_with_affinity.Affinity() == TextAffinity::kDownstream)
     return VisiblePositionTemplate<Strategy>(downstream_position);
+
+  if (RuntimeEnabledFeatures::BidiCaretAffinityEnabled() &&
+      NGInlineFormattingContextOf(deep_position)) {
+    // When not at a line wrap or bidi boundary, make sure to end up with
+    // |TextAffinity::Downstream| affinity.
+    const PositionWithAffinityTemplate<Strategy> upstream_position(
+        deep_position, TextAffinity::kUpstream);
+
+    if (AbsoluteCaretBoundsOf(downstream_position) !=
+        AbsoluteCaretBoundsOf(upstream_position)) {
+      return VisiblePositionTemplate<Strategy>(upstream_position);
+    }
+    return VisiblePositionTemplate<Strategy>(downstream_position);
+  }
 
   // When not at a line wrap, make sure to end up with
   // |TextAffinity::Downstream| affinity.
@@ -163,7 +178,7 @@ VisiblePositionInFlatTree CreateVisiblePosition(
   return VisiblePositionInFlatTree::Create(position_with_affinity);
 }
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
 
 template <typename Strategy>
 void VisiblePositionTemplate<Strategy>::ShowTreeForThis() const {
@@ -208,14 +223,14 @@ std::ostream& operator<<(std::ostream& ostream,
 
 }  // namespace blink
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
 
 void showTree(const blink::VisiblePosition* vpos) {
   if (vpos) {
     vpos->ShowTreeForThis();
     return;
   }
-  DVLOG(0) << "Cannot showTree for (nil) VisiblePosition.";
+  DLOG(INFO) << "Cannot showTree for (nil) VisiblePosition.";
 }
 
 void showTree(const blink::VisiblePosition& vpos) {

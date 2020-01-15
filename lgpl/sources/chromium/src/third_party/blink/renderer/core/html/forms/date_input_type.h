@@ -37,11 +37,9 @@ namespace blink {
 
 class DateInputType final : public BaseTemporalInputType {
  public:
-  static InputType* Create(HTMLInputElement&);
-
- private:
   explicit DateInputType(HTMLInputElement&);
 
+ private:
   void CountUsage() override;
   const AtomicString& FormControlType() const override;
   StepRange CreateStepRange(AnyStepHandling) const override;

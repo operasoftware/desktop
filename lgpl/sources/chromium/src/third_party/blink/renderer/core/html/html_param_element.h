@@ -31,7 +31,7 @@ class HTMLParamElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(HTMLParamElement);
+  explicit HTMLParamElement(Document&);
 
   const AtomicString& GetName() const;
   const AtomicString& Value() const;
@@ -39,8 +39,6 @@ class HTMLParamElement final : public HTMLElement {
   static bool IsURLParameter(const String&);
 
  private:
-  explicit HTMLParamElement(Document&);
-
   bool IsURLAttribute(const Attribute&) const override;
 };
 

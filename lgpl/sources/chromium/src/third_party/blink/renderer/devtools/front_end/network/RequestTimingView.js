@@ -96,8 +96,9 @@ Network.RequestTimingView = class extends UI.VBox {
      * @param {number} end
      */
     function addRange(name, start, end) {
-      if (start < Number.MAX_VALUE && start <= end)
+      if (start < Number.MAX_VALUE && start <= end) {
         result.push({name: name, start: start, end: end});
+      }
     }
 
     /**
@@ -106,8 +107,9 @@ Network.RequestTimingView = class extends UI.VBox {
      */
     function firstPositive(numbers) {
       for (let i = 0; i < numbers.length; ++i) {
-        if (numbers[i] > 0)
+        if (numbers[i] > 0) {
           return numbers[i];
+        }
       }
       return undefined;
     }
@@ -118,8 +120,9 @@ Network.RequestTimingView = class extends UI.VBox {
      * @param {number} end
      */
     function addOffsetRange(name, start, end) {
-      if (start >= 0 && end >= 0)
+      if (start >= 0 && end >= 0) {
         addRange(name, startTime + (start / 1000), startTime + (end / 1000));
+      }
     }
 
     const timing = request.timing;
@@ -142,11 +145,13 @@ Network.RequestTimingView = class extends UI.VBox {
       const pushEnd = timing.pushEnd || endTime;
       // Only show the part of push that happened after the navigation/reload.
       // Pushes that happened on the same connection before we started main request will not be shown.
-      if (pushEnd > navigationStart)
+      if (pushEnd > navigationStart) {
         addRange(Network.RequestTimeRangeNames.Push, Math.max(timing.pushStart, navigationStart), pushEnd);
+      }
     }
-    if (issueTime < startTime)
+    if (issueTime < startTime) {
       addRange(Network.RequestTimeRangeNames.Queueing, issueTime, startTime);
+    }
 
     const responseReceived = (request.responseReceivedTime - startTime) * 1000;
     if (request.fetchedViaServiceWorker) {
@@ -201,9 +206,20 @@ Network.RequestTimingView = class extends UI.VBox {
     let totalDuration = 0;
 
     const startTimeHeader = tableElement.createChild('thead', 'network-timing-start');
+    const tableHeaderRow = startTimeHeader.createChild('tr');
+    const activityHeaderCell = tableHeaderRow.createChild('th');
+    activityHeaderCell.createChild('span', 'network-timing-hidden-header').textContent = ls`Label`;
+    activityHeaderCell.scope = 'col';
+    const waterfallHeaderCell = tableHeaderRow.createChild('th');
+    waterfallHeaderCell.createChild('span', 'network-timing-hidden-header').textContent = ls`Waterfall`;
+    waterfallHeaderCell.scope = 'col';
+    const durationHeaderCell = tableHeaderRow.createChild('th');
+    durationHeaderCell.createChild('span', 'network-timing-hidden-header').textContent = ls`Duration`;
+    durationHeaderCell.scope = 'col';
+
     const queuedCell = startTimeHeader.createChild('tr').createChild('td');
     const startedCell = startTimeHeader.createChild('tr').createChild('td');
-    queuedCell.colSpan = startedCell.colSpan = 2;
+    queuedCell.colSpan = startedCell.colSpan = 3;
     queuedCell.createTextChild(Common.UIString('Queued at %s', calculator.formatValue(request.issueTime(), 2)));
     startedCell.createTextChild(Common.UIString('Started at %s', calculator.formatValue(request.startTime, 2)));
 
@@ -218,16 +234,17 @@ Network.RequestTimingView = class extends UI.VBox {
       if (rangeName === Network.RequestTimeRangeNames.Push) {
         createHeader(Common.UIString('Server Push'));
       } else if (rangeName === Network.RequestTimeRangeNames.Queueing) {
-        queueingHeader = tableElement.createChild('tr', 'network-timing-table-header');
-        queueingHeader.createChild('td').createTextChild(Common.UIString('Resource Scheduling'));
-        queueingHeader.createChild('td').createTextChild('');
-        queueingHeader.createChild('td').createTextChild(Common.UIString('TIME'));
+        if (!queueingHeader) {
+          queueingHeader = createHeader(ls`Resource Scheduling`);
+        }
       } else if (Network.RequestTimingView.ConnectionSetupRangeNames.has(rangeName)) {
-        if (!connectionHeader)
+        if (!connectionHeader) {
           connectionHeader = createHeader(Common.UIString('Connection Start'));
+        }
       } else {
-        if (!dataHeader)
+        if (!dataHeader) {
           dataHeader = createHeader(Common.UIString('Request/Response'));
+        }
       }
 
       const left = (scale * (range.start - startTime));
@@ -242,6 +259,7 @@ Network.RequestTimingView = class extends UI.VBox {
       bar.style.left = left + '%';
       bar.style.right = right + '%';
       bar.textContent = '\u200B';  // Important for 0-time items to have 0 width.
+      UI.ARIAUtils.setAccessibleName(row, ls`Started at ${calculator.formatValue(range.start, 2)}`);
       const label = tr.createChild('td').createChild('div', 'network-timing-bar-title');
       label.textContent = Number.secondsToString(duration, true);
     }
@@ -261,8 +279,9 @@ Network.RequestTimingView = class extends UI.VBox {
     footer.createChild('td').createTextChild(Number.secondsToString(totalDuration, true));
 
     const serverTimings = request.serverTimings;
-    if (!serverTimings)
+    if (!serverTimings) {
       return tableElement;
+    }
 
     const lastTimingRightEdge = right === undefined ? 100 : right;
 
@@ -291,19 +310,23 @@ Network.RequestTimingView = class extends UI.VBox {
       const isTotal = serverTiming.metric.toLowerCase() === 'total';
       const tr = tableElement.createChild('tr', isTotal ? 'network-timing-footer' : '');
       const metric = tr.createChild('td', 'network-timing-metric');
-      metric.createTextChild(serverTiming.description || serverTiming.metric);
+      const description = serverTiming.description || serverTiming.metric;
+      metric.createTextChild(description);
+      metric.title = description;
       const row = tr.createChild('td').createChild('div', 'network-timing-row');
 
-      if (serverTiming.value === null)
+      if (serverTiming.value === null) {
         return;
+      }
       const left = scale * (endTime - startTime - (serverTiming.value / 1000));
       if (left >= 0) {  // don't chart values too big or too small
         const bar = row.createChild('span', 'network-timing-bar server-timing');
         bar.style.left = left + '%';
         bar.style.right = right + '%';
         bar.textContent = '\u200B';  // Important for 0-time items to have 0 width.
-        if (!isTotal)
+        if (!isTotal) {
           bar.style.backgroundColor = colorGenerator.colorForID(serverTiming.metric);
+        }
       }
       const label = tr.createChild('td').createChild('div', 'network-timing-bar-title');
       label.textContent = Number.millisToString(serverTiming.value, true);
@@ -315,9 +338,11 @@ Network.RequestTimingView = class extends UI.VBox {
      */
     function createHeader(title) {
       const dataHeader = tableElement.createChild('tr', 'network-timing-table-header');
-      dataHeader.createChild('td').createTextChild(title);
+      const headerCell = dataHeader.createChild('td');
+      headerCell.createTextChild(title);
+      UI.ARIAUtils.markAsHeading(headerCell, 2);
       dataHeader.createChild('td').createTextChild('');
-      dataHeader.createChild('td').createTextChild(Common.UIString('TIME'));
+      dataHeader.createChild('td').createTextChild(ls`DURATION`);
       return dataHeader;
     }
   }
@@ -342,8 +367,9 @@ Network.RequestTimingView = class extends UI.VBox {
   }
 
   _refresh() {
-    if (this._tableElement)
+    if (this._tableElement) {
       this._tableElement.remove();
+    }
 
     this._tableElement = Network.RequestTimingView.createTimingTable(this._request, this._calculator);
     this._tableElement.classList.add('resource-timing-table');

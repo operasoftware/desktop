@@ -37,8 +37,7 @@ class IntRect;
 class LocalFrame;
 class Node;
 
-class CORE_EXPORT PrintContext
-    : public GarbageCollectedFinalized<PrintContext> {
+class CORE_EXPORT PrintContext : public GarbageCollected<PrintContext> {
  public:
   // By shrinking to a width of 75%, we will render the correct physical
   // dimensions in paged media (i.e. cm, pt,). The shrinkage used
@@ -85,7 +84,7 @@ class CORE_EXPORT PrintContext
   // Return to screen mode.
   virtual void EndPrintMode();
 
-  // The following static methods are used by layout tests:
+  // The following static methods are used by web tests:
 
   // Returns -1 if page isn't found.
   static int PageNumberForElement(Element*,

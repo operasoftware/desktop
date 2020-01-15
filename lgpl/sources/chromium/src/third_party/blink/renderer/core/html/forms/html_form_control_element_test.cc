@@ -18,7 +18,7 @@ namespace blink {
 
 namespace {
 class MockFormValidationMessageClient
-    : public GarbageCollectedFinalized<MockFormValidationMessageClient>,
+    : public GarbageCollected<MockFormValidationMessageClient>,
       public ValidationMessageClient {
   USING_GARBAGE_COLLECTED_MIXIN(MockFormValidationMessageClient);
 
@@ -43,8 +43,9 @@ class MockFormValidationMessageClient
   }
 
   void DocumentDetached(const Document&) override {}
+  void DidChangeFocusTo(const Element*) override {}
   void WillBeDestroyed() override {}
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) override {
     visitor->Trace(anchor_);
     ValidationMessageClient::Trace(visitor);
   }
@@ -75,7 +76,7 @@ TEST_F(HTMLFormControlElementTest, customValidationMessageTextDirection) {
   input->setCustomValidity(
       String::FromUTF8("\xD8\xB9\xD8\xB1\xD8\xA8\xD9\x89"));
   input->setAttribute(
-      HTMLNames::titleAttr,
+      html_names::kTitleAttr,
       AtomicString::FromUTF8("\xD8\xB9\xD8\xB1\xD8\xA8\xD9\x89"));
 
   String message = input->validationMessage().StripWhiteSpace();
@@ -117,7 +118,7 @@ TEST_F(HTMLFormControlElementTest, customValidationMessageTextDirection) {
 TEST_F(HTMLFormControlElementTest, UpdateValidationMessageSkippedIfPrinting) {
   SetHtmlInnerHTML("<body><input required id=input></body>");
   ValidationMessageClient* validation_message_client =
-      new MockFormValidationMessageClient();
+      MakeGarbageCollected<MockFormValidationMessageClient>();
   GetPage().SetValidationMessageClientForTesting(validation_message_client);
   Page::OrdinaryPages().insert(&GetPage());
 
@@ -133,10 +134,12 @@ TEST_F(HTMLFormControlElementTest, DoNotUpdateLayoutDuringDOMMutation) {
   // dangerous. This test ensures ShowValidationMessage() is NOT called in
   // appendChild(). crbug.com/756408
   GetDocument().documentElement()->SetInnerHTMLFromString("<select></select>");
-  HTMLFormControlElement* const select =
-      ToHTMLFormControlElement(GetDocument().QuerySelector("select"));
-  auto* const optgroup = GetDocument().CreateRawElement(HTMLNames::optgroupTag);
-  auto* validation_client = new MockFormValidationMessageClient();
+  auto* const select =
+      To<HTMLFormControlElement>(GetDocument().QuerySelector("select"));
+  auto* const optgroup =
+      GetDocument().CreateRawElement(html_names::kOptgroupTag);
+  auto* validation_client =
+      MakeGarbageCollected<MockFormValidationMessageClient>();
   GetDocument().GetPage()->SetValidationMessageClientForTesting(
       validation_client);
 
@@ -150,12 +153,12 @@ TEST_F(HTMLFormControlElementTest, DoNotUpdateLayoutDuringDOMMutation) {
 
 TEST_F(HTMLFormControlElementTest, UniqueRendererFormControlId) {
   SetHtmlInnerHTML("<body><input id=input1><input id=input2></body>");
-  auto* form_control1 = ToHTMLFormControlElement(GetElementById("input1"));
+  auto* form_control1 = To<HTMLFormControlElement>(GetElementById("input1"));
   unsigned first_id = form_control1->UniqueRendererFormControlId();
-  auto* form_control2 = ToHTMLFormControlElement(GetElementById("input2"));
+  auto* form_control2 = To<HTMLFormControlElement>(GetElementById("input2"));
   EXPECT_EQ(first_id + 1, form_control2->UniqueRendererFormControlId());
   SetHtmlInnerHTML("<body><select id=select1></body>");
-  auto* form_control3 = ToHTMLFormControlElement(GetElementById("select1"));
+  auto* form_control3 = To<HTMLFormControlElement>(GetElementById("select1"));
   EXPECT_EQ(first_id + 2, form_control3->UniqueRendererFormControlId());
 }
 

@@ -25,14 +25,14 @@ void TablePaintInvalidator::InvalidatePaint() {
         context_.old_visual_rect != context_.fragment_data->VisualRect();
     for (LayoutTableCol* col = table_.FirstColumn(); col;
          col = col->NextColumn()) {
-      // LayoutTableCol uses the table's localVisualRect(). Should check column
+      // LayoutTableCol uses the table's LocalVisualRect(). Should check column
       // for paint invalidation when table's visual rect changed.
       if (visual_rect_changed)
         col->SetShouldCheckForPaintInvalidation();
-      // This ensures that the backgroundChangedSinceLastPaintInvalidation flag
-      // is up-to-date.
+      // This ensures that the BackgroundNeedsFullPaintInvalidation flag is
+      // up-to-date.
       col->EnsureIsReadyForPaintInvalidation();
-      if (col->BackgroundChangedSinceLastPaintInvalidation()) {
+      if (col->BackgroundNeedsFullPaintInvalidation()) {
         has_col_changed_background = true;
         break;
       }
@@ -44,7 +44,7 @@ void TablePaintInvalidator::InvalidatePaint() {
          child = child->NextSibling()) {
       if (!child->IsTableSection())
         continue;
-      LayoutTableSection* section = ToLayoutTableSection(child);
+      LayoutTableSection* section = To<LayoutTableSection>(child);
       section->EnsureIsReadyForPaintInvalidation();
       ObjectPaintInvalidator(*section)
           .SlowSetPaintingLayerNeedsRepaintAndInvalidateDisplayItemClient(

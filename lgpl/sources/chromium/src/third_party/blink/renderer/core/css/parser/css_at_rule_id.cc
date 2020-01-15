@@ -5,7 +5,8 @@
 #include "third_party/blink/renderer/core/css/parser/css_at_rule_id.h"
 
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -24,6 +25,8 @@ CSSAtRuleID CssAtRuleID(StringView name) {
     return kCSSAtRuleNamespace;
   if (EqualIgnoringASCIICase(name, "page"))
     return kCSSAtRulePage;
+  if (EqualIgnoringASCIICase(name, "property"))
+    return kCSSAtRuleProperty;
   if (EqualIgnoringASCIICase(name, "supports"))
     return kCSSAtRuleSupports;
   if (EqualIgnoringASCIICase(name, "viewport"))
@@ -58,6 +61,9 @@ void CountAtRule(const CSSParserContext* context, CSSAtRuleID rule_id) {
     case kCSSAtRulePage:
       feature = WebFeature::kCSSAtRulePage;
       break;
+    case kCSSAtRuleProperty:
+      feature = WebFeature::kCSSAtRuleProperty;
+      return;
     case kCSSAtRuleSupports:
       feature = WebFeature::kCSSAtRuleSupports;
       break;

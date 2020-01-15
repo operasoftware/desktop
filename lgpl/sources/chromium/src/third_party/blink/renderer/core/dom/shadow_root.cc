@@ -56,9 +56,8 @@ void ShadowRoot::Distribute() {
 }
 
 struct SameSizeAsShadowRoot : public DocumentFragment, public TreeScope {
-  char empty_class_fields_due_to_gc_mixin_marker[1];
   Member<void*> member[3];
-  unsigned counters_and_flags[1];
+  unsigned flags[1];
 };
 
 static_assert(sizeof(ShadowRoot) == sizeof(SameSizeAsShadowRoot),
@@ -69,21 +68,21 @@ ShadowRoot::ShadowRoot(Document& document, ShadowRootType type)
       TreeScope(*this, document),
       style_sheet_list_(nullptr),
       child_shadow_root_count_(0),
-      type_(static_cast<unsigned short>(type)),
+      type_(static_cast<unsigned>(type)),
       registered_with_parent_shadow_root_(false),
       delegates_focus_(false),
-      slotting_(static_cast<unsigned short>(ShadowRootSlotting::kAuto)),
+      slotting_(static_cast<unsigned>(ShadowRootSlotting::kAuto)),
       needs_distribution_recalc_(false),
       unused_(0) {
   if (IsV0())
-    shadow_root_v0_ = new ShadowRootV0(*this);
+    shadow_root_v0_ = MakeGarbageCollected<ShadowRootV0>(*this);
 }
 
 ShadowRoot::~ShadowRoot() = default;
 
 SlotAssignment& ShadowRoot::EnsureSlotAssignment() {
   if (!slot_assignment_)
-    slot_assignment_ = SlotAssignment::Create(*this);
+    slot_assignment_ = MakeGarbageCollected<SlotAssignment>(*this);
   return *slot_assignment_;
 }
 
@@ -111,7 +110,7 @@ Node* ShadowRoot::Clone(Document&, CloneChildrenFlag) const {
 }
 
 void ShadowRoot::SetSlotting(ShadowRootSlotting slotting) {
-  slotting_ = static_cast<unsigned short>(slotting);
+  slotting_ = static_cast<unsigned>(slotting);
 }
 
 String ShadowRoot::InnerHTMLAsString() const {
@@ -139,44 +138,27 @@ void ShadowRoot::setInnerHTML(const StringOrTrustedHTML& stringOrHtml,
   }
 }
 
-void ShadowRoot::RecalcStyle(StyleRecalcChange change) {
+void ShadowRoot::RecalcStyle(const StyleRecalcChange change) {
   // ShadowRoot doesn't support custom callbacks.
   DCHECK(!HasCustomStyleCallbacks());
+  DCHECK(!RuntimeEnabledFeatures::FlatTreeStyleRecalcEnabled());
 
-  if (GetStyleChangeType() >= kSubtreeStyleChange) {
-    if (change < kForce)
-      change = kForce;
-    if (NeedsAttach() || change == kReattach)
-      SetNeedsReattachLayoutTree();
-  }
+  StyleRecalcChange child_change = change;
+  if (GetStyleChangeType() == kSubtreeStyleChange)
+    child_change = child_change.ForceRecalcDescendants();
+
   // There's no style to update so just calling RecalcStyle means we're updated.
-  if (change != kReattach)
-    ClearNeedsStyleRecalc();
+  ClearNeedsStyleRecalc();
 
-  if (change >= kUpdatePseudoElements || ChildNeedsStyleRecalc())
-    RecalcDescendantStyles(change);
+  if (child_change.TraverseChildren(*this))
+    RecalcDescendantStyles(child_change);
   ClearChildNeedsStyleRecalc();
 }
 
 void ShadowRoot::RebuildLayoutTree(WhitespaceAttacher& whitespace_attacher) {
-  ClearNeedsReattachLayoutTree();
+  DCHECK(!NeedsReattachLayoutTree());
+  DCHECK(!ChildNeedsReattachLayoutTree());
   RebuildChildrenLayoutTrees(whitespace_attacher);
-  ClearChildNeedsReattachLayoutTree();
-}
-
-void ShadowRoot::AttachLayoutTree(AttachContext& context) {
-  Node::AttachContext children_context(context);
-  DocumentFragment::AttachLayoutTree(children_context);
-}
-
-void ShadowRoot::DetachLayoutTree(const AttachContext& context) {
-  Node::AttachContext children_context(context);
-  children_context.clear_invalidation = true;
-  GetDocument()
-      .GetStyleEngine()
-      .GetPendingNodeInvalidations()
-      .ClearInvalidation(*this);
-  DocumentFragment::DetachLayoutTree(children_context);
 }
 
 Node::InsertionNotificationRequest ShadowRoot::InsertedInto(
@@ -185,6 +167,8 @@ Node::InsertionNotificationRequest ShadowRoot::InsertedInto(
 
   if (!insertion_point.isConnected())
     return kInsertionDone;
+
+  GetDocument().GetStyleEngine().ShadowRootInsertedToDocument(*this);
 
   GetDocument().GetSlotAssignmentEngine().Connected(*this);
 
@@ -217,12 +201,6 @@ void ShadowRoot::RemovedFrom(ContainerNode& insertion_point) {
         root->RemoveChildShadowRoot();
       registered_with_parent_shadow_root_ = false;
     }
-    if (NeedsStyleInvalidation()) {
-      GetDocument()
-          .GetStyleEngine()
-          .GetPendingNodeInvalidations()
-          .ClearInvalidation(*this);
-    }
   }
 
   DocumentFragment::RemovedFrom(insertion_point);
@@ -246,14 +224,14 @@ void ShadowRoot::ChildrenChanged(const ChildrenChange& change) {
     CheckForSiblingStyleChanges(
         change.type == kElementRemoved ? kSiblingElementRemoved
                                        : kSiblingElementInserted,
-        ToElement(change.sibling_changed), change.sibling_before_change,
+        To<Element>(change.sibling_changed.Get()), change.sibling_before_change,
         change.sibling_after_change);
   }
 }
 
 StyleSheetList& ShadowRoot::StyleSheets() {
   if (!style_sheet_list_)
-    SetStyleSheets(StyleSheetList::Create(this));
+    SetStyleSheets(MakeGarbageCollected<StyleSheetList>(this));
   return *style_sheet_list_;
 }
 
@@ -274,7 +252,7 @@ void ShadowRoot::SetNeedsDistributionRecalc() {
     V0().ClearDistribution();
 }
 
-void ShadowRoot::Trace(blink::Visitor* visitor) {
+void ShadowRoot::Trace(Visitor* visitor) {
   visitor->Trace(style_sheet_list_);
   visitor->Trace(slot_assignment_);
   visitor->Trace(shadow_root_v0_);

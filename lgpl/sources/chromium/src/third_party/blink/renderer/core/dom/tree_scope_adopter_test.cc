@@ -8,23 +8,24 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
 // TODO(hayato): It's hard to see what's happening in these tests.
 // It would be better to refactor these tests.
 TEST(TreeScopeAdopterTest, SimpleMove) {
-  Document* doc1 = Document::CreateForTest();
-  Document* doc2 = Document::CreateForTest();
+  auto* doc1 = MakeGarbageCollected<Document>();
+  auto* doc2 = MakeGarbageCollected<Document>();
 
-  Element* html1 = doc1->CreateRawElement(HTMLNames::htmlTag);
+  Element* html1 = doc1->CreateRawElement(html_names::kHTMLTag);
   doc1->AppendChild(html1);
-  Element* div1 = doc1->CreateRawElement(HTMLNames::divTag);
+  Element* div1 = doc1->CreateRawElement(html_names::kDivTag);
   html1->AppendChild(div1);
 
-  Element* html2 = doc2->CreateRawElement(HTMLNames::htmlTag);
+  Element* html2 = doc2->CreateRawElement(html_names::kHTMLTag);
   doc2->AppendChild(html2);
-  Element* div2 = doc1->CreateRawElement(HTMLNames::divTag);
+  Element* div2 = doc1->CreateRawElement(html_names::kDivTag);
   html2->AppendChild(div2);
 
   EXPECT_EQ(div1->ownerDocument(), doc1);
@@ -42,12 +43,12 @@ TEST(TreeScopeAdopterTest, SimpleMove) {
 }
 
 TEST(TreeScopeAdopterTest, AdoptV1ShadowRootToV0Document) {
-  Document* doc1 = Document::CreateForTest();
-  Document* doc2 = Document::CreateForTest();
+  auto* doc1 = MakeGarbageCollected<Document>();
+  auto* doc2 = MakeGarbageCollected<Document>();
 
-  Element* html1 = doc1->CreateRawElement(HTMLNames::htmlTag);
+  Element* html1 = doc1->CreateRawElement(html_names::kHTMLTag);
   doc1->AppendChild(html1);
-  Element* div1 = doc1->CreateRawElement(HTMLNames::divTag);
+  Element* div1 = doc1->CreateRawElement(html_names::kDivTag);
   html1->AppendChild(div1);
   EXPECT_EQ(doc1->GetShadowCascadeOrder(),
             ShadowCascadeOrder::kShadowCascadeNone);
@@ -56,9 +57,9 @@ TEST(TreeScopeAdopterTest, AdoptV1ShadowRootToV0Document) {
             ShadowCascadeOrder::kShadowCascadeV0);
   EXPECT_TRUE(doc1->MayContainV0Shadow());
 
-  Element* html2 = doc2->CreateRawElement(HTMLNames::htmlTag);
+  Element* html2 = doc2->CreateRawElement(html_names::kHTMLTag);
   doc2->AppendChild(html2);
-  Element* div2 = doc1->CreateRawElement(HTMLNames::divTag);
+  Element* div2 = doc1->CreateRawElement(html_names::kDivTag);
   html2->AppendChild(div2);
   div2->AttachShadowRootInternal(ShadowRootType::kOpen);
 
@@ -78,12 +79,12 @@ TEST(TreeScopeAdopterTest, AdoptV1ShadowRootToV0Document) {
 }
 
 TEST(TreeScopeAdopterTest, AdoptV0ShadowRootToV1Document) {
-  Document* doc1 = Document::CreateForTest();
-  Document* doc2 = Document::CreateForTest();
+  auto* doc1 = MakeGarbageCollected<Document>();
+  auto* doc2 = MakeGarbageCollected<Document>();
 
-  Element* html1 = doc1->CreateRawElement(HTMLNames::htmlTag);
+  Element* html1 = doc1->CreateRawElement(html_names::kHTMLTag);
   doc1->AppendChild(html1);
-  Element* div1 = doc1->CreateRawElement(HTMLNames::divTag);
+  Element* div1 = doc1->CreateRawElement(html_names::kDivTag);
   html1->AppendChild(div1);
   EXPECT_EQ(doc1->GetShadowCascadeOrder(),
             ShadowCascadeOrder::kShadowCascadeNone);
@@ -92,9 +93,9 @@ TEST(TreeScopeAdopterTest, AdoptV0ShadowRootToV1Document) {
             ShadowCascadeOrder::kShadowCascadeV1);
   EXPECT_FALSE(doc1->MayContainV0Shadow());
 
-  Element* html2 = doc2->CreateRawElement(HTMLNames::htmlTag);
+  Element* html2 = doc2->CreateRawElement(html_names::kHTMLTag);
   doc2->AppendChild(html2);
-  Element* div2 = doc1->CreateRawElement(HTMLNames::divTag);
+  Element* div2 = doc1->CreateRawElement(html_names::kDivTag);
   html2->AppendChild(div2);
   div2->CreateV0ShadowRootForTesting();
 
@@ -114,14 +115,14 @@ TEST(TreeScopeAdopterTest, AdoptV0ShadowRootToV1Document) {
 }
 
 TEST(TreeScopeAdopterTest, AdoptV0InV1ToNewDocument) {
-  Document* old_doc = Document::CreateForTest();
-  Element* html = old_doc->CreateRawElement(HTMLNames::htmlTag);
+  auto* old_doc = MakeGarbageCollected<Document>();
+  Element* html = old_doc->CreateRawElement(html_names::kHTMLTag);
   old_doc->AppendChild(html);
-  Element* host1 = old_doc->CreateRawElement(HTMLNames::divTag);
+  Element* host1 = old_doc->CreateRawElement(html_names::kDivTag);
   html->AppendChild(host1);
   ShadowRoot& shadow_root_v1 =
       host1->AttachShadowRootInternal(ShadowRootType::kOpen);
-  Element* host2 = old_doc->CreateRawElement(HTMLNames::divTag);
+  Element* host2 = old_doc->CreateRawElement(html_names::kDivTag);
   shadow_root_v1.AppendChild(host2);
   host2->CreateV0ShadowRootForTesting();
 
@@ -133,7 +134,7 @@ TEST(TreeScopeAdopterTest, AdoptV0InV1ToNewDocument) {
   //                 └──/shadow-root-v0
   EXPECT_TRUE(old_doc->MayContainV0Shadow());
 
-  Document* new_doc = Document::CreateForTest();
+  auto* new_doc = MakeGarbageCollected<Document>();
   EXPECT_FALSE(new_doc->MayContainV0Shadow());
 
   TreeScopeAdopter adopter(*host1, *new_doc);

@@ -38,7 +38,7 @@ suite('SiteDetailsPermission', function() {
     // Set the camera icon on <site-details-permission> manually to avoid
     // failures on undefined icons during teardown in PolymerTest.testIronIcons.
     // In practice, this is done from the parent.
-    testElement.icon = 'settings:videocam';
+    testElement.icon = 'cr:videocam';
     document.body.appendChild(testElement);
   });
 
@@ -167,7 +167,10 @@ suite('SiteDetailsPermission', function() {
         source: testSource,
       };
       assertEquals(
-          permissionSourcesNoSetting[testSource],
+          permissionSourcesNoSetting[testSource] +
+              (permissionSourcesNoSetting[testSource].length === 0 ?
+                   'Block (default)\nAllow\nBlock\nAsk' :
+                   '\nBlock (default)\nAllow\nBlock\nAsk'),
           testElement.$.permissionItem.innerText.trim());
       assertEquals(
           permissionSourcesNoSetting[testSource] != '',
@@ -199,7 +202,8 @@ suite('SiteDetailsPermission', function() {
         source: settings.SiteSettingSource.EXTENSION,
       };
       assertEquals(
-          extensionSourceStrings[testSetting],
+          extensionSourceStrings[testSetting] +
+              '\nBlock (default)\nAllow\nBlock\nAsk',
           testElement.$.permissionItem.innerText.trim());
       assertTrue(testElement.$.permissionItem.classList.contains('two-line'));
       assertTrue(testElement.$.permission.disabled);
@@ -223,7 +227,8 @@ suite('SiteDetailsPermission', function() {
         source: settings.SiteSettingSource.POLICY,
       };
       assertEquals(
-          policySourceStrings[testSetting],
+          policySourceStrings[testSetting] +
+              '\nBlock (default)\nAllow\nBlock\nAsk',
           testElement.$.permissionItem.innerText.trim());
       assertTrue(testElement.$.permissionItem.classList.contains('two-line'));
       assertTrue(testElement.$.permission.disabled);
@@ -238,7 +243,9 @@ suite('SiteDetailsPermission', function() {
       setting: settings.ContentSetting.ASK,
       source: settings.SiteSettingSource.DEFAULT,
     };
-    assertEquals('', testElement.$.permissionItem.innerText.trim());
+    assertEquals(
+        'Ask (default)\nAllow\nBlock\nAsk',
+        testElement.$.permissionItem.innerText.trim());
     assertFalse(testElement.$.permissionItem.classList.contains('two-line'));
     assertFalse(testElement.$.permission.disabled);
   });
@@ -254,7 +261,8 @@ suite('SiteDetailsPermission', function() {
       source: settings.SiteSettingSource.DRM_DISABLED,
     };
     assertEquals(
-        'To change this setting, first turn on identifiers',
+        'To change this setting, first turn on identifiers' +
+            '\nAllow\nBlock\nAsk',
         testElement.$.permissionItem.innerText.trim());
     assertTrue(testElement.$.permissionItem.classList.contains('two-line'));
     assertTrue(testElement.$.permission.disabled);
@@ -270,7 +278,8 @@ suite('SiteDetailsPermission', function() {
       source: settings.SiteSettingSource.ADS_FILTER_BLACKLIST,
     };
     assertEquals(
-        'Site shows intrusive or misleading ads',
+        'Site shows intrusive or misleading ads' +
+            '\nAllow\nBlock\nAsk',
         testElement.$.permissionItem.innerText.trim());
     assertTrue(testElement.$.permissionItem.classList.contains('two-line'));
     assertFalse(testElement.$.permission.disabled);
@@ -283,7 +292,8 @@ suite('SiteDetailsPermission', function() {
       source: settings.SiteSettingSource.PREFERENCE,
     };
     assertEquals(
-        'Block if site shows intrusive or misleading ads',
+        'Block if site shows intrusive or misleading ads' +
+            '\nAllow\nBlock\nAsk',
         testElement.$.permissionItem.innerText.trim());
     assertTrue(testElement.$.permissionItem.classList.contains('two-line'));
     assertFalse(testElement.$.permission.disabled);
@@ -296,7 +306,8 @@ suite('SiteDetailsPermission', function() {
       source: settings.SiteSettingSource.DEFAULT,
     };
     assertEquals(
-        'Block if site shows intrusive or misleading ads',
+        'Block if site shows intrusive or misleading ads' +
+            '\nBlock (default)\nAllow\nBlock\nAsk',
         testElement.$.permissionItem.innerText.trim());
     assertTrue(testElement.$.permissionItem.classList.contains('two-line'));
     assertFalse(testElement.$.permission.disabled);
@@ -308,7 +319,9 @@ suite('SiteDetailsPermission', function() {
       setting: settings.ContentSetting.ALLOW,
       source: settings.SiteSettingSource.PREFERENCE,
     };
-    assertEquals('', testElement.$.permissionItem.innerText.trim());
+    assertEquals(
+        'Block (default)\nAllow\nBlock\nAsk',
+        testElement.$.permissionItem.innerText.trim());
     assertFalse(testElement.$.permissionItem.classList.contains('two-line'));
     assertFalse(testElement.$.permission.disabled);
   });
@@ -391,4 +404,94 @@ suite('SiteDetailsPermission', function() {
               'Block setting string should match prefs');
         });
   });
+
+  test('ASK can be chosen as a preference by users', function() {
+    const origin = 'https://www.example.com';
+    testElement.category = settings.ContentSettingsTypes.USB_DEVICES;
+    testElement.label = 'USB';
+    testElement.site = {
+      origin: origin,
+      embeddingOrigin: origin,
+      setting: settings.ContentSetting.ASK,
+      source: settings.SiteSettingSource.PREFERENCE,
+    };
+
+    // In addition to the assertions below, the main goal of this test is to
+    // ensure we do not hit any assertions when choosing ASK as a setting.
+    assertEquals(testElement.$.permission.value, settings.ContentSetting.ASK);
+    assertFalse(testElement.$.permission.disabled);
+    assertFalse(testElement.$.permission.options.ask.hidden);
+  });
+
+  test(
+      'Bluetooth scanning: ASK/BLOCK can be chosen as a preference by users',
+      function() {
+        const origin = 'https://www.example.com';
+        testElement.category = settings.ContentSettingsTypes.BLUETOOTH_SCANNING;
+        testElement.label = 'Bluetooth-scanning';
+        testElement.site = {
+          origin: origin,
+          embeddingOrigin: origin,
+          setting: settings.ContentSetting.ASK,
+          source: settings.SiteSettingSource.PREFERENCE,
+        };
+
+        // In addition to the assertions below, the main goal of this test is to
+        // ensure we do not hit any assertions when choosing ASK as a setting.
+        assertEquals(
+            testElement.$.permission.value, settings.ContentSetting.ASK);
+        assertFalse(testElement.$.permission.disabled);
+        assertFalse(testElement.$.permission.options.ask.hidden);
+
+        testElement.site = {
+          origin: origin,
+          embeddingOrigin: origin,
+          setting: settings.ContentSetting.BLOCK,
+          source: settings.SiteSettingSource.PREFERENCE,
+        };
+
+        // In addition to the assertions below, the main goal of this test is to
+        // ensure we do not hit any assertions when choosing BLOCK as a setting.
+        assertEquals(
+            testElement.$.permission.value, settings.ContentSetting.BLOCK);
+        assertFalse(testElement.$.permission.disabled);
+        assertFalse(testElement.$.permission.options.block.hidden);
+      });
+
+  test(
+      'Native File System Write: ASK/BLOCK can be chosen as a preference by ' +
+          'users',
+      function() {
+        const origin = 'https://www.example.com';
+        testElement.category =
+            settings.ContentSettingsTypes.NATIVE_FILE_SYSTEM_WRITE;
+        testElement.label = 'Save to original files';
+        testElement.site = {
+          origin: origin,
+          embeddingOrigin: origin,
+          setting: settings.ContentSetting.ASK,
+          source: settings.SiteSettingSource.PREFERENCE,
+        };
+
+        // In addition to the assertions below, the main goal of this test is to
+        // ensure we do not hit any assertions when choosing ASK as a setting.
+        assertEquals(
+            testElement.$.permission.value, settings.ContentSetting.ASK);
+        assertFalse(testElement.$.permission.disabled);
+        assertFalse(testElement.$.permission.options.ask.hidden);
+
+        testElement.site = {
+          origin: origin,
+          embeddingOrigin: origin,
+          setting: settings.ContentSetting.BLOCK,
+          source: settings.SiteSettingSource.PREFERENCE,
+        };
+
+        // In addition to the assertions below, the main goal of this test is to
+        // ensure we do not hit any assertions when choosing BLOCK as a setting.
+        assertEquals(
+            testElement.$.permission.value, settings.ContentSetting.BLOCK);
+        assertFalse(testElement.$.permission.disabled);
+        assertFalse(testElement.$.permission.options.block.hidden);
+      });
 });

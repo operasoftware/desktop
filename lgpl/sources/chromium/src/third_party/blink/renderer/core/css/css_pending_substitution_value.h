@@ -5,20 +5,28 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_PENDING_SUBSTITUTION_VALUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_PENDING_SUBSTITUTION_VALUE_H_
 
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/core/css/css_variable_reference_value.h"
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
+namespace cssvalue {
 
 class CSSPendingSubstitutionValue : public CSSValue {
  public:
   static CSSPendingSubstitutionValue* Create(
       CSSPropertyID shorthand_property_id,
       CSSVariableReferenceValue* shorthand_value) {
-    return new CSSPendingSubstitutionValue(shorthand_property_id,
-                                           shorthand_value);
+    return MakeGarbageCollected<CSSPendingSubstitutionValue>(
+        shorthand_property_id, shorthand_value);
   }
+
+  CSSPendingSubstitutionValue(CSSPropertyID shorthand_property_id,
+                              CSSVariableReferenceValue* shorthand_value)
+      : CSSValue(kPendingSubstitutionValueClass),
+        shorthand_property_id_(shorthand_property_id),
+        shorthand_value_(shorthand_value) {}
 
   CSSVariableReferenceValue* ShorthandValue() const {
     return shorthand_value_.Get();
@@ -34,18 +42,18 @@ class CSSPendingSubstitutionValue : public CSSValue {
   void TraceAfterDispatch(blink::Visitor*);
 
  private:
-  CSSPendingSubstitutionValue(CSSPropertyID shorthand_property_id,
-                              CSSVariableReferenceValue* shorthand_value)
-      : CSSValue(kPendingSubstitutionValueClass),
-        shorthand_property_id_(shorthand_property_id),
-        shorthand_value_(shorthand_value) {}
-
   CSSPropertyID shorthand_property_id_;
   Member<CSSVariableReferenceValue> shorthand_value_;
 };
 
-DEFINE_CSS_VALUE_TYPE_CASTS(CSSPendingSubstitutionValue,
-                            IsPendingSubstitutionValue());
+}  // namespace cssvalue
+
+template <>
+struct DowncastTraits<cssvalue::CSSPendingSubstitutionValue> {
+  static bool AllowFrom(const CSSValue& value) {
+    return value.IsPendingSubstitutionValue();
+  }
+};
 
 }  // namespace blink
 

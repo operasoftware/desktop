@@ -12,6 +12,7 @@
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_widget_client.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
 #include "third_party/blink/renderer/core/dom/user_gesture_indicator.h"
 #include "third_party/blink/renderer/core/events/web_input_event_conversion.h"
 #include "third_party/blink/renderer/core/events/wheel_event.h"
@@ -21,6 +22,9 @@
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/input/context_menu_allowed_scope.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
+#include "third_party/blink/renderer/core/layout/hit_test_location.h"
+#include "third_party/blink/renderer/core/layout/hit_test_request.h"
+#include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/page/context_menu_controller.h"
 #include "third_party/blink/renderer/core/page/drag_actions.h"
 #include "third_party/blink/renderer/core/page/drag_controller.h"
@@ -28,6 +32,9 @@
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/pointer_lock_controller.h"
+#include "third_party/blink/renderer/platform/graphics/animation_worklet_mutator_dispatcher_impl.h"
+#include "third_party/blink/renderer/platform/graphics/compositor_mutator_client.h"
+#include "third_party/blink/renderer/platform/graphics/paint_worklet_paint_dispatcher.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
@@ -51,27 +58,57 @@ WebFrameWidgetBase::WebFrameWidgetBase(WebWidgetClient& client)
 WebFrameWidgetBase::~WebFrameWidgetBase() = default;
 
 void WebFrameWidgetBase::BindLocalRoot(WebLocalFrame& local_root) {
-  local_root_ = ToWebLocalFrameImpl(local_root);
+  local_root_ = To<WebLocalFrameImpl>(local_root);
   local_root_->SetFrameWidget(this);
-
-  Initialize();
+  request_animation_after_delay_timer_.reset(
+      new TaskRunnerTimer<WebFrameWidgetBase>(
+          local_root.GetTaskRunner(TaskType::kInternalDefault), this,
+          &WebFrameWidgetBase::RequestAnimationAfterDelayTimerFired));
 }
 
 void WebFrameWidgetBase::Close() {
+  mutator_dispatcher_ = nullptr;
   local_root_->SetFrameWidget(nullptr);
   local_root_ = nullptr;
   client_ = nullptr;
+  request_animation_after_delay_timer_.reset();
 }
 
 WebLocalFrame* WebFrameWidgetBase::LocalRoot() const {
   return local_root_;
 }
 
-void WebFrameWidgetBase::UpdateAllLifecyclePhasesAndCompositeForTesting(
-    bool do_raster) {
-  if (WebLayerTreeView* layer_tree_view = GetLayerTreeView()) {
-    layer_tree_view->UpdateAllLifecyclePhasesAndCompositeForTesting(do_raster);
+WebRect WebFrameWidgetBase::ComputeBlockBound(
+    const gfx::Point& point_in_root_frame,
+    bool ignore_clipping) const {
+  HitTestLocation location(local_root_->GetFrameView()->ConvertFromRootFrame(
+      PhysicalOffset(IntPoint(point_in_root_frame))));
+  HitTestRequest::HitTestRequestType hit_type =
+      HitTestRequest::kReadOnly | HitTestRequest::kActive |
+      (ignore_clipping ? HitTestRequest::kIgnoreClipping : 0);
+  HitTestResult result =
+      local_root_->GetFrame()->GetEventHandler().HitTestResultAtLocation(
+          location, hit_type);
+  result.SetToShadowHostIfInRestrictedShadowRoot();
+
+  Node* node = result.InnerNodeOrImageMapImage();
+  if (!node)
+    return WebRect();
+
+  // Find the block type node based on the hit node.
+  // FIXME: This wants to walk flat tree with
+  // LayoutTreeBuilderTraversal::parent().
+  while (node &&
+         (!node->GetLayoutObject() || node->GetLayoutObject()->IsInline()))
+    node = LayoutTreeBuilderTraversal::Parent(*node);
+
+  // Return the bounding box in the root frame's coordinate space.
+  if (node) {
+    IntRect absolute_rect = node->GetLayoutObject()->AbsoluteBoundingBoxRect();
+    LocalFrame* frame = node->GetDocument().GetFrame();
+    return frame->View()->ConvertToRootFrame(absolute_rect);
   }
+  return WebRect();
 }
 
 WebDragOperation WebFrameWidgetBase::DragTargetDragEnter(
@@ -184,7 +221,7 @@ void WebFrameWidgetBase::DragSourceEndedAt(
   WebMouseEvent fake_mouse_move(
       WebInputEvent::kMouseMove, point_in_root_frame, screen_point,
       WebPointerProperties::Button::kLeft, 0, WebInputEvent::kNoModifiers,
-      CurrentTimeTicks());
+      base::TimeTicks::Now());
   fake_mouse_move.SetFrameScale(1);
   local_root_->GetFrame()->GetEventHandler().DragSourceEndedAt(
       fake_mouse_move, static_cast<DragOperation>(operation));
@@ -195,7 +232,7 @@ void WebFrameWidgetBase::DragSourceSystemDragEnded() {
 }
 
 void WebFrameWidgetBase::CancelDrag() {
-  // It's possible for us this to be callback while we're not doing a drag if
+  // It's possible for this to be called while we're not doing a drag if
   // it's from a previous page that got unloaded.
   if (!doing_drag_and_drop_)
     return;
@@ -203,11 +240,11 @@ void WebFrameWidgetBase::CancelDrag() {
   doing_drag_and_drop_ = false;
 }
 
-void WebFrameWidgetBase::StartDragging(WebReferrerPolicy policy,
+void WebFrameWidgetBase::StartDragging(network::mojom::ReferrerPolicy policy,
                                        const WebDragData& data,
                                        WebDragOperationsMask mask,
                                        const SkBitmap& drag_image,
-                                       const WebPoint& drag_image_offset) {
+                                       const gfx::Point& drag_image_offset) {
   doing_drag_and_drop_ = true;
   Client()->StartDragging(policy, data, mask, drag_image, drag_image_offset);
 }
@@ -249,6 +286,31 @@ WebDragOperation WebFrameWidgetBase::DragTargetDragEnterOrOver(
   return drag_operation_;
 }
 
+void WebFrameWidgetBase::SendOverscrollEventFromImplSide(
+    const gfx::Vector2dF& overscroll_delta,
+    cc::ElementId scroll_latched_element_id) {
+  if (!RuntimeEnabledFeatures::OverscrollCustomizationEnabled())
+    return;
+
+  Node* target_node = View()->FindNodeFromScrollableCompositorElementId(
+      scroll_latched_element_id);
+  if (target_node) {
+    target_node->GetDocument().EnqueueOverscrollEventForNode(
+        target_node, overscroll_delta.x(), overscroll_delta.y());
+  }
+}
+
+void WebFrameWidgetBase::SendScrollEndEventFromImplSide(
+    cc::ElementId scroll_latched_element_id) {
+  if (!RuntimeEnabledFeatures::OverscrollCustomizationEnabled())
+    return;
+
+  Node* target_node = View()->FindNodeFromScrollableCompositorElementId(
+      scroll_latched_element_id);
+  if (target_node)
+    target_node->GetDocument().EnqueueScrollEndEventForNode(target_node);
+}
+
 WebFloatPoint WebFrameWidgetBase::ViewportToRootFrame(
     const WebFloatPoint& point_in_viewport) const {
   return GetPage()->GetVisualViewport().ViewportToRootFrame(point_in_viewport);
@@ -283,13 +345,7 @@ void WebFrameWidgetBase::DidLosePointerLock() {
 void WebFrameWidgetBase::RequestDecode(
     const PaintImage& image,
     base::OnceCallback<void(bool)> callback) {
-  // If we have a LayerTreeView, propagate the request, otherwise fail it since
-  // otherwise it would remain in a unresolved and unrejected state.
-  if (WebLayerTreeView* layer_tree_view = GetLayerTreeView()) {
-    layer_tree_view->RequestDecode(image, std::move(callback));
-  } else {
-    std::move(callback).Run(false);
-  }
+  Client()->RequestDecode(image, std::move(callback));
 }
 
 void WebFrameWidgetBase::Trace(blink::Visitor* visitor) {
@@ -307,17 +363,11 @@ void WebFrameWidgetBase::PointerLockMouseEvent(
   WebMouseEvent transformed_event =
       TransformWebMouseEvent(local_root_->GetFrameView(), mouse_event);
 
-  LocalFrame* focusedFrame = FocusedLocalFrameInWidget();
-  if (focusedFrame) {
-    focusedFrame->GetEventHandler().ProcessPendingPointerCaptureForPointerLock(
-        transformed_event);
-  }
-
   std::unique_ptr<UserGestureIndicator> gesture_indicator;
   AtomicString event_type;
   switch (input_event.GetType()) {
     case WebInputEvent::kMouseDown:
-      event_type = EventTypeNames::mousedown;
+      event_type = event_type_names::kMousedown;
       if (!GetPage() || !GetPage()->GetPointerLockController().GetElement())
         break;
       gesture_indicator =
@@ -330,12 +380,12 @@ void WebFrameWidgetBase::PointerLockMouseEvent(
       pointer_lock_gesture_token_ = gesture_indicator->CurrentToken();
       break;
     case WebInputEvent::kMouseUp:
-      event_type = EventTypeNames::mouseup;
+      event_type = event_type_names::kMouseup;
       gesture_indicator = std::make_unique<UserGestureIndicator>(
           std::move(pointer_lock_gesture_token_));
       break;
     case WebInputEvent::kMouseMove:
-      event_type = EventTypeNames::mousemove;
+      event_type = event_type_names::kMousemove;
       break;
     default:
       NOTREACHED() << input_event.GetType();
@@ -347,6 +397,9 @@ void WebFrameWidgetBase::PointerLockMouseEvent(
         TransformWebMouseEventVector(
             local_root_->GetFrameView(),
             coalesced_event.GetCoalescedEventsPointers()),
+        TransformWebMouseEventVector(
+            local_root_->GetFrameView(),
+            coalesced_event.GetPredictedEventsPointers()),
         event_type);
   }
 }
@@ -383,6 +436,53 @@ LocalFrame* WebFrameWidgetBase::FocusedLocalFrameInWidget() const {
 
 WebLocalFrame* WebFrameWidgetBase::FocusedWebLocalFrameInWidget() const {
   return WebLocalFrameImpl::FromFrame(FocusedLocalFrameInWidget());
+}
+
+void WebFrameWidgetBase::RequestAnimationAfterDelay(
+    const base::TimeDelta& delay) {
+  DCHECK(request_animation_after_delay_timer_.get());
+  if (request_animation_after_delay_timer_->IsActive() &&
+      request_animation_after_delay_timer_->NextFireInterval() > delay) {
+    request_animation_after_delay_timer_->Stop();
+  }
+  if (!request_animation_after_delay_timer_->IsActive()) {
+    request_animation_after_delay_timer_->StartOneShot(delay, FROM_HERE);
+  }
+}
+
+void WebFrameWidgetBase::RequestAnimationAfterDelayTimerFired(TimerBase*) {
+  if (client_)
+    client_->ScheduleAnimation();
+}
+
+base::WeakPtr<AnimationWorkletMutatorDispatcherImpl>
+WebFrameWidgetBase::EnsureCompositorMutatorDispatcher(
+    scoped_refptr<base::SingleThreadTaskRunner>* mutator_task_runner) {
+  if (!mutator_task_runner_) {
+    Client()->SetLayerTreeMutator(
+        AnimationWorkletMutatorDispatcherImpl::CreateCompositorThreadClient(
+            &mutator_dispatcher_, &mutator_task_runner_));
+  }
+
+  DCHECK(mutator_task_runner_);
+  *mutator_task_runner = mutator_task_runner_;
+  return mutator_dispatcher_;
+}
+
+base::WeakPtr<PaintWorkletPaintDispatcher>
+WebFrameWidgetBase::EnsureCompositorPaintDispatcher(
+    scoped_refptr<base::SingleThreadTaskRunner>* paint_task_runner) {
+  // We check paint_task_runner_ not paint_dispatcher_ because the dispatcher is
+  // a base::WeakPtr that should only be used on the compositor thread.
+  if (!paint_task_runner_) {
+    Client()->SetPaintWorkletLayerPainterClient(
+        PaintWorkletPaintDispatcher::CreateCompositorThreadPainter(
+            &paint_dispatcher_));
+    paint_task_runner_ = Thread::CompositorThread()->GetTaskRunner();
+  }
+  DCHECK(paint_task_runner_);
+  *paint_task_runner = paint_task_runner_;
+  return paint_dispatcher_;
 }
 
 }  // namespace blink

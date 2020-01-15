@@ -36,6 +36,7 @@ from blinkpy.common.system.system_host_mock import MockSystemHost
 from blinkpy.web_tests.builder_list import BuilderList
 from blinkpy.web_tests.port.factory import PortFactory
 from blinkpy.web_tests.port.test import add_unit_tests_to_mock_filesystem
+from blinkpy.w3c.wpt_manifest import BASE_MANIFEST_NAME
 
 
 class MockHost(MockSystemHost):
@@ -79,7 +80,8 @@ class MockHost(MockSystemHost):
             },
             'Fake Test Mac10.12': {
                 'port_name': 'mac-mac10.12',
-                'specifiers': ['Mac10.12', 'Release']
+                'specifiers': ['Mac10.12', 'Release'],
+                'is_try_builder': True,
             },
             'fake_blink_try_linux': {
                 'port_name': 'linux-trusty',
@@ -91,14 +93,8 @@ class MockHost(MockSystemHost):
                 'specifiers': ['Win10', 'Release'],
                 'is_try_builder': True,
             },
-            'fake_mac_cq': {
-                'bucket': 'master.tryserver.chromium.mac',
-                'port_name': 'mac-mac10.12',
-                'specifiers': ['Mac10.12', 'Release'],
-                'is_try_builder': True,
-            },
             'android_blink_rel': {
-                'bucket': 'master.tryserver.chromium.android',
+                'bucket': 'luci.chromium.android',
                 'port_name': 'android-kitkat',
                 'specifiers': ['KitKat', 'Release'],
                 'is_try_builder': True,
@@ -118,9 +114,8 @@ class MockHost(MockSystemHost):
     def _add_base_manifest_to_mock_filesystem(self, filesystem):
         path_finder = PathFinder(filesystem)
 
-        external_dir = path_finder.path_from_layout_tests('external')
+        external_dir = path_finder.path_from_web_tests('external')
         filesystem.maybe_make_directory(filesystem.join(external_dir, 'wpt'))
 
-        # This filename should match the constant BASE_MANIFEST_NAME.
-        manifest_base_path = filesystem.join(external_dir, 'WPT_BASE_MANIFEST_5.json')
+        manifest_base_path = filesystem.join(external_dir, BASE_MANIFEST_NAME)
         filesystem.files[manifest_base_path] = '{"manifest": "base"}'

@@ -23,7 +23,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "third_party/blink/renderer/platform/wtf/compiler.h"
+
 #include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
 template <typename T>
@@ -45,17 +45,19 @@ class ArrayPiece;
 class AtomicString;
 class BigInt64Array;
 class BigUint64Array;
-class CString;
+class CaseMap;
 class Float32Array;
 class Float64Array;
 class Int8Array;
 class Int16Array;
 class Int32Array;
 class OrdinalNumber;
+class SharedBuffer;
 class String;
 class StringBuilder;
 class StringImpl;
 class StringView;
+class TextOffsetMap;
 class TextStream;
 class Uint8Array;
 class Uint8ClampedArray;
@@ -72,17 +74,19 @@ using WTF::ArrayPiece;
 using WTF::AtomicString;
 using WTF::BigInt64Array;
 using WTF::BigUint64Array;
-using WTF::CString;
+using WTF::CaseMap;
 using WTF::Float32Array;
 using WTF::Float64Array;
 using WTF::Int8Array;
 using WTF::Int16Array;
 using WTF::Int32Array;
+using WTF::SharedBuffer;
 using WTF::String;
 using WTF::StringBuffer;
 using WTF::StringBuilder;
 using WTF::StringImpl;
 using WTF::StringView;
+using WTF::TextOffsetMap;
 using WTF::Uint8Array;
 using WTF::Uint8ClampedArray;
 using WTF::Uint16Array;

@@ -5,20 +5,25 @@
 #include "third_party/blink/renderer/core/fetch/fetch_data_loader.h"
 
 #include <memory>
+#include <utility>
+
 #include "mojo/public/cpp/system/simple_watcher.h"
-#include "third_party/blink/renderer/core/fetch/bytes_consumer.h"
 #include "third_party/blink/renderer/core/fetch/multipart_parser.h"
 #include "third_party/blink/renderer/core/fileapi/file.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/html/parser/text_resource_decoder.h"
 #include "third_party/blink/renderer/platform/file_metadata.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/loader/fetch/bytes_consumer.h"
 #include "third_party/blink/renderer/platform/loader/fetch/text_resource_decoder_options.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/network/parsed_content_disposition.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "third_party/blink/renderer/platform/wtf/typed_arrays/array_buffer_builder.h"
 
 namespace blink {
 
@@ -47,7 +52,7 @@ class FetchDataLoaderAsBlobHandle final : public FetchDataLoader,
       if (blob_handle->GetType() != mime_type_) {
         // A new Blob is created to override the Blob's type.
         auto blob_size = blob_handle->size();
-        auto blob_data = BlobData::Create();
+        auto blob_data = std::make_unique<BlobData>();
         blob_data->SetContentType(mime_type_);
         blob_data->AppendBlob(std::move(blob_handle), 0, blob_size);
         client_->DidFetchDataLoadedBlobHandle(
@@ -58,7 +63,7 @@ class FetchDataLoaderAsBlobHandle final : public FetchDataLoader,
       return;
     }
 
-    blob_data_ = BlobData::Create();
+    blob_data_ = std::make_unique<BlobData>();
     blob_data_->SetContentType(mime_type_);
     consumer_->SetClient(this);
     OnStateChange();
@@ -106,7 +111,7 @@ class FetchDataLoaderAsBlobHandle final : public FetchDataLoader,
   }
 
  private:
-  TraceWrapperMember<BytesConsumer> consumer_;
+  Member<BytesConsumer> consumer_;
   Member<FetchDataLoader::Client> client_;
 
   String mime_type_;
@@ -115,16 +120,17 @@ class FetchDataLoaderAsBlobHandle final : public FetchDataLoader,
 
 class FetchDataLoaderAsArrayBuffer final : public FetchDataLoader,
                                            public BytesConsumer::Client {
-  USING_GARBAGE_COLLECTED_MIXIN(FetchDataLoaderAsArrayBuffer)
+  USING_GARBAGE_COLLECTED_MIXIN(FetchDataLoaderAsArrayBuffer);
+
  public:
   void Start(BytesConsumer* consumer,
              FetchDataLoader::Client* client) override {
     DCHECK(!client_);
-    DCHECK(!raw_data_);
     DCHECK(!consumer_);
+    DCHECK(!buffer_);
     client_ = client;
-    raw_data_ = std::make_unique<ArrayBufferBuilder>();
     consumer_ = consumer;
+    buffer_ = WTF::SharedBuffer::Create();
     consumer_->SetClient(this);
     OnStateChange();
   }
@@ -140,15 +146,14 @@ class FetchDataLoaderAsArrayBuffer final : public FetchDataLoader,
         return;
       if (result == BytesConsumer::Result::kOk) {
         if (available > 0) {
-          unsigned bytes_appended = raw_data_->Append(buffer, available);
-          if (!bytes_appended) {
+          bool ok = Append(buffer, SafeCast<wtf_size_t>(available));
+          if (!ok) {
             auto unused = consumer_->EndRead(0);
             ALLOW_UNUSED_LOCAL(unused);
             consumer_->Cancel();
             client_->DidFetchDataLoadFailed();
             return;
           }
-          DCHECK_EQ(bytes_appended, available);
         }
         result = consumer_->EndRead(available);
       }
@@ -158,10 +163,15 @@ class FetchDataLoaderAsArrayBuffer final : public FetchDataLoader,
         case BytesConsumer::Result::kShouldWait:
           NOTREACHED();
           return;
-        case BytesConsumer::Result::kDone:
-          client_->DidFetchDataLoadedArrayBuffer(
-              DOMArrayBuffer::Create(raw_data_->ToArrayBuffer()));
+        case BytesConsumer::Result::kDone: {
+          DOMArrayBuffer* result = BuildArrayBuffer();
+          if (!result) {
+            client_->DidFetchDataLoadFailed();
+            return;
+          }
+          client_->DidFetchDataLoadedArrayBuffer(result);
           return;
+        }
         case BytesConsumer::Result::kError:
           client_->DidFetchDataLoadFailed();
           return;
@@ -179,10 +189,38 @@ class FetchDataLoaderAsArrayBuffer final : public FetchDataLoader,
   }
 
  private:
-  TraceWrapperMember<BytesConsumer> consumer_;
+  // Appending empty data is not allowed. Returns false upon buffer overlow.
+  bool Append(const char* data, wtf_size_t length) {
+    DCHECK_GT(length, 0u);
+    buffer_->Append(data, length);
+    if (buffer_->size() >
+        static_cast<size_t>(std::numeric_limits<uint32_t>::max())) {
+      return false;
+    }
+    return true;
+  }
+
+  // Builds a DOMArrayBuffer from the received bytes.
+  DOMArrayBuffer* BuildArrayBuffer() {
+    DOMArrayBuffer* result = DOMArrayBuffer::CreateUninitializedOrNull(
+        SafeCast<unsigned>(buffer_->size()), 1);
+    // Handle a failed allocation.
+    if (!result) {
+      return result;
+    }
+    char* data = reinterpret_cast<char*>(result->Data());
+    for (const auto& span : *buffer_) {
+      memcpy(data, span.data(), span.size());
+      data += span.size();
+    }
+    buffer_->Clear();
+    return result;
+  }
+
+  Member<BytesConsumer> consumer_;
   Member<FetchDataLoader::Client> client_;
 
-  std::unique_ptr<ArrayBufferBuilder> raw_data_;
+  scoped_refptr<SharedBuffer> buffer_;
 };
 
 class FetchDataLoaderAsFailure final : public FetchDataLoader,
@@ -235,7 +273,7 @@ class FetchDataLoaderAsFailure final : public FetchDataLoader,
   }
 
  private:
-  TraceWrapperMember<BytesConsumer> consumer_;
+  Member<BytesConsumer> consumer_;
   Member<FetchDataLoader::Client> client_;
 };
 
@@ -255,15 +293,16 @@ class FetchDataLoaderAsFormData final : public FetchDataLoader,
     DCHECK(!form_data_);
     DCHECK(!multipart_parser_);
 
-    const CString multipart_boundary_utf8 = multipart_boundary_.Utf8();
+    StringUTF8Adaptor multipart_boundary_utf8(multipart_boundary_);
     Vector<char> multipart_boundary_vector;
-    multipart_boundary_vector.Append(multipart_boundary_utf8.data(),
-                                     multipart_boundary_utf8.length());
+    multipart_boundary_vector.Append(
+        multipart_boundary_utf8.data(),
+        multipart_boundary_utf8.size());
 
     client_ = client;
-    form_data_ = FormData::Create();
-    multipart_parser_ =
-        new MultipartParser(std::move(multipart_boundary_vector), this);
+    form_data_ = MakeGarbageCollected<FormData>();
+    multipart_parser_ = MakeGarbageCollected<MultipartParser>(
+        std::move(multipart_boundary_vector), this);
     consumer_ = consumer;
     consumer_->SetClient(this);
     OnStateChange();
@@ -343,7 +382,7 @@ class FetchDataLoaderAsFormData final : public FetchDataLoader,
    public:
     bool Initialize(const HTTPHeaderMap& header_fields) {
       const ParsedContentDisposition disposition(
-          header_fields.Get(HTTPNames::Content_Disposition));
+          header_fields.Get(http_names::kContentDisposition));
       const String disposition_type = disposition.Type();
       filename_ = disposition.Filename();
       name_ = disposition.ParameterValueForName("name");
@@ -352,14 +391,14 @@ class FetchDataLoaderAsFormData final : public FetchDataLoader,
       if (disposition_type != "form-data" || name_.IsNull())
         return false;
       if (!filename_.IsNull()) {
-        blob_data_ = BlobData::Create();
+        blob_data_ = std::make_unique<BlobData>();
         const AtomicString& content_type =
-            header_fields.Get(HTTPNames::Content_Type);
+            header_fields.Get(http_names::kContentType);
         blob_data_->SetContentType(content_type.IsNull() ? "text/plain"
                                                          : content_type);
       } else {
         if (!string_decoder_) {
-          string_decoder_ = TextResourceDecoder::Create(
+          string_decoder_ = std::make_unique<TextResourceDecoder>(
               TextResourceDecoderOptions::CreateAlwaysUseUTF8ForText());
         }
         string_builder_.reset(new StringBuilder);
@@ -405,7 +444,7 @@ class FetchDataLoaderAsFormData final : public FetchDataLoader,
     std::unique_ptr<TextResourceDecoder> string_decoder_;
   };
 
-  TraceWrapperMember<BytesConsumer> consumer_;
+  Member<BytesConsumer> consumer_;
   Member<FetchDataLoader::Client> client_;
   Member<FormData> form_data_;
   Member<MultipartParser> multipart_parser_;
@@ -425,7 +464,7 @@ class FetchDataLoaderAsString final : public FetchDataLoader,
     DCHECK(!decoder_);
     DCHECK(!consumer_);
     client_ = client;
-    decoder_ = TextResourceDecoder::Create(
+    decoder_ = std::make_unique<TextResourceDecoder>(
         TextResourceDecoderOptions::CreateAlwaysUseUTF8ForText());
     consumer_ = consumer;
     consumer_->SetClient(this);
@@ -473,7 +512,7 @@ class FetchDataLoaderAsString final : public FetchDataLoader,
   }
 
  private:
-  TraceWrapperMember<BytesConsumer> consumer_;
+  Member<BytesConsumer> consumer_;
   Member<FetchDataLoader::Client> client_;
 
   std::unique_ptr<TextResourceDecoder> decoder_;
@@ -483,6 +522,7 @@ class FetchDataLoaderAsString final : public FetchDataLoader,
 class FetchDataLoaderAsDataPipe final : public FetchDataLoader,
                                         public BytesConsumer::Client {
   USING_GARBAGE_COLLECTED_MIXIN(FetchDataLoaderAsDataPipe);
+  USING_PRE_FINALIZER(FetchDataLoaderAsDataPipe, Dispose);
 
  public:
   explicit FetchDataLoaderAsDataPipe(
@@ -561,7 +601,7 @@ class FetchDataLoaderAsDataPipe final : public FetchDataLoader,
         if (available == 0) {
           result = consumer_->EndRead(0);
         } else {
-          uint32_t num_bytes = available;
+          uint32_t num_bytes = SafeCast<uint32_t>(available);
           MojoResult mojo_result = out_data_pipe_->WriteData(
               buffer, &num_bytes, MOJO_WRITE_DATA_FLAG_NONE);
           if (mojo_result == MOJO_RESULT_OK) {
@@ -614,7 +654,9 @@ class FetchDataLoaderAsDataPipe final : public FetchDataLoader,
     out_data_pipe_.reset();
   }
 
-  TraceWrapperMember<BytesConsumer> consumer_;
+  void Dispose() { data_pipe_watcher_.Cancel(); }
+
+  Member<BytesConsumer> consumer_;
   Member<FetchDataLoader::Client> client_;
 
   mojo::ScopedDataPipeProducerHandle out_data_pipe_;
@@ -625,29 +667,30 @@ class FetchDataLoaderAsDataPipe final : public FetchDataLoader,
 
 FetchDataLoader* FetchDataLoader::CreateLoaderAsBlobHandle(
     const String& mime_type) {
-  return new FetchDataLoaderAsBlobHandle(mime_type);
+  return MakeGarbageCollected<FetchDataLoaderAsBlobHandle>(mime_type);
 }
 
 FetchDataLoader* FetchDataLoader::CreateLoaderAsArrayBuffer() {
-  return new FetchDataLoaderAsArrayBuffer();
+  return MakeGarbageCollected<FetchDataLoaderAsArrayBuffer>();
 }
 
 FetchDataLoader* FetchDataLoader::CreateLoaderAsFailure() {
-  return new FetchDataLoaderAsFailure();
+  return MakeGarbageCollected<FetchDataLoaderAsFailure>();
 }
 
 FetchDataLoader* FetchDataLoader::CreateLoaderAsFormData(
     const String& multipartBoundary) {
-  return new FetchDataLoaderAsFormData(multipartBoundary);
+  return MakeGarbageCollected<FetchDataLoaderAsFormData>(multipartBoundary);
 }
 
 FetchDataLoader* FetchDataLoader::CreateLoaderAsString() {
-  return new FetchDataLoaderAsString();
+  return MakeGarbageCollected<FetchDataLoaderAsString>();
 }
 
 FetchDataLoader* FetchDataLoader::CreateLoaderAsDataPipe(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  return new FetchDataLoaderAsDataPipe(std::move(task_runner));
+  return MakeGarbageCollected<FetchDataLoaderAsDataPipe>(
+      std::move(task_runner));
 }
 
 }  // namespace blink

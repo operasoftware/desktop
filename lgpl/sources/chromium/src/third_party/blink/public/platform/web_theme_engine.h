@@ -31,7 +31,10 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_THEME_ENGINE_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_THEME_ENGINE_H_
 
+#include "base/optional.h"
 #include "base/time/time.h"
+#include "third_party/blink/public/common/css/forced_colors.h"
+#include "third_party/blink/public/platform/web_color_scheme.h"
 #include "third_party/blink/public/platform/web_rect.h"
 #include "third_party/blink/public/platform/web_scrollbar_overlay_color_theme.h"
 #include "third_party/blink/public/platform/web_size.h"
@@ -80,6 +83,21 @@ class WebThemeEngine {
     kPartProgressBar
   };
 
+  enum class SystemThemeColor {
+    kNotSupported,
+    kButtonFace,
+    kButtonText,
+    kGrayText,
+    kHighlight,
+    kHighlightText,
+    kHotlight,
+    kMenuHighlight,
+    kScrollbar,
+    kWindow,
+    kWindowText,
+    kMaxValue = kWindowText,
+  };
+
   // Extra parameters for drawing the PartScrollbarHorizontalTrack and
   // PartScrollbarVerticalTrack.
   struct ScrollbarTrackExtraParams {
@@ -96,7 +114,6 @@ class WebThemeEngine {
   struct ButtonExtraParams {
     bool checked;
     bool indeterminate;  // Whether the button state is indeterminate.
-    bool is_default;     // Whether the button is default button.
     bool has_border;
     bool has_focus;
     SkColor background_color;
@@ -125,6 +142,8 @@ class WebThemeEngine {
   struct SliderExtraParams {
     bool vertical;
     bool in_drag;
+    int thumb_x;
+    int thumb_y;
   };
 
   // Extra parameters for PartInnerSpinButton
@@ -147,6 +166,11 @@ class WebThemeEngine {
     WebScrollbarOverlayColorTheme scrollbar_theme;
   };
 
+  struct ScrollbarButtonExtraParams {
+    float zoom;
+    bool right_to_left;
+  };
+
   union ExtraParams {
     ScrollbarTrackExtraParams scrollbar_track;
     ButtonExtraParams button;
@@ -156,7 +180,10 @@ class WebThemeEngine {
     InnerSpinButtonExtraParams inner_spin;
     ProgressBarExtraParams progress_bar;
     ScrollbarThumbExtraParams scrollbar_thumb;
+    ScrollbarButtonExtraParams scrollbar_button;
   };
+
+  virtual ~WebThemeEngine() {}
 
   // Gets the size of the given theme part. For variable sized items
   // like vertical scrollbar thumbs, the width will be the required width of
@@ -192,7 +219,16 @@ class WebThemeEngine {
                      Part,
                      State,
                      const WebRect&,
-                     const ExtraParams*) {}
+                     const ExtraParams*,
+                     blink::WebColorScheme) {}
+
+  virtual base::Optional<SkColor> GetSystemColor(
+      SystemThemeColor system_theme) const {
+    return base::nullopt;
+  }
+
+  virtual ForcedColors ForcedColors() const { return ForcedColors::kNone; }
+  virtual void SetForcedColors(const blink::ForcedColors forced_colors) {}
 };
 
 }  // namespace blink

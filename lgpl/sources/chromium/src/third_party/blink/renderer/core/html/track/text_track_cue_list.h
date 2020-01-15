@@ -28,7 +28,6 @@
 
 #include "third_party/blink/renderer/core/html/track/text_track_cue.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -37,7 +36,7 @@ class TextTrackCueList final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static TextTrackCueList* Create() { return new TextTrackCueList; }
+  TextTrackCueList();
 
   wtf_size_t length() const;
 
@@ -56,15 +55,14 @@ class TextTrackCueList final : public ScriptWrappable {
   }
   void ValidateCueIndexes();
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  TextTrackCueList();
   wtf_size_t FindInsertionIndex(const TextTrackCue*) const;
   void InvalidateCueIndex(wtf_size_t index);
   void Clear();
 
-  HeapVector<TraceWrapperMember<TextTrackCue>> list_;
+  HeapVector<Member<TextTrackCue>> list_;
   wtf_size_t first_invalid_index_;
 };
 

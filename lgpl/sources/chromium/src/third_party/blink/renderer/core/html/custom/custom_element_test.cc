@@ -157,7 +157,7 @@ TEST(CustomElementTest, StateByParser) {
       "<div id=div></div>"
       "<a-a id=v1v0></a-a>"
       "<font-face id=v0></font-face>";
-  std::unique_ptr<DummyPageHolder> page_holder = DummyPageHolder::Create();
+  auto page_holder = std::make_unique<DummyPageHolder>();
   Document& document = page_holder->GetDocument();
   document.body()->SetInnerHTMLFromString(String::FromUTF8(body_content));
 
@@ -192,19 +192,19 @@ TEST(CustomElementTest, StateByCreateElement) {
        Element::kV0WaitingForUpgrade},
       {"_-X", CustomElementState::kUncustomized, Element::kV0WaitingForUpgrade},
   };
-  std::unique_ptr<DummyPageHolder> page_holder = DummyPageHolder::Create();
+  auto page_holder = std::make_unique<DummyPageHolder>();
   Document& document = page_holder->GetDocument();
   for (const auto& data : create_element_data) {
     Element* element = document.CreateElementForBinding(data.name);
     EXPECT_EQ(data.state, element->GetCustomElementState()) << data.name;
     EXPECT_EQ(data.v0state, element->GetV0CustomElementState()) << data.name;
 
-    element = document.createElementNS(HTMLNames::xhtmlNamespaceURI, data.name,
+    element = document.createElementNS(html_names::xhtmlNamespaceURI, data.name,
                                        ASSERT_NO_EXCEPTION);
     EXPECT_EQ(data.state, element->GetCustomElementState()) << data.name;
     EXPECT_EQ(data.v0state, element->GetV0CustomElementState()) << data.name;
 
-    element = document.createElementNS(SVGNames::svgNamespaceURI, data.name,
+    element = document.createElementNS(svg_names::kNamespaceURI, data.name,
                                        ASSERT_NO_EXCEPTION);
     EXPECT_EQ(CustomElementState::kUncustomized,
               element->GetCustomElementState())
@@ -216,7 +216,7 @@ TEST(CustomElementTest, StateByCreateElement) {
 TEST(CustomElementTest,
      CreateElement_TagNameCaseHandlingCreatingCustomElement) {
   // register a definition
-  std::unique_ptr<DummyPageHolder> holder(DummyPageHolder::Create());
+  auto holder(std::make_unique<DummyPageHolder>());
   ScriptState* script_state = ToScriptStateForMainWorld(&holder->GetFrame());
   CustomElementRegistry* registry =
       holder->GetFrame().DomWindow()->customElements();
@@ -225,7 +225,8 @@ TEST(CustomElementTest,
     CEReactionsScope reactions;
     TestCustomElementDefinitionBuilder builder;
     registry->DefineInternal(script_state, "a-a", builder,
-                             ElementDefinitionOptions(), should_not_throw);
+                             ElementDefinitionOptions::Create(),
+                             should_not_throw);
   }
   CustomElementDefinition* definition =
       registry->DefinitionFor(CustomElementDescriptor("a-a", "a-a"));

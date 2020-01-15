@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/modules/accessibility/testing/accessibility_test.h"
 
 namespace blink {
+namespace test {
 
 TEST_F(AccessibilityTest, CommonAncestorContainerOfRange) {
   SetBodyInnerHTML(R"HTML(<input id='input' type='text' value='value'>"
@@ -18,6 +19,8 @@ TEST_F(AccessibilityTest, CommonAncestorContainerOfRange) {
 
   const AXObject* root = GetAXRootObject();
   ASSERT_NE(nullptr, root);
+  const AXObject* body = root->FirstChild();
+  ASSERT_NE(nullptr, body);
   const AXObject* input = GetAXObjectByElementId("input");
   ASSERT_NE(nullptr, input);
   const AXObject* paragraph = GetAXObjectByElementId("paragraph");
@@ -33,10 +36,10 @@ TEST_F(AccessibilityTest, CommonAncestorContainerOfRange) {
   const AXObject* button = GetAXObjectByElementId("button");
   ASSERT_NE(nullptr, button);
 
-  EXPECT_EQ(root, AXRange(AXPosition::CreateFirstPositionInObject(*input),
+  EXPECT_EQ(body, AXRange(AXPosition::CreateFirstPositionInObject(*input),
                           AXPosition::CreateLastPositionInObject(*button))
                       .CommonAncestorContainer());
-  EXPECT_EQ(root, AXRange(AXPosition::CreateFirstPositionInObject(*br),
+  EXPECT_EQ(body, AXRange(AXPosition::CreateFirstPositionInObject(*br),
                           AXPosition::CreateFirstPositionInObject(*button))
                       .CommonAncestorContainer());
   EXPECT_EQ(paragraph, AXRange(AXPosition::CreatePositionBeforeObject(*text1),
@@ -79,4 +82,5 @@ TEST_F(AccessibilityTest, RangeOfContents) {
             paragraph_range.End());
 }
 
+}  // namespace test
 }  // namespace blink

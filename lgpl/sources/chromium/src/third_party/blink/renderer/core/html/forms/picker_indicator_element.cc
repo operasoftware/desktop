@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/core/html/forms/picker_indicator_element.h"
 
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
@@ -37,34 +38,32 @@
 #include "third_party/blink/renderer/core/layout/layout_details_marker.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/layout_test_support.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
+#include "third_party/blink/renderer/platform/web_test_support.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-inline PickerIndicatorElement::PickerIndicatorElement(
+PickerIndicatorElement::PickerIndicatorElement(
     Document& document,
     PickerIndicatorOwner& picker_indicator_owner)
     : HTMLDivElement(document),
-      picker_indicator_owner_(&picker_indicator_owner) {}
-
-PickerIndicatorElement* PickerIndicatorElement::Create(
-    Document& document,
-    PickerIndicatorOwner& picker_indicator_owner) {
-  PickerIndicatorElement* element =
-      new PickerIndicatorElement(document, picker_indicator_owner);
-  element->SetShadowPseudoId(AtomicString("-webkit-calendar-picker-indicator"));
-  element->setAttribute(idAttr, ShadowElementNames::PickerIndicator());
-  return element;
+      picker_indicator_owner_(&picker_indicator_owner) {
+  SetShadowPseudoId(AtomicString("-webkit-calendar-picker-indicator"));
+  setAttribute(kIdAttr, shadow_element_names::PickerIndicator());
 }
 
 PickerIndicatorElement::~PickerIndicatorElement() {
   DCHECK(!chooser_);
 }
 
-LayoutObject* PickerIndicatorElement::CreateLayoutObject(const ComputedStyle&) {
+LayoutObject* PickerIndicatorElement::CreateLayoutObject(
+    const ComputedStyle& style,
+    LegacyLayout legacy) {
+  if (RuntimeEnabledFeatures::FormControlsRefreshEnabled())
+    return HTMLDivElement::CreateLayoutObject(style, legacy);
+
   return new LayoutDetailsMarker(this);
 }
 
@@ -75,10 +74,10 @@ void PickerIndicatorElement::DefaultEventHandler(Event& event) {
       picker_indicator_owner_->IsPickerIndicatorOwnerDisabledOrReadOnly())
     return;
 
-  if (event.type() == EventTypeNames::click) {
+  if (event.type() == event_type_names::kClick) {
     OpenPopup();
     event.SetDefaultHandled();
-  } else if (event.type() == EventTypeNames::keypress &&
+  } else if (event.type() == event_type_names::kKeypress &&
              event.IsKeyboardEvent()) {
     int char_code = ToKeyboardEvent(event).charCode();
     if (char_code == ' ' || char_code == '\r') {
@@ -125,7 +124,7 @@ void PickerIndicatorElement::OpenPopup() {
   if (!picker_indicator_owner_->SetupDateTimeChooserParameters(parameters))
     return;
   chooser_ = GetDocument().GetPage()->GetChromeClient().OpenDateTimeChooser(
-      this, parameters);
+      GetDocument().GetFrame(), this, parameters);
 }
 
 Element& PickerIndicatorElement::OwnerElement() const {
@@ -139,9 +138,9 @@ void PickerIndicatorElement::ClosePopup() {
   chooser_->EndChooser();
 }
 
-void PickerIndicatorElement::DetachLayoutTree(const AttachContext& context) {
+void PickerIndicatorElement::DetachLayoutTree(bool performing_reattach) {
   ClosePopup();
-  HTMLDivElement::DetachLayoutTree(context);
+  HTMLDivElement::DetachLayoutTree(performing_reattach);
 }
 
 AXObject* PickerIndicatorElement::PopupRootAXObject() const {
@@ -161,20 +160,20 @@ Node::InsertionNotificationRequest PickerIndicatorElement::InsertedInto(
 void PickerIndicatorElement::DidNotifySubtreeInsertionsToDocument() {
   if (!GetDocument().ExistingAXObjectCache())
     return;
-  // Don't make this focusable if we are in layout tests in order to avoid to
-  // break existing tests.
-  // FIXME: We should have a way to disable accessibility in layout tests.
-  if (LayoutTestSupport::IsRunningLayoutTest())
+  // Don't make this focusable if we are in web tests in order to avoid
+  // breaking existing tests.
+  // FIXME: We should have a way to disable accessibility in web tests.
+  if (WebTestSupport::IsRunningWebTest())
     return;
-  setAttribute(tabindexAttr, "0");
-  setAttribute(aria_haspopupAttr, "menu");
-  setAttribute(roleAttr, "button");
-  setAttribute(aria_labelAttr,
-               AtomicString(GetLocale().QueryString(
-                   WebLocalizedString::kAXCalendarShowDatePicker)));
+  setAttribute(kTabindexAttr, "0");
+  setAttribute(kAriaHaspopupAttr, "menu");
+  setAttribute(kRoleAttr, "button");
+  setAttribute(
+      kAriaLabelAttr,
+      AtomicString(GetLocale().QueryString(IDS_AX_CALENDAR_SHOW_DATE_PICKER)));
 }
 
-void PickerIndicatorElement::Trace(blink::Visitor* visitor) {
+void PickerIndicatorElement::Trace(Visitor* visitor) {
   visitor->Trace(picker_indicator_owner_);
   visitor->Trace(chooser_);
   HTMLDivElement::Trace(visitor);

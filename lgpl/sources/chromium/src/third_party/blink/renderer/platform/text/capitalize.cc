@@ -32,8 +32,7 @@ String Capitalize(const String& string, UChar previous_character) {
       string_with_previous[i] = input[i - 1];
   }
 
-  TextBreakIterator* boundary =
-      WordBreakIterator(string_with_previous.Characters(), length + 1);
+  TextBreakIterator* boundary = WordBreakIterator(string_with_previous.Span());
   if (!boundary)
     return string;
 
@@ -48,7 +47,7 @@ String Capitalize(const String& string, UChar previous_character) {
       result.Append(
           input[start_of_word - 1] == kNoBreakSpaceCharacter
               ? kNoBreakSpaceCharacter
-              : WTF::Unicode::ToTitleCase(string_with_previous[start_of_word]));
+              : WTF::unicode::ToTitleCase(string_with_previous[start_of_word]));
     }
     for (int i = start_of_word + 1; i < end_of_word; i++)
       result.Append(input[i - 1]);

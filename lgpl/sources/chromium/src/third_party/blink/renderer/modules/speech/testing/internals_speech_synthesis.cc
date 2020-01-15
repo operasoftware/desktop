@@ -35,7 +35,7 @@
 #include "third_party/blink/renderer/core/testing/internals.h"
 #include "third_party/blink/renderer/modules/speech/dom_window_speech_synthesis.h"
 #include "third_party/blink/renderer/modules/speech/speech_synthesis.h"
-#include "third_party/blink/renderer/modules/speech/testing/platform_speech_synthesizer_mock.h"
+#include "third_party/blink/renderer/modules/speech/testing/mojom_speech_synthesis_mock.h"
 
 namespace blink {
 
@@ -48,15 +48,14 @@ void InternalsSpeechSynthesis::enableMockSpeechSynthesizer(
   // and the Window interface is accessible cross origin. The long-term fix is
   // to make the Internals object per-context, so |window| doesn't need to
   // passed as an argument.
-  if (!window->IsLocalDOMWindow())
-    return;
-  SpeechSynthesis* synthesis = DOMWindowSpeechSynthesis::speechSynthesis(
-      script_state, ToLocalDOMWindow(*window));
-  if (!synthesis)
+  auto* local_window = DynamicTo<LocalDOMWindow>(window);
+  if (!local_window)
     return;
 
-  synthesis->SetPlatformSynthesizer(PlatformSpeechSynthesizerMock::Create(
-      synthesis, ExecutionContext::From(script_state)));
+  ExecutionContext* context = ExecutionContext::From(script_state);
+  DOMWindowSpeechSynthesis::From(*local_window)
+      .SetSpeechSynthesisForTesting(SpeechSynthesis::CreateForTesting(
+          context, MojomSpeechSynthesisMock::Create(context)));
 }
 
 }  // namespace blink

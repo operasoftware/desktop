@@ -31,6 +31,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_TRACK_TEXT_TRACK_CONTAINER_H_
 
 #include "third_party/blink/renderer/core/html/html_div_element.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -38,7 +39,11 @@ class HTMLMediaElement;
 
 class TextTrackContainer final : public HTMLDivElement {
  public:
-  static TextTrackContainer* Create(HTMLMediaElement&);
+  TextTrackContainer(HTMLMediaElement&);
+
+  // Node override.
+  Node::InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
 
   // Runs the "rules for updating the text track rendering". The
   // ExposingControls enum is used in the WebVTT processing model to reset the
@@ -50,21 +55,25 @@ class TextTrackContainer final : public HTMLDivElement {
   void UpdateDisplay(HTMLMediaElement&, ExposingControls);
   void UpdateDefaultFontSize(LayoutObject*);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  TextTrackContainer(Document&);
-
   bool IsTextTrackContainer() const override { return true; }
   void ObserveSizeChanges(Element&);
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 
+  Member<HTMLMediaElement> media_element_;
   Member<ResizeObserver> video_size_observer_;
   float default_font_size_;
 };
 
-DEFINE_ELEMENT_TYPE_CASTS(TextTrackContainer, IsTextTrackContainer());
+template <>
+struct DowncastTraits<TextTrackContainer> {
+  static bool AllowFrom(const Node& node) {
+    return node.IsTextTrackContainer();
+  }
+};
 
 }  // namespace blink
 

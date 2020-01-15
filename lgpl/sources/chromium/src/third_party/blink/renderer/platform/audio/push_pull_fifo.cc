@@ -4,10 +4,12 @@
 
 #include "third_party/blink/renderer/platform/audio/push_pull_fifo.h"
 
+#include <algorithm>
 #include <memory>
+
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 
 namespace blink {
@@ -63,7 +65,7 @@ void PushPullFIFO::Push(const AudioBus* input_bus) {
   MutexLocker locker(lock_);
 
   CHECK(input_bus);
-  CHECK_EQ(input_bus->length(), AudioUtilities::kRenderQuantumFrames);
+  CHECK_EQ(input_bus->length(), audio_utilities::kRenderQuantumFrames);
   SECURITY_CHECK(input_bus->length() <= fifo_length_);
   SECURITY_CHECK(index_write_ < fifo_length_);
 
@@ -207,7 +209,8 @@ size_t PushPullFIFO::Pull(AudioBus* output_bus, size_t frames_requested) {
       : 0;
 }
 
-const PushPullFIFOStateForTest PushPullFIFO::GetStateForTest() const {
+const PushPullFIFOStateForTest PushPullFIFO::GetStateForTest() {
+  MutexLocker locker(lock_);
   return {length(),     NumberOfChannels(), frames_available_, index_read_,
           index_write_, overflow_count_,    underflow_count_};
 }

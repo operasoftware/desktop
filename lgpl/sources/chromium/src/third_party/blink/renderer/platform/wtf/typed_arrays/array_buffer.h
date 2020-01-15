@@ -28,6 +28,7 @@
 
 #include "base/allocator/partition_allocator/oom.h"
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
@@ -40,12 +41,14 @@ class ArrayBuffer;
 class ArrayBufferView;
 
 class WTF_EXPORT ArrayBuffer : public RefCounted<ArrayBuffer> {
+  USING_FAST_MALLOC(ArrayBuffer);
+
  public:
   static inline scoped_refptr<ArrayBuffer> Create(unsigned num_elements,
                                                   unsigned element_byte_size);
   static inline scoped_refptr<ArrayBuffer> Create(ArrayBuffer*);
   static inline scoped_refptr<ArrayBuffer> Create(const void* source,
-                                                  unsigned byte_length);
+                                                  size_t byte_length);
   static inline scoped_refptr<ArrayBuffer> Create(ArrayBufferContents&);
 
   static inline scoped_refptr<ArrayBuffer> CreateOrNull(
@@ -73,15 +76,16 @@ class WTF_EXPORT ArrayBuffer : public RefCounted<ArrayBuffer> {
 
   // Creates a new ArrayBuffer object with copy of bytes in this object
   // ranging from |begin| up to but not including |end|.
-  inline scoped_refptr<ArrayBuffer> Slice(int begin, int end) const;
-  inline scoped_refptr<ArrayBuffer> Slice(int begin) const;
+  inline scoped_refptr<ArrayBuffer> Slice(unsigned begin, unsigned end) const;
 
   void AddView(ArrayBufferView*);
   void RemoveView(ArrayBufferView*);
 
   bool Transfer(ArrayBufferContents&);
   bool ShareContentsWith(ArrayBufferContents&);
-  bool IsNeutered() const { return is_neutered_; }
+  // Documentation see DOMArrayBuffer.
+  bool ShareNonSharedForInternalUse(ArrayBufferContents&);
+  bool IsDetached() const { return is_detached_; }
   bool IsShared() const { return contents_.IsShared(); }
 
   ~ArrayBuffer() = default;
@@ -103,24 +107,12 @@ class WTF_EXPORT ArrayBuffer : public RefCounted<ArrayBuffer> {
       unsigned element_byte_size,
       ArrayBufferContents::InitializationPolicy);
 
-  inline scoped_refptr<ArrayBuffer> SliceImpl(unsigned begin,
-                                              unsigned end) const;
-  inline unsigned ClampIndex(int index) const;
-  static inline int ClampValue(int x, int left, int right);
+  inline unsigned ClampIndex(unsigned index) const;
 
   ArrayBufferContents contents_;
   ArrayBufferView* first_view_;
-  bool is_neutered_;
+  bool is_detached_;
 };
-
-int ArrayBuffer::ClampValue(int x, int left, int right) {
-  DCHECK_LE(left, right);
-  if (x < left)
-    x = left;
-  if (right < x)
-    x = right;
-  return x;
-}
 
 scoped_refptr<ArrayBuffer> ArrayBuffer::Create(unsigned num_elements,
                                                unsigned element_byte_size) {
@@ -136,7 +128,7 @@ scoped_refptr<ArrayBuffer> ArrayBuffer::Create(ArrayBuffer* other) {
 }
 
 scoped_refptr<ArrayBuffer> ArrayBuffer::Create(const void* source,
-                                               unsigned byte_length) {
+                                               size_t byte_length) {
   ArrayBufferContents contents(byte_length, 1, ArrayBufferContents::kNotShared,
                                ArrayBufferContents::kDontInitialize);
   if (UNLIKELY(!contents.Data()))
@@ -215,7 +207,7 @@ scoped_refptr<ArrayBuffer> ArrayBuffer::CreateShared(
 }
 
 ArrayBuffer::ArrayBuffer(ArrayBufferContents& contents)
-    : first_view_(nullptr), is_neutered_(false) {
+    : first_view_(nullptr), is_detached_(false) {
   if (contents.IsShared())
     contents.ShareWith(contents_);
   else
@@ -247,28 +239,22 @@ const void* ArrayBuffer::DataMaybeShared() const {
 }
 
 unsigned ArrayBuffer::ByteLength() const {
-  return contents_.DataLength();
+  // TODO(dtapuska): Revisit this cast. ArrayBufferContents
+  // uses size_t for storing data. Whereas ArrayBuffer IDL is
+  // only uint32_t based.
+  return static_cast<unsigned>(contents_.DataLength());
 }
 
-scoped_refptr<ArrayBuffer> ArrayBuffer::Slice(int begin, int end) const {
-  return SliceImpl(ClampIndex(begin), ClampIndex(end));
-}
-
-scoped_refptr<ArrayBuffer> ArrayBuffer::Slice(int begin) const {
-  return SliceImpl(ClampIndex(begin), ByteLength());
-}
-
-scoped_refptr<ArrayBuffer> ArrayBuffer::SliceImpl(unsigned begin,
-                                                  unsigned end) const {
-  unsigned size = begin <= end ? end - begin : 0;
+scoped_refptr<ArrayBuffer> ArrayBuffer::Slice(unsigned begin,
+                                              unsigned end) const {
+  begin = ClampIndex(begin);
+  end = ClampIndex(end);
+  size_t size = static_cast<size_t>(begin <= end ? end - begin : 0);
   return ArrayBuffer::Create(static_cast<const char*>(Data()) + begin, size);
 }
 
-unsigned ArrayBuffer::ClampIndex(int index) const {
-  unsigned current_length = ByteLength();
-  if (index < 0)
-    index = current_length + index;
-  return ClampValue(index, 0, current_length);
+unsigned ArrayBuffer::ClampIndex(unsigned index) const {
+  return index < ByteLength() ? index : ByteLength();
 }
 
 }  // namespace WTF

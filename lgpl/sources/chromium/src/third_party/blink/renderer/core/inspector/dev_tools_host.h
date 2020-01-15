@@ -46,12 +46,9 @@ class CORE_EXPORT DevToolsHost final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static DevToolsHost* Create(InspectorFrontendClient* client,
-                              LocalFrame* frontend_frame) {
-    return new DevToolsHost(client, frontend_frame);
-  }
-
+  DevToolsHost(InspectorFrontendClient*, LocalFrame* frontend_frame);
   ~DevToolsHost() override;
+
   void Trace(blink::Visitor*) override;
   void DisconnectClient();
 
@@ -67,11 +64,6 @@ class CORE_EXPORT DevToolsHost final : public ScriptWrappable {
                        WebVector<WebMenuItemInfo> items);
   void sendMessageToEmbedder(const String& message);
 
-  String getSelectionBackgroundColor();
-  String getSelectionForegroundColor();
-  String getInactiveSelectionBackgroundColor();
-  String getInactiveSelectionForegroundColor();
-
   bool isHostedMode();
 
   LocalFrame* FrontendFrame() { return frontend_frame_; }
@@ -85,7 +77,6 @@ class CORE_EXPORT DevToolsHost final : public ScriptWrappable {
  private:
   friend class FrontendMenuProvider;
 
-  DevToolsHost(InspectorFrontendClient*, LocalFrame* frontend_frame);
   void EvaluateScript(const String&);
 
   Member<InspectorFrontendClient> client_;

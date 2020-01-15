@@ -33,7 +33,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_EDITING_STYLE_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -74,31 +74,15 @@ class CORE_EXPORT EditingStyle final : public GarbageCollected<EditingStyle> {
     kExtractMatchingStyle,
     kDoNotExtractMatchingStyle
   };
-  static float no_font_delta_;
+  static constexpr float kNoFontDelta = 0.0f;
 
-  static EditingStyle* Create() { return new EditingStyle(); }
-
-  static EditingStyle* Create(ContainerNode* node,
-                              PropertiesToInclude properties_to_include =
-                                  kOnlyEditingInheritableProperties) {
-    return new EditingStyle(node, properties_to_include);
-  }
-
-  static EditingStyle* Create(const Position& position,
-                              PropertiesToInclude properties_to_include =
-                                  kOnlyEditingInheritableProperties) {
-    return new EditingStyle(position, properties_to_include);
-  }
-
-  static EditingStyle* Create(const CSSPropertyValueSet* style) {
-    return new EditingStyle(style);
-  }
-
-  static EditingStyle* Create(CSSPropertyID property_id,
-                              const String& value,
-                              SecureContextMode secure_context_mode) {
-    return new EditingStyle(property_id, value, secure_context_mode);
-  }
+  EditingStyle() = default;
+  EditingStyle(ContainerNode*,
+               PropertiesToInclude = kOnlyEditingInheritableProperties);
+  EditingStyle(const Position&,
+               PropertiesToInclude = kOnlyEditingInheritableProperties);
+  explicit EditingStyle(const CSSPropertyValueSet*);
+  EditingStyle(CSSPropertyID, const String& value, SecureContextMode);
 
   MutableCSSPropertyValueSet* Style() { return mutable_style_.Get(); }
   bool GetTextDirection(WritingDirection&) const;
@@ -163,24 +147,19 @@ class CORE_EXPORT EditingStyle final : public GarbageCollected<EditingStyle> {
   int LegacyFontSize(Document*) const;
 
   float FontSizeDelta() const { return font_size_delta_; }
-  bool HasFontSizeDelta() const { return font_size_delta_ != no_font_delta_; }
+  bool HasFontSizeDelta() const { return font_size_delta_ != kNoFontDelta; }
 
   void SetProperty(CSSPropertyID,
                    const String& value,
                    bool important,
                    SecureContextMode);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
   static EditingTriState SelectionHasStyle(const LocalFrame&,
                                            CSSPropertyID,
                                            const String& value);
 
  private:
-  EditingStyle() = default;
-  EditingStyle(ContainerNode*, PropertiesToInclude);
-  EditingStyle(const Position&, PropertiesToInclude);
-  explicit EditingStyle(const CSSPropertyValueSet*);
-  EditingStyle(CSSPropertyID, const String& value, SecureContextMode);
   void Init(Node*, PropertiesToInclude);
   void RemoveInheritedColorsIfNeeded(const ComputedStyle*);
   void ReplaceFontSizeByKeywordIfPossible(const ComputedStyle*,
@@ -198,7 +177,7 @@ class CORE_EXPORT EditingStyle final : public GarbageCollected<EditingStyle> {
 
   Member<MutableCSSPropertyValueSet> mutable_style_;
   bool is_monospace_font_ = false;
-  float font_size_delta_ = no_font_delta_;
+  float font_size_delta_ = kNoFontDelta;
   bool is_vertical_align_ = false;
 
   friend class HTMLElementEquivalent;

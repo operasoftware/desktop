@@ -29,7 +29,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_COMPUTED_STYLE_CONSTANTS_H_
 
 #include <cstddef>
-#include "third_party/blink/renderer/core/computed_style_base_constants.h"
+#include "third_party/blink/renderer/core/style/computed_style_base_constants.h"
 
 namespace blink {
 
@@ -48,17 +48,6 @@ inline bool EnumHasFlags(Enum v, Enum mask) {
 // Sides used when drawing borders and outlines. The values should run clockwise
 // from top.
 enum class BoxSide : unsigned { kTop, kRight, kBottom, kLeft };
-
-// See core/style/stylerecalc.md for an explanation on what each state means
-enum StyleRecalcChange {
-  kNoChange,
-  kNoInherit,
-  kUpdatePseudoElements,
-  kIndependentInherit,
-  kInherit,
-  kForce,
-  kReattach
-};
 
 // Static pseudo styles. Dynamic ones are produced on the fly.
 enum PseudoId {
@@ -181,9 +170,8 @@ enum Containment {
   kContainsStyle = 0x2,
   kContainsPaint = 0x4,
   kContainsSize = 0x8,
-  kContainsStrict =
-      kContainsLayout | kContainsStyle | kContainsPaint | kContainsSize,
-  kContainsContent = kContainsLayout | kContainsStyle | kContainsPaint,
+  kContainsStrict = kContainsLayout | kContainsPaint | kContainsSize,
+  kContainsContent = kContainsLayout | kContainsPaint,
 };
 inline Containment operator|(Containment a, Containment b) {
   return Containment(int(a) | int(b));

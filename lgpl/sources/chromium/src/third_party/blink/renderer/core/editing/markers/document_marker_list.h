@@ -19,7 +19,7 @@ class DocumentMarker;
 // MarkerTypes with different insertion/retrieval patterns, or to provide
 // different behavior for certain MarkerTypes).
 class CORE_EXPORT DocumentMarkerList
-    : public GarbageCollectedFinalized<DocumentMarkerList> {
+    : public GarbageCollected<DocumentMarkerList> {
  public:
   virtual ~DocumentMarkerList();
 
@@ -61,7 +61,7 @@ class CORE_EXPORT DocumentMarkerList
                             unsigned old_length,
                             unsigned new_length) = 0;
 
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) {}
 
  protected:
   DocumentMarkerList();

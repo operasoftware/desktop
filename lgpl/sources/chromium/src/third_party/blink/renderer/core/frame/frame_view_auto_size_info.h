@@ -9,7 +9,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -18,9 +18,7 @@ class LocalFrameView;
 class FrameViewAutoSizeInfo final
     : public GarbageCollected<FrameViewAutoSizeInfo> {
  public:
-  static FrameViewAutoSizeInfo* Create(LocalFrameView* frame_view) {
-    return new FrameViewAutoSizeInfo(frame_view);
-  }
+  explicit FrameViewAutoSizeInfo(LocalFrameView*);
 
   void ConfigureAutoSizeMode(const IntSize& min_size, const IntSize& max_size);
   void AutoSizeIfNeeded();
@@ -28,8 +26,6 @@ class FrameViewAutoSizeInfo final
   void Trace(blink::Visitor*);
 
  private:
-  explicit FrameViewAutoSizeInfo(LocalFrameView*);
-
   Member<LocalFrameView> frame_view_;
 
   // The lower bound on the size when autosizing.

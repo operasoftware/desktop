@@ -11,18 +11,14 @@
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
-#include "third_party/blink/renderer/platform/layout_test_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/web_test_support.h"
 
 namespace blink {
 
-SimTest::SimTest()
-    : web_frame_client_(*this),
-      // SimCompositor overrides the LayerTreeViewDelegate to respond to
-      // BeginMainFrame(), which will update and paint the WebViewImpl given to
-      // SetWebView().
-      web_view_client_(&compositor_) {
+SimTest::SimTest() {
   Document::SetThreadedParsingEnabledForTesting(false);
   // Use the mock theme to get more predictable code paths, this also avoids
   // the OS callbacks in ScrollAnimatorMac which can schedule frames
@@ -30,7 +26,7 @@ SimTest::SimTest()
   // updateScrollerStyleForNewRecommendedScrollerStyle which then does
   // FrameView::scrollbarStyleChanged and will adjust the scrollbar existence
   // in the middle of a test.
-  LayoutTestSupport::SetMockThemeEnabledForTest(true);
+  WebTestSupport::SetMockThemeEnabledForTest(true);
   ScrollbarTheme::SetMockScrollbarsEnabled(true);
   // Threaded animations are usually enabled for blink. However these tests use
   // synchronous compositing, which can not run threaded animations.
@@ -42,11 +38,8 @@ SimTest::SimTest()
 }
 
 SimTest::~SimTest() {
-  // Pump the message loop to process the load event.
-  test::RunPendingTasks();
-
   Document::SetThreadedParsingEnabledForTesting(true);
-  LayoutTestSupport::SetMockThemeEnabledForTest(false);
+  WebTestSupport::SetMockThemeEnabledForTest(false);
   ScrollbarTheme::SetMockScrollbarsEnabled(false);
   content::TestBlinkWebUnitTestSupport::SetThreadedAnimationEnabled(true);
   WebCache::Clear();
@@ -55,25 +48,59 @@ SimTest::~SimTest() {
 void SimTest::SetUp() {
   Test::SetUp();
 
-  web_view_helper_.Initialize(&web_frame_client_, &web_view_client_);
-  compositor_.SetWebView(WebView(), *web_view_client_.layer_tree_view());
-  page_.SetPage(WebView().GetPage());
+  // SimCompositor overrides the LayerTreeViewDelegate to respond to
+  // BeginMainFrame(), which will update and paint the main frame of the
+  // WebViewImpl given to SetWebView().
+  network_ = std::make_unique<SimNetwork>();
+  compositor_ = std::make_unique<SimCompositor>();
+  web_frame_client_ =
+      std::make_unique<frame_test_helpers::TestWebFrameClient>();
+  web_widget_client_ =
+      std::make_unique<frame_test_helpers::TestWebWidgetClient>(
+          compositor_.get());
+  web_view_client_ = std::make_unique<frame_test_helpers::TestWebViewClient>();
+  page_ = std::make_unique<SimPage>();
+  web_view_helper_ = std::make_unique<frame_test_helpers::WebViewHelper>();
+
+  web_view_helper_->Initialize(web_frame_client_.get(), web_view_client_.get(),
+                               web_widget_client_.get());
+  compositor_->SetWebView(WebView(), *web_widget_client_->layer_tree_host(),
+                          *web_view_client_, *web_widget_client_);
+  page_->SetPage(WebView().GetPage());
 }
 
-void SimTest::LoadURL(const String& url) {
-  WebURLRequest request{KURL(url)};
-  WebView().MainFrameImpl()->CommitNavigation(
-      request, WebFrameLoadType::kStandard, WebHistoryItem(), false,
-      base::UnguessableToken::Create(), nullptr /* navigation_params */,
-      nullptr /* extra_data */);
+void SimTest::TearDown() {
+  // Pump the message loop to process the load event.
+  test::RunPendingTasks();
+
+  // Shut down this stuff before settings change to keep the world
+  // consistent, and before the subclass tears down.
+  web_view_helper_.reset();
+  page_.reset();
+  web_view_client_.reset();
+  web_widget_client_.reset();
+  web_frame_client_.reset();
+  compositor_.reset();
+  network_.reset();
+}
+
+void SimTest::LoadURL(const String& url_string) {
+  KURL url(url_string);
+  frame_test_helpers::LoadFrameDontWait(WebView().MainFrameImpl(), url);
+  if (DocumentLoader::WillLoadUrlAsEmpty(url) || url.ProtocolIsData()) {
+    // Empty documents and data urls are not using mocked out SimRequests,
+    // but instead load data directly.
+    frame_test_helpers::PumpPendingRequestsForFrameToLoad(
+        WebView().MainFrameImpl());
+  }
 }
 
 LocalDOMWindow& SimTest::Window() {
   return *GetDocument().domWindow();
 }
 
-SimPage& SimTest::Page() {
-  return page_;
+SimPage& SimTest::GetPage() {
+  return *page_;
 }
 
 Document& SimTest::GetDocument() {
@@ -81,29 +108,31 @@ Document& SimTest::GetDocument() {
 }
 
 WebViewImpl& SimTest::WebView() {
-  return *web_view_helper_.GetWebView();
+  return *web_view_helper_->GetWebView();
 }
 
 WebLocalFrameImpl& SimTest::MainFrame() {
   return *WebView().MainFrameImpl();
 }
 
-const SimWebViewClient& SimTest::WebViewClient() const {
-  return web_view_client_;
+frame_test_helpers::TestWebViewClient& SimTest::WebViewClient() {
+  return *web_view_client_;
+}
+
+frame_test_helpers::TestWebWidgetClient& SimTest::WebWidgetClient() {
+  return *web_widget_client_;
+}
+
+frame_test_helpers::TestWebFrameClient& SimTest::WebFrameClient() {
+  return *web_frame_client_;
 }
 
 SimCompositor& SimTest::Compositor() {
-  return compositor_;
+  return *compositor_;
 }
 
-void SimTest::SetEffectiveConnectionTypeForTesting(
-    WebEffectiveConnectionType effective_connection_type) {
-  web_frame_client_.SetEffectiveConnectionTypeForTesting(
-      effective_connection_type);
-}
-
-void SimTest::AddConsoleMessage(const String& message) {
-  console_messages_.push_back(message);
+Vector<String>& SimTest::ConsoleMessages() {
+  return web_frame_client_->ConsoleMessages();
 }
 
 }  // namespace blink

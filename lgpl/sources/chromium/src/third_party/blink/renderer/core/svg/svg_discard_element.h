@@ -39,19 +39,18 @@ class SVGDiscardElement final : public SVGSMILElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(SVGDiscardElement);
+  explicit SVGDiscardElement(Document&);
 
   bool IsSVGDiscardElement() const override { return true; }
 
  private:
-  explicit SVGDiscardElement(Document&);
-
   void ResetAnimatedType() override {}
   void ClearAnimatedType() override {}
   void ApplyResultsToTarget() override {}
   void AnimationAttributeChanged() override {}
 
-  void StartedActiveInterval() override {}
+  bool OverwritesUnderlyingAnimationValue() const override { return false; }
+
   void UpdateAnimation(float percent,
                        unsigned repeat,
                        SVGSMILElement* result_element) override {}

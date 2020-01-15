@@ -20,23 +20,19 @@
 namespace blink {
 
 void EmbeddedContentPainter::PaintReplaced(const PaintInfo& paint_info,
-                                           const LayoutPoint& paint_offset) {
+                                           const PhysicalOffset& paint_offset) {
   EmbeddedContentView* embedded_content_view =
       layout_embedded_content_.GetEmbeddedContentView();
   if (!embedded_content_view)
     return;
 
   IntPoint paint_location(RoundedIntPoint(
-      paint_offset +
-      layout_embedded_content_.ReplacedContentRect().Location()));
+      paint_offset + layout_embedded_content_.ReplacedContentRect().offset));
 
-  // Views don't support painting with a paint offset, but instead
-  // offset themselves using the frame rect location. To paint Views at
-  // our desired location, we need to apply paint offset as a transform, with
-  // the frame rect neutralized.
   IntSize view_paint_offset =
       paint_location - embedded_content_view->FrameRect().Location();
-  CullRect adjusted_cull_rect(paint_info.GetCullRect(), -view_paint_offset);
+  CullRect adjusted_cull_rect = paint_info.GetCullRect();
+  adjusted_cull_rect.Move(-view_paint_offset);
   embedded_content_view->Paint(paint_info.context,
                                paint_info.GetGlobalPaintFlags(),
                                adjusted_cull_rect, view_paint_offset);

@@ -29,7 +29,7 @@
 #include "cc/base/region.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace cc {
@@ -71,7 +71,7 @@ class PLATFORM_EXPORT Region {
   // Returns true if the query region intersects any part of this region.
   bool Intersects(const Region&) const;
 
-  double Area() const;
+  uint64_t Area() const;
 
 #ifndef NDEBUG
   void Dump() const;

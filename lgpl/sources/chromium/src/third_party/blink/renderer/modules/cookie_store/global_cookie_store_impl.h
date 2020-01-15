@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/cookie_store/cookie_store.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
@@ -27,11 +28,14 @@ class GlobalCookieStoreImpl final
     GlobalCookieStoreImpl* supplement =
         Supplement<T>::template From<GlobalCookieStoreImpl>(supplementable);
     if (!supplement) {
-      supplement = new GlobalCookieStoreImpl(supplementable);
+      supplement = MakeGarbageCollected<GlobalCookieStoreImpl>(supplementable);
       Supplement<T>::ProvideTo(supplementable, supplement);
     }
     return *supplement;
   }
+
+  explicit GlobalCookieStoreImpl(T& supplementable)
+      : Supplement<T>(supplementable) {}
 
   CookieStore* GetCookieStore(T& scope) {
     if (!cookie_store_) {
@@ -55,9 +59,6 @@ class GlobalCookieStoreImpl final
   }
 
  private:
-  explicit GlobalCookieStoreImpl(T& supplementable)
-      : Supplement<T>(supplementable) {}
-
   Member<CookieStore> cookie_store_;
 };
 

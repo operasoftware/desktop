@@ -25,14 +25,18 @@ class CORE_EXPORT ThreadedWorkletMessagingProxy
   // WorkletGlobalScopeProxy implementation.
   void FetchAndInvokeScript(
       const KURL& module_url_record,
-      network::mojom::FetchCredentialsMode,
-      FetchClientSettingsObjectSnapshot* outside_settings_object,
+      network::mojom::CredentialsMode,
+      const FetchClientSettingsObjectSnapshot& outside_settings_object,
+      WorkerResourceTimingNotifier& outside_resource_timing_notifier,
       scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner,
       WorkletPendingTasks*) final;
   void WorkletObjectDestroyed() final;
   void TerminateWorkletGlobalScope() final;
 
-  void Initialize(WorkerClients*, WorkletModuleResponsesMap*);
+  void Initialize(
+      WorkerClients*,
+      WorkletModuleResponsesMap*,
+      const base::Optional<WorkerBackingThreadStartupData>& = base::nullopt);
 
   void Trace(blink::Visitor*) override;
 

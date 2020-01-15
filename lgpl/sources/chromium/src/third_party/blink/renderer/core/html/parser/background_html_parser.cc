@@ -32,15 +32,12 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/html/parser/html_document_parser.h"
 #include "third_party/blink/renderer/core/html/parser/text_resource_decoder.h"
-#include "third_party/blink/renderer/core/html/parser/xss_auditor.h"
 #include "third_party/blink/renderer/core/html_names.h"
-#include "third_party/blink/renderer/platform/cross_thread_functional.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
-#include "third_party/blink/renderer/platform/web_task_runner.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_position.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -66,8 +63,6 @@ static const size_t kPendingTokenLimit = 1000;
 static_assert(kOutstandingTokenLimit > kPendingTokenLimit,
               "Outstanding token limit is applied after pending token limit.");
 
-using namespace HTMLNames;
-
 base::WeakPtr<BackgroundHTMLParser> BackgroundHTMLParser::Create(
     std::unique_ptr<Configuration> config,
     scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner) {
@@ -79,11 +74,14 @@ base::WeakPtr<BackgroundHTMLParser> BackgroundHTMLParser::Create(
 void BackgroundHTMLParser::Init(
     const KURL& document_url,
     std::unique_ptr<CachedDocumentParameters> cached_document_parameters,
-    const MediaValuesCached::MediaValuesCachedData& media_values_cached_data) {
+    const MediaValuesCached::MediaValuesCachedData& media_values_cached_data,
+    bool priority_hints_origin_trial_enabled) {
+  TRACE_EVENT1("loading", "BackgroundHTMLParser::Init", "url",
+               document_url.GetString().Utf8());
   preload_scanner_.reset(new TokenPreloadScanner(
       document_url, std::move(cached_document_parameters),
-      media_values_cached_data,
-      TokenPreloadScanner::ScannerType::kMainDocument));
+      media_values_cached_data, TokenPreloadScanner::ScannerType::kMainDocument,
+      priority_hints_origin_trial_enabled));
 }
 
 BackgroundHTMLParser::Configuration::Configuration() {}
@@ -92,23 +90,21 @@ BackgroundHTMLParser::BackgroundHTMLParser(
     std::unique_ptr<Configuration> config,
     scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner)
     : token_(std::make_unique<HTMLToken>()),
-      tokenizer_(HTMLTokenizer::Create(config->options)),
+      tokenizer_(std::make_unique<HTMLTokenizer>(config->options)),
       tree_builder_simulator_(config->options),
       options_(config->options),
       parser_(config->parser),
-      xss_auditor_(std::move(config->xss_auditor)),
       decoder_(std::move(config->decoder)),
       loading_task_runner_(std::move(loading_task_runner)),
       pending_csp_meta_token_index_(
           HTMLDocumentParser::TokenizedChunk::kNoPendingToken),
-      starting_script_(false),
-      weak_factory_(this) {
-}
+      starting_script_(false) {}
 
 BackgroundHTMLParser::~BackgroundHTMLParser() = default;
 
 void BackgroundHTMLParser::AppendRawBytesFromMainThread(
     std::unique_ptr<Vector<char>> buffer) {
+  TRACE_EVENT0("loading", "BackgroundHTMLParser::AppendRawBytesFromMainThread");
   DCHECK(decoder_);
   UpdateDocument(decoder_->Decode(buffer->data(), buffer->size()));
 }
@@ -132,15 +128,11 @@ void BackgroundHTMLParser::Flush() {
 
 void BackgroundHTMLParser::UpdateDocument(const String& decoded_data) {
   DocumentEncodingData encoding_data(*decoder_.get());
-
   if (encoding_data != last_seen_encoding_data_) {
     last_seen_encoding_data_ = encoding_data;
-
-    xss_auditor_->SetEncoding(encoding_data.Encoding());
     if (parser_)
       parser_->DidReceiveEncodingDataFromBackgroundParser(encoding_data);
   }
-
   if (decoded_data.IsEmpty())
     return;
 
@@ -198,31 +190,12 @@ void BackgroundHTMLParser::PumpTokenizer() {
   if (input_.TotalCheckpointTokenCount() > kOutstandingTokenLimit)
     return;
 
-  while (true) {
-    if (xss_auditor_->IsEnabled())
-      source_tracker_.Start(input_.Current(), tokenizer_.get(), *token_);
-
-    if (!tokenizer_->NextToken(input_.Current(), *token_)) {
-      // We've reached the end of our current input.
-      break;
-    }
-
-    if (xss_auditor_->IsEnabled())
-      source_tracker_.end(input_.Current(), tokenizer_.get(), *token_);
-
+  while (tokenizer_->NextToken(input_.Current(), *token_)) {
     {
       TextPosition position = TextPosition(input_.Current().CurrentLine(),
                                            input_.Current().CurrentColumn());
 
-      if (std::unique_ptr<XSSInfo> xss_info =
-              xss_auditor_->FilterToken(FilterTokenRequest(
-                  *token_, source_tracker_, tokenizer_->ShouldAllowCDATA()))) {
-        xss_info->text_position_ = position;
-        pending_xss_infos_.push_back(std::move(xss_info));
-      }
-
       CompactHTMLToken token(token_.get(), position);
-
       bool is_csp_meta_tag = false;
       preload_scanner_->Scan(token, input_.Current(), pending_preloads_,
                              &viewport_description_, &is_csp_meta_tag);
@@ -249,6 +222,7 @@ void BackgroundHTMLParser::PumpTokenizer() {
     if (simulated_token == HTMLTreeBuilderSimulator::kScriptEnd ||
         simulated_token == HTMLTreeBuilderSimulator::kStyleEnd ||
         simulated_token == HTMLTreeBuilderSimulator::kLink ||
+        simulated_token == HTMLTreeBuilderSimulator::kCustomElementBegin ||
         pending_tokens_.size() >= kPendingTokenLimit) {
       EnqueueTokenizedChunk();
 
@@ -272,9 +246,8 @@ void BackgroundHTMLParser::EnqueueTokenizedChunk() {
                          chunk.get(), TRACE_EVENT_FLAG_FLOW_OUT);
 
   chunk->preloads.swap(pending_preloads_);
-  if (viewport_description_.set)
+  if (viewport_description_.has_value())
     chunk->viewport = viewport_description_;
-  chunk->xss_infos.swap(pending_xss_infos_);
   chunk->tokenizer_state = tokenizer_->GetState();
   chunk->tree_builder_state = tree_builder_simulator_.GetState();
   chunk->input_checkpoint = input_.CreateCheckpoint(pending_tokens_.size());

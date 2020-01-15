@@ -39,7 +39,7 @@ class RTCStatsResponse final : public RTCStatsResponseBase {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static RTCStatsResponse* Create();
+  RTCStatsResponse();
 
   const HeapVector<Member<RTCLegacyStatsReport>>& result() const {
     return result_;
@@ -51,8 +51,6 @@ class RTCStatsResponse final : public RTCStatsResponseBase {
   void Trace(blink::Visitor*) override;
 
  private:
-  RTCStatsResponse();
-
   HeapVector<Member<RTCLegacyStatsReport>> result_;
   HashMap<String, int> idmap_;
 };

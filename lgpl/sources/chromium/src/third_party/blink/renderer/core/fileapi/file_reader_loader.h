@@ -34,7 +34,7 @@
 #include <memory>
 
 #include "base/memory/weak_ptr.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "third_party/blink/public/mojom/blob/blob.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/fileapi/file_error.h"
@@ -43,7 +43,8 @@
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "third_party/blink/renderer/platform/wtf/typed_arrays/array_buffer_builder.h"
+#include "third_party/blink/renderer/platform/wtf/typed_arrays/array_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/typed_arrays/array_buffer_contents.h"
 
 namespace blink {
 
@@ -75,9 +76,9 @@ class CORE_EXPORT FileReaderLoader : public mojom::blink::BlobReaderClient {
 
   // If client is given, do the loading asynchronously. Otherwise, load
   // synchronously.
-  static std::unique_ptr<FileReaderLoader> Create(ReadType,
-                                                  FileReaderLoaderClient*);
-  FileReaderLoader(ReadType, FileReaderLoaderClient*);
+  FileReaderLoader(ReadType,
+                   FileReaderLoaderClient*,
+                   scoped_refptr<base::SingleThreadTaskRunner>);
   ~FileReaderLoader() override;
 
   void Start(scoped_refptr<BlobDataHandle>);
@@ -85,6 +86,7 @@ class CORE_EXPORT FileReaderLoader : public mojom::blink::BlobReaderClient {
 
   DOMArrayBuffer* ArrayBufferResult();
   String StringResult();
+  WTF::ArrayBufferContents::DataHandle TakeDataHandle();
 
   // Returns the total bytes received. Bytes ignored by m_rawData won't be
   // counted.
@@ -97,7 +99,7 @@ class CORE_EXPORT FileReaderLoader : public mojom::blink::BlobReaderClient {
   // After OnCalculatedSize() is called: Returns the size of the resource.
   base::Optional<uint64_t> TotalBytes() const { return total_bytes_; }
 
-  FileError::ErrorCode GetErrorCode() const { return error_code_; }
+  FileErrorCode GetErrorCode() const { return error_code_; }
 
   int32_t GetNetError() const { return net_error_; }
 
@@ -128,7 +130,7 @@ class CORE_EXPORT FileReaderLoader : public mojom::blink::BlobReaderClient {
   };
 
   void Cleanup();
-  void Failed(FileError::ErrorCode, FailureType type);
+  void Failed(FileErrorCode, FailureType type);
 
   void OnStartLoading(uint64_t total_bytes);
   void OnReceivedData(const char* data, unsigned data_length);
@@ -154,7 +156,7 @@ class CORE_EXPORT FileReaderLoader : public mojom::blink::BlobReaderClient {
   WTF::TextEncoding encoding_;
   String data_type_;
 
-  std::unique_ptr<ArrayBufferBuilder> raw_data_;
+  WTF::ArrayBufferContents::DataHandle raw_data_;
   bool is_raw_data_converted_ = false;
 
   Persistent<DOMArrayBuffer> array_buffer_result_;
@@ -172,18 +174,20 @@ class CORE_EXPORT FileReaderLoader : public mojom::blink::BlobReaderClient {
   int64_t memory_usage_reported_to_v8_ = 0;
 
   int32_t net_error_ = 0;  // net::OK
-  FileError::ErrorCode error_code_ = FileError::kOK;
+  FileErrorCode error_code_ = FileErrorCode::kOK;
 
   mojo::ScopedDataPipeConsumerHandle consumer_handle_;
   mojo::SimpleWatcher handle_watcher_;
-  mojo::Binding<mojom::blink::BlobReaderClient> binding_;
+  mojo::Receiver<mojom::blink::BlobReaderClient> receiver_{this};
   bool received_all_data_ = false;
   bool received_on_complete_ = false;
 #if DCHECK_IS_ON()
   bool started_loading_ = false;
 #endif  // DCHECK_IS_ON()
 
-  base::WeakPtrFactory<FileReaderLoader> weak_factory_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+
+  base::WeakPtrFactory<FileReaderLoader> weak_factory_{this};
 };
 
 }  // namespace blink

@@ -33,32 +33,34 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_session_description_init.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
 RTCSessionDescription* RTCSessionDescription::Create(
     ExecutionContext* context,
-    const RTCSessionDescriptionInit& description_init_dict) {
+    const RTCSessionDescriptionInit* description_init_dict) {
   String type;
-  if (description_init_dict.hasType())
-    type = description_init_dict.type();
+  if (description_init_dict->hasType())
+    type = description_init_dict->type();
   else
     UseCounter::Count(context, WebFeature::kRTCSessionDescriptionInitNoType);
 
   String sdp;
-  if (description_init_dict.hasSdp())
-    sdp = description_init_dict.sdp();
+  if (description_init_dict->hasSdp())
+    sdp = description_init_dict->sdp();
   else
     UseCounter::Count(context, WebFeature::kRTCSessionDescriptionInitNoSdp);
 
-  return new RTCSessionDescription(WebRTCSessionDescription(type, sdp));
+  return MakeGarbageCollected<RTCSessionDescription>(
+      WebRTCSessionDescription(type, sdp));
 }
 
 RTCSessionDescription* RTCSessionDescription::Create(
     WebRTCSessionDescription web_session_description) {
-  return new RTCSessionDescription(web_session_description);
+  return MakeGarbageCollected<RTCSessionDescription>(web_session_description);
 }
 
 RTCSessionDescription::RTCSessionDescription(

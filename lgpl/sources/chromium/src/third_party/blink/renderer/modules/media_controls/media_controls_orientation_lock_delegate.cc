@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "build/build_config.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_screen_info.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
@@ -20,14 +21,12 @@
 #include "third_party/blink/renderer/modules/screen_orientation/screen_orientation.h"
 #include "third_party/blink/renderer/modules/screen_orientation/screen_screen_orientation.h"
 #include "third_party/blink/renderer/modules/screen_orientation/web_lock_orientation_callback.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 #if defined(OS_ANDROID)
-#include "services/device/public/mojom/constants.mojom-blink.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/mojo/mojo_helper.h"
 #endif  // defined(OS_ANDROID)
@@ -50,29 +49,12 @@ enum class MetadataAvailabilityMetrics {
   kMax = 3
 };
 
-// These values are used for histograms. Do not reorder.
-enum class LockResultMetrics {
-  kAlreadyLocked = 0,  // Frame already has a lock.
-  kPortrait = 1,       // Locked to portrait.
-  kLandscape = 2,      // Locked to landscape.
-
-  // Keep at the end.
-  kMax = 3
-};
-
 void RecordMetadataAvailability(MetadataAvailabilityMetrics metrics) {
   DEFINE_STATIC_LOCAL(
       EnumerationHistogram, metadata_histogram,
       ("Media.Video.FullscreenOrientationLock.MetadataAvailability",
        static_cast<int>(MetadataAvailabilityMetrics::kMax)));
   metadata_histogram.Count(static_cast<int>(metrics));
-}
-
-void RecordLockResult(LockResultMetrics metrics) {
-  DEFINE_STATIC_LOCAL(EnumerationHistogram, lock_result_histogram,
-                      ("Media.Video.FullscreenOrientationLock.LockResult",
-                       static_cast<int>(LockResultMetrics::kMax)));
-  lock_result_histogram.Count(static_cast<int>(metrics));
 }
 
 void RecordAutoRotateEnabled(bool enabled) {
@@ -92,11 +74,11 @@ class DummyScreenOrientationCallback : public WebLockOrientationCallback {
 
 }  // anonymous namespace
 
-constexpr TimeDelta MediaControlsOrientationLockDelegate::kLockToAnyDelay;
+constexpr base::TimeDelta MediaControlsOrientationLockDelegate::kLockToAnyDelay;
 
 MediaControlsOrientationLockDelegate::MediaControlsOrientationLockDelegate(
     HTMLVideoElement& video)
-    : EventListener(kCPPEventListenerType), video_element_(video) {
+    : video_element_(video) {
   if (VideoElement().isConnected())
     Attach();
 }
@@ -104,26 +86,23 @@ MediaControlsOrientationLockDelegate::MediaControlsOrientationLockDelegate(
 void MediaControlsOrientationLockDelegate::Attach() {
   DCHECK(VideoElement().isConnected());
 
-  GetDocument().addEventListener(EventTypeNames::fullscreenchange, this, true);
-  VideoElement().addEventListener(EventTypeNames::webkitfullscreenchange, this,
+  GetDocument().addEventListener(event_type_names::kFullscreenchange, this,
+                                 true);
+  VideoElement().addEventListener(event_type_names::kWebkitfullscreenchange,
+                                  this, true);
+  VideoElement().addEventListener(event_type_names::kLoadedmetadata, this,
                                   true);
-  VideoElement().addEventListener(EventTypeNames::loadedmetadata, this, true);
 }
 
 void MediaControlsOrientationLockDelegate::Detach() {
   DCHECK(!VideoElement().isConnected());
 
-  GetDocument().removeEventListener(EventTypeNames::fullscreenchange, this,
+  GetDocument().removeEventListener(event_type_names::kFullscreenchange, this,
                                     true);
-  VideoElement().removeEventListener(EventTypeNames::webkitfullscreenchange,
+  VideoElement().removeEventListener(event_type_names::kWebkitfullscreenchange,
                                      this, true);
-  VideoElement().removeEventListener(EventTypeNames::loadedmetadata, this,
+  VideoElement().removeEventListener(event_type_names::kLoadedmetadata, this,
                                      true);
-}
-
-bool MediaControlsOrientationLockDelegate::operator==(
-    const EventListener& other) const {
-  return this == &other;
 }
 
 void MediaControlsOrientationLockDelegate::MaybeLockOrientation() {
@@ -147,20 +126,13 @@ void MediaControlsOrientationLockDelegate::MaybeLockOrientation() {
 
   auto* controller =
       ScreenOrientationController::From(*GetDocument().GetFrame());
-  if (controller->MaybeHasActiveLock()) {
-    RecordLockResult(LockResultMetrics::kAlreadyLocked);
+  if (controller->MaybeHasActiveLock())
     return;
-  }
 
   locked_orientation_ = ComputeOrientationLock();
   DCHECK_NE(locked_orientation_, kWebScreenOrientationLockDefault);
   controller->lock(locked_orientation_,
                    std::make_unique<DummyScreenOrientationCallback>());
-
-  if (locked_orientation_ == kWebScreenOrientationLockLandscape)
-    RecordLockResult(LockResultMetrics::kLandscape);
-  else
-    RecordLockResult(LockResultMetrics::kPortrait);
 
   MaybeListenToDeviceOrientation();
 }
@@ -171,9 +143,13 @@ void MediaControlsOrientationLockDelegate::ChangeLockToAnyOrientation() {
   DCHECK_NE(locked_orientation_, kWebScreenOrientationLockDefault);
 
   locked_orientation_ = kWebScreenOrientationLockAny;
-  ScreenOrientationController::From(*GetDocument().GetFrame())
-      ->lock(locked_orientation_,
-             std::make_unique<DummyScreenOrientationCallback>());
+
+  // The document could have been detached from the frame.
+  if (LocalFrame* frame = GetDocument().GetFrame()) {
+    ScreenOrientationController::From(*frame)->lock(
+        locked_orientation_,
+        std::make_unique<DummyScreenOrientationCallback>());
+  }
 }
 
 void MediaControlsOrientationLockDelegate::MaybeUnlockOrientation() {
@@ -186,7 +162,7 @@ void MediaControlsOrientationLockDelegate::MaybeUnlockOrientation() {
 
   monitor_.reset();  // Cancel any GotIsAutoRotateEnabledByUser Mojo callback.
   if (LocalDOMWindow* dom_window = GetDocument().domWindow()) {
-    dom_window->removeEventListener(EventTypeNames::deviceorientation, this,
+    dom_window->removeEventListener(event_type_names::kDeviceorientation, this,
                                     false);
   }
 
@@ -219,8 +195,8 @@ void MediaControlsOrientationLockDelegate::MaybeListenToDeviceOrientation() {
 // Check whether the user locked screen orientation at the OS level.
 #if defined(OS_ANDROID)
   DCHECK(!monitor_.is_bound());
-  Platform::Current()->GetConnector()->BindInterface(
-      device::mojom::blink::kServiceName, mojo::MakeRequest(&monitor_));
+  Platform::Current()->GetBrowserInterfaceBrokerProxy()->GetInterface(
+      monitor_.BindNewPipeAndPassReceiver());
   monitor_->IsAutoRotateEnabledByUser(WTF::Bind(
       &MediaControlsOrientationLockDelegate::GotIsAutoRotateEnabledByUser,
       WrapPersistent(this)));
@@ -250,7 +226,7 @@ void MediaControlsOrientationLockDelegate::GotIsAutoRotateEnabledByUser(
   }
 
   if (LocalDOMWindow* dom_window = GetDocument().domWindow()) {
-    dom_window->addEventListener(EventTypeNames::deviceorientation, this,
+    dom_window->addEventListener(event_type_names::kDeviceorientation, this,
                                  false);
   }
 }
@@ -263,11 +239,11 @@ Document& MediaControlsOrientationLockDelegate::GetDocument() const {
   return VideoElement().GetDocument();
 }
 
-void MediaControlsOrientationLockDelegate::handleEvent(
+void MediaControlsOrientationLockDelegate::Invoke(
     ExecutionContext* execution_context,
     Event* event) {
-  if (event->type() == EventTypeNames::fullscreenchange ||
-      event->type() == EventTypeNames::webkitfullscreenchange) {
+  if (event->type() == event_type_names::kFullscreenchange ||
+      event->type() == event_type_names::kWebkitfullscreenchange) {
     if (VideoElement().IsFullscreen()) {
       if (state_ == State::kPendingFullscreen)
         MaybeLockOrientation();
@@ -279,16 +255,17 @@ void MediaControlsOrientationLockDelegate::handleEvent(
     return;
   }
 
-  if (event->type() == EventTypeNames::loadedmetadata) {
+  if (event->type() == event_type_names::kLoadedmetadata) {
     if (state_ == State::kPendingMetadata)
       MaybeLockOrientation();
 
     return;
   }
 
-  if (event->type() == EventTypeNames::deviceorientation) {
+  if (event->type() == event_type_names::kDeviceorientation) {
     if (event->isTrusted() &&
-        event->InterfaceName() == EventNames::DeviceOrientationEvent) {
+        event->InterfaceName() ==
+            event_interface_names::kDeviceOrientationEvent) {
       MaybeLockToAnyIfDeviceOrientationMatchesVideo(
           ToDeviceOrientationEvent(event));
     }
@@ -316,11 +293,12 @@ MediaControlsOrientationLockDelegate::ComputeOrientationLock() const {
   // consistency. Use WebScreenOrientationLockLandscape as a fallback value.
   // TODO(mlamouri): we could improve this by having direct access to
   // `window.screen.orientation.type`.
-  Frame* frame = GetDocument().GetFrame();
+  LocalFrame* frame = GetDocument().GetFrame();
   if (!frame)
     return kWebScreenOrientationLockLandscape;
 
-  switch (frame->GetChromeClient().GetScreenInfo().orientation_type) {
+  ChromeClient& chrome_client = frame->GetChromeClient();
+  switch (chrome_client.GetScreenInfo(*frame).orientation_type) {
     case kWebScreenOrientationPortraitPrimary:
     case kWebScreenOrientationPortraitSecondary:
       return kWebScreenOrientationLockPortrait;
@@ -391,9 +369,7 @@ MediaControlsOrientationLockDelegate::ComputeDeviceOrientation(
   // screen.orientation.angle is the standardized replacement for
   // window.orientation. They are equal, except -90 was replaced by 270.
   int screen_orientation_angle =
-      ScreenScreenOrientation::orientation(nullptr /* ScriptState */,
-                                           *dom_window->screen())
-          ->angle();
+      ScreenScreenOrientation::orientation(*dom_window->screen())->angle();
 
   // This is equivalent to screen.orientation.type.startsWith('landscape').
   bool screen_orientation_is_portrait =
@@ -438,7 +414,7 @@ void MediaControlsOrientationLockDelegate::
   // Job done: the user rotated their device to match the orientation of the
   // video that we locked to, so now we can stop listening.
   if (LocalDOMWindow* dom_window = GetDocument().domWindow()) {
-    dom_window->removeEventListener(EventTypeNames::deviceorientation, this,
+    dom_window->removeEventListener(event_type_names::kDeviceorientation, this,
                                     false);
   }
   // Delay before changing lock, as a workaround for the case where the device
@@ -472,7 +448,7 @@ void MediaControlsOrientationLockDelegate::
 }
 
 void MediaControlsOrientationLockDelegate::Trace(blink::Visitor* visitor) {
-  EventListener::Trace(visitor);
+  NativeEventListener::Trace(visitor);
   visitor->Trace(video_element_);
 }
 

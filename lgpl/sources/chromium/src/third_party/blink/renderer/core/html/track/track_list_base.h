@@ -9,7 +9,6 @@
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/track/track_event.h"
 #include "third_party/blink/renderer/core/html/track/track_event_init.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 
 namespace blink {
 
@@ -37,9 +36,9 @@ class TrackListBase : public EventTargetWithInlineData {
     return nullptr;
   }
 
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(change);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(addtrack);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(removetrack);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(change, kChange)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(addtrack, kAddtrack)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(removetrack, kRemovetrack)
 
   // EventTarget interface
   ExecutionContext* GetExecutionContext() const override {
@@ -51,7 +50,7 @@ class TrackListBase : public EventTargetWithInlineData {
   void Add(T* track) {
     track->SetMediaElement(media_element_);
     tracks_.push_back(track);
-    ScheduleEvent(TrackEvent::Create(EventTypeNames::addtrack, track));
+    ScheduleEvent(TrackEvent::Create(event_type_names::kAddtrack, track));
   }
 
   void Remove(WebMediaPlayer::TrackId track_id) {
@@ -61,7 +60,7 @@ class TrackListBase : public EventTargetWithInlineData {
 
       tracks_[i]->SetMediaElement(nullptr);
       ScheduleEvent(
-          TrackEvent::Create(EventTypeNames::removetrack, tracks_[i].Get()));
+          TrackEvent::Create(event_type_names::kRemovetrack, tracks_[i].Get()));
       tracks_.EraseAt(i);
       return;
     }
@@ -76,10 +75,10 @@ class TrackListBase : public EventTargetWithInlineData {
   }
 
   void ScheduleChangeEvent() {
-    ScheduleEvent(Event::Create(EventTypeNames::change));
+    ScheduleEvent(Event::Create(event_type_names::kChange));
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) override {
     visitor->Trace(tracks_);
     visitor->Trace(media_element_);
     EventTargetWithInlineData::Trace(visitor);
@@ -91,7 +90,7 @@ class TrackListBase : public EventTargetWithInlineData {
     media_element_->ScheduleEvent(event);
   }
 
-  HeapVector<TraceWrapperMember<T>> tracks_;
+  HeapVector<Member<T>> tracks_;
   Member<HTMLMediaElement> media_element_;
 };
 

@@ -33,7 +33,6 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 
@@ -50,13 +49,8 @@ class CORE_EXPORT SVGMatrixTearOff final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SVGMatrixTearOff* Create(const AffineTransform& value) {
-    return new SVGMatrixTearOff(value);
-  }
-
-  static SVGMatrixTearOff* Create(SVGTransformTearOff* target) {
-    return new SVGMatrixTearOff(target);
-  }
+  explicit SVGMatrixTearOff(const AffineTransform&);
+  explicit SVGMatrixTearOff(SVGTransformTearOff*);
 
   double a() { return Value().A(); }
   double b() { return Value().B(); }
@@ -91,15 +85,12 @@ class CORE_EXPORT SVGMatrixTearOff final : public ScriptWrappable {
   void Trace(blink::Visitor*) override;
 
  private:
-  explicit SVGMatrixTearOff(const AffineTransform&);
-  explicit SVGMatrixTearOff(SVGTransformTearOff*);
-
   AffineTransform* MutableValue();
   void CommitChange();
 
   AffineTransform static_value_;
 
-  TraceWrapperMember<SVGTransformTearOff> context_transform_;
+  Member<SVGTransformTearOff> context_transform_;
 };
 
 }  // namespace blink

@@ -22,33 +22,31 @@
 
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/html_div_element.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 HTMLMeterElement::HTMLMeterElement(Document& document)
-    : LabelableElement(meterTag, document) {
+    : HTMLElement(kMeterTag, document) {
   UseCounter::Count(document, WebFeature::kMeterElement);
+  EnsureUserAgentShadowRoot();
 }
 
 HTMLMeterElement::~HTMLMeterElement() = default;
 
-HTMLMeterElement* HTMLMeterElement::Create(Document& document) {
-  HTMLMeterElement* meter = new HTMLMeterElement(document);
-  meter->EnsureUserAgentShadowRoot();
-  return meter;
-}
-
-LayoutObject* HTMLMeterElement::CreateLayoutObject(const ComputedStyle& style) {
-  switch (style.Appearance()) {
+LayoutObject* HTMLMeterElement::CreateLayoutObject(const ComputedStyle& style,
+                                                   LegacyLayout legacy) {
+  switch (style.EffectiveAppearance()) {
     case kMeterPart:
       UseCounter::Count(GetDocument(),
                         WebFeature::kMeterElementWithMeterAppearance);
@@ -60,70 +58,70 @@ LayoutObject* HTMLMeterElement::CreateLayoutObject(const ComputedStyle& style) {
     default:
       break;
   }
-  return LabelableElement::CreateLayoutObject(style);
+  return HTMLElement::CreateLayoutObject(style, legacy);
 }
 
 void HTMLMeterElement::ParseAttribute(
     const AttributeModificationParams& params) {
   const QualifiedName& name = params.name;
-  if (name == valueAttr || name == minAttr || name == maxAttr ||
-      name == lowAttr || name == highAttr || name == optimumAttr)
+  if (name == kValueAttr || name == kMinAttr || name == kMaxAttr ||
+      name == kLowAttr || name == kHighAttr || name == kOptimumAttr)
     DidElementStateChange();
   else
-    LabelableElement::ParseAttribute(params);
+    HTMLElement::ParseAttribute(params);
 }
 
 double HTMLMeterElement::value() const {
-  double value = GetFloatingPointAttribute(valueAttr, 0);
+  double value = GetFloatingPointAttribute(kValueAttr, 0);
   return std::min(std::max(value, min()), max());
 }
 
 void HTMLMeterElement::setValue(double value) {
-  SetFloatingPointAttribute(valueAttr, value);
+  SetFloatingPointAttribute(kValueAttr, value);
 }
 
 double HTMLMeterElement::min() const {
-  return GetFloatingPointAttribute(minAttr, 0);
+  return GetFloatingPointAttribute(kMinAttr, 0);
 }
 
 void HTMLMeterElement::setMin(double min) {
-  SetFloatingPointAttribute(minAttr, min);
+  SetFloatingPointAttribute(kMinAttr, min);
 }
 
 double HTMLMeterElement::max() const {
-  return std::max(GetFloatingPointAttribute(maxAttr, std::max(1.0, min())),
+  return std::max(GetFloatingPointAttribute(kMaxAttr, std::max(1.0, min())),
                   min());
 }
 
 void HTMLMeterElement::setMax(double max) {
-  SetFloatingPointAttribute(maxAttr, max);
+  SetFloatingPointAttribute(kMaxAttr, max);
 }
 
 double HTMLMeterElement::low() const {
-  double low = GetFloatingPointAttribute(lowAttr, min());
+  double low = GetFloatingPointAttribute(kLowAttr, min());
   return std::min(std::max(low, min()), max());
 }
 
 void HTMLMeterElement::setLow(double low) {
-  SetFloatingPointAttribute(lowAttr, low);
+  SetFloatingPointAttribute(kLowAttr, low);
 }
 
 double HTMLMeterElement::high() const {
-  double high = GetFloatingPointAttribute(highAttr, max());
+  double high = GetFloatingPointAttribute(kHighAttr, max());
   return std::min(std::max(high, low()), max());
 }
 
 void HTMLMeterElement::setHigh(double high) {
-  SetFloatingPointAttribute(highAttr, high);
+  SetFloatingPointAttribute(kHighAttr, high);
 }
 
 double HTMLMeterElement::optimum() const {
-  double optimum = GetFloatingPointAttribute(optimumAttr, (max() + min()) / 2);
+  double optimum = GetFloatingPointAttribute(kOptimumAttr, (max() + min()) / 2);
   return std::min(std::max(optimum, min()), max());
 }
 
 void HTMLMeterElement::setOptimum(double optimum) {
-  SetFloatingPointAttribute(optimumAttr, optimum);
+  SetFloatingPointAttribute(kOptimumAttr, optimum);
 }
 
 HTMLMeterElement::GaugeRegion HTMLMeterElement::GetGaugeRegion() const {
@@ -175,20 +173,28 @@ void HTMLMeterElement::DidElementStateChange() {
 void HTMLMeterElement::DidAddUserAgentShadowRoot(ShadowRoot& root) {
   DCHECK(!value_);
 
-  HTMLDivElement* inner = HTMLDivElement::Create(GetDocument());
+  auto* inner = MakeGarbageCollected<HTMLDivElement>(GetDocument());
   inner->SetShadowPseudoId(AtomicString("-webkit-meter-inner-element"));
   root.AppendChild(inner);
 
-  HTMLDivElement* bar = HTMLDivElement::Create(GetDocument());
+  auto* bar = MakeGarbageCollected<HTMLDivElement>(GetDocument());
   bar->SetShadowPseudoId(AtomicString("-webkit-meter-bar"));
 
-  value_ = HTMLDivElement::Create(GetDocument());
+  value_ = MakeGarbageCollected<HTMLDivElement>(GetDocument());
   UpdateValueAppearance(0);
-  bar->AppendChild(value_);
+
+  if (RuntimeEnabledFeatures::FormControlsRefreshEnabled()) {
+    auto* clip = MakeGarbageCollected<HTMLDivElement>(GetDocument());
+    clip->SetShadowPseudoId(AtomicString("-internal-meter-clip"));
+    bar->AppendChild(clip);
+    clip->AppendChild(value_);
+  } else {
+    bar->AppendChild(value_);
+  }
 
   inner->AppendChild(bar);
 
-  HTMLDivElement* fallback = HTMLDivElement::Create(GetDocument());
+  auto* fallback = MakeGarbageCollected<HTMLDivElement>(GetDocument());
   fallback->AppendChild(
       HTMLSlotElement::CreateUserAgentDefaultSlot(GetDocument()));
   fallback->SetShadowPseudoId(AtomicString("-internal-fallback"));
@@ -203,7 +209,7 @@ void HTMLMeterElement::UpdateValueAppearance(double percentage) {
   DEFINE_STATIC_LOCAL(AtomicString, even_less_good_pseudo_id,
                       ("-webkit-meter-even-less-good-value"));
 
-  value_->SetInlineStyleProperty(CSSPropertyWidth, percentage,
+  value_->SetInlineStyleProperty(CSSPropertyID::kWidth, percentage,
                                  CSSPrimitiveValue::UnitType::kPercentage);
   switch (GetGaugeRegion()) {
     case kGaugeRegionOptimum:
@@ -220,12 +226,12 @@ void HTMLMeterElement::UpdateValueAppearance(double percentage) {
 
 bool HTMLMeterElement::CanContainRangeEndPoint() const {
   GetDocument().UpdateStyleAndLayoutTreeForNode(this);
-  return GetComputedStyle() && !GetComputedStyle()->HasAppearance();
+  return GetComputedStyle() && !GetComputedStyle()->HasEffectiveAppearance();
 }
 
-void HTMLMeterElement::Trace(blink::Visitor* visitor) {
+void HTMLMeterElement::Trace(Visitor* visitor) {
   visitor->Trace(value_);
-  LabelableElement::Trace(visitor);
+  HTMLElement::Trace(visitor);
 }
 
 }  // namespace blink

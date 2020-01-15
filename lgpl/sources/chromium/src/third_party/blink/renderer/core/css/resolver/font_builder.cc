@@ -86,17 +86,17 @@ AtomicString FontBuilder::GenericFontFamilyName(
     case FontDescription::kStandardFamily:
       return StandardFontFamilyName();
     case FontDescription::kSerifFamily:
-      return FontFamilyNames::webkit_serif;
+      return font_family_names::kWebkitSerif;
     case FontDescription::kSansSerifFamily:
-      return FontFamilyNames::webkit_sans_serif;
+      return font_family_names::kWebkitSansSerif;
     case FontDescription::kMonospaceFamily:
-      return FontFamilyNames::webkit_monospace;
+      return font_family_names::kWebkitMonospace;
     case FontDescription::kCursiveFamily:
-      return FontFamilyNames::webkit_cursive;
+      return font_family_names::kWebkitCursive;
     case FontDescription::kFantasyFamily:
-      return FontFamilyNames::webkit_fantasy;
+      return font_family_names::kWebkitFantasy;
     case FontDescription::kPictographFamily:
-      return FontFamilyNames::webkit_pictograph;
+      return font_family_names::kWebkitPictograph;
   }
 }
 
@@ -182,6 +182,12 @@ void FontBuilder::SetKerning(FontDescription::Kerning kerning) {
   font_description_.SetKerning(kerning);
 }
 
+void FontBuilder::SetFontOpticalSizing(OpticalSizing font_optical_sizing) {
+  Set(PropertySetFlag::kFontOpticalSizing);
+
+  font_description_.SetFontOpticalSizing(font_optical_sizing);
+}
+
 void FontBuilder::SetFontSmoothing(FontSmoothingMode foont_smoothing_mode) {
   Set(PropertySetFlag::kFontSmoothing);
 
@@ -238,7 +244,8 @@ float FontBuilder::GetComputedSizeFromSpecifiedSize(
     float specified_size) {
   DCHECK(document_);
   float zoom_factor = effective_zoom;
-  // FIXME: Why is this here!!!!?!
+  // Apply the text zoom factor preference. The preference is exposed in
+  // accessibility settings in Chrome for Android to improve readability.
   if (LocalFrame* frame = document_->GetFrame())
     zoom_factor *= frame->TextZoomFactor();
 
@@ -379,6 +386,8 @@ void FontBuilder::UpdateFontDescription(FontDescription& description,
     description.SetTextRendering(font_description_.TextRendering());
   if (IsSet(PropertySetFlag::kKerning))
     description.SetKerning(font_description_.GetKerning());
+  if (IsSet(PropertySetFlag::kFontOpticalSizing))
+    description.SetFontOpticalSizing(font_description_.FontOpticalSizing());
   if (IsSet(PropertySetFlag::kFontSmoothing))
     description.SetFontSmoothing(font_description_.FontSmoothing());
   if (IsSet(PropertySetFlag::kTextOrientation) ||

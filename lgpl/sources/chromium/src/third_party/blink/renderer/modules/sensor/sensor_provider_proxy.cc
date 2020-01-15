@@ -4,8 +4,7 @@
 
 #include "third_party/blink/renderer/modules/sensor/sensor_provider_proxy.h"
 
-#include "services/device/public/mojom/constants.mojom-blink.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/renderer/modules/sensor/sensor_proxy_impl.h"
 #include "third_party/blink/renderer/modules/sensor/sensor_proxy_inspector_impl.h"
 #include "third_party/blink/renderer/platform/mojo/mojo_helper.h"
@@ -20,9 +19,9 @@ void SensorProviderProxy::InitializeIfNeeded() {
   if (IsInitialized())
     return;
 
-  GetSupplementable()->GetInterfaceProvider()->GetInterface(
-      mojo::MakeRequest(&sensor_provider_));
-  sensor_provider_.set_connection_error_handler(
+  GetSupplementable()->GetBrowserInterfaceBroker().GetInterface(
+      sensor_provider_.BindNewPipeAndPassReceiver());
+  sensor_provider_.set_disconnect_handler(
       WTF::Bind(&SensorProviderProxy::OnSensorProviderConnectionError,
                 WrapWeakPersistent(this)));
 }
@@ -36,7 +35,7 @@ SensorProviderProxy* SensorProviderProxy::From(Document* document) {
   SensorProviderProxy* provider_proxy =
       Supplement<Document>::From<SensorProviderProxy>(*document);
   if (!provider_proxy) {
-    provider_proxy = new SensorProviderProxy(*document);
+    provider_proxy = MakeGarbageCollected<SensorProviderProxy>(*document);
     Supplement<Document>::ProvideTo(*document, provider_proxy);
   }
   provider_proxy->InitializeIfNeeded();
@@ -58,8 +57,10 @@ SensorProxy* SensorProviderProxy::CreateSensorProxy(
   SensorProxy* sensor =
       inspector_mode_
           ? static_cast<SensorProxy*>(
-                new SensorProxyInspectorImpl(type, this, page))
-          : static_cast<SensorProxy*>(new SensorProxyImpl(type, this, page));
+                MakeGarbageCollected<SensorProxyInspectorImpl>(type, this,
+                                                               page))
+          : static_cast<SensorProxy*>(
+                MakeGarbageCollected<SensorProxyImpl>(type, this, page));
   sensor_proxies_.insert(sensor);
 
   return sensor;

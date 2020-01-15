@@ -37,7 +37,9 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/public/platform/web_isolated_world_ids.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "v8/include/v8.h"
@@ -45,7 +47,6 @@
 namespace blink {
 
 class DOMDataStore;
-class DOMObjectHolderBase;
 class ScriptWrappable;
 class SecurityOrigin;
 
@@ -53,14 +54,18 @@ class SecurityOrigin;
 // is identified by a world id that is a per-thread global identifier (see
 // WorldId enum).
 class PLATFORM_EXPORT DOMWrapperWorld : public RefCounted<DOMWrapperWorld> {
+  USING_FAST_MALLOC(DOMWrapperWorld);
+
  public:
   // Per-thread global identifiers for DOMWrapperWorld.
-  enum WorldId {
+  enum WorldId : int32_t {
     kInvalidWorldId = -1,
     kMainWorldId = 0,
 
-    kEmbedderWorldIdLimit = IsolatedWorldId::kEmbedderWorldIdLimit,
-    kIsolatedWorldIdLimit = IsolatedWorldId::kIsolatedWorldIdLimit,
+    kDOMWrapperWorldEmbedderWorldIdLimit =
+        IsolatedWorldId::kEmbedderWorldIdLimit,
+    kDOMWrapperWorldIsolatedWorldIdLimit =
+        IsolatedWorldId::kIsolatedWorldIdLimit,
 
     // Other worlds can use IDs after this. Don't manually pick up an ID from
     // this range. generateWorldIdForType() picks it up on behalf of you.
@@ -72,10 +77,14 @@ class PLATFORM_EXPORT DOMWrapperWorld : public RefCounted<DOMWrapperWorld> {
     kIsolated,
     kInspectorIsolated,
     kRegExp,
-    kTesting,
     kForV8ContextSnapshotNonMain,
     kWorker,
   };
+
+  static bool IsIsolatedWorldId(int32_t world_id) {
+    return DOMWrapperWorld::kMainWorldId < world_id &&
+           world_id < DOMWrapperWorld::kDOMWrapperWorldIsolatedWorldIdLimit;
+  }
 
   // Creates a world other than IsolatedWorld. Note this can return nullptr if
   // GenerateWorldIdForType fails to allocate a valid id.
@@ -83,7 +92,7 @@ class PLATFORM_EXPORT DOMWrapperWorld : public RefCounted<DOMWrapperWorld> {
 
   // Ensures an IsolatedWorld for |worldId|.
   static scoped_refptr<DOMWrapperWorld> EnsureIsolatedWorld(v8::Isolate*,
-                                                            int world_id);
+                                                            int32_t world_id);
   ~DOMWrapperWorld();
   void Dispose();
 
@@ -96,9 +105,6 @@ class PLATFORM_EXPORT DOMWrapperWorld : public RefCounted<DOMWrapperWorld> {
   static void AllWorldsInCurrentThread(
       Vector<scoped_refptr<DOMWrapperWorld>>& worlds);
 
-  // Traces wrappers corresponding to the ScriptWrappable in DOM data stores.
-  static void Trace(const ScriptWrappable*, Visitor*);
-
   static DOMWrapperWorld& World(v8::Local<v8::Context> context) {
     return ScriptState::From(context)->World();
   }
@@ -109,27 +115,18 @@ class PLATFORM_EXPORT DOMWrapperWorld : public RefCounted<DOMWrapperWorld> {
 
   static DOMWrapperWorld& MainWorld();
 
-  static void SetNonMainWorldHumanReadableName(int world_id, const String&);
+  static void SetNonMainWorldHumanReadableName(int32_t world_id, const String&);
   String NonMainWorldHumanReadableName();
 
   // Associates an isolated world (see above for description) with a security
   // origin. XMLHttpRequest instances used in that world will be considered
   // to come from that origin, not the frame's.
-  static void SetIsolatedWorldSecurityOrigin(int world_id,
-                                             scoped_refptr<SecurityOrigin>);
+  // Note: if |security_origin| is null, the security origin stored for the
+  // isolated world is cleared.
+  static void SetIsolatedWorldSecurityOrigin(
+      int32_t world_id,
+      scoped_refptr<SecurityOrigin> security_origin);
   SecurityOrigin* IsolatedWorldSecurityOrigin();
-
-  // Associated an isolated world with a Content Security Policy. Resources
-  // embedded into the main world's DOM from script executed in an isolated
-  // world should be restricted based on the isolated world's DOM, not the
-  // main world's.
-  //
-  // FIXME: Right now, resource injection simply bypasses the main world's
-  // DOM. More work is necessary to allow the isolated world's policy to be
-  // applied correctly.
-  static void SetIsolatedWorldContentSecurityPolicy(int world_id,
-                                                    const String& policy);
-  bool IsolatedWorldHasContentSecurityPolicy();
 
   static bool HasWrapperInAnyWorldInMainThread(ScriptWrappable*);
 
@@ -143,57 +140,17 @@ class PLATFORM_EXPORT DOMWrapperWorld : public RefCounted<DOMWrapperWorld> {
   int GetWorldId() const { return world_id_; }
   DOMDataStore& DomDataStore() const { return *dom_data_store_; }
 
-  template <typename T>
-  void RegisterDOMObjectHolder(v8::Isolate* isolate,
-                               T* object,
-                               v8::Local<v8::Value> wrapper) {
-    RegisterDOMObjectHolderInternal(
-        DOMObjectHolder<T>::Create(isolate, object, wrapper));
-  }
+  // Clear the reference pointing from |object| to |handle| in any world.
+  static bool UnsetSpecificWrapperIfSet(
+      ScriptWrappable* object,
+      const v8::TracedReference<v8::Object>& handle);
 
  private:
-  class DOMObjectHolderBase {
-    USING_FAST_MALLOC(DOMObjectHolderBase);
+  static bool UnsetNonMainWorldWrapperIfSet(
+      ScriptWrappable* object,
+      const v8::TracedReference<v8::Object>& handle);
 
-   public:
-    DOMObjectHolderBase(v8::Isolate* isolate, v8::Local<v8::Value> wrapper)
-        : wrapper_(isolate, wrapper), world_(nullptr) {}
-    virtual ~DOMObjectHolderBase() = default;
-
-    DOMWrapperWorld* World() const { return world_; }
-    void SetWorld(DOMWrapperWorld* world) { world_ = world; }
-    void SetWeak(v8::WeakCallbackInfo<DOMObjectHolderBase>::Callback callback) {
-      wrapper_.SetWeak(this, callback);
-    }
-
-   private:
-    ScopedPersistent<v8::Value> wrapper_;
-    DOMWrapperWorld* world_;
-  };
-
-  template <typename T>
-  class DOMObjectHolder : public DOMObjectHolderBase {
-   public:
-    static std::unique_ptr<DOMObjectHolder<T>>
-    Create(v8::Isolate* isolate, T* object, v8::Local<v8::Value> wrapper) {
-      return base::WrapUnique(new DOMObjectHolder(isolate, object, wrapper));
-    }
-
-   private:
-    DOMObjectHolder(v8::Isolate* isolate,
-                    T* object,
-                    v8::Local<v8::Value> wrapper)
-        : DOMObjectHolderBase(isolate, wrapper), object_(object) {}
-
-    Persistent<T> object_;
-  };
-
-  DOMWrapperWorld(v8::Isolate*, WorldType, int world_id);
-
-  static void WeakCallbackForDOMObjectHolder(
-      const v8::WeakCallbackInfo<DOMObjectHolderBase>&);
-  void RegisterDOMObjectHolderInternal(std::unique_ptr<DOMObjectHolderBase>);
-  void UnregisterDOMObjectHolder(DOMObjectHolderBase*);
+  DOMWrapperWorld(v8::Isolate*, WorldType, int32_t world_id);
 
   static unsigned number_of_non_main_worlds_in_main_thread_;
 
@@ -202,35 +159,22 @@ class PLATFORM_EXPORT DOMWrapperWorld : public RefCounted<DOMWrapperWorld> {
   // out of DOMWrapperWorld.
   static int GenerateWorldIdForType(WorldType);
 
-  // Dissociates all wrappers in all worlds associated with |script_wrappable|.
-  //
-  // Do not use this function except for DOMWindow.  Only DOMWindow needs to
-  // dissociate wrappers from the ScriptWrappable because of the following two
-  // reasons.
-  //
-  // Reason 1) Case of the main world
-  // A DOMWindow may be collected by Blink GC *before* V8 GC collects the
-  // wrapper because the wrapper object associated with a DOMWindow is a global
-  // proxy, which remains after navigations.  We don't want V8 GC to reset the
-  // weak persistent handle to a wrapper within the DOMWindow
-  // (ScriptWrappable::main_world_wrapper_) *after* Blink GC collects the
-  // DOMWindow because it's use-after-free.  Thus, we need to dissociate the
-  // wrapper in advance.
-  //
-  // Reason 2) Case of isolated worlds
-  // As same, a DOMWindow may be collected before the wrapper gets collected.
-  // A DOMWrapperMap supports mapping from ScriptWrappable* to v8::Global<T>,
-  // and we don't want to leave an entry of an already-dead DOMWindow* to the
-  // persistent handle for the global proxy object, especially considering that
-  // the address to the already-dead DOMWindow* may be re-used.
-  friend class DOMWindow;
-  static void DissociateDOMWindowWrappersInAllWorlds(ScriptWrappable*);
-
   const WorldType world_type_;
-  const int world_id_;
-  std::unique_ptr<DOMDataStore> dom_data_store_;
-  HashSet<std::unique_ptr<DOMObjectHolderBase>> dom_object_holders_;
+  const int32_t world_id_;
+  Persistent<DOMDataStore> dom_data_store_;
 };
+
+// static
+inline bool DOMWrapperWorld::UnsetSpecificWrapperIfSet(
+    ScriptWrappable* object,
+    const v8::TracedReference<v8::Object>& handle) {
+  // Fast path for main world.
+  if (object->UnsetMainWorldWrapperIfSet(handle))
+    return true;
+
+  // Slow path: |object| may point to |handle| in any non-main DOM world.
+  return DOMWrapperWorld::UnsetNonMainWorldWrapperIfSet(object, handle);
+}
 
 }  // namespace blink
 

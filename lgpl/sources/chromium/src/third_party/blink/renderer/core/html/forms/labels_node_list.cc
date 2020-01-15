@@ -26,12 +26,9 @@
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node_rare_data.h"
 #include "third_party/blink/renderer/core/html/forms/html_label_element.h"
-#include "third_party/blink/renderer/core/html/forms/labelable_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 
 namespace blink {
-
-using namespace HTMLNames;
 
 LabelsNodeList::LabelsNodeList(ContainerNode& owner_node)
     : LiveNodeList(owner_node,
@@ -39,11 +36,16 @@ LabelsNodeList::LabelsNodeList(ContainerNode& owner_node)
                    kInvalidateForFormControls,
                    NodeListSearchRoot::kTreeScope) {}
 
+LabelsNodeList::LabelsNodeList(ContainerNode& owner_node, CollectionType type)
+    : LabelsNodeList(owner_node) {
+  DCHECK_EQ(type, kLabelsNodeListType);
+}
+
 LabelsNodeList::~LabelsNodeList() = default;
 
 bool LabelsNodeList::ElementMatches(const Element& element) const {
-  return IsHTMLLabelElement(element) &&
-         ToHTMLLabelElement(element).control() == ownerNode();
+  auto* html_label_element = DynamicTo<HTMLLabelElement>(element);
+  return html_label_element && html_label_element->control() == ownerNode();
 }
 
 }  // namespace blink

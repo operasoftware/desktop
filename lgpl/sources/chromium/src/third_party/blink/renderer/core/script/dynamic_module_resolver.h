@@ -23,11 +23,10 @@ class ScriptPromiseResolver;
 class CORE_EXPORT DynamicModuleResolver final
     : public GarbageCollected<DynamicModuleResolver> {
  public:
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
-  static DynamicModuleResolver* Create(Modulator* modulator) {
-    return new DynamicModuleResolver(modulator);
-  }
+  explicit DynamicModuleResolver(Modulator* modulator)
+      : modulator_(modulator) {}
 
   // Implements "HostImportModuleDynamically" semantics.
   // Should be called w/ a valid V8 context.
@@ -37,9 +36,6 @@ class CORE_EXPORT DynamicModuleResolver final
                           ScriptPromiseResolver*);
 
  private:
-  explicit DynamicModuleResolver(Modulator* modulator)
-      : modulator_(modulator) {}
-
   Member<Modulator> modulator_;
 };
 

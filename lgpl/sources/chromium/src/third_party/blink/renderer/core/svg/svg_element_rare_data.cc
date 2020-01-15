@@ -7,6 +7,7 @@
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
@@ -14,7 +15,7 @@ MutableCSSPropertyValueSet*
 SVGElementRareData::EnsureAnimatedSMILStyleProperties() {
   if (!animated_smil_style_properties_) {
     animated_smil_style_properties_ =
-        MutableCSSPropertyValueSet::Create(kSVGAttributeMode);
+        MakeGarbageCollected<MutableCSSPropertyValueSet>(kSVGAttributeMode);
   }
   return animated_smil_style_properties_.Get();
 }
@@ -45,7 +46,7 @@ void SVGElementRareData::ClearOverriddenComputedStyle() {
 SVGResourceClient& SVGElementRareData::EnsureSVGResourceClient(
     SVGElement* element) {
   if (!resource_client_)
-    resource_client_ = new SVGElementResourceClient(element);
+    resource_client_ = MakeGarbageCollected<SVGElementResourceClient>(element);
   return *resource_client_;
 }
 

@@ -33,20 +33,19 @@
 
 namespace blink {
 
-inline const ComputedStyle* Node::GetComputedStyle() const {
-  return MutableComputedStyle();
+inline ComputedStyle* Node::MutableComputedStyleForEditingDeprecated() const {
+  return const_cast<ComputedStyle*>(GetComputedStyle());
 }
 
-inline ComputedStyle* Node::MutableComputedStyle() const {
-  if (NeedsReattachLayoutTree())
-    return GetNonAttachedStyle();
-
+inline const ComputedStyle* Node::GetComputedStyle() const {
+  if (IsElementNode()) {
+    return HasRareData()
+               ? data_.rare_data_->GetNodeRenderingData()->GetComputedStyle()
+               : data_.node_layout_data_->GetComputedStyle();
+  }
+  // Text nodes and Document.
   if (LayoutObject* layout_object = GetLayoutObject())
-    return layout_object->MutableStyle();
-
-  if (IsElementNode())
-    return ToElement(this)->MutableNonLayoutObjectComputedStyle();
-
+    return layout_object->Style();
   return nullptr;
 }
 
@@ -54,7 +53,12 @@ inline const ComputedStyle* Node::ParentComputedStyle() const {
   if (!CanParticipateInFlatTree())
     return nullptr;
   ContainerNode* parent = LayoutTreeBuilderTraversal::Parent(*this);
-  return parent ? parent->GetComputedStyle() : nullptr;
+  if (parent && parent->ChildrenCanHaveStyle()) {
+    const ComputedStyle* parent_style = parent->GetComputedStyle();
+    if (parent_style && !parent_style->IsEnsuredInDisplayNone())
+      return parent_style;
+  }
+  return nullptr;
 }
 
 inline const ComputedStyle& Node::ComputedStyleRef() const {

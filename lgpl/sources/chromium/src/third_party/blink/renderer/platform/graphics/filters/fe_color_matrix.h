@@ -38,7 +38,7 @@ enum ColorMatrixType {
 
 class PLATFORM_EXPORT FEColorMatrix final : public FilterEffect {
  public:
-  static FEColorMatrix* Create(Filter*, ColorMatrixType, const Vector<float>&);
+  FEColorMatrix(Filter*, ColorMatrixType, const Vector<float>&);
 
   ColorMatrixType GetType() const;
   bool SetType(ColorMatrixType);
@@ -55,8 +55,6 @@ class PLATFORM_EXPORT FEColorMatrix final : public FilterEffect {
                                                   float value);
 
  private:
-  FEColorMatrix(Filter*, ColorMatrixType, const Vector<float>&);
-
   sk_sp<PaintFilter> CreateImageFilter() override;
 
   bool AffectsTransparentPixels() const override;

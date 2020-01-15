@@ -22,10 +22,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_STRING_HASH_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_STRING_HASH_H_
 
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_traits.h"
-#include "third_party/blink/renderer/platform/wtf/string_hasher.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_hasher.h"
 
 namespace WTF {
 
@@ -138,11 +138,11 @@ class CaseFoldingHash {
   static inline UChar FoldCase(T ch) {
     if (std::is_same<T, LChar>::value)
       return StringImpl::kLatin1CaseFoldTable[ch];
-    // It's possible for WTF::Unicode::foldCase() to return a 32-bit value
+    // It's possible for WTF::unicode::foldCase() to return a 32-bit value
     // that's not representable as a UChar.  However, since this is rare and
     // deterministic, and the result of this is merely used for hashing, go
     // ahead and clamp the value.
-    return static_cast<UChar>(WTF::Unicode::FoldCase(ch));
+    return static_cast<UChar>(WTF::unicode::FoldCase(ch));
   }
 };
 

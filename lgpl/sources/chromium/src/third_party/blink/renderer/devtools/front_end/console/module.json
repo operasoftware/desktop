@@ -37,6 +37,9 @@
         {
             "type": "action",
             "category": "Console",
+            "contextTypes": [
+                "Console.ConsoleView"
+            ],
             "actionId": "console.clear",
             "title": "Clear console",
             "iconClass": "largeicon-clear",
@@ -181,6 +184,24 @@
                 {
                     "value": false,
                     "title": "Do not eagerly evaluate console prompt text"
+                }
+            ]
+        },
+        {
+            "type": "setting",
+            "category": "Console",
+            "title": "Evaluate triggers user activation",
+            "settingName": "consoleUserActivationEval",
+            "settingType": "boolean",
+            "defaultValue": true,
+            "options": [
+                {
+                    "value": true,
+                    "title": "Treat evaluation as user activation"
+                },
+                {
+                    "value": false,
+                    "title": "Do not treat evaluation as user activation"
                 }
             ]
         }

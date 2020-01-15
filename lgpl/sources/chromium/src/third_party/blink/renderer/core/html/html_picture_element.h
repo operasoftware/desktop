@@ -13,14 +13,11 @@ class HTMLPictureElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(HTMLPictureElement);
+  explicit HTMLPictureElement(Document&);
 
   void SourceOrMediaChanged();
   void RemoveListenerFromSourceChildren();
   void AddListenerToSourceChildren();
-
- protected:
-  explicit HTMLPictureElement(Document&);
 
  private:
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;

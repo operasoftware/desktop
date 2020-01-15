@@ -30,9 +30,7 @@ namespace blink {
 
 class CORE_EXPORT HTMLImageLoader final : public ImageLoader {
  public:
-  static HTMLImageLoader* Create(Element* element) {
-    return new HTMLImageLoader(element);
-  }
+  explicit HTMLImageLoader(Element*);
   ~HTMLImageLoader() override;
 
   void DispatchLoadEvent() override;
@@ -41,7 +39,6 @@ class CORE_EXPORT HTMLImageLoader final : public ImageLoader {
   String DebugName() const override { return "HTMLImageLoader"; }
 
  private:
-  explicit HTMLImageLoader(Element*);
   void NoImageResourceToLoad() override;
 };
 

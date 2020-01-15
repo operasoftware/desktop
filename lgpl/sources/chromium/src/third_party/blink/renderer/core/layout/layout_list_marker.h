@@ -33,7 +33,7 @@ class LayoutListItem;
 
 // Used to layout the list item's marker.
 // The LayoutListMarker always has to be a child of a LayoutListItem.
-class LayoutListMarker final : public LayoutBox {
+class CORE_EXPORT LayoutListMarker final : public LayoutBox {
  public:
   static LayoutListMarker* CreateAnonymous(LayoutListItem*);
   ~LayoutListMarker() override;
@@ -42,11 +42,11 @@ class LayoutListMarker final : public LayoutBox {
   const String& GetText() const { return text_; }
 
   // Marker text with suffix, e.g. "1. ", for use in accessibility.
-  CORE_EXPORT String TextAlternative() const;
+  String TextAlternative() const;
 
   // A reduced set of list style categories allowing for more concise expression
   // of list style specific logic.
-  enum class ListStyleCategory { kNone, kSymbol, kLanguage };
+  enum class ListStyleCategory { kNone, kSymbol, kLanguage, kStaticString };
 
   // Returns the list's style as one of a reduced high level categorical set of
   // styles.
@@ -113,7 +113,7 @@ class LayoutListMarker final : public LayoutBox {
 
   bool IsText() const { return !IsImage(); }
 
-  LayoutUnit GetWidthOfTextWithSuffix() const;
+  LayoutUnit GetWidthOfText(ListStyleCategory) const;
   void UpdateMargins();
   void UpdateContent();
 

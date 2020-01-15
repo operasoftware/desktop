@@ -35,11 +35,12 @@
 
 #include "base/containers/span.h"
 #include "base/optional.h"
+#include "third_party/blink/public/common/messaging/message_port_channel.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/transferables.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/mojo/mojo_handle.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -52,8 +53,9 @@ namespace blink {
 class BlobDataHandle;
 class DOMSharedArrayBuffer;
 class ExceptionState;
+class ExecutionContext;
+class MessagePort;
 class ScriptValue;
-class SharedBuffer;
 class StaticBitmapImage;
 class Transferables;
 class UnpackedSerializedScriptValue;
@@ -66,12 +68,14 @@ typedef HeapVector<Member<DOMSharedArrayBuffer>> SharedArrayBufferArray;
 
 class CORE_EXPORT SerializedScriptValue
     : public ThreadSafeRefCounted<SerializedScriptValue> {
+  USING_FAST_MALLOC(SerializedScriptValue);
+
  public:
   using ArrayBufferContentsArray = Vector<WTF::ArrayBufferContents, 1>;
   using SharedArrayBufferContentsArray = Vector<WTF::ArrayBufferContents, 1>;
   using ImageBitmapContentsArray = Vector<scoped_refptr<StaticBitmapImage>, 1>;
-  using TransferredWasmModulesArray =
-      WTF::Vector<v8::WasmCompiledModule::TransferrableModule>;
+  using TransferredWasmModulesArray = WTF::Vector<v8::CompiledWasmModule>;
+  using MessagePortChannelArray = Vector<MessagePortChannel>;
 
   // Increment this for each incompatible change to the wire format.
   // Version 2: Added StringUCharTag for UChar v8 strings.
@@ -106,7 +110,7 @@ class CORE_EXPORT SerializedScriptValue
   // This enumeration specifies whether we're serializing a value for storage;
   // e.g. when writing to IndexedDB. This corresponds to the forStorage flag of
   // the HTML spec:
-  // https://html.spec.whatwg.org/multipage/infrastructure.html#safe-passing-of-structured-data
+  // https://html.spec.whatwg.org/C/#safe-passing-of-structured-data
   enum StoragePolicy {
     // Not persisted; used only during the execution of the browser.
     kNotForStorage,
@@ -200,7 +204,7 @@ class CORE_EXPORT SerializedScriptValue
                                    Transferables&,
                                    ExceptionState&);
   static bool ExtractTransferables(v8::Isolate*,
-                                   const Vector<ScriptValue>&,
+                                   const HeapVector<ScriptValue>&,
                                    Transferables&,
                                    ExceptionState&);
 
@@ -254,6 +258,8 @@ class CORE_EXPORT SerializedScriptValue
   }
   void SetImageBitmapContentsArray(ImageBitmapContentsArray contents);
 
+  MessagePortChannelArray& GetStreamChannels() { return stream_channels_; }
+
   bool IsLockedToAgentCluster() const {
     return !wasm_modules_.IsEmpty() ||
            !shared_array_buffers_contents_.IsEmpty();
@@ -288,6 +294,25 @@ class CORE_EXPORT SerializedScriptValue
   void TransferOffscreenCanvas(v8::Isolate*,
                                const OffscreenCanvasArray&,
                                ExceptionState&);
+  void TransferReadableStreams(ScriptState*,
+                               const ReadableStreamArray&,
+                               ExceptionState&);
+  void TransferReadableStream(ScriptState* script_state,
+                              ExecutionContext* execution_context,
+                              ReadableStream* readable_streams,
+                              ExceptionState& exception_state);
+  void TransferWritableStreams(ScriptState*,
+                               const WritableStreamArray&,
+                               ExceptionState&);
+  void TransferWritableStream(ScriptState* script_state,
+                              ExecutionContext* execution_context,
+                              WritableStream* writable_streams,
+                              ExceptionState& exception_state);
+  void TransferTransformStreams(ScriptState*,
+                                const TransformStreamArray&,
+                                ExceptionState&);
+  MessagePort* AddStreamChannel(ExecutionContext*);
+
   void CloneSharedArrayBuffers(SharedArrayBufferArray&);
   DataBufferPtr data_buffer_;
   size_t data_buffer_size_ = 0;
@@ -296,6 +321,10 @@ class CORE_EXPORT SerializedScriptValue
   // UnpackedSerializedScriptValue thereafter.
   ArrayBufferContentsArray array_buffer_contents_array_;
   ImageBitmapContentsArray image_bitmap_contents_array_;
+
+  // |stream_channels_| is also single-use but is special-cased because it works
+  // with ServiceWorkers.
+  MessagePortChannelArray stream_channels_;
 
   // These do not have one-use transferred contents, like the above.
   TransferredWasmModulesArray wasm_modules_;

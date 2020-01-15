@@ -45,10 +45,7 @@ class FileEntrySync final : public EntrySync {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static FileEntrySync* Create(DOMFileSystemBase* file_system,
-                               const String& full_path) {
-    return new FileEntrySync(file_system, full_path);
-  }
+  FileEntrySync(DOMFileSystemBase*, const String& full_path);
 
   bool isFile() const override { return true; }
 
@@ -56,9 +53,6 @@ class FileEntrySync final : public EntrySync {
   FileWriterSync* createWriter(ExceptionState&);
 
   void Trace(blink::Visitor*) override;
-
- private:
-  FileEntrySync(DOMFileSystemBase*, const String& full_path);
 };
 
 DEFINE_TYPE_CASTS(FileEntrySync,

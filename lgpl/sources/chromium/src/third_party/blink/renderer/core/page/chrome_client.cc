@@ -22,6 +22,8 @@
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 
 #include <algorithm>
+#include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/platform/web_prescient_networking.h"
 #include "third_party/blink/public/platform/web_screen_info.h"
 #include "third_party/blink/renderer/core/core_initializer.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -35,7 +37,6 @@
 #include "third_party/blink/renderer/core/page/scoped_page_pauser.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
-#include "third_party/blink/renderer/platform/network/network_hints.h"
 
 namespace blink {
 
@@ -49,7 +50,7 @@ void ChromeClient::InstallSupplements(LocalFrame& frame) {
 
 void ChromeClient::SetWindowRectWithAdjustment(const IntRect& pending_rect,
                                                LocalFrame& frame) {
-  IntRect screen = GetScreenInfo().available_rect;
+  IntRect screen = GetScreenInfo(frame).available_rect;
   IntRect window = pending_rect;
 
   IntSize minimum_size = MinimumWindowSize();
@@ -79,37 +80,54 @@ void ChromeClient::SetWindowRectWithAdjustment(const IntRect& pending_rect,
   SetWindowRect(window, frame);
 }
 
-bool ChromeClient::CanOpenModalIfDuringPageDismissal(
+bool ChromeClient::CanOpenUIElementIfDuringPageDismissal(
     Frame& main_frame,
-    ChromeClient::DialogType dialog,
+    UIElementType ui_element_type,
     const String& message) {
   for (Frame* frame = &main_frame; frame;
        frame = frame->Tree().TraverseNext()) {
-    if (!frame->IsLocalFrame())
+    auto* local_frame = DynamicTo<LocalFrame>(frame);
+    if (!local_frame)
       continue;
-    LocalFrame& local_frame = ToLocalFrame(*frame);
     Document::PageDismissalType dismissal =
-        local_frame.GetDocument()->PageDismissalEventBeingDispatched();
+        local_frame->GetDocument()->PageDismissalEventBeingDispatched();
     if (dismissal != Document::kNoDismissal) {
-      return ShouldOpenModalDialogDuringPageDismissal(local_frame, dialog,
-                                                      message, dismissal);
+      return ShouldOpenUIElementDuringPageDismissal(
+          *local_frame, ui_element_type, message, dismissal);
     }
   }
   return true;
 }
 
+Page* ChromeClient::CreateWindow(
+    LocalFrame* frame,
+    const FrameLoadRequest& r,
+    const AtomicString& frame_name,
+    const WebWindowFeatures& features,
+    WebSandboxFlags sandbox_flags,
+    const FeaturePolicy::FeatureState& opener_feature_state,
+    const SessionStorageNamespaceId& session_storage_namespace_id) {
+  if (!CanOpenUIElementIfDuringPageDismissal(
+          frame->Tree().Top(), UIElementType::kPopup, g_empty_string)) {
+    return nullptr;
+  }
+
+  return CreateWindowDelegate(frame, r, frame_name, features, sandbox_flags,
+                              opener_feature_state,
+                              session_storage_namespace_id);
+}
+
 template <typename Delegate>
 static bool OpenJavaScriptDialog(LocalFrame* frame,
                                  const String& message,
-                                 ChromeClient::DialogType dialog_type,
                                  const Delegate& delegate) {
   // Suspend pages in case the client method runs a new event loop that would
   // otherwise cause the load to continue while we're in the middle of
   // executing JavaScript.
   ScopedPagePauser pauser;
-  probe::willRunJavaScriptDialog(frame);
+  probe::WillRunJavaScriptDialog(frame);
   bool result = delegate();
-  probe::didRunJavaScriptDialog(frame);
+  probe::DidRunJavaScriptDialog(frame);
   return result;
 }
 
@@ -117,34 +135,33 @@ bool ChromeClient::OpenBeforeUnloadConfirmPanel(const String& message,
                                                 LocalFrame* frame,
                                                 bool is_reload) {
   DCHECK(frame);
-  return OpenJavaScriptDialog(
-      frame, message, ChromeClient::kHTMLDialog, [this, frame, is_reload]() {
-        return OpenBeforeUnloadConfirmPanelDelegate(frame, is_reload);
-      });
+  return OpenJavaScriptDialog(frame, message, [this, frame, is_reload]() {
+    return OpenBeforeUnloadConfirmPanelDelegate(frame, is_reload);
+  });
 }
 
 bool ChromeClient::OpenJavaScriptAlert(LocalFrame* frame,
                                        const String& message) {
   DCHECK(frame);
-  if (!CanOpenModalIfDuringPageDismissal(frame->Tree().Top(),
-                                         ChromeClient::kAlertDialog, message))
+  if (!CanOpenUIElementIfDuringPageDismissal(
+          frame->Tree().Top(), UIElementType::kAlertDialog, message)) {
     return false;
-  return OpenJavaScriptDialog(
-      frame, message, ChromeClient::kAlertDialog, [this, frame, &message]() {
-        return OpenJavaScriptAlertDelegate(frame, message);
-      });
+  }
+  return OpenJavaScriptDialog(frame, message, [this, frame, &message]() {
+    return OpenJavaScriptAlertDelegate(frame, message);
+  });
 }
 
 bool ChromeClient::OpenJavaScriptConfirm(LocalFrame* frame,
                                          const String& message) {
   DCHECK(frame);
-  if (!CanOpenModalIfDuringPageDismissal(frame->Tree().Top(),
-                                         ChromeClient::kConfirmDialog, message))
+  if (!CanOpenUIElementIfDuringPageDismissal(
+          frame->Tree().Top(), UIElementType::kConfirmDialog, message)) {
     return false;
-  return OpenJavaScriptDialog(
-      frame, message, ChromeClient::kConfirmDialog, [this, frame, &message]() {
-        return OpenJavaScriptConfirmDelegate(frame, message);
-      });
+  }
+  return OpenJavaScriptDialog(frame, message, [this, frame, &message]() {
+    return OpenJavaScriptConfirmDelegate(frame, message);
+  });
 }
 
 bool ChromeClient::OpenJavaScriptPrompt(LocalFrame* frame,
@@ -152,12 +169,12 @@ bool ChromeClient::OpenJavaScriptPrompt(LocalFrame* frame,
                                         const String& default_value,
                                         String& result) {
   DCHECK(frame);
-  if (!CanOpenModalIfDuringPageDismissal(frame->Tree().Top(),
-                                         ChromeClient::kPromptDialog, prompt))
+  if (!CanOpenUIElementIfDuringPageDismissal(
+          frame->Tree().Top(), UIElementType::kPromptDialog, prompt)) {
     return false;
+  }
   return OpenJavaScriptDialog(
-      frame, prompt, ChromeClient::kPromptDialog,
-      [this, frame, &prompt, &default_value, &result]() {
+      frame, prompt, [this, frame, &prompt, &default_value, &result]() {
         return OpenJavaScriptPromptDelegate(frame, prompt, default_value,
                                             result);
       });
@@ -167,8 +184,13 @@ void ChromeClient::MouseDidMoveOverElement(LocalFrame& frame,
                                            const HitTestLocation& location,
                                            const HitTestResult& result) {
   if (!result.GetScrollbar() && result.InnerNode() &&
-      result.InnerNode()->GetDocument().IsDNSPrefetchEnabled())
-    PrefetchDNS(result.AbsoluteLinkURL().Host());
+      result.InnerNode()->GetDocument().IsDNSPrefetchEnabled()) {
+    WebPrescientNetworking* web_prescient_networking =
+        Platform::Current()->PrescientNetworking();
+    if (web_prescient_networking) {
+      web_prescient_networking->PrefetchDNS(result.AbsoluteLinkURL().Host());
+    }
+  }
 
   ShowMouseOverURL(result);
 
@@ -188,17 +210,15 @@ void ChromeClient::SetToolTip(LocalFrame& frame,
   // Lastly, some elements provide default tooltip strings.  e.g. <input
   // type="file" multiple> shows a tooltip for the selected filenames.
   if (tool_tip.IsNull()) {
-    if (Node* node = result.InnerNode()) {
-      if (node->IsElementNode()) {
-        tool_tip = ToElement(node)->DefaultToolTip();
+    if (auto* element = DynamicTo<Element>(result.InnerNode())) {
+      tool_tip = element->DefaultToolTip();
 
-        // FIXME: We should obtain text direction of tooltip from
-        // ChromeClient or platform. As of October 2011, all client
-        // implementations don't use text direction information for
-        // ChromeClient::setToolTip. We'll work on tooltip text
-        // direction during bidi cleanup in form inputs.
-        tool_tip_direction = TextDirection::kLtr;
-      }
+      // FIXME: We should obtain text direction of tooltip from
+      // ChromeClient or platform. As of October 2011, all client
+      // implementations don't use text direction information for
+      // ChromeClient::setToolTip. We'll work on tooltip text
+      // direction during bidi cleanup in form inputs.
+      tool_tip_direction = TextDirection::kLtr;
     }
   }
 
@@ -229,15 +249,18 @@ void ChromeClient::ClearToolTip(LocalFrame& frame) {
 }
 
 bool ChromeClient::Print(LocalFrame* frame) {
-  if (!CanOpenModalIfDuringPageDismissal(*frame->GetPage()->MainFrame(),
-                                         ChromeClient::kPrintDialog, "")) {
+  if (!CanOpenUIElementIfDuringPageDismissal(*frame->GetPage()->MainFrame(),
+                                             UIElementType::kPrintDialog,
+                                             g_empty_string)) {
     return false;
   }
 
-  if (frame->GetDocument()->IsSandboxed(kSandboxModals)) {
-    UseCounter::Count(frame, WebFeature::kDialogInSandboxedContext);
+  if (frame->GetDocument()->IsSandboxed(WebSandboxFlags::kModals)) {
+    UseCounter::Count(frame->GetDocument(),
+                      WebFeature::kDialogInSandboxedContext);
     frame->Console().AddMessage(ConsoleMessage::Create(
-        kSecurityMessageSource, kErrorMessageLevel,
+        mojom::ConsoleMessageSource::kSecurity,
+        mojom::ConsoleMessageLevel::kError,
         "Ignored call to 'print()'. The document is sandboxed, and the "
         "'allow-modals' keyword is not set."));
     return false;

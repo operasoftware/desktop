@@ -72,6 +72,7 @@ class CORE_EXPORT FontBuilder {
   void SetVariantNumeric(const FontVariantNumeric&);
   void SetTextRendering(TextRenderingMode);
   void SetKerning(FontDescription::Kerning);
+  void SetFontOpticalSizing(OpticalSizing);
   void SetFontSmoothing(FontSmoothingMode);
   void SetVariationSettings(scoped_refptr<FontVariationSettings>);
 
@@ -103,17 +104,18 @@ class CORE_EXPORT FontBuilder {
   }
   static FontVariantEastAsian InitialVariantEastAsian() {
     return FontVariantEastAsian();
-  };
+  }
   static FontDescription::VariantLigatures InitialVariantLigatures() {
     return FontDescription::VariantLigatures();
   }
   static FontVariantNumeric InitialVariantNumeric() {
     return FontVariantNumeric();
-  };
+  }
   static LayoutLocale* InitialLocale() { return nullptr; }
   static FontDescription::Kerning InitialKerning() {
     return FontDescription::kAutoKerning;
   }
+  static OpticalSizing InitialFontOpticalSizing() { return kAutoOpticalSizing; }
   static FontSmoothingMode InitialFontSmoothing() { return kAutoSmoothing; }
 
   static FontSelectionValue InitialStretch() { return NormalWidthValue(); }
@@ -156,6 +158,7 @@ class CORE_EXPORT FontBuilder {
     kVariationSettings,
     kTextRendering,
     kKerning,
+    kFontOpticalSizing,
     kFontSmoothing,
 
     kEffectiveZoom,

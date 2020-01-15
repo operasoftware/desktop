@@ -5,21 +5,19 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_CANVAS_CANVAS2D_HIT_REGION_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_CANVAS_CANVAS2D_HIT_REGION_H_
 
+#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/modules/canvas/canvas2d/hit_region_options.h"
 #include "third_party/blink/renderer/platform/graphics/path.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
+#include "third_party/blink/renderer/platform/wtf/linked_hash_set.h"
 
 namespace blink {
 
-class HitRegion final : public GarbageCollectedFinalized<HitRegion> {
+class HitRegion final : public GarbageCollected<HitRegion> {
  public:
-  static HitRegion* Create(const Path& path, const HitRegionOptions& options) {
-    return new HitRegion(path, options);
-  }
-
+  HitRegion(const Path&, const HitRegionOptions*);
   virtual ~HitRegion() = default;
 
   void RemovePixels(const Path&);
@@ -33,8 +31,6 @@ class HitRegion final : public GarbageCollectedFinalized<HitRegion> {
   void Trace(blink::Visitor*);
 
  private:
-  HitRegion(const Path&, const HitRegionOptions&);
-
   String id_;
   Member<Element> control_;
   Path path_;
@@ -42,10 +38,9 @@ class HitRegion final : public GarbageCollectedFinalized<HitRegion> {
 };
 
 class HitRegionManager final : public GarbageCollected<HitRegionManager> {
-  WTF_MAKE_NONCOPYABLE(HitRegionManager);
-
  public:
-  static HitRegionManager* Create() { return new HitRegionManager; }
+  HitRegionManager() = default;
+  ~HitRegionManager() {}
 
   void AddHitRegion(HitRegion*);
 
@@ -64,9 +59,7 @@ class HitRegionManager final : public GarbageCollected<HitRegionManager> {
   void Trace(blink::Visitor*);
 
  private:
-  HitRegionManager() = default;
-
-  typedef HeapListHashSet<Member<HitRegion>> HitRegionList;
+  typedef HeapLinkedHashSet<Member<HitRegion>> HitRegionList;
   typedef HitRegionList::const_reverse_iterator HitRegionIterator;
   typedef HeapHashMap<String, Member<HitRegion>> HitRegionIdMap;
   typedef HeapHashMap<Member<const Element>, Member<HitRegion>>
@@ -75,6 +68,8 @@ class HitRegionManager final : public GarbageCollected<HitRegionManager> {
   HitRegionList hit_region_list_;
   HitRegionIdMap hit_region_id_map_;
   HitRegionControlMap hit_region_control_map_;
+
+  DISALLOW_COPY_AND_ASSIGN(HitRegionManager);
 };
 
 }  // namespace blink

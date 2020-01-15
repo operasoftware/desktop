@@ -24,8 +24,6 @@
 
 namespace blink {
 
-inline SVGDescElement::SVGDescElement(Document& document)
-    : SVGElement(SVGNames::descTag, document) {}
-
-DEFINE_NODE_FACTORY(SVGDescElement)
+SVGDescElement::SVGDescElement(Document& document)
+    : SVGElement(svg_names::kDescTag, document) {}
 }

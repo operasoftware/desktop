@@ -15,9 +15,9 @@ class KURL;
 class WebLocalFrameImpl;
 
 class MODULES_EXPORT NavigatorContentUtilsClient
-    : public GarbageCollectedFinalized<NavigatorContentUtilsClient> {
+    : public GarbageCollected<NavigatorContentUtilsClient> {
  public:
-  static NavigatorContentUtilsClient* Create(WebLocalFrameImpl*);
+  explicit NavigatorContentUtilsClient(WebLocalFrameImpl*);
   virtual ~NavigatorContentUtilsClient() = default;
 
   virtual void RegisterProtocolHandler(const String& scheme,
@@ -27,9 +27,6 @@ class MODULES_EXPORT NavigatorContentUtilsClient
   virtual void UnregisterProtocolHandler(const String& scheme, const KURL&);
 
   virtual void Trace(blink::Visitor*);
-
- protected:
-  explicit NavigatorContentUtilsClient(WebLocalFrameImpl*);
 
  private:
   Member<WebLocalFrameImpl> web_frame_;

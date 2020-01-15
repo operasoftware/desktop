@@ -8,10 +8,11 @@
 #include <memory>
 #include <utility>
 
+#include "base/bind.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
@@ -45,7 +46,7 @@ class BlobBytesProviderTest : public testing::Test {
   }
 
   void TearDown() override {
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
     Platform::UnsetMainThreadTaskRunnerForTesting();
   }
 
@@ -59,7 +60,7 @@ class BlobBytesProviderTest : public testing::Test {
   }
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   scoped_refptr<RawData> test_data1_;
   Vector<uint8_t> test_bytes1_;
@@ -116,8 +117,8 @@ TEST_F(BlobBytesProviderTest, RequestAsReply) {
 namespace {
 
 struct FileTestData {
-  uint64_t offset;
-  uint64_t size;
+  uint32_t offset;
+  uint32_t size;
 };
 
 void PrintTo(const FileTestData& test, std::ostream* os) {
@@ -144,14 +145,14 @@ class RequestAsFile : public BlobBytesProviderTest,
                              uint64_t file_offset) {
     base::FilePath path;
     base::CreateTemporaryFile(&path);
-    base::Optional<WTF::Time> received_modified;
+    base::Optional<base::Time> received_modified;
     test_provider_->RequestAsFile(
         source_offset, source_length,
         base::File(path, base::File::FLAG_OPEN | base::File::FLAG_WRITE),
         file_offset,
         base::BindOnce(
-            [](base::Optional<WTF::Time>* received_modified,
-               base::Optional<WTF::Time> modified) {
+            [](base::Optional<base::Time>* received_modified,
+               base::Optional<base::Time> modified) {
               *received_modified = modified;
             },
             &received_modified));
@@ -226,7 +227,7 @@ TEST_P(RequestAsFile, OffsetInNonEmptyFile) {
   test_provider_->RequestAsFile(
       test.offset, test.size,
       base::File(path, base::File::FLAG_OPEN | base::File::FLAG_WRITE),
-      file_offset, base::BindOnce([](base::Optional<WTF::Time> last_modified) {
+      file_offset, base::BindOnce([](base::Optional<base::Time> last_modified) {
         EXPECT_TRUE(last_modified);
       }));
 
@@ -255,9 +256,9 @@ const FileTestData file_tests[] = {
     {10, 128 + 64},      // Parts of all three chunks.
 };
 
-INSTANTIATE_TEST_CASE_P(BlobBytesProviderTest,
-                        RequestAsFile,
-                        testing::ValuesIn(file_tests));
+INSTANTIATE_TEST_SUITE_P(BlobBytesProviderTest,
+                         RequestAsFile,
+                         testing::ValuesIn(file_tests));
 
 TEST_F(BlobBytesProviderTest, RequestAsFile_MultipleChunks) {
   auto provider = CreateProvider();
@@ -273,7 +274,7 @@ TEST_F(BlobBytesProviderTest, RequestAsFile_MultipleChunks) {
     provider->RequestAsFile(
         i, 16, base::File(path, base::File::FLAG_OPEN | base::File::FLAG_WRITE),
         combined_bytes_.size() - i - 16,
-        base::BindOnce([](base::Optional<WTF::Time> last_modified) {
+        base::BindOnce([](base::Optional<base::Time> last_modified) {
           EXPECT_TRUE(last_modified);
         }));
     expected_data.insert(0, combined_bytes_.data() + i, 16);
@@ -297,7 +298,7 @@ TEST_F(BlobBytesProviderTest, RequestAsFile_InvaldFile) {
 
   provider->RequestAsFile(
       0, 16, base::File(), 0,
-      base::BindOnce([](base::Optional<WTF::Time> last_modified) {
+      base::BindOnce([](base::Optional<base::Time> last_modified) {
         EXPECT_FALSE(last_modified);
       }));
 }
@@ -309,7 +310,7 @@ TEST_F(BlobBytesProviderTest, RequestAsFile_UnwritableFile) {
   base::CreateTemporaryFile(&path);
   provider->RequestAsFile(
       0, 16, base::File(path, base::File::FLAG_OPEN | base::File::FLAG_READ), 0,
-      base::BindOnce([](base::Optional<WTF::Time> last_modified) {
+      base::BindOnce([](base::Optional<base::Time> last_modified) {
         EXPECT_FALSE(last_modified);
       }));
 
@@ -336,9 +337,11 @@ TEST_F(BlobBytesProviderTest, RequestAsStream) {
       blink::scheduler::GetSequencedTaskRunnerForTesting());
   watcher.Watch(
       pipe.consumer_handle.get(), MOJO_HANDLE_SIGNAL_READABLE,
+      MOJO_WATCH_CONDITION_SATISFIED,
       base::BindRepeating(
           [](mojo::DataPipeConsumerHandle pipe, base::Closure quit_closure,
-             Vector<uint8_t>* bytes_out, MojoResult result) {
+             Vector<uint8_t>* bytes_out, MojoResult result,
+             const mojo::HandleSignalsState& state) {
             if (result == MOJO_RESULT_CANCELLED ||
                 result == MOJO_RESULT_FAILED_PRECONDITION) {
               quit_closure.Run();

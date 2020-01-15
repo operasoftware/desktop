@@ -93,7 +93,7 @@ namespace blink {
 // which of the 2 destructs first.
 
 DatabaseContext* DatabaseContext::Create(ExecutionContext* context) {
-  DatabaseContext* self = new DatabaseContext(context);
+  DatabaseContext* self = MakeGarbageCollected<DatabaseContext>(context);
   DatabaseManager::Manager().RegisterDatabaseContext(self);
   return self;
 }
@@ -145,7 +145,7 @@ DatabaseThread* DatabaseContext::GetDatabaseThread() {
     // Create the database thread on first request - but not if at least one
     // database was already opened, because in that case we already had a
     // database thread and terminated it and should not create another.
-    database_thread_ = DatabaseThread::Create();
+    database_thread_ = MakeGarbageCollected<DatabaseThread>();
     database_thread_->Start();
   }
 

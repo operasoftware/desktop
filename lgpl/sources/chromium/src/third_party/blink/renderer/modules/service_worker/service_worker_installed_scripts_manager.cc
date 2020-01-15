@@ -9,12 +9,19 @@
 
 #include "base/barrier_closure.h"
 #include "base/threading/thread_checker.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
+#include "third_party/blink/public/web/web_embedded_worker.h"
 #include "third_party/blink/renderer/core/html/parser/text_resource_decoder.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker_thread.h"
-#include "third_party/blink/renderer/platform/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/instrumentation/tracing/traced_value.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -29,9 +36,9 @@ namespace {
 // BundledReceivers. It is created to read the script body or metadata from a
 // data pipe, and is destroyed when the read finishes.
 class Receiver {
- public:
-  using BytesChunk = Vector<char>;
+  DISALLOW_NEW();
 
+ public:
   Receiver(mojo::ScopedDataPipeConsumerHandle handle,
            uint64_t total_bytes,
            scoped_refptr<base::SingleThreadTaskRunner> task_runner)
@@ -39,7 +46,9 @@ class Receiver {
         watcher_(FROM_HERE,
                  mojo::SimpleWatcher::ArmingPolicy::MANUAL,
                  std::move(task_runner)),
-        remaining_bytes_(total_bytes) {}
+        remaining_bytes_(total_bytes) {
+    data_.ReserveInitialCapacity(SafeCast<wtf_size_t>(total_bytes));
+  }
 
   void Start(base::OnceClosure callback) {
     if (!handle_.is_valid()) {
@@ -84,11 +93,9 @@ class Receiver {
         return;
     }
 
-    if (bytes_read > 0) {
-      BytesChunk chunk;
-      chunk.Append(static_cast<const char*>(buffer), bytes_read);
-      chunks_.emplace_back(std::move(chunk));
-    }
+    if (bytes_read > 0)
+      data_.Append(static_cast<const uint8_t*>(buffer), bytes_read);
+
     rv = handle_->EndReadData(bytes_read);
     DCHECK_EQ(rv, MOJO_RESULT_OK);
     CHECK_GE(remaining_bytes_, bytes_read);
@@ -96,20 +103,20 @@ class Receiver {
     watcher_.ArmOrNotify();
   }
 
-  bool is_running() const { return handle_.is_valid(); }
-  bool has_received_all_data() const { return remaining_bytes_ == 0; }
+  bool IsRunning() const { return handle_.is_valid(); }
+  bool HasReceivedAllData() const { return remaining_bytes_ == 0; }
 
-  Vector<BytesChunk> TakeChunks() {
-    DCHECK(!is_running());
-    return std::move(chunks_);
+  Vector<uint8_t> TakeData() {
+    DCHECK(!IsRunning());
+    return std::move(data_);
   }
 
  private:
   void OnCompleted() {
     handle_.reset();
     watcher_.Cancel();
-    if (!has_received_all_data())
-      chunks_.clear();
+    if (!HasReceivedAllData())
+      data_.clear();
     DCHECK(callback_);
     std::move(callback_).Run();
   }
@@ -118,7 +125,7 @@ class Receiver {
   mojo::ScopedDataPipeConsumerHandle handle_;
   mojo::SimpleWatcher watcher_;
 
-  Vector<BytesChunk> chunks_;
+  Vector<uint8_t> data_;
   uint64_t remaining_bytes_;
 };
 
@@ -157,22 +164,22 @@ class BundledReceivers {
 class Internal : public mojom::blink::ServiceWorkerInstalledScriptsManager {
  public:
   // Called on the IO thread.
-  // Creates and binds a new Internal instance to |request|.
+  // Creates and binds a new Internal instance to |receiver|.
   static void Create(
       scoped_refptr<ThreadSafeScriptContainer> script_container,
-      mojom::blink::ServiceWorkerInstalledScriptsManagerRequest request,
+      mojo::PendingReceiver<mojom::blink::ServiceWorkerInstalledScriptsManager>
+          receiver,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-    mojo::MakeStrongBinding(
+    mojo::MakeSelfOwnedReceiver(
         std::make_unique<Internal>(std::move(script_container),
                                    std::move(task_runner)),
-        std::move(request));
+        std::move(receiver));
   }
 
   Internal(scoped_refptr<ThreadSafeScriptContainer> script_container,
            scoped_refptr<base::SingleThreadTaskRunner> task_runner)
       : script_container_(std::move(script_container)),
-        task_runner_(std::move(task_runner)),
-        weak_factory_(this) {}
+        task_runner_(std::move(task_runner)) {}
 
   ~Internal() override {
     DCHECK_CALLED_ON_VALID_THREAD(io_thread_checker_);
@@ -206,17 +213,17 @@ class Internal : public mojom::blink::ServiceWorkerInstalledScriptsManager {
     DCHECK(iter != running_receivers_.end());
     std::unique_ptr<BundledReceivers> receivers = std::move(iter->value);
     DCHECK(receivers);
-    if (!receivers->body()->has_received_all_data() ||
-        !receivers->meta_data()->has_received_all_data()) {
+    if (!receivers->body()->HasReceivedAllData() ||
+        !receivers->meta_data()->HasReceivedAllData()) {
       script_container_->AddOnIOThread(script_info->script_url,
                                        nullptr /* data */);
       running_receivers_.erase(iter);
       return;
     }
 
-    auto script_data = RawScriptData::Create(
-        script_info->encoding, receivers->body()->TakeChunks(),
-        receivers->meta_data()->TakeChunks());
+    auto script_data = std::make_unique<RawScriptData>(
+        script_info->encoding, receivers->body()->TakeData(),
+        receivers->meta_data()->TakeData());
     for (const auto& entry : script_info->headers)
       script_data->AddHeader(entry.key, entry.value);
     script_container_->AddOnIOThread(script_info->script_url,
@@ -229,30 +236,50 @@ class Internal : public mojom::blink::ServiceWorkerInstalledScriptsManager {
   HashMap<KURL, std::unique_ptr<BundledReceivers>> running_receivers_;
   scoped_refptr<ThreadSafeScriptContainer> script_container_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-  base::WeakPtrFactory<Internal> weak_factory_;
+  base::WeakPtrFactory<Internal> weak_factory_{this};
 };
+
+std::unique_ptr<TracedValue> UrlToTracedValue(const KURL& url) {
+  auto value = std::make_unique<TracedValue>();
+  value->SetString("url", url.GetString());
+  return value;
+}
 
 }  // namespace
 
 ServiceWorkerInstalledScriptsManager::ServiceWorkerInstalledScriptsManager(
-    const Vector<KURL>& installed_urls,
-    mojom::blink::ServiceWorkerInstalledScriptsManagerRequest manager_request,
-    mojom::blink::ServiceWorkerInstalledScriptsManagerHostPtrInfo
-        manager_host_ptr,
+    std::unique_ptr<WebServiceWorkerInstalledScriptsManagerParams>
+        installed_scripts_manager_params,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner)
-    : script_container_(base::MakeRefCounted<ThreadSafeScriptContainer>()),
-      manager_host_(
-          mojom::blink::ThreadSafeServiceWorkerInstalledScriptsManagerHostPtr::
-              Create(mojom::blink::ServiceWorkerInstalledScriptsManagerHostPtr(
-                  std::move(manager_host_ptr)))) {
-  // We're on the main thread now, but |installed_urls_| will be accessed on the
-  // worker thread later, so make a deep copy of |url| as key.
-  for (const KURL& url : installed_urls)
-    installed_urls_.insert(url.Copy());
-  io_task_runner->PostTask(
-      FROM_HERE, ConvertToBaseCallback(CrossThreadBind(
-                     &Internal::Create, script_container_,
-                     WTF::Passed(std::move(manager_request)), io_task_runner)));
+    : script_container_(base::MakeRefCounted<ThreadSafeScriptContainer>()) {
+  DCHECK(installed_scripts_manager_params);
+
+  DCHECK(installed_scripts_manager_params->manager_receiver);
+  auto manager_receiver =
+      mojo::PendingReceiver<mojom::blink::ServiceWorkerInstalledScriptsManager>(
+          std::move(installed_scripts_manager_params->manager_receiver));
+
+  DCHECK(installed_scripts_manager_params->manager_host_remote);
+  manager_host_ = mojo::SharedRemote<
+      mojom::blink::ServiceWorkerInstalledScriptsManagerHost>(
+      mojo::PendingRemote<
+          mojom::blink::ServiceWorkerInstalledScriptsManagerHost>(
+          std::move(installed_scripts_manager_params->manager_host_remote),
+          mojom::blink::ServiceWorkerInstalledScriptsManagerHost::Version_));
+
+  // Don't touch |installed_urls_| after this point. We're on the initiator
+  // thread now, but |installed_urls_| will be accessed on the
+  // worker thread later, so they should keep isolated from the current thread.
+  for (const WebURL& url :
+       installed_scripts_manager_params->installed_scripts_urls) {
+    installed_urls_.insert(KURL(url).Copy());
+  }
+
+  PostCrossThreadTask(
+      *io_task_runner, FROM_HERE,
+      CrossThreadBindOnce(&Internal::Create, script_container_,
+                          WTF::Passed(std::move(manager_receiver)),
+                          io_task_runner));
 }
 
 bool ServiceWorkerInstalledScriptsManager::IsScriptInstalled(
@@ -263,6 +290,9 @@ bool ServiceWorkerInstalledScriptsManager::IsScriptInstalled(
 std::unique_ptr<InstalledScriptsManager::ScriptData>
 ServiceWorkerInstalledScriptsManager::GetScriptData(const KURL& script_url) {
   DCHECK(!IsMainThread());
+  TRACE_EVENT1("ServiceWorker",
+               "ServiceWorkerInstalledScriptsManager::GetScriptData",
+               "script_url", UrlToTracedValue(script_url));
   if (!IsScriptInstalled(script_url))
     return nullptr;
 
@@ -273,29 +303,25 @@ ServiceWorkerInstalledScriptsManager::GetScriptData(const KURL& script_url) {
 
   // This is from WorkerClassicScriptLoader::DidReceiveData.
   std::unique_ptr<TextResourceDecoder> decoder =
-      TextResourceDecoder::Create(TextResourceDecoderOptions(
+      std::make_unique<TextResourceDecoder>(TextResourceDecoderOptions(
           TextResourceDecoderOptions::kPlainTextContent,
           raw_script_data->Encoding().IsEmpty()
               ? UTF8Encoding()
               : WTF::TextEncoding(raw_script_data->Encoding())));
 
-  StringBuilder source_text_builder;
-  for (const auto& chunk : raw_script_data->ScriptTextChunks())
-    source_text_builder.Append(decoder->Decode(chunk.data(), chunk.size()));
+  Vector<uint8_t> source_text = raw_script_data->TakeScriptText();
+  String decoded_source_text = decoder->Decode(
+      reinterpret_cast<const char*>(source_text.data()), source_text.size());
 
-  std::unique_ptr<Vector<char>> meta_data;
-  if (raw_script_data->MetaDataChunks().size() > 0) {
-    size_t total_metadata_size = 0;
-    for (const auto& chunk : raw_script_data->MetaDataChunks())
-      total_metadata_size += chunk.size();
-    meta_data = std::make_unique<Vector<char>>();
-    meta_data->ReserveInitialCapacity(total_metadata_size);
-    for (const auto& chunk : raw_script_data->MetaDataChunks())
-      meta_data->Append(chunk.data(), chunk.size());
-  }
+  // TODO(crbug.com/946676): Remove the unique_ptr<> wrapper around the Vector
+  // as we can just use Vector::IsEmpty() to distinguish missing code cache.
+  std::unique_ptr<Vector<uint8_t>> meta_data;
+  Vector<uint8_t> meta_data_in = raw_script_data->TakeMetaData();
+  if (meta_data_in.size() > 0)
+    meta_data = std::make_unique<Vector<uint8_t>>(std::move(meta_data_in));
 
   return std::make_unique<InstalledScriptsManager::ScriptData>(
-      script_url, source_text_builder.ToString(), std::move(meta_data),
+      script_url, decoded_source_text, std::move(meta_data),
       raw_script_data->TakeHeaders());
 }
 
@@ -307,7 +333,7 @@ ServiceWorkerInstalledScriptsManager::GetRawScriptData(const KURL& script_url) {
   // script.
   if (status == ThreadSafeScriptContainer::ScriptStatus::kTaken) {
     script_container_->ResetOnWorkerThread(script_url);
-    (*manager_host_)->RequestInstalledScript(script_url);
+    manager_host_->RequestInstalledScript(script_url);
     status = script_container_->GetStatusOnWorkerThread(script_url);
   }
 

@@ -9,14 +9,14 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/page/page_visibility_observer.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 #include "third_party/blink/renderer/platform/timer.h"
-#include "third_party/blink/renderer/platform/web_task_runner.h"
 
 namespace blink {
 
 // Base controller class for registering controllers with a dispatcher.
 // It watches page visibility and calls stopUpdating when page is not visible.
-// It provides a didUpdateData() callback method which is called when new data
+// It provides a DidUpdateData() callback method which is called when new data
 // it available.
 class CORE_EXPORT PlatformEventController : public PageVisibilityObserver {
  public:
@@ -36,7 +36,7 @@ class CORE_EXPORT PlatformEventController : public PageVisibilityObserver {
   virtual void RegisterWithDispatcher() = 0;
   virtual void UnregisterWithDispatcher() = 0;
 
-  // When true initiates a one-shot didUpdateData() when startUpdating() is
+  // When true initiates a one-shot DidUpdateData() when StartUpdating() is
   // called.
   virtual bool HasLastData() = 0;
 

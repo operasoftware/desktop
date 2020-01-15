@@ -56,16 +56,11 @@ WaveShaperNode* WaveShaperNode::Create(BaseAudioContext& context,
                                        ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
-  if (context.IsContextClosed()) {
-    context.ThrowExceptionForClosedState(exception_state);
-    return nullptr;
-  }
-
-  return new WaveShaperNode(context);
+  return MakeGarbageCollected<WaveShaperNode>(context);
 }
 
 WaveShaperNode* WaveShaperNode::Create(BaseAudioContext* context,
-                                       const WaveShaperOptions& options,
+                                       const WaveShaperOptions* options,
                                        ExceptionState& exception_state) {
   WaveShaperNode* node = Create(*context, exception_state);
 
@@ -74,10 +69,10 @@ WaveShaperNode* WaveShaperNode::Create(BaseAudioContext* context,
 
   node->HandleChannelOptions(options, exception_state);
 
-  if (options.hasCurve())
-    node->setCurve(options.curve(), exception_state);
+  if (options->hasCurve())
+    node->setCurve(options->curve(), exception_state);
 
-  node->setOversample(options.oversample());
+  node->setOversample(options->oversample());
 
   return node;
 }
@@ -130,12 +125,11 @@ NotShared<DOMFloat32Array> WaveShaperNode::curve() {
     return NotShared<DOMFloat32Array>(nullptr);
 
   unsigned size = curve->size();
-  scoped_refptr<WTF::Float32Array> new_curve = WTF::Float32Array::Create(size);
 
-  memcpy(new_curve->Data(), curve->data(), sizeof(float) * size);
+  NotShared<DOMFloat32Array> result(DOMFloat32Array::Create(size));
+  memcpy(result.View()->Data(), curve->data(), sizeof(float) * size);
 
-  return NotShared<DOMFloat32Array>(
-      DOMFloat32Array::Create(std::move(new_curve)));
+  return result;
 }
 
 void WaveShaperNode::setOversample(const String& type) {
@@ -172,6 +166,14 @@ String WaveShaperNode::oversample() const {
       NOTREACHED();
       return "none";
   }
+}
+
+void WaveShaperNode::ReportDidCreate() {
+  GraphTracer().DidCreateAudioNode(this);
+}
+
+void WaveShaperNode::ReportWillBeDestroyed() {
+  GraphTracer().WillDestroyAudioNode(this);
 }
 
 }  // namespace blink

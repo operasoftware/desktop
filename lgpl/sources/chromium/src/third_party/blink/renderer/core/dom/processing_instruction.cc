@@ -21,6 +21,7 @@
 #include "third_party/blink/renderer/core/dom/processing_instruction.h"
 
 #include <memory>
+
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/media_list.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
@@ -32,6 +33,7 @@
 #include "third_party/blink/renderer/core/xml/document_xslt.h"
 #include "third_party/blink/renderer/core/xml/parser/xml_document_parser.h"  // for parseAttributes()
 #include "third_party/blink/renderer/core/xml/xsl_style_sheet.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
@@ -53,7 +55,7 @@ inline ProcessingInstruction::ProcessingInstruction(Document& document,
 ProcessingInstruction* ProcessingInstruction::Create(Document& document,
                                                      const String& target,
                                                      const String& data) {
-  return new ProcessingInstruction(document, target, data);
+  return MakeGarbageCollected<ProcessingInstruction>(document, target, data);
 }
 
 ProcessingInstruction::~ProcessingInstruction() = default;
@@ -87,8 +89,11 @@ Node* ProcessingInstruction::Clone(Document& factory, CloneChildrenFlag) const {
 }
 
 void ProcessingInstruction::DidAttributeChanged() {
-  if (sheet_)
+  if (sheet_) {
+    if (sheet_->IsLoading())
+      RemovePendingSheet();
     ClearSheet();
+  }
 
   String href;
   String charset;
@@ -151,14 +156,15 @@ void ProcessingInstruction::Process(const String& href, const String& charset) {
     return;
 
   ResourceLoaderOptions options;
-  options.initiator_info.name = FetchInitiatorTypeNames::processinginstruction;
+  options.initiator_info.name =
+      fetch_initiator_type_names::kProcessinginstruction;
   FetchParameters params(ResourceRequest(GetDocument().CompleteURL(href)),
                          options);
   loading_ = true;
   if (is_xsl_) {
     DCHECK(RuntimeEnabledFeatures::XSLTEnabled());
-    params.MutableResourceRequest().SetFetchRequestMode(
-        network::mojom::FetchRequestMode::kSameOrigin);
+    params.MutableResourceRequest().SetMode(
+        network::mojom::RequestMode::kSameOrigin);
     XSLStyleSheetResource::Fetch(params, GetDocument().Fetcher(), this);
   } else {
     params.SetCharset(charset.IsEmpty() ? GetDocument().Encoding()
@@ -179,8 +185,7 @@ bool ProcessingInstruction::IsLoading() const {
 bool ProcessingInstruction::SheetLoaded() {
   if (!IsLoading()) {
     if (!DocumentXSLT::SheetLoaded(GetDocument(), this))
-      GetDocument().GetStyleEngine().RemovePendingSheet(*this,
-                                                        style_engine_context_);
+      RemovePendingSheet();
     return true;
   }
   return false;
@@ -193,24 +198,25 @@ void ProcessingInstruction::NotifyFinished(Resource* resource) {
   }
 
   std::unique_ptr<IncrementLoadEventDelayCount> delay =
-      is_xsl_ ? IncrementLoadEventDelayCount::Create(GetDocument()) : nullptr;
+      is_xsl_ ? std::make_unique<IncrementLoadEventDelayCount>(GetDocument())
+              : nullptr;
   if (is_xsl_) {
     sheet_ = XSLStyleSheet::Create(this, resource->Url(),
-                                   resource->GetResponse().Url());
+                                   resource->GetResponse().ResponseUrl());
     ToXSLStyleSheet(sheet_.Get())
         ->ParseString(ToXSLStyleSheetResource(resource)->Sheet());
   } else {
     DCHECK(is_css_);
     CSSStyleSheetResource* style_resource = ToCSSStyleSheetResource(resource);
-    CSSParserContext* parser_context = CSSParserContext::Create(
-        GetDocument(), style_resource->GetResponse().Url(),
-        style_resource->GetResponse().IsOpaqueResponseFromServiceWorker(),
+    auto* parser_context = MakeGarbageCollected<CSSParserContext>(
+        GetDocument(), style_resource->GetResponse().ResponseUrl(),
+        style_resource->GetResponse().IsCorsSameOrigin(),
         style_resource->GetReferrerPolicy(), style_resource->Encoding());
 
-    StyleSheetContents* new_sheet =
-        StyleSheetContents::Create(style_resource->Url(), parser_context);
+    auto* new_sheet = MakeGarbageCollected<StyleSheetContents>(
+        parser_context, style_resource->Url());
 
-    CSSStyleSheet* css_sheet = CSSStyleSheet::Create(new_sheet, *this);
+    auto* css_sheet = MakeGarbageCollected<CSSStyleSheet>(new_sheet, *this);
     css_sheet->setDisabled(alternate_);
     css_sheet->SetTitle(title_);
     if (!alternate_ && !title_.IsEmpty()) {
@@ -230,7 +236,7 @@ void ProcessingInstruction::NotifyFinished(Resource* resource) {
   loading_ = false;
 
   if (is_css_)
-    ToCSSStyleSheet(sheet_.Get())->Contents()->CheckLoaded();
+    To<CSSStyleSheet>(sheet_.Get())->Contents()->CheckLoaded();
   else if (is_xsl_)
     ToXSLStyleSheet(sheet_.Get())->CheckLoaded();
 }
@@ -264,6 +270,9 @@ void ProcessingInstruction::RemovedFrom(ContainerNode& insertion_point) {
         *this, insertion_point);
   }
 
+  if (IsLoading())
+    RemovePendingSheet();
+
   if (sheet_) {
     DCHECK_EQ(sheet_->ownerNode(), this);
     ClearSheet();
@@ -275,13 +284,15 @@ void ProcessingInstruction::RemovedFrom(ContainerNode& insertion_point) {
 
 void ProcessingInstruction::ClearSheet() {
   DCHECK(sheet_);
-  if (sheet_->IsLoading())
-    GetDocument().GetStyleEngine().RemovePendingSheet(*this,
-                                                      style_engine_context_);
   sheet_.Release()->ClearOwnerNode();
 }
 
-void ProcessingInstruction::Trace(blink::Visitor* visitor) {
+void ProcessingInstruction::RemovePendingSheet() {
+  GetDocument().GetStyleEngine().RemovePendingSheet(*this,
+                                                    style_engine_context_);
+}
+
+void ProcessingInstruction::Trace(Visitor* visitor) {
   visitor->Trace(sheet_);
   visitor->Trace(listener_for_xslt_);
   CharacterData::Trace(visitor);

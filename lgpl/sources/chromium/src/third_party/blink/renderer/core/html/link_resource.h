@@ -42,9 +42,7 @@ class Document;
 class HTMLLinkElement;
 class LocalFrame;
 
-class CORE_EXPORT LinkResource
-    : public GarbageCollectedFinalized<LinkResource> {
-
+class CORE_EXPORT LinkResource : public GarbageCollected<LinkResource> {
  public:
   enum LinkResourceType { kStyle, kImport, kManifest, kOther };
 
@@ -60,7 +58,7 @@ class CORE_EXPORT LinkResource
   virtual void OwnerInserted() {}
   virtual bool HasLoaded() const = 0;
 
-  virtual void Trace(blink::Visitor*);
+  virtual void Trace(Visitor*);
 
  protected:
   void Load();

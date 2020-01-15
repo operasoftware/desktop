@@ -2,6 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// clang-format off
+// #import 'chrome://resources/cr_elements/cr_input/cr_input.m.js';
+// #import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+// #import {eventToPromise, whenAttributeIs} from '../test_util.m.js';
+// clang-format on
+
 suite('cr-input', function() {
   let crInput;
   let input;
@@ -42,6 +48,12 @@ suite('cr-input', function() {
     });
   });
 
+  test('UnsupportedTypeThrows', function() {
+    assertThrows(function() {
+      crInput.type = 'checkbox';
+    });
+  });
+
   test('togglingDisableModifiesTabIndexCorrectly', function() {
     // Do innerHTML instead of createElement to make sure it's correct right
     // after being attached, and not messed up by disabledChanged_.
@@ -73,11 +85,13 @@ suite('cr-input', function() {
     input = crInput.$.input;
     Polymer.dom.flush();
 
-    assertEquals(null, crInput.getAttribute('tabindex'));
-    assertEquals(true, input.disabled);
-    crInput.disabled = false;
-    assertEquals('14', crInput.getAttribute('tabindex'));
-    assertEquals(14, input.tabIndex);
+    return test_util.whenAttributeIs(input, 'tabindex', null).then(() => {
+      assertEquals(null, crInput.getAttribute('tabindex'));
+      assertEquals(true, input.disabled);
+      crInput.disabled = false;
+      assertEquals('14', crInput.getAttribute('tabindex'));
+      assertEquals(14, input.tabIndex);
+    });
   });
 
   test('pointerDownAndTabIndex', function() {
@@ -144,7 +158,7 @@ suite('cr-input', function() {
     assertEquals('none', getComputedStyle(crInput.$.label).display);
     crInput.label = 'foobar';
     assertEquals('block', getComputedStyle(crInput.$.label).display);
-    assertEquals('foobar', label.textContent);
+    assertEquals('foobar', label.textContent.trim());
   });
 
   test('valueSetCorrectly', function() {

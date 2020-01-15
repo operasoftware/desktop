@@ -7,28 +7,63 @@
 
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_algorithm.h"
 
-#include "third_party/blink/renderer/core/layout/ng/ng_fragment_builder.h"
+#include "third_party/blink/renderer/core/layout/flexible_box_algorithm.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_box_fragment_builder.h"
 
 namespace blink {
 
 class NGBlockNode;
 class NGBlockBreakToken;
-class NGBreakToken;
-class NGConstraintSpace;
 
 class CORE_EXPORT NGFlexLayoutAlgorithm
     : public NGLayoutAlgorithm<NGBlockNode,
-                               NGFragmentBuilder,
+                               NGBoxFragmentBuilder,
                                NGBlockBreakToken> {
  public:
-  NGFlexLayoutAlgorithm(NGBlockNode,
-                        const NGConstraintSpace&,
-                        const NGBreakToken*);
+  NGFlexLayoutAlgorithm(const NGLayoutAlgorithmParams& params);
 
-  scoped_refptr<NGLayoutResult> Layout() override;
+  scoped_refptr<const NGLayoutResult> Layout() override;
 
   base::Optional<MinMaxSize> ComputeMinMaxSize(
       const MinMaxSizeInput&) const override;
+
+ private:
+  bool DoesItemCrossSizeComputeToAuto(const NGBlockNode& child) const;
+  bool IsItemMainSizeDefinite(const NGBlockNode& child) const;
+  bool ShouldItemShrinkToFit(const NGBlockNode& child) const;
+  bool DoesItemStretch(const NGBlockNode& child) const;
+  // This implements the first of the additional scenarios where a flex item
+  // has definite sizes when it would not if it weren't a flex item.
+  // https://drafts.csswg.org/css-flexbox/#definite-sizes
+  bool WillChildCrossSizeBeContainerCrossSize(const NGBlockNode& child) const;
+
+  bool IsColumnContainerMainSizeDefinite() const;
+  bool IsContainerCrossSizeDefinite() const;
+
+  NGConstraintSpace BuildConstraintSpaceForDeterminingFlexBasis(
+      const NGBlockNode& flex_item) const;
+  void ConstructAndAppendFlexItems();
+  void GiveLinesAndItemsFinalPositionAndSize();
+  // This is same method as FlexItem but we need that logic before FlexItem is
+  // constructed.
+  bool MainAxisIsInlineAxis(const NGBlockNode& child) const;
+  LayoutUnit MainAxisContentExtent(LayoutUnit sum_hypothetical_main_size);
+
+  void HandleOutOfFlowPositioned(NGBlockNode child);
+  // TODO(dgrogan): This is redundant with FlexLayoutAlgorithm.IsMultiline() but
+  // it's needed before the algorithm is instantiated. Figure out how to
+  // not reimplement.
+  bool IsMultiline() const;
+
+  const NGBoxStrut border_padding_;
+  const NGBoxStrut border_scrollbar_padding_;
+  const bool is_column_;
+  LogicalSize border_box_size_;
+  LogicalSize content_box_size_;
+  // These are populated at the top of Layout(), so aren't available in
+  // ComputeMinMaxSize() or anything it calls.
+  base::Optional<FlexLayoutAlgorithm> algorithm_;
+  bool is_horizontal_flow_;
 };
 
 }  // namespace blink

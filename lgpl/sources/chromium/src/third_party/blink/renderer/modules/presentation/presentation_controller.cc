@@ -5,23 +5,23 @@
 #include "third_party/blink/renderer/modules/presentation/presentation_controller.h"
 
 #include <memory>
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_availability_callbacks.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_availability_observer.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_availability_state.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_connection.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
 PresentationController::PresentationController(LocalFrame& frame)
     : Supplement<LocalFrame>(frame),
-      ContextLifecycleObserver(frame.GetDocument()),
-      controller_binding_(this) {}
+      ContextLifecycleObserver(frame.GetDocument()) {}
 
 PresentationController::~PresentationController() = default;
 
@@ -35,7 +35,8 @@ PresentationController* PresentationController::From(LocalFrame& frame) {
 
 // static
 void PresentationController::ProvideTo(LocalFrame& frame) {
-  Supplement<LocalFrame>::ProvideTo(frame, new PresentationController(frame));
+  Supplement<LocalFrame>::ProvideTo(
+      frame, MakeGarbageCollected<PresentationController>(frame));
 }
 
 // static
@@ -54,6 +55,7 @@ PresentationController* PresentationController::FromContext(
 void PresentationController::Trace(blink::Visitor* visitor) {
   visitor->Trace(presentation_);
   visitor->Trace(connections_);
+  visitor->Trace(availability_state_);
   Supplement<LocalFrame>::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);
 }
@@ -69,11 +71,11 @@ void PresentationController::RegisterConnection(
 
 PresentationAvailabilityState* PresentationController::GetAvailabilityState() {
   if (!availability_state_) {
-    availability_state_.reset(
-        new PresentationAvailabilityState(GetPresentationService().get()));
+    availability_state_ = MakeGarbageCollected<PresentationAvailabilityState>(
+        GetPresentationService().get());
   }
 
-  return availability_state_.get();
+  return availability_state_;
 }
 
 void PresentationController::AddAvailabilityObserver(
@@ -117,23 +119,21 @@ void PresentationController::OnDefaultPresentationStarted(
     mojom::blink::PresentationConnectionResultPtr result) {
   DCHECK(result);
   DCHECK(result->presentation_info);
-  DCHECK(result->connection_ptr && result->connection_request);
+  DCHECK(result->connection_remote && result->connection_receiver);
   if (!presentation_ || !presentation_->defaultRequest())
     return;
 
-  PresentationRequest::RecordStartOriginTypeAccess(*GetExecutionContext());
   auto* connection = ControllerPresentationConnection::Take(
       this, *result->presentation_info, presentation_->defaultRequest());
   // TODO(btolsch): Convert this and similar calls to just use InterfacePtrInfo
   // instead of constructing an InterfacePtr every time we have
   // InterfacePtrInfo.
-  connection->Init(mojom::blink::PresentationConnectionPtr(
-                       std::move(result->connection_ptr)),
-                   std::move(result->connection_request));
+  connection->Init(std::move(result->connection_remote),
+                   std::move(result->connection_receiver));
 }
 
 void PresentationController::ContextDestroyed(ExecutionContext*) {
-  controller_binding_.Close();
+  presentation_controller_receiver_.reset();
 }
 
 ControllerPresentationConnection*
@@ -152,17 +152,18 @@ PresentationController::FindExistingConnection(
   return nullptr;
 }
 
-mojom::blink::PresentationServicePtr&
+mojo::Remote<mojom::blink::PresentationService>&
 PresentationController::GetPresentationService() {
-  if (!presentation_service_ && GetFrame() && GetFrame()->Client()) {
-    auto* interface_provider = GetFrame()->Client()->GetInterfaceProvider();
-    interface_provider->GetInterface(mojo::MakeRequest(&presentation_service_));
-
-    mojom::blink::PresentationControllerPtr controller_ptr;
-    controller_binding_.Bind(mojo::MakeRequest(&controller_ptr));
-    presentation_service_->SetController(std::move(controller_ptr));
+  if (!presentation_service_remote_ && GetFrame()) {
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+        GetFrame()->GetTaskRunner(TaskType::kPresentation);
+    GetFrame()->GetBrowserInterfaceBroker().GetInterface(
+        presentation_service_remote_.BindNewPipeAndPassReceiver(task_runner));
+    presentation_service_remote_->SetController(
+        presentation_controller_receiver_.BindNewPipeAndPassRemote(
+            task_runner));
   }
-  return presentation_service_;
+  return presentation_service_remote_;
 }
 
 ControllerPresentationConnection* PresentationController::FindConnection(

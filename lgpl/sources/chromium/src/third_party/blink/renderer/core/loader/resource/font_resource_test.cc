@@ -4,9 +4,10 @@
 
 #include "third_party/blink/renderer/core/loader/resource/font_resource.h"
 
+#include "base/test/scoped_feature_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
-#include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/renderer/core/css/css_font_face_src_value.h"
 #include "third_party/blink/renderer/core/loader/resource/mock_font_resource_client.h"
@@ -21,17 +22,31 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/loader/testing/mock_fetch_context.h"
 #include "third_party/blink/renderer/platform/loader/testing/mock_resource_client.h"
+#include "third_party/blink/renderer/platform/loader/testing/test_loader_factory.h"
+#include "third_party/blink/renderer/platform/loader/testing/test_resource_fetcher_properties.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
 namespace blink {
 
 class FontResourceTest : public testing::Test {
+ public:
   void TearDown() override {
-    Platform::Current()
-        ->GetURLLoaderMockFactory()
-        ->UnregisterAllURLsAndClearMemoryCache();
+    url_test_helpers::UnregisterAllURLsAndClearMemoryCache();
   }
+};
+
+class CacheAwareFontResourceTest : public FontResourceTest {
+ public:
+  void SetUp() override {
+    scoped_feature_list_.InitAndEnableFeature(
+        features::kWebFontsCacheAwareTimeoutAdaption);
+    FontResourceTest::SetUp();
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // Tests if ResourceFetcher works fine with FontResource that requires defered
@@ -40,14 +55,19 @@ TEST_F(FontResourceTest,
        ResourceFetcherRevalidateDeferedResourceFromTwoInitiators) {
   KURL url("http://127.0.0.1:8000/font.woff");
   ResourceResponse response(url);
-  response.SetHTTPStatusCode(200);
-  response.SetHTTPHeaderField(HTTPNames::ETag, "1234567890");
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, WrappedResourceResponse(response), "");
+  response.SetHttpStatusCode(200);
+  response.SetHttpHeaderField(http_names::kETag, "1234567890");
+  // TODO(crbug.com/751425): We should use the mock functionality
+  // via the LoaderFactory.
+  url_test_helpers::RegisterMockedURLLoadWithCustomResponse(
+      url, "", WrappedResourceResponse(response));
 
-  MockFetchContext* context =
-      MockFetchContext::Create(MockFetchContext::kShouldLoadNewResource);
-  ResourceFetcher* fetcher = ResourceFetcher::Create(context);
+  MockFetchContext* context = MakeGarbageCollected<MockFetchContext>();
+  auto* properties = MakeGarbageCollected<TestResourceFetcherProperties>();
+  auto* fetcher = MakeGarbageCollected<ResourceFetcher>(
+      ResourceFetcherInit(properties->MakeDetachable(), context,
+                          base::MakeRefCounted<scheduler::FakeTaskRunner>(),
+                          MakeGarbageCollected<TestLoaderFactory>()));
 
   // Fetch to cache a resource.
   ResourceRequest request1(url);
@@ -55,12 +75,12 @@ TEST_F(FontResourceTest,
   Resource* resource1 = FontResource::Fetch(fetch_params1, fetcher, nullptr);
   ASSERT_FALSE(resource1->ErrorOccurred());
   fetcher->StartLoad(resource1);
-  Platform::Current()->GetURLLoaderMockFactory()->ServeAsynchronousRequests();
+  url_test_helpers::ServeAsynchronousRequests();
   EXPECT_TRUE(resource1->IsLoaded());
   EXPECT_FALSE(resource1->ErrorOccurred());
 
   // Set the context as it is on reloads.
-  context->SetLoadComplete(true);
+  properties->SetIsLoadComplete(true);
 
   // Revalidate the resource.
   ResourceRequest request2(url);
@@ -85,7 +105,7 @@ TEST_F(FontResourceTest,
   // StartLoad() can be called from any initiator. Here, call it from the
   // latter.
   fetcher->StartLoad(resource3);
-  Platform::Current()->GetURLLoaderMockFactory()->ServeAsynchronousRequests();
+  url_test_helpers::ServeAsynchronousRequests();
   EXPECT_TRUE(resource3->IsLoaded());
   EXPECT_FALSE(resource3->ErrorOccurred());
   EXPECT_TRUE(resource2->IsLoaded());
@@ -95,24 +115,22 @@ TEST_F(FontResourceTest,
 }
 
 // Tests if cache-aware font loading works correctly.
-TEST_F(FontResourceTest, CacheAwareFontLoading) {
+TEST_F(CacheAwareFontResourceTest, CacheAwareFontLoading) {
   KURL url("http://127.0.0.1:8000/font.woff");
   ResourceResponse response(url);
-  response.SetHTTPStatusCode(200);
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, WrappedResourceResponse(response), "");
+  response.SetHttpStatusCode(200);
+  // TODO(crbug.com/751425): We should use the mock functionality
+  // via the LoaderFactory.
+  url_test_helpers::RegisterMockedURLLoadWithCustomResponse(
+      url, "", WrappedResourceResponse(response));
 
-  RuntimeEnabledFeatures::Backup features_backup;
-  RuntimeEnabledFeatures::SetWebFontsCacheAwareTimeoutAdaptationEnabled(true);
-
-  std::unique_ptr<DummyPageHolder> dummy_page_holder =
-      DummyPageHolder::Create(IntSize(800, 600));
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
   Document& document = dummy_page_holder->GetDocument();
   ResourceFetcher* fetcher = document.Fetcher();
   CSSFontFaceSrcValue* src_value = CSSFontFaceSrcValue::Create(
       url.GetString(), url.GetString(),
       Referrer(document.Url(), document.GetReferrerPolicy()),
-      kDoNotCheckContentSecurityPolicy);
+      kDoNotCheckContentSecurityPolicy, OriginClean::kTrue);
 
   // Route font requests in this test through CSSFontFaceSrcValue::Fetch
   // instead of calling FontResource::Fetch directly. CSSFontFaceSrcValue
@@ -120,7 +138,8 @@ TEST_F(FontResourceTest, CacheAwareFontLoading) {
   // on future CSSFontFaceSrcValue::Fetch calls. This tests wants to ensure
   // correct behavior in the case where we reuse a FontResource without it being
   // a "cache hit" in ResourceFetcher's view.
-  Persistent<MockFontResourceClient> client = new MockFontResourceClient;
+  Persistent<MockFontResourceClient> client =
+      MakeGarbageCollected<MockFontResourceClient>();
   FontResource& resource = src_value->Fetch(&document, client);
 
   fetcher->StartLoad(&resource);
@@ -141,7 +160,8 @@ TEST_F(FontResourceTest, CacheAwareFontLoading) {
   EXPECT_FALSE(client->FontLoadLongLimitExceededCalled());
 
   // Add client now, FontLoadShortLimitExceeded() should be called.
-  Persistent<MockFontResourceClient> client2 = new MockFontResourceClient;
+  Persistent<MockFontResourceClient> client2 =
+      MakeGarbageCollected<MockFontResourceClient>();
   FontResource& resource2 = src_value->Fetch(&document, client2);
   EXPECT_EQ(&resource, &resource2);
   EXPECT_TRUE(client2->FontLoadShortLimitExceededCalled());
@@ -152,16 +172,15 @@ TEST_F(FontResourceTest, CacheAwareFontLoading) {
   EXPECT_TRUE(client->FontLoadLongLimitExceededCalled());
 
   // Add client now, both callbacks should be called.
-  Persistent<MockFontResourceClient> client3 = new MockFontResourceClient;
+  Persistent<MockFontResourceClient> client3 =
+      MakeGarbageCollected<MockFontResourceClient>();
   FontResource& resource3 = src_value->Fetch(&document, client3);
   EXPECT_EQ(&resource, &resource3);
   EXPECT_TRUE(client3->FontLoadShortLimitExceededCalled());
   EXPECT_TRUE(client3->FontLoadLongLimitExceededCalled());
 
-  Platform::Current()->GetURLLoaderMockFactory()->ServeAsynchronousRequests();
+  url_test_helpers::ServeAsynchronousRequests();
   GetMemoryCache()->Remove(&resource);
-
-  features_backup.Restore();
 }
 
 }  // namespace blink

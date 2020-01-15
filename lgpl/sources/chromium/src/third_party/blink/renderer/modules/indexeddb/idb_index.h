@@ -27,13 +27,14 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_INDEXEDDB_IDB_INDEX_H_
 
 #include "third_party/blink/public/common/indexeddb/web_idb_types.h"
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_cursor.h"
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_database.h"
+#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-blink-forward.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_cursor.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_key_path.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_key_range.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_metadata.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_request.h"
+#include "third_party/blink/renderer/modules/indexeddb/web_idb_cursor.h"
+#include "third_party/blink/renderer/modules/indexeddb/web_idb_database.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -47,12 +48,9 @@ class IDBIndex final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static IDBIndex* Create(scoped_refptr<IDBIndexMetadata> metadata,
-                          IDBObjectStore* object_store,
-                          IDBTransaction* transaction) {
-    return new IDBIndex(std::move(metadata), object_store, transaction);
-  }
+  IDBIndex(scoped_refptr<IDBIndexMetadata>, IDBObjectStore*, IDBTransaction*);
   ~IDBIndex() override;
+
   void Trace(blink::Visitor*) override;
 
   // Implement the IDL
@@ -60,6 +58,13 @@ class IDBIndex final : public ScriptWrappable {
   void setName(const String& name, ExceptionState&);
   IDBObjectStore* objectStore() const { return object_store_.Get(); }
   ScriptValue keyPath(ScriptState*) const;
+
+  // Per spec prose, keyPath attribute should return the same object each time
+  // (if it is not just a primitive type). The IDL cannot use [SameObject]
+  // because the key path may not be an 'object'. So use [CachedAttribute],
+  // but never dirty the cache.
+  bool IsKeyPathDirty() const { return false; }
+
   bool unique() const { return Metadata().unique; }
   bool multiEntry() const { return Metadata().multi_entry; }
 
@@ -76,7 +81,7 @@ class IDBIndex final : public ScriptWrappable {
   IDBRequest* getAll(ScriptState*, const ScriptValue& range, ExceptionState&);
   IDBRequest* getAll(ScriptState*,
                      const ScriptValue& range,
-                     unsigned long max_count,
+                     uint32_t max_count,
                      ExceptionState&);
   IDBRequest* getKey(ScriptState*, const ScriptValue& key, ExceptionState&);
   IDBRequest* getAllKeys(ScriptState*,
@@ -113,14 +118,12 @@ class IDBIndex final : public ScriptWrappable {
   IDBRequest* openCursor(
       ScriptState*,
       IDBKeyRange*,
-      WebIDBCursorDirection,
+      mojom::IDBCursorDirection,
       IDBRequest::AsyncTraceState = IDBRequest::AsyncTraceState());
 
   WebIDBDatabase* BackendDB() const;
 
  private:
-  IDBIndex(scoped_refptr<IDBIndexMetadata>, IDBObjectStore*, IDBTransaction*);
-
   const IDBIndexMetadata& Metadata() const { return *metadata_; }
 
   IDBRequest* GetInternal(ScriptState*,
@@ -130,7 +133,7 @@ class IDBIndex final : public ScriptWrappable {
                           IDBRequest::AsyncTraceState metrics);
   IDBRequest* GetAllInternal(ScriptState*,
                              const ScriptValue& range,
-                             unsigned long max_count,
+                             uint32_t max_count,
                              ExceptionState&,
                              bool key_only,
                              IDBRequest::AsyncTraceState metrics);

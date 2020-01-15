@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/fileapi/file.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 
 namespace blink {
@@ -114,7 +115,7 @@ TEST(SerializedScriptValueTest, WireFormatVersion0ImageData) {
       serializedScriptValue->Deserialize(isolate);
   ASSERT_TRUE(deserialized->IsObject());
   v8::Local<v8::Object> deserializedObject = deserialized.As<v8::Object>();
-  ASSERT_TRUE(V8ImageData::hasInstance(deserializedObject, isolate));
+  ASSERT_TRUE(V8ImageData::HasInstance(deserializedObject, isolate));
   ImageData* imageData = V8ImageData::ToImpl(deserializedObject);
   EXPECT_EQ(imageData->width(), 127);
   EXPECT_EQ(imageData->height(), 1);
@@ -122,10 +123,9 @@ TEST(SerializedScriptValueTest, WireFormatVersion0ImageData) {
 
 TEST(SerializedScriptValueTest, UserSelectedFile) {
   V8TestingScope scope;
-  String file_path = test::BlinkRootDir();
-  file_path.append(
-      "/renderer/bindings/core/v8/serialization/"
-      "serialized_script_value_test.cc");
+  String file_path = test::BlinkRootDir() +
+                     "/renderer/bindings/core/v8/serialization/"
+                     "serialized_script_value_test.cc";
   File* original_file = File::Create(file_path);
   ASSERT_TRUE(original_file->HasBackingFile());
   ASSERT_EQ(File::kIsUserVisible, original_file->GetUserVisibility());
@@ -140,7 +140,7 @@ TEST(SerializedScriptValueTest, UserSelectedFile) {
   v8::Local<v8::Value> v8_file =
       serialized_script_value->Deserialize(scope.GetIsolate());
 
-  ASSERT_TRUE(V8File::hasInstance(v8_file, scope.GetIsolate()));
+  ASSERT_TRUE(V8File::HasInstance(v8_file, scope.GetIsolate()));
   File* file = V8File::ToImpl(v8::Local<v8::Object>::Cast(v8_file));
   EXPECT_TRUE(file->HasBackingFile());
   EXPECT_EQ(File::kIsUserVisible, file->GetUserVisibility());
@@ -164,7 +164,7 @@ TEST(SerializedScriptValueTest, FileConstructorFile) {
   v8::Local<v8::Value> v8_file =
       serialized_script_value->Deserialize(scope.GetIsolate());
 
-  ASSERT_TRUE(V8File::hasInstance(v8_file, scope.GetIsolate()));
+  ASSERT_TRUE(V8File::HasInstance(v8_file, scope.GetIsolate()));
   File* file = V8File::ToImpl(v8::Local<v8::Object>::Cast(v8_file));
   EXPECT_FALSE(file->HasBackingFile());
   EXPECT_EQ(File::kIsNotUserVisible, file->GetUserVisibility());

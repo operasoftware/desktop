@@ -22,11 +22,11 @@
 
 #include "third_party/blink/renderer/core/html/html_font_element.h"
 
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/css_value_pool.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
-#include "third_party/blink/renderer/core/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
@@ -37,12 +37,10 @@
 namespace blink {
 
 using namespace cssvalue;
-using namespace HTMLNames;
+using namespace html_names;
 
-inline HTMLFontElement::HTMLFontElement(Document& document)
-    : HTMLElement(fontTag, document) {}
-
-DEFINE_NODE_FACTORY(HTMLFontElement)
+HTMLFontElement::HTMLFontElement(Document& document)
+    : HTMLElement(kFontTag, document) {}
 
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/rendering.html#fonts-and-colors
 template <typename CharacterType>
@@ -126,10 +124,10 @@ static const CSSValueList* CreateFontFaceValueWithPool(
       CssValuePool().GetFontFaceCacheEntry(string);
   if (!entry.stored_value->value) {
     const CSSValue* parsed_value = CSSParser::ParseSingleValue(
-        CSSPropertyFontFamily, string,
+        CSSPropertyID::kFontFamily, string,
         StrictCSSParserContext(secure_context_mode));
-    if (parsed_value && parsed_value->IsValueList())
-      entry.stored_value->value = ToCSSValueList(parsed_value);
+    if (auto* parsed_value_list = DynamicTo<CSSValueList>(parsed_value))
+      entry.stored_value->value = parsed_value_list;
   }
   return entry.stored_value->value;
 }
@@ -142,26 +140,27 @@ bool HTMLFontElement::CssValueFromFontSizeNumber(const String& s,
 
   switch (num) {
     case 1:
-      // FIXME: The spec says that we're supposed to use CSSValueXxSmall here.
-      size = CSSValueXSmall;
+      // FIXME: The spec says that we're supposed to use CSSValueID::kXxSmall
+      // here.
+      size = CSSValueID::kXSmall;
       break;
     case 2:
-      size = CSSValueSmall;
+      size = CSSValueID::kSmall;
       break;
     case 3:
-      size = CSSValueMedium;
+      size = CSSValueID::kMedium;
       break;
     case 4:
-      size = CSSValueLarge;
+      size = CSSValueID::kLarge;
       break;
     case 5:
-      size = CSSValueXLarge;
+      size = CSSValueID::kXLarge;
       break;
     case 6:
-      size = CSSValueXxLarge;
+      size = CSSValueID::kXxLarge;
       break;
     case 7:
-      size = CSSValueWebkitXxxLarge;
+      size = CSSValueID::kXxxLarge;
       break;
     default:
       NOTREACHED();
@@ -170,7 +169,7 @@ bool HTMLFontElement::CssValueFromFontSizeNumber(const String& s,
 }
 
 bool HTMLFontElement::IsPresentationAttribute(const QualifiedName& name) const {
-  if (name == sizeAttr || name == colorAttr || name == faceAttr)
+  if (name == kSizeAttr || name == kColorAttr || name == kFaceAttr)
     return true;
   return HTMLElement::IsPresentationAttribute(name);
 }
@@ -179,13 +178,15 @@ void HTMLFontElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
     MutableCSSPropertyValueSet* style) {
-  if (name == sizeAttr) {
-    CSSValueID size = CSSValueInvalid;
-    if (CssValueFromFontSizeNumber(value, size))
-      AddPropertyToPresentationAttributeStyle(style, CSSPropertyFontSize, size);
-  } else if (name == colorAttr) {
-    AddHTMLColorToStyle(style, CSSPropertyColor, value);
-  } else if (name == faceAttr && !value.IsEmpty()) {
+  if (name == kSizeAttr) {
+    CSSValueID size = CSSValueID::kInvalid;
+    if (CssValueFromFontSizeNumber(value, size)) {
+      AddPropertyToPresentationAttributeStyle(style, CSSPropertyID::kFontSize,
+                                              size);
+    }
+  } else if (name == kColorAttr) {
+    AddHTMLColorToStyle(style, CSSPropertyID::kColor, value);
+  } else if (name == kFaceAttr && !value.IsEmpty()) {
     if (const CSSValueList* font_face_value = CreateFontFaceValueWithPool(
             value, GetDocument().GetSecureContextMode())) {
       style->SetProperty(

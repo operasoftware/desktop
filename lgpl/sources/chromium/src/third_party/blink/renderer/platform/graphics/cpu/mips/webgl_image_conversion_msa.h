@@ -5,13 +5,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_CPU_MIPS_WEBGL_IMAGE_CONVERSION_MSA_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_CPU_MIPS_WEBGL_IMAGE_CONVERSION_MSA_H_
 
-#if HAVE_MIPS_MSA_INTRINSICS
+#include "base/compiler_specific.h"
+
+#if defined(HAVE_MIPS_MSA_INTRINSICS)
 
 #include "third_party/blink/renderer/platform/cpu/mips/common_macros_msa.h"
 
 namespace blink {
 
-namespace SIMD {
+namespace simd {
 
 #define SEPERATE_RGBA_FRM_16BIT_5551INPUT(in, out_r, out_g, out_b, out_a) \
   cnst31 = (v8u16)__msa_ldi_h(0x1F);                                      \
@@ -1145,7 +1147,7 @@ ALWAYS_INLINE void packOneRowOfRGBA8LittleToRA8MSA(const uint8_t*& source,
   pixelsPerRow &= 7;
 }
 
-}  // namespace SIMD
+}  // namespace simd
 
 }  // namespace blink
 

@@ -28,24 +28,35 @@ class MockPlatformChromeClient : public EmptyChromeClient {
 
   void SetIsPopup(bool is_popup) { is_popup_ = is_popup; }
 
-  float WindowToViewportScalar(const float) const override { return 0; }
+  float WindowToViewportScalar(LocalFrame*, const float) const override {
+    return 0;
+  }
 
  private:
   bool is_popup_;
 };
 
-class MockScrollableArea : public GarbageCollectedFinalized<MockScrollableArea>,
+class MockScrollableArea : public GarbageCollected<MockScrollableArea>,
                            public ScrollableArea {
   USING_GARBAGE_COLLECTED_MIXIN(MockScrollableArea);
 
  public:
-  static MockScrollableArea* Create() { return new MockScrollableArea(); }
+  static MockScrollableArea* Create() {
+    return MakeGarbageCollected<MockScrollableArea>();
+  }
 
   static MockScrollableArea* Create(const ScrollOffset& maximum_scroll_offset) {
     MockScrollableArea* mock = Create();
     mock->SetMaximumScrollOffset(maximum_scroll_offset);
     return mock;
   }
+
+  explicit MockScrollableArea()
+      : maximum_scroll_offset_(ScrollOffset(0, 100)),
+        chrome_client_(MakeGarbageCollected<MockPlatformChromeClient>()) {}
+  explicit MockScrollableArea(const ScrollOffset& offset)
+      : maximum_scroll_offset_(offset),
+        chrome_client_(MakeGarbageCollected<MockPlatformChromeClient>()) {}
 
   MOCK_CONST_METHOD0(VisualRectForScrollbarParts, LayoutRect());
   MOCK_CONST_METHOD0(IsActive, bool());
@@ -56,12 +67,13 @@ class MockScrollableArea : public GarbageCollectedFinalized<MockScrollableArea>,
   MOCK_CONST_METHOD0(EnclosingScrollableArea, ScrollableArea*());
   MOCK_CONST_METHOD1(VisibleContentRect, IntRect(IncludeScrollbarsInRect));
   MOCK_CONST_METHOD0(ContentsSize, IntSize());
-  MOCK_CONST_METHOD0(ScrollableAreaBoundingBox, IntRect());
   MOCK_CONST_METHOD0(LayerForHorizontalScrollbar, GraphicsLayer*());
   MOCK_CONST_METHOD0(LayerForVerticalScrollbar, GraphicsLayer*());
   MOCK_CONST_METHOD0(HorizontalScrollbar, Scrollbar*());
   MOCK_CONST_METHOD0(VerticalScrollbar, Scrollbar*());
   MOCK_CONST_METHOD0(ScrollbarsHiddenIfOverlay, bool());
+  MOCK_METHOD0(ScheduleAnimation, bool());
+  MOCK_CONST_METHOD0(UsedColorScheme, WebColorScheme());
 
   bool UserInputScrollable(ScrollbarOrientation) const override { return true; }
   bool ScrollbarsCanBeActive() const override { return true; }
@@ -108,14 +120,6 @@ class MockScrollableArea : public GarbageCollectedFinalized<MockScrollableArea>,
     visitor->Trace(chrome_client_);
     ScrollableArea::Trace(visitor);
   }
-
- protected:
-  explicit MockScrollableArea()
-      : maximum_scroll_offset_(ScrollOffset(0, 100)),
-        chrome_client_(new MockPlatformChromeClient()) {}
-  explicit MockScrollableArea(const ScrollOffset& offset)
-      : maximum_scroll_offset_(offset),
-        chrome_client_(new MockPlatformChromeClient()) {}
 
  private:
   void SetMaximumScrollOffset(const ScrollOffset& maximum_scroll_offset) {

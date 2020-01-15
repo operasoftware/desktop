@@ -28,19 +28,21 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/fonts/glyph.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/core/SkTypeface.h"
 
-#include <SkPaint.h>
-#include <SkRefCnt.h>
-#include <SkTypeface.h>
+class SkFont;
 
 namespace blink {
 
 class PLATFORM_EXPORT OpenTypeVerticalData
     : public RefCounted<OpenTypeVerticalData> {
+  USING_FAST_MALLOC(OpenTypeVerticalData);
+
  public:
   static scoped_refptr<OpenTypeVerticalData> CreateUnscaled(
       sk_sp<SkTypeface> typeface) {
@@ -55,7 +57,7 @@ class PLATFORM_EXPORT OpenTypeVerticalData
   bool HasVerticalMetrics() const { return !advance_heights_.IsEmpty(); }
   float AdvanceHeight(Glyph) const;
 
-  void GetVerticalTranslationsForGlyphs(const SkPaint&,
+  void GetVerticalTranslationsForGlyphs(const SkFont&,
                                         const Glyph*,
                                         size_t,
                                         float* out_xy_array) const;

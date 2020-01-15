@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_input_element.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
@@ -12,6 +13,7 @@
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/testing/histogram_tester.h"
 
 namespace blink {
@@ -28,9 +30,8 @@ const char* kControlInputElementOverflowHistogramName =
 class MediaControlInputElementImpl final : public MediaControlInputElement {
  public:
   MediaControlInputElementImpl(MediaControlsImpl& media_controls)
-      // Using arbitrary MediaControlElementType. It should have no impact.
-      : MediaControlInputElement(media_controls, kMediaDownloadButton) {
-    setType(InputTypeNames::button);
+      : MediaControlInputElement(media_controls) {
+    setType(input_type_names::kButton);
     SetIsWanted(false);
   }
 
@@ -44,8 +45,8 @@ class MediaControlInputElementImpl final : public MediaControlInputElement {
                                : "MediaControlInputElementImpl";
   }
 
-  WebLocalizedString::Name GetOverflowStringName() const final {
-    return WebLocalizedString::kOverflowMenuDownload;
+  int GetOverflowStringId() const final {
+    return IDS_MEDIA_OVERFLOW_MENU_DOWNLOAD;
   }
 };
 
@@ -56,15 +57,16 @@ class MediaControlInputElementTest : public PageTestBase {
   void SetUp() final {
     // Create page and add a video element with controls.
     PageTestBase::SetUp();
-    media_element_ = HTMLVideoElement::Create(GetDocument());
-    media_element_->SetBooleanAttribute(HTMLNames::controlsAttr, true);
+    media_element_ = MakeGarbageCollected<HTMLVideoElement>(GetDocument());
+    media_element_->SetBooleanAttribute(html_names::kControlsAttr, true);
     GetDocument().body()->AppendChild(media_element_);
 
     // Create instance of MediaControlInputElement to run tests on.
     media_controls_ =
         static_cast<MediaControlsImpl*>(media_element_->GetMediaControls());
     ASSERT_NE(media_controls_, nullptr);
-    control_input_element_ = new MediaControlInputElementImpl(*media_controls_);
+    control_input_element_ =
+        MakeGarbageCollected<MediaControlInputElementImpl>(*media_controls_);
   }
 
  protected:
@@ -169,7 +171,7 @@ TEST_F(MediaControlInputElementTest, ClickRecordsInteraction) {
   ControlInputElement().MaybeRecordDisplayed();
 
   ControlInputElement().DispatchSimulatedClick(
-      Event::CreateBubble(EventTypeNames::click), kSendNoEvents);
+      Event::CreateBubble(event_type_names::kClick), kSendNoEvents);
 
   histogram_tester_.ExpectTotalCount(kControlInputElementHistogramName, 2);
   histogram_tester_.ExpectBucketCount(kControlInputElementHistogramName, 0, 1);
@@ -181,7 +183,7 @@ TEST_F(MediaControlInputElementTest, OverflowElement_DisplayFallback) {
 
   Persistent<HTMLElement> overflow_container =
       ControlInputElement().CreateOverflowElement(
-          new MediaControlInputElementImpl(MediaControls()));
+          MakeGarbageCollected<MediaControlInputElementImpl>(MediaControls()));
 
   ControlInputElement().SetIsWanted(true);
   ControlInputElement().SetDoesFit(false);
@@ -198,7 +200,7 @@ TEST_F(MediaControlInputElementTest, OverflowElement_DisplayRequiresWanted) {
 
   Persistent<HTMLElement> overflow_container =
       ControlInputElement().CreateOverflowElement(
-          new MediaControlInputElementImpl(MediaControls()));
+          MakeGarbageCollected<MediaControlInputElementImpl>(MediaControls()));
 
   ControlInputElement().SetIsWanted(true);
   ControlInputElement().SetDoesFit(false);
@@ -220,7 +222,7 @@ TEST_F(MediaControlInputElementTest, OverflowElement_DisplayAfterInline) {
 
   Persistent<HTMLElement> overflow_container =
       ControlInputElement().CreateOverflowElement(
-          new MediaControlInputElementImpl(MediaControls()));
+          MakeGarbageCollected<MediaControlInputElementImpl>(MediaControls()));
 
   ControlInputElement().SetIsWanted(true);
   ControlInputElement().SetDoesFit(true);
@@ -236,7 +238,7 @@ TEST_F(MediaControlInputElementTest, OverflowElement_DisplayAfterInline) {
 }
 
 TEST_F(MediaControlInputElementTest, ShouldRecordDisplayStates_ReadyState) {
-  MediaElement().setAttribute(HTMLNames::preloadAttr, "auto");
+  MediaElement().setAttribute(html_names::kPreloadAttr, "auto");
 
   SetReadyState(HTMLMediaElement::kHaveNothing);
   EXPECT_FALSE(
@@ -264,15 +266,15 @@ TEST_F(MediaControlInputElementTest, ShouldRecordDisplayStates_Preload) {
   // the result.
   SetReadyState(HTMLMediaElement::kHaveNothing);
 
-  MediaElement().setAttribute(HTMLNames::preloadAttr, "none");
+  MediaElement().setAttribute(html_names::kPreloadAttr, "none");
   EXPECT_TRUE(
       MediaControlInputElement::ShouldRecordDisplayStates(MediaElement()));
 
-  MediaElement().setAttribute(HTMLNames::preloadAttr, "preload");
+  MediaElement().setAttribute(html_names::kPreloadAttr, "preload");
   EXPECT_FALSE(
       MediaControlInputElement::ShouldRecordDisplayStates(MediaElement()));
 
-  MediaElement().setAttribute(HTMLNames::preloadAttr, "auto");
+  MediaElement().setAttribute(html_names::kPreloadAttr, "auto");
   EXPECT_FALSE(
       MediaControlInputElement::ShouldRecordDisplayStates(MediaElement()));
 }

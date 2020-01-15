@@ -38,6 +38,7 @@
 #include "base/run_loop.h"
 #include "base/test/icu_test_util.h"
 #include "base/test/test_discardable_memory_allocator.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "third_party/blink/public/platform/interface_provider.h"
 #include "third_party/blink/public/platform/web_runtime_features.h"
@@ -68,9 +69,9 @@ class TestingPlatformSupport::TestingInterfaceProvider
       return;
     }
     if (std::string(name) == mojom::blink::MimeRegistry::Name_) {
-      mojo::MakeStrongBinding(
+      mojo::MakeSelfOwnedReceiver(
           std::make_unique<MockMimeRegistry>(),
-          mojom::blink::MimeRegistryRequest(std::move(handle)));
+          mojo::PendingReceiver<mojom::blink::MimeRegistry>(std::move(handle)));
       return;
     }
   }
@@ -96,7 +97,6 @@ TestingPlatformSupport::TestingPlatformSupport()
       interface_provider_(new TestingInterfaceProvider) {
   DCHECK(old_platform_);
   DCHECK(WTF::IsMainThread());
-  main_thread_ = old_platform_->CurrentThread();
 }
 
 TestingPlatformSupport::~TestingPlatformSupport() {
@@ -105,14 +105,6 @@ TestingPlatformSupport::~TestingPlatformSupport() {
 
 WebString TestingPlatformSupport::DefaultLocale() {
   return WebString::FromUTF8("en-US");
-}
-
-WebBlobRegistry* TestingPlatformSupport::GetBlobRegistry() {
-  return old_platform_ ? old_platform_->GetBlobRegistry() : nullptr;
-}
-
-std::unique_ptr<WebIDBFactory> TestingPlatformSupport::CreateIdbFactory() {
-  return old_platform_ ? old_platform_->CreateIdbFactory() : nullptr;
 }
 
 WebURLLoaderMockFactory* TestingPlatformSupport::GetURLLoaderMockFactory() {
@@ -125,8 +117,16 @@ TestingPlatformSupport::CreateDefaultURLLoaderFactory() {
                        : nullptr;
 }
 
-WebData TestingPlatformSupport::GetDataResource(const char* name) {
-  return old_platform_ ? old_platform_->GetDataResource(name) : WebData();
+WebData TestingPlatformSupport::GetDataResource(int resource_id,
+                                                ui::ScaleFactor scale_factor) {
+  return old_platform_
+             ? old_platform_->GetDataResource(resource_id, scale_factor)
+             : WebData();
+}
+
+WebData TestingPlatformSupport::UncompressDataResource(int resource_id) {
+  return old_platform_ ? old_platform_->UncompressDataResource(resource_id)
+                       : WebData();
 }
 
 InterfaceProvider* TestingPlatformSupport::GetInterfaceProvider() {
@@ -159,11 +159,21 @@ ScopedUnittestsEnvironmentSetup::ScopedUnittestsEnvironmentSetup(int argc,
   base::DiscardableMemoryAllocator::SetInstance(
       discardable_memory_allocator_.get());
 
+  // TODO(yutak): The initialization steps below are essentially a subset of
+  // Platform::Initialize() steps with a few modifications for tests.
+  // We really shouldn't have those initialization steps in two places,
+  // because they are a very fragile piece of code (the initialization order
+  // is so sensitive) and we want it to be consistent between tests and
+  // production. Fix this someday.
   dummy_platform_ = std::make_unique<Platform>();
   Platform::SetCurrentPlatformForTesting(dummy_platform_.get());
 
-  WTF::Partitions::Initialize(nullptr);
+  WTF::Partitions::Initialize();
   WTF::Initialize(nullptr);
+
+  // This must be called after WTF::Initialize(), because ThreadSpecific<>
+  // used in this function depends on WTF::IsMainThread().
+  Platform::CreateMainThreadForTesting();
 
   testing_platform_support_ = std::make_unique<TestingPlatformSupport>();
   Platform::SetCurrentPlatformForTesting(testing_platform_support_.get());
@@ -175,13 +185,12 @@ ScopedUnittestsEnvironmentSetup::ScopedUnittestsEnvironmentSetup(int argc,
 
   ProcessHeap::Init();
   ThreadState::AttachMainThread();
-  ThreadState::Current()->RegisterTraceDOMWrappers(nullptr, nullptr, nullptr,
-                                                   nullptr);
-  HTTPNames::init();
-  FetchInitiatorTypeNames::init();
+  blink::ThreadState::Current()->DetachFromIsolate();
+  http_names::Init();
+  fetch_initiator_type_names::Init();
 
   InitializePlatformLanguage();
-  FontFamilyNames::init();
+  font_family_names::Init();
   WebRuntimeFeatures::EnableExperimentalFeatures(true);
   WebRuntimeFeatures::EnableTestOnlyFeatures(true);
 }

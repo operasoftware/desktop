@@ -3,105 +3,225 @@
 // found in the LICENSE file.
 
 cr.define('settings_personalization_options', function() {
-  function registerTests() {
-    suite('SafeBrowsingExtendedReporting', function() {
-      /** @type {settings.TestPrivacyPageBrowserProxy} */
-      let testBrowserProxy;
+  suite('PersonalizationOptionsTests_AllBuilds', function() {
+    /** @type {settings.TestPrivacyPageBrowserProxy} */
+    let testBrowserProxy;
 
-      /** @type {SettingsPersonalizationOptionsElement} */
-      let testElement;
+    /** @type {settings.SyncBrowserProxy} */
+    let syncBrowserProxy;
 
-      setup(function() {
-        testBrowserProxy = new TestPrivacyPageBrowserProxy();
-        settings.PrivacyPageBrowserProxyImpl.instance_ = testBrowserProxy;
-        PolymerTest.clearBody();
-        testElement =
-            document.createElement('settings-personalization-options');
-        document.body.appendChild(testElement);
-      });
+    /** @type {SettingsPersonalizationOptionsElement} */
+    let testElement;
 
-      teardown(function() {
-        testElement.remove();
-      });
-
-      test('test whether extended reporting is enabled/managed', function() {
-        return testBrowserProxy.whenCalled('getSafeBrowsingExtendedReporting')
-            .then(function() {
-              Polymer.dom.flush();
-
-              // Control starts checked and managed by default.
-              assertTrue(testBrowserProxy.sberPrefState.enabled);
-              assertTrue(testBrowserProxy.sberPrefState.managed);
-
-              const control =
-                  testElement.$$('#safeBrowsingExtendedReportingControl');
-              assertEquals(true, control.checked);
-              assertEquals(true, !!control.pref.controlledBy);
-
-              // Change the managed and checked states
-              const changedPrefState = {
-                enabled: false,
-                managed: false,
-              };
-              // Notification from browser can uncheck the box and make it not
-              // managed.
-              cr.webUIListenerCallback(
-                  'safe-browsing-extended-reporting-change', changedPrefState);
-              Polymer.dom.flush();
-              assertEquals(false, control.checked);
-              assertEquals(false, !!control.pref.controlledBy);
-
-              // Tapping on the box will check it again.
-              control.click();
-
-              return testBrowserProxy.whenCalled(
-                  'setSafeBrowsingExtendedReportingEnabled');
-            })
-            .then(function(enabled) {
-              assertTrue(enabled);
-            });
+    suiteSetup(function() {
+      loadTimeData.overrideValues({
+        driveSuggestAvailable: true,
       });
     });
-  }
 
-  function registerOfficialBuildTests() {
-    suite('SafeBrowsingExtendedReportingOfficialBuild', function() {
-      /** @type {settings.TestPrivacyPageBrowserProxy} */
-      let testBrowserProxy;
-
-      /** @type {SettingsPersonalizationOptionsElement} */
-      let testElement;
-
-      setup(function() {
-        testBrowserProxy = new TestPrivacyPageBrowserProxy();
-        settings.PrivacyPageBrowserProxyImpl.instance_ = testBrowserProxy;
-        PolymerTest.clearBody();
-        testElement =
-            document.createElement('settings-personalization-options');
-        document.body.appendChild(testElement);
-      });
-
-      teardown(function() {
-        testElement.remove();
-      });
-
-      test('displaying toggles depending on unified consent', function() {
-        testElement.unifiedConsentEnabled = false;
-        Polymer.dom.flush();
-        assertEquals(
-            7,
-            testElement.root.querySelectorAll('settings-toggle-button').length);
-        testElement.unifiedConsentEnabled = true;
-        Polymer.dom.flush();
-        assertEquals(
-            8,
-            testElement.root.querySelectorAll('settings-toggle-button').length);
-      });
+    setup(function() {
+      testBrowserProxy = new TestPrivacyPageBrowserProxy();
+      settings.PrivacyPageBrowserProxyImpl.instance_ = testBrowserProxy;
+      syncBrowserProxy = new TestSyncBrowserProxy();
+      settings.SyncBrowserProxyImpl.instance_ = syncBrowserProxy;
+      PolymerTest.clearBody();
+      testElement = document.createElement('settings-personalization-options');
+      testElement.prefs = {
+        profile: {password_manager_leak_detection: {value: true}},
+        safebrowsing:
+            {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+      };
+      document.body.appendChild(testElement);
+      Polymer.dom.flush();
     });
-  }
 
-  return {
-    registerTests: registerTests,
-    registerOfficialBuildTests: registerOfficialBuildTests,
-  };
+    teardown(function() {
+      testElement.remove();
+    });
+
+    test('DriveSearchSuggestControl', function() {
+      assertFalse(!!testElement.$$('#driveSuggestControl'));
+
+      testElement.unifiedConsentEnabled = true;
+      testElement.syncStatus = {
+        signedIn: true,
+        statusAction: settings.StatusAction.NO_ACTION
+      };
+      Polymer.dom.flush();
+      assertTrue(!!testElement.$$('#driveSuggestControl'));
+
+      testElement.syncStatus = {
+        signedIn: true,
+        statusAction: settings.StatusAction.REAUTHENTICATE
+      };
+      Polymer.dom.flush();
+      assertFalse(!!testElement.$$('#driveSuggestControl'));
+    });
+
+    test('leakDetectionToggleSignedOutWithFalsePref', function() {
+      testElement.set(
+          'prefs.profile.password_manager_leak_detection.value', false);
+      testElement.syncStatus = {signedIn: false};
+      Polymer.dom.flush();
+
+      assertTrue(testElement.$.passwordsLeakDetectionCheckbox.disabled);
+      assertFalse(testElement.$.passwordsLeakDetectionCheckbox.checked);
+      assertEquals('', testElement.$.passwordsLeakDetectionCheckbox.subLabel);
+    });
+
+    test('leakDetectionToggleSignedOutWithTruePref', function() {
+      testElement.syncStatus = {signedIn: false};
+      Polymer.dom.flush();
+
+      assertTrue(testElement.$.passwordsLeakDetectionCheckbox.disabled);
+      assertFalse(testElement.$.passwordsLeakDetectionCheckbox.checked);
+      assertEquals(
+          loadTimeData.getString(
+              'passwordsLeakDetectionSignedOutEnabledDescription'),
+          testElement.$.passwordsLeakDetectionCheckbox.subLabel);
+    });
+
+    if (!cr.isChromeOS) {
+      test('leakDetectionToggleSignedInNotSyncingWithFalsePref', function() {
+        testElement.set(
+            'prefs.profile.password_manager_leak_detection.value', false);
+        testElement.syncStatus = {signedIn: false};
+        sync_test_util.simulateStoredAccounts([
+          {
+            fullName: 'testName',
+            givenName: 'test',
+            email: 'test@test.com',
+          },
+        ]);
+        Polymer.dom.flush();
+
+        assertFalse(testElement.$.passwordsLeakDetectionCheckbox.disabled);
+        assertFalse(testElement.$.passwordsLeakDetectionCheckbox.checked);
+        assertEquals('', testElement.$.passwordsLeakDetectionCheckbox.subLabel);
+      });
+
+      test('leakDetectionToggleSignedInNotSyncingWithTruePref', function() {
+        testElement.syncStatus = {signedIn: false};
+        sync_test_util.simulateStoredAccounts([
+          {
+            fullName: 'testName',
+            givenName: 'test',
+            email: 'test@test.com',
+          },
+        ]);
+        Polymer.dom.flush();
+
+        assertFalse(testElement.$.passwordsLeakDetectionCheckbox.disabled);
+        assertTrue(testElement.$.passwordsLeakDetectionCheckbox.checked);
+        assertEquals('', testElement.$.passwordsLeakDetectionCheckbox.subLabel);
+      });
+    }
+
+    test('leakDetectionToggleSignedInAndSyncingWithFalsePref', function() {
+      testElement.set(
+          'prefs.profile.password_manager_leak_detection.value', false);
+      testElement.syncStatus = {signedIn: true};
+      Polymer.dom.flush();
+
+      assertFalse(testElement.$.passwordsLeakDetectionCheckbox.disabled);
+      assertFalse(testElement.$.passwordsLeakDetectionCheckbox.checked);
+      assertEquals('', testElement.$.passwordsLeakDetectionCheckbox.subLabel);
+    });
+
+    test('leakDetectionToggleSignedInAndSyncingWithTruePref', function() {
+      testElement.syncStatus = {signedIn: true};
+      Polymer.dom.flush();
+
+      assertFalse(testElement.$.passwordsLeakDetectionCheckbox.disabled);
+      assertTrue(testElement.$.passwordsLeakDetectionCheckbox.checked);
+      assertEquals('', testElement.$.passwordsLeakDetectionCheckbox.subLabel);
+    });
+  });
+
+  suite('PersonalizationOptionsTests_OfficialBuild', function() {
+    /** @type {settings.TestPrivacyPageBrowserProxy} */
+    let testBrowserProxy;
+
+    /** @type {SettingsPersonalizationOptionsElement} */
+    let testElement;
+
+    setup(function() {
+      testBrowserProxy = new TestPrivacyPageBrowserProxy();
+      settings.PrivacyPageBrowserProxyImpl.instance_ = testBrowserProxy;
+      PolymerTest.clearBody();
+      testElement = document.createElement('settings-personalization-options');
+      document.body.appendChild(testElement);
+    });
+
+    teardown(function() {
+      testElement.remove();
+    });
+
+    test('UnifiedConsent spellcheck toggle', function() {
+      testElement.unifiedConsentEnabled = true;
+      testElement.prefs = {
+        profile: {password_manager_leak_detection: {value: true}},
+        safebrowsing:
+            {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+        spellcheck: {dictionaries: {value: ['en-US']}}
+      };
+      Polymer.dom.flush();
+      assertFalse(testElement.$.spellCheckControl.hidden);
+
+      testElement.prefs = {
+        profile: {password_manager_leak_detection: {value: true}},
+        safebrowsing:
+            {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+        spellcheck: {dictionaries: {value: []}}
+      };
+      Polymer.dom.flush();
+      assertTrue(testElement.$.spellCheckControl.hidden);
+
+      testElement.prefs = {
+        profile: {password_manager_leak_detection: {value: true}},
+        safebrowsing:
+            {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+        browser: {enable_spellchecking: {value: false}},
+        spellcheck: {
+          dictionaries: {value: ['en-US']},
+          use_spelling_service: {value: false}
+        }
+      };
+      Polymer.dom.flush();
+      testElement.$.spellCheckControl.click();
+      assertTrue(testElement.prefs.spellcheck.use_spelling_service.value);
+    });
+
+    test('NoUnifiedConsent spellcheck toggle', function() {
+      testElement.unifiedConsentEnabled = false;
+      testElement.prefs = {
+        profile: {password_manager_leak_detection: {value: true}},
+        safebrowsing:
+            {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+        spellcheck: {dictionaries: {value: ['en-US']}}
+      };
+      Polymer.dom.flush();
+      assertFalse(testElement.$.spellCheckControl.hidden);
+
+      testElement.prefs = {
+        profile: {password_manager_leak_detection: {value: true}},
+        safebrowsing:
+            {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+        spellcheck: {dictionaries: {value: []}}
+      };
+      Polymer.dom.flush();
+      assertFalse(testElement.$.spellCheckControl.hidden);
+
+      testElement.prefs = {
+        profile: {password_manager_leak_detection: {value: true}},
+        safebrowsing:
+            {enabled: {value: true}, scout_reporting_enabled: {value: true}},
+        browser: {enable_spellchecking: {value: false}},
+        spellcheck: {use_spelling_service: {value: false}}
+      };
+      Polymer.dom.flush();
+      testElement.$.spellCheckControl.click();
+      assertTrue(testElement.prefs.spellcheck.use_spelling_service.value);
+    });
+  });
 });

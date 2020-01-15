@@ -33,10 +33,10 @@ namespace blink {
 
 class IdTargetObserverRegistry;
 
-class IdTargetObserver : public GarbageCollectedFinalized<IdTargetObserver> {
+class IdTargetObserver : public GarbageCollected<IdTargetObserver> {
  public:
   virtual ~IdTargetObserver();
-  virtual void Trace(blink::Visitor*);
+  virtual void Trace(Visitor*);
   virtual void IdTargetChanged() = 0;
   virtual void Unregister();
 

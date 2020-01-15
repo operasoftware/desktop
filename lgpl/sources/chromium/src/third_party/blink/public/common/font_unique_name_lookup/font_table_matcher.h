@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_PUBLIC_COMMON_FONT_UNIQUE_NAME_LOOKUP_FONT_TABLE_MATCHER_H_
 
 #include "base/memory/read_only_shared_memory_region.h"
-#include "third_party/blink/common/common_export.h"
+#include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/font_unique_name_lookup/font_unique_name_table.pb.h"
 
 #include <stddef.h>
@@ -53,6 +53,12 @@ class BLINK_COMMON_EXPORT FontTableMatcher {
   // Compares this FontTableMatcher to other for whether
   // their internal list of fonts is disjoint. Used only for testing.
   bool FontListIsDisjointFrom(const FontTableMatcher& other) const;
+
+  // When building a FontUniqueNameTable, use this function to prepare and sort
+  // the font names in the protobuf datastructure so that the binary search used
+  // by calls to MatchName succeeds on ReadOnlySharedMemoryMappings that are
+  // handed out to renderers.
+  static void SortUniqueNameTableForSearch(FontUniqueNameTable* font_table);
 
  private:
   FontUniqueNameTable font_table_;

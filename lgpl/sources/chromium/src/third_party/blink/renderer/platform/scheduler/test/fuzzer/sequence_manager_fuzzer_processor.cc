@@ -19,7 +19,7 @@ SequenceManagerFuzzerProcessor::SequenceManagerFuzzerProcessor()
 SequenceManagerFuzzerProcessor::SequenceManagerFuzzerProcessor(
     bool log_for_testing)
     : log_for_testing_(log_for_testing),
-      initial_time_(TimeTicks() + TimeDelta::FromMilliseconds(1)),
+      initial_time_(base::TimeTicks() + base::TimeDelta::FromMilliseconds(1)),
       thread_pool_manager_(std::make_unique<ThreadPoolManager>(this)),
       main_thread_manager_(
           std::make_unique<ThreadManager>(initial_time_, this)) {}
@@ -41,20 +41,19 @@ void SequenceManagerFuzzerProcessor::RunTest(
     ordered_actions_.emplace_back(main_thread_manager_->ordered_actions());
     ordered_tasks_.emplace_back(main_thread_manager_->ordered_tasks());
 
-    for (auto&& thread : (thread_pool_manager_->threads())) {
-      DCHECK(thread->thread_manager());
-      ordered_actions_.emplace_back(
-          thread->thread_manager()->ordered_actions());
-      ordered_tasks_.emplace_back(thread->thread_manager()->ordered_tasks());
+    for (ThreadManager* thread_manager :
+         thread_pool_manager_->GetAllThreadManagers()) {
+      ordered_actions_.emplace_back(thread_manager->ordered_actions());
+      ordered_tasks_.emplace_back(thread_manager->ordered_tasks());
     }
   }
 }
 
 void SequenceManagerFuzzerProcessor::LogTaskForTesting(
-    std::vector<TaskForTest>* ordered_tasks,
+    Vector<TaskForTest>* ordered_tasks,
     uint64_t task_id,
-    TimeTicks start_time,
-    TimeTicks end_time) {
+    base::TimeTicks start_time,
+    base::TimeTicks end_time) {
   if (!log_for_testing_)
     return;
 
@@ -65,10 +64,10 @@ void SequenceManagerFuzzerProcessor::LogTaskForTesting(
 }
 
 void SequenceManagerFuzzerProcessor::LogActionForTesting(
-    std::vector<ActionForTest>* ordered_actions,
+    Vector<ActionForTest>* ordered_actions,
     uint64_t action_id,
     ActionForTest::ActionType type,
-    TimeTicks start_time) {
+    base::TimeTicks start_time) {
   if (!log_for_testing_)
     return;
 
@@ -76,12 +75,12 @@ void SequenceManagerFuzzerProcessor::LogActionForTesting(
                                 (start_time - initial_time_).InMilliseconds());
 }
 
-const std::vector<std::vector<SequenceManagerFuzzerProcessor::TaskForTest>>&
+const Vector<Vector<SequenceManagerFuzzerProcessor::TaskForTest>>&
 SequenceManagerFuzzerProcessor::ordered_tasks() const {
   return ordered_tasks_;
 }
 
-const std::vector<std::vector<SequenceManagerFuzzerProcessor::ActionForTest>>&
+const Vector<Vector<SequenceManagerFuzzerProcessor::ActionForTest>>&
 SequenceManagerFuzzerProcessor::ordered_actions() const {
   return ordered_actions_;
 }

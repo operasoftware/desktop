@@ -88,16 +88,16 @@ StyleStrokeData::StyleStrokeData(const StyleStrokeData& other)
 bool StyleStrokeData::operator==(const StyleStrokeData& other) const {
   return width == other.width && opacity == other.opacity &&
          miter_limit == other.miter_limit && dash_offset == other.dash_offset &&
-         *dash_array == *other.dash_array && paint == other.paint &&
+         dash_array->data == other.dash_array->data && paint == other.paint &&
          visited_link_paint == other.visited_link_paint;
 }
 
 StyleStopData::StyleStopData()
-    : opacity(SVGComputedStyle::InitialStopOpacity()),
-      color(SVGComputedStyle::InitialStopColor()) {}
+    : color(SVGComputedStyle::InitialStopColor()),
+      opacity(SVGComputedStyle::InitialStopOpacity()) {}
 
 StyleStopData::StyleStopData(const StyleStopData& other)
-    : RefCounted<StyleStopData>(), opacity(other.opacity), color(other.color) {}
+    : RefCounted<StyleStopData>(), color(other.color), opacity(other.opacity) {}
 
 bool StyleStopData::operator==(const StyleStopData& other) const {
   return color == other.color && opacity == other.opacity;

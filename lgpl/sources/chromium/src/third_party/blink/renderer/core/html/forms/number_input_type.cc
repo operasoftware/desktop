@@ -32,6 +32,7 @@
 #include "third_party/blink/renderer/core/html/forms/number_input_type.h"
 
 #include <limits>
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
 #include "third_party/blink/renderer/core/events/before_text_inserted_event.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
@@ -48,8 +49,7 @@
 
 namespace blink {
 
-using blink::WebLocalizedString;
-using namespace HTMLNames;
+using namespace html_names;
 
 static const int kNumberDefaultStep = 1;
 static const int kNumberDefaultStepBase = 0;
@@ -94,16 +94,12 @@ static RealNumberRenderSize CalculateRenderSize(const Decimal& value) {
       number_of_zero_after_decimal_point + size_of_digits);
 }
 
-InputType* NumberInputType::Create(HTMLInputElement& element) {
-  return new NumberInputType(element);
-}
-
 void NumberInputType::CountUsage() {
   CountUsageIfVisible(WebFeature::kInputTypeNumber);
 }
 
 const AtomicString& NumberInputType::FormControlType() const {
-  return InputTypeNames::number;
+  return input_type_names::kNumber;
 }
 
 void NumberInputType::SetValue(const String& sanitized_value,
@@ -157,17 +153,17 @@ bool NumberInputType::SizeShouldIncludeDecoration(int default_size,
                                                   int& preferred_size) const {
   preferred_size = default_size;
 
-  const String step_string = GetElement().FastGetAttribute(stepAttr);
+  const String step_string = GetElement().FastGetAttribute(kStepAttr);
   if (DeprecatedEqualIgnoringCase(step_string, "any"))
     return false;
 
   const Decimal minimum =
-      ParseToDecimalForNumberType(GetElement().FastGetAttribute(minAttr));
+      ParseToDecimalForNumberType(GetElement().FastGetAttribute(kMinAttr));
   if (!minimum.IsFinite())
     return false;
 
   const Decimal maximum =
-      ParseToDecimalForNumberType(GetElement().FastGetAttribute(maxAttr));
+      ParseToDecimalForNumberType(GetElement().FastGetAttribute(kMaxAttr));
   if (!maximum.IsFinite())
     return false;
 
@@ -265,17 +261,16 @@ bool NumberInputType::HasBadInput() const {
 }
 
 String NumberInputType::BadInputText() const {
-  return GetLocale().QueryString(
-      WebLocalizedString::kValidationBadInputForNumber);
+  return GetLocale().QueryString(IDS_FORM_VALIDATION_BAD_INPUT_NUMBER);
 }
 
 String NumberInputType::RangeOverflowText(const Decimal& maximum) const {
-  return GetLocale().QueryString(WebLocalizedString::kValidationRangeOverflow,
+  return GetLocale().QueryString(IDS_FORM_VALIDATION_RANGE_OVERFLOW,
                                  LocalizeValue(Serialize(maximum)));
 }
 
 String NumberInputType::RangeUnderflowText(const Decimal& minimum) const {
-  return GetLocale().QueryString(WebLocalizedString::kValidationRangeUnderflow,
+  return GetLocale().QueryString(IDS_FORM_VALIDATION_RANGE_UNDERFLOW,
                                  LocalizeValue(Serialize(minimum)));
 }
 
@@ -286,21 +281,23 @@ bool NumberInputType::SupportsPlaceholder() const {
 void NumberInputType::MinOrMaxAttributeChanged() {
   TextFieldInputType::MinOrMaxAttributeChanged();
 
-  if (GetElement().GetLayoutObject())
+  if (GetElement().GetLayoutObject()) {
     GetElement()
         .GetLayoutObject()
         ->SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
-            LayoutInvalidationReason::kAttributeChanged);
+            layout_invalidation_reason::kAttributeChanged);
+  }
 }
 
 void NumberInputType::StepAttributeChanged() {
   TextFieldInputType::StepAttributeChanged();
 
-  if (GetElement().GetLayoutObject())
+  if (GetElement().GetLayoutObject()) {
     GetElement()
         .GetLayoutObject()
         ->SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
-            LayoutInvalidationReason::kAttributeChanged);
+            layout_invalidation_reason::kAttributeChanged);
+  }
 }
 
 bool NumberInputType::SupportsSelectionAPI() const {

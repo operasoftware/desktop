@@ -36,8 +36,8 @@ constexpr CompositingReasonStringMap kCompositingReasonsStringMap[] = {
     {CompositingReason::kActiveBackdropFilterAnimation,
      "activeBackdropFilterAnimation",
      "Has an active accelerated backdrop filter animation or transition"},
-    {CompositingReason::kTransitionProperty, "transitionProperty",
-     "Has an acceleratable transition property (active or inactive)"},
+    {CompositingReason::kImmersiveArOverlay, "immersiveArOverlay",
+     "Is DOM overlay for WebXR immersive-ar mode"},
     {CompositingReason::kScrollDependentPosition, "scrollDependentPosition",
      "Is fixed or sticky position"},
     {CompositingReason::kOverflowScrollingTouch, "overflowScrollingTouch",
@@ -48,8 +48,12 @@ constexpr CompositingReasonStringMap kCompositingReasonsStringMap[] = {
      "Has clipping ancestor"},
     {CompositingReason::kVideoOverlay, "videoOverlay",
      "Is overlay controls for video"},
-    {CompositingReason::kWillChangeCompositingHint, "willChange",
-     "Has a will-change compositing hint"},
+    {CompositingReason::kWillChangeTransform, "willChangeTransform",
+     "Has a will-change: transform compositing hint"},
+    {CompositingReason::kWillChangeOpacity, "willChangeOpacity",
+     "Has a will-change: opacity compositing hint"},
+    {CompositingReason::kWillChangeOther, "willChangeOther",
+     "Has a will-change compositing hint other than transform and opacity"},
     {CompositingReason::kBackdropFilter, "backdropFilter",
      "Has a backdrop filter"},
     {CompositingReason::kRootScroller, "rootScroller",
@@ -62,10 +66,6 @@ constexpr CompositingReasonStringMap kCompositingReasonsStringMap[] = {
      "Parent with composited negative z-index content"},
     {CompositingReason::kSquashingDisallowed, "squashingDisallowed",
      "Layer was separately composited because it could not be squashed."},
-    {CompositingReason::kTransformWithCompositedDescendants,
-     "transformWithCompositedDescendants",
-     "Has a transform that needs to be known by compositor because of "
-     "composited descendants"},
     {CompositingReason::kOpacityWithCompositedDescendants,
      "opacityWithCompositedDescendants",
      "Has opacity that needs to be applied by compositor because of composited "
@@ -103,18 +103,15 @@ constexpr CompositingReasonStringMap kCompositingReasonsStringMap[] = {
     {CompositingReason::kIsolateCompositedDescendants,
      "isolateCompositedDescendants",
      "Should isolate descendants to apply a blend effect"},
-    {CompositingReason::kPositionFixedOrStickyWithCompositedDescendants,
-     "positionFixedOrStickyWithCompositedDescendants"
-     "Is a position:fixed or position:sticky element with composited "
-     "descendants"},
+    {CompositingReason::kPositionFixedWithCompositedDescendants,
+     "positionFixedWithCompositedDescendants"
+     "Is a position:fixed element with composited descendants"},
     {CompositingReason::kRoot, "root", "Is the root layer"},
     {CompositingReason::kLayerForAncestorClip, "layerForAncestorClip",
      "Secondary layer, applies a clip due to a sibling in the compositing "
      "tree"},
     {CompositingReason::kLayerForDescendantClip, "layerForDescendantClip",
      "Secondary layer, to clip descendants of the owning layer"},
-    {CompositingReason::kLayerForPerspective, "layerForPerspective",
-     "Secondary layer, to house the perspective transform for all descendants"},
     {CompositingReason::kLayerForHorizontalScrollbar,
      "layerForHorizontalScrollbar",
      "Secondary layer, the horizontal scrollbar layer"},
@@ -156,9 +153,6 @@ constexpr CompositingReasonStringMap kCompositingReasonsStringMap[] = {
      "with no scrolling contents"},
     {CompositingReason::kLayerForDecoration, "layerForDecoration",
      "Layer painted on top of other layers as decoration"},
-    {CompositingReason::kInlineTransform, "inlineTransform",
-     "Has an inline transform, which causes subsequent layers to assume "
-     "overlap"},
 
 };
 

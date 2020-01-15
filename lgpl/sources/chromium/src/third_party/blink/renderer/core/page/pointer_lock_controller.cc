@@ -28,6 +28,7 @@
 #include "third_party/blink/public/platform/web_mouse_event.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/dom/pointer_lock_options.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
@@ -39,48 +40,52 @@ namespace blink {
 PointerLockController::PointerLockController(Page* page)
     : page_(page), lock_pending_(false) {}
 
-PointerLockController* PointerLockController::Create(Page* page) {
-  return new PointerLockController(page);
-}
-
-void PointerLockController::RequestPointerLock(Element* target) {
+void PointerLockController::RequestPointerLock(
+    Element* target,
+    const PointerLockOptions* options) {
   if (!target || !target->isConnected() ||
       document_of_removed_element_while_waiting_for_unlock_) {
-    EnqueueEvent(EventTypeNames::pointerlockerror, target);
+    EnqueueEvent(event_type_names::kPointerlockerror, target);
     return;
   }
 
-  UseCounter::CountCrossOriginIframe(
-      target->GetDocument(), WebFeature::kElementRequestPointerLockIframe);
+  target->GetDocument().CountUseOnlyInCrossOriginIframe(
+      WebFeature::kElementRequestPointerLockIframe);
   if (target->IsInShadowTree()) {
     UseCounter::Count(target->GetDocument(),
                       WebFeature::kElementRequestPointerLockInShadow);
   }
+  if (options && options->unadjustedMovement()) {
+    UseCounter::Count(target->GetDocument(),
+                      WebFeature::kPointerLockUnadjustedMovement);
+  }
 
-  if (target->GetDocument().IsSandboxed(kSandboxPointerLock)) {
+  if (target->GetDocument().IsSandboxed(WebSandboxFlags::kPointerLock)) {
     // FIXME: This message should be moved off the console once a solution to
     // https://bugs.webkit.org/show_bug.cgi?id=103274 exists.
     target->GetDocument().AddConsoleMessage(ConsoleMessage::Create(
-        kSecurityMessageSource, kErrorMessageLevel,
+        mojom::ConsoleMessageSource::kSecurity,
+        mojom::ConsoleMessageLevel::kError,
         "Blocked pointer lock on an element because the element's frame is "
         "sandboxed and the 'allow-pointer-lock' permission is not set."));
-    EnqueueEvent(EventTypeNames::pointerlockerror, target);
+    EnqueueEvent(event_type_names::kPointerlockerror, target);
     return;
   }
 
   if (element_) {
     if (element_->GetDocument() != target->GetDocument()) {
-      EnqueueEvent(EventTypeNames::pointerlockerror, target);
+      EnqueueEvent(event_type_names::kPointerlockerror, target);
       return;
     }
-    EnqueueEvent(EventTypeNames::pointerlockchange, target);
+    EnqueueEvent(event_type_names::kPointerlockchange, target);
     element_ = target;
   } else if (page_->GetChromeClient().RequestPointerLock(
-                 target->GetDocument().GetFrame())) {
+                 target->GetDocument().GetFrame(),
+                 (options ? options->unadjustedMovement() : false))) {
     lock_pending_ = true;
     element_ = target;
   } else {
-    EnqueueEvent(EventTypeNames::pointerlockerror, target);
+    EnqueueEvent(event_type_names::kPointerlockerror, target);
   }
 }
 
@@ -116,20 +121,37 @@ Element* PointerLockController::GetElement() const {
 }
 
 void PointerLockController::DidAcquirePointerLock() {
-  EnqueueEvent(EventTypeNames::pointerlockchange, element_.Get());
+  EnqueueEvent(event_type_names::kPointerlockchange, element_.Get());
   lock_pending_ = false;
+  if (element_) {
+    LocalFrame* frame = element_->GetDocument().GetFrame();
+    pointer_lock_position_ = frame->LocalFrameRoot()
+                                 .GetEventHandler()
+                                 .LastKnownMousePositionInRootFrame();
+    pointer_lock_screen_position_ = frame->LocalFrameRoot()
+                                        .GetEventHandler()
+                                        .LastKnownMouseScreenPosition();
+  }
 }
 
 void PointerLockController::DidNotAcquirePointerLock() {
-  EnqueueEvent(EventTypeNames::pointerlockerror, element_.Get());
+  EnqueueEvent(event_type_names::kPointerlockerror, element_.Get());
   ClearElement();
 }
 
 void PointerLockController::DidLosePointerLock() {
-  EnqueueEvent(
-      EventTypeNames::pointerlockchange,
+  Document* pointer_lock_document =
       element_ ? &element_->GetDocument()
-               : document_of_removed_element_while_waiting_for_unlock_.Get());
+               : document_of_removed_element_while_waiting_for_unlock_.Get();
+  EnqueueEvent(event_type_names::kPointerlockchange, pointer_lock_document);
+
+  // Set the last mouse position back the locked position.
+  if (pointer_lock_document && pointer_lock_document->GetFrame()) {
+    pointer_lock_document->GetFrame()
+        ->GetEventHandler()
+        .ResetMousePositionForPointerUnlock();
+  }
+
   ClearElement();
   document_of_removed_element_while_waiting_for_unlock_ = nullptr;
 }
@@ -137,23 +159,36 @@ void PointerLockController::DidLosePointerLock() {
 void PointerLockController::DispatchLockedMouseEvent(
     const WebMouseEvent& event,
     const Vector<WebMouseEvent>& coalesced_events,
+    const Vector<WebMouseEvent>& predicted_events,
     const AtomicString& event_type) {
   if (!element_ || !element_->GetDocument().GetFrame())
     return;
 
   if (LocalFrame* frame = element_->GetDocument().GetFrame()) {
     frame->GetEventHandler().HandleTargetedMouseEvent(
-        element_, event, event_type, coalesced_events);
+        element_, event, event_type, coalesced_events, predicted_events);
 
     // Event handlers may remove element.
     if (!element_)
       return;
 
     // Create click events
-    if (event_type == EventTypeNames::mouseup) {
+    if (event_type == event_type_names::kMouseup) {
       frame->GetEventHandler().HandleTargetedMouseEvent(
-          element_, event, EventTypeNames::click, Vector<WebMouseEvent>());
+          element_, event, event_type_names::kClick, Vector<WebMouseEvent>(),
+          Vector<WebMouseEvent>());
     }
+  }
+}
+
+void PointerLockController::GetPointerLockPosition(
+    FloatPoint* lock_position,
+    FloatPoint* lock_screen_position) {
+  if (element_ && !lock_pending_) {
+    DCHECK(lock_position);
+    DCHECK(lock_screen_position);
+    *lock_position = pointer_lock_position_;
+    *lock_screen_position = pointer_lock_screen_position_;
   }
 }
 

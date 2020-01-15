@@ -30,7 +30,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_TEXT_RUN_ITERATOR_H_
 
 #include "third_party/blink/renderer/platform/text/text_run.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -52,9 +52,9 @@ class TextRunIterator {
   void Increment() { offset_++; }
   bool AtEnd() const { return offset_ >= length_; }
   UChar Current() const { return (*text_run_)[offset_]; }
-  WTF::Unicode::CharDirection Direction() const {
-    return AtEnd() ? WTF::Unicode::kOtherNeutral
-                   : WTF::Unicode::Direction(Current());
+  WTF::unicode::CharDirection Direction() const {
+    return AtEnd() ? WTF::unicode::kOtherNeutral
+                   : WTF::unicode::Direction(Current());
   }
   bool AtParagraphSeparator() const { return Current() == '\n'; }
 

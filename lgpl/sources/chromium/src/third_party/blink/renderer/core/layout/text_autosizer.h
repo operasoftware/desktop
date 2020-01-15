@@ -34,20 +34,21 @@
 #include <unicode/uchar.h>
 #include <memory>
 #include "base/macros.h"
+#include "third_party/blink/public/platform/web_text_autosizer_page_info.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/layout_unit.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 
 namespace blink {
 
-class ComputedStyle;
 class Document;
+class Frame;
 class IntSize;
 class LayoutBlock;
+class LayoutNGTableInterface;
 class LayoutObject;
-class LayoutTable;
 class LayoutText;
 class LocalFrame;
 class NGBlockNode;
@@ -57,20 +58,21 @@ class SubtreeLayoutScope;
 // Single-pass text autosizer. Documentation at:
 // http://tinyurl.com/TextAutosizer
 
-class CORE_EXPORT TextAutosizer final
-    : public GarbageCollectedFinalized<TextAutosizer> {
+class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
  public:
+  explicit TextAutosizer(const Document*);
   ~TextAutosizer();
-  static TextAutosizer* Create(const Document* document) {
-    return new TextAutosizer(document);
-  }
 
   // computed_size should include zoom.
   static float ComputeAutosizedFontSize(float computed_size,
                                         float multiplier,
                                         float effective_zoom);
+  // Static to allow starting updates from the frame tree root when it's a
+  // remote frame, though this function is called for all main frames, local
+  // or remote.
+  static void UpdatePageInfoInAllFrames(Frame* root_frame);
 
-  void UpdatePageInfoInAllFrames();
+  bool HasLayoutInlineSizeChanged() const;
   void UpdatePageInfo();
   void Record(LayoutBlock*);
   void Record(LayoutText*);
@@ -96,7 +98,7 @@ class CORE_EXPORT TextAutosizer final
     STACK_ALLOCATED();
 
    public:
-    explicit TableLayoutScope(LayoutTable*);
+    explicit TableLayoutScope(LayoutNGTableInterface*);
   };
 
   class NGLayoutScope {
@@ -278,29 +280,18 @@ class CORE_EXPORT TextAutosizer final
 
   struct PageInfo {
     DISALLOW_NEW();
-    PageInfo()
-        : frame_width_(0),
-          layout_width_(0),
-          accessibility_font_scale_factor_(1),
-          device_scale_adjustment_(1),
-          page_needs_autosizing_(false),
-          has_autosized_(false),
-          setting_enabled_(false) {}
+    PageInfo() = default;
 
-    int frame_width_;  // LocalFrame width in density-independent pixels (DIPs).
-    int layout_width_;  // Layout width in CSS pixels.
+    WebTextAutosizerPageInfo shared_info_;
     float accessibility_font_scale_factor_;
-    float device_scale_adjustment_;
     bool page_needs_autosizing_;
     bool has_autosized_;
     bool setting_enabled_;
   };
 
-  explicit TextAutosizer(const Document*);
-
   void BeginLayout(LayoutBlock*, SubtreeLayoutScope*);
   void EndLayout(LayoutBlock*);
-  void InflateAutoTable(LayoutTable*);
+  void InflateAutoTable(LayoutNGTableInterface*);
   float Inflate(LayoutObject*,
                 SubtreeLayoutScope*,
                 InflateBehavior = kThisBlockOnly,
@@ -360,6 +351,8 @@ class CORE_EXPORT TextAutosizer final
   // Mark the nearest non-inheritance supercluser
   void MarkSuperclusterForConsistencyCheck(LayoutObject*);
 
+  void ReportIfCrossSiteFrame();
+
   Member<const Document> document_;
   const LayoutBlock* first_block_to_begin_layout_;
 #if DCHECK_IS_ON()
@@ -371,10 +364,14 @@ class CORE_EXPORT TextAutosizer final
   // Clusters are created and destroyed during layout
   ClusterStack cluster_stack_;
   FingerprintMapper fingerprint_mapper_;
-  Vector<scoped_refptr<const ComputedStyle>> styles_retained_during_layout_;
   // FIXME: All frames should share the same m_pageInfo instance.
   PageInfo page_info_;
   bool update_page_info_deferred_;
+
+  // Inflate reports a use counter if we're autosizing a cross site iframe.
+  // This flag makes sure we only check it once per layout pass.
+  bool did_check_cross_site_use_count_;
+
   DISALLOW_COPY_AND_ASSIGN(TextAutosizer);
 };
 

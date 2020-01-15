@@ -73,7 +73,7 @@ StyleRuleList* ElementRuleCollector::MatchedStyleRuleList() {
   return style_rule_list_.Release();
 }
 
-CSSRuleList* ElementRuleCollector::MatchedCSSRuleList() {
+RuleIndexList* ElementRuleCollector::MatchedCSSRuleList() {
   DCHECK_EQ(mode_, SelectorChecker::kCollectingCSSRules);
   return css_rule_list_.Release();
 }
@@ -84,13 +84,13 @@ void ElementRuleCollector::ClearMatchedRules() {
 
 inline StyleRuleList* ElementRuleCollector::EnsureStyleRuleList() {
   if (!style_rule_list_)
-    style_rule_list_ = new StyleRuleList();
+    style_rule_list_ = MakeGarbageCollected<StyleRuleList>();
   return style_rule_list_;
 }
 
-inline StaticCSSRuleList* ElementRuleCollector::EnsureRuleList() {
+inline RuleIndexList* ElementRuleCollector::EnsureRuleList() {
   if (!css_rule_list_)
-    css_rule_list_ = StaticCSSRuleList::Create();
+    css_rule_list_ = MakeGarbageCollected<RuleIndexList>();
   return css_rule_list_.Get();
 }
 
@@ -130,7 +130,7 @@ void ElementRuleCollector::CollectMatchingRulesForList(
   init.part_names = part_names;
   SelectorChecker checker(init);
   SelectorChecker::SelectorCheckingContext context(
-      context_.GetElement(), SelectorChecker::kVisitedMatchEnabled);
+      &context_.GetElement(), SelectorChecker::kVisitedMatchEnabled);
   context.scope = match_request.scope;
   context.pseudo_id = pseudo_style_request_.pseudo_id;
 
@@ -175,7 +175,7 @@ void ElementRuleCollector::CollectMatchingRulesForList(
   }
 
   StyleEngine& style_engine =
-      context_.GetElement()->GetDocument().GetStyleEngine();
+      context_.GetElement().GetDocument().GetStyleEngine();
   if (!style_engine.Stats())
     return;
 
@@ -191,9 +191,8 @@ void ElementRuleCollector::CollectMatchingRules(
     ShadowV0CascadeOrder cascade_order,
     bool matching_tree_boundary_rules) {
   DCHECK(match_request.rule_set);
-  DCHECK(context_.GetElement());
 
-  Element& element = *context_.GetElement();
+  Element& element = context_.GetElement();
   const AtomicString& pseudo_id = element.ShadowPseudoId();
   if (!pseudo_id.IsEmpty()) {
     DCHECK(element.IsStyledElement());
@@ -235,9 +234,16 @@ void ElementRuleCollector::CollectMatchingRules(
   if (SelectorChecker::MatchesFocusPseudoClass(element))
     CollectMatchingRulesForList(match_request.rule_set->FocusPseudoClassRules(),
                                 cascade_order, match_request);
-  CollectMatchingRulesForList(
-      match_request.rule_set->TagRules(element.LocalNameForSelectorMatching()),
-      cascade_order, match_request);
+  if (SelectorChecker::MatchesSpatialNavigationInterestPseudoClass(element)) {
+    CollectMatchingRulesForList(
+        match_request.rule_set->SpatialNavigationInterestPseudoClassRules(),
+        cascade_order, match_request);
+  }
+  AtomicString element_name = matching_ua_rules_
+                                  ? element.localName()
+                                  : element.LocalNameForSelectorMatching();
+  CollectMatchingRulesForList(match_request.rule_set->TagRules(element_name),
+                              cascade_order, match_request);
   CollectMatchingRulesForList(match_request.rule_set->UniversalRules(),
                               cascade_order, match_request);
 }
@@ -253,8 +259,6 @@ void ElementRuleCollector::CollectMatchingPartPseudoRules(
     const MatchRequest& match_request,
     PartNames& part_names,
     ShadowV0CascadeOrder cascade_order) {
-  if (!RuntimeEnabledFeatures::CSSPartPseudoElementEnabled())
-    return;
   CollectMatchingRulesForList(match_request.rule_set->PartPseudoRules(),
                               cascade_order, match_request, &part_names);
 }
@@ -267,13 +271,10 @@ CSSRule* ElementRuleCollector::FindStyleRule(CSSRuleCollection* css_rules,
   CSSRule* result = nullptr;
   for (unsigned i = 0; i < css_rules->length() && !result; ++i) {
     CSSRule* css_rule = css_rules->item(i);
-    CSSRule::Type css_rule_type = css_rule->type();
-    if (css_rule_type == CSSRule::kStyleRule) {
-      CSSStyleRule* css_style_rule = ToCSSStyleRule(css_rule);
+    if (auto* css_style_rule = DynamicTo<CSSStyleRule>(css_rule)) {
       if (css_style_rule->GetStyleRule() == style_rule)
         result = css_rule;
-    } else if (css_rule_type == CSSRule::kImportRule) {
-      CSSImportRule* css_import_rule = ToCSSImportRule(css_rule);
+    } else if (auto* css_import_rule = DynamicTo<CSSImportRule>(css_rule)) {
       result = FindStyleRule(css_import_rule->styleSheet(), style_rule);
     } else {
       result = FindStyleRule(css_rule->cssRules(), style_rule);
@@ -284,18 +285,19 @@ CSSRule* ElementRuleCollector::FindStyleRule(CSSRuleCollection* css_rules,
 
 void ElementRuleCollector::AppendCSSOMWrapperForRule(
     CSSStyleSheet* parent_style_sheet,
-    StyleRule* rule) {
+    const RuleData* rule_data) {
   // |parentStyleSheet| is 0 if and only if the |rule| is coming from User
   // Agent. In this case, it is safe to create CSSOM wrappers without
   // parentStyleSheets as they will be used only by inspector which will not try
   // to edit them.
   CSSRule* css_rule = nullptr;
+  StyleRule* rule = rule_data->Rule();
   if (parent_style_sheet)
     css_rule = FindStyleRule(parent_style_sheet, rule);
   else
     css_rule = rule->CreateCSSOMWrapper();
   DCHECK(!parent_style_sheet || css_rule);
-  EnsureRuleList()->Rules().push_back(css_rule);
+  EnsureRuleList()->emplace_back(css_rule, rule_data->SelectorIndex());
 }
 
 void ElementRuleCollector::SortAndTransferMatchedRules() {
@@ -311,10 +313,11 @@ void ElementRuleCollector::SortAndTransferMatchedRules() {
   }
 
   if (mode_ == SelectorChecker::kCollectingCSSRules) {
-    for (unsigned i = 0; i < matched_rules_.size(); ++i)
+    for (unsigned i = 0; i < matched_rules_.size(); ++i) {
       AppendCSSOMWrapperForRule(
           const_cast<CSSStyleSheet*>(matched_rules_[i].ParentStyleSheet()),
-          matched_rules_[i].GetRuleData()->Rule());
+          matched_rules_[i].GetRuleData());
+    }
     return;
   }
 
@@ -323,7 +326,7 @@ void ElementRuleCollector::SortAndTransferMatchedRules() {
     const RuleData* rule_data = matched_rules_[i].GetRuleData();
     result_.AddMatchedProperties(
         &rule_data->Rule()->Properties(), rule_data->LinkMatchType(),
-        rule_data->PropertyWhitelist(matching_ua_rules_));
+        rule_data->GetValidPropertyFilter(matching_ua_rules_));
   }
 }
 
@@ -345,9 +348,9 @@ void ElementRuleCollector::DidMatchRule(
       return;
     if ((dynamic_pseudo == kPseudoIdBefore ||
          dynamic_pseudo == kPseudoIdAfter) &&
-        !rule_data->Rule()->Properties().HasProperty(CSSPropertyContent))
+        !rule_data->Rule()->Properties().HasProperty(CSSPropertyID::kContent))
       return;
-    style_->SetHasPseudoStyle(dynamic_pseudo);
+    style_->SetHasPseudoElementStyle(dynamic_pseudo);
   } else {
     matched_rules_.push_back(MatchedRule(
         rule_data, result.specificity, cascade_order,

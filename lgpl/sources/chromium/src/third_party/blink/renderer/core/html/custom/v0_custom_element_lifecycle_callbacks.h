@@ -39,7 +39,7 @@ namespace blink {
 class Element;
 
 class V0CustomElementLifecycleCallbacks
-    : public GarbageCollectedFinalized<V0CustomElementLifecycleCallbacks> {
+    : public GarbageCollected<V0CustomElementLifecycleCallbacks> {
  public:
   virtual ~V0CustomElementLifecycleCallbacks() = default;
 
@@ -61,7 +61,7 @@ class V0CustomElementLifecycleCallbacks
                                 const AtomicString& old_value,
                                 const AtomicString& new_value) = 0;
 
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) {}
 
  protected:
   explicit V0CustomElementLifecycleCallbacks(CallbackType type)

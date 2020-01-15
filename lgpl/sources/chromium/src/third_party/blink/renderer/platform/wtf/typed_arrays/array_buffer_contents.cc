@@ -53,7 +53,7 @@ ArrayBufferContents::ArrayBufferContents()
     : holder_(base::AdoptRef(new DataHolder())) {}
 
 ArrayBufferContents::ArrayBufferContents(
-    unsigned num_elements,
+    size_t num_elements,
     unsigned element_byte_size,
     SharingType is_shared,
     ArrayBufferContents::InitializationPolicy policy)
@@ -83,7 +83,7 @@ ArrayBufferContents::ArrayBufferContents(DataHandle data,
 
 ArrayBufferContents::~ArrayBufferContents() = default;
 
-void ArrayBufferContents::Neuter() {
+void ArrayBufferContents::Detach() {
   holder_ = nullptr;
 }
 
@@ -91,12 +91,20 @@ void ArrayBufferContents::Transfer(ArrayBufferContents& other) {
   DCHECK(!IsShared());
   DCHECK(!other.holder_->Data());
   other.holder_ = holder_;
-  Neuter();
+  Detach();
 }
 
 void ArrayBufferContents::ShareWith(ArrayBufferContents& other) {
   DCHECK(IsShared());
   DCHECK(!other.holder_->Data());
+  other.holder_ = holder_;
+}
+
+void ArrayBufferContents::ShareNonSharedForInternalUse(
+    ArrayBufferContents& other) {
+  DCHECK(!IsShared());
+  DCHECK(!other.holder_->Data());
+  DCHECK(holder_->Data());
   other.holder_ = holder_;
 }
 

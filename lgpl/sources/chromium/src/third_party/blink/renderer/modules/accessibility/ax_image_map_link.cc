@@ -28,27 +28,20 @@
 
 #include "third_party/blink/renderer/modules/accessibility/ax_image_map_link.h"
 
-#include "SkMatrix44.h"
 #include "third_party/blink/renderer/core/aom/accessible_node.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_layout_object.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_object_cache_impl.h"
 #include "third_party/blink/renderer/platform/graphics/path.h"
+#include "third_party/skia/include/core/SkMatrix44.h"
 
 namespace blink {
-
-using namespace HTMLNames;
 
 AXImageMapLink::AXImageMapLink(HTMLAreaElement* area,
                                AXObjectCacheImpl& ax_object_cache)
     : AXNodeObject(area, ax_object_cache) {}
 
 AXImageMapLink::~AXImageMapLink() = default;
-
-AXImageMapLink* AXImageMapLink::Create(HTMLAreaElement* area,
-                                       AXObjectCacheImpl& ax_object_cache) {
-  return new AXImageMapLink(area, ax_object_cache);
-}
 
 HTMLMapElement* AXImageMapLink::MapElement() const {
   HTMLAreaElement* area = AreaElement();
@@ -87,7 +80,7 @@ Element* AXImageMapLink::ActionElement() const {
 }
 
 Element* AXImageMapLink::AnchorElement() const {
-  return GetNode() ? ToElement(GetNode()) : nullptr;
+  return To<Element>(GetNode());
 }
 
 KURL AXImageMapLink::Url() const {

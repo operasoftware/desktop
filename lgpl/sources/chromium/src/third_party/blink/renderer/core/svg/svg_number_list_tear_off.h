@@ -41,14 +41,6 @@ class SVGNumberListTearOff final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SVGNumberListTearOff* Create(
-      SVGNumberList* target,
-      SVGAnimatedPropertyBase* binding,
-      PropertyIsAnimValType property_is_anim_val) {
-    return new SVGNumberListTearOff(target, binding, property_is_anim_val);
-  }
-
- private:
   SVGNumberListTearOff(SVGNumberList* target,
                        SVGAnimatedPropertyBase* binding,
                        PropertyIsAnimValType property_is_anim_val)

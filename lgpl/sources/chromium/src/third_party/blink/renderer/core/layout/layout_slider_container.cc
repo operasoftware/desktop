@@ -56,7 +56,7 @@ inline static bool HasVerticalAppearance(HTMLInputElement* input) {
   if (!input->GetLayoutObject() || !input->GetLayoutObject()->Style())
     return false;
   const ComputedStyle& slider_style = input->GetLayoutObject()->StyleRef();
-  return slider_style.Appearance() == kSliderVerticalPart;
+  return slider_style.EffectiveAppearance() == kSliderVerticalPart;
 }
 
 void LayoutSliderContainer::ComputeLogicalHeight(
@@ -102,9 +102,9 @@ void LayoutSliderContainer::UpdateLayout() {
   bool is_vertical = HasVerticalAppearance(input);
 
   Element* thumb_element = input->UserAgentShadowRoot()->getElementById(
-      ShadowElementNames::SliderThumb());
+      shadow_element_names::SliderThumb());
   Element* track_element = input->UserAgentShadowRoot()->getElementById(
-      ShadowElementNames::SliderTrack());
+      shadow_element_names::SliderTrack());
   LayoutBox* thumb = thumb_element ? thumb_element->GetLayoutBox() : nullptr;
   LayoutBox* track = track_element ? track_element->GetLayoutBox() : nullptr;
 

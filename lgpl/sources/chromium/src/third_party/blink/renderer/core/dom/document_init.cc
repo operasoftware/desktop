@@ -76,10 +76,9 @@ bool DocumentInit::ShouldSetURL() const {
   return (loader && loader->GetFrame()->Tree().Parent()) || !url_.IsEmpty();
 }
 
-bool DocumentInit::ShouldTreatURLAsSrcdocDocument() const {
-  return parent_document_ &&
-         document_loader_->GetFrame()->Loader().ShouldTreatURLAsSrcdocDocument(
-             url_);
+bool DocumentInit::IsSrcdocDocument() const {
+  // TODO(dgozman): why do we check |parent_document_| here?
+  return parent_document_ && is_srcdoc_document_;
 }
 
 DocumentLoader* DocumentInit::MasterDocumentLoader() const {
@@ -94,18 +93,16 @@ DocumentLoader* DocumentInit::MasterDocumentLoader() const {
   return nullptr;
 }
 
-SandboxFlags DocumentInit::GetSandboxFlags() const {
-  DCHECK(MasterDocumentLoader());
-  DocumentLoader* loader = MasterDocumentLoader();
-  SandboxFlags flags = loader->GetFrame()->Loader().EffectiveSandboxFlags();
-
+WebSandboxFlags DocumentInit::GetSandboxFlags() const {
+  WebSandboxFlags flags = sandbox_flags_;
+  if (DocumentLoader* loader = MasterDocumentLoader())
+    flags |= loader->GetFrame()->Loader().EffectiveSandboxFlags();
   // If the load was blocked by CSP, force the Document's origin to be unique,
-  // so that the blocked document appears to be a normal cross-origin document's
-  // load per CSP spec: https://www.w3.org/TR/CSP3/#directive-frame-ancestors.
-  if (loader->WasBlockedAfterCSP()) {
-    flags |= kSandboxOrigin;
-  }
-
+  // so that the blocked document appears to be a normal cross-origin
+  // document's load per CSP spec:
+  // https://www.w3.org/TR/CSP3/#directive-frame-ancestors.
+  if (blocked_by_csp_)
+    flags |= WebSandboxFlags::kOrigin;
   return flags;
 }
 
@@ -117,23 +114,17 @@ WebInsecureRequestPolicy DocumentInit::GetInsecureRequestPolicy() const {
   return parent_frame->GetSecurityContext()->GetInsecureRequestPolicy();
 }
 
-SecurityContext::InsecureNavigationsSet*
+const SecurityContext::InsecureNavigationsSet*
 DocumentInit::InsecureNavigationsToUpgrade() const {
   DCHECK(MasterDocumentLoader());
   Frame* parent_frame = MasterDocumentLoader()->GetFrame()->Tree().Parent();
   if (!parent_frame)
     return nullptr;
-  return parent_frame->GetSecurityContext()->InsecureNavigationsToUpgrade();
+  return &parent_frame->GetSecurityContext()->InsecureNavigationsToUpgrade();
 }
 
-bool DocumentInit::IsHostedInReservedIPRange() const {
-  if (DocumentLoader* loader = MasterDocumentLoader()) {
-    if (!loader->GetResponse().RemoteIPAddress().IsEmpty()) {
-      return NetworkUtils::IsReservedIPAddress(
-          loader->GetResponse().RemoteIPAddress());
-    }
-  }
-  return false;
+network::mojom::IPAddressSpace DocumentInit::GetIPAddressSpace() const {
+  return ip_address_space_;
 }
 
 Settings* DocumentInit::GetSettings() const {
@@ -166,9 +157,67 @@ DocumentInit& DocumentInit::WithURL(const KURL& url) {
   return *this;
 }
 
+scoped_refptr<SecurityOrigin> DocumentInit::GetDocumentOrigin() const {
+  // Origin to commit is specified by the browser process, it must be taken
+  // and used directly. It is currently supplied only for session history
+  // navigations, where the origin was already calcuated previously and
+  // stored on the session history entry.
+  if (origin_to_commit_)
+    return origin_to_commit_;
+
+  if (owner_document_)
+    return owner_document_->GetMutableSecurityOrigin();
+
+  // Otherwise, create an origin that propagates precursor information
+  // as needed. For non-opaque origins, this creates a standard tuple
+  // origin, but for opaque origins, it creates an origin with the
+  // initiator origin as the precursor.
+  return SecurityOrigin::CreateWithReferenceOrigin(url_,
+                                                   initiator_origin_.get());
+}
+
 DocumentInit& DocumentInit::WithOwnerDocument(Document* owner_document) {
   DCHECK(!owner_document_);
+  DCHECK(!initiator_origin_ || !owner_document ||
+         owner_document->GetSecurityOrigin() == initiator_origin_);
   owner_document_ = owner_document;
+  return *this;
+}
+
+DocumentInit& DocumentInit::WithInitiatorOrigin(
+    scoped_refptr<const SecurityOrigin> initiator_origin) {
+  DCHECK(!initiator_origin_);
+  DCHECK(!initiator_origin || !owner_document_ ||
+         owner_document_->GetSecurityOrigin() == initiator_origin);
+  initiator_origin_ = std::move(initiator_origin);
+  return *this;
+}
+
+DocumentInit& DocumentInit::WithOriginToCommit(
+    scoped_refptr<SecurityOrigin> origin_to_commit) {
+  origin_to_commit_ = std::move(origin_to_commit);
+  return *this;
+}
+
+DocumentInit& DocumentInit::WithIPAddressSpace(
+    network::mojom::IPAddressSpace ip_address_space) {
+  ip_address_space_ = ip_address_space;
+  return *this;
+}
+
+DocumentInit& DocumentInit::WithSrcdocDocument(bool is_srcdoc_document) {
+  is_srcdoc_document_ = is_srcdoc_document;
+  return *this;
+}
+
+DocumentInit& DocumentInit::WithBlockedByCSP(bool blocked_by_csp) {
+  blocked_by_csp_ = blocked_by_csp;
+  return *this;
+}
+
+DocumentInit& DocumentInit::WithGrantLoadLocalResources(
+    bool grant_load_local_resources) {
+  grant_load_local_resources_ = grant_load_local_resources;
   return *this;
 }
 
@@ -193,7 +242,7 @@ V0CustomElementRegistrationContext* DocumentInit::RegistrationContext(
     return nullptr;
 
   if (create_new_registration_context_)
-    return V0CustomElementRegistrationContext::Create();
+    return MakeGarbageCollected<V0CustomElementRegistrationContext>();
 
   return registration_context_.Get();
 }
@@ -202,10 +251,27 @@ Document* DocumentInit::ContextDocument() const {
   return context_document_;
 }
 
-DocumentInit& DocumentInit::WithPreviousDocumentCSP(
-    const ContentSecurityPolicy* previous_csp) {
-  DCHECK(!previous_csp_);
-  previous_csp_ = previous_csp;
+DocumentInit& DocumentInit::WithFeaturePolicyHeader(const String& header) {
+  DCHECK(feature_policy_header_.IsEmpty());
+  feature_policy_header_ = header;
+  return *this;
+}
+
+DocumentInit& DocumentInit::WithOriginTrialsHeader(const String& header) {
+  DCHECK(origin_trials_header_.IsEmpty());
+  origin_trials_header_ = header;
+  return *this;
+}
+
+DocumentInit& DocumentInit::WithSandboxFlags(WebSandboxFlags flags) {
+  // Only allow adding more sandbox flags.
+  sandbox_flags_ |= flags;
+  return *this;
+}
+
+DocumentInit& DocumentInit::WithContentSecurityPolicy(
+    ContentSecurityPolicy* policy) {
+  content_security_policy_ = policy;
   return *this;
 }
 

@@ -18,7 +18,7 @@ class WorkerInternals final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static WorkerInternals* Create() { return new WorkerInternals(); }
+  explicit WorkerInternals();
   ~WorkerInternals() override;
 
   OriginTrialsTest* originTrialsTest() const;
@@ -26,9 +26,6 @@ class WorkerInternals final : public ScriptWrappable {
   void countDeprecation(ScriptState*, uint32_t feature, ExceptionState&);
 
   void collectGarbage(ScriptState*);
-
- private:
-  explicit WorkerInternals();
 };
 
 }  // namespace blink

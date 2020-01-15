@@ -19,11 +19,10 @@ namespace {
 // If the merchant requests shipping information, but the browser does not
 // provide the shipping option, reject the show() promise.
 TEST(OnPaymentResponseTest, RejectMissingShippingOption) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestShipping(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestShipping(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -32,8 +31,6 @@ TEST(OnPaymentResponseTest, RejectMissingShippingOption) {
       BuildPaymentResponseForTest();
   response->shipping_address = payments::mojom::blink::PaymentAddress::New();
   response->shipping_address->country = "US";
-  response->shipping_address->language_code = "en";
-  response->shipping_address->script_code = "Latn";
 
   request->show(scope.GetScriptState())
       .Then(funcs.ExpectNoCall(), funcs.ExpectCall());
@@ -45,11 +42,10 @@ TEST(OnPaymentResponseTest, RejectMissingShippingOption) {
 // If the merchant requests shipping information, but the browser does not
 // provide a shipping address, reject the show() promise.
 TEST(OnPaymentResponseTest, RejectMissingAddress) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestShipping(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestShipping(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -68,11 +64,10 @@ TEST(OnPaymentResponseTest, RejectMissingAddress) {
 // If the merchant requests a payer name, but the browser does not provide it,
 // reject the show() promise.
 TEST(OnPaymentResponseTest, RejectMissingName) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerName(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerName(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -90,11 +85,10 @@ TEST(OnPaymentResponseTest, RejectMissingName) {
 // If the merchant requests an email address, but the browser does not provide
 // it, reject the show() promise.
 TEST(OnPaymentResponseTest, RejectMissingEmail) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerEmail(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerEmail(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -112,11 +106,10 @@ TEST(OnPaymentResponseTest, RejectMissingEmail) {
 // If the merchant requests a phone number, but the browser does not provide it,
 // reject the show() promise.
 TEST(OnPaymentResponseTest, RejectMissingPhone) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerPhone(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerPhone(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -134,11 +127,10 @@ TEST(OnPaymentResponseTest, RejectMissingPhone) {
 // If the merchant requests shipping information, but the browser provides an
 // empty string for shipping option, reject the show() promise.
 TEST(OnPaymentResponseTest, RejectEmptyShippingOption) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestShipping(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestShipping(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -148,8 +140,6 @@ TEST(OnPaymentResponseTest, RejectEmptyShippingOption) {
   response->shipping_option = "";
   response->shipping_address = payments::mojom::blink::PaymentAddress::New();
   response->shipping_address->country = "US";
-  response->shipping_address->language_code = "en";
-  response->shipping_address->script_code = "Latn";
 
   request->show(scope.GetScriptState())
       .Then(funcs.ExpectNoCall(), funcs.ExpectCall());
@@ -161,11 +151,10 @@ TEST(OnPaymentResponseTest, RejectEmptyShippingOption) {
 // If the merchant requests shipping information, but the browser provides an
 // empty shipping address, reject the show() promise.
 TEST(OnPaymentResponseTest, RejectEmptyAddress) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestShipping(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestShipping(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -185,11 +174,10 @@ TEST(OnPaymentResponseTest, RejectEmptyAddress) {
 // If the merchant requests a payer name, but the browser provides an empty
 // string for name, reject the show() promise.
 TEST(OnPaymentResponseTest, RejectEmptyName) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerName(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerName(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -208,11 +196,10 @@ TEST(OnPaymentResponseTest, RejectEmptyName) {
 // If the merchant requests an email, but the browser provides an empty string
 // for email, reject the show() promise.
 TEST(OnPaymentResponseTest, RejectEmptyEmail) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerEmail(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerEmail(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -231,11 +218,10 @@ TEST(OnPaymentResponseTest, RejectEmptyEmail) {
 // If the merchant requests a phone number, but the browser provides an empty
 // string for the phone number, reject the show() promise.
 TEST(OnPaymentResponseTest, RejectEmptyPhone) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerPhone(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerPhone(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -254,11 +240,10 @@ TEST(OnPaymentResponseTest, RejectEmptyPhone) {
 // If the merchant does not request shipping information, but the browser
 // provides a shipping address, reject the show() promise.
 TEST(OnPaymentResponseTest, RejectNotRequestedAddress) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestShipping(false);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestShipping(false);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -267,8 +252,6 @@ TEST(OnPaymentResponseTest, RejectNotRequestedAddress) {
       BuildPaymentResponseForTest();
   response->shipping_address = payments::mojom::blink::PaymentAddress::New();
   response->shipping_address->country = "US";
-  response->shipping_address->language_code = "en";
-  response->shipping_address->script_code = "Latn";
 
   request->show(scope.GetScriptState())
       .Then(funcs.ExpectNoCall(), funcs.ExpectCall());
@@ -280,11 +263,10 @@ TEST(OnPaymentResponseTest, RejectNotRequestedAddress) {
 // If the merchant does not request shipping information, but the browser
 // provides a shipping option, reject the show() promise.
 TEST(OnPaymentResponseTest, RejectNotRequestedShippingOption) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestShipping(false);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestShipping(false);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -303,11 +285,10 @@ TEST(OnPaymentResponseTest, RejectNotRequestedShippingOption) {
 // If the merchant does not request a payer name, but the browser provides it,
 // reject the show() promise.
 TEST(OnPaymentResponseTest, RejectNotRequestedName) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerName(false);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerName(false);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -326,11 +307,10 @@ TEST(OnPaymentResponseTest, RejectNotRequestedName) {
 // If the merchant does not request an email, but the browser provides it,
 // reject the show() promise.
 TEST(OnPaymentResponseTest, RejectNotRequestedEmail) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerEmail(false);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerEmail(false);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -349,11 +329,10 @@ TEST(OnPaymentResponseTest, RejectNotRequestedEmail) {
 // If the merchant does not request a phone number, but the browser provides it,
 // reject the show() promise.
 TEST(OnPaymentResponseTest, RejectNotRequestedPhone) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerPhone(false);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerPhone(false);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -372,11 +351,10 @@ TEST(OnPaymentResponseTest, RejectNotRequestedPhone) {
 // If the merchant requests shipping information, but the browser provides an
 // invalid shipping address, reject the show() promise.
 TEST(OnPaymentResponseTest, RejectInvalidAddress) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestShipping(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestShipping(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -399,16 +377,16 @@ class PaymentResponseFunction : public ScriptFunction {
   static v8::Local<v8::Function> Create(ScriptState* script_state,
                                         ScriptValue* out_value) {
     PaymentResponseFunction* self =
-        new PaymentResponseFunction(script_state, out_value);
+        MakeGarbageCollected<PaymentResponseFunction>(script_state, out_value);
     return self->BindToV8Function();
   }
 
- private:
   PaymentResponseFunction(ScriptState* script_state, ScriptValue* out_value)
       : ScriptFunction(script_state), value_(out_value) {
     DCHECK(value_);
   }
 
+ private:
   ScriptValue Call(ScriptValue value) override {
     DCHECK(!value.IsEmpty());
     *value_ = value;
@@ -421,11 +399,10 @@ class PaymentResponseFunction : public ScriptFunction {
 // If the merchant requests shipping information, the resolved show() promise
 // should contain a shipping option and an address.
 TEST(OnPaymentResponseTest, CanRequestShippingInformation) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestShipping(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestShipping(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -435,8 +412,6 @@ TEST(OnPaymentResponseTest, CanRequestShippingInformation) {
   response->shipping_option = "standardShipping";
   response->shipping_address = payments::mojom::blink::PaymentAddress::New();
   response->shipping_address->country = "US";
-  response->shipping_address->language_code = "en";
-  response->shipping_address->script_code = "Latn";
   ScriptValue out_value;
   request->show(scope.GetScriptState())
       .Then(PaymentResponseFunction::Create(scope.GetScriptState(), &out_value),
@@ -449,18 +424,15 @@ TEST(OnPaymentResponseTest, CanRequestShippingInformation) {
   PaymentResponse* resp = V8PaymentResponse::ToImplWithTypeCheck(
       scope.GetIsolate(), out_value.V8Value());
   EXPECT_EQ("standardShipping", resp->shippingOption());
-  EXPECT_EQ("US", resp->shippingAddress()->country());
-  EXPECT_EQ("en-Latn", resp->shippingAddress()->languageCode());
 }
 
 // If the merchant requests a payer name, the resolved show() promise should
 // contain a payer name.
 TEST(OnPaymentResponseTest, CanRequestName) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerName(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerName(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -486,11 +458,10 @@ TEST(OnPaymentResponseTest, CanRequestName) {
 // If the merchant requests an email address, the resolved show() promise should
 // contain an email address.
 TEST(OnPaymentResponseTest, CanRequestEmail) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerEmail(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerEmail(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -515,11 +486,10 @@ TEST(OnPaymentResponseTest, CanRequestEmail) {
 // If the merchant requests a phone number, the resolved show() promise should
 // contain a phone number.
 TEST(OnPaymentResponseTest, CanRequestPhone) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerPhone(true);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerPhone(true);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -545,11 +515,10 @@ TEST(OnPaymentResponseTest, CanRequestPhone) {
 // If the merchant does not request shipping information, the resolved show()
 // promise should contain null shipping option and address.
 TEST(OnPaymentResponseTest, ShippingInformationNotRequired) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestShipping(false);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestShipping(false);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -572,11 +541,10 @@ TEST(OnPaymentResponseTest, ShippingInformationNotRequired) {
 // If the merchant does not request a phone number, the resolved show() promise
 // should contain null phone number.
 TEST(OnPaymentResponseTest, PhoneNotRequred) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerPhone(false);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerPhone(false);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -601,11 +569,10 @@ TEST(OnPaymentResponseTest, PhoneNotRequred) {
 // If the merchant does not request a payer name, the resolved show() promise
 // should contain null payer name.
 TEST(OnPaymentResponseTest, NameNotRequired) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerName(false);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerName(false);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());
@@ -630,11 +597,10 @@ TEST(OnPaymentResponseTest, NameNotRequired) {
 // If the merchant does not request an email address, the resolved show()
 // promise should contain null email address.
 TEST(OnPaymentResponseTest, EmailNotRequired) {
-  V8TestingScope scope;
+  PaymentRequestV8TestingScope scope;
   PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
-  MakePaymentRequestOriginSecure(scope.GetDocument());
-  PaymentOptions options;
-  options.setRequestPayerEmail(false);
+  PaymentOptions* options = PaymentOptions::Create();
+  options->setRequestPayerEmail(false);
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), options, scope.GetExceptionState());

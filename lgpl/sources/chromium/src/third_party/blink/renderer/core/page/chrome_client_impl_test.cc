@@ -31,6 +31,8 @@
 #include "third_party/blink/renderer/core/page/chrome_client_impl.h"
 #include "cc/trees/layer_tree_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/feature_policy/feature_policy.h"
+#include "third_party/blink/public/mojom/choosers/color_chooser.mojom-blink.h"
 #include "third_party/blink/public/platform/web_input_event.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
@@ -44,6 +46,7 @@
 #include "third_party/blink/renderer/core/html/forms/date_time_chooser_client.h"
 #include "third_party/blink/renderer/core/html/forms/file_chooser.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
+#include "third_party/blink/renderer/core/html/forms/mock_file_chooser.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/scoped_page_pauser.h"
@@ -52,35 +55,21 @@
 
 namespace blink {
 
-namespace {
-
-class TestWebViewClient : public FrameTestHelpers::TestWebViewClient {
- public:
-  explicit TestWebViewClient(WebNavigationPolicy* target) : target_(target) {}
-  ~TestWebViewClient() override = default;
-
-  void Show(WebNavigationPolicy policy) override { *target_ = policy; }
-
- private:
-  WebNavigationPolicy* target_;
-};
-
-}  // anonymous namespace
-
-class ViewCreatingClient : public FrameTestHelpers::TestWebViewClient {
+class ViewCreatingClient : public frame_test_helpers::TestWebViewClient {
  public:
   WebView* CreateView(WebLocalFrame* opener,
                       const WebURLRequest&,
                       const WebWindowFeatures&,
                       const WebString& name,
                       WebNavigationPolicy,
-                      bool,
-                      WebSandboxFlags) override {
+                      WebSandboxFlags,
+                      const FeaturePolicy::FeatureState&,
+                      const SessionStorageNamespaceId&) override {
     return web_view_helper_.InitializeWithOpener(opener);
   }
 
  private:
-  FrameTestHelpers::WebViewHelper web_view_helper_;
+  frame_test_helpers::WebViewHelper web_view_helper_;
 };
 
 class CreateWindowTest : public testing::Test {
@@ -93,7 +82,7 @@ class CreateWindowTest : public testing::Test {
   }
 
   ViewCreatingClient web_view_client_;
-  FrameTestHelpers::WebViewHelper helper_;
+  frame_test_helpers::WebViewHelper helper_;
   WebViewImpl* web_view_;
   WebLocalFrame* main_frame_;
   Persistent<ChromeClientImpl> chrome_client_impl_;
@@ -101,17 +90,17 @@ class CreateWindowTest : public testing::Test {
 
 TEST_F(CreateWindowTest, CreateWindowFromPausedPage) {
   ScopedPagePauser pauser;
-  LocalFrame* frame = ToWebLocalFrameImpl(main_frame_)->GetFrame();
-  FrameLoadRequest request(frame->GetDocument());
+  LocalFrame* frame = To<WebLocalFrameImpl>(main_frame_)->GetFrame();
+  FrameLoadRequest request(frame->GetDocument(), ResourceRequest());
+  request.SetNavigationPolicy(kNavigationPolicyNewForegroundTab);
   WebWindowFeatures features;
   EXPECT_EQ(nullptr, chrome_client_impl_->CreateWindow(
-                         frame, request, features,
-                         kNavigationPolicyNewForegroundTab, kSandboxNone));
+                         frame, request, "", features, WebSandboxFlags::kNone,
+                         FeaturePolicy::FeatureState(), ""));
 }
 
-class FakeColorChooserClient
-    : public GarbageCollectedFinalized<FakeColorChooserClient>,
-      public ColorChooserClient {
+class FakeColorChooserClient : public GarbageCollected<FakeColorChooserClient>,
+                               public ColorChooserClient {
  public:
   FakeColorChooserClient(Element* owner_element)
       : owner_element_(owner_element) {}
@@ -122,7 +111,7 @@ class FakeColorChooserClient
     ColorChooserClient::Trace(visitor);
   }
 
-  USING_GARBAGE_COLLECTED_MIXIN(FakeColorChooserClient)
+  USING_GARBAGE_COLLECTED_MIXIN(FakeColorChooserClient);
 
   // ColorChooserClient
   void DidChooseColor(const Color& color) override {}
@@ -140,7 +129,7 @@ class FakeColorChooserClient
 };
 
 class FakeDateTimeChooserClient
-    : public GarbageCollectedFinalized<FakeDateTimeChooserClient>,
+    : public GarbageCollected<FakeDateTimeChooserClient>,
       public DateTimeChooserClient {
  public:
   FakeDateTimeChooserClient(Element* owner_element)
@@ -152,7 +141,7 @@ class FakeDateTimeChooserClient
     DateTimeChooserClient::Trace(visitor);
   }
 
-  USING_GARBAGE_COLLECTED_MIXIN(FakeDateTimeChooserClient)
+  USING_GARBAGE_COLLECTED_MIXIN(FakeDateTimeChooserClient);
 
   // DateTimeChooserClient
   Element& OwnerElement() const override { return *owner_element_; }
@@ -179,10 +168,11 @@ class PagePopupSuppressionTest : public testing::Test {
   }
 
   bool CanOpenDateTimeChooser() {
+    LocalFrame* frame = main_frame_->GetFrame();
     DateTimeChooserParameters params;
     params.locale = DefaultLanguage();
-    return !!chrome_client_impl_->OpenDateTimeChooser(date_time_chooser_client_,
-                                                      params);
+    return !!chrome_client_impl_->OpenDateTimeChooser(
+        frame, date_time_chooser_client_, params);
   }
 
   Settings* GetSettings() {
@@ -197,15 +187,15 @@ class PagePopupSuppressionTest : public testing::Test {
     chrome_client_impl_ =
         ToChromeClientImpl(&web_view_->GetPage()->GetChromeClient());
     LocalFrame* frame = helper_.LocalMainFrame()->GetFrame();
-    color_chooser_client_ =
-        new FakeColorChooserClient(frame->GetDocument()->documentElement());
-    date_time_chooser_client_ =
-        new FakeDateTimeChooserClient(frame->GetDocument()->documentElement());
-    select_ = HTMLSelectElement::Create(*(frame->GetDocument()));
+    color_chooser_client_ = MakeGarbageCollected<FakeColorChooserClient>(
+        frame->GetDocument()->documentElement());
+    date_time_chooser_client_ = MakeGarbageCollected<FakeDateTimeChooserClient>(
+        frame->GetDocument()->documentElement());
+    select_ = MakeGarbageCollected<HTMLSelectElement>(*(frame->GetDocument()));
   }
 
  protected:
-  FrameTestHelpers::WebViewHelper helper_;
+  frame_test_helpers::WebViewHelper helper_;
   WebViewImpl* web_view_;
   Persistent<WebLocalFrameImpl> main_frame_;
   Persistent<ChromeClientImpl> chrome_client_impl_;
@@ -240,18 +230,9 @@ TEST_F(PagePopupSuppressionTest, SuppressDateTimeChooser) {
   EXPECT_TRUE(CanOpenDateTimeChooser());
 }
 
-// A WebLocalFrameClient which makes FileChooser::OpenFileChooser() success.
-class FrameClientForFileChooser : public FrameTestHelpers::TestWebFrameClient {
-  bool RunFileChooser(const WebFileChooserParams& params,
-                      WebFileChooserCompletion* chooser_completion) override {
-    return true;
-  }
-};
-
 // A FileChooserClient which makes FileChooser::OpenFileChooser() success.
-class MockFileChooserClient
-    : public GarbageCollectedFinalized<MockFileChooserClient>,
-      public FileChooserClient {
+class MockFileChooserClient : public GarbageCollected<MockFileChooserClient>,
+                              public FileChooserClient {
   USING_GARBAGE_COLLECTED_MIXIN(MockFileChooserClient);
 
  public:
@@ -263,7 +244,7 @@ class MockFileChooserClient
 
  private:
   // FilesChosen() and WillOpenPopup() are never called in the test.
-  void FilesChosen(const FileChooserFileInfoList&) override {}
+  void FilesChosen(FileChooserFileInfoList, const base::FilePath&) override {}
   void WillOpenPopup() override {}
 
   LocalFrame* FrameOrNull() const override { return frame_; }
@@ -274,30 +255,44 @@ class MockFileChooserClient
 class FileChooserQueueTest : public testing::Test {
  protected:
   void SetUp() override {
-    web_view_ = helper_.Initialize(&frame_client_);
+    web_view_ = helper_.Initialize();
     chrome_client_impl_ =
         ToChromeClientImpl(&web_view_->GetPage()->GetChromeClient());
   }
 
-  FrameTestHelpers::WebViewHelper helper_;
-  FrameClientForFileChooser frame_client_;
+  frame_test_helpers::WebViewHelper helper_;
   WebViewImpl* web_view_;
   Persistent<ChromeClientImpl> chrome_client_impl_;
 };
 
 TEST_F(FileChooserQueueTest, DerefQueuedChooser) {
   LocalFrame* frame = helper_.LocalMainFrame()->GetFrame();
-  auto* client = new MockFileChooserClient(frame);
-  WebFileChooserParams params;
-  scoped_refptr<FileChooser> chooser1 = FileChooser::Create(client, params);
-  scoped_refptr<FileChooser> chooser2 = FileChooser::Create(client, params);
+  base::RunLoop run_loop_for_chooser1;
+  MockFileChooser chooser(frame->GetBrowserInterfaceBroker(),
+                          run_loop_for_chooser1.QuitClosure());
+  auto* client1 = MakeGarbageCollected<MockFileChooserClient>(frame);
+  auto* client2 = MakeGarbageCollected<MockFileChooserClient>(frame);
+  mojom::blink::FileChooserParams params;
+  params.title = g_empty_string;
+  scoped_refptr<FileChooser> chooser1 = FileChooser::Create(client1, params);
+  scoped_refptr<FileChooser> chooser2 = FileChooser::Create(client2, params);
 
   chrome_client_impl_->OpenFileChooser(frame, chooser1);
   chrome_client_impl_->OpenFileChooser(frame, chooser2);
   EXPECT_EQ(2u, chrome_client_impl_->file_chooser_queue_.size());
   chooser2.reset();
-  chrome_client_impl_->DidCompleteFileChooser(*chooser1);
+
+  // Kicks ChromeClientImpl::DidCompleteFileChooser() for chooser1.
+  run_loop_for_chooser1.Run();
+  chooser.ResponseOnOpenFileChooser(FileChooserFileInfoList());
+
   EXPECT_EQ(1u, chrome_client_impl_->file_chooser_queue_.size());
+  base::RunLoop run_loop_for_chooser2;
+
+  chooser.SetQuitClosure(run_loop_for_chooser2.QuitClosure());
+  run_loop_for_chooser2.Run();
+
+  chooser.ResponseOnOpenFileChooser(FileChooserFileInfoList());
 }
 
 }  // namespace blink

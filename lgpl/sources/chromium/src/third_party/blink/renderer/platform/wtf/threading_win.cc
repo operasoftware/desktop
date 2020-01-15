@@ -107,7 +107,6 @@
 #include <windows.h>
 #include "base/threading/scoped_blocking_call.h"
 #include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace WTF {
 
@@ -175,14 +174,14 @@ bool RecursiveMutex::TryLock() {
   return true;
 }
 
-ThreadCondition::ThreadCondition(Mutex& mutex) : mutex_(mutex.Impl()) {
-  InitializeConditionVariable(&condition_);
-}
+ThreadCondition::ThreadCondition(Mutex& mutex)
+  : condition_(CONDITION_VARIABLE_INIT), mutex_(mutex.Impl()) {}
 
 ThreadCondition::~ThreadCondition() {}
 
 void ThreadCondition::Wait() {
-  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
+  base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
+                                                base::BlockingType::MAY_BLOCK);
   --mutex_.recursion_count_;
   BOOL result =
       SleepConditionVariableCS(&condition_, &mutex_.internal_mutex_, INFINITE);

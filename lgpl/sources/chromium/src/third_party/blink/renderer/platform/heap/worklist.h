@@ -19,7 +19,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/logging.h"
 #include "base/synchronization/lock.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -30,13 +30,17 @@ namespace blink {
 //
 // Work stealing is best effort, i.e., there is no way to inform other tasks
 // of the need of items.
-template <typename EntryType, int segment_size, int max_tasks = 1>
+template <typename _EntryType, int segment_size, int max_tasks = 2>
 class Worklist {
   USING_FAST_MALLOC(Worklist);
-  using WorklistType = Worklist<EntryType, segment_size, max_tasks>;
+  using WorklistType = Worklist<_EntryType, segment_size, max_tasks>;
 
  public:
+  using EntryType = _EntryType;
+
   class View {
+    DISALLOW_NEW();
+
    public:
     View(WorklistType* worklist, int task_id)
         : worklist_(worklist), task_id_(task_id) {}
@@ -55,6 +59,8 @@ class Worklist {
     bool IsGlobalEmpty() { return worklist_->IsGlobalEmpty(); }
 
     bool IsGlobalPoolEmpty() { return worklist_->IsGlobalPoolEmpty(); }
+
+    void FlushToGlobal() { worklist_->FlushToGlobal(task_id_); }
 
     size_t LocalPushSegmentSize() const {
       return worklist_->LocalPushSegmentSize(task_id_);
@@ -184,6 +190,8 @@ class Worklist {
     global_pool_.MergeList(pair.first, pair.second);
   }
 
+  int num_tasks() const { return num_tasks_; }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(WorklistTest, SegmentCreate);
   FRIEND_TEST_ALL_PREFIXES(WorklistTest, SegmentPush);
@@ -257,6 +265,8 @@ class Worklist {
   };
 
   class GlobalPool {
+    DISALLOW_NEW();
+
    public:
     GlobalPool() : top_(nullptr) {}
 

@@ -10,11 +10,6 @@
 
 namespace blink {
 
-MediaValuesInitialViewport* MediaValuesInitialViewport::Create(
-    LocalFrame& frame) {
-  return new MediaValuesInitialViewport(frame);
-}
-
 MediaValuesInitialViewport::MediaValuesInitialViewport(LocalFrame& frame)
     : MediaValuesDynamic(&frame) {}
 

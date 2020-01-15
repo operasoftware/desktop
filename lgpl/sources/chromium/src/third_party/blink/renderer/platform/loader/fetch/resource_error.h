@@ -30,14 +30,14 @@
 #include <iosfwd>
 #include "base/optional.h"
 #include "services/network/public/cpp/cors/cors_error_status.h"
-#include "third_party/blink/public/platform/web_url_error.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
+struct WebURLError;
 enum class ResourceRequestBlockedReason;
 
 // ResourceError represents an error for loading a resource. There is no
@@ -63,9 +63,9 @@ class PLATFORM_EXPORT ResourceError final {
   // |error_code| must not be 0.
   ResourceError(int error_code,
                 const KURL& failing_url,
-                base::Optional<network::CORSErrorStatus>);
+                base::Optional<network::CorsErrorStatus>);
   ResourceError(const KURL& failing_url,
-                const network::CORSErrorStatus& status);
+                const network::CorsErrorStatus& status);
   ResourceError(const WebURLError&);
 
   // Makes a deep copy. Useful for when you need to use a ResourceError on
@@ -86,16 +86,13 @@ class PLATFORM_EXPORT ResourceError final {
   base::Optional<ResourceRequestBlockedReason> GetResourceRequestBlockedReason()
       const;
 
-  base::Optional<network::CORSErrorStatus> CORSErrorStatus() const {
+  base::Optional<network::CorsErrorStatus> CorsErrorStatus() const {
     return cors_error_status_;
   }
 
   operator WebURLError() const;
 
   static bool Compare(const ResourceError&, const ResourceError&);
-
-  // Net error code getters are here to avoid unpreferred header inclusion.
-  static int BlockedByXSSAuditorErrorCode();
 
  private:
   void InitializeDescription();
@@ -107,7 +104,7 @@ class PLATFORM_EXPORT ResourceError final {
   bool is_access_check_ = false;
   bool has_copy_in_cache_ = false;
   bool blocked_by_subresource_filter_ = false;
-  base::Optional<network::CORSErrorStatus> cors_error_status_;
+  base::Optional<network::CorsErrorStatus> cors_error_status_;
 };
 
 inline bool operator==(const ResourceError& a, const ResourceError& b) {

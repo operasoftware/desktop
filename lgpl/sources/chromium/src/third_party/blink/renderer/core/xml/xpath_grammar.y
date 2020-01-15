@@ -34,15 +34,14 @@
 #include "third_party/blink/renderer/core/xml/xpath_predicate.h"
 #include "third_party/blink/renderer/core/xml/xpath_step.h"
 #include "third_party/blink/renderer/core/xml/xpath_variable_reference.h"
-#include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 
-void* YyFastMalloc(size_t size)
-{
-  return WTF::Partitions::FastMalloc(size, nullptr);
-}
-
-#define YYMALLOC YyFastMalloc
-#define YYFREE WTF::Partitions::FastFree
+// The union below must be located on the stack because it contains raw
+// pointers to Oilpan objects. crbug.com/961413
+#define YYSTACK_USE_ALLOCA 1
+// Bison's bug? YYSTACK_ALLOC is not defined if _MSC_VER.
+#if defined(_MSC_VER)
+#define YYSTACK_ALLOC _alloca
+#endif
 
 #define YYENABLE_NLS 0
 #define YYLTYPE_IS_TRIVIAL 1
@@ -138,7 +137,7 @@ LocationPath:
 AbsoluteLocationPath:
     '/'
     {
-      $$ = new blink::xpath::LocationPath;
+      $$ = blink::MakeGarbageCollected<blink::xpath::LocationPath>();
     }
     |
     '/' RelativeLocationPath
@@ -156,7 +155,7 @@ AbsoluteLocationPath:
 RelativeLocationPath:
     Step
     {
-      $$ = new blink::xpath::LocationPath;
+      $$ = blink::MakeGarbageCollected<blink::xpath::LocationPath>();
       $$->AppendStep($1);
     }
     |
@@ -176,9 +175,9 @@ Step:
     NodeTest OptionalPredicateList
     {
       if ($2)
-        $$ = new Step(Step::kChildAxis, *$1, *$2);
+        $$ = blink::MakeGarbageCollected<Step>(Step::kChildAxis, *$1, *$2);
       else
-        $$ = new Step(Step::kChildAxis, *$1);
+        $$ = blink::MakeGarbageCollected<Step>(Step::kChildAxis, *$1);
     }
     |
     NAMETEST OptionalPredicateList
@@ -191,18 +190,18 @@ Step:
       }
 
       if ($2)
-        $$ = new Step(Step::kChildAxis, Step::NodeTest(Step::NodeTest::kNameTest, local_name, namespace_uri), *$2);
+        $$ = blink::MakeGarbageCollected<Step>(Step::kChildAxis, Step::NodeTest(Step::NodeTest::kNameTest, local_name, namespace_uri), *$2);
       else
-        $$ = new Step(Step::kChildAxis, Step::NodeTest(Step::NodeTest::kNameTest, local_name, namespace_uri));
+        $$ = blink::MakeGarbageCollected<Step>(Step::kChildAxis, Step::NodeTest(Step::NodeTest::kNameTest, local_name, namespace_uri));
        parser->DeleteString($1);
     }
     |
     AxisSpecifier NodeTest OptionalPredicateList
     {
       if ($3)
-        $$ = new Step($1, *$2, *$3);
+        $$ = blink::MakeGarbageCollected<Step>($1, *$2, *$3);
       else
-        $$ = new Step($1, *$2);
+        $$ = blink::MakeGarbageCollected<Step>($1, *$2);
     }
     |
     AxisSpecifier NAMETEST OptionalPredicateList
@@ -215,9 +214,9 @@ Step:
       }
 
       if ($3)
-        $$ = new Step($1, Step::NodeTest(Step::NodeTest::kNameTest, local_name, namespace_uri), *$3);
+        $$ = blink::MakeGarbageCollected<Step>($1, Step::NodeTest(Step::NodeTest::kNameTest, local_name, namespace_uri), *$3);
       else
-        $$ = new Step($1, Step::NodeTest(Step::NodeTest::kNameTest, local_name, namespace_uri));
+        $$ = blink::MakeGarbageCollected<Step>($1, Step::NodeTest(Step::NodeTest::kNameTest, local_name, namespace_uri));
       parser->DeleteString($2);
     }
     |
@@ -237,24 +236,24 @@ NodeTest:
     NODETYPE '(' ')'
     {
       if (*$1 == "node")
-        $$ = new Step::NodeTest(Step::NodeTest::kAnyNodeTest);
+        $$ = blink::MakeGarbageCollected<Step::NodeTest>(Step::NodeTest::kAnyNodeTest);
       else if (*$1 == "text")
-        $$ = new Step::NodeTest(Step::NodeTest::kTextNodeTest);
+        $$ = blink::MakeGarbageCollected<Step::NodeTest>(Step::NodeTest::kTextNodeTest);
       else if (*$1 == "comment")
-        $$ = new Step::NodeTest(Step::NodeTest::kCommentNodeTest);
+        $$ = blink::MakeGarbageCollected<Step::NodeTest>(Step::NodeTest::kCommentNodeTest);
 
       parser->DeleteString($1);
     }
     |
     PI '(' ')'
     {
-      $$ = new Step::NodeTest(Step::NodeTest::kProcessingInstructionNodeTest);
+      $$ = blink::MakeGarbageCollected<Step::NodeTest>(Step::NodeTest::kProcessingInstructionNodeTest);
       parser->DeleteString($1);
     }
     |
     PI '(' LITERAL ')'
     {
-      $$ = new Step::NodeTest(Step::NodeTest::kProcessingInstructionNodeTest, $3->StripWhiteSpace());
+      $$ = blink::MakeGarbageCollected<Step::NodeTest>(Step::NodeTest::kProcessingInstructionNodeTest, $3->StripWhiteSpace());
       parser->DeleteString($1);
       parser->DeleteString($3);
     }
@@ -272,13 +271,13 @@ OptionalPredicateList:
 PredicateList:
     Predicate
     {
-      $$ = new blink::HeapVector<blink::Member<blink::xpath::Predicate>>;
-      $$->push_back(new blink::xpath::Predicate($1));
+      $$ = blink::MakeGarbageCollected<blink::HeapVector<blink::Member<blink::xpath::Predicate>>>();
+      $$->push_back(blink::MakeGarbageCollected<blink::xpath::Predicate>($1));
     }
     |
     PredicateList Predicate
     {
-      $$->push_back(new blink::xpath::Predicate($2));
+      $$->push_back(blink::MakeGarbageCollected<blink::xpath::Predicate>($2));
     }
     ;
 
@@ -292,26 +291,26 @@ Predicate:
 DescendantOrSelf:
     SLASHSLASH
     {
-      $$ = new Step(Step::kDescendantOrSelfAxis, Step::NodeTest(Step::NodeTest::kAnyNodeTest));
+      $$ = blink::MakeGarbageCollected<Step>(Step::kDescendantOrSelfAxis, Step::NodeTest(Step::NodeTest::kAnyNodeTest));
     }
     ;
 
 AbbreviatedStep:
     '.'
     {
-      $$ = new Step(Step::kSelfAxis, Step::NodeTest(Step::NodeTest::kAnyNodeTest));
+      $$ = blink::MakeGarbageCollected<Step>(Step::kSelfAxis, Step::NodeTest(Step::NodeTest::kAnyNodeTest));
     }
     |
     DOTDOT
     {
-      $$ = new Step(Step::kParentAxis, Step::NodeTest(Step::NodeTest::kAnyNodeTest));
+      $$ = blink::MakeGarbageCollected<Step>(Step::kParentAxis, Step::NodeTest(Step::NodeTest::kAnyNodeTest));
     }
     ;
 
 PrimaryExpr:
     VARIABLEREFERENCE
     {
-      $$ = new blink::xpath::VariableReference(*$1);
+      $$ = blink::MakeGarbageCollected<blink::xpath::VariableReference>(*$1);
       parser->DeleteString($1);
     }
     |
@@ -322,13 +321,13 @@ PrimaryExpr:
     |
     LITERAL
     {
-      $$ = new blink::xpath::StringExpression(*$1);
+      $$ = blink::MakeGarbageCollected<blink::xpath::StringExpression>(*$1);
       parser->DeleteString($1);
     }
     |
     NUMBER
     {
-      $$ = new blink::xpath::Number($1->ToDouble());
+      $$ = blink::MakeGarbageCollected<blink::xpath::Number>($1->ToDouble());
       parser->DeleteString($1);
     }
     |
@@ -356,7 +355,7 @@ FunctionCall:
 ArgumentList:
     Argument
     {
-      $$ = new blink::HeapVector<blink::Member<blink::xpath::Expression>>;
+      $$ = blink::MakeGarbageCollected<blink::HeapVector<blink::Member<blink::xpath::Expression>>>();
       $$->push_back($1);
     }
     |
@@ -375,7 +374,7 @@ UnionExpr:
     |
     UnionExpr '|' PathExpr
     {
-      $$ = new blink::xpath::Union;
+      $$ = blink::MakeGarbageCollected<blink::xpath::Union>();
       $$->AddSubExpression($1);
       $$->AddSubExpression($3);
     }
@@ -392,14 +391,14 @@ PathExpr:
     FilterExpr '/' RelativeLocationPath
     {
       $3->SetAbsolute(true);
-      $$ = new blink::xpath::Path($1, $3);
+      $$ = blink::MakeGarbageCollected<blink::xpath::Path>($1, $3);
     }
     |
     FilterExpr DescendantOrSelf RelativeLocationPath
     {
       $3->InsertFirstStep($2);
       $3->SetAbsolute(true);
-      $$ = new blink::xpath::Path($1, $3);
+      $$ = blink::MakeGarbageCollected<blink::xpath::Path>($1, $3);
     }
     ;
 
@@ -408,7 +407,7 @@ FilterExpr:
     |
     PrimaryExpr PredicateList
     {
-      $$ = new blink::xpath::Filter($1, *$2);
+      $$ = blink::MakeGarbageCollected<blink::xpath::Filter>($1, *$2);
     }
     ;
 
@@ -417,7 +416,7 @@ OrExpr:
     |
     OrExpr OR AndExpr
     {
-      $$ = new blink::xpath::LogicalOp(blink::xpath::LogicalOp::kOP_Or, $1, $3);
+      $$ = blink::MakeGarbageCollected<blink::xpath::LogicalOp>(blink::xpath::LogicalOp::kOP_Or, $1, $3);
     }
     ;
 
@@ -426,7 +425,7 @@ AndExpr:
     |
     AndExpr AND EqualityExpr
     {
-      $$ = new blink::xpath::LogicalOp(blink::xpath::LogicalOp::kOP_And, $1, $3);
+      $$ = blink::MakeGarbageCollected<blink::xpath::LogicalOp>(blink::xpath::LogicalOp::kOP_And, $1, $3);
     }
     ;
 
@@ -435,7 +434,7 @@ EqualityExpr:
     |
     EqualityExpr EQOP RelationalExpr
     {
-      $$ = new blink::xpath::EqTestOp($2, $1, $3);
+      $$ = blink::MakeGarbageCollected<blink::xpath::EqTestOp>($2, $1, $3);
     }
     ;
 
@@ -444,7 +443,7 @@ RelationalExpr:
     |
     RelationalExpr RELOP AdditiveExpr
     {
-      $$ = new blink::xpath::EqTestOp($2, $1, $3);
+      $$ = blink::MakeGarbageCollected<blink::xpath::EqTestOp>($2, $1, $3);
     }
     ;
 
@@ -453,12 +452,12 @@ AdditiveExpr:
     |
     AdditiveExpr PLUS MultiplicativeExpr
     {
-      $$ = new blink::xpath::NumericOp(blink::xpath::NumericOp::kOP_Add, $1, $3);
+      $$ = blink::MakeGarbageCollected<blink::xpath::NumericOp>(blink::xpath::NumericOp::kOP_Add, $1, $3);
     }
     |
     AdditiveExpr MINUS MultiplicativeExpr
     {
-      $$ = new blink::xpath::NumericOp(blink::xpath::NumericOp::kOP_Sub, $1, $3);
+      $$ = blink::MakeGarbageCollected<blink::xpath::NumericOp>(blink::xpath::NumericOp::kOP_Sub, $1, $3);
     }
     ;
 
@@ -467,7 +466,7 @@ MultiplicativeExpr:
     |
     MultiplicativeExpr MULOP UnaryExpr
     {
-      $$ = new blink::xpath::NumericOp($2, $1, $3);
+      $$ = blink::MakeGarbageCollected<blink::xpath::NumericOp>($2, $1, $3);
     }
     ;
 
@@ -476,7 +475,7 @@ UnaryExpr:
     |
     MINUS UnaryExpr
     {
-      $$ = new blink::xpath::Negative;
+      $$ = blink::MakeGarbageCollected<blink::xpath::Negative>();
       $$->AddSubExpression($2);
     }
     ;

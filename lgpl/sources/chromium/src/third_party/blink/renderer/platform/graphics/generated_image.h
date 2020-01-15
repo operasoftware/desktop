@@ -36,8 +36,7 @@ class PLATFORM_EXPORT GeneratedImage : public Image {
  public:
   bool CurrentFrameHasSingleSecurityOrigin() const override { return true; }
 
-  bool UsesContainerSize() const override { return true; }
-  bool HasRelativeSize() const override { return true; }
+  bool HasIntrinsicSize() const override { return false; }
 
   IntSize Size() const override { return RoundedIntSize(size_); }
 
@@ -54,6 +53,9 @@ class PLATFORM_EXPORT GeneratedImage : public Image {
                    SkBlendMode,
                    const FloatRect&,
                    const FloatSize& repeat_spacing) final;
+  virtual sk_sp<cc::PaintShader> CreateShader(const FloatRect& tile_rect,
+                                              const SkMatrix* pattern_matrix,
+                                              const FloatRect& src_rect);
 
   // FIXME: Implement this to be less conservative.
   bool CurrentFrameKnownToBeOpaque() override { return false; }

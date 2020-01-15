@@ -29,6 +29,14 @@
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_string.h"
 
+namespace base {
+class SingleThreadTaskRunner;
+}
+
+namespace webrtc {
+class DtmfSenderInterface;
+}
+
 namespace blink {
 
 class WebRTCDTMFSenderHandlerClient;
@@ -43,9 +51,14 @@ class WebRTCDTMFSenderHandler {
 
   virtual bool CanInsertDTMF() = 0;
   virtual bool InsertDTMF(const WebString& tones,
-                          long duration,
-                          long inter_tone_gap) = 0;
+                          int duration,
+                          int inter_tone_gap) = 0;
 };
+
+BLINK_PLATFORM_EXPORT std::unique_ptr<WebRTCDTMFSenderHandler>
+CreateRTCDTMFSenderHandler(
+    scoped_refptr<base::SingleThreadTaskRunner> main_thread,
+    webrtc::DtmfSenderInterface* dtmf_sender);
 
 }  // namespace blink
 

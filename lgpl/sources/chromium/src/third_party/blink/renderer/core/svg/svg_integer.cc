@@ -32,13 +32,14 @@
 
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/svg/svg_animation_element.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
 SVGInteger::SVGInteger(int value) : value_(value) {}
 
 SVGInteger* SVGInteger::Clone() const {
-  return Create(value_);
+  return MakeGarbageCollected<SVGInteger>(value_);
 }
 
 String SVGInteger::ValueAsString() const {
@@ -79,7 +80,7 @@ void SVGInteger::CalculateAnimatedValue(SVGAnimationElement* animation_element,
   animation_element->AnimateAdditiveNumber(
       percentage, repeat_count, from_integer->Value(), to_integer->Value(),
       to_at_end_of_duration_integer->Value(), animated_float);
-  value_ = static_cast<int>(roundf(animated_float));
+  value_ = clampTo<int>(roundf(animated_float));
 }
 
 float SVGInteger::CalculateDistance(SVGPropertyBase* other, SVGElement*) {

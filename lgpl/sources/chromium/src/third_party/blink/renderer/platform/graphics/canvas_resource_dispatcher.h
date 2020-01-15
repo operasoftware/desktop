@@ -6,12 +6,15 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_CANVAS_RESOURCE_DISPATCHER_H_
 
 #include <memory>
+
+#include "base/memory/read_only_shared_memory_region.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
 #include "components/viz/common/resources/resource_id.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom-blink.h"
-#include "third_party/blink/renderer/platform/wtf/compiler.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/viz/public/mojom/compositing/compositor_frame_sink.mojom-blink.h"
+#include "third_party/blink/public/mojom/frame_sinks/embedded_frame_sink.mojom-blink.h"
 
 namespace blink {
 
@@ -19,7 +22,7 @@ class CanvasResource;
 
 class CanvasResourceDispatcherClient {
  public:
-  virtual void BeginFrame() = 0;
+  virtual bool BeginFrame() = 0;
 };
 
 class PLATFORM_EXPORT CanvasResourceDispatcher
@@ -57,32 +60,26 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
                          const SkIRect& damage_rect,
                          bool needs_vertical_flip,
                          bool is_opaque);
+  void ReplaceBeginFrameAck(const viz::BeginFrameArgs& args) {
+    current_begin_frame_ack_ = viz::BeginFrameAck(args, true);
+  }
+  bool HasTooManyPendingFrames() const;
 
   void Reshape(const IntSize&);
 
   // viz::mojom::blink::CompositorFrameSinkClient implementation.
   void DidReceiveCompositorFrameAck(
       const WTF::Vector<viz::ReturnedResource>& resources) final;
-  void DidPresentCompositorFrame(
-      uint32_t presentation_token,
-      ::gfx::mojom::blink::PresentationFeedbackPtr feedback) final;
-  void OnBeginFrame(const viz::BeginFrameArgs&) final;
-  void OnBeginFramePausedChanged(bool paused) final{};
+  void OnBeginFrame(
+      const viz::BeginFrameArgs&,
+      WTF::HashMap<uint32_t, ::viz::mojom::blink::FrameTimingDetailsPtr>) final;
+  void OnBeginFramePausedChanged(bool paused) final {}
   void ReclaimResources(
       const WTF::Vector<viz::ReturnedResource>& resources) final;
 
-  void DidAllocateSharedBitmap(mojo::ScopedSharedBufferHandle buffer,
+  void DidAllocateSharedBitmap(base::ReadOnlySharedMemoryRegion region,
                                ::gpu::mojom::blink::MailboxPtr id);
   void DidDeleteSharedBitmap(::gpu::mojom::blink::MailboxPtr id);
-
-  // This enum is used in histogram, so it should be append-only.
-  enum OffscreenCanvasCommitType {
-    kCommitGPUCanvasGPUCompositing = 0,
-    kCommitGPUCanvasSoftwareCompositing = 1,
-    kCommitSoftwareCanvasGPUCompositing = 2,
-    kCommitSoftwareCanvasSoftwareCompositing = 3,
-    kOffscreenCanvasCommitTypeCount,
-  };
 
  private:
   friend class CanvasResourceDispatcherTest;
@@ -118,14 +115,16 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
   void ReclaimResourceInternal(viz::ResourceId resource_id);
   void ReclaimResourceInternal(const ResourceMap::iterator&);
 
-  viz::mojom::blink::CompositorFrameSinkPtr sink_;
-  mojo::Binding<viz::mojom::blink::CompositorFrameSinkClient> binding_;
-  viz::mojom::blink::CompositorFrameSinkClientPtr client_ptr_;
+  mojo::Remote<viz::mojom::blink::CompositorFrameSink> sink_;
+  mojo::Remote<mojom::blink::SurfaceEmbedder> surface_embedder_;
+  mojo::Receiver<viz::mojom::blink::CompositorFrameSinkClient> receiver_{this};
 
   int placeholder_canvas_id_;
 
   unsigned next_resource_id_ = 0;
   ResourceMap resources_;
+
+  viz::FrameTokenGenerator next_frame_token_;
 
   // The latest_unposted_resource_id_ always refers to the Id of the frame
   // resource used by the latest_unposted_image_.
@@ -137,7 +136,7 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
 
   CanvasResourceDispatcherClient* client_;
 
-  base::WeakPtrFactory<CanvasResourceDispatcher> weak_ptr_factory_;
+  base::WeakPtrFactory<CanvasResourceDispatcher> weak_ptr_factory_{this};
 };
 
 }  // namespace blink

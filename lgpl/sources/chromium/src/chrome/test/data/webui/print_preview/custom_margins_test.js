@@ -9,11 +9,15 @@ cr.define('custom_margins_test', function() {
     SetFromStickySettings: 'set from sticky settings',
     DragControls: 'drag controls',
     SetControlsWithTextbox: 'set controls with textbox',
+    SetControlsWithTextboxMetric: 'set controls with textbox metric',
     RestoreStickyMarginsAfterDefault: 'restore sticky margins after default',
     MediaSizeClearsCustomMargins: 'media size clears custom margins',
     LayoutClearsCustomMargins: 'layout clears custom margins',
     IgnoreDocumentMarginsFromPDF: 'ignore document margins from pdf',
     MediaSizeClearsCustomMarginsPDF: 'media size clears custom margins pdf',
+    RequestScrollToOutOfBoundsTextbox:
+        'request scroll to out of bounds textbox',
+    ControlsDisabledOnError: 'controls disabled on error',
   };
 
   const suiteName = 'CustomMarginsTest';
@@ -21,43 +25,14 @@ cr.define('custom_margins_test', function() {
     /** @type {?PrintPreviewMarginControlContainerElement} */
     let container = null;
 
-    /** @type {!Array<!print_preview.ticket_items.CustomMarginsOrientation>} */
+    /** @type {?PrintPreviewModelElement} */
+    let model = null;
+
+    /** @type {!Array<!print_preview.CustomMarginsOrientation>} */
     let sides = [];
 
-    // Only care about marginType, customMargins, mediaSize, and layout
-    let settings = {
-      margins: {
-        value: 0,  // print_preview.ticket_items.MarginsTypeValue.DEFAULT,
-        unavailableValue: 0,
-        valid: true,
-        available: true,
-        key: 'marginsType',
-      },
-      customMargins: {
-        value: {},
-        unavailableValue: {},
-        valid: true,
-        available: true,
-        key: 'customMargins',
-      },
-      layout: {
-        value: false,
-        unavailableValue: false,
-        valid: true,
-        available: true,
-        key: 'isLandscapeEnabled',
-      },
-      mediaSize: {
-        value: {
-          width_microns: 215900,
-          height_microns: 279400,
-        },
-        unavailableValue: {},
-        valid: true,
-        available: true,
-        key: 'mediaSize',
-      },
-    };
+    /** @type {!print_preview.MeasurementSystem} */
+    let measurementSystem = null;
 
     /** @type {number} */
     const pixelsPerInch = 100;
@@ -74,11 +49,17 @@ cr.define('custom_margins_test', function() {
     /** @override */
     setup(function() {
       PolymerTest.clearBody();
+      measurementSystem = new print_preview.MeasurementSystem(
+          ',', '.', print_preview.MeasurementSystemUnitType.IMPERIAL);
+      model = document.createElement('print-preview-model');
+      document.body.appendChild(model);
+      model.set('settings.mediaSize.available', true);
+
       sides = [
-        print_preview.ticket_items.CustomMarginsOrientation.TOP,
-        print_preview.ticket_items.CustomMarginsOrientation.RIGHT,
-        print_preview.ticket_items.CustomMarginsOrientation.BOTTOM,
-        print_preview.ticket_items.CustomMarginsOrientation.LEFT
+        print_preview.CustomMarginsOrientation.TOP,
+        print_preview.CustomMarginsOrientation.RIGHT,
+        print_preview.CustomMarginsOrientation.BOTTOM,
+        print_preview.CustomMarginsOrientation.LEFT
       ];
 
       container =
@@ -89,9 +70,7 @@ cr.define('custom_margins_test', function() {
       container.documentMargins = new print_preview.Margins(
           defaultMarginPts, defaultMarginPts, defaultMarginPts,
           defaultMarginPts);
-      container.measurementSystem = new print_preview.MeasurementSystem(
-          ',', '.', print_preview.MeasurementSystemUnitType.IMPERIAL);
-      container.state = print_preview_new.State.NOT_READY;
+      container.state = print_preview.State.NOT_READY;
     });
 
     /** @return {!Array<!PrintPreviewMarginControlElement>} */
@@ -107,17 +86,18 @@ cr.define('custom_margins_test', function() {
      *     added and initialization is complete.
      */
     function finishSetup() {
-      document.body.appendChild(container);
-
       // Wait for the control elements to be created before updating the state.
-      container.$$('template').notifyDomChange = true;
+      container.measurementSystem = measurementSystem;
+      document.body.appendChild(container);
       let controlsAdded = test_util.eventToPromise('dom-change', container);
       return controlsAdded.then(() => {
         // 8.5 x 11, in pixels
         const controls = getControls();
         assertEquals(4, controls.length);
-        container.settings = settings;
-        container.state = print_preview_new.State.READY;
+        container.settings = model.settings;
+        test_util.fakeDataBind(model, container, 'settings');
+
+        container.state = print_preview.State.READY;
         container.updateClippingMask(new print_preview.Size(850, 1100));
         container.updateScaleTransform(pixelsPerInch / pointsPerInch);
         container.previewLoaded = true;
@@ -142,27 +122,28 @@ cr.define('custom_margins_test', function() {
      * @param {number} end The ending position for the control in pixels.
      */
     function dragControl(control, start, end) {
-      if (window.getComputedStyle(control)['pointer-events'] === 'none')
+      if (window.getComputedStyle(control)['pointer-events'] === 'none') {
         return;
+      }
 
       let xStart = 0;
       let yStart = 0;
       let xEnd = 0;
       let yEnd = 0;
       switch (control.side) {
-        case print_preview.ticket_items.CustomMarginsOrientation.TOP:
+        case print_preview.CustomMarginsOrientation.TOP:
           yStart = start;
           yEnd = end;
           break;
-        case print_preview.ticket_items.CustomMarginsOrientation.RIGHT:
+        case print_preview.CustomMarginsOrientation.RIGHT:
           xStart = control.clipSize.width - start;
           xEnd = control.clipSize.width - end;
           break;
-        case print_preview.ticket_items.CustomMarginsOrientation.BOTTOM:
+        case print_preview.CustomMarginsOrientation.BOTTOM:
           yStart = control.clipSize.height - start;
           yEnd = control.clipSize.height - end;
           break;
-        case print_preview.ticket_items.CustomMarginsOrientation.LEFT:
+        case print_preview.CustomMarginsOrientation.LEFT:
           xStart = start;
           xEnd = end;
           break;
@@ -187,40 +168,50 @@ cr.define('custom_margins_test', function() {
      * @param {number} currentValue The current margin value in points.
      * @param {string} input The new textbox input for the margin.
      * @param {boolean} invalid Whether the new value is invalid.
+     * @param {number=} newValuePts the new margin value in pts. If not
+     *     specified, computes the value assuming it is in bounds and assuming
+     *     the default measurement system.
      * @return {!Promise} Promise that resolves when the test is complete.
      */
-    function testControlTextbox(control, key, currentValuePts, input, invalid) {
-      const newValuePts = invalid ?
-          currentValuePts :
-          Math.round(parseFloat(input) * pointsPerInch);
+    function testControlTextbox(
+        control, key, currentValuePts, input, invalid, newValuePts) {
+      if (newValuePts === undefined) {
+        newValuePts = invalid ? currentValuePts :
+                                Math.round(parseFloat(input) * pointsPerInch);
+      }
       assertEquals(
           currentValuePts, container.getSettingValue('customMargins')[key]);
-      controlTextbox = control.$.textbox.inputElement;
+      controlTextbox = control.$.input;
       controlTextbox.value = input;
       controlTextbox.dispatchEvent(
           new CustomEvent('input', {composed: true, bubbles: true}));
 
-      return test_util.eventToPromise('text-change', control).then(() => {
-        assertEquals(
-            newValuePts, container.getSettingValue('customMargins')[key]);
-        assertEquals(invalid, control.invalid);
-      });
+      if (!invalid) {
+        return test_util.eventToPromise('text-change', control).then(() => {
+          assertEquals(
+              newValuePts, container.getSettingValue('customMargins')[key]);
+          assertFalse(control.invalid);
+        });
+      } else {
+        return test_util.eventToPromise('input-change', control).then(() => {
+          assertTrue(control.invalid);
+        });
+      }
     }
 
     /*
      * Initializes the settings custom margins to some test values, and returns
      * a map with the values.
-     * @return {!Map<!print_preview.ticket_items.CustomMarginsOrientation,
+     * @return {!Map<!print_preview.CustomMarginsOrientation,
      *               number>}
      */
     function setupCustomMargins() {
-      const orientationEnum =
-          print_preview.ticket_items.CustomMarginsOrientation;
+      const orientationEnum = print_preview.CustomMarginsOrientation;
       const marginValues = new Map([
         [orientationEnum.TOP, 72], [orientationEnum.RIGHT, 36],
         [orientationEnum.BOTTOM, 108], [orientationEnum.LEFT, 18]
       ]);
-      settings.customMargins.value = {
+      model.settings.customMargins.value = {
         marginTop: marginValues.get(orientationEnum.TOP),
         marginRight: marginValues.get(orientationEnum.RIGHT),
         marginBottom: marginValues.get(orientationEnum.BOTTOM),
@@ -240,9 +231,7 @@ cr.define('custom_margins_test', function() {
       const marginValues = setupCustomMargins();
       return finishSetup().then(() => {
         // Simulate setting custom margins.
-        container.set(
-            'settings.margins.value',
-            print_preview.ticket_items.MarginsTypeValue.CUSTOM);
+        model.set('settings.margins.value', print_preview.MarginsType.CUSTOM);
 
         // Validate control positions are set based on the custom values.
         const controls = getControls();
@@ -259,7 +248,7 @@ cr.define('custom_margins_test', function() {
         // Margins should be reset to default and custom margins values should
         // be cleared.
         expectEquals(
-            print_preview.ticket_items.MarginsTypeValue.DEFAULT,
+            print_preview.MarginsType.DEFAULT,
             container.getSettingValue('margins'));
         expectEquals(
             '{}', JSON.stringify(container.getSettingValue('customMargins')));
@@ -288,9 +277,8 @@ cr.define('custom_margins_test', function() {
 
             let onTransitionEnd = getAllTransitions(controls);
             // Controls become visible when margin type CUSTOM is selected.
-            container.set(
-                'settings.margins.value',
-                print_preview.ticket_items.MarginsTypeValue.CUSTOM);
+            model.set(
+                'settings.margins.value', print_preview.MarginsType.CUSTOM);
 
             // Wait for the opacity transitions to finish.
             return onTransitionEnd;
@@ -315,6 +303,7 @@ cr.define('custom_margins_test', function() {
             const controls = getControls();
             controls.forEach((control, index) => {
               assertFalse(control.invisible);
+              assertFalse(control.disabled);
               assertEquals('1', window.getComputedStyle(control).opacity);
               assertEquals(sides[index], control.side);
               assertEquals(defaultMarginPts, control.getPositionInPts());
@@ -333,6 +322,7 @@ cr.define('custom_margins_test', function() {
             controls.forEach((control, index) => {
               assertEquals('0', window.getComputedStyle(control).opacity);
               assertTrue(control.invisible);
+              assertTrue(control.disabled);
             });
           });
     });
@@ -344,11 +334,9 @@ cr.define('custom_margins_test', function() {
         const controls = getControls();
 
         // Simulate setting custom margins from sticky settings.
-        container.set(
-            'settings.margins.value',
-            print_preview.ticket_items.MarginsTypeValue.CUSTOM);
+        model.set('settings.margins.value', print_preview.MarginsType.CUSTOM);
         const marginValues = setupCustomMargins();
-        container.notifyPath('settings.customMargins.value');
+        model.notifyPath('settings.customMargins.value');
         Polymer.dom.flush();
 
         // Validate control positions have been updated.
@@ -391,9 +379,7 @@ cr.define('custom_margins_test', function() {
 
       return finishSetup().then(() => {
         const controls = getControls();
-        container.set(
-            'settings.margins.value',
-            print_preview.ticket_items.MarginsTypeValue.CUSTOM);
+        model.set('settings.margins.value', print_preview.MarginsType.CUSTOM);
         Polymer.dom.flush();
 
 
@@ -411,45 +397,131 @@ cr.define('custom_margins_test', function() {
       });
     });
 
+    /**
+     * @param {!Array<!MarginControlElement>} controls
+     * @param {number} currentValue Current margin value in pts
+     * @param {string} input String to set in margin textboxes
+     * @param {boolean} invalid Whether the string is invalid
+     * @param {number=} newValuePts the new margin value in pts. If not
+     *     specified, computes the value assuming it is in bounds and assuming
+     *     the default measurement system.
+     * @return {!Promise} Promise that resolves when all controls have been
+     *     tested.
+     */
+    function testAllTextboxes(
+        controls, currentValue, input, invalid, newValuePts) {
+      return testControlTextbox(
+                 controls[0], keys[0], currentValue, input, invalid,
+                 newValuePts)
+          .then(
+              () => testControlTextbox(
+                  controls[1], keys[1], currentValue, input, invalid,
+                  newValuePts))
+          .then(
+              () => testControlTextbox(
+                  controls[2], keys[2], currentValue, input, invalid,
+                  newValuePts))
+          .then(
+              () => testControlTextbox(
+                  controls[3], keys[3], currentValue, input, invalid,
+                  newValuePts));
+    }
+
     // Test that setting the margin controls with their textbox inputs updates
     // the custom margins setting.
     test(assert(TestNames.SetControlsWithTextbox), function() {
       return finishSetup().then(() => {
         const controls = getControls();
-        container.set(
-            'settings.margins.value',
-            print_preview.ticket_items.MarginsTypeValue.CUSTOM);
+        // Set a shorter delay for testing so the test doesn't take too
+        // long.
+        controls.forEach(c => {
+          c.getInput().setAttribute('data-timeout-delay', 1);
+        });
+        model.set('settings.margins.value', print_preview.MarginsType.CUSTOM);
         Polymer.dom.flush();
 
         // Verify entering a new value updates the settings.
-        // Then verify entering an invalid value invalidates the control and
-        // does not update the settings.
-        const newValue = '1.75';  // 1.75 inches
-        const invalidValue = 'abc';
-        const newMarginPts = Math.round(parseFloat(newValue) * pointsPerInch);
-        return testControlTextbox(
-                   controls[0], keys[0], defaultMarginPts, newValue, false)
+        // Then verify entering an invalid value invalidates the control
+        // and does not update the settings.
+        const value1 = '1.75';  // 1.75 inches
+        const newMargin1 = Math.round(parseFloat(value1) * pointsPerInch);
+        const value2 = '.6';
+        const newMargin2 = Math.round(parseFloat(value2) * pointsPerInch);
+        const value3 = '2';  // 2 inches
+        const newMargin3 = Math.round(parseFloat(value3) * pointsPerInch);
+        const maxTopMargin = container.pageSize.height - newMargin3 -
+            72 /* MINIMUM_DISTANCE, see margin_control.js */;
+        return testAllTextboxes(controls, defaultMarginPts, value1, false)
+            .then(() => testAllTextboxes(controls, newMargin1, 'abc', true))
+            .then(() => testAllTextboxes(controls, newMargin1, '1.2abc', true))
+            .then(() => testAllTextboxes(controls, newMargin1, '1.   2', true))
+            .then(() => testAllTextboxes(controls, newMargin1, value2, false))
+            .then(() => testAllTextboxes(controls, newMargin2, value3, false))
             .then(
                 () => testControlTextbox(
-                    controls[1], keys[1], defaultMarginPts, newValue, false))
+                    controls[0], keys[0], newMargin3, '100', false,
+                    maxTopMargin))
             .then(
                 () => testControlTextbox(
-                    controls[2], keys[2], defaultMarginPts, newValue, false))
+                    controls[0], keys[0], maxTopMargin, '1,000', false,
+                    maxTopMargin));
+      });
+    });
+
+    // Test that setting the margin controls with their textbox inputs updates
+    // the custom margins setting, using a metric measurement system with a ','
+    // as the decimal delimiter and '.' as the thousands delimiter. Regression
+    // test for https://crbug.com/1005816.
+    test(assert(TestNames.SetControlsWithTextboxMetric), function() {
+      measurementSystem = new print_preview.MeasurementSystem(
+          '.', ',', print_preview.MeasurementSystemUnitType.METRIC);
+      return finishSetup().then(() => {
+        const controls = getControls();
+        // Set a shorter delay for testing so the test doesn't take too
+        // long.
+        controls.forEach(c => {
+          c.getInput().setAttribute('data-timeout-delay', 1);
+        });
+        model.set('settings.margins.value', print_preview.MarginsType.CUSTOM);
+        Polymer.dom.flush();
+
+        // Verify entering a new value updates the settings.
+        // Then verify entering an invalid value invalidates the control
+        // and does not update the settings.
+        const pointsPerMM = pointsPerInch / 25.4;
+        const newMargin1 = '50,0';
+        const newMargin1Pts = Math.round(50 * pointsPerMM);
+        const newMargin2 = ',9';
+        const newMargin2Pts = Math.round(.9 * pointsPerMM);
+        const newMargin3 = '60';
+        const newMargin3Pts = Math.round(60 * pointsPerMM);
+        const maxTopMargin = container.pageSize.height - newMargin3Pts -
+            72 /* MINIMUM_DISTANCE, see margin_control.js */;
+        return testAllTextboxes(
+                   controls, defaultMarginPts, newMargin1, false, newMargin1Pts)
+            .then(
+                () => testAllTextboxes(
+                    controls, newMargin1Pts, 'abc', true, newMargin1Pts))
+            .then(
+                () => testAllTextboxes(
+                    controls, newMargin1Pts, '50,2abc', true, newMargin1Pts))
+            .then(
+                () => testAllTextboxes(
+                    controls, newMargin1Pts, '10,   2', true, newMargin1Pts))
+            .then(
+                () => testAllTextboxes(
+                    controls, newMargin1Pts, newMargin2, false, newMargin2Pts))
+            .then(
+                () => testAllTextboxes(
+                    controls, newMargin2Pts, newMargin3, false, newMargin3Pts))
             .then(
                 () => testControlTextbox(
-                    controls[3], keys[3], defaultMarginPts, newValue, false))
+                    controls[0], keys[0], newMargin3Pts, '1.000.000', false,
+                    maxTopMargin))
             .then(
                 () => testControlTextbox(
-                    controls[0], keys[0], newMarginPts, invalidValue, true))
-            .then(
-                () => testControlTextbox(
-                    controls[1], keys[1], newMarginPts, invalidValue, true))
-            .then(
-                () => testControlTextbox(
-                    controls[2], keys[2], newMarginPts, invalidValue, true))
-            .then(
-                () => testControlTextbox(
-                    controls[3], keys[3], newMarginPts, invalidValue, true));
+                    controls[0], keys[0], maxTopMargin, '1.000', false,
+                    maxTopMargin));
       });
     });
 
@@ -460,9 +532,7 @@ cr.define('custom_margins_test', function() {
       return finishSetup().then(() => {
         // Simulate setting custom margins.
         const controls = getControls();
-        container.set(
-            'settings.margins.value',
-            print_preview.ticket_items.MarginsTypeValue.CUSTOM);
+        model.set('settings.margins.value', print_preview.MarginsType.CUSTOM);
 
         // Validate control positions are set based on the custom values.
         controls.forEach((control, index) => {
@@ -472,9 +542,7 @@ cr.define('custom_margins_test', function() {
         });
 
         // Simulate setting minimum margins.
-        container.set(
-            'settings.margins.value',
-            print_preview.ticket_items.MarginsTypeValue.MINIMUM);
+        model.set('settings.margins.value', print_preview.MarginsType.MINIMUM);
 
         // Validate control positions still reflect the custom values.
         controls.forEach((control, index) => {
@@ -491,9 +559,8 @@ cr.define('custom_margins_test', function() {
                  'mediaSize', {height_microns: 200000, width_microns: 200000})
           .then(() => {
             // Simulate setting custom margins again.
-            container.set(
-                'settings.margins.value',
-                print_preview.ticket_items.MarginsTypeValue.CUSTOM);
+            model.set(
+                'settings.margins.value', print_preview.MarginsType.CUSTOM);
 
             // Validate control positions are initialized based on the default
             // values.
@@ -510,9 +577,7 @@ cr.define('custom_margins_test', function() {
     test(assert(TestNames.LayoutClearsCustomMargins), function() {
       return validateMarginsClearedForSetting('layout', true).then(() => {
         // Simulate setting custom margins again
-        container.set(
-            'settings.margins.value',
-            print_preview.ticket_items.MarginsTypeValue.CUSTOM);
+        model.set('settings.margins.value', print_preview.MarginsType.CUSTOM);
 
         // Validate control positions are initialized based on the default
         // values.
@@ -529,7 +594,7 @@ cr.define('custom_margins_test', function() {
     // not updated based on the document margins - i.e. PDFs do not change the
     // custom margins state.
     test(assert(TestNames.IgnoreDocumentMarginsFromPDF), function() {
-      settings.margins.available = false;
+      model.set('settings.margins.available', false);
       return finishSetup().then(() => {
         assertEquals(
             '{}', JSON.stringify(container.getSettingValue('customMargins')));
@@ -539,9 +604,86 @@ cr.define('custom_margins_test', function() {
     // Test that if margins are not available but the user changes the media
     // size, the custom margins are cleared.
     test(assert(TestNames.MediaSizeClearsCustomMarginsPDF), function() {
-      settings.margins.available = false;
+      model.set('settings.margins.available', false);
       return validateMarginsClearedForSetting(
           'mediaSize', {height_microns: 200000, width_microns: 200000});
+    });
+
+    function whenAnimationFrameDone() {
+      return new Promise(resolve => window.requestAnimationFrame(resolve));
+    }
+
+    // Test that if the user focuses a textbox that is not visible, the
+    // text-focus event is fired with the correct values to scroll by.
+    test(assert(TestNames.RequestScrollToOutOfBoundsTextbox), function() {
+      return finishSetup()
+          .then(() => {
+            // Wait for the controls to be set up, which occurs in an
+            // animation frame.
+            return whenAnimationFrameDone();
+          })
+          .then(() => {
+            const onTransitionEnd = getAllTransitions(getControls());
+
+            // Controls become visible when margin type CUSTOM is selected.
+            model.set(
+                'settings.margins.value', print_preview.MarginsType.CUSTOM);
+            container.notifyPath('settings.customMargins.value');
+            Polymer.dom.flush();
+            return onTransitionEnd;
+          })
+          .then(() => {
+            // Zoom in by 2x, so that some margin controls will not be visible.
+            container.updateScaleTransform(pixelsPerInch * 2 / pointsPerInch);
+            Polymer.dom.flush();
+            return whenAnimationFrameDone();
+          })
+          .then(() => {
+            const controls = getControls();
+            assertEquals(4, controls.length);
+
+            // Focus the bottom control, which is currently not visible since
+            // the viewer is showing only the top left quarter of the page.
+            const bottomControl = controls[2];
+            const whenEventFired =
+                test_util.eventToPromise('text-focus-position', container);
+            bottomControl.$.input.focus();
+            // Workaround for mac so that this does not need to be an
+            // interactive test: manually fire the focus event from the control.
+            bottomControl.fire('text-focus');
+            return whenEventFired;
+          })
+          .then((args) => {
+            // Shifts left by padding of 50px to ensure that the full textbox is
+            // visible.
+            assertEquals(50, args.detail.x);
+
+            // Offset top will be 2097 = 200 px/in / 72 pts/in * (794pts -
+            // 36ptx) - 9px radius of line
+            // Height of the clip box is 200 px/in * 11in = 2200px
+            // Shifts down by offsetTop = 2097 - height / 2 + padding = 1047px.
+            // This will ensure that the textbox is in the visible area.
+            assertEquals(1047, args.detail.y);
+          });
+    });
+
+    // Tests that the margin controls can be correctly set from the sticky
+    // settings.
+    test(assert(TestNames.ControlsDisabledOnError), function() {
+      return finishSetup().then(() => {
+        // Simulate setting custom margins.
+        model.set('settings.margins.value', print_preview.MarginsType.CUSTOM);
+
+        const controls = getControls();
+        controls.forEach(control => assertFalse(control.disabled));
+
+        container.state = print_preview.State.ERROR;
+        // Validate controls are disabled.
+        controls.forEach(control => assertTrue(control.disabled));
+
+        container.state = print_preview.State.READY;
+        controls.forEach(control => assertFalse(control.disabled));
+      });
     });
 
   });

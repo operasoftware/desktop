@@ -4,33 +4,30 @@
 
 #include "third_party/blink/renderer/core/fetch/fetch_response_data.h"
 
-#include "third_party/blink/public/platform/modules/service_worker/web_service_worker_response.h"
+#include "services/network/public/cpp/content_security_policy.h"
+#include "services/network/public/cpp/features.h"
+#include "services/network/public/mojom/content_security_policy.mojom-blink.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_response.mojom-blink.h"
 #include "third_party/blink/renderer/core/fetch/fetch_header_list.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/loader/cors/cors.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_utils.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 
 using Type = network::mojom::FetchResponseType;
+using ResponseSource = network::mojom::FetchResponseSource;
 
 namespace blink {
 
 namespace {
 
-WebVector<WebString> HeaderSetToWebVector(const WebHTTPHeaderSet& headers) {
-  // Can't just pass *headers to the WebVector constructor because HashSet
-  // iterators are not stl iterator compatible.
-  WebVector<WebString> result(static_cast<size_t>(headers.size()));
-  int idx = 0;
-  for (const auto& header : headers)
-    result[idx++] = WebString::FromASCII(header);
-  return result;
-}
-
 Vector<String> HeaderSetToVector(const WebHTTPHeaderSet& headers) {
   Vector<String> result;
-  result.ReserveInitialCapacity(headers.size());
+  result.ReserveInitialCapacity(SafeCast<wtf_size_t>(headers.size()));
   // WebHTTPHeaderSet stores headers using Latin1 encoding.
   for (const auto& header : headers)
     result.push_back(String(header.data(), header.size()));
@@ -43,14 +40,16 @@ FetchResponseData* FetchResponseData::Create() {
   // "Unless stated otherwise, a response's url is null, status is 200, status
   // message is the empty byte sequence, header list is an empty header list,
   // and body is null."
-  return new FetchResponseData(Type::kDefault, 200, g_empty_atom);
+  return MakeGarbageCollected<FetchResponseData>(
+      Type::kDefault, ResponseSource::kUnspecified, 200, g_empty_atom);
 }
 
 FetchResponseData* FetchResponseData::CreateNetworkErrorResponse() {
   // "A network error is a response whose status is always 0, status message
   // is always the empty byte sequence, header list is aways an empty list,
   // and body is always null."
-  return new FetchResponseData(Type::kError, 0, g_empty_atom);
+  return MakeGarbageCollected<FetchResponseData>(
+      Type::kError, ResponseSource::kUnspecified, 0, g_empty_atom);
 }
 
 FetchResponseData* FetchResponseData::CreateWithBuffer(
@@ -65,8 +64,8 @@ FetchResponseData* FetchResponseData::CreateBasicFilteredResponse() const {
   // "A basic filtered response is a filtered response whose type is |basic|,
   // header list excludes any headers in internal response's header list whose
   // name is `Set-Cookie` or `Set-Cookie2`."
-  FetchResponseData* response =
-      new FetchResponseData(Type::kBasic, status_, status_message_);
+  FetchResponseData* response = MakeGarbageCollected<FetchResponseData>(
+      Type::kBasic, response_source_, status_, status_message_);
   response->SetURLList(url_list_);
   for (const auto& header : header_list_->List()) {
     if (FetchUtils::IsForbiddenResponseHeaderName(header.first))
@@ -79,7 +78,7 @@ FetchResponseData* FetchResponseData::CreateBasicFilteredResponse() const {
   return response;
 }
 
-FetchResponseData* FetchResponseData::CreateCORSFilteredResponse(
+FetchResponseData* FetchResponseData::CreateCorsFilteredResponse(
     const WebHTTPHeaderSet& exposed_headers) const {
   DCHECK_EQ(type_, Type::kDefault);
   // "A CORS filtered response is a filtered response whose type is |CORS|,
@@ -89,13 +88,13 @@ FetchResponseData* FetchResponseData::CreateCORSFilteredResponse(
   // `Pragma`, and except those whose name is one of the values resulting from
   // parsing `Access-Control-Expose-Headers` in internal response's header
   // list."
-  FetchResponseData* response =
-      new FetchResponseData(Type::kCORS, status_, status_message_);
+  FetchResponseData* response = MakeGarbageCollected<FetchResponseData>(
+      Type::kCors, response_source_, status_, status_message_);
   response->SetURLList(url_list_);
   for (const auto& header : header_list_->List()) {
     const String& name = header.first;
-    if (WebCORS::IsOnAccessControlResponseHeaderWhitelist(name) ||
-        (exposed_headers.find(name.Ascii().data()) != exposed_headers.end() &&
+    if (cors::IsCorsSafelistedResponseHeader(name) ||
+        (exposed_headers.find(name.Ascii()) != exposed_headers.end() &&
          !FetchUtils::IsForbiddenResponseHeaderName(name))) {
       response->header_list_->Append(name, header.second);
     }
@@ -115,8 +114,8 @@ FetchResponseData* FetchResponseData::CreateOpaqueFilteredResponse() const {
   // cache state is 'none'."
   //
   // https://fetch.spec.whatwg.org/#concept-filtered-response-opaque
-  FetchResponseData* response =
-      new FetchResponseData(Type::kOpaque, 0, g_empty_atom);
+  FetchResponseData* response = MakeGarbageCollected<FetchResponseData>(
+      Type::kOpaque, response_source_, 0, g_empty_atom);
   response->internal_response_ = const_cast<FetchResponseData*>(this);
   return response;
 }
@@ -129,8 +128,8 @@ FetchResponseData* FetchResponseData::CreateOpaqueRedirectFilteredResponse()
   // header list is the empty list, body is null, and cache state is 'none'."
   //
   // https://fetch.spec.whatwg.org/#concept-filtered-response-opaque-redirect
-  FetchResponseData* response =
-      new FetchResponseData(Type::kOpaqueRedirect, 0, g_empty_atom);
+  FetchResponseData* response = MakeGarbageCollected<FetchResponseData>(
+      Type::kOpaqueRedirect, response_source_, 0, g_empty_atom);
   response->SetURLList(url_list_);
   response->internal_response_ = const_cast<FetchResponseData*>(this);
   return response;
@@ -177,6 +176,7 @@ FetchResponseData* FetchResponseData::Clone(ScriptState* script_state,
                                             ExceptionState& exception_state) {
   FetchResponseData* new_response = Create();
   new_response->type_ = type_;
+  new_response->response_source_ = response_source_;
   if (termination_reason_) {
     new_response->termination_reason_ = std::make_unique<TerminationReason>();
     *new_response->termination_reason_ = *termination_reason_;
@@ -192,7 +192,7 @@ FetchResponseData* FetchResponseData::Clone(ScriptState* script_state,
 
   switch (type_) {
     case Type::kBasic:
-    case Type::kCORS:
+    case Type::kCors:
       DCHECK(internal_response_);
       DCHECK_EQ(buffer_, internal_response_->buffer_);
       DCHECK_EQ(internal_response_->type_, Type::kDefault);
@@ -234,34 +234,13 @@ FetchResponseData* FetchResponseData::Clone(ScriptState* script_state,
   return new_response;
 }
 
-void FetchResponseData::PopulateWebServiceWorkerResponse(
-    WebServiceWorkerResponse& response) {
-  if (internal_response_) {
-    internal_response_->PopulateWebServiceWorkerResponse(response);
-    response.SetResponseType(type_);
-    response.SetCorsExposedHeaderNames(
-        HeaderSetToWebVector(cors_exposed_header_names_));
-    return;
-  }
-  response.SetURLList(url_list_);
-  response.SetStatus(Status());
-  response.SetStatusText(StatusMessage());
-  response.SetResponseType(type_);
-  response.SetResponseTime(ResponseTime());
-  response.SetCacheStorageCacheName(CacheStorageCacheName());
-  response.SetCorsExposedHeaderNames(
-      HeaderSetToWebVector(cors_exposed_header_names_));
-  for (const auto& header : HeaderList()->List()) {
-    response.AppendHeader(header.first, header.second);
-  }
-}
-
 mojom::blink::FetchAPIResponsePtr
 FetchResponseData::PopulateFetchAPIResponse() {
   if (internal_response_) {
     mojom::blink::FetchAPIResponsePtr response =
         internal_response_->PopulateFetchAPIResponse();
     response->response_type = type_;
+    response->response_source = response_source_;
     response->cors_exposed_header_names =
         HeaderSetToVector(cors_exposed_header_names_);
     return response;
@@ -272,26 +251,64 @@ FetchResponseData::PopulateFetchAPIResponse() {
   response->status_code = status_;
   response->status_text = status_message_;
   response->response_type = type_;
+  response->response_source = response_source_;
   response->response_time = response_time_;
   response->cache_storage_cache_name = cache_storage_cache_name_;
   response->cors_exposed_header_names =
       HeaderSetToVector(cors_exposed_header_names_);
+  response->side_data_blob = side_data_blob_;
   for (const auto& header : HeaderList()->List())
     response->headers.insert(header.first, header.second);
+
+  // Check if there's a Content-Security-Policy header and parse it if
+  // necessary.
+  if (base::FeatureList::IsEnabled(
+          network::features::kOutOfBlinkFrameAncestors)) {
+    String content_security_policy_header;
+    if (HeaderList()->Get("content-security-policy",
+                          content_security_policy_header)) {
+      network::ContentSecurityPolicy policy;
+      if (policy.Parse(StringUTF8Adaptor(content_security_policy_header)
+                           .AsStringPiece())) {
+        const network::mojom::CSPSourceListPtr& frame_ancestors_directive =
+            policy.content_security_policy_ptr()->frame_ancestors;
+        if (frame_ancestors_directive) {
+          // Convert network::mojom::ContentSecurityPolicy to
+          // network::mojom::blink::ContentSecurityPolicy.
+          auto blink_frame_ancestors =
+              network::mojom::blink::CSPSourceList::New();
+          for (auto& csp_source : frame_ancestors_directive->sources) {
+            blink_frame_ancestors->sources.push_back(
+                network::mojom::blink::CSPSource::New(
+                    String::FromUTF8(csp_source->scheme),
+                    String::FromUTF8(csp_source->host), csp_source->port,
+                    String::FromUTF8(csp_source->path),
+                    csp_source->is_host_wildcard, csp_source->is_port_wildcard,
+                    csp_source->allow_self));
+          }
+          response->content_security_policy =
+              network::mojom::blink::ContentSecurityPolicy::New(
+                  std::move(blink_frame_ancestors));
+        }
+      }
+    }
+  }
   return response;
 }
 
 FetchResponseData::FetchResponseData(Type type,
-                                     unsigned short status,
+                                     network::mojom::FetchResponseSource source,
+                                     uint16_t status,
                                      AtomicString status_message)
     : type_(type),
+      response_source_(source),
       status_(status),
       status_message_(status_message),
-      header_list_(FetchHeaderList::Create()),
+      header_list_(MakeGarbageCollected<FetchHeaderList>()),
       response_time_(base::Time::Now()) {}
 
 void FetchResponseData::ReplaceBodyStreamBuffer(BodyStreamBuffer* buffer) {
-  if (type_ == Type::kBasic || type_ == Type::kCORS) {
+  if (type_ == Type::kBasic || type_ == Type::kCors) {
     DCHECK(internal_response_);
     internal_response_->buffer_ = buffer;
     buffer_ = buffer;

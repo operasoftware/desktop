@@ -42,13 +42,14 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include <v8.h>
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 WebElement WebElement::FromV8Value(v8::Isolate* isolate,
                                    v8::Local<v8::Value> value) {
@@ -74,7 +75,7 @@ bool WebElement::IsEditable() const {
       return true;
   }
 
-  return EqualIgnoringASCIICase(element->getAttribute(roleAttr), "textbox");
+  return EqualIgnoringASCIICase(element->getAttribute(kRoleAttr), "textbox");
 }
 
 WebString WebElement::TagName() const {
@@ -88,8 +89,8 @@ bool WebElement::HasHTMLTagName(const WebString& tag_name) const {
   // createElementNS(xhtmlNS, 'input') HTMLInputElement   INPUT    input
   // createElementNS(xhtmlNS, 'INPUT') HTMLUnknownElement INPUT    INPUT
   const Element* element = ConstUnwrap<Element>();
-  return HTMLNames::xhtmlNamespaceURI == element->namespaceURI() &&
-         element->localName() == String(tag_name).DeprecatedLower();
+  return html_names::xhtmlNamespaceURI == element->namespaceURI() &&
+         element->localName() == String(tag_name).LowerASCII();
 }
 
 bool WebElement::HasAttribute(const WebString& attr_name) const {
@@ -182,10 +183,6 @@ WebNode WebElement::ShadowRoot() const {
   return WebNode(root);
 }
 
-bool WebElement::HasNonEmptyLayoutSize() const {
-  return ConstUnwrap<Element>()->HasNonEmptyLayoutSize();
-}
-
 WebRect WebElement::BoundsInViewport() const {
   return ConstUnwrap<Element>()->BoundsInViewport();
 }
@@ -206,7 +203,7 @@ void WebElement::RequestFullscreen() {
 
 WebElement::WebElement(Element* elem) : WebNode(elem) {}
 
-DEFINE_WEB_NODE_TYPE_CASTS(WebElement, IsElementNode());
+DEFINE_WEB_NODE_TYPE_CASTS(WebElement, IsElementNode())
 
 WebElement& WebElement::operator=(Element* elem) {
   private_ = elem;
@@ -214,7 +211,7 @@ WebElement& WebElement::operator=(Element* elem) {
 }
 
 WebElement::operator Element*() const {
-  return ToElement(private_.Get());
+  return blink::To<Element>(private_.Get());
 }
 
 }  // namespace blink

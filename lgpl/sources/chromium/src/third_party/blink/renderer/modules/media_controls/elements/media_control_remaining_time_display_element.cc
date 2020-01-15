@@ -4,16 +4,31 @@
 
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_remaining_time_display_element.h"
 
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
+
+namespace {
+
+// The during element has extra '/ ' in the text which takes approximately
+// 9 pixels.
+constexpr int kTimeDisplayExtraCharacterWidth = 9;
+
+}  // namespace
 
 namespace blink {
 
 MediaControlRemainingTimeDisplayElement::
     MediaControlRemainingTimeDisplayElement(MediaControlsImpl& media_controls)
     : MediaControlTimeDisplayElement(media_controls,
-                                     kMediaTimeRemainingDisplay) {
+                                     IDS_AX_MEDIA_TIME_REMAINING_DISPLAY) {
   SetShadowPseudoId(
       AtomicString("-webkit-media-controls-time-remaining-display"));
+}
+
+int MediaControlRemainingTimeDisplayElement::EstimateElementWidth() const {
+  // Add extra pixel width for during display since we have an extra  "/ ".
+  return kTimeDisplayExtraCharacterWidth +
+         MediaControlTimeDisplayElement::EstimateElementWidth();
 }
 
 String MediaControlRemainingTimeDisplayElement::FormatTime() const {

@@ -6,7 +6,8 @@
 
 #include <memory>
 
-#include "base/test/scoped_task_environment.h"
+#include "base/bind.h"
+#include "base/test/task_environment.h"
 #include "base/time/tick_clock.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -18,11 +19,8 @@ class DeadlineTaskRunnerTest : public testing::Test {
  public:
   DeadlineTaskRunnerTest()
       : task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::MOCK_TIME,
-            base::test::ScopedTaskEnvironment::ExecutionMode::QUEUED) {
-    // Null clock might trigger some assertions.
-    task_environment_.FastForwardBy(base::TimeDelta::FromMilliseconds(5));
-  }
+            base::test::TaskEnvironment::TimeSource::MOCK_TIME,
+            base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED) {}
   ~DeadlineTaskRunnerTest() override = default;
 
   void SetUp() override {
@@ -39,7 +37,7 @@ class DeadlineTaskRunnerTest : public testing::Test {
 
   void TestTask() { run_times_.push_back(Now()); }
 
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<DeadlineTaskRunner> deadline_task_runner_;
   std::vector<base::TimeTicks> run_times_;
 };
@@ -51,7 +49,7 @@ TEST_F(DeadlineTaskRunnerTest, RunOnce) {
   task_environment_.FastForwardUntilNoTasksRemain();
 
   EXPECT_THAT(run_times_, testing::ElementsAre(start_time + delay));
-};
+}
 
 TEST_F(DeadlineTaskRunnerTest, RunTwice) {
   base::TimeDelta delay1 = base::TimeDelta::FromMilliseconds(10);
@@ -65,7 +63,7 @@ TEST_F(DeadlineTaskRunnerTest, RunTwice) {
   task_environment_.FastForwardUntilNoTasksRemain();
 
   EXPECT_THAT(run_times_, testing::ElementsAre(deadline1, deadline2));
-};
+}
 
 TEST_F(DeadlineTaskRunnerTest, EarlierDeadlinesTakePrecidence) {
   base::TimeTicks start_time = Now();
@@ -78,7 +76,7 @@ TEST_F(DeadlineTaskRunnerTest, EarlierDeadlinesTakePrecidence) {
   task_environment_.FastForwardUntilNoTasksRemain();
 
   EXPECT_THAT(run_times_, testing::ElementsAre(start_time + delay1));
-};
+}
 
 TEST_F(DeadlineTaskRunnerTest, LaterDeadlinesIgnored) {
   base::TimeTicks start_time = Now();
@@ -89,7 +87,7 @@ TEST_F(DeadlineTaskRunnerTest, LaterDeadlinesIgnored) {
   task_environment_.FastForwardUntilNoTasksRemain();
 
   EXPECT_THAT(run_times_, testing::ElementsAre(start_time + delay100));
-};
+}
 
 TEST_F(DeadlineTaskRunnerTest, DeleteDeadlineTaskRunnerAfterPosting) {
   deadline_task_runner_->SetDeadline(
@@ -100,7 +98,7 @@ TEST_F(DeadlineTaskRunnerTest, DeleteDeadlineTaskRunnerAfterPosting) {
   task_environment_.FastForwardUntilNoTasksRemain();
 
   EXPECT_TRUE(run_times_.empty());
-};
+}
 
 }  // namespace scheduler
 }  // namespace blink

@@ -1,3 +1,0 @@
-include_rules = [
-    "+base/sampling_heap_profiler/sampling_heap_profiler.h",
-]

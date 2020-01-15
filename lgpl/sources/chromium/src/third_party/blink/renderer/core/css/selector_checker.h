@@ -33,15 +33,15 @@
 #include "base/macros.h"
 #include "third_party/blink/renderer/core/css/css_selector.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/platform/scroll/scroll_types.h"
+#include "third_party/blink/renderer/core/scroll/scroll_types.h"
 
 namespace blink {
 
 class CSSSelector;
 class ContainerNode;
-class Element;
-class LayoutScrollbar;
+class CustomScrollbar;
 class ComputedStyle;
+class Element;
 class PartNames;
 
 class SelectorChecker {
@@ -83,7 +83,7 @@ class SelectorChecker {
     Mode mode = kResolvingStyle;
     bool is_ua_rule = false;
     ComputedStyle* element_style = nullptr;
-    Member<LayoutScrollbar> scrollbar = nullptr;
+    Member<CustomScrollbar> scrollbar = nullptr;
     ScrollbarPart scrollbar_part = kNoPart;
     PartNames* part_names = nullptr;
   };
@@ -153,6 +153,7 @@ class SelectorChecker {
 
   static bool MatchesFocusPseudoClass(const Element&);
   static bool MatchesFocusVisiblePseudoClass(const Element&);
+  static bool MatchesSpatialNavigationInterestPseudoClass(const Element&);
 
  private:
   // Does the work of checking whether the simple selector and element pointed
@@ -205,7 +206,7 @@ class SelectorChecker {
   Mode mode_;
   bool is_ua_rule_;
   ComputedStyle* element_style_;
-  Member<LayoutScrollbar> scrollbar_;
+  Member<CustomScrollbar> scrollbar_;
   ScrollbarPart scrollbar_part_;
   PartNames* part_names_;
   DISALLOW_COPY_AND_ASSIGN(SelectorChecker);

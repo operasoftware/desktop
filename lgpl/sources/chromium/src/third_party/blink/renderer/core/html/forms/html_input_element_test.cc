@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 
 #include <memory>
+
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
@@ -20,6 +21,7 @@
 #include "third_party/blink/renderer/core/html/html_html_element.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
@@ -82,29 +84,30 @@ TEST_F(HTMLInputElementTest, FilteredDataListOptionsForMultipleEmail) {
 }
 
 TEST_F(HTMLInputElementTest, create) {
-  auto* input = HTMLInputElement::Create(GetDocument(),
-                                         CreateElementFlags::ByCreateElement());
+  auto* input = MakeGarbageCollected<HTMLInputElement>(
+      GetDocument(), CreateElementFlags::ByCreateElement());
   EXPECT_NE(nullptr, input->UserAgentShadowRoot());
 
-  input =
-      HTMLInputElement::Create(GetDocument(), CreateElementFlags::ByParser());
+  input = MakeGarbageCollected<HTMLInputElement>(
+      GetDocument(), CreateElementFlags::ByParser());
   EXPECT_EQ(nullptr, input->UserAgentShadowRoot());
   input->ParserSetAttributes(Vector<Attribute>());
   EXPECT_NE(nullptr, input->UserAgentShadowRoot());
 }
 
 TEST_F(HTMLInputElementTest, NoAssertWhenMovedInNewDocument) {
-  Document* document_without_frame = Document::CreateForTest();
+  auto* document_without_frame = MakeGarbageCollected<Document>();
   EXPECT_EQ(nullptr, document_without_frame->GetPage());
-  HTMLHtmlElement* html = HTMLHtmlElement::Create(*document_without_frame);
-  html->AppendChild(HTMLBodyElement::Create(*document_without_frame));
+  auto* html = MakeGarbageCollected<HTMLHtmlElement>(*document_without_frame);
+  html->AppendChild(
+      MakeGarbageCollected<HTMLBodyElement>(*document_without_frame));
 
   // Create an input element with type "range" inside a document without frame.
-  ToHTMLBodyElement(html->firstChild())
+  To<HTMLBodyElement>(html->firstChild())
       ->SetInnerHTMLFromString("<input type='range' />");
   document_without_frame->AppendChild(html);
 
-  std::unique_ptr<DummyPageHolder> page_holder = DummyPageHolder::Create();
+  auto page_holder = std::make_unique<DummyPageHolder>();
   auto& document = page_holder->GetDocument();
   EXPECT_NE(nullptr, document.GetPage());
 
@@ -119,33 +122,34 @@ TEST_F(HTMLInputElementTest, NoAssertWhenMovedInNewDocument) {
 }
 
 TEST_F(HTMLInputElementTest, DefaultToolTip) {
-  auto* input_without_form =
-      HTMLInputElement::Create(GetDocument(), CreateElementFlags());
-  input_without_form->SetBooleanAttribute(HTMLNames::requiredAttr, true);
+  auto* input_without_form = MakeGarbageCollected<HTMLInputElement>(
+      GetDocument(), CreateElementFlags());
+  input_without_form->SetBooleanAttribute(html_names::kRequiredAttr, true);
   GetDocument().body()->AppendChild(input_without_form);
   EXPECT_EQ("<<ValidationValueMissing>>", input_without_form->DefaultToolTip());
 
-  HTMLFormElement* form = HTMLFormElement::Create(GetDocument());
+  auto* form = MakeGarbageCollected<HTMLFormElement>(GetDocument());
   GetDocument().body()->AppendChild(form);
-  auto* input_with_form =
-      HTMLInputElement::Create(GetDocument(), CreateElementFlags());
-  input_with_form->SetBooleanAttribute(HTMLNames::requiredAttr, true);
+  auto* input_with_form = MakeGarbageCollected<HTMLInputElement>(
+      GetDocument(), CreateElementFlags());
+  input_with_form->SetBooleanAttribute(html_names::kRequiredAttr, true);
   form->AppendChild(input_with_form);
   EXPECT_EQ("<<ValidationValueMissing>>", input_with_form->DefaultToolTip());
 
-  form->SetBooleanAttribute(HTMLNames::novalidateAttr, true);
+  form->SetBooleanAttribute(html_names::kNovalidateAttr, true);
   EXPECT_EQ(String(), input_with_form->DefaultToolTip());
 }
 
 // crbug.com/589838
 TEST_F(HTMLInputElementTest, ImageTypeCrash) {
-  auto* input = HTMLInputElement::Create(GetDocument(), CreateElementFlags());
-  input->setAttribute(HTMLNames::typeAttr, "image");
+  auto* input = MakeGarbageCollected<HTMLInputElement>(GetDocument(),
+                                                       CreateElementFlags());
+  input->setAttribute(html_names::kTypeAttr, "image");
   input->EnsureFallbackContent();
   // Make sure ensurePrimaryContent() recreates UA shadow tree, and updating
   // |value| doesn't crash.
   input->EnsurePrimaryContent();
-  input->setAttribute(HTMLNames::valueAttr, "aaa");
+  input->setAttribute(html_names::kValueAttr, "aaa");
 }
 
 TEST_F(HTMLInputElementTest, RadioKeyDownDCHECKFailure) {
@@ -157,10 +161,11 @@ TEST_F(HTMLInputElementTest, RadioKeyDownDCHECKFailure) {
   HTMLInputElement& radio2 = ToHTMLInputElement(*radio1.nextSibling());
   radio1.focus();
   // Make layout-dirty.
-  radio2.setAttribute(HTMLNames::styleAttr, "position:fixed");
-  KeyboardEventInit init;
-  init.setKey("ArrowRight");
-  radio1.DefaultEventHandler(*new KeyboardEvent("keydown", init));
+  radio2.setAttribute(html_names::kStyleAttr, "position:fixed");
+  KeyboardEventInit* init = KeyboardEventInit::Create();
+  init->setKey("ArrowRight");
+  radio1.DefaultEventHandler(
+      *MakeGarbageCollected<KeyboardEvent>("keydown", init));
   EXPECT_EQ(GetDocument().ActiveElement(), &radio2);
 }
 
@@ -169,7 +174,7 @@ TEST_F(HTMLInputElementTest, DateTimeChooserSizeParamRespectsScale) {
   GetDocument().View()->GetFrame().GetPage()->GetVisualViewport().SetScale(2.f);
   GetDocument().body()->SetInnerHTMLFromString(
       "<input type='date' style='width:200px;height:50px' />");
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
   HTMLInputElement* input =
       ToHTMLInputElement(GetDocument().body()->firstChild());
 
@@ -181,10 +186,11 @@ TEST_F(HTMLInputElementTest, DateTimeChooserSizeParamRespectsScale) {
 }
 
 TEST_F(HTMLInputElementTest, StepDownOverflow) {
-  auto* input = HTMLInputElement::Create(GetDocument(), CreateElementFlags());
-  input->setAttribute(HTMLNames::typeAttr, "date");
-  input->setAttribute(HTMLNames::minAttr, "2010-02-10");
-  input->setAttribute(HTMLNames::stepAttr, "9223372036854775556");
+  auto* input = MakeGarbageCollected<HTMLInputElement>(GetDocument(),
+                                                       CreateElementFlags());
+  input->setAttribute(html_names::kTypeAttr, "date");
+  input->setAttribute(html_names::kMinAttr, "2010-02-10");
+  input->setAttribute(html_names::kStepAttr, "9223372036854775556");
   // InputType::applyStep() should not pass an out-of-range value to
   // setValueAsDecimal, and WTF::msToYear() should not cause a DCHECK failure.
   input->stepDown(1, ASSERT_NO_EXCEPTION);
@@ -202,7 +208,7 @@ TEST_F(HTMLInputElementTest, ChangingInputTypeCausesShadowRootToBeCreated) {
   HTMLInputElement* input =
       ToHTMLInputElement(GetDocument().body()->firstChild());
   EXPECT_EQ(nullptr, input->UserAgentShadowRoot());
-  input->setAttribute(HTMLNames::typeAttr, "text");
+  input->setAttribute(html_names::kTypeAttr, "text");
   EXPECT_NE(nullptr, input->UserAgentShadowRoot());
 }
 
@@ -214,12 +220,12 @@ TEST_F(HTMLInputElementTest, RepaintAfterClearingFile) {
   FileChooserFileInfoList files;
   files.push_back(CreateFileChooserFileInfoNative("/native/path/native-file",
                                                   "display-name"));
-  FileList* list = FileInputType::CreateFileList(files, false);
+  FileList* list = FileInputType::CreateFileList(files, base::FilePath());
   ASSERT_TRUE(list);
   EXPECT_EQ(1u, list->length());
 
   input->setFiles(list);
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   ASSERT_TRUE(input->GetLayoutObject());
   EXPECT_FALSE(input->GetLayoutObject()->ShouldCheckForPaintInvalidation());
@@ -229,6 +235,18 @@ TEST_F(HTMLInputElementTest, RepaintAfterClearingFile) {
 
   ASSERT_TRUE(input->GetLayoutObject());
   EXPECT_TRUE(input->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+}
+
+TEST_F(HTMLInputElementTest, UpdateTypeDcheck) {
+  Document& doc = GetDocument();
+  // Removing <body> is required to reproduce the issue.
+  doc.body()->remove();
+  Element* input = doc.CreateRawElement(html_names::kInputTag);
+  doc.documentElement()->appendChild(input);
+  input->focus();
+  input->setAttribute(html_names::kTypeAttr, AtomicString("radio"));
+  // Test succeeds if the above setAttribute() didn't trigger a DCHECK failure
+  // in Document::UpdateFocusAppearanceAfterLayout().
 }
 
 }  // namespace blink

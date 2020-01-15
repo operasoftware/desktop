@@ -37,7 +37,7 @@
 #include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/skia/include/core/SkImage.h"
 
 namespace blink {
@@ -79,7 +79,7 @@ SkBitmap WebImage::FromData(const WebData& data, const WebSize& desired_size) {
   return frame->Bitmap();
 }
 
-WebVector<SkBitmap> WebImage::FramesFromData(const WebData& data, bool allow_svg) {
+WebVector<SkBitmap> WebImage::FramesFromData(const WebData& data) {
   // This is to protect from malicious images. It should be big enough that it's
   // never hit in practice.
   const size_t kMaxFrameCount = 8;
@@ -87,8 +87,7 @@ WebVector<SkBitmap> WebImage::FramesFromData(const WebData& data, bool allow_svg
   const bool data_complete = true;
   std::unique_ptr<ImageDecoder> decoder(ImageDecoder::Create(
       data, data_complete, ImageDecoder::kAlphaPremultiplied,
-      ImageDecoder::kDefaultBitDepth, ColorBehavior::Ignore(),
-      SkISize::MakeEmpty(), allow_svg));
+      ImageDecoder::kDefaultBitDepth, ColorBehavior::Ignore()));
   if (!decoder || !decoder->IsSizeAvailable())
     return {};
 

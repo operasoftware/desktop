@@ -5,11 +5,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_VIEW_PAINTER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_VIEW_PAINTER_H_
 
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
 struct PaintInfo;
+class DisplayItemClient;
+class IntRect;
 class LayoutView;
 
 class ViewPainter {
@@ -23,6 +25,11 @@ class ViewPainter {
 
  private:
   const LayoutView& layout_view_;
+
+  void PaintBoxDecorationBackgroundInternal(
+      const PaintInfo&,
+      const IntRect& background_rect,
+      const DisplayItemClient& background_client);
 };
 
 }  // namespace blink

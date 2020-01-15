@@ -31,12 +31,14 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_event_target.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
-void V8EventTarget::addEventListenerMethodPrologueCustom(
+void V8EventTarget::AddEventListenerMethodPrologueCustom(
     const v8::FunctionCallbackInfo<v8::Value>& info,
     EventTarget*) {
   if (info.Length() >= 3 && info[2]->IsObject()) {
@@ -49,7 +51,7 @@ void V8EventTarget::addEventListenerMethodPrologueCustom(
   }
 }
 
-void V8EventTarget::removeEventListenerMethodPrologueCustom(
+void V8EventTarget::RemoveEventListenerMethodPrologueCustom(
     const v8::FunctionCallbackInfo<v8::Value>& info,
     EventTarget*) {
   if (info.Length() >= 3 && info[2]->IsObject()) {

@@ -35,12 +35,15 @@
 #include "third_party/blink/public/web/web_user_gesture_indicator.h"
 #include "third_party/blink/renderer/core/dom/user_gesture_indicator.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
 
 TEST(WebUserGestureTokenTest, Basic) {
+  // UserGestureTokens are meaningless with UAv2.
+  ScopedUserActivationV2ForTest scoped_feature(false);
+
   WebUserGestureToken token;
-  EXPECT_FALSE(token.HasGestures());
 
   {
     WebScopedUserGesture indicator(token);
@@ -55,7 +58,6 @@ TEST(WebUserGestureTokenTest, Basic) {
     token = WebUserGestureIndicator::CurrentUserGestureToken();
   }
 
-  EXPECT_TRUE(token.HasGestures());
   EXPECT_FALSE(WebUserGestureIndicator::IsProcessingUserGesture(nullptr));
 
   {
@@ -64,8 +66,6 @@ TEST(WebUserGestureTokenTest, Basic) {
     WebUserGestureIndicator::ConsumeUserGesture(nullptr);
     EXPECT_FALSE(WebUserGestureIndicator::IsProcessingUserGesture(nullptr));
   }
-
-  EXPECT_FALSE(token.HasGestures());
 
   {
     WebScopedUserGesture indicator(token);

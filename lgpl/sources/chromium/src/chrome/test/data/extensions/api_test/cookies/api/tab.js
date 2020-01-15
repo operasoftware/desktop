@@ -11,9 +11,10 @@ var TEST_URL3 = 'https://' + TEST_HOST + '/content.html';
 var TEST_URL4 = 'https://' + TEST_HOST + TEST_PATH + '/content.html';
 var TEST_URL5 = 'http://' + TEST_HOST + TEST_PATH + '/content.html';
 var TEST_EXPIRATION_DATE = 12345678900;
-var TEST_ODD_DOMAIN = '.strange stuff!!.com';
+var TEST_ODD_DOMAIN_HOST_ONLY = 'strange stuff!!.com';
+var TEST_ODD_DOMAIN = '.' + TEST_ODD_DOMAIN_HOST_ONLY;
 var TEST_ODD_PATH = '/hello = world';
-var TEST_ODD_URL = 'http://' + TEST_ODD_DOMAIN + TEST_ODD_PATH + '/index.html';
+var TEST_ODD_URL = 'http://' + TEST_ODD_DOMAIN_HOST_ONLY + TEST_ODD_PATH + '/index.html';
 var TEST_UNPERMITTED_URL = 'http://illegal.' + TEST_DOMAIN + '/';
 
 var TEST_BASIC_COOKIE = {
@@ -77,9 +78,11 @@ function removeTestCookies() {
   chrome.cookies.remove(
       {url: TEST_URL4, name: TEST_SECURE_COOKIE.name});
   chrome.cookies.remove({url: TEST_URL, name: 'abcd'});
+  chrome.cookies.remove({url: TEST_URL, name: 'AA'});
   chrome.cookies.remove({url: TEST_URL, name: 'A'});
   chrome.cookies.remove({url: TEST_URL, name: 'B'});
   chrome.cookies.remove({url: TEST_URL, name: 'C'});
+  chrome.cookies.remove({url: TEST_URL, name: 'D'});
   chrome.cookies.remove({url: TEST_ODD_URL, name: 'abcd'});
 }
 
@@ -131,7 +134,7 @@ chrome.test.runTests([
             chrome.test.assertEq('/', cookie.path);
             chrome.test.assertEq(false, cookie.secure);
             chrome.test.assertEq(false, cookie.httpOnly);
-            chrome.test.assertEq("no_restriction", cookie.sameSite);
+            chrome.test.assertEq('unspecified', cookie.sameSite);
             chrome.test.assertEq(true, cookie.session);
             chrome.test.assertTrue(typeof cookie.expirationDate === 'undefined',
                 'Session cookie should not have expirationDate property.');
@@ -154,7 +157,7 @@ chrome.test.runTests([
             chrome.test.assertEq('/', cookie.path);
             chrome.test.assertEq(false, cookie.secure);
             chrome.test.assertEq(false, cookie.httpOnly);
-            chrome.test.assertEq("no_restriction", cookie.sameSite);
+            chrome.test.assertEq('unspecified', cookie.sameSite);
             chrome.test.assertEq(false, cookie.session);
             chrome.test.assertEq(TEST_EXPIRATION_DATE, cookie.expirationDate);
           }));
@@ -182,7 +185,7 @@ chrome.test.runTests([
             chrome.test.assertEq(TEST_PATH, cookie.path);
             chrome.test.assertEq(true, cookie.secure);
             chrome.test.assertEq(true, cookie.httpOnly);
-            chrome.test.assertEq("no_restriction", cookie.sameSite);
+            chrome.test.assertEq('unspecified', cookie.sameSite);
             chrome.test.assertEq(true, cookie.session);
           }));
     }));
@@ -246,6 +249,16 @@ chrome.test.runTests([
   function setSameSiteCookies() {
     removeTestCookies();
 
+    // Property is left out
+    chrome.cookies.set(
+      {url: TEST_URL, name: "AA", value: "1"},
+      pass(function () {
+        chrome.cookies.get({url: TEST_URL, name: "AA"}, pass(function (c) {
+          expectValidCookie(c);
+          chrome.test.assertEq('unspecified', c.sameSite);
+        }));
+      }));
+
     // No same-site restriction
     chrome.cookies.set(
       {url: TEST_URL, name: "A", value: "1", sameSite: "no_restriction"},
@@ -273,6 +286,16 @@ chrome.test.runTests([
         chrome.cookies.get({url: TEST_URL, name: "C"}, pass(function (c) {
           expectValidCookie(c);
           chrome.test.assertEq("strict", c.sameSite);
+        }));
+      }));
+
+    // Unspecified
+    chrome.cookies.set(
+      {url: TEST_URL, name: "D", value: "1", sameSite: "unspecified"},
+      pass(function () {
+        chrome.cookies.get({url: TEST_URL, name: "D"}, pass(function (c) {
+          expectValidCookie(c);
+          chrome.test.assertEq('unspecified', c.sameSite);
         }));
       }));
   },

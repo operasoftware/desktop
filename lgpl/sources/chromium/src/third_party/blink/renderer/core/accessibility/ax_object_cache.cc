@@ -31,6 +31,7 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
 #include "third_party/blink/public/web/web_ax_enums.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node.h"
@@ -77,7 +78,7 @@ const char* g_aria_widgets[] = {
 
 static ARIAWidgetSet* CreateARIARoleWidgetSet() {
   ARIAWidgetSet* widget_set = new HashSet<String, CaseFoldingHash>();
-  for (size_t i = 0; i < arraysize(g_aria_widgets); ++i)
+  for (size_t i = 0; i < base::size(g_aria_widgets); ++i)
     widget_set->insert(String(g_aria_widgets[i]));
   return widget_set;
 }
@@ -111,7 +112,8 @@ const char* g_aria_interactive_widget_attributes[] = {
 };
 
 bool HasInteractiveARIAAttribute(const Element& element) {
-  for (size_t i = 0; i < arraysize(g_aria_interactive_widget_attributes); ++i) {
+  for (size_t i = 0; i < base::size(g_aria_interactive_widget_attributes);
+       ++i) {
     const char* attribute = g_aria_interactive_widget_attributes[i];
     if (element.hasAttribute(attribute)) {
       return true;
@@ -125,8 +127,7 @@ bool HasInteractiveARIAAttribute(const Element& element) {
 bool AXObjectCache::IsInsideFocusableElementOrARIAWidget(const Node& node) {
   const Node* cur_node = &node;
   do {
-    if (cur_node->IsElementNode()) {
-      const Element* element = ToElement(cur_node);
+    if (const auto* element = DynamicTo<Element>(cur_node)) {
       if (element->IsFocusable())
         return true;
       String role = element->getAttribute("role");
@@ -136,7 +137,7 @@ bool AXObjectCache::IsInsideFocusableElementOrARIAWidget(const Node& node) {
         return true;
     }
     cur_node = cur_node->parentNode();
-  } while (cur_node && !IsHTMLBodyElement(node));
+  } while (cur_node && !IsA<HTMLBodyElement>(node));
   return false;
 }
 

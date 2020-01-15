@@ -35,7 +35,7 @@ class HTMLFrameSetElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(HTMLFrameSetElement);
+  explicit HTMLFrameSetElement(Document&);
 
   bool HasFrameBorder() const { return frameborder_; }
   bool NoResize() const { return noresize_; }
@@ -55,17 +55,15 @@ class HTMLFrameSetElement final : public HTMLElement {
 
   bool HasNonInBodyInsertionMode() const override { return true; }
 
-  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(blur);
-  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(error);
-  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(focus);
-  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(load);
-  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(resize);
-  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(scroll);
-  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(orientationchange);
+  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(blur, kBlur)
+  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(error, kError)
+  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(focus, kFocus)
+  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(load, kLoad)
+  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(resize, kResize)
+  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(scroll, kScroll)
+  DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(orientationchange, kOrientationchange)
 
  private:
-  explicit HTMLFrameSetElement(Document&);
-
   void ParseAttribute(const AttributeModificationParams&) override;
   bool IsPresentationAttribute(const QualifiedName&) const override;
   void CollectStyleForPresentationAttribute(
@@ -75,12 +73,12 @@ class HTMLFrameSetElement final : public HTMLElement {
 
   void AttachLayoutTree(AttachContext&) override;
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override;
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 
   void DefaultEventHandler(Event&) override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
-  void WillRecalcStyle(StyleRecalcChange) override;
+  void WillRecalcStyle(const StyleRecalcChange) override;
 
   Vector<HTMLDimension> row_lengths_;
   Vector<HTMLDimension> col_lengths_;

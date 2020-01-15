@@ -3,8 +3,12 @@
 // found in the LICENSE file.
 
 /**
- * @fileoverview loadTimeData override values for ONC strings used in
- *     network_config.html and other network configuration UI.
+ * @fileoverview This file has two parts:
+ *
+ * 1. loadTimeData override values for ONC strings used in network_config.html
+ * and other network configuration UI.
+ *
+ * 2. Helper functions to convert and handle ONC properties for using in tests.
  */
 
 var CrOncTest = CrOncTest || {};
@@ -73,11 +77,48 @@ CrOncTest.overrideCrOncStrings = function() {
     'OncWiFi-Security_WPA-PSK': 'OncWiFi-Security_WPA-PSK',
     'OncWiFi-Security_WEP-8021X': 'OncWiFi-Security_WEP-8021X',
     'OncWiFi-SignalStrength': 'OncWiFi-SignalStrength',
-    'OncWiMAX-EAP-Identity': 'OncWiMAX-EAP-Identity',
     'Oncipv4-Gateway': 'Oncipv4-Gateway',
     'Oncipv4-IPAddress': 'Oncipv4-IPAddress',
     'Oncipv4-RoutingPrefix': 'Oncipv4-RoutingPrefix',
     'Oncipv6-IPAddress': 'Oncipv6-IPAddress',
   };
   loadTimeData.overrideValues(oncKeys);
+};
+
+/**
+ * Converts an unmanaged ONC dictionary into a managed dictionary by
+ * setting properties 'Active' values to values from unmanaged dictionary.
+ * NOTE: Unmanaged properties inside ManagedProperties (e.g. 'GUID',
+ * 'Source', 'Type', etc) need to be specified here to avoid treating them
+ * as managed.
+ * The full list of ManagedProperties is found in networking_private.idl
+ * @param {!Object|undefined} properties An unmanaged ONC dictionary
+ * @return {!Object|undefined} A managed version of |properties|.
+ */
+CrOncTest.convertToManagedProperties = function(properties) {
+  'use strict';
+  if (properties === undefined) {
+    return undefined;
+  }
+  if (typeof properties != 'object') {
+    return {Active: properties};
+  }
+  const unmanagedProperties = [
+    'ConnectionState',
+    'GUID',
+    /* ManagedCellularProperties.SIMLockStatus */ 'LockType',
+    'Source',
+    'Type',
+  ];
+  var result = {};
+  var keys = Object.keys(properties);
+  for (var i = 0; i < keys.length; ++i) {
+    var k = keys[i];
+    if (unmanagedProperties.includes(k)) {
+      result[k] = properties[k];
+    } else {
+      result[k] = this.convertToManagedProperties(properties[k]);
+    }
+  }
+  return result;
 };

@@ -41,9 +41,7 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
       sk_sp<SkImage>,
       base::WeakPtr<WebGraphicsContext3DProviderWrapper> = nullptr);
   static scoped_refptr<StaticBitmapImage> Create(PaintImage);
-  static scoped_refptr<StaticBitmapImage> Create(scoped_refptr<Uint8Array>&&,
-                                                 const SkImageInfo&);
-  static scoped_refptr<StaticBitmapImage> Create(WTF::ArrayBufferContents&,
+  static scoped_refptr<StaticBitmapImage> Create(sk_sp<SkData> data,
                                                  const SkImageInfo&);
 
   bool IsStaticBitmapImage() const override { return true; }
@@ -65,7 +63,6 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
   virtual bool HasMailbox() const { return false; }
   virtual bool IsValid() const { return true; }
   virtual void Transfer() {}
-  virtual void Abandon() {}
 
   // Creates a non-gpu copy of the image, or returns this if image is already
   // non-gpu.
@@ -76,6 +73,7 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
   virtual bool CopyToTexture(gpu::gles2::GLES2Interface*,
                              GLenum,
                              GLuint,
+                             GLint,
                              bool,
                              bool,
                              const IntPoint&,
@@ -107,7 +105,6 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
     return mailbox;
   }
   virtual const gpu::SyncToken& GetSyncToken() const;
-  virtual void UpdateSyncToken(gpu::SyncToken) { NOTREACHED(); }
   virtual bool IsPremultiplied() const { return true; }
 
   // Methods have exactly the same implementation for all sub-classes

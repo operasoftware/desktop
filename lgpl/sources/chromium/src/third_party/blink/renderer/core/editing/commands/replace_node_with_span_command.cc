@@ -35,11 +35,10 @@
 #include "third_party/blink/renderer/core/html/html_span_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
-
-using namespace HTMLNames;
 
 ReplaceNodeWithSpanCommand::ReplaceNodeWithSpanCommand(HTMLElement* element)
     : SimpleEditCommand(element->GetDocument()), element_to_replace_(element) {
@@ -68,8 +67,10 @@ static void SwapInNodePreservingAttributesAndChildren(
 void ReplaceNodeWithSpanCommand::DoApply(EditingState*) {
   if (!element_to_replace_->isConnected())
     return;
-  if (!span_element_)
-    span_element_ = HTMLSpanElement::Create(element_to_replace_->GetDocument());
+  if (!span_element_) {
+    span_element_ = MakeGarbageCollected<HTMLSpanElement>(
+        element_to_replace_->GetDocument());
+  }
   SwapInNodePreservingAttributesAndChildren(span_element_.Get(),
                                             *element_to_replace_);
 }
@@ -81,7 +82,7 @@ void ReplaceNodeWithSpanCommand::DoUnapply() {
                                             *span_element_);
 }
 
-void ReplaceNodeWithSpanCommand::Trace(blink::Visitor* visitor) {
+void ReplaceNodeWithSpanCommand::Trace(Visitor* visitor) {
   visitor->Trace(element_to_replace_);
   visitor->Trace(span_element_);
   SimpleEditCommand::Trace(visitor);

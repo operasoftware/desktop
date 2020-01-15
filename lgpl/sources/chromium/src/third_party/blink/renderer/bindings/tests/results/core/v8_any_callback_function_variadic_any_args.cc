@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // This file has been auto-generated from the Jinja2 template
-// third_party/blink/renderer/bindings/templates/callback_function.cpp.tmpl
+// third_party/blink/renderer/bindings/templates/callback_function.cc.tmpl
 // by the script code_generator_v8.py.
 // DO NOT MODIFY!
 
@@ -20,6 +20,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 
 namespace blink {
 
@@ -27,8 +28,16 @@ const char* V8AnyCallbackFunctionVariadicAnyArgs::NameInHeapSnapshot() const {
   return "V8AnyCallbackFunctionVariadicAnyArgs";
 }
 
-v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Invoke(ScriptWrappable* callback_this_value, const Vector<ScriptValue>& arguments) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Invoke(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, const HeapVector<ScriptValue>& arguments) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "AnyCallbackFunctionVariadicAnyArgs",
+          "invoke");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<ScriptValue>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -48,10 +57,15 @@ v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Invoke(ScriptWrappa
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<ScriptValue>();
+  }
 
   v8::Local<v8::Function> function;
   // callback function's invoke:
@@ -62,17 +76,28 @@ v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Invoke(ScriptWrappa
   function = CallbackFunction();
 
   v8::Local<v8::Value> this_arg;
-  this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+  if (callback_this_value.IsEmpty()) {
+    // step 2. If thisArg was not given, let thisArg be undefined.
+    this_arg = v8::Undefined(GetIsolate());
+  } else {
+    this_arg = callback_this_value.V8Value(callback_relevant_script_state);
+  }
 
   // step: Let esArgs be the result of converting args to an ECMAScript
   //   arguments list. If this throws an exception, set completion to the
   //   completion value representing the thrown exception and jump to the step
   //   labeled return.
   v8::Local<v8::Object> argument_creation_context =
-      CallbackRelevantScriptState()->GetContext()->Global();
+      callback_relevant_script_state->GetContext()->Global();
   ALLOW_UNUSED_LOCAL(argument_creation_context);
+  // Secure one element at least in |argv| to avoid the following restriction.
+  //
+  // C++14 8.3.4 Arrays
+  // If the constant-expression (5.19) is present, it shall be a converted
+  // constant expression of type std::size_t and its value shall be greater than
+  // zero.
   const int argc = 0 + arguments.size();
-  v8::Local<v8::Value> argv[argc];
+  v8::Local<v8::Value> argv[std::max(1, argc)];
   for (wtf_size_t i = 0; i < arguments.size(); ++i) {
     argv[0 + i] = ToV8(arguments[i], argument_creation_context, GetIsolate());
   }
@@ -81,7 +106,7 @@ v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Invoke(ScriptWrappa
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,
@@ -108,8 +133,16 @@ v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Invoke(ScriptWrappa
   }
 }
 
-v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Construct(const Vector<ScriptValue>& arguments) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Construct(const HeapVector<ScriptValue>& arguments) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "AnyCallbackFunctionVariadicAnyArgs",
+          "construct");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<ScriptValue>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -129,10 +162,15 @@ v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Construct(const Vec
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<ScriptValue>();
+  }
 
   // step 3. If ! IsConstructor(F) is false, throw a TypeError exception.
   //
@@ -162,10 +200,16 @@ v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Construct(const Vec
   //   completion value representing the thrown exception and jump to the step
   //   labeled return.
   v8::Local<v8::Object> argument_creation_context =
-      CallbackRelevantScriptState()->GetContext()->Global();
+      callback_relevant_script_state->GetContext()->Global();
   ALLOW_UNUSED_LOCAL(argument_creation_context);
+  // Secure one element at least in |argv| to avoid the following restriction.
+  //
+  // C++14 8.3.4 Arrays
+  // If the constant-expression (5.19) is present, it shall be a converted
+  // constant expression of type std::size_t and its value shall be greater than
+  // zero.
   const int argc = 0 + arguments.size();
-  v8::Local<v8::Value> argv[argc];
+  v8::Local<v8::Value> argv[std::max(1, argc)];
   for (wtf_size_t i = 0; i < arguments.size(); ++i) {
     argv[0 + i] = ToV8(arguments[i], argument_creation_context, GetIsolate());
   }
@@ -174,7 +218,7 @@ v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Construct(const Vec
   if (!V8ScriptRunner::CallAsConstructor(
           GetIsolate(),
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           argc,
           argv).ToLocal(&call_result)) {
     // step 11. If callResult is an abrupt completion, set completion to
@@ -197,11 +241,6 @@ v8::Maybe<ScriptValue> V8AnyCallbackFunctionVariadicAnyArgs::Construct(const Vec
     else
       return v8::Just<ScriptValue>(native_result);
   }
-}
-
-v8::Maybe<ScriptValue> V8PersistentCallbackFunction<V8AnyCallbackFunctionVariadicAnyArgs>::Invoke(ScriptWrappable* callback_this_value, const Vector<ScriptValue>& arguments) {
-  return Proxy()->Invoke(
-      callback_this_value, arguments);
 }
 
 }  // namespace blink

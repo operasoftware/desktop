@@ -30,7 +30,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/local_window_proxy.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/initialize_v8_extras_binding.h"
+#include "third_party/blink/renderer/bindings/core/v8/isolated_world_csp.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
@@ -40,6 +40,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_initializer.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_page_popup_controller_binding.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
+#include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -57,14 +58,20 @@
 #include "third_party/blink/renderer/platform/bindings/v8_dom_wrapper.h"
 #include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/weborigin/security_violation_reporting_policy.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_operators.h"
 #include "v8/include/v8.h"
 
 namespace blink {
+
+namespace {
+
+constexpr char kGlobalProxyLabel[] = "WindowProxy::global_proxy_";
+
+}  // namespace
 
 void LocalWindowProxy::Trace(blink::Visitor* visitor) {
   visitor->Trace(script_state_);
@@ -73,8 +80,23 @@ void LocalWindowProxy::Trace(blink::Visitor* visitor) {
 
 void LocalWindowProxy::DisposeContext(Lifecycle next_status,
                                       FrameReuseStatus frame_reuse_status) {
-  DCHECK(next_status == Lifecycle::kGlobalObjectIsDetached ||
-         next_status == Lifecycle::kFrameIsDetached);
+  DCHECK(next_status == Lifecycle::kV8MemoryIsForciblyPurged ||
+         next_status == Lifecycle::kGlobalObjectIsDetached ||
+         next_status == Lifecycle::kFrameIsDetached ||
+         next_status == Lifecycle::kFrameIsDetachedAndV8MemoryIsPurged);
+
+  // If the current lifecycle is kV8MemoryIsForciblyPurged, next status should
+  // be either kFrameIsDetachedAndV8MemoryIsPurged, or kGlobalObjectIsDetached.
+  // If the former, |global_proxy_| should become weak, and if the latter, the
+  // necessary operations are already done so can return here.
+  if (lifecycle_ == Lifecycle::kV8MemoryIsForciblyPurged) {
+    DCHECK(next_status == Lifecycle::kGlobalObjectIsDetached ||
+           next_status == Lifecycle::kFrameIsDetachedAndV8MemoryIsPurged);
+    if (next_status == Lifecycle::kFrameIsDetachedAndV8MemoryIsPurged)
+      global_proxy_.SetPhantom();
+    lifecycle_ = next_status;
+    return;
+  }
 
   if (lifecycle_ != Lifecycle::kContextIsInitialized)
     return;
@@ -86,8 +108,8 @@ void LocalWindowProxy::DisposeContext(Lifecycle next_status,
   // it returns.
   GetFrame()->Client()->WillReleaseScriptContext(context, world_->GetWorldId());
   MainThreadDebugger::Instance()->ContextWillBeDestroyed(script_state_);
-
-  if (next_status == Lifecycle::kGlobalObjectIsDetached) {
+  if (next_status == Lifecycle::kV8MemoryIsForciblyPurged ||
+      next_status == Lifecycle::kGlobalObjectIsDetached) {
     // Clean up state on the global proxy, which will be reused.
     if (!global_proxy_.IsEmpty()) {
       CHECK(global_proxy_ == context->Global());
@@ -124,14 +146,7 @@ void LocalWindowProxy::DisposeContext(Lifecycle next_status,
 void LocalWindowProxy::Initialize() {
   TRACE_EVENT1("v8", "LocalWindowProxy::Initialize", "IsMainFrame",
                GetFrame()->IsMainFrame());
-  DEFINE_STATIC_LOCAL(
-      CustomCountHistogram, main_frame_hist,
-      ("Blink.Binding.InitializeMainLocalWindowProxy", 0, 10000000, 50));
-  DEFINE_STATIC_LOCAL(
-      CustomCountHistogram, non_main_frame_hist,
-      ("Blink.Binding.InitializeNonMainLocalWindowProxy", 0, 10000000, 50));
-  ScopedUsHistogramTimer timer(GetFrame()->IsMainFrame() ? main_frame_hist
-                                                         : non_main_frame_hist);
+  CHECK(!GetFrame()->IsProvisional());
 
   ScriptForbiddenScope::AllowUserAgentScript allow_script;
   // Inspector may request V8 interruption to process DevTools protocol
@@ -148,24 +163,42 @@ void LocalWindowProxy::Initialize() {
   v8::Local<v8::Context> context = script_state_->GetContext();
   if (global_proxy_.IsEmpty()) {
     global_proxy_.Set(GetIsolate(), context->Global());
+    global_proxy_.Get().AnnotateStrongRetainer(kGlobalProxyLabel);
     CHECK(!global_proxy_.IsEmpty());
   }
 
   SetupWindowPrototypeChain();
+
+  // Setup handling for eval checks for the context. Isolated worlds which don't
+  // specify their own CSPs are exempt from eval checks currently.
+  // TODO(crbug.com/982388): For other CSP checks, we use the main world CSP
+  // when an isolated world doesn't specify its own CSP. We should do the same
+  // here.
+  const bool evaluate_csp_for_eval =
+      world_->IsMainWorld() ||
+      (world_->IsIsolatedWorld() &&
+       IsolatedWorldCSP::Get().HasContentSecurityPolicy(world_->GetWorldId()));
+  if (evaluate_csp_for_eval) {
+    ContentSecurityPolicy* csp =
+        GetFrame()->GetDocument()->GetContentSecurityPolicyForWorld();
+    // CSP has two mechanisms for controlling eval, script-src and Trusted
+    // Types, and we need to check both.
+    // TODO(vogelheim): Provide a simple(e) API for this use case.
+    bool allow_code_generation =
+        csp->AllowEval(SecurityViolationReportingPolicy::kSuppressReporting,
+                       ContentSecurityPolicy::kWillNotThrowException,
+                       g_empty_string) &&
+        !csp->IsRequireTrustedTypes();
+    context->AllowCodeGenerationFromStrings(allow_code_generation);
+    context->SetErrorMessageForCodeGenerationFromStrings(
+        V8String(GetIsolate(), csp->EvalDisabledErrorMessage()));
+  }
 
   const SecurityOrigin* origin = nullptr;
   if (world_->IsMainWorld()) {
     // ActivityLogger for main world is updated within updateDocumentInternal().
     UpdateDocumentInternal();
     origin = GetFrame()->GetDocument()->GetSecurityOrigin();
-    // FIXME: Can this be removed when CSP moves to browser?
-    ContentSecurityPolicy* csp =
-        GetFrame()->GetDocument()->GetContentSecurityPolicy();
-    context->AllowCodeGenerationFromStrings(csp->AllowEval(
-        nullptr, SecurityViolationReportingPolicy::kSuppressReporting,
-        ContentSecurityPolicy::kWillNotThrowException, g_empty_string));
-    context->SetErrorMessageForCodeGenerationFromStrings(
-        V8String(GetIsolate(), csp->EvalDisabledErrorMessage()));
   } else {
     UpdateActivityLogger();
     origin = world_->IsolatedWorldSecurityOrigin();
@@ -194,28 +227,11 @@ void LocalWindowProxy::CreateContext() {
   // TODO(yukishiino): Remove this CHECK once crbug.com/713699 gets fixed.
   CHECK(IsMainThread());
 
-  Vector<const char*> extension_names;
-  // Dynamically tell v8 about our extensions now.
-  if (GetFrame()->Client()->AllowScriptExtensions()) {
-    const V8Extensions& extensions = ScriptController::RegisteredExtensions();
-    extension_names.ReserveInitialCapacity(extensions.size());
-    for (const auto* extension : extensions)
-      extension_names.push_back(extension->name());
-  }
-  v8::ExtensionConfiguration extension_configuration(extension_names.size(),
-                                                     extension_names.data());
+  v8::ExtensionConfiguration extension_configuration =
+      ScriptController::ExtensionsFor(GetFrame()->GetDocument());
 
   v8::Local<v8::Context> context;
   {
-    DEFINE_STATIC_LOCAL(
-        CustomCountHistogram, main_frame_hist,
-        ("Blink.Binding.CreateV8ContextForMainFrame", 0, 10000000, 50));
-    DEFINE_STATIC_LOCAL(
-        CustomCountHistogram, non_main_frame_hist,
-        ("Blink.Binding.CreateV8ContextForNonMainFrame", 0, 10000000, 50));
-    ScopedUsHistogramTimer timer(
-        GetFrame()->IsMainFrame() ? main_frame_hist : non_main_frame_hist);
-
     v8::Isolate* isolate = GetIsolate();
     V8PerIsolateData::UseCounterDisabledScope use_counter_disabled(
         V8PerIsolateData::From(isolate));
@@ -229,7 +245,7 @@ void LocalWindowProxy::CreateContext() {
     // in some cases, e.g. loading XML files.
     if (context.IsEmpty()) {
       v8::Local<v8::ObjectTemplate> global_template =
-          V8Window::domTemplate(isolate, World())->InstanceTemplate();
+          V8Window::DomTemplate(isolate, World())->InstanceTemplate();
       CHECK(!global_template.IsEmpty());
       context = v8::Context::New(isolate, &extension_configuration,
                                  global_template, global_proxy);
@@ -242,9 +258,7 @@ void LocalWindowProxy::CreateContext() {
   DidAttachGlobalObject();
 #endif
 
-  script_state_ = ScriptState::Create(context, world_);
-
-  InitializeV8ExtrasBinding(script_state_);
+  script_state_ = MakeGarbageCollected<ScriptState>(context, world_);
 
   DCHECK(lifecycle_ == Lifecycle::kContextIsUninitialized ||
          lifecycle_ == Lifecycle::kGlobalObjectIsDetached);
@@ -275,7 +289,7 @@ void LocalWindowProxy::InstallConditionalFeatures() {
   wrapper_type_info->InstallConditionalFeatures(
       context, World(), global_proxy, unused_prototype_object,
       unused_interface_object,
-      wrapper_type_info->domTemplate(GetIsolate(), World()));
+      wrapper_type_info->DomTemplate(GetIsolate(), World()));
 
   if (World().IsMainWorld()) {
     // For the main world, install any remaining conditional bindings (i.e.
@@ -466,16 +480,16 @@ static v8::Local<v8::Value> GetNamedProperty(
     v8::Local<v8::Object> creation_context,
     v8::Isolate* isolate) {
   if (!html_document->HasNamedItem(key))
-    return V8Undefined();
+    return v8::Local<v8::Value>();
 
   DocumentNameCollection* items = html_document->DocumentNamedItems(key);
   if (items->IsEmpty())
-    return V8Undefined();
+    return v8::Local<v8::Value>();
 
   if (items->HasExactlyOneItem()) {
     HTMLElement* element = items->Item(0);
     DCHECK(element);
-    if (auto* iframe = ToHTMLIFrameElementOrNull(*element)) {
+    if (auto* iframe = DynamicTo<HTMLIFrameElement>(*element)) {
       if (Frame* frame = iframe->ContentFrame())
         return ToV8(frame->DomWindow(), creation_context, isolate);
     }

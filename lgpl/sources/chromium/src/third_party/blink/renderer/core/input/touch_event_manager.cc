@@ -20,9 +20,8 @@
 #include "third_party/blink/renderer/core/layout/hit_test_canvas_result.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -66,24 +65,18 @@ const AtomicString& TouchEventNameForPointerEventType(
     WebInputEvent::Type type) {
   switch (type) {
     case WebInputEvent::kPointerUp:
-      return EventTypeNames::touchend;
+      return event_type_names::kTouchend;
     case WebInputEvent::kPointerCancel:
-      return EventTypeNames::touchcancel;
+      return event_type_names::kTouchcancel;
     case WebInputEvent::kPointerDown:
-      return EventTypeNames::touchstart;
+      return event_type_names::kTouchstart;
     case WebInputEvent::kPointerMove:
-      return EventTypeNames::touchmove;
+      return event_type_names::kTouchmove;
     default:
       NOTREACHED();
       return g_empty_atom;
   }
 }
-
-enum TouchEventDispatchResultType {
-  kUnhandledTouches,  // Unhandled touch events.
-  kHandledTouches,    // Handled touch events.
-  kTouchEventDispatchResultTypeMax,
-};
 
 WebTouchPoint::State TouchPointStateFromPointerEventType(
     WebInputEvent::Type type,
@@ -221,10 +214,10 @@ Touch* TouchEventManager::CreateDomTouch(
       FloatSize(transformed_event.width / 2.f, transformed_event.height / 2.f)
           .ScaledBy(scale_factor);
 
-  return Touch::Create(target_frame, touch_node, point_attr->event_.id,
-                       transformed_event.PositionInScreen(), document_point,
-                       adjusted_radius, transformed_event.rotation_angle,
-                       transformed_event.force, region_id);
+  return MakeGarbageCollected<Touch>(
+      target_frame, touch_node, point_attr->event_.id,
+      transformed_event.PositionInScreen(), document_point, adjusted_radius,
+      transformed_event.rotation_angle, transformed_event.force, region_id);
 }
 
 WebCoalescedInputEvent TouchEventManager::GenerateWebCoalescedInputEvent() {
@@ -251,6 +244,10 @@ WebCoalescedInputEvent TouchEventManager::GenerateWebCoalescedInputEvent() {
     event.touches[event.touches_length++] =
         CreateWebTouchPointFromWebPointerEvent(touch_pointer_event,
                                                touch_point_attribute->stale_);
+    if (!touch_point_attribute->stale_) {
+      event.SetTimeStamp(std::max(event.TimeStamp(),
+                                  touch_point_attribute->event_.TimeStamp()));
+    }
 
     // Only change the touch event type from move. So if we have two pointers
     // in up and down state we just set the touch event type to the first one
@@ -283,7 +280,7 @@ WebCoalescedInputEvent TouchEventManager::GenerateWebCoalescedInputEvent() {
   } timestamp_based_event_comparison;
   std::sort(all_coalesced_events.begin(), all_coalesced_events.end(),
             timestamp_based_event_comparison);
-  WebCoalescedInputEvent result(event, std::vector<const WebInputEvent*>());
+  WebCoalescedInputEvent result(event, {}, {});
   for (const auto& web_pointer_event : all_coalesced_events) {
     if (web_pointer_event.GetType() == WebInputEvent::kPointerDown) {
       // TODO(crbug.com/732842): Technically we should never receive the
@@ -481,9 +478,9 @@ TouchEventManager::DispatchTouchEventFromAccumulatdTouchPoints() {
       DispatchEventResult dom_dispatch_result =
           touch_event_target->DispatchEvent(*touch_event);
 
-      event_result = EventHandlingUtil::MergeEventResult(
+      event_result = event_handling_util::MergeEventResult(
           event_result,
-          EventHandlingUtil::ToWebInputEventResult(dom_dispatch_result));
+          event_handling_util::ToWebInputEventResult(dom_dispatch_result));
     }
   }
 
@@ -502,7 +499,7 @@ TouchEventManager::DispatchTouchEventFromAccumulatdTouchPoints() {
 
 void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
     const WebPointerEvent& event,
-    const EventHandlingUtil::PointerEventTarget& pointer_event_target) {
+    const event_handling_util::PointerEventTarget& pointer_event_target) {
   // Touch events implicitly capture to the touched node, and don't change
   // active/hover states themselves (Gesture events do). So we only need
   // to hit-test on touchstart and when the target could be different than
@@ -514,9 +511,10 @@ void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
   // some tests that take advantage of it. There may also be edge
   // cases in the browser where this happens.
   // See http://crbug.com/345372.
-  touch_attribute_map_.Set(event.id, new TouchPointAttributes(event));
+  touch_attribute_map_.Set(event.id,
+                           MakeGarbageCollected<TouchPointAttributes>(event));
 
-  Node* touch_node = pointer_event_target.target_node;
+  Node* touch_node = pointer_event_target.target_element;
   String region = pointer_event_target.region;
 
   HitTestRequest::HitTestRequestType hit_type = HitTestRequest::kTouchEvent |
@@ -533,10 +531,10 @@ void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
   if (touch_sequence_document_ &&
       (!touch_node || &touch_node->GetDocument() != touch_sequence_document_)) {
     if (touch_sequence_document_->GetFrame()) {
-      HitTestLocation location(LayoutPoint(
+      HitTestLocation location(PhysicalOffset::FromFloatPointRound(
           touch_sequence_document_->GetFrame()->View()->ConvertFromRootFrame(
               event.PositionInWidget())));
-      result = EventHandlingUtil::HitTestResultInFrame(
+      result = event_handling_util::HitTestResultInFrame(
           touch_sequence_document_->GetFrame(), location, hit_type);
       Node* node = result.InnerNode();
       if (!node)
@@ -572,7 +570,7 @@ void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
   attributes->region_ = region;
 
   TouchAction effective_touch_action =
-      TouchActionUtil::ComputeEffectiveTouchAction(*touch_node);
+      touch_action_util::ComputeEffectiveTouchAction(*touch_node);
 
   should_enforce_vertical_scroll_ =
       touch_sequence_document_->IsVerticalScrollEnforced();
@@ -595,7 +593,7 @@ void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
 void TouchEventManager::HandleTouchPoint(
     const WebPointerEvent& event,
     const Vector<WebPointerEvent>& coalesced_events,
-    const EventHandlingUtil::PointerEventTarget& pointer_event_target) {
+    const event_handling_util::PointerEventTarget& pointer_event_target) {
   DCHECK_GE(event.GetType(), WebInputEvent::kPointerTypeFirst);
   DCHECK_LE(event.GetType(), WebInputEvent::kPointerTypeLast);
   DCHECK_NE(event.GetType(), WebInputEvent::kPointerCausedUaAction);
@@ -634,7 +632,8 @@ void TouchEventManager::HandleTouchPoint(
   // them. For those just keep them in the map with a null target. Later they
   // will be targeted at the |touch_sequence_document_|.
   if (!touch_attribute_map_.Contains(event.id)) {
-    touch_attribute_map_.insert(event.id, new TouchPointAttributes(event));
+    touch_attribute_map_.insert(
+        event.id, MakeGarbageCollected<TouchPointAttributes>(event));
   }
 
   TouchPointAttributes* attributes = touch_attribute_map_.at(event.id);

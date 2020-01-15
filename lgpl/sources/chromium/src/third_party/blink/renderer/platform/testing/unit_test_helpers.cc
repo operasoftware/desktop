@@ -35,8 +35,8 @@
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 
 namespace blink {
@@ -51,33 +51,27 @@ base::FilePath BlinkRootFilePath() {
       path.Append(FILE_PATH_LITERAL("third_party/blink")));
 }
 
-// TODO(tkent): Rename this function.  crbug.com/843412.
-base::FilePath LayoutTestsFilePath() {
+base::FilePath WebTestsFilePath() {
   base::FilePath path;
   base::PathService::Get(base::DIR_SOURCE_ROOT, &path);
-  base::FilePath web_tests_path = base::MakeAbsoluteFilePath(
-      path.Append(FILE_PATH_LITERAL("third_party/blink/web_tests")));
-  if (base::PathExists(web_tests_path))
-    return web_tests_path;
   return base::MakeAbsoluteFilePath(
-      path.Append(FILE_PATH_LITERAL("third_party/WebKit/LayoutTests")));
+      path.Append(FILE_PATH_LITERAL("third_party/blink/web_tests")));
 }
 
 }  // namespace
 
 void RunPendingTasks() {
-  Platform::Current()->CurrentThread()->GetTaskRunner()->PostTask(
-      FROM_HERE, WTF::Bind(&ExitRunLoop));
+  Thread::Current()->GetTaskRunner()->PostTask(FROM_HERE,
+                                               WTF::Bind(&ExitRunLoop));
 
   // We forbid GC in the tasks. Otherwise the registered GCTaskObserver tries
   // to run GC with NoHeapPointerOnStack.
-  ThreadState::Current()->EnterGCForbiddenScope();
+  ThreadState::GCForbiddenScope gc_forbidden(ThreadState::Current());
   EnterRunLoop();
-  ThreadState::Current()->LeaveGCForbiddenScope();
 }
 
-void RunDelayedTasks(TimeDelta delay) {
-  Platform::Current()->CurrentThread()->GetTaskRunner()->PostDelayedTask(
+void RunDelayedTasks(base::TimeDelta delay) {
+  Thread::Current()->GetTaskRunner()->PostDelayedTask(
       FROM_HERE, WTF::Bind(&ExitRunLoop), delay);
   EnterRunLoop();
 }
@@ -98,8 +92,8 @@ String BlinkRootDir() {
   return FilePathToWebString(BlinkRootFilePath());
 }
 
-String BlinkLayoutTestsDir() {
-  return FilePathToWebString(LayoutTestsFilePath());
+String BlinkWebTestsDir() {
+  return FilePathToWebString(WebTestsFilePath());
 }
 
 String ExecutableDir() {
@@ -122,6 +116,14 @@ String PlatformTestDataPath(const String& relative_path) {
           .Append(WebStringToFilePath(relative_path)));
 }
 
+String AccessibilityTestDataPath(const String& relative_path) {
+  return FilePathToWebString(
+      BlinkRootFilePath()
+          .Append(
+              FILE_PATH_LITERAL("renderer/modules/accessibility/testing/data"))
+          .Append(WebStringToFilePath(relative_path)));
+}
+
 scoped_refptr<SharedBuffer> ReadFromFile(const String& path) {
   base::FilePath file_path = blink::WebStringToFilePath(path);
   std::string buffer;
@@ -129,21 +131,20 @@ scoped_refptr<SharedBuffer> ReadFromFile(const String& path) {
   return SharedBuffer::Create(buffer.data(), buffer.size());
 }
 
-LineReader::LineReader(const std::string& text) : text_(text), index_(0) {}
+LineReader::LineReader(const String& text) : text_(text), index_(0) {}
 
-bool LineReader::GetNextLine(std::string* line) {
-  line->clear();
+bool LineReader::GetNextLine(String* line) {
   if (index_ >= text_.length())
     return false;
 
-  size_t end_of_line_index = text_.find("\r\n", index_);
-  if (end_of_line_index == std::string::npos) {
-    *line = text_.substr(index_);
+  wtf_size_t end_of_line_index = text_.Find("\r\n", index_);
+  if (end_of_line_index == kNotFound) {
+    *line = text_.Substring(index_);
     index_ = text_.length();
     return true;
   }
 
-  *line = text_.substr(index_, end_of_line_index - index_);
+  *line = text_.Substring(index_, end_of_line_index - index_);
   index_ = end_of_line_index + 2;
   return true;
 }

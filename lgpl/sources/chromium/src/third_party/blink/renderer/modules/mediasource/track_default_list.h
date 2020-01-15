@@ -17,11 +17,12 @@ class TrackDefaultList final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static TrackDefaultList* Create();  // Creates an empty TrackDefaultList.
-
   // Implement the IDL
   static TrackDefaultList* Create(const HeapVector<Member<TrackDefault>>&,
                                   ExceptionState&);
+
+  TrackDefaultList();
+  explicit TrackDefaultList(const HeapVector<Member<TrackDefault>>&);
 
   unsigned length() const { return track_defaults_.size(); }
   TrackDefault* item(unsigned) const;
@@ -29,10 +30,6 @@ class TrackDefaultList final : public ScriptWrappable {
   void Trace(blink::Visitor*) override;
 
  private:
-  TrackDefaultList();
-
-  explicit TrackDefaultList(const HeapVector<Member<TrackDefault>>&);
-
   const HeapVector<Member<TrackDefault>> track_defaults_;
 };
 

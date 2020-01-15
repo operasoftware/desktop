@@ -11,21 +11,14 @@ namespace blink {
 
 class CORE_EXPORT SetCharacterDataCommand final : public SimpleEditCommand {
  public:
-  static SetCharacterDataCommand* Create(Text* node,
-                                         unsigned offset,
-                                         unsigned count,
-                                         const String& text) {
-    return new SetCharacterDataCommand(node, offset, count, text);
-  }
-
-  void Trace(blink::Visitor*) override;
-
- private:
   SetCharacterDataCommand(Text* node,
                           unsigned offset,
                           unsigned count,
                           const String& text);
 
+  void Trace(Visitor*) override;
+
+ private:
   // EditCommand implementation
   void DoApply(EditingState*) final;
   void DoUnapply() final;

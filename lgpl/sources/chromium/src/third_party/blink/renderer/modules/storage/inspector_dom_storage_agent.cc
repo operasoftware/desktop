@@ -29,6 +29,8 @@
 
 #include "third_party/blink/renderer/modules/storage/inspector_dom_storage_agent.h"
 
+#include "base/feature_list.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -124,8 +126,8 @@ Response InspectorDOMStorageAgent::getDOMStorageItems(
   if (!response.isSuccess())
     return response;
 
-  std::unique_ptr<protocol::Array<protocol::Array<String>>> storage_items =
-      protocol::Array<protocol::Array<String>>::create();
+  auto storage_items =
+      std::make_unique<protocol::Array<protocol::Array<String>>>();
 
   DummyExceptionStateForTesting exception_state;
   for (unsigned i = 0; i < storage_area->length(exception_state); ++i) {
@@ -137,11 +139,10 @@ Response InspectorDOMStorageAgent::getDOMStorageItems(
     response = ToResponse(exception_state);
     if (!response.isSuccess())
       return response;
-    std::unique_ptr<protocol::Array<String>> entry =
-        protocol::Array<String>::create();
-    entry->addItem(name);
-    entry->addItem(value);
-    storage_items->addItem(std::move(entry));
+    auto entry = std::make_unique<protocol::Array<String>>();
+    entry->emplace_back(name);
+    entry->emplace_back(value);
+    storage_items->emplace_back(std::move(entry));
   }
   *items = std::move(storage_items);
   return Response::OK();
@@ -219,9 +220,9 @@ Response InspectorDOMStorageAgent::FindStorageArea(
   if (is_local_storage) {
     if (!frame->GetDocument()->GetSecurityOrigin()->CanAccessLocalStorage())
       return Response::Error("Security origin cannot access local storage");
-    storage_area = StorageArea::Create(
+    storage_area = StorageArea::CreateForInspectorAgent(
         frame,
-        StorageController::GetInstance()->GetWebLocalStorageArea(
+        StorageController::GetInstance()->GetLocalStorageArea(
             frame->GetDocument()->GetSecurityOrigin()),
         StorageArea::StorageType::kLocalStorage);
     return Response::OK();
@@ -235,11 +236,11 @@ Response InspectorDOMStorageAgent::FindStorageArea(
     return Response::Error("SessionStorage is not supported");
   DCHECK(session_namespace->IsSessionStorage());
 
-  storage_area =
-      StorageArea::Create(frame,
-                          session_namespace->GetWebStorageArea(
-                              frame->GetDocument()->GetSecurityOrigin()),
-                          StorageArea::StorageType::kSessionStorage);
+  storage_area = StorageArea::CreateForInspectorAgent(
+      frame,
+      session_namespace->GetCachedArea(
+          frame->GetDocument()->GetSecurityOrigin()),
+      StorageArea::StorageType::kSessionStorage);
   return Response::OK();
 }
 

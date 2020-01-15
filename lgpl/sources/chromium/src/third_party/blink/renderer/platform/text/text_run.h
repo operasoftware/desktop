@@ -24,18 +24,19 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_TEXT_RUN_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_TEXT_RUN_H_
 
+#include <unicode/utf16.h>
+
+#include "base/containers/span.h"
 #include "base/optional.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/text/tab_size.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/text/text_justify.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-
-#include <SkRefCnt.h>
-#include <unicode/utf16.h>
+#include "third_party/skia/include/core/SkRefCnt.h"
 
 namespace blink {
 
@@ -49,8 +50,6 @@ class PLATFORM_EXPORT TextRun final {
     kForbidLeadingExpansion = 0 << 1,
     kAllowLeadingExpansion = 1 << 1,
   };
-
-  enum TextCodePath { kAuto = 0, kForceSimple = 1, kForceComplex = 2 };
 
   typedef unsigned ExpansionBehavior;
 
@@ -67,7 +66,7 @@ class PLATFORM_EXPORT TextRun final {
         xpos_(xpos),
         expansion_(expansion),
         expansion_behavior_(expansion_behavior),
-        is8_bit_(true),
+        is_8bit_(true),
         allow_tabs_(false),
         direction_(static_cast<unsigned>(direction)),
         directional_override_(directional_override),
@@ -91,7 +90,7 @@ class PLATFORM_EXPORT TextRun final {
         xpos_(xpos),
         expansion_(expansion),
         expansion_behavior_(expansion_behavior),
-        is8_bit_(false),
+        is_8bit_(false),
         allow_tabs_(false),
         direction_(static_cast<unsigned>(direction)),
         directional_override_(directional_override),
@@ -122,14 +121,14 @@ class PLATFORM_EXPORT TextRun final {
         normalize_space_(false),
         tab_size_(0) {
     if (!characters_length_) {
-      is8_bit_ = true;
+      is_8bit_ = true;
       data_.characters8 = nullptr;
     } else if (string.Is8Bit()) {
       data_.characters8 = string.Characters8();
-      is8_bit_ = true;
+      is_8bit_ = true;
     } else {
       data_.characters16 = string.Characters16();
-      is8_bit_ = false;
+      is_8bit_ = false;
     }
   }
 
@@ -163,6 +162,16 @@ class PLATFORM_EXPORT TextRun final {
     SECURITY_DCHECK(i < len_);
     DCHECK(!Is8Bit());
     return &data_.characters16[i];
+  }
+
+  // Prefer Span8() and Span16() to Characters8() and Characters16().
+  base::span<const LChar> Span8() const {
+    DCHECK(Is8Bit());
+    return {data_.characters8, len_};
+  }
+  base::span<const UChar> Span16() const {
+    DCHECK(!Is8Bit());
+    return {data_.characters16, len_};
   }
 
   const LChar* Characters8() const {
@@ -199,7 +208,7 @@ class PLATFORM_EXPORT TextRun final {
 
   const void* Bytes() const { return data_.bytes_; }
 
-  bool Is8Bit() const { return is8_bit_; }
+  bool Is8Bit() const { return is_8bit_; }
   unsigned length() const { return len_; }
   unsigned CharactersLength() const { return characters_length_; }
 
@@ -211,12 +220,12 @@ class PLATFORM_EXPORT TextRun final {
   void SetText(const LChar* c, unsigned len) {
     data_.characters8 = c;
     len_ = len;
-    is8_bit_ = true;
+    is_8bit_ = true;
   }
   void SetText(const UChar* c, unsigned len) {
     data_.characters16 = c;
     len_ = len;
-    is8_bit_ = false;
+    is_8bit_ = false;
   }
   void SetText(const String&);
   void SetCharactersLength(unsigned characters_length) {
@@ -287,7 +296,7 @@ class PLATFORM_EXPORT TextRun final {
 
   float expansion_;
   ExpansionBehavior expansion_behavior_ : 2;
-  unsigned is8_bit_ : 1;
+  unsigned is_8bit_ : 1;
   unsigned allow_tabs_ : 1;
   unsigned direction_ : 1;
   // Was this direction set by an override character.

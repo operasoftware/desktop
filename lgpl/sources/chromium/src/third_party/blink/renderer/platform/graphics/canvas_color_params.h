@@ -8,11 +8,12 @@
 #include "components/viz/common/resources/resource_format.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "ui/gfx/buffer_types.h"
 
-class SkCanvas;
+class SkSurfaceProps;
 
 namespace cc {
 class PaintCanvas;
@@ -26,36 +27,33 @@ namespace blink {
 
 enum CanvasColorSpace {
   kSRGBCanvasColorSpace,
+  kLinearRGBCanvasColorSpace,
   kRec2020CanvasColorSpace,
   kP3CanvasColorSpace,
 };
 
 enum CanvasPixelFormat {
   kRGBA8CanvasPixelFormat,
-  kRGB10A2CanvasPixelFormat,
-  kRGBA12CanvasPixelFormat,
   kF16CanvasPixelFormat,
 };
 
 class PLATFORM_EXPORT CanvasColorParams {
+  DISALLOW_NEW();
+
  public:
   // The default constructor will create an output-blended 8-bit surface.
   CanvasColorParams();
   CanvasColorParams(CanvasColorSpace, CanvasPixelFormat, OpacityMode);
-  explicit CanvasColorParams(const sk_sp<SkColorSpace> color_space,
-                             SkColorType color_type);
+  CanvasColorParams(const CanvasColorParams& params, bool force_rgba);
   explicit CanvasColorParams(const SkImageInfo&);
+
   CanvasColorSpace ColorSpace() const { return color_space_; }
   CanvasPixelFormat PixelFormat() const { return pixel_format_; }
   OpacityMode GetOpacityMode() const { return opacity_mode_; }
 
-  void SetCanvasColorSpace(CanvasColorSpace);
-  void SetCanvasPixelFormat(CanvasPixelFormat);
-  void SetOpacityMode(OpacityMode);
-
-  // Indicates whether rendering needs to go through an SkColorSpaceXformCanvas
-  // in order to enforce non-gamma-aware pixel math behaviour.
-  bool NeedsSkColorSpaceXformCanvas() const;
+  void SetCanvasColorSpace(CanvasColorSpace c) { color_space_ = c; }
+  void SetCanvasPixelFormat(CanvasPixelFormat f) { pixel_format_ = f; }
+  void SetOpacityMode(OpacityMode m) { opacity_mode_ = m; }
 
   // Indicates if pixels in this canvas color settings require any color
   // conversion to be used in the passed canvas color settings.
@@ -66,10 +64,6 @@ class PLATFORM_EXPORT CanvasColorParams {
   // in sRGB (for which we wrap the canvas into a PaintCanvas along with an
   // SkColorSpaceXformCanvas).
   sk_sp<SkColorSpace> GetSkColorSpaceForSkSurfaces() const;
-
-  // Wraps an SkCanvas into a PaintCanvas, along with an SkColorSpaceXformCanvas
-  // if necessary.
-  std::unique_ptr<cc::PaintCanvas> WrapCanvas(SkCanvas*) const;
 
   // The pixel format to use for allocating SkSurfaces.
   SkColorType GetSkColorType() const;
@@ -95,9 +89,13 @@ class PLATFORM_EXPORT CanvasColorParams {
   viz::ResourceFormat TransferableResourceFormat() const;
 
  private:
+  CanvasColorParams(const sk_sp<SkColorSpace> color_space,
+                    SkColorType color_type);
+
   CanvasColorSpace color_space_ = kSRGBCanvasColorSpace;
   CanvasPixelFormat pixel_format_ = kRGBA8CanvasPixelFormat;
   OpacityMode opacity_mode_ = kNonOpaque;
+  bool force_rgba_ = false;
 };
 
 }  // namespace blink

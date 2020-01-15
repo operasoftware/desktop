@@ -4,19 +4,19 @@
 
 #include "third_party/blink/renderer/core/loader/http_equiv.h"
 
+#include "third_party/blink/public/platform/web_content_settings_client.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/scriptable_document_parser.h"
-#include "third_party/blink/renderer/core/frame/content_settings_client.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/private/frame_client_hints_preferences_context.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/client_hints_preferences.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
@@ -47,18 +47,17 @@ bool IsFirstPartyOrigin(Frame* frame, const KURL& url) {
 // JavaScript was blocked from being executed.
 bool AllowScriptFromSourceWithoutNotifying(
     const KURL& url,
-    ContentSettingsClient* settings_client,
+    WebContentSettingsClient* settings_client,
     Settings* settings) {
-  if (settings_client && !settings_client->AllowScriptFromSource(
-                             !settings || settings->GetScriptEnabled(), url)) {
-    return false;
-  }
-  return true;
+  bool allow_script = !settings || settings->GetScriptEnabled();
+  if (settings_client)
+    allow_script = settings_client->AllowScriptFromSource(allow_script, url);
+  return allow_script;
 }
 
 // Notifies content settings client of persistent client hint headers.
 void NotifyPersistentClientHintsToContentSettingsClient(Document& document) {
-  TimeDelta persist_duration =
+  base::TimeDelta persist_duration =
       document.GetFrame()->GetClientHintsPreferences().GetPersistDuration();
   if (persist_duration.InSeconds() <= 0)
     return;
@@ -78,8 +77,10 @@ void NotifyPersistentClientHintsToContentSettingsClient(Document& document) {
     return;
   }
 
-  document.GetFrame()->GetContentSettingsClient()->PersistClientHints(
-      enabled_client_hints, persist_duration, document.Url());
+  if (auto* settings_client = document.GetFrame()->GetContentSettingsClient()) {
+    settings_client->PersistClientHints(enabled_client_hints, persist_duration,
+                                        document.Url());
+  }
 }
 
 }  // namespace
@@ -104,12 +105,13 @@ void HttpEquiv::Process(Document& document,
     document.ParseDNSPrefetchControlHeader(content);
   } else if (EqualIgnoringASCIICase(equiv, "x-frame-options")) {
     document.AddConsoleMessage(ConsoleMessage::Create(
-        kSecurityMessageSource, kErrorMessageLevel,
+        mojom::ConsoleMessageSource::kSecurity,
+        mojom::ConsoleMessageLevel::kError,
         "X-Frame-Options may only be set via an HTTP header sent along with a "
         "document. It may not be set inside <meta>."));
-  } else if (EqualIgnoringASCIICase(equiv, HTTPNames::Accept_CH)) {
+  } else if (EqualIgnoringASCIICase(equiv, http_names::kAcceptCH)) {
     ProcessHttpEquivAcceptCH(document, content);
-  } else if (EqualIgnoringASCIICase(equiv, HTTPNames::Accept_CH_Lifetime)) {
+  } else if (EqualIgnoringASCIICase(equiv, http_names::kAcceptCHLifetime)) {
     ProcessHttpEquivAcceptCHLifetime(document, content);
   } else if (EqualIgnoringASCIICase(equiv, "content-security-policy") ||
              EqualIgnoringASCIICase(equiv,
@@ -118,9 +120,9 @@ void HttpEquiv::Process(Document& document,
       ProcessHttpEquivContentSecurityPolicy(document, equiv, content);
     else
       document.GetContentSecurityPolicy()->ReportMetaOutsideHead(content);
-  } else if (EqualIgnoringASCIICase(equiv, HTTPNames::Origin_Trial)) {
+  } else if (EqualIgnoringASCIICase(equiv, http_names::kOriginTrial)) {
     if (in_document_head_element)
-      OriginTrialContext::FromOrCreate(&document)->AddToken(content);
+      document.GetOriginTrialContext()->AddToken(content);
   }
 }
 
@@ -181,9 +183,9 @@ void HttpEquiv::ProcessHttpEquivRefresh(Document& document,
                                         const AtomicString& content,
                                         Element* element) {
   UseCounter::Count(document, WebFeature::kMetaRefresh);
-  if (!document.GetContentSecurityPolicy()->AllowInlineScript(
-          element, NullURL(), "", OrdinalNumber(), "",
-          ContentSecurityPolicy::InlineType::kBlock,
+  if (!document.GetContentSecurityPolicy()->AllowInline(
+          ContentSecurityPolicy::InlineType::kScript, element, "" /* content */,
+          "" /* nonce */, NullURL(), OrdinalNumber(),
           SecurityViolationReportingPolicy::kSuppressReporting)) {
     UseCounter::Count(document,
                       WebFeature::kMetaRefreshWhenCSPBlocksInlineScript);
@@ -195,20 +197,11 @@ void HttpEquiv::ProcessHttpEquivRefresh(Document& document,
 void HttpEquiv::ProcessHttpEquivSetCookie(Document& document,
                                           const AtomicString& content,
                                           Element* element) {
-  Deprecation::CountDeprecation(document, WebFeature::kMetaSetCookie);
-
-  if (!document.GetContentSecurityPolicy()->AllowInlineScript(
-          element, NullURL(), "", OrdinalNumber(), "",
-          ContentSecurityPolicy::InlineType::kBlock,
-          SecurityViolationReportingPolicy::kSuppressReporting)) {
-    UseCounter::Count(document,
-                      WebFeature::kMetaSetCookieWhenCSPBlocksInlineScript);
-  }
-
   document.AddConsoleMessage(ConsoleMessage::Create(
-      kSecurityMessageSource, kErrorMessageLevel,
+      mojom::ConsoleMessageSource::kSecurity,
+      mojom::ConsoleMessageLevel::kError,
       String::Format("Blocked setting the `%s` cookie from a `<meta>` tag.",
-                     content.Utf8().data())));
+                     content.Utf8().c_str())));
 }
 
 }  // namespace blink

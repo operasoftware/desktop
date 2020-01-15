@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/stl_util.h"
 #include "third_party/blink/public/common/screen_orientation/web_screen_orientation_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
@@ -15,6 +16,7 @@
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/screen_orientation/lock_orientation_callback.h"
 #include "third_party/blink/renderer/modules/screen_orientation/screen_orientation_controller_impl.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 // This code assumes that WebScreenOrientationType values are included in
@@ -58,7 +60,7 @@ static ScreenOrientationInfo* OrientationsMap(unsigned& length) {
       {portrait, kWebScreenOrientationLockPortrait},
       {landscape, kWebScreenOrientationLockLandscape},
       {natural, kWebScreenOrientationLockNatural}};
-  length = arraysize(orientation_map);
+  length = base::size(orientation_map);
 
   return orientation_map;
 }
@@ -100,7 +102,8 @@ ScreenOrientation* ScreenOrientation::Create(LocalFrame* frame) {
   if (!ScreenOrientationControllerImpl::From(*frame))
     return nullptr;
 
-  ScreenOrientation* orientation = new ScreenOrientation(frame);
+  ScreenOrientation* orientation =
+      MakeGarbageCollected<ScreenOrientation>(frame);
   DCHECK(orientation->Controller());
   // FIXME: ideally, we would like to provide the ScreenOrientationController
   // the case where it is not defined but for the moment, it is eagerly
@@ -119,7 +122,7 @@ ScreenOrientation::ScreenOrientation(LocalFrame* frame)
 ScreenOrientation::~ScreenOrientation() = default;
 
 const WTF::AtomicString& ScreenOrientation::InterfaceName() const {
-  return EventTargetNames::ScreenOrientation;
+  return event_target_names::kScreenOrientation;
 }
 
 ExecutionContext* ScreenOrientation::GetExecutionContext() const {
@@ -132,7 +135,7 @@ String ScreenOrientation::type() const {
   return OrientationTypeToString(type_);
 }
 
-unsigned short ScreenOrientation::angle() const {
+uint16_t ScreenOrientation::angle() const {
   return angle_;
 }
 
@@ -140,30 +143,30 @@ void ScreenOrientation::SetType(WebScreenOrientationType type) {
   type_ = type;
 }
 
-void ScreenOrientation::SetAngle(unsigned short angle) {
+void ScreenOrientation::SetAngle(uint16_t angle) {
   angle_ = angle;
 }
 
 ScriptPromise ScreenOrientation::lock(ScriptState* state,
                                       const AtomicString& lock_string) {
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(state);
   ScriptPromise promise = resolver->Promise();
 
   Document* document = GetFrame() ? GetFrame()->GetDocument() : nullptr;
 
   if (!document || !Controller()) {
-    DOMException* exception = DOMException::Create(
+    auto* exception = MakeGarbageCollected<DOMException>(
         DOMExceptionCode::kInvalidStateError,
         "The object is no longer associated to a document.");
     resolver->Reject(exception);
     return promise;
   }
 
-  if (document->IsSandboxed(kSandboxOrientationLock)) {
-    DOMException* exception =
-        DOMException::Create(DOMExceptionCode::kSecurityError,
-                             "The document is sandboxed and lacks the "
-                             "'allow-orientation-lock' flag.");
+  if (document->IsSandboxed(WebSandboxFlags::kOrientationLock)) {
+    auto* exception = MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kSecurityError,
+        "The document is sandboxed and lacks the "
+        "'allow-orientation-lock' flag.");
     resolver->Reject(exception);
     return promise;
   }

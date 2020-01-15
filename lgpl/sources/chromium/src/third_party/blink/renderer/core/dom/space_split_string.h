@@ -22,7 +22,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_SPACE_SPLIT_STRING_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -65,19 +65,17 @@ class CORE_EXPORT SpaceSplitString {
   const AtomicString& operator[](wtf_size_t i) const { return (*data_)[i]; }
 
  private:
-  class Data : public RefCounted<Data> {
+  class CORE_EXPORT Data : public RefCounted<Data> {
+    USING_FAST_MALLOC(Data);
+
    public:
     static scoped_refptr<Data> Create(const AtomicString&);
     static scoped_refptr<Data> CreateUnique(const Data&);
 
     ~Data();
 
-    bool Contains(const AtomicString& string) {
-      for (const auto& item : vector_) {
-        if (item == string)
-          return true;
-      }
-      return false;
+    bool Contains(const AtomicString& string) const {
+      return vector_.Contains(string);
     }
 
     bool ContainsAll(Data&);

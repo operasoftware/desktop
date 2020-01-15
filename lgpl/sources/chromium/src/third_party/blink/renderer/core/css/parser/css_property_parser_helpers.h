@@ -14,23 +14,28 @@
 #include "third_party/blink/renderer/core/css/parser/css_parser_mode.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
 #include "third_party/blink/renderer/core/frame/web_feature_forward.h"
+#include "third_party/blink/renderer/platform/geometry/length.h"  // For ValueRange
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/length.h"  // For ValueRange
 
 namespace blink {
 
 class CSSParserContext;
 class CSSPropertyValue;
 class CSSStringValue;
-class CSSURIValue;
 class CSSValuePair;
 class StylePropertyShorthand;
+
+namespace cssvalue {
+
+class CSSURIValue;
+
+}
 
 // When these functions are successful, they will consume all the relevant
 // tokens from the range and also consume any whitespace which follows. When
 // the start of the range doesn't match the type we're looking for, the range
 // will not be modified.
-namespace CSSPropertyParserHelpers {
+namespace css_property_parser_helpers {
 
 void Complete4Sides(CSSValue* side[4]);
 
@@ -45,6 +50,7 @@ enum class UnitlessQuirk { kAllow, kForbid };
 CSSPrimitiveValue* ConsumeInteger(
     CSSParserTokenRange&,
     double minimum_value = -std::numeric_limits<double>::max());
+CSSPrimitiveValue* ConsumeIntegerOrNumberCalc(CSSParserTokenRange&);
 CSSPrimitiveValue* ConsumePositiveInteger(CSSParserTokenRange&);
 bool ConsumeNumberRaw(CSSParserTokenRange&, double& result);
 CSSPrimitiveValue* ConsumeNumber(CSSParserTokenRange&, ValueRange);
@@ -53,16 +59,26 @@ CSSPrimitiveValue* ConsumeLength(CSSParserTokenRange&,
                                  ValueRange,
                                  UnitlessQuirk = UnitlessQuirk::kForbid);
 CSSPrimitiveValue* ConsumePercent(CSSParserTokenRange&, ValueRange);
+CSSPrimitiveValue* ConsumeAlphaValue(CSSParserTokenRange&);
 CSSPrimitiveValue* ConsumeLengthOrPercent(
     CSSParserTokenRange&,
     CSSParserMode,
     ValueRange,
     UnitlessQuirk = UnitlessQuirk::kForbid);
+CSSPrimitiveValue* ConsumeSVGGeometryPropertyLength(CSSParserTokenRange&,
+                                                    const CSSParserContext&,
+                                                    ValueRange);
 
 CSSPrimitiveValue* ConsumeAngle(
     CSSParserTokenRange&,
     const CSSParserContext*,
     base::Optional<WebFeature> unitless_zero_feature);
+CSSPrimitiveValue* ConsumeAngle(
+    CSSParserTokenRange&,
+    const CSSParserContext*,
+    base::Optional<WebFeature> unitless_zero_feature,
+    double minimum_value,
+    double maximum_value);
 CSSPrimitiveValue* ConsumeTime(CSSParserTokenRange&, ValueRange);
 CSSPrimitiveValue* ConsumeResolution(CSSParserTokenRange&);
 
@@ -75,10 +91,12 @@ inline bool IdentMatches(CSSValueID id);
 template <CSSValueID... allowedIdents>
 CSSIdentifierValue* ConsumeIdent(CSSParserTokenRange&);
 
-CSSCustomIdentValue* ConsumeCustomIdent(CSSParserTokenRange&);
+CSSCustomIdentValue* ConsumeCustomIdent(CSSParserTokenRange&,
+                                        const CSSParserContext&);
 CSSStringValue* ConsumeString(CSSParserTokenRange&);
 StringView ConsumeUrlAsStringView(CSSParserTokenRange&);
-CSSURIValue* ConsumeUrl(CSSParserTokenRange&, const CSSParserContext*);
+cssvalue::CSSURIValue* ConsumeUrl(CSSParserTokenRange&,
+                                  const CSSParserContext*);
 
 CSSValue* ConsumeColor(CSSParserTokenRange&,
                        CSSParserMode,
@@ -115,7 +133,11 @@ CSSValue* ConsumeImage(
     ConsumeGeneratedImagePolicy = ConsumeGeneratedImagePolicy::kAllow);
 CSSValue* ConsumeImageOrNone(CSSParserTokenRange&, const CSSParserContext*);
 
+CSSValue* ConsumeAxis(CSSParserTokenRange&);
+
 bool IsCSSWideKeyword(StringView);
+bool IsRevertKeyword(StringView);
+bool IsDefaultKeyword(StringView);
 
 CSSIdentifierValue* ConsumeShapeBox(CSSParserTokenRange&);
 
@@ -205,7 +227,7 @@ CSSValue* ConsumeTransformList(CSSParserTokenRange&, const CSSParserContext&);
 CSSValue* ConsumeFilterFunctionList(CSSParserTokenRange&,
                                     const CSSParserContext&);
 
-}  // namespace CSSPropertyParserHelpers
+}  // namespace css_property_parser_helpers
 
 }  // namespace blink
 

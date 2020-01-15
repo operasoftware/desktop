@@ -14,7 +14,6 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/loader/mixed_content_checker.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_availability.h"
@@ -25,6 +24,8 @@
 #include "third_party/blink/renderer/modules/presentation/presentation_controller.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_error.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -38,7 +39,6 @@ Settings* GetSettings(ExecutionContext* execution_context) {
 }
 
 bool IsKnownProtocolForPresentationUrl(const KURL& url) {
-  // TODO(crbug.com/733381): Restrict to https + custom schemes.
   return url.ProtocolIsInHTTPFamily() || url.ProtocolIs("cast") ||
          url.ProtocolIs("cast-dial");
 }
@@ -60,7 +60,7 @@ PresentationRequest* PresentationRequest::Create(
     const Vector<String>& urls,
     ExceptionState& exception_state) {
   if (To<Document>(execution_context)
-          ->IsSandboxed(kSandboxPresentationController)) {
+          ->IsSandboxed(WebSandboxFlags::kPresentationController)) {
     exception_state.ThrowSecurityError(
         "The document is sandboxed and lacks the 'allow-presentation' flag.");
     return nullptr;
@@ -96,11 +96,12 @@ PresentationRequest* PresentationRequest::Create(
     return nullptr;
   }
 
-  return new PresentationRequest(execution_context, parsed_urls);
+  return MakeGarbageCollected<PresentationRequest>(execution_context,
+                                                   parsed_urls);
 }
 
 const AtomicString& PresentationRequest::InterfaceName() const {
-  return EventTargetNames::PresentationRequest;
+  return event_target_names::kPresentationRequest;
 }
 
 ExecutionContext* PresentationRequest::GetExecutionContext() const {
@@ -112,7 +113,7 @@ void PresentationRequest::AddedEventListener(
     RegisteredEventListener& registered_listener) {
   EventTargetWithInlineData::AddedEventListener(event_type,
                                                 registered_listener);
-  if (event_type == EventTypeNames::connectionavailable) {
+  if (event_type == event_type_names::kConnectionavailable) {
     UseCounter::Count(
         GetExecutionContext(),
         WebFeature::kPresentationRequestConnectionAvailableEventListener);
@@ -132,19 +133,6 @@ bool PresentationRequest::HasPendingActivity() const {
                                        ScriptPromisePropertyBase::kPending;
 }
 
-// static
-void PresentationRequest::RecordStartOriginTypeAccess(
-    ExecutionContext& execution_context) {
-  if (execution_context.IsSecureContext()) {
-    UseCounter::Count(&execution_context,
-                      WebFeature::kPresentationRequestStartSecureOrigin);
-  } else {
-    Deprecation::CountDeprecation(
-        &execution_context,
-        WebFeature::kPresentationRequestStartInsecureOrigin);
-  }
-}
-
 ScriptPromise PresentationRequest::start(ScriptState* script_state) {
   ExecutionContext* execution_context = GetExecutionContext();
   Settings* context_settings = GetSettings(execution_context);
@@ -158,7 +146,7 @@ ScriptPromise PresentationRequest::start(ScriptState* script_state) {
       !LocalFrame::HasTransientUserActivation(doc->GetFrame()))
     return ScriptPromise::RejectWithDOMException(
         script_state,
-        DOMException::Create(
+        MakeGarbageCollected<DOMException>(
             DOMExceptionCode::kInvalidAccessError,
             "PresentationRequest::start() requires user gesture."));
 
@@ -167,12 +155,11 @@ ScriptPromise PresentationRequest::start(ScriptState* script_state) {
   if (!controller)
     return ScriptPromise::RejectWithDOMException(
         script_state,
-        DOMException::Create(
+        MakeGarbageCollected<DOMException>(
             DOMExceptionCode::kInvalidStateError,
             "The PresentationRequest is no longer associated to a frame."));
 
-  RecordStartOriginTypeAccess(*execution_context);
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
 
   controller->GetPresentationService()->StartPresentation(
       urls_,
@@ -189,11 +176,11 @@ ScriptPromise PresentationRequest::reconnect(ScriptState* script_state,
   if (!controller)
     return ScriptPromise::RejectWithDOMException(
         script_state,
-        DOMException::Create(
+        MakeGarbageCollected<DOMException>(
             DOMExceptionCode::kInvalidStateError,
             "The PresentationRequest is no longer associated to a frame."));
 
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
 
   ControllerPresentationConnection* existing_connection =
       controller->FindExistingConnection(urls_, id);
@@ -219,17 +206,18 @@ ScriptPromise PresentationRequest::getAvailability(ScriptState* script_state) {
   if (!controller)
     return ScriptPromise::RejectWithDOMException(
         script_state,
-        DOMException::Create(
+        MakeGarbageCollected<DOMException>(
             DOMExceptionCode::kInvalidStateError,
             "The PresentationRequest is no longer associated to a frame."));
 
   if (!availability_property_) {
-    availability_property_ = new PresentationAvailabilityProperty(
-        ExecutionContext::From(script_state), this,
-        PresentationAvailabilityProperty::kReady);
+    availability_property_ =
+        MakeGarbageCollected<PresentationAvailabilityProperty>(
+            ExecutionContext::From(script_state), this,
+            PresentationAvailabilityProperty::kReady);
 
     controller->GetAvailabilityState()->RequestAvailability(
-        urls_, std::make_unique<PresentationAvailabilityCallbacks>(
+        urls_, MakeGarbageCollected<PresentationAvailabilityCallbacks>(
                    availability_property_, urls_));
   }
   return availability_property_->Promise(script_state->World());
@@ -247,20 +235,6 @@ void PresentationRequest::Trace(blink::Visitor* visitor) {
 
 PresentationRequest::PresentationRequest(ExecutionContext* execution_context,
                                          const Vector<KURL>& urls)
-    : ContextClient(execution_context), urls_(urls) {
-  RecordConstructorOriginTypeAccess(*execution_context);
-}
-
-// static
-void PresentationRequest::RecordConstructorOriginTypeAccess(
-    ExecutionContext& execution_context) {
-  if (execution_context.IsSecureContext()) {
-    UseCounter::Count(&execution_context,
-                      WebFeature::kPresentationRequestSecureOrigin);
-  } else {
-    UseCounter::Count(&execution_context,
-                      WebFeature::kPresentationRequestInsecureOrigin);
-  }
-}
+    : ContextClient(execution_context), urls_(urls) {}
 
 }  // namespace blink

@@ -43,15 +43,14 @@
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
-namespace URLTestHelpers {
+namespace url_test_helpers {
 
 WebURL RegisterMockedURLLoadFromBase(const WebString& base_url,
                                      const WebString& base_path,
                                      const WebString& file_name,
                                      const WebString& mime_type) {
   // fullURL = baseURL + fileName.
-  std::string full_url = std::string(base_url.Utf8().data()) +
-                         std::string(file_name.Utf8().data());
+  std::string full_url = base_url.Utf8() + file_name.Utf8();
 
   // filePath = basePath + ("/" +) fileName.
   base::FilePath file_path =
@@ -69,9 +68,9 @@ void RegisterMockedURLLoad(const WebURL& full_url,
   timing.Initialize();
 
   WebURLResponse response(full_url);
-  response.SetMIMEType(mime_type);
-  response.SetHTTPHeaderField(HTTPNames::Content_Type, mime_type);
-  response.SetHTTPStatusCode(200);
+  response.SetMimeType(mime_type);
+  response.SetHttpHeaderField(http_names::kContentType, mime_type);
+  response.SetHttpStatusCode(200);
   response.SetLoadTiming(timing);
 
   RegisterMockedURLLoadWithCustomResponse(full_url, file_path, response);
@@ -82,9 +81,9 @@ void RegisterMockedErrorURLLoad(const WebURL& full_url) {
   timing.Initialize();
 
   WebURLResponse response;
-  response.SetMIMEType("image/png");
-  response.SetHTTPHeaderField(HTTPNames::Content_Type, "image/png");
-  response.SetHTTPStatusCode(404);
+  response.SetMimeType("image/png");
+  response.SetHttpHeaderField(http_names::kContentType, "image/png");
+  response.SetHttpStatusCode(404);
   response.SetLoadTiming(timing);
 
   ResourceError error = ResourceError::Failure(full_url);
@@ -103,5 +102,19 @@ void RegisterMockedURLUnregister(const WebURL& url) {
   Platform::Current()->GetURLLoaderMockFactory()->UnregisterURL(url);
 }
 
-}  // namespace URLTestHelpers
+void UnregisterAllURLsAndClearMemoryCache() {
+  Platform::Current()
+      ->GetURLLoaderMockFactory()
+      ->UnregisterAllURLsAndClearMemoryCache();
+}
+
+void SetLoaderDelegate(WebURLLoaderTestDelegate* delegate) {
+  Platform::Current()->GetURLLoaderMockFactory()->SetLoaderDelegate(delegate);
+}
+
+void ServeAsynchronousRequests() {
+  Platform::Current()->GetURLLoaderMockFactory()->ServeAsynchronousRequests();
+}
+
+}  // namespace url_test_helpers
 }  // namespace blink

@@ -7,7 +7,7 @@
 
 #include "third_party/blink/renderer/core/layout/api/line_layout_box_model.h"
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
-#include "third_party/blink/renderer/platform/layout_unit.h"
+#include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 
 namespace blink {
 
@@ -66,9 +66,9 @@ class LineLayoutInline : public LineLayoutBoxModel {
   LineBoxList* LineBoxes() { return ToInline()->MutableLineBoxes(); }
 
   bool HitTestCulledInline(HitTestResult& result,
-                           const HitTestLocation& location_in_container,
-                           const LayoutPoint& accumulated_offset) {
-    return ToInline()->HitTestCulledInline(result, location_in_container,
+                           const HitTestLocation& hit_test_location,
+                           const PhysicalOffset& accumulated_offset) {
+    return ToInline()->HitTestCulledInline(result, hit_test_location,
                                            accumulated_offset);
   }
 

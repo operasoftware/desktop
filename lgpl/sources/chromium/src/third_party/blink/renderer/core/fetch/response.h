@@ -5,7 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_RESPONSE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_RESPONSE_H_
 
-#include "third_party/blink/public/mojom/fetch/fetch_api_response.mojom-blink.h"
+#include "services/network/public/mojom/fetch_api.mojom-blink.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_response.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -24,7 +25,6 @@ namespace blink {
 class ExceptionState;
 class ResponseInit;
 class ScriptState;
-class WebServiceWorkerResponse;
 
 class CORE_EXPORT Response final : public Body {
   DEFINE_WRAPPERTYPEINFO();
@@ -36,13 +36,13 @@ class CORE_EXPORT Response final : public Body {
   static Response* Create(ScriptState*, ExceptionState&);
   static Response* Create(ScriptState*,
                           ScriptValue body,
-                          const ResponseInit&,
+                          const ResponseInit*,
                           ExceptionState&);
 
   static Response* Create(ScriptState*,
                           BodyStreamBuffer*,
                           const String& content_type,
-                          const ResponseInit&,
+                          const ResponseInit*,
                           ExceptionState&);
   static Response* Create(ExecutionContext*, FetchResponseData*);
   static Response* Create(ScriptState*, mojom::blink::FetchAPIResponse&);
@@ -52,8 +52,21 @@ class CORE_EXPORT Response final : public Body {
   static Response* error(ScriptState*);
   static Response* redirect(ScriptState*,
                             const String& url,
-                            unsigned short status,
+                            uint16_t status,
                             ExceptionState&);
+
+  static FetchResponseData* CreateUnfilteredFetchResponseDataWithoutBody(
+      ScriptState*,
+      mojom::blink::FetchAPIResponse&);
+
+  static FetchResponseData* FilterResponseData(
+      network::mojom::FetchResponseType response_type,
+      FetchResponseData* response,
+      WTF::Vector<WTF::String>& headers);
+
+  explicit Response(ExecutionContext*);
+  Response(ExecutionContext*, FetchResponseData*);
+  Response(ExecutionContext*, FetchResponseData*, Headers*);
 
   const FetchResponseData* GetResponse() const { return response_; }
 
@@ -61,7 +74,7 @@ class CORE_EXPORT Response final : public Body {
   String type() const;
   String url() const;
   bool redirected() const;
-  unsigned short status() const;
+  uint16_t status() const;
   bool ok() const;
   String statusText() const;
   Headers* headers() const;
@@ -73,9 +86,7 @@ class CORE_EXPORT Response final : public Body {
   // ScriptWrappable
   bool HasPendingActivity() const final;
 
-  // Does not call response.setBlobDataHandle().
-  void PopulateWebServiceWorkerResponse(
-      WebServiceWorkerResponse& /* response */);
+  // Does not contain the blob response body.
   mojom::blink::FetchAPIResponsePtr PopulateFetchAPIResponse();
 
   bool HasBody() const;
@@ -105,14 +116,10 @@ class CORE_EXPORT Response final : public Body {
  protected:
   // A version of IsBodyUsed() which catches exceptions and returns
   // false. Should never be used outside DCHECK().
-  bool IsBodyUsedForDCheck() override;
+  bool IsBodyUsedForDCheck(ExceptionState&) override;
 
  private:
-  explicit Response(ExecutionContext*);
-  Response(ExecutionContext*, FetchResponseData*);
-  Response(ExecutionContext*, FetchResponseData*, Headers*);
-
-  const TraceWrapperMember<FetchResponseData> response_;
+  const Member<FetchResponseData> response_;
   const Member<Headers> headers_;
   DISALLOW_COPY_AND_ASSIGN(Response);
 };

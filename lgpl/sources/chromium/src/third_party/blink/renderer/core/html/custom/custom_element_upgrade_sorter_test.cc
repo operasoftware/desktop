@@ -4,9 +4,8 @@
 
 #include "third_party/blink/renderer/core/html/custom/custom_element_upgrade_sorter.h"
 
-#include <memory>
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/bindings/core/v8/string_or_dictionary.h"
+#include "third_party/blink/renderer/bindings/core/v8/string_or_element_creation_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -17,6 +16,7 @@
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
@@ -28,8 +28,8 @@ class CustomElementUpgradeSorterTest : public PageTestBase {
   Element* CreateElementWithId(const char* local_name, const char* id) {
     NonThrowableExceptionState no_exceptions;
     Element* element = GetDocument().CreateElementForBinding(
-        local_name, StringOrDictionary(), no_exceptions);
-    element->setAttribute(HTMLNames::idAttr, id);
+        local_name, StringOrElementCreationOptions(), no_exceptions);
+    element->setAttribute(html_names::kIdAttr, id);
     return element;
   }
 
@@ -41,9 +41,9 @@ class CustomElementUpgradeSorterTest : public PageTestBase {
 TEST_F(CustomElementUpgradeSorterTest, inOtherDocument_notInSet) {
   NonThrowableExceptionState no_exceptions;
   Element* element = GetDocument().CreateElementForBinding(
-      "a-a", StringOrDictionary(), no_exceptions);
+      "a-a", StringOrElementCreationOptions(), no_exceptions);
 
-  Document* other_document = HTMLDocument::CreateForTest();
+  auto* other_document = MakeGarbageCollected<HTMLDocument>();
   other_document->AppendChild(element);
   EXPECT_EQ(other_document, element->ownerDocument())
       << "sanity: another document should have adopted an element on append";
@@ -60,7 +60,7 @@ TEST_F(CustomElementUpgradeSorterTest, inOtherDocument_notInSet) {
 TEST_F(CustomElementUpgradeSorterTest, oneCandidate) {
   NonThrowableExceptionState no_exceptions;
   Element* element = GetDocument().CreateElementForBinding(
-      "a-a", StringOrDictionary(), no_exceptions);
+      "a-a", StringOrElementCreationOptions(), no_exceptions);
   GetDocument().documentElement()->AppendChild(element);
 
   CustomElementUpgradeSorter sorter;

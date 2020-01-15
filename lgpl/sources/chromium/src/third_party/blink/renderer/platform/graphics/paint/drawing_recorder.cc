@@ -34,7 +34,7 @@ DrawingRecorder::DrawingRecorder(GraphicsContext& context,
   if (context.GetPaintController().DisplayItemConstructionIsDisabled())
     return;
 
-  // Must check DrawingRecorder::useCachedDrawingIfPossible before creating the
+  // Must check DrawingRecorder::UseCachedDrawingIfPossible before creating the
   // DrawingRecorder.
   DCHECK(RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled() ||
          !UseCachedDrawingIfPossible(context_, client_, type_));
@@ -71,7 +71,7 @@ DrawingRecorder::~DrawingRecorder() {
 #endif
 
   context_.GetPaintController().CreateAndAppend<DrawingDisplayItem>(
-      client_, type_, picture, known_to_be_opaque_);
+      client_, type_, std::move(picture), known_to_be_opaque_);
 }
 
 }  // namespace blink

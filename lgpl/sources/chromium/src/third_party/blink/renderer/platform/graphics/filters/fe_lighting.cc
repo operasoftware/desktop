@@ -27,12 +27,12 @@
 
 #include "third_party/blink/renderer/platform/graphics/filters/fe_lighting.h"
 
-#include "SkLightingImageFilter.h"
-#include "SkPoint3.h"
 #include "third_party/blink/renderer/platform/graphics/filters/distant_light_source.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/graphics/filters/point_light_source.h"
 #include "third_party/blink/renderer/platform/graphics/filters/spot_light_source.h"
+#include "third_party/skia/include/core/SkPoint3.h"
+#include "third_party/skia/include/effects/SkLightingImageFilter.h"
 
 namespace blink {
 
@@ -58,8 +58,8 @@ sk_sp<PaintFilter> FELighting::CreateImageFilter() {
     return CreateTransparentBlack();
   PaintFilter::CropRect rect = GetCropRect();
   Color light_color = AdaptColorToOperatingInterpolationSpace(lighting_color_);
-  sk_sp<PaintFilter> input(
-      PaintFilterBuilder::Build(InputEffect(0), OperatingInterpolationSpace()));
+  sk_sp<PaintFilter> input(paint_filter_builder::Build(
+      InputEffect(0), OperatingInterpolationSpace()));
   switch (light_source_->GetType()) {
     case LS_DISTANT: {
       DistantLightSource* distant_light_source =

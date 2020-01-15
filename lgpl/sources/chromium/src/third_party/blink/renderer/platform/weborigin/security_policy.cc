@@ -32,8 +32,7 @@
 
 #include "base/strings/pattern.h"
 #include "services/network/public/cpp/cors/origin_access_list.h"
-#include "services/network/public/mojom/cors_origin_pattern.mojom-shared.h"
-#include "third_party/blink/public/platform/web_referrer_policy.h"
+#include "services/network/public/mojom/referrer_policy.mojom-blink.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -64,9 +63,9 @@ static network::cors::OriginAccessList& GetOriginAccessList() {
 
 using OriginSet = HashSet<String>;
 
-static OriginSet& TrustworthyOriginSet() {
-  DEFINE_STATIC_LOCAL(OriginSet, trustworthy_origin_set, ());
-  return trustworthy_origin_set;
+static OriginSet& TrustworthyOriginSafelist() {
+  DEFINE_STATIC_LOCAL(OriginSet, safelist, ());
+  return safelist;
 }
 
 #if defined(OPERA_DESKTOP)
@@ -76,8 +75,22 @@ static OriginSet& FirstPartyForSubframes() {
 }
 #endif  // OPERA_DESKTOP
 
+network::mojom::ReferrerPolicy ReferrerPolicyResolveDefault(
+    network::mojom::ReferrerPolicy referrer_policy) {
+  if (referrer_policy == network::mojom::ReferrerPolicy::kDefault) {
+    if (RuntimeEnabledFeatures::ReducedReferrerGranularityEnabled()) {
+      return network::mojom::ReferrerPolicy::
+          kNoReferrerWhenDowngradeOriginWhenCrossOrigin;
+    } else {
+      return network::mojom::ReferrerPolicy::kNoReferrerWhenDowngrade;
+    }
+  }
+
+  return referrer_policy;
+}
+
 void SecurityPolicy::Init() {
-  TrustworthyOriginSet();
+  TrustworthyOriginSafelist();
 #if defined(OPERA_DESKTOP)
   FirstPartyForSubframes();
 #endif  // OPERA_DESKTOP
@@ -100,17 +113,12 @@ bool SecurityPolicy::ShouldHideReferrer(const KURL& url, const KURL& referrer) {
   return !url_is_secure_url;
 }
 
-Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
-                                          const KURL& url,
-                                          const String& referrer) {
-  ReferrerPolicy referrer_policy_no_default = referrer_policy;
-  if (referrer_policy_no_default == kReferrerPolicyDefault) {
-    if (RuntimeEnabledFeatures::ReducedReferrerGranularityEnabled()) {
-      referrer_policy_no_default = kReferrerPolicyStrictOriginWhenCrossOrigin;
-    } else {
-      referrer_policy_no_default = kReferrerPolicyNoReferrerWhenDowngrade;
-    }
-  }
+Referrer SecurityPolicy::GenerateReferrer(
+    network::mojom::ReferrerPolicy referrer_policy,
+    const KURL& url,
+    const String& referrer) {
+  network::mojom::ReferrerPolicy referrer_policy_no_default =
+      ReferrerPolicyResolveDefault(referrer_policy);
   if (referrer == Referrer::NoReferrer())
     return Referrer(Referrer::NoReferrer(), referrer_policy_no_default);
   DCHECK(!referrer.IsEmpty());
@@ -124,17 +132,17 @@ Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
     return Referrer(Referrer::NoReferrer(), referrer_policy_no_default);
 
   switch (referrer_policy_no_default) {
-    case kReferrerPolicyNever:
+    case network::mojom::ReferrerPolicy::kNever:
       return Referrer(Referrer::NoReferrer(), referrer_policy_no_default);
-    case kReferrerPolicyAlways:
+    case network::mojom::ReferrerPolicy::kAlways:
       return Referrer(referrer, referrer_policy_no_default);
-    case kReferrerPolicyOrigin: {
+    case network::mojom::ReferrerPolicy::kOrigin: {
       String origin = SecurityOrigin::Create(referrer_url)->ToString();
       // A security origin is not a canonical URL as it lacks a path. Add /
       // to turn it into a canonical URL we can use as referrer.
       return Referrer(origin + "/", referrer_policy_no_default);
     }
-    case kReferrerPolicyOriginWhenCrossOrigin: {
+    case network::mojom::ReferrerPolicy::kOriginWhenCrossOrigin: {
       scoped_refptr<const SecurityOrigin> referrer_origin =
           SecurityOrigin::Create(referrer_url);
       scoped_refptr<const SecurityOrigin> url_origin =
@@ -145,7 +153,7 @@ Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
       }
       break;
     }
-    case kReferrerPolicySameOrigin: {
+    case network::mojom::ReferrerPolicy::kSameOrigin: {
       scoped_refptr<const SecurityOrigin> referrer_origin =
           SecurityOrigin::Create(referrer_url);
       scoped_refptr<const SecurityOrigin> url_origin =
@@ -155,14 +163,15 @@ Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
       }
       return Referrer(referrer, referrer_policy_no_default);
     }
-    case kReferrerPolicyStrictOrigin: {
+    case network::mojom::ReferrerPolicy::kStrictOrigin: {
       String origin = SecurityOrigin::Create(referrer_url)->ToString();
       return Referrer(ShouldHideReferrer(url, referrer_url)
                           ? Referrer::NoReferrer()
                           : origin + "/",
                       referrer_policy_no_default);
     }
-    case kReferrerPolicyStrictOriginWhenCrossOrigin: {
+    case network::mojom::ReferrerPolicy::
+        kNoReferrerWhenDowngradeOriginWhenCrossOrigin: {
       scoped_refptr<const SecurityOrigin> referrer_origin =
           SecurityOrigin::Create(referrer_url);
       scoped_refptr<const SecurityOrigin> url_origin =
@@ -176,9 +185,9 @@ Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
       }
       break;
     }
-    case kReferrerPolicyNoReferrerWhenDowngrade:
+    case network::mojom::ReferrerPolicy::kNoReferrerWhenDowngrade:
       break;
-    case kReferrerPolicyDefault:
+    case network::mojom::ReferrerPolicy::kDefault:
       NOTREACHED();
       break;
   }
@@ -188,31 +197,32 @@ Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
       referrer_policy_no_default);
 }
 
-void SecurityPolicy::AddOriginTrustworthyWhiteList(const String& origin) {
+void SecurityPolicy::AddOriginToTrustworthySafelist(
+    const String& origin_or_pattern) {
 #if DCHECK_IS_ON()
   // Must be called before we start other threads.
   DCHECK(WTF::IsBeforeThreadCreated());
 #endif
-  TrustworthyOriginSet().insert(origin);
+  // Origins and hostname patterns must be canonicalized (including
+  // canonicalization to 8-bit strings) before being inserted into
+  // TrustworthyOriginSafelist().
+  CHECK(origin_or_pattern.Is8Bit());
+  TrustworthyOriginSafelist().insert(origin_or_pattern);
 }
 
-bool SecurityPolicy::IsOriginWhiteListedTrustworthy(
+bool SecurityPolicy::IsOriginTrustworthySafelisted(
     const SecurityOrigin& origin) {
-  // Early return if there are no whitelisted origins to avoid unnecessary
-  // allocations, copies, and frees.
-  if (origin.IsOpaque() || TrustworthyOriginSet().IsEmpty())
+  // Early return if |origin| cannot possibly be matched.
+  if (origin.IsOpaque() || TrustworthyOriginSafelist().IsEmpty())
     return false;
-  if (TrustworthyOriginSet().Contains(origin.ToRawString()))
+
+  if (TrustworthyOriginSafelist().Contains(origin.ToRawString()))
     return true;
 
   // KURL and SecurityOrigin hosts should be canonicalized to 8-bit strings.
   CHECK(origin.Host().Is8Bit());
   StringUTF8Adaptor host_adaptor(origin.Host());
-  for (const auto& origin_or_pattern : TrustworthyOriginSet()) {
-    // Origins and hostname patterns are expected to be canonicalized (including
-    // canonicalization to 8-bit strings) before being inserted into the
-    // TrustworthyOriginSet().
-    CHECK(origin_or_pattern.Is8Bit());
+  for (const auto& origin_or_pattern : TrustworthyOriginSafelist()) {
     StringUTF8Adaptor origin_or_pattern_adaptor(origin_or_pattern);
     if (base::MatchPattern(host_adaptor.AsStringPiece(),
                            origin_or_pattern_adaptor.AsStringPiece())) {
@@ -223,84 +233,77 @@ bool SecurityPolicy::IsOriginWhiteListedTrustworthy(
   return false;
 }
 
-bool SecurityPolicy::IsUrlWhiteListedTrustworthy(const KURL& url) {
+bool SecurityPolicy::IsUrlTrustworthySafelisted(const KURL& url) {
   // Early return to avoid initializing the SecurityOrigin.
-  if (TrustworthyOriginSet().IsEmpty())
+  if (TrustworthyOriginSafelist().IsEmpty())
     return false;
-  return IsOriginWhiteListedTrustworthy(*SecurityOrigin::Create(url).get());
+  return IsOriginTrustworthySafelisted(*SecurityOrigin::Create(url).get());
 }
 
 bool SecurityPolicy::IsOriginAccessAllowed(
     const SecurityOrigin* active_origin,
     const SecurityOrigin* target_origin) {
   MutexLocker lock(GetMutex());
-  return GetOriginAccessList().IsAllowed(active_origin->ToUrlOrigin(),
-                                         target_origin->ToUrlOrigin().GetURL());
+  return GetOriginAccessList().CheckAccessState(
+             active_origin->ToUrlOrigin(),
+             target_origin->ToUrlOrigin().GetURL()) ==
+         network::cors::OriginAccessList::AccessState::kAllowed;
 }
 
 bool SecurityPolicy::IsOriginAccessToURLAllowed(
     const SecurityOrigin* active_origin,
     const KURL& url) {
   MutexLocker lock(GetMutex());
-  return GetOriginAccessList().IsAllowed(active_origin->ToUrlOrigin(), url);
+  return GetOriginAccessList().CheckAccessState(active_origin->ToUrlOrigin(),
+                                                url) ==
+         network::cors::OriginAccessList::AccessState::kAllowed;
 }
 
 void SecurityPolicy::AddOriginAccessAllowListEntry(
     const SecurityOrigin& source_origin,
     const String& destination_protocol,
     const String& destination_domain,
-    bool allow_destination_subdomains,
-    const network::mojom::CORSOriginAccessMatchPriority priority) {
+    const uint16_t port,
+    const network::mojom::CorsDomainMatchMode domain_match_mode,
+    const network::mojom::CorsPortMatchMode port_match_mode,
+    const network::mojom::CorsOriginAccessMatchPriority priority) {
   MutexLocker lock(GetMutex());
   GetOriginAccessList().AddAllowListEntryForOrigin(
-      source_origin.ToUrlOrigin(), WebString(destination_protocol).Utf8(),
-      WebString(destination_domain).Utf8(), allow_destination_subdomains,
+      source_origin.ToUrlOrigin(), destination_protocol.Utf8(),
+      destination_domain.Utf8(), port, domain_match_mode, port_match_mode,
       priority);
-}
-
-void SecurityPolicy::ClearOriginAccessAllowListForOrigin(
-    const SecurityOrigin& source_origin) {
-  MutexLocker lock(GetMutex());
-  GetOriginAccessList().SetAllowListForOrigin(
-      source_origin.ToUrlOrigin(),
-      std::vector<network::mojom::CorsOriginPatternPtr>());
-}
-
-void SecurityPolicy::ClearOriginAccessBlockListForOrigin(
-    const SecurityOrigin& source_origin) {
-  MutexLocker lock(GetMutex());
-  GetOriginAccessList().SetBlockListForOrigin(
-      source_origin.ToUrlOrigin(),
-      std::vector<network::mojom::CorsOriginPatternPtr>());
-}
-
-void SecurityPolicy::ClearOriginAccessAllowList() {
-  MutexLocker lock(GetMutex());
-  GetOriginAccessList().ClearAllowList();
 }
 
 void SecurityPolicy::AddOriginAccessBlockListEntry(
     const SecurityOrigin& source_origin,
     const String& destination_protocol,
     const String& destination_domain,
-    bool allow_destination_subdomains,
-    const network::mojom::CORSOriginAccessMatchPriority priority) {
+    const uint16_t port,
+    const network::mojom::CorsDomainMatchMode domain_match_mode,
+    const network::mojom::CorsPortMatchMode port_match_mode,
+    const network::mojom::CorsOriginAccessMatchPriority priority) {
   MutexLocker lock(GetMutex());
   GetOriginAccessList().AddBlockListEntryForOrigin(
-      source_origin.ToUrlOrigin(), WebString(destination_protocol).Utf8(),
-      WebString(destination_domain).Utf8(), allow_destination_subdomains,
+      source_origin.ToUrlOrigin(), destination_protocol.Utf8(),
+      destination_domain.Utf8(), port, domain_match_mode, port_match_mode,
       priority);
 }
 
-void SecurityPolicy::ClearOriginAccessBlockList() {
+void SecurityPolicy::ClearOriginAccessListForOrigin(
+    const SecurityOrigin& source_origin) {
   MutexLocker lock(GetMutex());
-  GetOriginAccessList().ClearBlockList();
+  GetOriginAccessList().ClearForOrigin(source_origin.ToUrlOrigin());
+}
+
+void SecurityPolicy::ClearOriginAccessList() {
+  MutexLocker lock(GetMutex());
+  GetOriginAccessList().Clear();
 }
 
 bool SecurityPolicy::ReferrerPolicyFromString(
     const String& policy,
     ReferrerPolicyLegacyKeywordsSupport legacy_keywords_support,
-    ReferrerPolicy* result) {
+    network::mojom::ReferrerPolicy* result) {
   DCHECK(!policy.IsNull());
   bool support_legacy_keywords =
       (legacy_keywords_support == kSupportReferrerPolicyLegacyKeywords);
@@ -308,39 +311,40 @@ bool SecurityPolicy::ReferrerPolicyFromString(
   if (EqualIgnoringASCIICase(policy, "no-referrer") ||
       (support_legacy_keywords && (EqualIgnoringASCIICase(policy, "never") ||
                                    EqualIgnoringASCIICase(policy, "none")))) {
-    *result = kReferrerPolicyNever;
+    *result = network::mojom::ReferrerPolicy::kNever;
     return true;
   }
   if (EqualIgnoringASCIICase(policy, "unsafe-url") ||
       (support_legacy_keywords && EqualIgnoringASCIICase(policy, "always"))) {
-    *result = kReferrerPolicyAlways;
+    *result = network::mojom::ReferrerPolicy::kAlways;
     return true;
   }
   if (EqualIgnoringASCIICase(policy, "origin")) {
-    *result = kReferrerPolicyOrigin;
+    *result = network::mojom::ReferrerPolicy::kOrigin;
     return true;
   }
   if (EqualIgnoringASCIICase(policy, "origin-when-cross-origin") ||
       (support_legacy_keywords &&
        EqualIgnoringASCIICase(policy, "origin-when-crossorigin"))) {
-    *result = kReferrerPolicyOriginWhenCrossOrigin;
+    *result = network::mojom::ReferrerPolicy::kOriginWhenCrossOrigin;
     return true;
   }
   if (EqualIgnoringASCIICase(policy, "same-origin")) {
-    *result = kReferrerPolicySameOrigin;
+    *result = network::mojom::ReferrerPolicy::kSameOrigin;
     return true;
   }
   if (EqualIgnoringASCIICase(policy, "strict-origin")) {
-    *result = kReferrerPolicyStrictOrigin;
+    *result = network::mojom::ReferrerPolicy::kStrictOrigin;
     return true;
   }
   if (EqualIgnoringASCIICase(policy, "strict-origin-when-cross-origin")) {
-    *result = kReferrerPolicyStrictOriginWhenCrossOrigin;
+    *result = network::mojom::ReferrerPolicy::
+        kNoReferrerWhenDowngradeOriginWhenCrossOrigin;
     return true;
   }
   if (EqualIgnoringASCIICase(policy, "no-referrer-when-downgrade") ||
       (support_legacy_keywords && EqualIgnoringASCIICase(policy, "default"))) {
-    *result = kReferrerPolicyNoReferrerWhenDowngrade;
+    *result = network::mojom::ReferrerPolicy::kNoReferrerWhenDowngrade;
     return true;
   }
   return false;
@@ -358,13 +362,14 @@ inline bool IsASCIIAlphaOrHyphen(CharType c) {
 bool SecurityPolicy::ReferrerPolicyFromHeaderValue(
     const String& header_value,
     ReferrerPolicyLegacyKeywordsSupport legacy_keywords_support,
-    ReferrerPolicy* result) {
-  ReferrerPolicy referrer_policy = kReferrerPolicyDefault;
+    network::mojom::ReferrerPolicy* result) {
+  network::mojom::ReferrerPolicy referrer_policy =
+      network::mojom::ReferrerPolicy::kDefault;
 
   Vector<String> tokens;
   header_value.Split(',', true, tokens);
   for (const auto& token : tokens) {
-    ReferrerPolicy current_result;
+    network::mojom::ReferrerPolicy current_result;
     auto stripped_token = token.StripWhiteSpace();
     if (SecurityPolicy::ReferrerPolicyFromString(token.StripWhiteSpace(),
                                                  legacy_keywords_support,
@@ -381,7 +386,7 @@ bool SecurityPolicy::ReferrerPolicyFromHeaderValue(
     }
   }
 
-  if (referrer_policy == kReferrerPolicyDefault)
+  if (referrer_policy == network::mojom::ReferrerPolicy::kDefault)
     return false;
 
   *result = referrer_policy;
@@ -407,19 +412,5 @@ bool SecurityPolicy::IsOriginFirstPartyWhenTopLevel(
   return FirstPartyForSubframes().Contains(origin.ToRawString());
 }
 #endif  // OPERA_DESKTOP
-
-STATIC_ASSERT_ENUM(kWebReferrerPolicyAlways, kReferrerPolicyAlways);
-STATIC_ASSERT_ENUM(kWebReferrerPolicyDefault, kReferrerPolicyDefault);
-STATIC_ASSERT_ENUM(kWebReferrerPolicyNoReferrerWhenDowngrade,
-                   kReferrerPolicyNoReferrerWhenDowngrade);
-STATIC_ASSERT_ENUM(kWebReferrerPolicyNever, kReferrerPolicyNever);
-STATIC_ASSERT_ENUM(kWebReferrerPolicyOrigin, kReferrerPolicyOrigin);
-STATIC_ASSERT_ENUM(kWebReferrerPolicyOriginWhenCrossOrigin,
-                   kReferrerPolicyOriginWhenCrossOrigin);
-STATIC_ASSERT_ENUM(kWebReferrerPolicySameOrigin, kReferrerPolicySameOrigin);
-STATIC_ASSERT_ENUM(kWebReferrerPolicyStrictOrigin, kReferrerPolicyStrictOrigin);
-STATIC_ASSERT_ENUM(
-    kWebReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin,
-    kReferrerPolicyStrictOriginWhenCrossOrigin);
 
 }  // namespace blink

@@ -14,7 +14,8 @@
 namespace blink {
 
 class ExceptionState;
-class TransformStreamDefaultController;
+class ScriptState;
+class TransformStreamDefaultControllerInterface;
 class Visitor;
 
 // Interface to be implemented by C++ code that needs to create a
@@ -27,15 +28,19 @@ class Visitor;
 // uncollectable cycles implementations must not directly or indirectly strongly
 // reference any JS object.
 class CORE_EXPORT TransformStreamTransformer
-    : public GarbageCollectedFinalized<TransformStreamTransformer> {
+    : public GarbageCollected<TransformStreamTransformer> {
  public:
   TransformStreamTransformer() = default;
   virtual ~TransformStreamTransformer() = default;
 
   virtual void Transform(v8::Local<v8::Value> chunk,
-                         TransformStreamDefaultController*,
+                         TransformStreamDefaultControllerInterface*,
                          ExceptionState&) = 0;
-  virtual void Flush(TransformStreamDefaultController*, ExceptionState&) = 0;
+  virtual void Flush(TransformStreamDefaultControllerInterface*,
+                     ExceptionState&) = 0;
+
+  // Returns the ScriptState associated with this Transformer.
+  virtual ScriptState* GetScriptState() = 0;
 
   virtual void Trace(Visitor*) {}
 

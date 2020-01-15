@@ -11,7 +11,9 @@ MobileThrottling.ThrottlingSettingsTab = class extends UI.VBox {
     super(true);
     this.registerRequiredCSS('mobile_throttling/throttlingSettingsTab.css');
 
-    this.contentElement.createChild('div', 'header').textContent = Common.UIString('Network Throttling Profiles');
+    const header = this.contentElement.createChild('div', 'header');
+    header.textContent = ls`Network Throttling Profiles`;
+    UI.ARIAUtils.markAsHeading(header, 1);
 
     const addButton = UI.createTextButton(
         Common.UIString('Add custom profile...'), this._addButtonClicked.bind(this), 'add-conditions-button');
@@ -26,7 +28,6 @@ MobileThrottling.ThrottlingSettingsTab = class extends UI.VBox {
     this._customSetting.addChangeListener(this._conditionsUpdated, this);
 
     this.setDefaultFocusedElement(addButton);
-    this.contentElement.tabIndex = 0;
   }
 
   /**
@@ -41,8 +42,9 @@ MobileThrottling.ThrottlingSettingsTab = class extends UI.VBox {
     this._list.clear();
 
     const conditions = this._customSetting.get();
-    for (let i = 0; i < conditions.length; ++i)
+    for (let i = 0; i < conditions.length; ++i) {
       this._list.appendItem(conditions[i], true);
+    }
 
     this._list.appendSeparator();
   }
@@ -102,8 +104,9 @@ MobileThrottling.ThrottlingSettingsTab = class extends UI.VBox {
     conditions.latency = latency ? parseInt(latency, 10) : 0;
 
     const list = this._customSetting.get();
-    if (isNew)
+    if (isNew) {
       list.push(conditions);
+    }
     this._customSetting.set(list);
   }
 
@@ -126,8 +129,9 @@ MobileThrottling.ThrottlingSettingsTab = class extends UI.VBox {
    * @return {!UI.ListWidget.Editor}
    */
   _createEditor() {
-    if (this._editor)
+    if (this._editor) {
       return this._editor;
+    }
 
     const editor = new UI.ListWidget.Editor();
     this._editor = editor;
@@ -168,33 +172,36 @@ MobileThrottling.ThrottlingSettingsTab = class extends UI.VBox {
      * @param {*} item
      * @param {number} index
      * @param {!HTMLInputElement|!HTMLSelectElement} input
-     * @return {boolean}
+     * @return {!UI.ListWidget.ValidatorResult}
      */
     function titleValidator(item, index, input) {
       const value = input.value.trim();
-      return value.length > 0 && value.length < 50;
+      const valid = value.length > 0 && value.length < 50;
+      return {valid};
     }
 
     /**
      * @param {*} item
      * @param {number} index
      * @param {!HTMLInputElement|!HTMLSelectElement} input
-     * @return {boolean}
+     * @return {!UI.ListWidget.ValidatorResult}
      */
     function throughputValidator(item, index, input) {
       const value = input.value.trim();
-      return !value || (/^[\d]+(\.\d+)?|\.\d+$/.test(value) && value >= 0 && value <= 10000000);
+      const valid = !value || (/^[\d]+(\.\d+)?|\.\d+$/.test(value) && value >= 0 && value <= 10000000);
+      return {valid};
     }
 
     /**
      * @param {*} item
      * @param {number} index
      * @param {!HTMLInputElement|!HTMLSelectElement} input
-     * @return {boolean}
+     * @return {!UI.ListWidget.ValidatorResult}
      */
     function latencyValidator(item, index, input) {
       const value = input.value.trim();
-      return !value || (/^[\d]+$/.test(value) && value >= 0 && value <= 1000000);
+      const valid = !value || (/^[\d]+$/.test(value) && value >= 0 && value <= 1000000);
+      return {valid};
     }
   }
 };
@@ -205,13 +212,16 @@ MobileThrottling.ThrottlingSettingsTab = class extends UI.VBox {
  * @return {string}
  */
 MobileThrottling.throughputText = function(throughput, plainText) {
-  if (throughput < 0)
+  if (throughput < 0) {
     return '';
+  }
   const throughputInKbps = throughput / (1024 / 8);
   const delimiter = plainText ? '' : ' ';
-  if (throughputInKbps < 1024)
+  if (throughputInKbps < 1024) {
     return Common.UIString('%d%skb/s', throughputInKbps, delimiter);
-  if (throughputInKbps < 1024 * 10)
+  }
+  if (throughputInKbps < 1024 * 10) {
     return Common.UIString('%.1f%sMb/s', throughputInKbps / 1024, delimiter);
+  }
   return Common.UIString('%d%sMb/s', (throughputInKbps / 1024) | 0, delimiter);
 };

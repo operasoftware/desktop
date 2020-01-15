@@ -53,13 +53,12 @@ bool operator==(const IconURL& lhs, const IconURL& rhs) {
   return lhs.icon_type_ == rhs.icon_type_ &&
          lhs.is_default_icon_ == rhs.is_default_icon_ &&
          lhs.icon_url_ == rhs.icon_url_ && lhs.sizes_ == rhs.sizes_ &&
-         lhs.mime_type_ == rhs.mime_type_ && lhs.color_ == rhs.color_;
+         lhs.mime_type_ == rhs.mime_type_;
 }
 
 STATIC_ASSERT_ENUM(WebIconURL::kTypeInvalid, kInvalidIcon);
 STATIC_ASSERT_ENUM(WebIconURL::kTypeFavicon, kFavicon);
 STATIC_ASSERT_ENUM(WebIconURL::kTypeTouch, kTouchIcon);
 STATIC_ASSERT_ENUM(WebIconURL::kTypeTouchPrecomposed, kTouchPrecomposedIcon);
-STATIC_ASSERT_ENUM(WebIconURL::kTypePinned, kPinnedIcon);
 
 }  // namespace blink

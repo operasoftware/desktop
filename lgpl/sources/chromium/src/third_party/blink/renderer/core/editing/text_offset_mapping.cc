@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/core/editing/iterators/character_iterator.h"
 #include "third_party/blink/renderer/core/editing/iterators/text_iterator.h"
 #include "third_party/blink/renderer/core/editing/position.h"
+#include "third_party/blink/renderer/core/html/forms/text_control_element.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 
 namespace blink {
@@ -34,12 +35,12 @@ bool HasNonPsuedoNode(const LayoutObject& parent) {
 }
 
 bool CanBeInlineContentsContainer(const LayoutObject& layout_object) {
-  if (!layout_object.IsLayoutBlockFlow())
+  const auto* block_flow = DynamicTo<LayoutBlockFlow>(layout_object);
+  if (!block_flow)
     return false;
-  const LayoutBlockFlow& block_flow = ToLayoutBlockFlow(layout_object);
-  if (!block_flow.ChildrenInline() || block_flow.IsAtomicInlineLevel())
+  if (!block_flow->ChildrenInline() || block_flow->IsAtomicInlineLevel())
     return false;
-  if (block_flow.NonPseudoNode()) {
+  if (block_flow->NonPseudoNode()) {
     // It is OK as long as |block_flow| is associated to non-pseudo |Node| even
     // if it is empty block or containing only anonymous objects.
     // See LinkSelectionClickEventsTest.SingleAndDoubleClickWillBeHandled
@@ -48,7 +49,7 @@ bool CanBeInlineContentsContainer(const LayoutObject& layout_object) {
   // Since we can't create |EphemeralRange|, we exclude a |LayoutBlockFlow| if
   // its entire subtree is anonymous, e.g. |LayoutMultiColumnSet|,
   // and with anonymous layout objects.
-  return HasNonPsuedoNode(block_flow);
+  return HasNonPsuedoNode(*block_flow);
 }
 
 // Returns outer most nested inline formatting context.
@@ -58,9 +59,9 @@ const LayoutBlockFlow& RootInlineContentsContainerOf(
   const LayoutBlockFlow* root_block_flow = &block_flow;
   for (const LayoutBlock* runner = block_flow.ContainingBlock(); runner;
        runner = runner->ContainingBlock()) {
-    if (!runner->IsLayoutBlockFlow() || !runner->ChildrenInline())
-      break;
-    root_block_flow = ToLayoutBlockFlow(runner);
+    auto* containing_block_flow = DynamicTo<LayoutBlockFlow>(runner);
+    if (containing_block_flow && runner->ChildrenInline())
+      root_block_flow = containing_block_flow;
   }
   DCHECK(!root_block_flow->IsAtomicInlineLevel())
       << block_flow << ' ' << root_block_flow;
@@ -90,27 +91,29 @@ const LayoutBlockFlow& RootInlineContentsContainerOf(
 // |LayoutBlockFlow|.
 const LayoutBlockFlow* ComputeInlineContentsAsBlockFlow(
     const LayoutObject& layout_object) {
-  const LayoutBlock* const block = layout_object.IsLayoutBlock()
-                                       ? &ToLayoutBlock(layout_object)
-                                       : layout_object.ContainingBlock();
+  const auto* block = DynamicTo<LayoutBlock>(layout_object);
+  if (!block)
+    block = layout_object.ContainingBlock();
+
   DCHECK(block) << layout_object;
-  if (!block->IsLayoutBlockFlow())
+  const auto* block_flow = DynamicTo<LayoutBlockFlow>(block);
+  if (!block_flow)
     return nullptr;
-  const LayoutBlockFlow& block_flow = ToLayoutBlockFlow(*block);
-  if (!block_flow.ChildrenInline())
+  if (!block_flow->ChildrenInline())
     return nullptr;
-  if (block_flow.IsAtomicInlineLevel() ||
-      block_flow.IsFloatingOrOutOfFlowPositioned()) {
+  if (block_flow->IsAtomicInlineLevel() ||
+      block_flow->IsFloatingOrOutOfFlowPositioned()) {
     const LayoutBlockFlow& root_block_flow =
-        RootInlineContentsContainerOf(block_flow);
-    DCHECK(CanBeInlineContentsContainer(root_block_flow))
-        << layout_object << " block_flow=" << block_flow
-        << " root_block_flow=" << root_block_flow;
+        RootInlineContentsContainerOf(*block_flow);
+    // Skip |root_block_flow| if it's an anonymous wrapper created for
+    // pseudo elements. See test AnonymousBlockFlowWrapperForFloatPseudo.
+    if (!CanBeInlineContentsContainer(root_block_flow))
+      return nullptr;
     return &root_block_flow;
   }
-  if (!CanBeInlineContentsContainer(block_flow))
+  if (!CanBeInlineContentsContainer(*block_flow))
     return nullptr;
-  return &block_flow;
+  return block_flow;
 }
 
 TextOffsetMapping::InlineContents CreateInlineContentsFromBlockFlow(
@@ -232,10 +235,11 @@ TextOffsetMapping::ForwardRange TextOffsetMapping::ForwardRangeOf(
 }
 
 // static
-TextOffsetMapping::InlineContents TextOffsetMapping::FindBackwardInlineContents(
-    const PositionInFlatTree& position) {
-  for (const Node* node = position.NodeAsRangeLastNode(); node;
-       node = FlatTreeTraversal::Previous(*node)) {
+template <typename Traverser>
+TextOffsetMapping::InlineContents TextOffsetMapping::FindInlineContentsInternal(
+    const Node* start_node,
+    Traverser traverser) {
+  for (const Node* node = start_node; node; node = traverser(*node)) {
     const InlineContents inline_contents = ComputeInlineContentsFromNode(*node);
     if (inline_contents.IsNotNull())
       return inline_contents;
@@ -244,17 +248,78 @@ TextOffsetMapping::InlineContents TextOffsetMapping::FindBackwardInlineContents(
 }
 
 // static
+TextOffsetMapping::InlineContents TextOffsetMapping::FindBackwardInlineContents(
+    const PositionInFlatTree& position) {
+  const Node* previous_node = position.NodeAsRangeLastNode();
+  if (!previous_node)
+    return InlineContents();
+
+  if (const TextControlElement* enclosing_text_control =
+          EnclosingTextControl(position)) {
+    if (!FlatTreeTraversal::IsDescendantOf(*previous_node,
+                                           *enclosing_text_control)) {
+      // The first position in a text control reaches here.
+      return InlineContents();
+    }
+
+    return TextOffsetMapping::FindInlineContentsInternal(
+        previous_node, [enclosing_text_control](const Node& node) {
+          return FlatTreeTraversal::Previous(node, enclosing_text_control);
+        });
+  }
+
+  auto previous_skipping_text_control = [](const Node& node) -> const Node* {
+    DCHECK(!EnclosingTextControl(&node));
+    const Node* previous = FlatTreeTraversal::Previous(node);
+    const TextControlElement* previous_text_control =
+        EnclosingTextControl(previous);
+    if (!previous_text_control)
+      return previous;
+    return previous_text_control;
+  };
+
+  if (const TextControlElement* last_enclosing_text_control =
+          EnclosingTextControl(previous_node)) {
+    // Example, <input value=foo><span>bar</span>, span@beforeAnchor
+    return TextOffsetMapping::FindInlineContentsInternal(
+        last_enclosing_text_control, previous_skipping_text_control);
+  }
+  return TextOffsetMapping::FindInlineContentsInternal(
+      previous_node, previous_skipping_text_control);
+}
+
+// static
 // Note: "doubleclick-whitespace-img-crash.html" call |NextWordPosition())
 // with AfterNode(IMG) for <body><img></body>
 TextOffsetMapping::InlineContents TextOffsetMapping::FindForwardInlineContents(
     const PositionInFlatTree& position) {
-  for (const Node* node = position.NodeAsRangeFirstNode(); node;
-       node = FlatTreeTraversal::Next(*node)) {
-    const InlineContents inline_contents = ComputeInlineContentsFromNode(*node);
-    if (inline_contents.IsNotNull())
-      return inline_contents;
+  const Node* next_node = position.NodeAsRangeFirstNode();
+  if (!next_node)
+    return InlineContents();
+
+  if (const TextControlElement* enclosing_text_control =
+          EnclosingTextControl(position)) {
+    if (!FlatTreeTraversal::IsDescendantOf(*next_node,
+                                           *enclosing_text_control)) {
+      // The last position in a text control reaches here.
+      return InlineContents();
+    }
+
+    return TextOffsetMapping::FindInlineContentsInternal(
+        next_node, [enclosing_text_control](const Node& node) {
+          return FlatTreeTraversal::Next(node, enclosing_text_control);
+        });
   }
-  return InlineContents();
+
+  auto next_skipping_text_control = [](const Node& node) {
+    DCHECK(!EnclosingTextControl(&node));
+    if (IsTextControl(node))
+      return FlatTreeTraversal::NextSkippingChildren(node);
+    return FlatTreeTraversal::Next(node);
+  };
+  DCHECK(!EnclosingTextControl(next_node));
+  return TextOffsetMapping::FindInlineContentsInternal(
+      next_node, next_skipping_text_control);
 }
 
 // ----
@@ -314,46 +379,65 @@ EphemeralRangeInFlatTree TextOffsetMapping::InlineContents::GetRange() const {
   }
   const Node& first_node = *first_->NonPseudoNode();
   const Node& last_node = *last_->NonPseudoNode();
+  auto* first_text_node = DynamicTo<Text>(first_node);
+  auto* last_text_node = DynamicTo<Text>(last_node);
   return EphemeralRangeInFlatTree(
-      first_node.IsTextNode() ? PositionInFlatTree(first_node, 0)
-                              : PositionInFlatTree::BeforeNode(first_node),
-      last_node.IsTextNode()
-          ? PositionInFlatTree(last_node, ToText(last_node).length())
-          : PositionInFlatTree::AfterNode(last_node));
+      first_text_node ? PositionInFlatTree(first_node, 0)
+                      : PositionInFlatTree::BeforeNode(first_node),
+      last_text_node ? PositionInFlatTree(last_node, last_text_node->length())
+                     : PositionInFlatTree::AfterNode(last_node));
+}
+
+PositionInFlatTree
+TextOffsetMapping::InlineContents::LastPositionBeforeBlockFlow() const {
+  DCHECK(block_flow_);
+  if (const Node* node = block_flow_->NonPseudoNode()) {
+    if (!FlatTreeTraversal::Parent(*node)) {
+      // Reached start of document.
+      return PositionInFlatTree();
+    }
+    return PositionInFlatTree::BeforeNode(*node);
+  }
+  DCHECK(first_);
+  DCHECK(first_->NonPseudoNode());
+  DCHECK(FlatTreeTraversal::Parent(*first_->NonPseudoNode()));
+  return PositionInFlatTree::BeforeNode(*first_->NonPseudoNode());
+}
+
+PositionInFlatTree
+TextOffsetMapping::InlineContents::FirstPositionAfterBlockFlow() const {
+  DCHECK(block_flow_);
+  if (const Node* node = block_flow_->NonPseudoNode()) {
+    if (!FlatTreeTraversal::Parent(*node)) {
+      // Reached end of document.
+      return PositionInFlatTree();
+    }
+    return PositionInFlatTree::AfterNode(*node);
+  }
+  DCHECK(last_);
+  DCHECK(last_->NonPseudoNode());
+  DCHECK(FlatTreeTraversal::Parent(*last_->NonPseudoNode()));
+  return PositionInFlatTree::AfterNode(*last_->NonPseudoNode());
 }
 
 // static
 TextOffsetMapping::InlineContents TextOffsetMapping::InlineContents::NextOf(
     const InlineContents& inline_contents) {
-  for (LayoutObject* runner =
-           inline_contents.block_flow_->NextInPreOrderAfterChildren();
-       runner; runner = runner->NextInPreOrder()) {
-    if (!CanBeInlineContentsContainer(*runner))
-      continue;
-    const LayoutBlockFlow& block_flow = ToLayoutBlockFlow(*runner);
-    if (block_flow.IsFloatingOrOutOfFlowPositioned())
-      continue;
-    DCHECK(!block_flow.IsAtomicInlineLevel()) << block_flow;
-    return CreateInlineContentsFromBlockFlow(block_flow);
-  }
-  return InlineContents();
+  const PositionInFlatTree position_after =
+      inline_contents.FirstPositionAfterBlockFlow();
+  if (position_after.IsNull())
+    return InlineContents();
+  return TextOffsetMapping::FindForwardInlineContents(position_after);
 }
 
 // static
 TextOffsetMapping::InlineContents TextOffsetMapping::InlineContents::PreviousOf(
     const InlineContents& inline_contents) {
-  for (LayoutObject* runner = inline_contents.block_flow_->PreviousInPreOrder();
-       runner; runner = runner->PreviousInPreOrder()) {
-    const LayoutBlockFlow* const block_flow =
-        ComputeInlineContentsAsBlockFlow(*runner);
-    if (!block_flow || block_flow->IsFloatingOrOutOfFlowPositioned())
-      continue;
-    DCHECK(!block_flow->IsDescendantOf(inline_contents.block_flow_))
-        << block_flow;
-    DCHECK(!block_flow->IsAtomicInlineLevel()) << block_flow;
-    return CreateInlineContentsFromBlockFlow(*block_flow);
-  }
-  return InlineContents();
+  const PositionInFlatTree position_before =
+      inline_contents.LastPositionBeforeBlockFlow();
+  if (position_before.IsNull())
+    return InlineContents();
+  return TextOffsetMapping::FindBackwardInlineContents(position_before);
 }
 
 std::ostream& operator<<(

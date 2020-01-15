@@ -38,42 +38,40 @@
 
 namespace blink {
 
-class ChromeClient;
 class DateTimeChooserClient;
+class LocalFrame;
 class PagePopup;
 
 class CORE_EXPORT DateTimeChooserImpl final : public DateTimeChooser,
                                               public PagePopupClient {
  public:
-  static DateTimeChooserImpl* Create(ChromeClient*,
-                                     DateTimeChooserClient*,
-                                     const DateTimeChooserParameters&);
+  DateTimeChooserImpl(LocalFrame*,
+                      DateTimeChooserClient*,
+                      const DateTimeChooserParameters&);
   ~DateTimeChooserImpl() override;
 
   // DateTimeChooser functions:
   void EndChooser() override;
   AXObject* RootAXObject() override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  DateTimeChooserImpl(ChromeClient*,
-                      DateTimeChooserClient*,
-                      const DateTimeChooserParameters&);
   // PagePopupClient functions:
   void WriteDocument(SharedBuffer*) override;
   void SelectFontsFromOwnerDocument(Document&) override {}
   Locale& GetLocale() override;
   void SetValueAndClosePopup(int, const String&) override;
   void SetValue(const String&) override;
-  void ClosePopup() override;
+  void CancelPopup() override;
   Element& OwnerElement() override;
   void DidClosePopup() override;
 
-  Member<ChromeClient> chrome_client_;
+  Member<LocalFrame> frame_;
   Member<DateTimeChooserClient> client_;
   PagePopup* popup_;
-  DateTimeChooserParameters parameters_;
+  // This pointer is valid only in the constructor.
+  const DateTimeChooserParameters* parameters_;
   std::unique_ptr<Locale> locale_;
 };
 

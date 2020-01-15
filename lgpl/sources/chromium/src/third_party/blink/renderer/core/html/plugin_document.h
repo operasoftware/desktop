@@ -36,10 +36,7 @@ class WebPluginContainerImpl;
 
 class CORE_EXPORT PluginDocument final : public HTMLDocument {
  public:
-  static PluginDocument* Create(const DocumentInit& initializer,
-                                Color background_color) {
-    return new PluginDocument(initializer, background_color);
-  }
+  PluginDocument(const DocumentInit&, Color background_color);
 
   void SetPluginNode(HTMLPlugInElement* plugin_node) {
     plugin_node_ = plugin_node;
@@ -48,21 +45,16 @@ class CORE_EXPORT PluginDocument final : public HTMLDocument {
 
   WebPluginContainerImpl* GetPluginView();
 
-  void SetShowBeforeUnloadDialog(bool show_dialog);
-
   void Shutdown() override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
   class BeforeUnloadEventListener;
 
-  PluginDocument(const DocumentInit&, Color background_color);
-
   DocumentParser* CreateParser() override;
 
   Member<HTMLPlugInElement> plugin_node_;
-  Member<BeforeUnloadEventListener> before_unload_event_listener_;
 
   const Color background_color_;
 };

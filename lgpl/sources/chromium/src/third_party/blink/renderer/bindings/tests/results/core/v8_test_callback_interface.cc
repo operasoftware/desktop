@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // This file has been auto-generated from the Jinja2 template
-// third_party/blink/renderer/bindings/templates/callback_interface.cpp.tmpl
+// third_party/blink/renderer/bindings/templates/callback_interface.cc.tmpl
 // by the script code_generator_v8.py.
 // DO NOT MODIFY!
 
@@ -18,6 +18,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_test_interface_empty.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 
 namespace blink {
 
@@ -25,21 +26,16 @@ const char* V8TestCallbackInterface::NameInHeapSnapshot() const {
   return "V8TestCallbackInterface";
 }
 
-// static
-V8TestCallbackInterface* V8TestCallbackInterface::CreateOrNull(v8::Local<v8::Object> callback_object) {
-  v8::Local<v8::Context> creation_context = callback_object->CreationContext();
-  // When |callback_object| is an object in RemoteContext (i.e. RemoteInstance),
-  // the object has no creation context, and no way to proceed.
-  // TODO(crbug.com/886588): Make CreateOrNull into Create removing the early
-  // return with nullptr.
-  if (creation_context.IsEmpty())
-    return nullptr;
+v8::Maybe<void> V8TestCallbackInterface::voidMethod(bindings::V8ValueOrScriptWrappableAdapter callback_this_value) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "TestCallbackInterface",
+          "voidMethod");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<void>();
+  }
 
-  return new V8TestCallbackInterface(callback_object, creation_context);
-}
-
-v8::Maybe<void> V8TestCallbackInterface::voidMethod(ScriptWrappable* callback_this_value) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -59,10 +55,15 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethod(ScriptWrappable* callback_th
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<void>();
+  }
 
   v8::Local<v8::Function> function;
   if (IsCallbackObjectCallable()) {
@@ -74,7 +75,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethod(ScriptWrappable* callback_th
     // step 9.2.2. If getResult is an abrupt completion, set completion to
     //   getResult and jump to the step labeled return.
     v8::Local<v8::Value> value;
-    if (!CallbackObject()->Get(CallbackRelevantScriptState()->GetContext(),
+    if (!CallbackObject()->Get(callback_relevant_script_state->GetContext(),
                                V8String(GetIsolate(), "voidMethod"))
         .ToLocal(&value)) {
       return v8::Nothing<void>();
@@ -100,11 +101,11 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethod(ScriptWrappable* callback_th
     //   interface, or if !IsCallable(O) is false, set thisArg to O (overriding
     //   the provided value).
     this_arg = CallbackObject();
-  } else if (!callback_this_value) {
+  } else if (callback_this_value.IsEmpty()) {
     // step 2. If thisArg was not given, let thisArg be undefined.
     this_arg = v8::Undefined(GetIsolate());
   } else {
-    this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+    this_arg = callback_this_value.V8Value(callback_relevant_script_state);
   }
 
   // step: Let esArgs be the result of converting args to an ECMAScript
@@ -118,7 +119,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethod(ScriptWrappable* callback_th
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,
@@ -133,8 +134,16 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethod(ScriptWrappable* callback_th
   return v8::JustVoid();
 }
 
-v8::Maybe<bool> V8TestCallbackInterface::booleanMethod(ScriptWrappable* callback_this_value) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+v8::Maybe<bool> V8TestCallbackInterface::booleanMethod(bindings::V8ValueOrScriptWrappableAdapter callback_this_value) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "TestCallbackInterface",
+          "booleanMethod");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<bool>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -154,10 +163,15 @@ v8::Maybe<bool> V8TestCallbackInterface::booleanMethod(ScriptWrappable* callback
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<bool>();
+  }
 
   v8::Local<v8::Function> function;
   if (IsCallbackObjectCallable()) {
@@ -169,7 +183,7 @@ v8::Maybe<bool> V8TestCallbackInterface::booleanMethod(ScriptWrappable* callback
     // step 9.2.2. If getResult is an abrupt completion, set completion to
     //   getResult and jump to the step labeled return.
     v8::Local<v8::Value> value;
-    if (!CallbackObject()->Get(CallbackRelevantScriptState()->GetContext(),
+    if (!CallbackObject()->Get(callback_relevant_script_state->GetContext(),
                                V8String(GetIsolate(), "booleanMethod"))
         .ToLocal(&value)) {
       return v8::Nothing<bool>();
@@ -195,11 +209,11 @@ v8::Maybe<bool> V8TestCallbackInterface::booleanMethod(ScriptWrappable* callback
     //   interface, or if !IsCallable(O) is false, set thisArg to O (overriding
     //   the provided value).
     this_arg = CallbackObject();
-  } else if (!callback_this_value) {
+  } else if (callback_this_value.IsEmpty()) {
     // step 2. If thisArg was not given, let thisArg be undefined.
     this_arg = v8::Undefined(GetIsolate());
   } else {
-    this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+    this_arg = callback_this_value.V8Value(callback_relevant_script_state);
   }
 
   // step: Let esArgs be the result of converting args to an ECMAScript
@@ -213,7 +227,7 @@ v8::Maybe<bool> V8TestCallbackInterface::booleanMethod(ScriptWrappable* callback
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,
@@ -240,8 +254,16 @@ v8::Maybe<bool> V8TestCallbackInterface::booleanMethod(ScriptWrappable* callback
   }
 }
 
-v8::Maybe<void> V8TestCallbackInterface::voidMethodBooleanArg(ScriptWrappable* callback_this_value, bool boolArg) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+v8::Maybe<void> V8TestCallbackInterface::voidMethodBooleanArg(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, bool boolArg) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "TestCallbackInterface",
+          "voidMethodBooleanArg");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<void>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -261,10 +283,15 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodBooleanArg(ScriptWrappable* c
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<void>();
+  }
 
   v8::Local<v8::Function> function;
   if (IsCallbackObjectCallable()) {
@@ -276,7 +303,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodBooleanArg(ScriptWrappable* c
     // step 9.2.2. If getResult is an abrupt completion, set completion to
     //   getResult and jump to the step labeled return.
     v8::Local<v8::Value> value;
-    if (!CallbackObject()->Get(CallbackRelevantScriptState()->GetContext(),
+    if (!CallbackObject()->Get(callback_relevant_script_state->GetContext(),
                                V8String(GetIsolate(), "voidMethodBooleanArg"))
         .ToLocal(&value)) {
       return v8::Nothing<void>();
@@ -302,11 +329,11 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodBooleanArg(ScriptWrappable* c
     //   interface, or if !IsCallable(O) is false, set thisArg to O (overriding
     //   the provided value).
     this_arg = CallbackObject();
-  } else if (!callback_this_value) {
+  } else if (callback_this_value.IsEmpty()) {
     // step 2. If thisArg was not given, let thisArg be undefined.
     this_arg = v8::Undefined(GetIsolate());
   } else {
-    this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+    this_arg = callback_this_value.V8Value(callback_relevant_script_state);
   }
 
   // step: Let esArgs be the result of converting args to an ECMAScript
@@ -314,7 +341,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodBooleanArg(ScriptWrappable* c
   //   completion value representing the thrown exception and jump to the step
   //   labeled return.
   v8::Local<v8::Object> argument_creation_context =
-      CallbackRelevantScriptState()->GetContext()->Global();
+      callback_relevant_script_state->GetContext()->Global();
   ALLOW_UNUSED_LOCAL(argument_creation_context);
   v8::Local<v8::Value> v8_boolArg = v8::Boolean::New(GetIsolate(), boolArg);
   constexpr int argc = 1;
@@ -325,7 +352,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodBooleanArg(ScriptWrappable* c
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,
@@ -340,8 +367,16 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodBooleanArg(ScriptWrappable* c
   return v8::JustVoid();
 }
 
-v8::Maybe<void> V8TestCallbackInterface::voidMethodSequenceArg(ScriptWrappable* callback_this_value, const HeapVector<Member<TestInterfaceEmpty>>& sequenceArg) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+v8::Maybe<void> V8TestCallbackInterface::voidMethodSequenceArg(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, const HeapVector<Member<TestInterfaceEmpty>>& sequenceArg) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "TestCallbackInterface",
+          "voidMethodSequenceArg");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<void>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -361,10 +396,15 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodSequenceArg(ScriptWrappable* 
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<void>();
+  }
 
   v8::Local<v8::Function> function;
   if (IsCallbackObjectCallable()) {
@@ -376,7 +416,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodSequenceArg(ScriptWrappable* 
     // step 9.2.2. If getResult is an abrupt completion, set completion to
     //   getResult and jump to the step labeled return.
     v8::Local<v8::Value> value;
-    if (!CallbackObject()->Get(CallbackRelevantScriptState()->GetContext(),
+    if (!CallbackObject()->Get(callback_relevant_script_state->GetContext(),
                                V8String(GetIsolate(), "voidMethodSequenceArg"))
         .ToLocal(&value)) {
       return v8::Nothing<void>();
@@ -402,11 +442,11 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodSequenceArg(ScriptWrappable* 
     //   interface, or if !IsCallable(O) is false, set thisArg to O (overriding
     //   the provided value).
     this_arg = CallbackObject();
-  } else if (!callback_this_value) {
+  } else if (callback_this_value.IsEmpty()) {
     // step 2. If thisArg was not given, let thisArg be undefined.
     this_arg = v8::Undefined(GetIsolate());
   } else {
-    this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+    this_arg = callback_this_value.V8Value(callback_relevant_script_state);
   }
 
   // step: Let esArgs be the result of converting args to an ECMAScript
@@ -414,7 +454,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodSequenceArg(ScriptWrappable* 
   //   completion value representing the thrown exception and jump to the step
   //   labeled return.
   v8::Local<v8::Object> argument_creation_context =
-      CallbackRelevantScriptState()->GetContext()->Global();
+      callback_relevant_script_state->GetContext()->Global();
   ALLOW_UNUSED_LOCAL(argument_creation_context);
   v8::Local<v8::Value> v8_sequenceArg = ToV8(sequenceArg, argument_creation_context, GetIsolate());
   constexpr int argc = 1;
@@ -425,7 +465,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodSequenceArg(ScriptWrappable* 
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,
@@ -440,8 +480,16 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodSequenceArg(ScriptWrappable* 
   return v8::JustVoid();
 }
 
-v8::Maybe<void> V8TestCallbackInterface::voidMethodFloatArg(ScriptWrappable* callback_this_value, float floatArg) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+v8::Maybe<void> V8TestCallbackInterface::voidMethodFloatArg(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, float floatArg) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "TestCallbackInterface",
+          "voidMethodFloatArg");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<void>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -461,10 +509,15 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodFloatArg(ScriptWrappable* cal
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<void>();
+  }
 
   v8::Local<v8::Function> function;
   if (IsCallbackObjectCallable()) {
@@ -476,7 +529,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodFloatArg(ScriptWrappable* cal
     // step 9.2.2. If getResult is an abrupt completion, set completion to
     //   getResult and jump to the step labeled return.
     v8::Local<v8::Value> value;
-    if (!CallbackObject()->Get(CallbackRelevantScriptState()->GetContext(),
+    if (!CallbackObject()->Get(callback_relevant_script_state->GetContext(),
                                V8String(GetIsolate(), "voidMethodFloatArg"))
         .ToLocal(&value)) {
       return v8::Nothing<void>();
@@ -502,11 +555,11 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodFloatArg(ScriptWrappable* cal
     //   interface, or if !IsCallable(O) is false, set thisArg to O (overriding
     //   the provided value).
     this_arg = CallbackObject();
-  } else if (!callback_this_value) {
+  } else if (callback_this_value.IsEmpty()) {
     // step 2. If thisArg was not given, let thisArg be undefined.
     this_arg = v8::Undefined(GetIsolate());
   } else {
-    this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+    this_arg = callback_this_value.V8Value(callback_relevant_script_state);
   }
 
   // step: Let esArgs be the result of converting args to an ECMAScript
@@ -514,7 +567,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodFloatArg(ScriptWrappable* cal
   //   completion value representing the thrown exception and jump to the step
   //   labeled return.
   v8::Local<v8::Object> argument_creation_context =
-      CallbackRelevantScriptState()->GetContext()->Global();
+      callback_relevant_script_state->GetContext()->Global();
   ALLOW_UNUSED_LOCAL(argument_creation_context);
   v8::Local<v8::Value> v8_floatArg = v8::Number::New(GetIsolate(), floatArg);
   constexpr int argc = 1;
@@ -525,7 +578,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodFloatArg(ScriptWrappable* cal
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,
@@ -540,8 +593,16 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodFloatArg(ScriptWrappable* cal
   return v8::JustVoid();
 }
 
-v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyArg(ScriptWrappable* callback_this_value, TestInterfaceEmpty* testInterfaceEmptyArg) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyArg(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, TestInterfaceEmpty* testInterfaceEmptyArg) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "TestCallbackInterface",
+          "voidMethodTestInterfaceEmptyArg");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<void>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -561,10 +622,15 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyArg(ScriptW
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<void>();
+  }
 
   v8::Local<v8::Function> function;
   if (IsCallbackObjectCallable()) {
@@ -576,7 +642,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyArg(ScriptW
     // step 9.2.2. If getResult is an abrupt completion, set completion to
     //   getResult and jump to the step labeled return.
     v8::Local<v8::Value> value;
-    if (!CallbackObject()->Get(CallbackRelevantScriptState()->GetContext(),
+    if (!CallbackObject()->Get(callback_relevant_script_state->GetContext(),
                                V8String(GetIsolate(), "voidMethodTestInterfaceEmptyArg"))
         .ToLocal(&value)) {
       return v8::Nothing<void>();
@@ -602,11 +668,11 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyArg(ScriptW
     //   interface, or if !IsCallable(O) is false, set thisArg to O (overriding
     //   the provided value).
     this_arg = CallbackObject();
-  } else if (!callback_this_value) {
+  } else if (callback_this_value.IsEmpty()) {
     // step 2. If thisArg was not given, let thisArg be undefined.
     this_arg = v8::Undefined(GetIsolate());
   } else {
-    this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+    this_arg = callback_this_value.V8Value(callback_relevant_script_state);
   }
 
   // step: Let esArgs be the result of converting args to an ECMAScript
@@ -614,7 +680,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyArg(ScriptW
   //   completion value representing the thrown exception and jump to the step
   //   labeled return.
   v8::Local<v8::Object> argument_creation_context =
-      CallbackRelevantScriptState()->GetContext()->Global();
+      callback_relevant_script_state->GetContext()->Global();
   ALLOW_UNUSED_LOCAL(argument_creation_context);
   v8::Local<v8::Value> v8_testInterfaceEmptyArg = ToV8(testInterfaceEmptyArg, argument_creation_context, GetIsolate());
   constexpr int argc = 1;
@@ -625,7 +691,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyArg(ScriptW
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,
@@ -640,8 +706,16 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyArg(ScriptW
   return v8::JustVoid();
 }
 
-v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyStringArg(ScriptWrappable* callback_this_value, TestInterfaceEmpty* testInterfaceEmptyArg, const String& stringArg) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyStringArg(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, TestInterfaceEmpty* testInterfaceEmptyArg, const String& stringArg) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "TestCallbackInterface",
+          "voidMethodTestInterfaceEmptyStringArg");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<void>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -661,10 +735,15 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyStringArg(S
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<void>();
+  }
 
   v8::Local<v8::Function> function;
   if (IsCallbackObjectCallable()) {
@@ -676,7 +755,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyStringArg(S
     // step 9.2.2. If getResult is an abrupt completion, set completion to
     //   getResult and jump to the step labeled return.
     v8::Local<v8::Value> value;
-    if (!CallbackObject()->Get(CallbackRelevantScriptState()->GetContext(),
+    if (!CallbackObject()->Get(callback_relevant_script_state->GetContext(),
                                V8String(GetIsolate(), "voidMethodTestInterfaceEmptyStringArg"))
         .ToLocal(&value)) {
       return v8::Nothing<void>();
@@ -702,11 +781,11 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyStringArg(S
     //   interface, or if !IsCallable(O) is false, set thisArg to O (overriding
     //   the provided value).
     this_arg = CallbackObject();
-  } else if (!callback_this_value) {
+  } else if (callback_this_value.IsEmpty()) {
     // step 2. If thisArg was not given, let thisArg be undefined.
     this_arg = v8::Undefined(GetIsolate());
   } else {
-    this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+    this_arg = callback_this_value.V8Value(callback_relevant_script_state);
   }
 
   // step: Let esArgs be the result of converting args to an ECMAScript
@@ -714,7 +793,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyStringArg(S
   //   completion value representing the thrown exception and jump to the step
   //   labeled return.
   v8::Local<v8::Object> argument_creation_context =
-      CallbackRelevantScriptState()->GetContext()->Global();
+      callback_relevant_script_state->GetContext()->Global();
   ALLOW_UNUSED_LOCAL(argument_creation_context);
   v8::Local<v8::Value> v8_testInterfaceEmptyArg = ToV8(testInterfaceEmptyArg, argument_creation_context, GetIsolate());
   v8::Local<v8::Value> v8_stringArg = V8String(GetIsolate(), stringArg);
@@ -726,7 +805,7 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyStringArg(S
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,
@@ -741,8 +820,16 @@ v8::Maybe<void> V8TestCallbackInterface::voidMethodTestInterfaceEmptyStringArg(S
   return v8::JustVoid();
 }
 
-v8::Maybe<void> V8TestCallbackInterface::callbackWithThisValueVoidMethodStringArg(ScriptWrappable* callback_this_value, const String& stringArg) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+v8::Maybe<void> V8TestCallbackInterface::callbackWithThisValueVoidMethodStringArg(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, const String& stringArg) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "TestCallbackInterface",
+          "callbackWithThisValueVoidMethodStringArg");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<void>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -762,10 +849,15 @@ v8::Maybe<void> V8TestCallbackInterface::callbackWithThisValueVoidMethodStringAr
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<void>();
+  }
 
   v8::Local<v8::Function> function;
   if (IsCallbackObjectCallable()) {
@@ -777,7 +869,7 @@ v8::Maybe<void> V8TestCallbackInterface::callbackWithThisValueVoidMethodStringAr
     // step 9.2.2. If getResult is an abrupt completion, set completion to
     //   getResult and jump to the step labeled return.
     v8::Local<v8::Value> value;
-    if (!CallbackObject()->Get(CallbackRelevantScriptState()->GetContext(),
+    if (!CallbackObject()->Get(callback_relevant_script_state->GetContext(),
                                V8String(GetIsolate(), "callbackWithThisValueVoidMethodStringArg"))
         .ToLocal(&value)) {
       return v8::Nothing<void>();
@@ -803,11 +895,11 @@ v8::Maybe<void> V8TestCallbackInterface::callbackWithThisValueVoidMethodStringAr
     //   interface, or if !IsCallable(O) is false, set thisArg to O (overriding
     //   the provided value).
     this_arg = CallbackObject();
-  } else if (!callback_this_value) {
+  } else if (callback_this_value.IsEmpty()) {
     // step 2. If thisArg was not given, let thisArg be undefined.
     this_arg = v8::Undefined(GetIsolate());
   } else {
-    this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+    this_arg = callback_this_value.V8Value(callback_relevant_script_state);
   }
 
   // step: Let esArgs be the result of converting args to an ECMAScript
@@ -815,7 +907,7 @@ v8::Maybe<void> V8TestCallbackInterface::callbackWithThisValueVoidMethodStringAr
   //   completion value representing the thrown exception and jump to the step
   //   labeled return.
   v8::Local<v8::Object> argument_creation_context =
-      CallbackRelevantScriptState()->GetContext()->Global();
+      callback_relevant_script_state->GetContext()->Global();
   ALLOW_UNUSED_LOCAL(argument_creation_context);
   v8::Local<v8::Value> v8_stringArg = V8String(GetIsolate(), stringArg);
   constexpr int argc = 1;
@@ -826,7 +918,7 @@ v8::Maybe<void> V8TestCallbackInterface::callbackWithThisValueVoidMethodStringAr
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,
@@ -841,8 +933,16 @@ v8::Maybe<void> V8TestCallbackInterface::callbackWithThisValueVoidMethodStringAr
   return v8::JustVoid();
 }
 
-v8::Maybe<void> V8TestCallbackInterface::customVoidMethodTestInterfaceEmptyArg(ScriptWrappable* callback_this_value, TestInterfaceEmpty* testInterfaceEmptyArg) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+v8::Maybe<void> V8TestCallbackInterface::customVoidMethodTestInterfaceEmptyArg(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, TestInterfaceEmpty* testInterfaceEmptyArg) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "TestCallbackInterface",
+          "customVoidMethodTestInterfaceEmptyArg");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<void>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -862,10 +962,15 @@ v8::Maybe<void> V8TestCallbackInterface::customVoidMethodTestInterfaceEmptyArg(S
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<void>();
+  }
 
   v8::Local<v8::Function> function;
   if (IsCallbackObjectCallable()) {
@@ -877,7 +982,7 @@ v8::Maybe<void> V8TestCallbackInterface::customVoidMethodTestInterfaceEmptyArg(S
     // step 9.2.2. If getResult is an abrupt completion, set completion to
     //   getResult and jump to the step labeled return.
     v8::Local<v8::Value> value;
-    if (!CallbackObject()->Get(CallbackRelevantScriptState()->GetContext(),
+    if (!CallbackObject()->Get(callback_relevant_script_state->GetContext(),
                                V8String(GetIsolate(), "customVoidMethodTestInterfaceEmptyArg"))
         .ToLocal(&value)) {
       return v8::Nothing<void>();
@@ -903,11 +1008,11 @@ v8::Maybe<void> V8TestCallbackInterface::customVoidMethodTestInterfaceEmptyArg(S
     //   interface, or if !IsCallable(O) is false, set thisArg to O (overriding
     //   the provided value).
     this_arg = CallbackObject();
-  } else if (!callback_this_value) {
+  } else if (callback_this_value.IsEmpty()) {
     // step 2. If thisArg was not given, let thisArg be undefined.
     this_arg = v8::Undefined(GetIsolate());
   } else {
-    this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+    this_arg = callback_this_value.V8Value(callback_relevant_script_state);
   }
 
   // step: Let esArgs be the result of converting args to an ECMAScript
@@ -915,7 +1020,7 @@ v8::Maybe<void> V8TestCallbackInterface::customVoidMethodTestInterfaceEmptyArg(S
   //   completion value representing the thrown exception and jump to the step
   //   labeled return.
   v8::Local<v8::Object> argument_creation_context =
-      CallbackRelevantScriptState()->GetContext()->Global();
+      callback_relevant_script_state->GetContext()->Global();
   ALLOW_UNUSED_LOCAL(argument_creation_context);
   v8::Local<v8::Value> v8_testInterfaceEmptyArg = ToV8(testInterfaceEmptyArg, argument_creation_context, GetIsolate());
   constexpr int argc = 1;
@@ -926,7 +1031,7 @@ v8::Maybe<void> V8TestCallbackInterface::customVoidMethodTestInterfaceEmptyArg(S
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,
@@ -939,51 +1044,6 @@ v8::Maybe<void> V8TestCallbackInterface::customVoidMethodTestInterfaceEmptyArg(S
   // step: Set completion to the result of converting callResult.[[Value]] to
   //   an IDL value of the same type as the operation's return type.
   return v8::JustVoid();
-}
-
-v8::Maybe<void> V8PersistentCallbackInterface<V8TestCallbackInterface>::voidMethod(ScriptWrappable* callback_this_value) {
-  return Proxy()->voidMethod(
-      callback_this_value);
-}
-
-v8::Maybe<bool> V8PersistentCallbackInterface<V8TestCallbackInterface>::booleanMethod(ScriptWrappable* callback_this_value) {
-  return Proxy()->booleanMethod(
-      callback_this_value);
-}
-
-v8::Maybe<void> V8PersistentCallbackInterface<V8TestCallbackInterface>::voidMethodBooleanArg(ScriptWrappable* callback_this_value, bool boolArg) {
-  return Proxy()->voidMethodBooleanArg(
-      callback_this_value, boolArg);
-}
-
-v8::Maybe<void> V8PersistentCallbackInterface<V8TestCallbackInterface>::voidMethodSequenceArg(ScriptWrappable* callback_this_value, const HeapVector<Member<TestInterfaceEmpty>>& sequenceArg) {
-  return Proxy()->voidMethodSequenceArg(
-      callback_this_value, sequenceArg);
-}
-
-v8::Maybe<void> V8PersistentCallbackInterface<V8TestCallbackInterface>::voidMethodFloatArg(ScriptWrappable* callback_this_value, float floatArg) {
-  return Proxy()->voidMethodFloatArg(
-      callback_this_value, floatArg);
-}
-
-v8::Maybe<void> V8PersistentCallbackInterface<V8TestCallbackInterface>::voidMethodTestInterfaceEmptyArg(ScriptWrappable* callback_this_value, TestInterfaceEmpty* testInterfaceEmptyArg) {
-  return Proxy()->voidMethodTestInterfaceEmptyArg(
-      callback_this_value, testInterfaceEmptyArg);
-}
-
-v8::Maybe<void> V8PersistentCallbackInterface<V8TestCallbackInterface>::voidMethodTestInterfaceEmptyStringArg(ScriptWrappable* callback_this_value, TestInterfaceEmpty* testInterfaceEmptyArg, const String& stringArg) {
-  return Proxy()->voidMethodTestInterfaceEmptyStringArg(
-      callback_this_value, testInterfaceEmptyArg, stringArg);
-}
-
-v8::Maybe<void> V8PersistentCallbackInterface<V8TestCallbackInterface>::callbackWithThisValueVoidMethodStringArg(ScriptWrappable* callback_this_value, const String& stringArg) {
-  return Proxy()->callbackWithThisValueVoidMethodStringArg(
-      callback_this_value, stringArg);
-}
-
-v8::Maybe<void> V8PersistentCallbackInterface<V8TestCallbackInterface>::customVoidMethodTestInterfaceEmptyArg(ScriptWrappable* callback_this_value, TestInterfaceEmpty* testInterfaceEmptyArg) {
-  return Proxy()->customVoidMethodTestInterfaceEmptyArg(
-      callback_this_value, testInterfaceEmptyArg);
 }
 
 }  // namespace blink

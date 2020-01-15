@@ -16,48 +16,22 @@ cr.define('print_header_interactive_test', function() {
 
     /** @override */
     setup(function() {
-      // Only care about copies, duplex, pages, and pages per sheet.
-      const settings = {
-        copies: {
-          value: '1',
-          unavailableValue: '1',
-          valid: true,
-          available: true,
-          key: '',
-        },
-        duplex: {
-          value: false,
-          unavailableValue: false,
-          valid: true,
-          available: true,
-          key: 'isDuplexEnabled',
-        },
-        pages: {
-          value: [1],
-          unavailableValue: [],
-          valid: true,
-          available: true,
-          key: '',
-        },
-        pagesPerSheet: {
-          value: 1,
-          unavailableValue: 1,
-          valid: true,
-          available: true,
-          key: '',
-        },
-      };
-
+      loadTimeData.overrideValues({
+        newPrintPreviewLayoutEnabled: false,
+      });
       PolymerTest.clearBody();
+      const model = document.createElement('print-preview-model');
+      document.body.appendChild(model);
+
       header = document.createElement('print-preview-header');
-      header.settings = settings;
+      header.settings = model.settings;
       header.destination = new print_preview.Destination(
           'FooDevice', print_preview.DestinationType.GOOGLE,
           print_preview.DestinationOrigin.COOKIES, 'FooName',
-          true /* isRecent */,
           print_preview.DestinationConnectionStatus.ONLINE);
-      header.errorMessage = '';
-      header.state = print_preview_new.State.NOT_READY;
+      header.state = print_preview.State.NOT_READY;
+      header.firstLoad = true;
+      test_util.fakeDataBind(model, header, 'settings');
       document.body.appendChild(header);
     });
 
@@ -69,7 +43,7 @@ cr.define('print_header_interactive_test', function() {
       const whenFocusDone = test_util.eventToPromise('focus', printButton);
 
       // Simulate initialization finishing.
-      header.state = print_preview_new.State.READY;
+      header.state = print_preview.State.READY;
       return whenFocusDone;
     });
   });

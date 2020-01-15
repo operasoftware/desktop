@@ -54,7 +54,7 @@ static inline InlineFlowBox* FlowBoxForLayoutObject(
   if (layout_object->IsLayoutBlock()) {
     // If we're given a block element, it has to be a LayoutSVGText.
     DCHECK(layout_object->IsSVGText());
-    LayoutBlockFlow* layout_block_flow = ToLayoutBlockFlow(layout_object);
+    auto* layout_block_flow = To<LayoutBlockFlow>(layout_object);
 
     // LayoutSVGText only ever contains a single line box.
     InlineFlowBox* flow_box = layout_block_flow->FirstLineBox();
@@ -556,7 +556,7 @@ static unsigned LogicalOffsetInTextNode(
   CollectTextBoxesInLogicalOrder(text_line_layout, text_boxes);
 
   DCHECK(start_text_box);
-  size_t index = text_boxes.Find(start_text_box);
+  wtf_size_t index = text_boxes.Find(start_text_box);
   DCHECK_NE(index, kNotFound);
 
   unsigned offset = fragment_offset;

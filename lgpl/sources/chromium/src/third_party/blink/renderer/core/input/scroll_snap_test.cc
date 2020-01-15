@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/input/scroll_manager.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_compositor.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
@@ -33,7 +34,7 @@ class ScrollSnapTest : public SimTest {
 
 void ScrollSnapTest::SetUpForDiv() {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
-  WebView().Resize(WebSize(400, 400));
+  WebView().MainFrameWidget()->Resize(WebSize(400, 400));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(R"HTML(
@@ -90,8 +91,8 @@ void ScrollSnapTest::ScrollBegin(double x,
                                  double hint_x,
                                  double hint_y) {
   WebGestureEvent event(WebInputEvent::kGestureScrollBegin,
-                        WebInputEvent::kNoModifiers, CurrentTimeTicks(),
-                        WebGestureDevice::kWebGestureDeviceTouchscreen);
+                        WebInputEvent::kNoModifiers, base::TimeTicks::Now(),
+                        WebGestureDevice::kTouchscreen);
   event.SetPositionInWidget(WebFloatPoint(x, y));
   event.SetPositionInScreen(WebFloatPoint(x, y));
   event.data.scroll_begin.delta_x_hint = hint_x;
@@ -107,15 +108,16 @@ void ScrollSnapTest::ScrollUpdate(double x,
                                   double delta_y,
                                   bool is_in_inertial_phase) {
   WebGestureEvent event(WebInputEvent::kGestureScrollUpdate,
-                        WebInputEvent::kNoModifiers, CurrentTimeTicks(),
-                        WebGestureDevice::kWebGestureDeviceTouchscreen);
+                        WebInputEvent::kNoModifiers, base::TimeTicks::Now(),
+                        WebGestureDevice::kTouchscreen);
   event.SetPositionInWidget(WebFloatPoint(x, y));
   event.SetPositionInScreen(WebFloatPoint(x, y));
   event.data.scroll_update.delta_x = delta_x;
   event.data.scroll_update.delta_y = delta_y;
   if (is_in_inertial_phase) {
-    event.data.scroll_update.inertial_phase = WebGestureEvent::kMomentumPhase;
-    event.SetTimeStamp(base::TimeTicks());
+    event.data.scroll_update.inertial_phase =
+        WebGestureEvent::InertialPhaseState::kMomentum;
+    event.SetTimeStamp(Compositor().LastFrameTime());
   }
   event.SetFrameScale(1);
   GetDocument().GetFrame()->GetEventHandler().HandleGestureScrollEvent(event);
@@ -123,20 +125,20 @@ void ScrollSnapTest::ScrollUpdate(double x,
 
 void ScrollSnapTest::ScrollEnd(double x, double y, bool is_in_inertial_phase) {
   WebGestureEvent event(WebInputEvent::kGestureScrollEnd,
-                        WebInputEvent::kNoModifiers, CurrentTimeTicks(),
-                        WebGestureDevice::kWebGestureDeviceTouchscreen);
+                        WebInputEvent::kNoModifiers, base::TimeTicks::Now(),
+                        WebGestureDevice::kTouchscreen);
   event.SetPositionInWidget(WebFloatPoint(x, y));
   event.SetPositionInScreen(WebFloatPoint(x, y));
   event.data.scroll_end.inertial_phase =
-      is_in_inertial_phase ? WebGestureEvent::kMomentumPhase
-                           : WebGestureEvent::kNonMomentumPhase;
+      is_in_inertial_phase ? WebGestureEvent::InertialPhaseState::kMomentum
+                           : WebGestureEvent::InertialPhaseState::kNonMomentum;
   GetDocument().GetFrame()->GetEventHandler().HandleGestureScrollEvent(event);
 }
 
 void ScrollSnapTest::SetInitialScrollOffset(double x, double y) {
   Element* scroller = GetDocument().getElementById("scroller");
-  scroller->GetLayoutBox()->SetScrollLeft(LayoutUnit::FromFloatRound(x));
-  scroller->GetLayoutBox()->SetScrollTop(LayoutUnit::FromFloatRound(y));
+  scroller->GetScrollableArea()->ScrollToAbsolutePosition(FloatPoint(x, y),
+                                                          kScrollBehaviorAuto);
   ASSERT_EQ(scroller->scrollLeft(), x);
   ASSERT_EQ(scroller->scrollTop(), y);
 }
@@ -190,9 +192,8 @@ TEST_F(ScrollSnapTest, AnimateFlingToArriveAtSnapPoint) {
   // Fling with an inertial GSU.
   ScrollUpdate(95, 100, -5, 0, true);
   ScrollEnd(90, 100);
-  Compositor().BeginFrame();
   // Animate halfway through the fling.
-  Compositor().BeginFrame(0.2);
+  Compositor().BeginFrame(0.25);
   ASSERT_GT(scroller->scrollLeft(), 150);
   ASSERT_LT(scroller->scrollLeft(), 180);
   ASSERT_EQ(scroller->scrollTop(), 200);
@@ -205,15 +206,17 @@ TEST_F(ScrollSnapTest, AnimateFlingToArriveAtSnapPoint) {
 
 TEST_F(ScrollSnapTest, SnapWhenBodyViewportDefining) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
-  WebView().Resize(WebSize(300, 300));
+  WebView().MainFrameWidget()->Resize(WebSize(300, 300));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(R"HTML(
     <!DOCTYPE html>
     <style>
+    html {
+      scroll-snap-type: both mandatory;
+    }
     body {
       overflow: scroll;
-      scroll-snap-type: both mandatory;
       height: 300px;
       width: 300px;
       margin: 0px;
@@ -252,7 +255,7 @@ TEST_F(ScrollSnapTest, SnapWhenBodyViewportDefining) {
 
 TEST_F(ScrollSnapTest, SnapWhenHtmlViewportDefining) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
-  WebView().Resize(WebSize(300, 300));
+  WebView().MainFrameWidget()->Resize(WebSize(300, 300));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(R"HTML(
@@ -302,7 +305,7 @@ TEST_F(ScrollSnapTest, SnapWhenHtmlViewportDefining) {
 
 TEST_F(ScrollSnapTest, SnapWhenBodyOverflowHtmlViewportDefining) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
-  WebView().Resize(WebSize(300, 300));
+  WebView().MainFrameWidget()->Resize(WebSize(300, 300));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(R"HTML(

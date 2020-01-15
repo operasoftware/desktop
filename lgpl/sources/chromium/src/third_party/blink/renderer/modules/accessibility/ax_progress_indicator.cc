@@ -28,17 +28,9 @@
 
 namespace blink {
 
-using namespace HTMLNames;
-
 AXProgressIndicator::AXProgressIndicator(LayoutProgress* layout_object,
                                          AXObjectCacheImpl& ax_object_cache)
     : AXLayoutObject(layout_object, ax_object_cache) {}
-
-AXProgressIndicator* AXProgressIndicator::Create(
-    LayoutProgress* layout_object,
-    AXObjectCacheImpl& ax_object_cache) {
-  return new AXProgressIndicator(layout_object, ax_object_cache);
-}
 
 ax::mojom::Role AXProgressIndicator::DetermineAccessibilityRole() {
   if ((aria_role_ = DetermineAriaRoleAttribute()) != ax::mojom::Role::kUnknown)

@@ -8,6 +8,19 @@
 
 namespace blink {
 
+namespace {
+
+struct SameSizeAsNGInlineBreakToken : NGBreakToken {
+  scoped_refptr<const ComputedStyle> style_;
+  unsigned numbers[2];
+};
+
+static_assert(sizeof(NGInlineBreakToken) ==
+                  sizeof(SameSizeAsNGInlineBreakToken),
+              "NGInlineBreakToken should stay small");
+
+}  // namespace
+
 NGInlineBreakToken::NGInlineBreakToken(
     NGInlineNode node,
     const ComputedStyle* style,
@@ -17,20 +30,18 @@ NGInlineBreakToken::NGInlineBreakToken(
     : NGBreakToken(kInlineBreakToken, kUnfinished, node),
       style_(style),
       item_index_(item_index),
-      text_offset_(text_offset),
-      flags_(flags),
-      ignore_floats_(false) {}
+      text_offset_(text_offset) {
+  flags_ = flags;
+}
 
 NGInlineBreakToken::NGInlineBreakToken(NGLayoutInputNode node)
     : NGBreakToken(kInlineBreakToken, kFinished, node),
       item_index_(0),
-      text_offset_(0),
-      flags_(kDefault),
-      ignore_floats_(false) {}
+      text_offset_(0) {}
 
 NGInlineBreakToken::~NGInlineBreakToken() = default;
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
 
 String NGInlineBreakToken::ToString() const {
   StringBuilder string_builder;
@@ -44,6 +55,6 @@ String NGInlineBreakToken::ToString() const {
   return string_builder.ToString();
 }
 
-#endif  // NDEBUG
+#endif  // DCHECK_IS_ON()
 
 }  // namespace blink

@@ -16,9 +16,9 @@ class TestSyncBrowserProxy extends TestBrowserProxy {
       'setSyncEncryption',
       'signOut',
       'pauseSync',
+      'sendSyncPrefsChanged',
       'startSignIn',
       'startSyncingWithEmail',
-      'unifiedConsentToggleChanged',
     ]);
 
     /** @private {number} */
@@ -98,7 +98,7 @@ class TestSyncBrowserProxy extends TestBrowserProxy {
   }
 
   /** @override */
-  unifiedConsentToggleChanged(toggleChecked) {
-    this.methodCalled('unifiedConsentToggleChanged', toggleChecked);
+  sendSyncPrefsChanged() {
+    this.methodCalled('sendSyncPrefsChanged');
   }
 }

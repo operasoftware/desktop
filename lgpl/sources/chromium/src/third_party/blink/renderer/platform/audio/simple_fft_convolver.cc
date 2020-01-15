@@ -26,15 +26,13 @@ SimpleFFTConvolver::SimpleFFTConvolver(
 
 void SimpleFFTConvolver::Process(const float* source_p,
                                  float* dest_p,
-                                 size_t frames_to_process) {
+                                 uint32_t frames_to_process) {
   size_t half_size = FftSize() / 2;
 
   // frames_to_process must be exactly half_size.
   DCHECK(source_p);
   DCHECK(dest_p);
   DCHECK_EQ(frames_to_process, half_size);
-  if (!(source_p && dest_p && frames_to_process == half_size))
-    return;
 
   // Do padded FFT (get frequency-domain version) by copying samples to the 1st
   // half of the input buffer (the second half is always zero), multiply in
@@ -46,8 +44,8 @@ void SimpleFFTConvolver::Process(const float* source_p,
 
   // Overlap-add 1st half with 2nd half from previous time and write
   // to destination.
-  VectorMath::Vadd(output_buffer_.Data(), 1, last_overlap_buffer_.Data(), 1,
-                   dest_p, 1, half_size);
+  vector_math::Vadd(output_buffer_.Data(), 1, last_overlap_buffer_.Data(), 1,
+                    dest_p, 1, half_size);
 
   // Finally, save 2nd half for the next time.
   last_overlap_buffer_.CopyToRange(output_buffer_.Data() + half_size, 0,

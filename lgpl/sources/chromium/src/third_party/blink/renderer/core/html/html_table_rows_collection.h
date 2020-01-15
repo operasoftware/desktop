@@ -39,7 +39,8 @@ class HTMLTableRowElement;
 
 class HTMLTableRowsCollection final : public HTMLCollection {
  public:
-  static HTMLTableRowsCollection* Create(ContainerNode&, CollectionType);
+  explicit HTMLTableRowsCollection(ContainerNode&);
+  HTMLTableRowsCollection(ContainerNode&, CollectionType);
 
   HTMLTableRowElement* Item(unsigned offset) const {
     return ToHTMLTableRowElement(HTMLCollection::item(offset));
@@ -49,8 +50,6 @@ class HTMLTableRowsCollection final : public HTMLCollection {
   static HTMLTableRowElement* LastRow(HTMLTableElement&);
 
  private:
-  explicit HTMLTableRowsCollection(ContainerNode&);
-
   Element* VirtualItemAfter(Element*) const override;
 };
 

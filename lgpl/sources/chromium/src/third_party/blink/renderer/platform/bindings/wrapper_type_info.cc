@@ -21,14 +21,8 @@ void WrapperTypeInfo::WrapperCreated() {
 }
 
 void WrapperTypeInfo::WrapperDestroyed() {
-  ThreadState* const thread_state = ThreadState::Current();
-  // WrapperDestroyed may be called during thread teardown as part of invoking
-  // V8 callbacks in which case ThreadState has already been destroyed.
-  if (!thread_state)
-    return;
-
   ThreadHeapStatsCollector* stats_collector =
-      thread_state->Heap().stats_collector();
+      ThreadState::Current()->Heap().stats_collector();
   stats_collector->DecreaseWrapperCount(1);
   stats_collector->IncreaseCollectedWrapperCount(1);
 }
@@ -41,20 +35,6 @@ void WrapperTypeInfo::Trace(Visitor* visitor, void* impl) const {
       break;
     case WrapperTypeInfo::kCustomWrappableId:
       visitor->Trace(reinterpret_cast<CustomWrappable*>(impl));
-      break;
-    default:
-      NOTREACHED();
-  }
-}
-
-void WrapperTypeInfo::TraceWithWrappers(Visitor* visitor, void* impl) const {
-  switch (wrapper_class_id) {
-    case WrapperTypeInfo::kNodeClassId:
-    case WrapperTypeInfo::kObjectClassId:
-      visitor->TraceWithWrappers(reinterpret_cast<ScriptWrappable*>(impl));
-      break;
-    case WrapperTypeInfo::kCustomWrappableId:
-      visitor->TraceWithWrappers(reinterpret_cast<CustomWrappable*>(impl));
       break;
     default:
       NOTREACHED();

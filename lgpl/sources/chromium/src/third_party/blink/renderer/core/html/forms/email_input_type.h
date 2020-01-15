@@ -37,7 +37,7 @@ namespace blink {
 
 class EmailInputType final : public BaseTextInputType {
  public:
-  static InputType* Create(HTMLInputElement&);
+  explicit EmailInputType(HTMLInputElement&);
 
   // They are public for unit testing.
   CORE_EXPORT static String ConvertEmailAddressToASCII(const ScriptRegexp&,
@@ -47,7 +47,6 @@ class EmailInputType final : public BaseTextInputType {
   CORE_EXPORT static std::unique_ptr<ScriptRegexp> CreateEmailRegexp();
 
  private:
-  explicit EmailInputType(HTMLInputElement&);
   void CountUsage() override;
   const AtomicString& FormControlType() const override;
   bool TypeMismatchFor(const String&) const override;

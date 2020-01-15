@@ -26,10 +26,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FILEAPI_PUBLIC_URL_MANAGER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FILEAPI_PUBLIC_URL_MANAGER_H_
 
-#include "services/network/public/mojom/url_loader_factory.mojom-blink.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "services/network/public/mojom/url_loader_factory.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
@@ -43,12 +45,12 @@ class URLRegistry;
 class URLRegistrable;
 
 class CORE_EXPORT PublicURLManager final
-    : public GarbageCollectedFinalized<PublicURLManager>,
+    : public GarbageCollected<PublicURLManager>,
       public ContextLifecycleObserver {
   USING_GARBAGE_COLLECTED_MIXIN(PublicURLManager);
 
  public:
-  static PublicURLManager* Create(ExecutionContext*);
+  explicit PublicURLManager(ExecutionContext*);
 
   // Generates a new Blob URL and registers the URLRegistrable to the
   // corresponding URLRegistry with the Blob URL. Returns the serialization
@@ -58,12 +60,13 @@ class CORE_EXPORT PublicURLManager final
   void Revoke(const KURL&);
   // When mojo Blob URLs are enabled this resolves the provided URL to a
   // factory capable of creating loaders for the specific URL.
-  void Resolve(const KURL&, network::mojom::blink::URLLoaderFactoryRequest);
+  void Resolve(const KURL&,
+               mojo::PendingReceiver<network::mojom::blink::URLLoaderFactory>);
   // When mojo Blob URLs are enabled this resolves the provided URL to a mojom
   // BlobURLToken. This token can be used by the browser process to securely
   // lookup what blob a URL used to refer to, even after the URL is revoked.
   // If the URL fails to resolve the request will simply be disconnected.
-  void Resolve(const KURL&, mojom::blink::BlobURLTokenRequest);
+  void Resolve(const KURL&, mojo::PendingReceiver<mojom::blink::BlobURLToken>);
 
   // ContextLifecycleObserver interface.
   void ContextDestroyed(ExecutionContext*) override;
@@ -71,13 +74,11 @@ class CORE_EXPORT PublicURLManager final
   void Trace(blink::Visitor*) override;
 
   void SetURLStoreForTesting(
-      mojom::blink::BlobURLStoreAssociatedPtr url_store) {
+      mojo::AssociatedRemote<mojom::blink::BlobURLStore> url_store) {
     url_store_ = std::move(url_store);
   }
 
  private:
-  explicit PublicURLManager(ExecutionContext*);
-
   typedef String URLString;
   // Map from URLs to the URLRegistry they are registered with.
   typedef HashMap<URLString, URLRegistry*> URLToRegistryMap;
@@ -86,7 +87,7 @@ class CORE_EXPORT PublicURLManager final
 
   bool is_stopped_;
 
-  mojom::blink::BlobURLStoreAssociatedPtr url_store_;
+  mojo::AssociatedRemote<mojom::blink::BlobURLStore> url_store_;
 };
 
 }  // namespace blink

@@ -29,7 +29,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_AUDIO_AUDIO_IO_CALLBACK_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_AUDIO_AUDIO_IO_CALLBACK_H_
 
-#include "base/time/time.h"
+#include "third_party/blink/renderer/platform/audio/audio_callback_metric_reporter.h"
 
 namespace blink {
 
@@ -49,8 +49,9 @@ class AudioIOCallback {
   // Called periodically to get the next render quantum of audio into
   // |destination_bus|.
   virtual void Render(AudioBus* destination_bus,
-                      size_t frames_to_process,
-                      const AudioIOPosition& output_position) = 0;
+                      uint32_t frames_to_process,
+                      const AudioIOPosition& output_position,
+                      const AudioCallbackMetric& metric) = 0;
 
   virtual ~AudioIOCallback() = default;
 };

@@ -22,7 +22,8 @@ WorkerNavigatorNetworkInformation& WorkerNavigatorNetworkInformation::From(
   WorkerNavigatorNetworkInformation* supplement =
       ToWorkerNavigatorNetworkInformation(navigator, context);
   if (!supplement) {
-    supplement = new WorkerNavigatorNetworkInformation(navigator, context);
+    supplement = MakeGarbageCollected<WorkerNavigatorNetworkInformation>(
+        navigator, context);
     ProvideTo(navigator, supplement);
   }
   return *supplement;
@@ -56,7 +57,7 @@ NetworkInformation* WorkerNavigatorNetworkInformation::connection(
     ExecutionContext* context) {
   DCHECK(context);
   if (!connection_)
-    connection_ = NetworkInformation::Create(context);
+    connection_ = MakeGarbageCollected<NetworkInformation>(context);
   return connection_.Get();
 }
 

@@ -30,10 +30,12 @@ class SVGRect;
 class SVGTransformList;
 class SVGViewElement;
 
-class SVGViewSpec final : public GarbageCollectedFinalized<SVGViewSpec> {
+class SVGViewSpec final : public GarbageCollected<SVGViewSpec> {
  public:
   static SVGViewSpec* CreateFromFragment(const String&);
   static SVGViewSpec* CreateForViewElement(const SVGViewElement&);
+
+  SVGViewSpec();
 
   const SVGRect* ViewBox() const { return view_box_; }
   const SVGPreserveAspectRatio* PreserveAspectRatio() const {
@@ -45,8 +47,6 @@ class SVGViewSpec final : public GarbageCollectedFinalized<SVGViewSpec> {
   void Trace(Visitor*);
 
  private:
-  SVGViewSpec();
-
   bool ParseViewSpec(const String&);
   template <typename CharType>
   bool ParseViewSpecInternal(const CharType* ptr, const CharType* end);

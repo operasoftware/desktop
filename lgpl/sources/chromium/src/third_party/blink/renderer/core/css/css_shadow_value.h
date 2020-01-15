@@ -24,6 +24,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -33,14 +34,12 @@ class CSSPrimitiveValue;
 // Used for text-shadow and box-shadow
 class CORE_EXPORT CSSShadowValue : public CSSValue {
  public:
-  static CSSShadowValue* Create(CSSPrimitiveValue* x,
-                                CSSPrimitiveValue* y,
-                                CSSPrimitiveValue* blur,
-                                CSSPrimitiveValue* spread,
-                                CSSIdentifierValue* style,
-                                CSSValue* color) {
-    return new CSSShadowValue(x, y, blur, spread, style, color);
-  }
+  CSSShadowValue(CSSPrimitiveValue* x,
+                 CSSPrimitiveValue* y,
+                 CSSPrimitiveValue* blur,
+                 CSSPrimitiveValue* spread,
+                 CSSIdentifierValue* style,
+                 CSSValue* color);
 
   String CustomCSSText() const;
 
@@ -54,17 +53,12 @@ class CORE_EXPORT CSSShadowValue : public CSSValue {
   Member<CSSValue> color;
 
   void TraceAfterDispatch(blink::Visitor*);
-
- private:
-  CSSShadowValue(CSSPrimitiveValue* x,
-                 CSSPrimitiveValue* y,
-                 CSSPrimitiveValue* blur,
-                 CSSPrimitiveValue* spread,
-                 CSSIdentifierValue* style,
-                 CSSValue* color);
 };
 
-DEFINE_CSS_VALUE_TYPE_CASTS(CSSShadowValue, IsShadowValue());
+template <>
+struct DowncastTraits<CSSShadowValue> {
+  static bool AllowFrom(const CSSValue& value) { return value.IsShadowValue(); }
+};
 
 }  // namespace blink
 

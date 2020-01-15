@@ -19,7 +19,7 @@ NavigatorCredentials& NavigatorCredentials::From(Navigator& navigator) {
   NavigatorCredentials* supplement =
       Supplement<Navigator>::From<NavigatorCredentials>(navigator);
   if (!supplement) {
-    supplement = new NavigatorCredentials(navigator);
+    supplement = MakeGarbageCollected<NavigatorCredentials>(navigator);
     ProvideTo(navigator, supplement);
   }
   return *supplement;
@@ -33,7 +33,7 @@ CredentialsContainer* NavigatorCredentials::credentials(Navigator& navigator) {
 
 CredentialsContainer* NavigatorCredentials::credentials() {
   if (!credentials_container_)
-    credentials_container_ = CredentialsContainer::Create();
+    credentials_container_ = MakeGarbageCollected<CredentialsContainer>();
   return credentials_container_.Get();
 }
 

@@ -4,8 +4,11 @@
 
 #include "third_party/blink/renderer/core/timing/window_performance.h"
 
+#include "base/test/metrics/histogram_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/renderer/bindings/core/v8/string_or_double.h"
+#include "third_party/blink/renderer/bindings/core/v8/string_or_performance_measure_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_performance_observer_callback.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -22,7 +25,7 @@ namespace blink {
 class TestPerformance : public Performance {
  public:
   explicit TestPerformance(ScriptState* script_state)
-      : Performance(TimeTicks(),
+      : Performance(base::TimeTicks(),
                     ExecutionContext::From(script_state)
                         ->GetTaskRunner(TaskType::kPerformanceTimeline)) {}
   ~TestPerformance() override = default;
@@ -45,15 +48,15 @@ class PerformanceTest : public PageTestBase {
   void Initialize(ScriptState* script_state) {
     v8::Local<v8::Function> callback =
         v8::Function::New(script_state->GetContext(), nullptr).ToLocalChecked();
-    base_ = new TestPerformance(script_state);
+    base_ = MakeGarbageCollected<TestPerformance>(script_state);
     cb_ = V8PerformanceObserverCallback::Create(callback);
-    observer_ = new PerformanceObserver(ExecutionContext::From(script_state),
-                                        base_, cb_);
+    observer_ = MakeGarbageCollected<PerformanceObserver>(
+        ExecutionContext::From(script_state), base_, cb_);
   }
 
   void SetUp() override {
     PageTestBase::SetUp();
-    execution_context_ = new NullExecutionContext();
+    execution_context_ = MakeGarbageCollected<NullExecutionContext>();
   }
 
   ExecutionContext* GetExecutionContext() { return execution_context_.Get(); }
@@ -119,25 +122,27 @@ TEST_F(PerformanceTest, AddLongTaskTiming) {
   SubTaskAttribution::EntriesVector sub_task_attributions;
 
   // Add a long task entry, but no observer registered.
-  base_->AddLongTaskTiming(TimeTicksFromSeconds(1234),
-                           TimeTicksFromSeconds(5678), "same-origin",
-                           "www.foo.com/bar", "", "", sub_task_attributions);
+  base_->AddLongTaskTiming(
+      base::TimeTicks() + base::TimeDelta::FromSecondsD(1234),
+      base::TimeTicks() + base::TimeDelta::FromSecondsD(5678), "same-origin",
+      "www.foo.com/bar", "", "", sub_task_attributions);
   EXPECT_FALSE(base_->HasPerformanceObserverFor(PerformanceEntry::kLongTask));
   EXPECT_EQ(0, NumPerformanceEntriesInObserver());  // has no effect
 
   // Make an observer for longtask
   NonThrowableExceptionState exception_state;
-  PerformanceObserverInit options;
+  PerformanceObserverInit* options = PerformanceObserverInit::Create();
   Vector<String> entry_type_vec;
   entry_type_vec.push_back("longtask");
-  options.setEntryTypes(entry_type_vec);
+  options->setEntryTypes(entry_type_vec);
   observer_->observe(options, exception_state);
 
   EXPECT_TRUE(base_->HasPerformanceObserverFor(PerformanceEntry::kLongTask));
   // Add a long task entry
-  base_->AddLongTaskTiming(TimeTicksFromSeconds(1234),
-                           TimeTicksFromSeconds(5678), "same-origin",
-                           "www.foo.com/bar", "", "", sub_task_attributions);
+  base_->AddLongTaskTiming(
+      base::TimeTicks() + base::TimeDelta::FromSecondsD(1234),
+      base::TimeTicks() + base::TimeDelta::FromSecondsD(5678), "same-origin",
+      "www.foo.com/bar", "", "", sub_task_attributions);
   EXPECT_EQ(1, NumPerformanceEntriesInObserver());  // added an entry
 }
 
@@ -170,9 +175,15 @@ TEST_F(PerformanceTest, AllowsTimingRedirect) {
                                     *security_origin.get(),
                                     GetExecutionContext()));
 
-  // When cross-origin redirect opts in.
-  redirect_chain.back().SetHTTPHeaderField(HTTPNames::Timing_Allow_Origin,
+  // When cross-origin redirect opts in, but the final response doesn't.
+  redirect_chain.back().SetHttpHeaderField(http_names::kTimingAllowOrigin,
                                            origin_domain);
+  EXPECT_FALSE(AllowsTimingRedirect(redirect_chain, final_response,
+                                    *security_origin.get(),
+                                    GetExecutionContext()));
+  // When cross-origin redirect opts in, and the final response has as well.
+  final_response.SetHttpHeaderField(http_names::kTimingAllowOrigin,
+                                    origin_domain);
   EXPECT_TRUE(AllowsTimingRedirect(redirect_chain, final_response,
                                    *security_origin.get(),
                                    GetExecutionContext()));

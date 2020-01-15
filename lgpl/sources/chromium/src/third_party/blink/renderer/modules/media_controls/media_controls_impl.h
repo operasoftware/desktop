@@ -27,6 +27,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIA_CONTROLS_MEDIA_CONTROLS_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIA_CONTROLS_MEDIA_CONTROLS_IMPL_H_
 
+#include "base/macros.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect_read_only.h"
 #include "third_party/blink/renderer/core/html/html_div_element.h"
 #include "third_party/blink/renderer/core/html/media/media_controls.h"
@@ -62,10 +63,11 @@ class MediaControlPlayButtonElement;
 class MediaControlRemainingTimeDisplayElement;
 class MediaControlScrubbingMessageElement;
 class MediaControlTextTrackListElement;
+class MediaControlsTextTrackManager;
 class MediaControlTimelineElement;
 class MediaControlToggleClosedCaptionsButtonElement;
+class MediaControlVolumeControlContainerElement;
 class MediaControlVolumeSliderElement;
-class MediaDownloadInProductHelpManager;
 class ShadowRoot;
 class TextTrack;
 
@@ -74,14 +76,12 @@ class TextTrack;
 class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
                                                public MediaControls {
   USING_GARBAGE_COLLECTED_MIXIN(MediaControlsImpl);
-  WTF_MAKE_NONCOPYABLE(MediaControlsImpl);
 
  public:
   static MediaControlsImpl* Create(HTMLMediaElement&, ShadowRoot&);
-  ~MediaControlsImpl() override = default;
 
-  // Returns whether the ModernMediaControlsEnabled runtime flag is on.
-  static bool IsModern();
+  explicit MediaControlsImpl(HTMLMediaElement&);
+  ~MediaControlsImpl() override = default;
 
   // Returns whether the event is considered a touch event.
   static bool IsTouchEvent(Event*);
@@ -109,6 +109,7 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   // Return the internal elements, which is used by registering clicking
   // EventHandlers from MediaControlsWindowEventListener.
   HTMLDivElement* PanelElement() override;
+  HTMLDivElement* ButtonPanelElement();
   // TODO(mlamouri): this method is needed in order to notify the controls that
   // the `MediaControlsEnabled` setting has changed.
   void OnMediaControlsEnabledChange() override {
@@ -126,17 +127,18 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
 
   // Text track related methods exposed to components handling closed captions.
   void ToggleTextTrackList();
-  void ShowTextTrackAtIndex(unsigned);
-  void DisableShowingTextTracks();
-
-  // Returns the label for the track when a valid track is passed in and "Off"
-  // when the parameter is null.
-  String GetTextTrackLabel(TextTrack*) const;
+  bool TextTrackListIsWanted();
+  MediaControlsTextTrackManager& GetTextTrackManager();
 
   // Methods related to the overflow menu.
+  void OpenOverflowMenu();
+  void CloseOverflowMenu();
+  bool OverflowMenuIsWanted();
+
   void ToggleOverflowMenu();
   bool OverflowMenuVisible();
 
+  void VolumeSliderWantedTimerFired(TimerBase*);
   void OpenVolumeSliderIfNecessary();
   void CloseVolumeSliderIfNecessary();
 
@@ -148,14 +150,12 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   void UpdateCurrentTimeDisplay();
 
   // Methods used for Download In-product help.
-  const MediaControlDownloadButtonElement& DownloadButton() const;
   const MediaControlOverflowMenuButtonElement& OverflowButton() const;
   MediaControlOverflowMenuButtonElement& OverflowButton();
-  void DidDismissDownloadInProductHelp();
-  MediaDownloadInProductHelpManager* DownloadInProductHelp();
 
   // Accessors for UI elements.
   const MediaControlCurrentTimeDisplayElement& CurrentTimeDisplay() const;
+  const MediaControlRemainingTimeDisplayElement& RemainingTimeDisplay() const;
   MediaControlToggleClosedCaptionsButtonElement& ToggleClosedCaptions();
 
   void Trace(blink::Visitor*) override;
@@ -168,8 +168,11 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
     // Metadata has not been loaded.
     kNotLoaded,
 
-    // Metadata is being loaded.
-    kLoadingMetadata,
+    // Metadata is being loaded and the media will not play once it's loaded.
+    kLoadingMetadataPaused,
+
+    // Metadata is being loaded and the media will play once it's loaded.
+    kLoadingMetadataPlaying,
 
     // Metadata is loaded and the media is ready to play. This can be when the
     // media is paused, when it has ended or before the media has started
@@ -237,10 +240,11 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   // check that the element is a video element first.
   HTMLVideoElement& VideoElement();
 
-  explicit MediaControlsImpl(HTMLMediaElement&);
-
   void InitializeControls();
   void PopulatePanel();
+
+  // Attach hover background div to buttons
+  void AttachHoverBackground(Element*);
 
   void MakeOpaque();
   void MakeOpaqueFromPointerEvent();
@@ -275,12 +279,17 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
 
   void ElementSizeChangedTimerFired(TimerBase*);
 
+  // Update any visible indicators of the current time.
+  void UpdateTimeIndicators();
+
   // Hide elements that don't fit, and show those things that we want which
   // do fit.  This requires that m_effectiveWidth and m_effectiveHeight are
   // current.
   void ComputeWhichControlsFit();
 
+  void HidePopupMenu();
   void UpdateOverflowMenuWanted() const;
+  void UpdateOverflowMenuItemCSSClass() const;
   void UpdateScrubbingMessageFits() const;
   void UpdateSizingCSSClass();
   void MaybeRecordElementsDisplayed() const;
@@ -328,6 +337,8 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   void OnPlay();
   void OnPlaying();
   void OnPause();
+  void OnSeeking();
+  void OnSeeked();
   void OnTextTracksAddedOrRemoved();
   void OnTextTracksChanged();
   void OnError();
@@ -354,6 +365,7 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   Member<MediaControlRemainingTimeDisplayElement> duration_display_;
   Member<MediaControlMuteButtonElement> mute_button_;
   Member<MediaControlVolumeSliderElement> volume_slider_;
+  Member<MediaControlVolumeControlContainerElement> volume_control_container_;
   Member<MediaControlToggleClosedCaptionsButtonElement>
       toggle_closed_captions_button_;
   Member<MediaControlTextTrackListElement> text_track_list_;
@@ -396,8 +408,6 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
 
   bool keep_showing_until_timer_fires_ : 1;
 
-  Member<MediaDownloadInProductHelpManager> download_iph_manager_;
-
   bool is_acting_as_audio_controls_ = false;
 
   // Our best guess on whether the user is interacting with the controls via
@@ -408,12 +418,18 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
 
   // Timer for distinguishing double-taps.
   TaskRunnerTimer<MediaControlsImpl> tap_timer_;
+  bool is_paused_for_double_tap_ = false;
+
+  // Timer to delay showing the volume slider to avoid accidental triggering
+  // of the slider
+  TaskRunnerTimer<MediaControlsImpl> volume_slider_wanted_timer_;
+
+  Member<MediaControlsTextTrackManager> text_track_manager_;
 
   bool is_test_mode_ = false;
+
+  DISALLOW_COPY_AND_ASSIGN(MediaControlsImpl);
 };
-
-DEFINE_ELEMENT_TYPE_CASTS(MediaControlsImpl, IsMediaControls());
-
 }  // namespace blink
 
 #endif

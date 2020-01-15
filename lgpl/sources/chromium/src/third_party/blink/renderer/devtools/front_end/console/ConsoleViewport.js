@@ -58,12 +58,9 @@ Console.ConsoleViewport = class {
     this.element.addEventListener('scroll', this._onScroll.bind(this), false);
     this.element.addEventListener('copy', this._onCopy.bind(this), false);
     this.element.addEventListener('dragstart', this._onDragStart.bind(this), false);
-    this._keyboardNavigationEnabled = Runtime.experiments.isEnabled('consoleKeyboardNavigation');
-    if (this._keyboardNavigationEnabled) {
-      this._contentElement.addEventListener('focusin', this._onFocusIn.bind(this), false);
-      this._contentElement.addEventListener('focusout', this._onFocusOut.bind(this), false);
-      this._contentElement.addEventListener('keydown', this._onKeyDown.bind(this), false);
-    }
+    this._contentElement.addEventListener('focusin', this._onFocusIn.bind(this), false);
+    this._contentElement.addEventListener('focusout', this._onFocusOut.bind(this), false);
+    this._contentElement.addEventListener('keydown', this._onKeyDown.bind(this), false);
     this._virtualSelectedIndex = -1;
     this._contentElement.tabIndex = -1;
 
@@ -95,10 +92,18 @@ Console.ConsoleViewport = class {
    */
   setStickToBottom(value) {
     this._stickToBottom = value;
-    if (this._stickToBottom)
+    if (this._stickToBottom) {
       this._observer.observe(this._contentElement, this._observerConfig);
-    else
+    } else {
       this._observer.disconnect();
+    }
+  }
+
+  /**
+   * @return {boolean}
+   */
+  hasVirtualSelection() {
+    return this._virtualSelectedIndex !== -1;
   }
 
   copyWithStyles() {
@@ -111,11 +116,13 @@ Console.ConsoleViewport = class {
    * @param {!Event} event
    */
   _onCopy(event) {
-    if (this._muteCopyHandler)
+    if (this._muteCopyHandler) {
       return;
+    }
     const text = this._selectedText();
-    if (!text)
+    if (!text) {
       return;
+    }
     event.preventDefault();
     event.clipboardData.setData('text/plain', text);
   }
@@ -125,13 +132,21 @@ Console.ConsoleViewport = class {
    */
   _onFocusIn(event) {
     const renderedIndex = this._renderedItems.findIndex(item => item.element().isSelfOrAncestor(event.target));
-    if (renderedIndex !== -1)
+    if (renderedIndex !== -1) {
       this._virtualSelectedIndex = this._firstActiveIndex + renderedIndex;
+    }
+    let focusLastChild = false;
     // Make default selection when moving from external (e.g. prompt) to the container.
     if (this._virtualSelectedIndex === -1 && this._isOutsideViewport(/** @type {?Element} */ (event.relatedTarget)) &&
-        event.target === this._contentElement)
+        event.target === this._contentElement && this._itemCount) {
+      focusLastChild = true;
       this._virtualSelectedIndex = this._itemCount - 1;
-    this._updateFocusedItem();
+
+      // Update stick to bottom before scrolling into view.
+      this.refresh();
+      this.scrollItemIntoView(this._virtualSelectedIndex);
+    }
+    this._updateFocusedItem(focusLastChild);
   }
 
   /**
@@ -139,8 +154,9 @@ Console.ConsoleViewport = class {
    */
   _onFocusOut(event) {
     // Remove selection when focus moves to external location (e.g. prompt).
-    if (this._isOutsideViewport(/** @type {?Element} */ (event.relatedTarget)))
+    if (this._isOutsideViewport(/** @type {?Element} */ (event.relatedTarget))) {
       this._virtualSelectedIndex = -1;
+    }
     this._updateFocusedItem();
   }
 
@@ -157,8 +173,9 @@ Console.ConsoleViewport = class {
    */
   _onDragStart(event) {
     const text = this._selectedText();
-    if (!text)
+    if (!text) {
       return false;
+    }
     event.dataTransfer.clearData();
     event.dataTransfer.setData('text/plain', text);
     event.dataTransfer.effectAllowed = 'copy';
@@ -169,8 +186,9 @@ Console.ConsoleViewport = class {
    * @param {!Event} event
    */
   _onKeyDown(event) {
-    if (UI.isEditing() || !this._itemCount || event.shiftKey)
+    if (UI.isEditing() || !this._itemCount || event.shiftKey) {
       return;
+    }
     let isArrowUp = false;
     switch (event.key) {
       case 'ArrowUp':
@@ -182,10 +200,11 @@ Console.ConsoleViewport = class {
         }
         break;
       case 'ArrowDown':
-        if (this._virtualSelectedIndex < this._itemCount - 1)
+        if (this._virtualSelectedIndex < this._itemCount - 1) {
           this._virtualSelectedIndex++;
-        else
+        } else {
           return;
+        }
         break;
       case 'Home':
         this._virtualSelectedIndex = 0;
@@ -208,22 +227,24 @@ Console.ConsoleViewport = class {
     const selectedElement = this.renderedElementAt(this._virtualSelectedIndex);
     const changed = this._lastSelectedElement !== selectedElement;
     const containerHasFocus = this._contentElement === this.element.ownerDocument.deepActiveElement();
-    if (this._lastSelectedElement && changed)
+    if (this._lastSelectedElement && changed) {
       this._lastSelectedElement.classList.remove('console-selected');
-    if (selectedElement && (changed || containerHasFocus) && this.element.hasFocus()) {
+    }
+    if (selectedElement && (focusLastChild || changed || containerHasFocus) && this.element.hasFocus()) {
       selectedElement.classList.add('console-selected');
       // Do not focus the message if something within holds focus (e.g. object).
-      if (!selectedElement.hasFocus()) {
-        if (focusLastChild)
-          this._renderedItems[this._virtualSelectedIndex - this._firstActiveIndex].focusLastChildOrSelf();
-        else
-          focusWithoutScroll(selectedElement);
+      if (focusLastChild) {
+        this.setStickToBottom(false);
+        this._renderedItems[this._virtualSelectedIndex - this._firstActiveIndex].focusLastChildOrSelf();
+      } else if (!selectedElement.hasFocus()) {
+        focusWithoutScroll(selectedElement);
       }
     }
-    if (this._itemCount && !this._contentElement.hasFocus())
+    if (this._itemCount && !this._contentElement.hasFocus()) {
       this._contentElement.tabIndex = 0;
-    else
+    } else {
       this._contentElement.tabIndex = -1;
+    }
     this._lastSelectedElement = selectedElement;
 
     /**
@@ -246,8 +267,9 @@ Console.ConsoleViewport = class {
   invalidate() {
     delete this._cachedProviderElements;
     this._itemCount = this._provider.itemCount();
-    if (this._virtualSelectedIndex > this._itemCount - 1)
+    if (this._virtualSelectedIndex > this._itemCount - 1) {
       this._virtualSelectedIndex = this._itemCount - 1;
+    }
     this._rebuildCumulativeHeights();
     this.refresh();
   }
@@ -257,8 +279,9 @@ Console.ConsoleViewport = class {
    * @return {?Console.ConsoleViewportElement}
    */
   _providerElement(index) {
-    if (!this._cachedProviderElements)
+    if (!this._cachedProviderElements) {
       this._cachedProviderElements = new Array(this._itemCount);
+    }
     let element = this._cachedProviderElements[index];
     if (!element) {
       element = this._provider.itemElement(index);
@@ -273,10 +296,11 @@ Console.ConsoleViewport = class {
     let height = 0;
     this._cumulativeHeights = new Int32Array(this._itemCount);
     for (let i = 0; i < this._itemCount; ++i) {
-      if (firstActiveIndex <= i && i - firstActiveIndex < this._renderedItems.length && i <= lastActiveIndex)
+      if (firstActiveIndex <= i && i - firstActiveIndex < this._renderedItems.length && i <= lastActiveIndex) {
         height += this._renderedItems[i - firstActiveIndex].element().offsetHeight;
-      else
+      } else {
         height += this._provider.fastHeight(i);
+      }
       this._cumulativeHeights[i] = height;
     }
   }
@@ -316,8 +340,9 @@ Console.ConsoleViewport = class {
    * @suppressGlobalPropertiesCheck
    */
   _isSelectionBackwards(selection) {
-    if (!selection || !selection.rangeCount)
+    if (!selection || !selection.rangeCount) {
       return false;
+    }
     const range = document.createRange();
     range.setStart(selection.anchorNode, selection.anchorOffset);
     range.setEnd(selection.focusNode, selection.focusOffset);
@@ -413,10 +438,11 @@ Console.ConsoleViewport = class {
       anchorElement = this._anchorSelection.node;
       anchorOffset = this._anchorSelection.offset;
     } else {
-      if (this._anchorSelection.item < this._firstActiveIndex)
+      if (this._anchorSelection.item < this._firstActiveIndex) {
         anchorElement = this._topGapElement;
-      else if (this._anchorSelection.item > this._lastActiveIndex)
+      } else if (this._anchorSelection.item > this._lastActiveIndex) {
         anchorElement = this._bottomGapElement;
+      }
       anchorOffset = this._selectionIsBackward ? 1 : 0;
     }
 
@@ -426,10 +452,11 @@ Console.ConsoleViewport = class {
       headElement = this._headSelection.node;
       headOffset = this._headSelection.offset;
     } else {
-      if (this._headSelection.item < this._firstActiveIndex)
+      if (this._headSelection.item < this._firstActiveIndex) {
         headElement = this._topGapElement;
-      else if (this._headSelection.item > this._lastActiveIndex)
+      } else if (this._headSelection.item > this._lastActiveIndex) {
         headElement = this._bottomGapElement;
+      }
       headOffset = this._selectionIsBackward ? 0 : 1;
     }
 
@@ -439,25 +466,27 @@ Console.ConsoleViewport = class {
   refresh() {
     this._observer.disconnect();
     this._innerRefresh();
-    if (this._stickToBottom)
+    if (this._stickToBottom) {
       this._observer.observe(this._contentElement, this._observerConfig);
+    }
   }
 
   _innerRefresh() {
-    if (!this._visibleHeight())
-      return;  // Do nothing for invisible controls.
+    if (!this._visibleHeight()) {
+      return;
+    }  // Do nothing for invisible controls.
 
     if (!this._itemCount) {
-      for (let i = 0; i < this._renderedItems.length; ++i)
+      for (let i = 0; i < this._renderedItems.length; ++i) {
         this._renderedItems[i].willHide();
+      }
       this._renderedItems = [];
       this._contentElement.removeChildren();
       this._topGapElement.style.height = '0px';
       this._bottomGapElement.style.height = '0px';
       this._firstActiveIndex = -1;
       this._lastActiveIndex = -1;
-      if (this._keyboardNavigationEnabled)
-        this._updateFocusedItem();
+      this._updateFocusedItem();
       return;
     }
 
@@ -502,10 +531,12 @@ Console.ConsoleViewport = class {
     this._partialViewportUpdate(prepare.bind(this));
     this._contentElement.style.removeProperty('height');
     // Should be the last call in the method as it might force layout.
-    if (shouldRestoreSelection)
+    if (shouldRestoreSelection) {
       this._restoreSelection(selection);
-    if (this._stickToBottom)
+    }
+    if (this._stickToBottom) {
       this.element.scrollTop = 10000000;
+    }
   }
 
   /**
@@ -513,16 +544,17 @@ Console.ConsoleViewport = class {
    */
   _partialViewportUpdate(prepare) {
     const itemsToRender = new Set();
-    for (let i = this._firstActiveIndex; i <= this._lastActiveIndex; ++i)
+    for (let i = this._firstActiveIndex; i <= this._lastActiveIndex; ++i) {
       itemsToRender.add(this._providerElement(i));
+    }
     const willBeHidden = this._renderedItems.filter(item => !itemsToRender.has(item));
-    for (let i = 0; i < willBeHidden.length; ++i)
+    for (let i = 0; i < willBeHidden.length; ++i) {
       willBeHidden[i].willHide();
+    }
     prepare();
     let hadFocus = false;
     for (let i = 0; i < willBeHidden.length; ++i) {
-      if (this._keyboardNavigationEnabled)
-        hadFocus = hadFocus || willBeHidden[i].element().hasFocus();
+      hadFocus = hadFocus || willBeHidden[i].element().hasFocus();
       willBeHidden[i].element().remove();
     }
 
@@ -532,22 +564,23 @@ Console.ConsoleViewport = class {
       const element = viewportElement.element();
       if (element !== anchor) {
         const shouldCallWasShown = !element.parentElement;
-        if (shouldCallWasShown)
+        if (shouldCallWasShown) {
           wasShown.push(viewportElement);
+        }
         this._contentElement.insertBefore(element, anchor);
       } else {
         anchor = anchor.nextSibling;
       }
     }
-    for (let i = 0; i < wasShown.length; ++i)
+    for (let i = 0; i < wasShown.length; ++i) {
       wasShown[i].wasShown();
+    }
     this._renderedItems = Array.from(itemsToRender);
 
-    if (this._keyboardNavigationEnabled) {
-      if (hadFocus)
-        this._contentElement.focus();
-      this._updateFocusedItem();
+    if (hadFocus) {
+      this._contentElement.focus();
     }
+    this._updateFocusedItem();
   }
 
   /**
@@ -555,8 +588,9 @@ Console.ConsoleViewport = class {
    */
   _selectedText() {
     this._updateSelectionModel(this.element.getComponentSelection());
-    if (!this._headSelection || !this._anchorSelection)
+    if (!this._headSelection || !this._anchorSelection) {
       return null;
+    }
 
     let startSelection = null;
     let endSelection = null;
@@ -611,14 +645,16 @@ Console.ConsoleViewport = class {
     let node = itemElement;
     while ((node = node.traverseNextNode(itemElement)) && node !== selectionNode) {
       if (node.nodeType !== Node.TEXT_NODE || node.parentElement.nodeName === 'STYLE' ||
-          node.parentElement.nodeName === 'SCRIPT')
+          node.parentElement.nodeName === 'SCRIPT') {
         continue;
+      }
       chars += Components.Linkifier.untruncatedNodeText(node).length;
     }
     // If the selected node text was truncated, treat any non-zero offset as the full length.
     const untruncatedContainerLength = Components.Linkifier.untruncatedNodeText(selectionNode).length;
-    if (offset > 0 && untruncatedContainerLength !== selectionNode.textContent.length)
+    if (offset > 0 && untruncatedContainerLength !== selectionNode.textContent.length) {
       offset = untruncatedContainerLength;
+    }
     return chars + offset;
   }
 
@@ -633,8 +669,9 @@ Console.ConsoleViewport = class {
    * @return {number}
    */
   firstVisibleIndex() {
-    if (!this._cumulativeHeights.length)
+    if (!this._cumulativeHeights.length) {
       return -1;
+    }
     this._rebuildCumulativeHeightsIfNeeded();
     return this._cumulativeHeights.lowerBound(this.element.scrollTop + 1);
   }
@@ -643,8 +680,9 @@ Console.ConsoleViewport = class {
    * @return {number}
    */
   lastVisibleIndex() {
-    if (!this._cumulativeHeights.length)
+    if (!this._cumulativeHeights.length) {
       return -1;
+    }
     this._rebuildCumulativeHeightsIfNeeded();
     const scrollBottom = this.element.scrollTop + this.element.clientHeight;
     const right = this._itemCount - 1;
@@ -655,8 +693,9 @@ Console.ConsoleViewport = class {
    * @return {?Element}
    */
   renderedElementAt(index) {
-    if (index === -1 || index < this._firstActiveIndex || index > this._lastActiveIndex)
+    if (index === -1 || index < this._firstActiveIndex || index > this._lastActiveIndex) {
       return null;
+    }
     return this._renderedItems[index - this._firstActiveIndex].element();
   }
 
@@ -667,17 +706,21 @@ Console.ConsoleViewport = class {
   scrollItemIntoView(index, makeLast) {
     const firstVisibleIndex = this.firstVisibleIndex();
     const lastVisibleIndex = this.lastVisibleIndex();
-    if (index > firstVisibleIndex && index < lastVisibleIndex)
+    if (index > firstVisibleIndex && index < lastVisibleIndex) {
       return;
+    }
     // If the prompt is visible, then the last item must be fully on screen.
-    if (index === lastVisibleIndex && this._cumulativeHeights[index] <= this.element.scrollTop + this._visibleHeight())
+    if (index === lastVisibleIndex &&
+        this._cumulativeHeights[index] <= this.element.scrollTop + this._visibleHeight()) {
       return;
-    if (makeLast)
+    }
+    if (makeLast) {
       this.forceScrollItemToBeLast(index);
-    else if (index <= firstVisibleIndex)
+    } else if (index <= firstVisibleIndex) {
       this.forceScrollItemToBeFirst(index);
-    else if (index >= lastVisibleIndex)
+    } else if (index >= lastVisibleIndex) {
       this.forceScrollItemToBeLast(index);
+    }
   }
 
   /**
@@ -688,8 +731,9 @@ Console.ConsoleViewport = class {
     this.setStickToBottom(false);
     this._rebuildCumulativeHeightsIfNeeded();
     this.element.scrollTop = index > 0 ? this._cumulativeHeights[index - 1] : 0;
-    if (this.element.isScrolledToBottom())
+    if (this.element.isScrolledToBottom()) {
       this.setStickToBottom(true);
+    }
     this.refresh();
     // After refresh, the item is in DOM, but may not be visible (items above were larger than expected).
     this.renderedElementAt(index).scrollIntoView(true /* alignTop */);
@@ -703,8 +747,9 @@ Console.ConsoleViewport = class {
     this.setStickToBottom(false);
     this._rebuildCumulativeHeightsIfNeeded();
     this.element.scrollTop = this._cumulativeHeights[index] - this._visibleHeight();
-    if (this.element.isScrolledToBottom())
+    if (this.element.isScrolledToBottom()) {
       this.setStickToBottom(true);
+    }
     this.refresh();
     // After refresh, the item is in DOM, but may not be visible (items above were larger than expected).
     this.renderedElementAt(index).scrollIntoView(false /* alignTop */);

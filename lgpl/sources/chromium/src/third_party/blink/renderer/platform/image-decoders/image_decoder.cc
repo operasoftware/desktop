@@ -21,18 +21,40 @@
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
 
 #include <memory>
-#include "third_party/blink/renderer/platform/graphics/bitmap_image_metrics.h"
+
+#include "base/numerics/safe_conversions.h"
 #include "third_party/blink/renderer/platform/image-decoders/bmp/bmp_image_decoder.h"
 #include "third_party/blink/renderer/platform/image-decoders/fast_shared_buffer_reader.h"
 #include "third_party/blink/renderer/platform/image-decoders/gif/gif_image_decoder.h"
 #include "third_party/blink/renderer/platform/image-decoders/ico/ico_image_decoder.h"
 #include "third_party/blink/renderer/platform/image-decoders/jpeg/jpeg_image_decoder.h"
 #include "third_party/blink/renderer/platform/image-decoders/png/png_image_decoder.h"
-#include "third_party/blink/renderer/platform/image-decoders/svg/svg_image_decoder.h"
 #include "third_party/blink/renderer/platform/image-decoders/webp/webp_image_decoder.h"
-#include "third_party/blink/renderer/platform/instrumentation/platform_instrumentation.h"
+#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/platform/network/mime/mime_type_registry.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace blink {
+
+namespace {
+
+cc::ImageType FileExtensionToImageType(String image_extension) {
+  if (image_extension == "png")
+    return cc::ImageType::kPNG;
+  if (image_extension == "jpg")
+    return cc::ImageType::kJPEG;
+  if (image_extension == "webp")
+    return cc::ImageType::kWEBP;
+  if (image_extension == "gif")
+    return cc::ImageType::kGIF;
+  if (image_extension == "ico")
+    return cc::ImageType::kICO;
+  if (image_extension == "bmp")
+    return cc::ImageType::kBMP;
+  return cc::ImageType::kInvalid;
+}
+
+}  // namespace
 
 const size_t ImageDecoder::kNoDecodedImageByteLimit;
 
@@ -61,11 +83,7 @@ inline bool MatchesCURSignature(const char* contents) {
 }
 
 inline bool MatchesBMPSignature(const char* contents) {
-  return !memcmp(contents, "BM", 2);
-}
-
-inline bool MatchesSVGSignature(const char* contents) {
-  return !memcmp(contents, "<?xml", 5) || !memcmp(contents, "<svg", 4);
+  return !memcmp(contents, "BM", 2) || !memcmp(contents, "BA", 2);
 }
 
 static constexpr size_t kLongestSignatureLength = sizeof("RIFF????WEBPVP") - 1;
@@ -78,8 +96,7 @@ std::unique_ptr<ImageDecoder> ImageDecoder::Create(
     AlphaOption alpha_option,
     HighBitDepthDecodingOption high_bit_depth_decoding_option,
     const ColorBehavior& color_behavior,
-    const SkISize& desired_size,
-    bool allow_svg) {
+    const SkISize& desired_size) {
   // At least kLongestSignatureLength bytes are needed to sniff the signature.
   if (data->size() < kLongestSignatureLength)
     return nullptr;
@@ -130,10 +147,6 @@ std::unique_ptr<ImageDecoder> ImageDecoder::Create(
   } else if (MatchesBMPSignature(contents)) {
     decoder.reset(
         new BMPImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
-  } else if (MatchesSVGSignature(contents)) {
-      if (allow_svg)
-        decoder.reset(
-            new SVGImageDecoder(alpha_option, color_behavior, max_decoded_bytes));
   }
 
   if (decoder)
@@ -144,6 +157,111 @@ std::unique_ptr<ImageDecoder> ImageDecoder::Create(
 
 bool ImageDecoder::HasSufficientDataToSniffImageType(const SharedBuffer& data) {
   return data.size() >= kLongestSignatureLength;
+}
+
+// static
+String ImageDecoder::SniffImageType(scoped_refptr<SharedBuffer> image_data) {
+  // Access the first kLongestSignatureLength chars to sniff the signature.
+  // (note: FastSharedBufferReader only makes a copy if the bytes are segmented)
+  char buffer[kLongestSignatureLength];
+  const FastSharedBufferReader fast_reader(
+      SegmentReader::CreateFromSharedBuffer(std::move(image_data)));
+  const char* contents =
+      fast_reader.GetConsecutiveData(0, kLongestSignatureLength, buffer);
+
+  if (MatchesJPEGSignature(contents))
+    return "image/jpeg";
+  if (MatchesPNGSignature(contents))
+    return "image/png";
+  if (MatchesGIFSignature(contents))
+    return "image/gif";
+  if (MatchesWebPSignature(contents))
+    return "image/webp";
+  if (MatchesICOSignature(contents) || MatchesCURSignature(contents))
+    return "image/x-icon";
+  if (MatchesBMPSignature(contents))
+    return "image/bmp";
+  return String();
+}
+
+// static
+ImageDecoder::CompressionFormat ImageDecoder::GetCompressionFormat(
+    scoped_refptr<SharedBuffer> image_data,
+    String mime_type) {
+  // Attempt to sniff the image content to determine the true MIME type of the
+  // image, and fall back on the provided MIME type if this is not possible.
+  //
+  // Note that if the type cannot be sniffed AND the provided type is incorrect
+  // (for example, due to a misconfigured web server), then it is possible that
+  // the wrong compression format will be returned. However, this case should be
+  // exceedingly rare.
+  if (image_data && HasSufficientDataToSniffImageType(*image_data.get()))
+    mime_type = SniffImageType(image_data);
+  if (!mime_type)
+    return kUndefinedFormat;
+
+  // Attempt to sniff whether a WebP image is using a lossy or lossless
+  // compression algorithm. Note: Will return kUndefinedFormat in the case of an
+  // animated WebP image.
+  size_t available_data = image_data ? image_data->size() : 0;
+  if (EqualIgnoringASCIICase(mime_type, "image/webp") && available_data >= 16) {
+    // Attempt to sniff only 8 bytes (the second half of the first 16). This
+    // will be sufficient to determine lossy vs. lossless in most WebP images
+    // (all but the extended format).
+    const FastSharedBufferReader fast_reader(
+        SegmentReader::CreateFromSharedBuffer(image_data));
+    char buffer[8];
+    const unsigned char* contents = reinterpret_cast<const unsigned char*>(
+        fast_reader.GetConsecutiveData(8, 8, buffer));
+    if (!memcmp(contents, "WEBPVP8 ", 8)) {
+      // Simple lossy WebP format.
+      return kLossyFormat;
+    }
+    if (!memcmp(contents, "WEBPVP8L", 8)) {
+      // Simple Lossless WebP format.
+      return kLosslessFormat;
+    }
+    if (!memcmp(contents, "WEBPVP8X", 8)) {
+      // Extended WebP format; more content will need to be sniffed to make a
+      // determination.
+      std::unique_ptr<char[]> long_buffer(new char[available_data]);
+      contents = reinterpret_cast<const unsigned char*>(
+          fast_reader.GetConsecutiveData(0, available_data, long_buffer.get()));
+      WebPBitstreamFeatures webp_features{};
+      VP8StatusCode status =
+          WebPGetFeatures(contents, available_data, &webp_features);
+      // It is possible that there is not have enough image data available to
+      // make a determination.
+      if (status == VP8_STATUS_OK) {
+        DCHECK_LT(webp_features.format,
+                  CompressionFormat::kWebPAnimationFormat);
+        return webp_features.has_animation
+                   ? CompressionFormat::kWebPAnimationFormat
+                   : static_cast<CompressionFormat>(webp_features.format);
+      }
+      DCHECK_EQ(status, VP8_STATUS_NOT_ENOUGH_DATA);
+    } else {
+      NOTREACHED();
+    }
+  }
+
+  if (MIMETypeRegistry::IsLossyImageMIMEType(mime_type))
+    return kLossyFormat;
+  if (MIMETypeRegistry::IsLosslessImageMIMEType(mime_type))
+    return kLosslessFormat;
+
+  return kUndefinedFormat;
+}
+
+cc::ImageHeaderMetadata ImageDecoder::MakeMetadataForDecodeAcceleration()
+    const {
+  DCHECK(IsDecodedSizeAvailable());
+  cc::ImageHeaderMetadata image_metadata{};
+  image_metadata.image_type = FileExtensionToImageType(FilenameExtension());
+  image_metadata.yuv_subsampling = GetYUVSubsampling();
+  image_metadata.image_size = static_cast<gfx::Size>(size_);
+  image_metadata.has_embedded_color_profile = HasEmbeddedColorProfile();
+  return image_metadata;
 }
 
 size_t ImageDecoder::FrameCount() {
@@ -166,16 +284,9 @@ ImageFrame* ImageDecoder::DecodeFrameBufferAtIndex(size_t index) {
     return nullptr;
   ImageFrame* frame = &frame_buffer_cache_[index];
   if (frame->GetStatus() != ImageFrame::kFrameComplete) {
-    PlatformInstrumentation::WillDecodeImage(FilenameExtension());
+    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "Decode Image",
+                 "imageType", FilenameExtension().Ascii());
     Decode(index);
-    PlatformInstrumentation::DidDecodeImage();
-  }
-
-  if (!has_histogrammed_color_space_) {
-    BitmapImageMetrics::CountImageGammaAndGamut(
-        embedded_color_profile_ ? embedded_color_profile_->GetProfile()
-                                : nullptr);
-    has_histogrammed_color_space_ = true;
   }
 
   frame->NotifyBitmapIfPixelsChanged();
@@ -203,20 +314,16 @@ size_t ImageDecoder::FrameBytesAtIndex(size_t index) const {
       frame_buffer_cache_[index].GetStatus() == ImageFrame::kFrameEmpty)
     return 0;
 
-  struct ImageSize {
-    explicit ImageSize(IntSize size) {
-      area = static_cast<uint64_t>(size.Width()) * size.Height();
-    }
-
-    uint64_t area;
-  };
-
   size_t decoded_bytes_per_pixel = k4BytesPerPixel;
   if (frame_buffer_cache_[index].GetPixelFormat() ==
       ImageFrame::PixelFormat::kRGBA_F16) {
     decoded_bytes_per_pixel = k8BytesPerPixel;
   }
-  return ImageSize(FrameSizeAtIndex(index)).area * decoded_bytes_per_pixel;
+  IntSize size = FrameSizeAtIndex(index);
+  base::CheckedNumeric<size_t> area = size.Width();
+  area *= size.Height();
+  area *= decoded_bytes_per_pixel;
+  return area.ValueOrDie();
 }
 
 size_t ImageDecoder::ClearCacheExceptFrame(size_t clear_except_frame) {
@@ -279,7 +386,7 @@ void ImageDecoder::ClearFrameBuffer(size_t frame_index) {
 }
 
 Vector<size_t> ImageDecoder::FindFramesToDecode(size_t index) const {
-  DCHECK(index < frame_buffer_cache_.size());
+  DCHECK_LT(index, frame_buffer_cache_.size());
 
   Vector<size_t> frames_to_decode;
   do {
@@ -561,7 +668,6 @@ const skcms_ICCProfile* ColorProfileTransform::DstProfile() const {
 void ImageDecoder::SetEmbeddedColorProfile(
     std::unique_ptr<ColorProfile> profile) {
   DCHECK(!IgnoresColorSpace());
-  DCHECK(!has_histogrammed_color_space_);
 
   embedded_color_profile_ = std::move(profile);
   source_to_target_color_transform_needs_update_ = true;

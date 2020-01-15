@@ -12,6 +12,8 @@ import v8_types
 
 CALLBACK_FUNCTION_H_INCLUDES = frozenset([
     'platform/bindings/callback_function_base.h',
+    'platform/bindings/v8_value_or_script_wrappable_adapter.h',
+    'platform/wtf/forward.h',
 ])
 CALLBACK_FUNCTION_CPP_INCLUDES = frozenset([
     'base/stl_util.h',
@@ -22,6 +24,7 @@ CALLBACK_FUNCTION_CPP_INCLUDES = frozenset([
     'core/execution_context/execution_context.h',
     'platform/bindings/exception_messages.h',
     'platform/bindings/exception_state.h',
+    'platform/bindings/script_forbidden_scope.h',
 ])
 
 
@@ -63,7 +66,7 @@ def forward_declarations(callback_function):
             return find_forward_declaration(idl_type.element_type)
         return None
 
-    declarations = set(['ScriptWrappable'])
+    declarations = set()
     for argument in callback_function.arguments:
         name = find_forward_declaration(argument.idl_type)
         if name:
@@ -88,11 +91,14 @@ def arguments_context(arguments):
     def argument_cpp_type(argument):
         cpp_type = argument.idl_type.callback_cpp_type
         if argument.is_variadic:
-            return 'const Vector<%s>&' % cpp_type
+            if argument.idl_type.is_traceable:
+                return 'const HeapVector<%s>&' % cpp_type
+            else:
+                return 'const Vector<%s>&' % cpp_type
         else:
             return cpp_type
 
-    argument_declarations = ['ScriptWrappable* callback_this_value']
+    argument_declarations = ['bindings::V8ValueOrScriptWrappableAdapter callback_this_value']
     argument_declarations.extend(
         '%s %s' % (argument_cpp_type(argument), argument.name)
         for argument in arguments)

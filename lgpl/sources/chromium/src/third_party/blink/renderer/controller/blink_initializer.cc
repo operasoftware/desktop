@@ -31,25 +31,29 @@
 #include "third_party/blink/renderer/controller/blink_initializer.h"
 
 #include <memory>
+#include <utility>
 
+#include "base/allocator/partition_allocator/page_allocator.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/common/experiments/memory_ablation_experiment.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/mojom/loader/previews_resource_loading_hints.mojom-blink.h"
 #include "third_party/blink/public/platform/interface_registry.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_initializer.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_context_snapshot_external_references.h"
 #include "third_party/blink/renderer/controller/blink_leak_detector.h"
-#include "third_party/blink/renderer/controller/bloated_renderer_detector.h"
 #include "third_party/blink/renderer/controller/dev_tools_frontend_impl.h"
 #include "third_party/blink/renderer/core/animation/animation_clock.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/display_cutout_client_impl.h"
+#include "third_party/blink/renderer/core/frame/frame_impl.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -59,6 +63,7 @@
 #if defined(OS_ANDROID)
 #include "third_party/blink/renderer/controller/crash_memory_metrics_reporter_impl.h"
 #include "third_party/blink/renderer/controller/oom_intervention_impl.h"
+#include "third_party/blink/renderer/controller/user_level_memory_pressure_signal_generator.h"
 #endif
 
 namespace blink {
@@ -67,9 +72,12 @@ namespace {
 
 class EndOfTaskRunner : public Thread::TaskObserver {
  public:
-  void WillProcessTask() override { AnimationClock::NotifyTaskStart(); }
-  void DidProcessTask() override {
-    Microtask::PerformCheckpoint(V8PerIsolateData::MainThreadIsolate());
+  void WillProcessTask(const base::PendingTask&) override {
+    AnimationClock::NotifyTaskStart();
+  }
+
+  void DidProcessTask(const base::PendingTask&) override {
+    // TODO(tzik): Move rejected promise handling to EventLoop.
     V8Initializer::ReportRejectedPromisesOnMainThread();
   }
 };
@@ -110,32 +118,24 @@ void InitializeCommon(Platform* platform,
   // BlinkInitializer::Initialize() must be called before InitializeMainThread
   GetBlinkInitializer().Initialize();
 
-  if (RuntimeEnabledFeatures::BloatedRendererDetectionEnabled()) {
-    BloatedRendererDetector::Initialize();
-    V8Initializer::SetNearV8HeapLimitOnMainThreadCallback(
-        BloatedRendererDetector::OnNearV8HeapLimitOnMainThread);
-  }
-
   V8Initializer::InitializeMainThread(
       V8ContextSnapshotExternalReferences::GetTable());
 
   GetBlinkInitializer().RegisterInterfaces(*registry);
 
-  // currentThread is null if we are running on a thread without a message loop.
-  if (Thread* current_thread = platform->CurrentThread()) {
-    DCHECK(!g_end_of_task_runner);
-    g_end_of_task_runner = new EndOfTaskRunner;
-    current_thread->AddTaskObserver(g_end_of_task_runner);
-  }
+  DCHECK(!g_end_of_task_runner);
+  g_end_of_task_runner = new EndOfTaskRunner;
+  Thread::Current()->AddTaskObserver(g_end_of_task_runner);
 
-  if (Thread* main_thread = Platform::Current()->MainThread()) {
-    scoped_refptr<base::SequencedTaskRunner> task_runner =
-        main_thread->GetTaskRunner();
-    if (task_runner)
-      MemoryAblationExperiment::MaybeStartForRenderer(task_runner);
-  }
+  scoped_refptr<base::SequencedTaskRunner> task_runner =
+      Thread::MainThread()->GetTaskRunner();
+  if (task_runner)
+    MemoryAblationExperiment::MaybeStartForRenderer(task_runner);
 
 #if defined(OS_ANDROID)
+  // Initialize UserLevelMemoryPressureSignalGenerator so it starts monitoring.
+  UserLevelMemoryPressureSignalGenerator::Instance();
+
   // Initialize CrashMemoryMetricsReporterImpl in order to assure that memory
   // allocation does not happen in OnOOMCallback.
   CrashMemoryMetricsReporterImpl::Instance();
@@ -162,39 +162,40 @@ void CreateMainThreadAndInitialize(Platform* platform,
 void BlinkInitializer::RegisterInterfaces(
     service_manager::BinderRegistry& registry) {
   ModulesInitializer::RegisterInterfaces(registry);
-  Thread* main_thread = Platform::Current()->MainThread();
+  Thread* main_thread = Thread::MainThread();
   // GetSingleThreadTaskRunner() uses GetTaskRunner() internally.
   // crbug.com/781664
-  if (!main_thread || !main_thread->GetTaskRunner())
+  if (!main_thread->GetTaskRunner())
     return;
 
 #if defined(OS_ANDROID)
-  registry.AddInterface(
-      ConvertToBaseCallback(CrossThreadBind(&OomInterventionImpl::Create)),
-      main_thread->GetTaskRunner());
+  registry.AddInterface(ConvertToBaseCallback(CrossThreadBindRepeating(
+                            &OomInterventionImpl::Create)),
+                        main_thread->GetTaskRunner());
 
-  registry.AddInterface(ConvertToBaseCallback(CrossThreadBind(
+  registry.AddInterface(ConvertToBaseCallback(CrossThreadBindRepeating(
                             &CrashMemoryMetricsReporterImpl::Bind)),
                         main_thread->GetTaskRunner());
 #endif
 
-  registry.AddInterface(
-      ConvertToBaseCallback(CrossThreadBind(&BlinkLeakDetector::Create)),
-      main_thread->GetTaskRunner());
+  registry.AddInterface(ConvertToBaseCallback(CrossThreadBindRepeating(
+                            &BlinkLeakDetector::Create)),
+                        main_thread->GetTaskRunner());
 }
 
 void BlinkInitializer::InitLocalFrame(LocalFrame& frame) const {
   if (RuntimeEnabledFeatures::DisplayCutoutAPIEnabled()) {
-    frame.GetInterfaceRegistry()->AddAssociatedInterface(WTF::BindRepeating(
-        &DisplayCutoutClientImpl::BindMojoRequest, WrapWeakPersistent(&frame)));
+    frame.GetInterfaceRegistry()->AddAssociatedInterface(
+        WTF::BindRepeating(&DisplayCutoutClientImpl::BindMojoReceiver,
+                           WrapWeakPersistent(&frame)));
   }
   frame.GetInterfaceRegistry()->AddAssociatedInterface(WTF::BindRepeating(
       &DevToolsFrontendImpl::BindMojoRequest, WrapWeakPersistent(&frame)));
+  frame.GetInterfaceRegistry()->AddAssociatedInterface(WTF::BindRepeating(
+      &FrameImpl::BindToReceiver, WrapWeakPersistent(&frame)));
+
   frame.GetInterfaceRegistry()->AddInterface(WTF::BindRepeating(
       &LocalFrame::PauseSubresourceLoading, WrapWeakPersistent(&frame)));
-  frame.GetInterfaceRegistry()->AddInterface(
-      WTF::BindRepeating(&LocalFrame::BindPreviewsResourceLoadingHintsRequest,
-                         WrapWeakPersistent(&frame)));
   ModulesInitializer::InitLocalFrame(frame);
 }
 

@@ -46,7 +46,7 @@ V0CustomElementMicrotaskImportStep::~V0CustomElementMicrotaskImportStep() =
     default;
 
 void V0CustomElementMicrotaskImportStep::Invalidate() {
-  queue_ = V0CustomElementSyncMicrotaskQueue::Create();
+  queue_ = MakeGarbageCollected<V0CustomElementSyncMicrotaskQueue>();
   import_.Clear();
 }
 
@@ -70,7 +70,7 @@ V0CustomElementMicrotaskImportStep::Process() {
   return kFinishedProcessing;
 }
 
-void V0CustomElementMicrotaskImportStep::Trace(blink::Visitor* visitor) {
+void V0CustomElementMicrotaskImportStep::Trace(Visitor* visitor) {
   visitor->Trace(import_);
   visitor->Trace(queue_);
   V0CustomElementMicrotaskStep::Trace(visitor);
@@ -80,7 +80,7 @@ void V0CustomElementMicrotaskImportStep::Trace(blink::Visitor* visitor) {
 void V0CustomElementMicrotaskImportStep::Show(unsigned indent) {
   fprintf(stderr, "%*sImport(wait=%d sync=%d, url=%s)\n", indent, "",
           ShouldWaitForImport(), import_ && import_->IsSync(),
-          import_ ? import_->Url().GetString().Utf8().data() : "null");
+          import_ ? import_->Url().GetString().Utf8().c_str() : "null");
   queue_->Show(indent + 1);
 }
 #endif

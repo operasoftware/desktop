@@ -33,15 +33,6 @@
 
 namespace blink {
 
-// Used for exposing text attributes.
-enum WebAXTextStyle {
-  kWebAXTextStyleNone = 0,
-  kWebAXTextStyleBold = 1 << 0,
-  kWebAXTextStyleItalic = 1 << 1,
-  kWebAXTextStyleUnderline = 1 << 2,
-  kWebAXTextStyleLineThrough = 1 << 3
-};
-
 // Expanded State.
 // These values must match blink::AccessibilityExpanded values.
 // Enforced in AssertMatchingEnums.cpp.
@@ -49,6 +40,14 @@ enum WebAXExpanded {
   kWebAXExpandedUndefined = 0,
   kWebAXExpandedCollapsed,
   kWebAXExpandedExpanded
+};
+
+// Grabbed State.
+// These values must match blink::AccessibilityGrabbedState values.
+enum WebAXGrabbedState {
+  kWebAXGrabbedStateUndefined = 0,
+  kWebAXGrabbedStateFalse,
+  kWebAXGrabbedStateTrue
 };
 
 // Selected State.
@@ -74,6 +73,13 @@ enum WebAXRestriction {
   kWebAXRestrictionDisabled,
 };
 
+// Autofill state.
+enum WebAXAutofillState {
+  kNoSuggestions = 0,
+  kAutofillAvailable,
+  kAutocompleteAvailable,
+};
+
 //
 // Sparse accessibility attributes
 //
@@ -91,6 +97,18 @@ enum WebAXRestriction {
 // must be false.
 enum class WebAXBoolAttribute {
   kAriaBusy,
+};
+
+enum class WebAXIntAttribute {
+  kAriaColumnCount,
+  kAriaRowCount,
+};
+
+enum class WebAXUIntAttribute {
+  kAriaColumnIndex,
+  kAriaColumnSpan,
+  kAriaRowIndex,
+  kAriaRowSpan,
 };
 
 // Sparse attributes of a WebAXObject whose value is a string.

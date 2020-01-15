@@ -43,11 +43,11 @@ namespace blink {
 class Animation;
 class CallbackFunctionTest;
 class CanvasRenderingContext;
+class DOMArrayBuffer;
+class DOMPoint;
 class DOMRect;
 class DOMRectList;
 class DOMRectReadOnly;
-class DOMArrayBuffer;
-class DOMPoint;
 class DOMWindow;
 class DictionaryTest;
 class Document;
@@ -56,15 +56,16 @@ class Element;
 class ExceptionState;
 class ExecutionContext;
 class GCObservation;
-class HitTestLocation;
-class HitTestResult;
+class HTMLIFrameElement;
 class HTMLInputElement;
 class HTMLMediaElement;
 class HTMLSelectElement;
 class HTMLVideoElement;
+class HitTestLayerRectList;
+class HitTestLocation;
+class HitTestResult;
 class InternalRuntimeFlags;
 class InternalSettings;
-class LayerRectList;
 class LocalDOMWindow;
 class LocalFrame;
 class Location;
@@ -73,26 +74,26 @@ class OriginTrialsTest;
 class Page;
 class Range;
 class RecordTest;
+class ScriptPromiseResolver;
+class ScrollState;
 class SequenceTest;
 class SerializedScriptValue;
 class ShadowRoot;
+template <typename NodeType>
+class StaticNodeTypeList;
 class StaticSelection;
 class TypeConversions;
 class UnionTypesTest;
-class ScrollState;
-template <typename NodeType>
-class StaticNodeTypeList;
+
 using StaticNodeList = StaticNodeTypeList<Node>;
 
 class Internals final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static Internals* Create(ExecutionContext* context) {
-    return new Internals(context);
-  }
-
   static void ResetToConsistentState(Page*);
+
+  explicit Internals(ExecutionContext*);
 
   String elementLayoutTreeAsText(Element*, ExceptionState&);
 
@@ -102,8 +103,11 @@ class Internals final : public ScriptWrappable {
   bool isPreloadedBy(const String& url, Document*);
   bool isLoading(const String& url);
   bool isLoadingFromMemoryCache(const String& url);
-  int getResourcePriority(const String& url, Document*);
+
+  ScriptPromise getResourcePriority(ScriptState*, const String& url, Document*);
   String getResourceHeader(const String& url, const String& header, Document*);
+
+  bool doesWindowHaveUrlFragment(DOMWindow*);
 
   CSSStyleDeclaration* computedStyleIncludingVisitedInfo(Node*) const;
 
@@ -137,9 +141,9 @@ class Internals final : public ScriptWrappable {
   bool isValidContentSelect(Element* insertion_point, ExceptionState&);
   Node* treeScopeRootNode(Node*);
   Node* parentTreeScope(Node*);
-  unsigned short compareTreeScopePosition(const Node*,
-                                          const Node*,
-                                          ExceptionState&) const;
+  uint16_t compareTreeScopePosition(const Node*,
+                                    const Node*,
+                                    ExceptionState&) const;
 
   Node* nextSiblingInFlatTree(Node*, ExceptionState&);
   Node* firstChildInFlatTree(Node*, ExceptionState&);
@@ -276,14 +280,14 @@ class Internals final : public ScriptWrappable {
 
   unsigned mediaKeysCount();
   unsigned mediaKeySessionCount();
-  unsigned pausableObjectCount(Document*);
+  unsigned contextLifecycleStateObserverObjectCount(Document*);
   unsigned wheelEventHandlerCount(Document*) const;
   unsigned scrollEventHandlerCount(Document*) const;
   unsigned touchStartOrMoveEventHandlerCount(Document*) const;
   unsigned touchEndOrCancelEventHandlerCount(Document*) const;
   unsigned pointerEventHandlerCount(Document*) const;
 
-  LayerRectList* touchEventTargetLayerRects(Document*, ExceptionState&);
+  HitTestLayerRectList* touchEventTargetLayerRects(Document*, ExceptionState&);
 
   bool executeCommand(Document*,
                       const String& name,
@@ -323,6 +327,13 @@ class Internals final : public ScriptWrappable {
   InternalSettings* settings() const;
   InternalRuntimeFlags* runtimeFlags() const;
   unsigned workerThreadCount() const;
+
+  String resolveModuleSpecifier(const String& specifier,
+                                const String& base_url_string,
+                                Document*,
+                                ExceptionState&);
+
+  String getParsedImportMap(Document*, ExceptionState&);
 
   void SetDeviceProximity(Document*,
                           const String& event_type,
@@ -381,8 +392,6 @@ class Internals final : public ScriptWrappable {
                                 float max_scale_factor,
                                 ExceptionState&);
 
-  bool magnifyScaleAroundAnchor(float factor, float x, float y);
-
   void setIsCursorVisible(Document*, bool, ExceptionState&);
 
   String effectivePreload(HTMLMediaElement*);
@@ -412,9 +421,7 @@ class Internals final : public ScriptWrappable {
 
   void startTrackingRepaints(Document*, ExceptionState&);
   void stopTrackingRepaints(Document*, ExceptionState&);
-  void updateLayoutIgnorePendingStylesheetsAndRunPostLayoutTasks(
-      Node*,
-      ExceptionState&);
+  void updateLayoutAndRunPostLayoutTasks(Node*, ExceptionState&);
   void forceFullRepaint(Document*, ExceptionState&);
 
   DOMRectList* draggableRegions(Document*, ExceptionState&);
@@ -446,6 +453,7 @@ class Internals final : public ScriptWrappable {
   int selectPopupItemStyleFontHeight(Node*, int);
   void resetTypeAheadSession(HTMLSelectElement*);
 
+  StaticSelection* getDragCaret();
   StaticSelection* getSelectionInFlatTree(DOMWindow*, ExceptionState&);
   Node* visibleSelectionAnchorNode();
   unsigned visibleSelectionAnchorOffset();
@@ -458,15 +466,13 @@ class Internals final : public ScriptWrappable {
 
   void forceCompositingUpdate(Document*, ExceptionState&);
 
-  void setZoomFactor(float);
-
   void setShouldRevealPassword(Element*, bool, ExceptionState&);
 
   ScriptPromise createResolvedPromise(ScriptState*, ScriptValue);
   ScriptPromise createRejectedPromise(ScriptState*, ScriptValue);
   ScriptPromise addOneToPromise(ScriptState*, ScriptPromise);
   ScriptPromise promiseCheck(ScriptState*,
-                             long,
+                             int32_t,
                              bool,
                              const ScriptValue&,
                              const String&,
@@ -476,10 +482,10 @@ class Internals final : public ScriptWrappable {
                                                   const ScriptValue&,
                                                   const String&,
                                                   const Vector<String>&);
-  ScriptPromise promiseCheckRange(ScriptState*, long);
+  ScriptPromise promiseCheckRange(ScriptState*, int32_t);
   ScriptPromise promiseCheckOverload(ScriptState*, Location*);
   ScriptPromise promiseCheckOverload(ScriptState*, Document*);
-  ScriptPromise promiseCheckOverload(ScriptState*, Location*, long, long);
+  ScriptPromise promiseCheckOverload(ScriptState*, Location*, int32_t, int32_t);
 
   void Trace(blink::Visitor*) override;
 
@@ -488,17 +494,7 @@ class Internals final : public ScriptWrappable {
   void setFocused(bool);
   void setInitialFocus(bool);
 
-  bool ignoreLayoutWithPendingStylesheets(Document*);
-
-  void setNetworkConnectionInfoOverride(bool,
-                                        const String&,
-                                        const String&,
-                                        unsigned long http_rtt_msec,
-                                        double downlink_max_mbps,
-                                        ExceptionState&);
-  void setSaveDataEnabled(bool);
-
-  void clearNetworkConnectionInfoOverride();
+  Element* interestedElement();
 
   unsigned countHitRegions(CanvasRenderingContext*);
 
@@ -511,9 +507,9 @@ class Internals final : public ScriptWrappable {
 
   // Schedule a forced Blink GC run (Oilpan) at the end of event loop.
   // Note: This is designed to be only used from PerformanceTests/BlinkGC to
-  //       explicitly measure only Blink GC time.  Normal LayoutTests should use
+  //       explicitly measure only Blink GC time.  Normal web tests should use
   //       gc() instead as it would trigger both Blink GC and V8 GC.
-  void forceBlinkGCWithoutV8GC();
+  void scheduleBlinkGC();
 
   String selectedHTMLForClipboard();
   String selectedTextForClipboard();
@@ -543,16 +539,20 @@ class Internals final : public ScriptWrappable {
   String unscopableAttribute();
   String unscopableMethod();
 
-  DOMRectList* focusRingRects(Element*);
-  DOMRectList* outlineRects(Element*);
-
   void setCapsLockState(bool enabled);
+  void setPseudoClassState(Element* element,
+                           const String& pseudo,
+                           bool enabled,
+                           ExceptionState& exception_state);
 
   bool setScrollbarVisibilityInScrollableArea(Node*, bool visible);
 
   // Translate given platform monotonic time in seconds to high resolution
   // document time in seconds
   double monotonicTimeToZeroBasedDocumentTime(double, ExceptionState&);
+
+  // Returns the current time ticks (in microseconds).
+  int64_t currentTimeTicks();
 
   // Returns the run state of the node's scroll animator (see
   // ScrollAnimatorCompositorCoordinater::RunState), or -1 if the node does not
@@ -592,13 +592,19 @@ class Internals final : public ScriptWrappable {
   unsigned LifecycleUpdateCount() const;
 
   void DisableIntersectionObserverThrottleDelay() const;
+  bool isSiteIsolated(HTMLIFrameElement* iframe) const;
+  bool isTrackingOcclusionForIFrame(HTMLIFrameElement* iframe) const;
 
   void addEmbedderCustomElementName(const AtomicString& name, ExceptionState&);
 
- private:
-  explicit Internals(ExecutionContext*);
-  Document* ContextDocument() const;
   LocalFrame* GetFrame() const;
+
+  void setDeviceEmulationScale(float scale, ExceptionState&);
+
+  String getDocumentAgentId(Document*);
+
+ private:
+  Document* ContextDocument() const;
   Vector<String> IconURLs(Document*, int icon_types_mask) const;
   DOMRectList* AnnotatedRegions(Document*, bool draggable, ExceptionState&);
   void HitTestRect(HitTestLocation&,
@@ -613,6 +619,8 @@ class Internals final : public ScriptWrappable {
                            const String& marker_type,
                            unsigned index,
                            ExceptionState&);
+  void ResolveResourcePriority(ScriptPromiseResolver*,
+                               int resource_load_priority);
   Member<InternalRuntimeFlags> runtime_flags_;
   Member<Document> document_;
 };

@@ -11,6 +11,8 @@ namespace blink {
 WebGLCompressedTextureETC::WebGLCompressedTextureETC(
     WebGLRenderingContextBase* context)
     : WebGLExtension(context) {
+  context->ExtensionsUtil()->EnsureExtensionEnabled(
+      "GL_ANGLE_compressed_texture_etc");
   context->AddCompressedTextureFormat(GL_COMPRESSED_R11_EAC);
   context->AddCompressedTextureFormat(GL_COMPRESSED_SIGNED_R11_EAC);
   context->AddCompressedTextureFormat(GL_COMPRESSED_RGB8_ETC2);
@@ -31,13 +33,12 @@ WebGLExtensionName WebGLCompressedTextureETC::GetName() const {
 
 WebGLCompressedTextureETC* WebGLCompressedTextureETC::Create(
     WebGLRenderingContextBase* context) {
-  return new WebGLCompressedTextureETC(context);
+  return MakeGarbageCollected<WebGLCompressedTextureETC>(context);
 }
 
 bool WebGLCompressedTextureETC::Supported(WebGLRenderingContextBase* context) {
   Extensions3DUtil* extensions_util = context->ExtensionsUtil();
-  return extensions_util->SupportsExtension(
-      "GL_CHROMIUM_compressed_texture_etc");
+  return extensions_util->SupportsExtension("GL_ANGLE_compressed_texture_etc");
 }
 
 const char* WebGLCompressedTextureETC::ExtensionName() {

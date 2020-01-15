@@ -33,9 +33,14 @@ class MockPendingScript : public PendingScript {
     return Create(document, ScriptSchedulingType::kAsync);
   }
 
+  MockPendingScript(ScriptElementBase* element,
+                    ScriptSchedulingType scheduling_type)
+      : PendingScript(element, TextPosition()) {
+    SetSchedulingType(scheduling_type);
+  }
   ~MockPendingScript() override {}
 
-  MOCK_CONST_METHOD0(GetScriptType, ScriptType());
+  MOCK_CONST_METHOD0(GetScriptType, mojom::ScriptType());
   MOCK_CONST_METHOD1(CheckMIMETypeBeforeRunScript, bool(Document*));
   MOCK_CONST_METHOD1(GetSource, Script*(const KURL&));
   MOCK_CONST_METHOD0(IsExternal, bool());
@@ -44,40 +49,9 @@ class MockPendingScript : public PendingScript {
   MOCK_METHOD0(RemoveFromMemoryCache, void());
   MOCK_METHOD1(ExecuteScriptBlock, void(const KURL&));
 
-  enum class State {
-    kStreamingNotReady,
-    kReadyToBeStreamed,
-    kStreaming,
-    kStreamingFinished,
-  };
+  void StartStreamingIfPossible() override {}
 
-  bool IsCurrentlyStreaming() const override {
-    return state_ == State::kStreaming;
-  }
-
-  void PrepareForStreaming() {
-    DCHECK_EQ(state_, State::kStreamingNotReady);
-    state_ = State::kReadyToBeStreamed;
-  }
-
-  bool StartStreamingIfPossible(base::OnceClosure closure) override {
-    if (state_ != State::kReadyToBeStreamed)
-      return false;
-
-    state_ = State::kStreaming;
-    streaming_finished_callback_ = std::move(closure);
-    return true;
-  }
-
-  void SimulateStreamingEnd() {
-    DCHECK_EQ(state_, State::kStreaming);
-    state_ = State::kStreamingFinished;
-    std::move(streaming_finished_callback_).Run();
-  }
-
-  State state() const { return state_; }
-
-  bool IsReady() const { return is_ready_; }
+  bool IsReady() const override { return is_ready_; }
   void SetIsReady(bool is_ready) { is_ready_ = is_ready; }
 
  protected:
@@ -85,38 +59,31 @@ class MockPendingScript : public PendingScript {
   MOCK_CONST_METHOD0(CheckState, void());
 
  private:
-  MockPendingScript(ScriptElementBase* element,
-                    ScriptSchedulingType scheduling_type)
-      : PendingScript(element, TextPosition()) {
-    SetSchedulingType(scheduling_type);
-  }
-
   static MockPendingScript* Create(Document* document,
                                    ScriptSchedulingType scheduling_type) {
     MockScriptElementBase* element = MockScriptElementBase::Create();
     EXPECT_CALL(*element, GetDocument())
         .WillRepeatedly(testing::ReturnRef(*document));
     MockPendingScript* pending_script =
-        new MockPendingScript(element, scheduling_type);
+        MakeGarbageCollected<MockPendingScript>(element, scheduling_type);
     EXPECT_CALL(*pending_script, IsExternal()).WillRepeatedly(Return(true));
     return pending_script;
   }
 
-  State state_ = State::kStreamingNotReady;
   bool is_ready_ = false;
   base::OnceClosure streaming_finished_callback_;
 };
 
 class ScriptRunnerTest : public testing::Test {
  public:
-  ScriptRunnerTest() : document_(Document::CreateForTest()) {}
+  ScriptRunnerTest() : document_(MakeGarbageCollected<Document>()) {}
 
   void SetUp() override {
     // We have to create ScriptRunner after initializing platform, because we
     // need Platform::current()->currentThread()->scheduler()->
     // loadingTaskRunner() to be initialized before creating ScriptRunner to
     // save it in constructor.
-    script_runner_ = ScriptRunner::Create(document_.Get());
+    script_runner_ = MakeGarbageCollected<ScriptRunner>(document_.Get());
     RuntimeCallStats::SetRuntimeCallStatsForTesting();
   }
   void TearDown() override {
@@ -397,6 +364,56 @@ TEST_F(ScriptRunnerTest, ResumeAndSuspend_Async) {
   EXPECT_THAT(order_, WhenSorted(ElementsAre(1, 2, 3)));
 }
 
+TEST_F(ScriptRunnerTest, SetForceDeferredWithAddedAsyncScript) {
+  auto* pending_script1 = MockPendingScript::CreateAsync(document_);
+
+  QueueScriptForExecution(pending_script1);
+  NotifyScriptReady(pending_script1);
+  EXPECT_CALL(*pending_script1, ExecuteScriptBlock(_))
+      .WillOnce(InvokeWithoutArgs([this] { order_.push_back(1); }));
+  script_runner_->SetForceDeferredExecution(true);
+
+  // Adding new async script while deferred will cause another task to be
+  // posted for it when execution is unblocked.
+  auto* pending_script2 = MockPendingScript::CreateAsync(document_);
+  QueueScriptForExecution(pending_script2);
+  NotifyScriptReady(pending_script2);
+  EXPECT_CALL(*pending_script2, ExecuteScriptBlock(_))
+      .WillOnce(InvokeWithoutArgs([this] { order_.push_back(2); }));
+  // Unblock async scripts before the tasks posted in NotifyScriptReady() is
+  // executed, i.e. no RunUntilIdle() etc. in between.
+  script_runner_->SetForceDeferredExecution(false);
+  platform_->RunUntilIdle();
+  ASSERT_EQ(2u, order_.size());
+}
+
+TEST_F(ScriptRunnerTest, SetForceDeferredAndResumeAndSuspend) {
+  auto* pending_script1 = MockPendingScript::CreateAsync(document_);
+
+  QueueScriptForExecution(pending_script1);
+  NotifyScriptReady(pending_script1);
+
+  EXPECT_CALL(*pending_script1, ExecuteScriptBlock(_))
+      .WillOnce(InvokeWithoutArgs([this] { order_.push_back(1); }));
+
+  script_runner_->SetForceDeferredExecution(true);
+  platform_->RunSingleTask();
+  ASSERT_EQ(0u, order_.size());
+
+  script_runner_->Suspend();
+  platform_->RunSingleTask();
+  ASSERT_EQ(0u, order_.size());
+
+  // Resume will not execute script while still in ForceDeferred state.
+  script_runner_->Resume();
+  platform_->RunUntilIdle();
+  ASSERT_EQ(0u, order_.size());
+
+  script_runner_->SetForceDeferredExecution(false);
+  platform_->RunUntilIdle();
+  ASSERT_EQ(1u, order_.size());
+}
+
 TEST_F(ScriptRunnerTest, LateNotifications) {
   auto* pending_script1 = MockPendingScript::CreateInOrder(document_);
   auto* pending_script2 = MockPendingScript::CreateInOrder(document_);
@@ -434,7 +451,7 @@ TEST_F(ScriptRunnerTest, TasksWithDeadScriptRunner) {
 
   script_runner_.Release();
 
-  ThreadState::Current()->CollectAllGarbage();
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
   // m_scriptRunner is gone. We need to make sure that ScriptRunner::Task do not
   // access dead object.
@@ -448,32 +465,6 @@ TEST_F(ScriptRunnerTest, TryStreamWhenEnqueingScript) {
   auto* pending_script1 = MockPendingScript::CreateAsync(document_);
   pending_script1->SetIsReady(true);
   QueueScriptForExecution(pending_script1);
-}
-
-TEST_F(ScriptRunnerTest, DontExecuteWhileStreaming) {
-  auto* pending_script = MockPendingScript::CreateAsync(document_);
-
-  // Enqueue script.
-  QueueScriptForExecution(pending_script);
-
-  // Simulate script load and mark the pending script as streaming ready.
-  pending_script->SetIsReady(true);
-  pending_script->PrepareForStreaming();
-  NotifyScriptReady(pending_script);
-
-  // ScriptLoader should have started streaming by now.
-  EXPECT_EQ(pending_script->state(), MockPendingScript::State::kStreaming);
-
-  // Note that there is no expectation for ScriptLoader::Execute() yet,
-  // so the mock will fail if it's called anyway.
-  platform_->RunUntilIdle();
-
-  // Finish streaming.
-  pending_script->SimulateStreamingEnd();
-
-  // Now that streaming is finished, expect Execute() to be called.
-  EXPECT_CALL(*pending_script, ExecuteScriptBlock(_)).Times(1);
-  platform_->RunUntilIdle();
 }
 
 }  // namespace blink

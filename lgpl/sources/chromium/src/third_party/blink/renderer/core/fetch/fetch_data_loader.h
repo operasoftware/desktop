@@ -21,15 +21,14 @@ class FormData;
 // FetchDataLoader subclasses
 // 1. take a BytesConsumer,
 // 2. read all data, and
-// 3. call either didFetchDataLoaded...() on success or
-//    difFetchDataLoadFailed() otherwise
+// 3. call either DidFetchDataLoaded...() on success or
+//    DidFetchDataLoadFailed() otherwise
 //    on the thread where FetchDataLoader is created.
 //
-// - Client's methods can be called synchronously in start().
-// - If FetchDataLoader::cancel() is called, Client's methods will not be
+// - Client's methods can be called synchronously in Start().
+// - If FetchDataLoader::Cancel() is called, Client's methods will not be
 //   called anymore.
-class CORE_EXPORT FetchDataLoader
-    : public GarbageCollectedFinalized<FetchDataLoader> {
+class CORE_EXPORT FetchDataLoader : public GarbageCollected<FetchDataLoader> {
  public:
   class CORE_EXPORT Client : public GarbageCollectedMixin {
    public:

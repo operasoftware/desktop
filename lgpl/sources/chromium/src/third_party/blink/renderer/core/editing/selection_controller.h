@@ -44,22 +44,22 @@ class HitTestResult;
 class LocalFrame;
 
 class CORE_EXPORT SelectionController final
-    : public GarbageCollectedFinalized<SelectionController>,
+    : public GarbageCollected<SelectionController>,
       public DocumentShutdownObserver {
   USING_GARBAGE_COLLECTED_MIXIN(SelectionController);
 
  public:
-  static SelectionController* Create(LocalFrame&);
+  explicit SelectionController(LocalFrame&);
   virtual ~SelectionController();
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
   bool HandleMousePressEvent(const MouseEventWithHitTestResults&);
   void HandleMouseDraggedEvent(const MouseEventWithHitTestResults&,
                                const IntPoint&,
-                               const LayoutPoint&,
-                               const LayoutPoint&);
+                               const PhysicalOffset&,
+                               const PhysicalOffset&);
   bool HandleMouseReleaseEvent(const MouseEventWithHitTestResults&,
-                               const LayoutPoint&);
+                               const PhysicalOffset&);
   bool HandlePasteGlobalSelection(const WebMouseEvent&);
   bool HandleGestureLongPress(const HitTestResult&);
   void HandleGestureTwoFingerTap(const GestureEventWithHitTestResults&);
@@ -67,12 +67,13 @@ class CORE_EXPORT SelectionController final
 
   bool PasteGlobalSelection();
 
-  void UpdateSelectionForMouseDrag(const LayoutPoint&, const LayoutPoint&);
+  void UpdateSelectionForMouseDrag(const PhysicalOffset&,
+                                   const PhysicalOffset&);
   void UpdateSelectionForMouseDrag(const HitTestResult&,
-                                   const LayoutPoint&,
-                                   const LayoutPoint&);
+                                   const PhysicalOffset&,
+                                   const PhysicalOffset&);
   void SendContextMenuEvent(const MouseEventWithHitTestResults&,
-                            const LayoutPoint&);
+                            const PhysicalOffset&);
   void PassMousePressEventToSubframe(const MouseEventWithHitTestResults&);
 
   void InitializeSelectionState();
@@ -131,8 +132,6 @@ class CORE_EXPORT SelectionController final
     TextGranularity granularity_;
     bool handle_visible_;
   };
-
-  explicit SelectionController(LocalFrame&);
 
   enum class AppendTrailingWhitespace { kShouldAppend, kDontAppend };
   enum class SelectInputEventType { kTouch, kMouse };
@@ -196,7 +195,7 @@ class CORE_EXPORT SelectionController final
   DISALLOW_COPY_AND_ASSIGN(SelectionController);
 };
 
-bool IsLinkSelection(const MouseEventWithHitTestResults&);
+bool IsSelectionOverLink(const MouseEventWithHitTestResults&);
 bool IsLinkSelectable(Node*);
 bool IsExtendingSelection(const MouseEventWithHitTestResults&);
 CORE_EXPORT SelectionInFlatTree

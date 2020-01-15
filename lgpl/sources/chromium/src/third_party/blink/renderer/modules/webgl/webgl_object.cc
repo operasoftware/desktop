@@ -32,7 +32,7 @@ namespace blink {
 WebGLObject::WebGLObject(WebGLRenderingContextBase* context)
     : cached_number_of_context_losses_(context->NumberOfContextLosses()),
       attachment_count_(0),
-      deleted_(false),
+      marked_for_deletion_(false),
       destruction_in_progress_(false) {}
 
 WebGLObject::~WebGLObject() = default;
@@ -42,7 +42,7 @@ uint32_t WebGLObject::CachedNumberOfContextLosses() const {
 }
 
 void WebGLObject::DeleteObject(gpu::gles2::GLES2Interface* gl) {
-  deleted_ = true;
+  marked_for_deletion_ = true;
   if (!HasObject())
     return;
 
@@ -66,7 +66,7 @@ void WebGLObject::DeleteObject(gpu::gles2::GLES2Interface* gl) {
 }
 
 void WebGLObject::Detach() {
-  attachment_count_ = 0;  // Make sure OpenGL resource is deleted.
+  attachment_count_ = 0;  // Make sure OpenGL resource is eventually deleted.
 }
 
 void WebGLObject::DetachAndDeleteObject() {
@@ -76,10 +76,10 @@ void WebGLObject::DetachAndDeleteObject() {
   DeleteObject(nullptr);
 }
 
-void WebGLObject::RunDestructor() {
+void WebGLObject::Dispose() {
   DCHECK(!destruction_in_progress_);
-  // This boilerplate destructor is sufficient for all subclasses, as long
-  // as they implement deleteObjectImpl properly, and don't try to touch
+  // This boilerplate pre-finalizer is sufficient for all subclasses, as long
+  // as they implement DeleteObjectImpl properly, and don't try to touch
   // other objects on the Oilpan heap if the destructor's been entered.
   destruction_in_progress_ = true;
   DetachAndDeleteObject();
@@ -92,7 +92,7 @@ bool WebGLObject::DestructionInProgress() const {
 void WebGLObject::OnDetached(gpu::gles2::GLES2Interface* gl) {
   if (attachment_count_)
     --attachment_count_;
-  if (deleted_)
+  if (marked_for_deletion_)
     DeleteObject(gl);
 }
 

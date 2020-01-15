@@ -11,6 +11,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/origin_trial_features_for_core.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_test_interface.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_test_object.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
 #include "third_party/blink/renderer/core/context_features/context_feature_settings.h"
@@ -20,6 +21,7 @@
 #include "third_party/blink/renderer/platform/bindings/origin_trial_features.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_context_data.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -44,28 +46,34 @@ void InstallOriginTrialFeaturesForCore(
   const DOMWrapperWorld& world = script_state->World();
   // TODO(iclelland): Unify ContextFeatureSettings with the rest of the
   // conditional features.
-  if (wrapper_type_info == &V8Window::wrapperTypeInfo) {
+  if (wrapper_type_info == V8Window::GetWrapperTypeInfo()) {
     auto* settings = ContextFeatureSettings::From(
         execution_context,
         ContextFeatureSettings::CreationMode::kDontCreateIfNotExists);
     if (settings && settings->isMojoJSEnabled()) {
       v8::Local<v8::Object> instance_object =
           script_state->GetContext()->Global();
-      V8Window::installMojoJS(isolate, world, instance_object, prototype_object,
+      V8Window::InstallMojoJS(isolate, world, instance_object, prototype_object,
                               interface_object);
     }
   }
   // TODO(iclelland): Extract this common code out of OriginTrialFeaturesForCore
   // and OriginTrialFeaturesForModules into a block.
-  if (wrapper_type_info == &V8TestObject::wrapperTypeInfo) {
-    if (OriginTrials::FeatureNameEnabled(execution_context)) {
-      V8TestObject::installFeatureName(
+  if (wrapper_type_info == V8TestInterface::GetWrapperTypeInfo()) {
+    if (RuntimeEnabledFeatures::TestFeatureEnabled(execution_context)) {
+      V8TestInterface::InstallTestFeature(
+          isolate, world, v8::Local<v8::Object>(), prototype_object, interface_object);
+    }
+  }
+  if (wrapper_type_info == V8TestObject::GetWrapperTypeInfo()) {
+    if (RuntimeEnabledFeatures::FeatureNameEnabled(execution_context)) {
+      V8TestObject::InstallFeatureName(
           isolate, world, v8::Local<v8::Object>(), prototype_object, interface_object);
     }
   }
 }
 
-void InstallPendingOriginTrialFeatureForCore(const String& feature,
+void InstallPendingOriginTrialFeatureForCore(OriginTrialFeature feature,
                                              const ScriptState* script_state) {
   (*g_old_install_pending_origin_trial_feature_function)(feature, script_state);
 
@@ -76,12 +84,25 @@ void InstallPendingOriginTrialFeatureForCore(const String& feature,
   v8::Isolate* isolate = script_state->GetIsolate();
   const DOMWrapperWorld& world = script_state->World();
   V8PerContextData* context_data = script_state->PerContextData();
-  if (feature == OriginTrials::kFeatureNameTrialName) {
-    if (context_data->GetExistingConstructorAndPrototypeForType(
-            &V8TestObject::wrapperTypeInfo, &prototype_object, &interface_object)) {
-      V8TestObject::installFeatureName(
-          isolate, world, v8::Local<v8::Object>(), prototype_object, interface_object);
+  switch (feature) {
+    case OriginTrialFeature::kFeatureName: {
+      if (context_data->GetExistingConstructorAndPrototypeForType(
+              V8TestObject::GetWrapperTypeInfo(), &prototype_object, &interface_object)) {
+        V8TestObject::InstallFeatureName(
+            isolate, world, v8::Local<v8::Object>(), prototype_object, interface_object);
+      }
+      break;
     }
+    case OriginTrialFeature::kTestFeature: {
+      if (context_data->GetExistingConstructorAndPrototypeForType(
+              V8TestInterface::GetWrapperTypeInfo(), &prototype_object, &interface_object)) {
+        V8TestInterface::InstallTestFeature(
+            isolate, world, v8::Local<v8::Object>(), prototype_object, interface_object);
+      }
+      break;
+    }
+    default:
+      break;
   }
 }
 

@@ -37,11 +37,11 @@ namespace blink {
 
 class CheckboxInputType final : public BaseCheckableInputType {
  public:
-  static InputType* Create(HTMLInputElement&);
-
- private:
   CheckboxInputType(HTMLInputElement& element)
       : BaseCheckableInputType(element) {}
+
+ private:
+  void CountUsage() override;
   const AtomicString& FormControlType() const override;
   bool ValueMissing(const String&) const override;
   String ValueMissingText() const override;

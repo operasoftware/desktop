@@ -7,6 +7,7 @@
 
 #include "third_party/blink/renderer/core/animation/animation_timeline.h"
 #include "third_party/blink/renderer/core/animation/scroll_timeline_options.h"
+#include "third_party/blink/renderer/core/animation/timing.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -36,12 +37,25 @@ class CORE_EXPORT ScrollTimeline final : public AnimationTimeline {
   };
 
   static ScrollTimeline* Create(Document&,
-                                ScrollTimelineOptions,
+                                ScrollTimelineOptions*,
                                 ExceptionState&);
+
+  ScrollTimeline(Document*,
+                 Element*,
+                 ScrollDirection,
+                 CSSPrimitiveValue*,
+                 CSSPrimitiveValue*,
+                 double,
+                 Timing::FillMode);
 
   // AnimationTimeline implementation.
   double currentTime(bool& is_null) final;
   bool IsScrollTimeline() const override { return true; }
+  Document* GetDocument() override { return document_; }
+  // ScrollTimeline is not active if scrollSource is null, does not currently
+  // have a CSS layout box, or if its layout box is not a scroll container.
+  // https://github.com/WICG/scroll-animations/issues/31
+  bool IsActive() const override;
 
   // IDL API implementation.
   Element* scrollSource();
@@ -49,45 +63,46 @@ class CORE_EXPORT ScrollTimeline final : public AnimationTimeline {
   String startScrollOffset();
   String endScrollOffset();
   void timeRange(DoubleOrScrollTimelineAutoKeyword&);
+  String fill();
 
   // Returns the Node that should actually have the ScrollableArea (if one
   // exists). This can differ from |scrollSource| when |scroll_source_| is the
-  // Document's scrollingElement.
-  Node* ResolvedScrollSource() const;
+  // Document's scrollingElement, and it may be null if the document was removed
+  // before the ScrollTimeline was created.
+  Node* ResolvedScrollSource() const { return resolved_scroll_source_; }
 
   ScrollDirection GetOrientation() const { return orientation_; }
+  Timing::FillMode GetFillMode() const { return fill_; }
 
-  // Must be called when this ScrollTimeline is attached/detached from an
-  // animation.
-  void AttachAnimation();
-  void DetachAnimation();
-
-  void Trace(blink::Visitor*) override;
-
-  // For the AnimationWorklet origin trial, we need to automatically composite
-  // elements that are targets of ScrollTimelines (http://crbug.com/776533). We
-  // expose a static lookup method to enable this.
-  //
-  // TODO(crbug.com/839341): Remove once WorkletAnimations can run on main.
-  static bool HasActiveScrollTimeline(Node* node);
-
- private:
-  ScrollTimeline(Element*,
-                 ScrollDirection,
-                 CSSPrimitiveValue*,
-                 CSSPrimitiveValue*,
-                 double);
-
+  void GetCurrentAndMaxOffset(const LayoutBox*,
+                              double& current_offset,
+                              double& max_offset) const;
   void ResolveScrollStartAndEnd(const LayoutBox*,
                                 double max_offset,
                                 double& resolved_start_scroll_offset,
-                                double& resolved_end_scroll_offset);
+                                double& resolved_end_scroll_offset) const;
 
+  // Must be called when this ScrollTimeline is attached/detached from an
+  // animation.
+  void AnimationAttached(Animation*) override;
+  void AnimationDetached(Animation*) override;
+
+  void Trace(blink::Visitor*) override;
+
+  static bool HasActiveScrollTimeline(Node* node);
+
+ private:
+  Member<Document> document_;
+  // Use |scroll_source_| only to implement the web-exposed API but use
+  // resolved_scroll_source_ to actually access the scroll related properties.
   Member<Element> scroll_source_;
+  Member<Node> resolved_scroll_source_;
+
   ScrollDirection orientation_;
   Member<CSSPrimitiveValue> start_scroll_offset_;
   Member<CSSPrimitiveValue> end_scroll_offset_;
   double time_range_;
+  Timing::FillMode fill_;
 };
 
 DEFINE_TYPE_CASTS(ScrollTimeline,

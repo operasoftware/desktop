@@ -38,7 +38,6 @@
 #include "third_party/blink/renderer/core/dom/events/add_event_listener_options_resolved.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener_options.h"
 #include "third_party/blink/renderer/core/dom/events/registered_event_listener.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable_visitor.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
 
 namespace blink {
@@ -60,11 +59,11 @@ class CORE_EXPORT EventListenerMap final {
   void Clear();
   bool Add(const AtomicString& event_type,
            EventListener*,
-           const AddEventListenerOptionsResolved&,
+           const AddEventListenerOptionsResolved*,
            RegisteredEventListener* registered_listener);
   bool Remove(const AtomicString& event_type,
               const EventListener*,
-              const EventListenerOptions&,
+              const EventListenerOptions*,
               wtf_size_t* index_of_removed_listener,
               RegisteredEventListener* registered_listener);
   EventListenerVector* Find(const AtomicString& event_type);
@@ -72,7 +71,7 @@ class CORE_EXPORT EventListenerMap final {
 
   void CopyEventListenersNotCreatedFromMarkupToTarget(EventTarget*);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
  private:
   friend class EventListenerIterator;
@@ -83,9 +82,7 @@ class CORE_EXPORT EventListenerMap final {
   //  - HeapVector is much more space efficient than HeapHashMap.
   //  - An EventTarget rarely has event listeners for many event types, and
   //    HeapVector is faster in such cases.
-  HeapVector<std::pair<AtomicString, TraceWrapperMember<EventListenerVector>>,
-             2>
-      entries_;
+  HeapVector<std::pair<AtomicString, Member<EventListenerVector>>, 2> entries_;
 
 #if DCHECK_IS_ON()
   int active_iterator_count_ = 0;

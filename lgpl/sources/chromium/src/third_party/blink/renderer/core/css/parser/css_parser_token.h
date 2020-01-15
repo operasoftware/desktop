@@ -8,10 +8,13 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/parser/at_rule_descriptors.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/core/css/parser/css_parser_mode.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 
 namespace blink {
+
+enum class CSSValueID;
 
 enum CSSParserTokenType {
   kIdentToken = 0,
@@ -111,7 +114,7 @@ class CORE_EXPORT CSSParserToken {
     return static_cast<CSSParserTokenType>(type_);
   }
   StringView Value() const {
-    if (value_is8_bit_)
+    if (value_is_8bit_)
       return StringView(reinterpret_cast<const LChar*>(value_data_char_raw_),
                         value_length_);
     return StringView(reinterpret_cast<const UChar*>(value_data_char_raw_),
@@ -145,7 +148,8 @@ class CORE_EXPORT CSSParserToken {
 
   bool HasStringBacking() const;
 
-  CSSPropertyID ParseAsUnresolvedCSSPropertyID() const;
+  CSSPropertyID ParseAsUnresolvedCSSPropertyID(
+      CSSParserMode mode = kHTMLStandardMode) const;
   AtRuleDescriptorID ParseAsAtRuleDescriptorID() const;
 
   void Serialize(StringBuilder&) const;
@@ -155,7 +159,7 @@ class CORE_EXPORT CSSParserToken {
  private:
   void InitValueFromStringView(StringView string) {
     value_length_ = string.length();
-    value_is8_bit_ = string.Is8Bit();
+    value_is_8bit_ = string.Is8Bit();
     value_data_char_raw_ = string.Bytes();
   }
   bool ValueDataCharRawEqual(const CSSParserToken& other) const;
@@ -167,7 +171,7 @@ class CORE_EXPORT CSSParserToken {
   unsigned unit_ : 7;                // CSSPrimitiveValue::UnitType
   // value_... is an unpacked StringView so that we can pack it
   // tightly with the rest of this object for a smaller object size.
-  bool value_is8_bit_ : 1;
+  bool value_is_8bit_ : 1;
   unsigned value_length_;
   const void* value_data_char_raw_;  // Either LChar* or UChar*.
 

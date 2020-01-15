@@ -39,26 +39,27 @@
 #include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
 
 class AXObject;
 class BeforeTextInsertedEvent;
+class ComputedStyle;
 class Element;
 class Event;
 class FormControlState;
 class HTMLFormElement;
 class HTMLInputElement;
 class KeyboardEvent;
-class MouseEvent;
 class LayoutObject;
-class ComputedStyle;
+enum class LegacyLayout;
+class MouseEvent;
 
 class ClickHandlingState final : public EventDispatchHandlingState {
  public:
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
   bool checked;
   bool indeterminate;
@@ -71,7 +72,7 @@ class ClickHandlingState final : public EventDispatchHandlingState {
 class CORE_EXPORT InputTypeView : public GarbageCollectedMixin {
  public:
   virtual ~InputTypeView();
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
   virtual bool SizeShouldIncludeDecoration(int default_size,
                                            int& preferred_size) const;
@@ -98,7 +99,8 @@ class CORE_EXPORT InputTypeView : public GarbageCollectedMixin {
   void DispatchSimulatedClickIfActive(KeyboardEvent&) const;
 
   virtual void SubtreeHasChanged();
-  virtual LayoutObject* CreateLayoutObject(const ComputedStyle&) const;
+  virtual LayoutObject* CreateLayoutObject(const ComputedStyle&,
+                                           LegacyLayout) const;
   virtual scoped_refptr<ComputedStyle> CustomStyleForLayoutObject(
       scoped_refptr<ComputedStyle>);
   virtual TextDirection ComputedTextDirection();

@@ -27,6 +27,7 @@
 #include <unicode/unistr.h>
 #include <unicode/uvernum.h>
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_regexp.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
@@ -41,8 +42,6 @@
 #endif
 
 namespace blink {
-
-using blink::WebLocalizedString;
 
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/states-of-the-type-attribute.html#valid-e-mail-address
 static const char kLocalPartCharacters[] =
@@ -65,7 +64,7 @@ std::unique_ptr<ScriptRegexp> EmailInputType::CreateEmailRegexp() {
 
 String EmailInputType::ConvertEmailAddressToASCII(const ScriptRegexp& regexp,
                                                   const String& address) {
-  if (address.ContainsOnlyASCII())
+  if (address.ContainsOnlyASCIIOrEmpty())
     return address;
 
   wtf_size_t at_position = address.find('@');
@@ -82,7 +81,7 @@ String EmailInputType::ConvertEmailAddressToASCII(const ScriptRegexp& regexp,
 
   // Leak |idna| at the end.
   UErrorCode error_code = U_ZERO_ERROR;
-  static icu::IDNA* idna =
+  static const icu::IDNA* const idna =
       icu::IDNA::createUTS46Instance(kIdnaConversionOption, error_code);
   DCHECK(idna);
   icu::IDNAInfo idna_info;
@@ -104,7 +103,7 @@ String EmailInputType::ConvertEmailAddressToASCII(const ScriptRegexp& regexp,
 
 String EmailInputType::ConvertEmailAddressToUnicode(
     const String& address) const {
-  if (!address.ContainsOnlyASCII())
+  if (!address.ContainsOnlyASCIIOrEmpty())
     return address;
 
   wtf_size_t at_position = address.find('@');
@@ -159,13 +158,10 @@ bool EmailInputType::IsValidEmailAddress(const ScriptRegexp& regexp,
 EmailInputType::EmailInputType(HTMLInputElement& element)
     : BaseTextInputType(element) {}
 
-InputType* EmailInputType::Create(HTMLInputElement& element) {
-  return new EmailInputType(element);
-}
-
 void EmailInputType::CountUsage() {
   CountUsageIfVisible(WebFeature::kInputTypeEmail);
-  bool has_max_length = GetElement().FastHasAttribute(HTMLNames::maxlengthAttr);
+  bool has_max_length =
+      GetElement().FastHasAttribute(html_names::kMaxlengthAttr);
   if (has_max_length)
     CountUsageIfVisible(WebFeature::kInputTypeEmailMaxLength);
   if (GetElement().Multiple()) {
@@ -176,7 +172,7 @@ void EmailInputType::CountUsage() {
 }
 
 const AtomicString& EmailInputType::FormControlType() const {
-  return InputTypeNames::email;
+  return input_type_names::kEmail;
 }
 
 ScriptRegexp& EmailInputType::EnsureEmailRegexp() const {
@@ -215,14 +211,15 @@ bool EmailInputType::TypeMismatch() const {
 String EmailInputType::TypeMismatchText() const {
   String invalid_address = FindInvalidAddress(GetElement().value());
   DCHECK(!invalid_address.IsNull());
-  if (invalid_address.IsEmpty())
+  if (invalid_address.IsEmpty()) {
     return GetLocale().QueryString(
-        WebLocalizedString::kValidationTypeMismatchForEmailEmpty);
+        IDS_FORM_VALIDATION_TYPE_MISMATCH_EMAIL_EMPTY);
+  }
   String at_sign = String("@");
   wtf_size_t at_index = invalid_address.find('@');
   if (at_index == kNotFound)
     return GetLocale().QueryString(
-        WebLocalizedString::kValidationTypeMismatchForEmailNoAtSign, at_sign,
+        IDS_FORM_VALIDATION_TYPE_MISMATCH_EMAIL_NO_AT_SIGN, at_sign,
         invalid_address);
   // We check validity against an ASCII value because of difficulty to check
   // invalid characters. However we should show Unicode value.
@@ -231,38 +228,38 @@ String EmailInputType::TypeMismatchText() const {
   String domain = invalid_address.Substring(at_index + 1);
   if (local_part.IsEmpty())
     return GetLocale().QueryString(
-        WebLocalizedString::kValidationTypeMismatchForEmailEmptyLocal, at_sign,
+        IDS_FORM_VALIDATION_TYPE_MISMATCH_EMAIL_EMPTY_LOCAL, at_sign,
         unicode_address);
   if (domain.IsEmpty())
     return GetLocale().QueryString(
-        WebLocalizedString::kValidationTypeMismatchForEmailEmptyDomain, at_sign,
+        IDS_FORM_VALIDATION_TYPE_MISMATCH_EMAIL_EMPTY_DOMAIN, at_sign,
         unicode_address);
   wtf_size_t invalid_char_index = local_part.Find(IsInvalidLocalPartCharacter);
   if (invalid_char_index != kNotFound) {
     unsigned char_length = U_IS_LEAD(local_part[invalid_char_index]) ? 2 : 1;
     return GetLocale().QueryString(
-        WebLocalizedString::kValidationTypeMismatchForEmailInvalidLocal,
-        at_sign, local_part.Substring(invalid_char_index, char_length));
+        IDS_FORM_VALIDATION_TYPE_MISMATCH_EMAIL_INVALID_LOCAL, at_sign,
+        local_part.Substring(invalid_char_index, char_length));
   }
   invalid_char_index = domain.Find(IsInvalidDomainCharacter);
   if (invalid_char_index != kNotFound) {
     unsigned char_length = U_IS_LEAD(domain[invalid_char_index]) ? 2 : 1;
     return GetLocale().QueryString(
-        WebLocalizedString::kValidationTypeMismatchForEmailInvalidDomain,
-        at_sign, domain.Substring(invalid_char_index, char_length));
+        IDS_FORM_VALIDATION_TYPE_MISMATCH_EMAIL_INVALID_DOMAIN, at_sign,
+        domain.Substring(invalid_char_index, char_length));
   }
   if (!CheckValidDotUsage(domain)) {
     wtf_size_t at_index_in_unicode = unicode_address.find('@');
     DCHECK_NE(at_index_in_unicode, kNotFound);
     return GetLocale().QueryString(
-        WebLocalizedString::kValidationTypeMismatchForEmailInvalidDots,
-        String("."), unicode_address.Substring(at_index_in_unicode + 1));
+        IDS_FORM_VALIDATION_TYPE_MISMATCH_EMAIL_INVALID_DOTS, String("."),
+        unicode_address.Substring(at_index_in_unicode + 1));
   }
-  if (GetElement().Multiple())
+  if (GetElement().Multiple()) {
     return GetLocale().QueryString(
-        WebLocalizedString::kValidationTypeMismatchForMultipleEmail);
-  return GetLocale().QueryString(
-      WebLocalizedString::kValidationTypeMismatchForEmail);
+        IDS_FORM_VALIDATION_TYPE_MISMATCH_MULTIPLE_EMAIL);
+  }
+  return GetLocale().QueryString(IDS_FORM_VALIDATION_TYPE_MISMATCH_EMAIL);
 }
 
 bool EmailInputType::SupportsSelectionAPI() const {

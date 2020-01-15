@@ -32,11 +32,13 @@
 
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
+#include "third_party/blink/renderer/core/editing/position.h"
 #include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/editing/testing/editing_test_base.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/forms/text_control_element.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 namespace text_iterator_test {
@@ -69,6 +71,16 @@ TextIteratorBehavior EmitsSmallXForTextSecurityBehavior() {
       .Build();
 }
 
+TextIteratorBehavior EmitsCharactersBetweenAllVisiblePositionsBehavior() {
+  return TextIteratorBehavior::Builder()
+      .SetEmitsCharactersBetweenAllVisiblePositions(true)
+      .Build();
+}
+
+TextIteratorBehavior EmitsSpaceForNbspBehavior() {
+  return TextIteratorBehavior::Builder().SetEmitsSpaceForNbsp(true).Build();
+}
+
 struct DOMTree : NodeTraversal {
   using PositionType = Position;
   using TextIteratorType = TextIterator;
@@ -79,8 +91,14 @@ struct FlatTree : FlatTreeTraversal {
   using TextIteratorType = TextIteratorInFlatTree;
 };
 
-class TextIteratorTest : public EditingTestBase {
+class TextIteratorTest : public testing::WithParamInterface<bool>,
+                         private ScopedLayoutNGForTest,
+                         public EditingTestBase {
  protected:
+  TextIteratorTest() : ScopedLayoutNGForTest(GetParam()) {}
+
+  bool LayoutNGEnabled() const { return GetParam(); }
+
   template <typename Tree>
   std::string Iterate(const TextIteratorBehavior& = TextIteratorBehavior());
 
@@ -91,6 +109,11 @@ class TextIteratorTest : public EditingTestBase {
       const TextIteratorBehavior& = TextIteratorBehavior());
 
   Range* GetBodyRange() const;
+
+  int TestRangeLength(const std::string& selection_text) {
+    return TextIterator::RangeLength(
+        SetSelectionTextToBody(selection_text).ComputeRange());
+  }
 
  private:
   template <typename Tree>
@@ -120,13 +143,13 @@ std::string TextIteratorTest::IteratePartial(
 template <typename Tree>
 std::string TextIteratorTest::IterateWithIterator(
     typename Tree::TextIteratorType& iterator) {
-  String text_chunks;
+  StringBuilder text_chunks;
   for (; !iterator.AtEnd(); iterator.Advance()) {
-    text_chunks.append('[');
-    text_chunks.append(iterator.GetText().GetTextForTesting());
-    text_chunks.append(']');
+    text_chunks.Append('[');
+    text_chunks.Append(iterator.GetText().GetTextForTesting());
+    text_chunks.Append(']');
   }
-  return std::string(text_chunks.Utf8().data());
+  return text_chunks.ToString().Utf8();
 }
 
 Range* TextIteratorTest::GetBodyRange() const {
@@ -135,24 +158,9 @@ Range* TextIteratorTest::GetBodyRange() const {
   return range;
 }
 
-class ParameterizedTextIteratorTest : public testing::WithParamInterface<bool>,
-                                      private ScopedLayoutNGForTest,
-                                      public TextIteratorTest {
- public:
-  ParameterizedTextIteratorTest() : ScopedLayoutNGForTest(GetParam()) {}
+INSTANTIATE_TEST_SUITE_P(All, TextIteratorTest, testing::Bool());
 
- protected:
-  bool LayoutNGEnabled() const { return GetParam(); }
-
-  int TestRangeLength(const std::string& selection_text) {
-    return TextIterator::RangeLength(
-        SetSelectionTextToBody(selection_text).ComputeRange());
-  }
-};
-
-INSTANTIATE_TEST_CASE_P(All, ParameterizedTextIteratorTest, testing::Bool());
-
-TEST_F(TextIteratorTest, BitStackOverflow) {
+TEST_P(TextIteratorTest, BitStackOverflow) {
   const unsigned kBitsInWord = sizeof(unsigned) * 8;
   BitStack bs;
 
@@ -164,14 +172,14 @@ TEST_F(TextIteratorTest, BitStackOverflow) {
   EXPECT_TRUE(bs.Top());
 }
 
-TEST_F(TextIteratorTest, BasicIteration) {
+TEST_P(TextIteratorTest, BasicIteration) {
   static const char* input = "<p>Hello, \ntext</p><p>iterator.</p>";
   SetBodyContent(input);
   EXPECT_EQ("[Hello, ][text][\n][\n][iterator.]", Iterate<DOMTree>());
   EXPECT_EQ("[Hello, ][text][\n][\n][iterator.]", Iterate<FlatTree>());
 }
 
-TEST_F(TextIteratorTest, EmitsSmallXForTextSecurity) {
+TEST_P(TextIteratorTest, EmitsSmallXForTextSecurity) {
   InsertStyleElement("s {-webkit-text-security:disc;}");
   SetBodyContent("abc<s>foo</s>baz");
   // E2 80 A2 is U+2022 BULLET
@@ -185,38 +193,37 @@ TEST_F(TextIteratorTest, EmitsSmallXForTextSecurity) {
             Iterate<FlatTree>(TextIteratorBehavior()));
 }
 
-TEST_F(TextIteratorTest, IgnoreAltTextInTextControls) {
+TEST_P(TextIteratorTest, IgnoreAltTextInTextControls) {
   static const char* input = "<p>Hello <input type='text' value='value'>!</p>";
   SetBodyContent(input);
   EXPECT_EQ("[Hello ][][!]", Iterate<DOMTree>(EmitsImageAltTextBehavior()));
-  EXPECT_EQ("[Hello ][][\n][value][\n][!]",
-            Iterate<FlatTree>(EmitsImageAltTextBehavior()));
+  EXPECT_EQ("[Hello ][][!]", Iterate<FlatTree>(EmitsImageAltTextBehavior()));
 }
 
-TEST_F(TextIteratorTest, DisplayAltTextInImageControls) {
+TEST_P(TextIteratorTest, DisplayAltTextInImageControls) {
   static const char* input = "<p>Hello <input type='image' alt='alt'>!</p>";
   SetBodyContent(input);
   EXPECT_EQ("[Hello ][alt][!]", Iterate<DOMTree>(EmitsImageAltTextBehavior()));
   EXPECT_EQ("[Hello ][alt][!]", Iterate<FlatTree>(EmitsImageAltTextBehavior()));
 }
 
-TEST_F(TextIteratorTest, NotEnteringTextControls) {
+TEST_P(TextIteratorTest, NotEnteringTextControls) {
   static const char* input = "<p>Hello <input type='text' value='input'>!</p>";
   SetBodyContent(input);
   EXPECT_EQ("[Hello ][][!]", Iterate<DOMTree>());
-  EXPECT_EQ("[Hello ][][\n][input][\n][!]", Iterate<FlatTree>());
+  EXPECT_EQ("[Hello ][][!]", Iterate<FlatTree>());
 }
 
-TEST_F(TextIteratorTest, EnteringTextControlsWithOption) {
+TEST_P(TextIteratorTest, EnteringTextControlsWithOption) {
   static const char* input = "<p>Hello <input type='text' value='input'>!</p>";
   SetBodyContent(input);
   EXPECT_EQ("[Hello ][\n][input][!]",
             Iterate<DOMTree>(EntersTextControlsBehavior()));
-  EXPECT_EQ("[Hello ][][\n][input][\n][!]",
+  EXPECT_EQ("[Hello ][\n][input][\n][!]",
             Iterate<FlatTree>(EntersTextControlsBehavior()));
 }
 
-TEST_F(TextIteratorTest, EnteringTextControlsWithOptionComplex) {
+TEST_P(TextIteratorTest, EnteringTextControlsWithOptionComplex) {
   static const char* input =
       "<input type='text' value='Beginning of range'><div><div><input "
       "type='text' value='Under DOM nodes'></div></div><input type='text' "
@@ -224,13 +231,11 @@ TEST_F(TextIteratorTest, EnteringTextControlsWithOptionComplex) {
   SetBodyContent(input);
   EXPECT_EQ("[\n][Beginning of range][\n][Under DOM nodes][\n][End of range]",
             Iterate<DOMTree>(EntersTextControlsBehavior()));
-  EXPECT_EQ(
-      "[][\n][Beginning of range][\n][][\n][Under DOM nodes][\n][][\n][End of "
-      "range]",
-      Iterate<FlatTree>(EntersTextControlsBehavior()));
+  EXPECT_EQ("[Beginning of range][\n][Under DOM nodes][\n][End of range]",
+            Iterate<FlatTree>(EntersTextControlsBehavior()));
 }
 
-TEST_F(TextIteratorTest, NotEnteringShadowTree) {
+TEST_P(TextIteratorTest, NotEnteringShadowTree) {
   static const char* body_content =
       "<div>Hello, <span id='host'>text</span> iterator.</div>";
   static const char* shadow_content = "<span>shadow</span>";
@@ -243,7 +248,7 @@ TEST_F(TextIteratorTest, NotEnteringShadowTree) {
   EXPECT_EQ("[Hello, ][shadow][ iterator.]", Iterate<FlatTree>());
 }
 
-TEST_F(TextIteratorTest, NotEnteringShadowTreeWithNestedShadowTrees) {
+TEST_P(TextIteratorTest, NotEnteringShadowTreeWithNestedShadowTrees) {
   static const char* body_content =
       "<div>Hello, <span id='host-in-document'>text</span> iterator.</div>";
   static const char* shadow_content1 =
@@ -259,7 +264,7 @@ TEST_F(TextIteratorTest, NotEnteringShadowTreeWithNestedShadowTrees) {
             Iterate<FlatTree>());
 }
 
-TEST_F(TextIteratorTest, NotEnteringShadowTreeWithContentInsertionPoint) {
+TEST_P(TextIteratorTest, NotEnteringShadowTreeWithContentInsertionPoint) {
   static const char* body_content =
       "<div>Hello, <span id='host'>text</span> iterator.</div>";
   static const char* shadow_content =
@@ -272,7 +277,7 @@ TEST_F(TextIteratorTest, NotEnteringShadowTreeWithContentInsertionPoint) {
   EXPECT_EQ("[Hello, ][shadow ][text][ iterator.]", Iterate<FlatTree>());
 }
 
-TEST_F(TextIteratorTest, EnteringShadowTreeWithOption) {
+TEST_P(TextIteratorTest, EnteringShadowTreeWithOption) {
   static const char* body_content =
       "<div>Hello, <span id='host'>text</span> iterator.</div>";
   static const char* shadow_content = "<span>shadow</span>";
@@ -287,7 +292,7 @@ TEST_F(TextIteratorTest, EnteringShadowTreeWithOption) {
             Iterate<FlatTree>(EntersOpenShadowRootsBehavior()));
 }
 
-TEST_F(TextIteratorTest, EnteringShadowTreeWithNestedShadowTreesWithOption) {
+TEST_P(TextIteratorTest, EnteringShadowTreeWithNestedShadowTreesWithOption) {
   static const char* body_content =
       "<div>Hello, <span id='host-in-document'>text</span> iterator.</div>";
   static const char* shadow_content1 =
@@ -304,7 +309,7 @@ TEST_F(TextIteratorTest, EnteringShadowTreeWithNestedShadowTreesWithOption) {
             Iterate<FlatTree>(EntersOpenShadowRootsBehavior()));
 }
 
-TEST_F(TextIteratorTest,
+TEST_P(TextIteratorTest,
        EnteringShadowTreeWithContentInsertionPointWithOption) {
   static const char* body_content =
       "<div>Hello, <span id='host'>text</span> iterator.</div>";
@@ -324,7 +329,7 @@ TEST_F(TextIteratorTest,
             Iterate<FlatTree>(EntersOpenShadowRootsBehavior()));
 }
 
-TEST_F(TextIteratorTest, StartingAtNodeInShadowRoot) {
+TEST_P(TextIteratorTest, StartingAtNodeInShadowRoot) {
   static const char* body_content =
       "<div id='outer'>Hello, <span id='host'>text</span> iterator.</div>";
   static const char* shadow_content =
@@ -349,7 +354,7 @@ TEST_F(TextIteratorTest, StartingAtNodeInShadowRoot) {
                                      EntersOpenShadowRootsBehavior()));
 }
 
-TEST_F(TextIteratorTest, FinishingAtNodeInShadowRoot) {
+TEST_P(TextIteratorTest, FinishingAtNodeInShadowRoot) {
   static const char* body_content =
       "<div id='outer'>Hello, <span id='host'>text</span> iterator.</div>";
   static const char* shadow_content =
@@ -374,7 +379,7 @@ TEST_F(TextIteratorTest, FinishingAtNodeInShadowRoot) {
                                      EntersOpenShadowRootsBehavior()));
 }
 
-TEST_F(TextIteratorTest, FullyClipsContents) {
+TEST_P(TextIteratorTest, FullyClipsContents) {
   static const char* body_content =
       "<div style='overflow: hidden; width: 200px; height: 0;'>"
       "I'm invisible"
@@ -384,7 +389,7 @@ TEST_F(TextIteratorTest, FullyClipsContents) {
   EXPECT_EQ("", Iterate<FlatTree>());
 }
 
-TEST_F(TextIteratorTest, IgnoresContainerClip) {
+TEST_P(TextIteratorTest, IgnoresContainerClip) {
   static const char* body_content =
       "<div style='overflow: hidden; width: 200px; height: 0;'>"
       "<div>I'm not visible</div>"
@@ -398,7 +403,7 @@ TEST_F(TextIteratorTest, IgnoresContainerClip) {
   EXPECT_EQ("[but I am!]", Iterate<FlatTree>());
 }
 
-TEST_F(TextIteratorTest, FullyClippedContentsDistributed) {
+TEST_P(TextIteratorTest, FullyClippedContentsDistributed) {
   static const char* body_content =
       "<div id='host'>"
       "<div>Am I visible?</div>"
@@ -417,7 +422,7 @@ TEST_F(TextIteratorTest, FullyClippedContentsDistributed) {
   EXPECT_EQ("", Iterate<FlatTree>(EntersOpenShadowRootsBehavior()));
 }
 
-TEST_F(TextIteratorTest, IgnoresContainersClipDistributed) {
+TEST_P(TextIteratorTest, IgnoresContainersClipDistributed) {
   static const char* body_content =
       "<div id='host' style='overflow: hidden; width: 200px; height: 0;'>"
       "<div>Nobody can find me!</div>"
@@ -438,7 +443,7 @@ TEST_F(TextIteratorTest, IgnoresContainersClipDistributed) {
             Iterate<FlatTree>(EntersOpenShadowRootsBehavior()));
 }
 
-TEST_F(TextIteratorTest, EmitsReplacementCharForInput) {
+TEST_P(TextIteratorTest, EmitsReplacementCharForInput) {
   static const char* body_content =
       "<div contenteditable='true'>"
       "Before"
@@ -452,11 +457,11 @@ TEST_F(TextIteratorTest, EmitsReplacementCharForInput) {
             Iterate<FlatTree>(EmitsObjectReplacementCharacterBehavior()));
 }
 
-TEST_F(TextIteratorTest, RangeLengthWithReplacedElements) {
+TEST_P(TextIteratorTest, RangeLengthWithReplacedElements) {
   static const char* body_content =
       "<div id='div' contenteditable='true'>1<img src='foo.png'>3</div>";
   SetBodyContent(body_content);
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   Node* div_node = GetDocument().getElementById("div");
   const EphemeralRange range(Position(div_node, 0), Position(div_node, 3));
@@ -464,7 +469,7 @@ TEST_F(TextIteratorTest, RangeLengthWithReplacedElements) {
   EXPECT_EQ(3, TextIterator::RangeLength(range));
 }
 
-TEST_F(TextIteratorTest, RangeLengthInMultilineSpan) {
+TEST_P(TextIteratorTest, RangeLengthInMultilineSpan) {
   static const char* body_content =
       "<table style='width:5em'>"
       "<tbody>"
@@ -477,7 +482,7 @@ TEST_F(TextIteratorTest, RangeLengthInMultilineSpan) {
       "</table>";
 
   SetBodyContent(body_content);
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   Node* span_node = GetDocument().getElementById("span1");
   Node* text_node = span_node->firstChild();
@@ -486,13 +491,13 @@ TEST_F(TextIteratorTest, RangeLengthInMultilineSpan) {
 
   const EphemeralRange range(Position(text_node, 4), Position(text_node, 7));
 
-  EXPECT_EQ(4, TextIterator::RangeLength(range));
+  EXPECT_EQ(LayoutNGEnabled() ? 3 : 4, TextIterator::RangeLength(range));
   EXPECT_EQ(3, TextIterator::RangeLength(
                    range,
                    TextIteratorBehavior::NoTrailingSpaceRangeLengthBehavior()));
 }
 
-TEST_P(ParameterizedTextIteratorTest, RangeLengthBasic) {
+TEST_P(TextIteratorTest, RangeLengthBasic) {
   EXPECT_EQ(0, TestRangeLength("<p>^| (1) abc def</p>"));
   EXPECT_EQ(0, TestRangeLength("<p>^ |(1) abc def</p>"));
   EXPECT_EQ(1, TestRangeLength("<p>^ (|1) abc def</p>"));
@@ -508,7 +513,7 @@ TEST_P(ParameterizedTextIteratorTest, RangeLengthBasic) {
   EXPECT_EQ(11, TestRangeLength("<p>^ (1) abc def|</p>"));
 }
 
-TEST_P(ParameterizedTextIteratorTest, RangeLengthWithFirstLetter) {
+TEST_P(TextIteratorTest, RangeLengthWithFirstLetter) {
   InsertStyleElement("p::first-letter {font-size:200%;}");
   // Expectation should be as same as |RangeLengthBasic|
   EXPECT_EQ(0, TestRangeLength("<p>^| (1) abc def</p>"));
@@ -526,8 +531,7 @@ TEST_P(ParameterizedTextIteratorTest, RangeLengthWithFirstLetter) {
   EXPECT_EQ(11, TestRangeLength("<p>^ (1) abc def|</p>"));
 }
 
-TEST_P(ParameterizedTextIteratorTest,
-       RangeLengthWithFirstLetterMultipleLeadingSpaces) {
+TEST_P(TextIteratorTest, RangeLengthWithFirstLetterMultipleLeadingSpaces) {
   InsertStyleElement("p::first-letter {font-size:200%;}");
   EXPECT_EQ(0, TestRangeLength("<p>^|   foo</p>"));
   EXPECT_EQ(0, TestRangeLength("<p>^ |  foo</p>"));
@@ -538,88 +542,19 @@ TEST_P(ParameterizedTextIteratorTest,
   EXPECT_EQ(3, TestRangeLength("<p>^   foo|</p>"));
 }
 
-TEST_F(TextIteratorTest, WhitespaceCollapseForReplacedElements) {
+TEST_P(TextIteratorTest, WhitespaceCollapseForReplacedElements) {
   static const char* body_content =
       "<span>Some text </span> <input type='button' value='Button "
       "text'/><span>Some more text</span>";
   SetBodyContent(body_content);
   EXPECT_EQ("[Some text ][][Some more text]",
             Iterate<DOMTree>(CollapseTrailingSpaceBehavior()));
+  // <input type=button> is not text control element
   EXPECT_EQ("[Some text ][][Button text][Some more text]",
             Iterate<FlatTree>(CollapseTrailingSpaceBehavior()));
 }
 
-TEST_F(TextIteratorTest, copyTextTo) {
-  const char* body_content =
-      "<a id=host><b id=one>one</b> not appeared <b id=two>two</b></a>";
-  const char* shadow_content =
-      "three <content select=#two></content> <content select=#one></content> "
-      "zero";
-  SetBodyContent(body_content);
-  SetShadowContent(shadow_content, "host");
-
-  Element* host = GetDocument().getElementById("host");
-  const char* message = "|iter%d| should have emitted '%s'.";
-
-  EphemeralRangeTemplate<EditingStrategy> range1(
-      EphemeralRangeTemplate<EditingStrategy>::RangeOfContents(*host));
-  TextIteratorAlgorithm<EditingStrategy> iter1(range1.StartPosition(),
-                                               range1.EndPosition());
-  ForwardsTextBuffer output1;
-  iter1.CopyTextTo(&output1, 0, 2);
-  EXPECT_EQ("on", String(output1.Data(), output1.Size()))
-      << String::Format(message, 1, "on").Utf8().data();
-  iter1.CopyTextTo(&output1, 2, 1);
-  EXPECT_EQ("one", String(output1.Data(), output1.Size()))
-      << String::Format(message, 1, "one").Utf8().data();
-  iter1.Advance();
-  iter1.CopyTextTo(&output1, 0, 1);
-  EXPECT_EQ("onet", String(output1.Data(), output1.Size()))
-      << String::Format(message, 1, "onet").Utf8().data();
-  iter1.CopyTextTo(&output1, 1, 2);
-  EXPECT_EQ("onetwo", String(output1.Data(), output1.Size()))
-      << String::Format(message, 1, "onetwo").Utf8().data();
-
-  EphemeralRangeTemplate<EditingInFlatTreeStrategy> range2(
-      EphemeralRangeTemplate<EditingInFlatTreeStrategy>::RangeOfContents(
-          *host));
-  TextIteratorAlgorithm<EditingInFlatTreeStrategy> iter2(range2.StartPosition(),
-                                                         range2.EndPosition());
-  ForwardsTextBuffer output2;
-  iter2.CopyTextTo(&output2, 0, 3);
-  EXPECT_EQ("thr", String(output2.Data(), output2.Size()))
-      << String::Format(message, 2, "thr").Utf8().data();
-  iter2.CopyTextTo(&output2, 3, 3);
-  EXPECT_EQ("three ", String(output2.Data(), output2.Size()))
-      << String::Format(message, 2, "three ").Utf8().data();
-  iter2.Advance();
-  iter2.CopyTextTo(&output2, 0, 2);
-  EXPECT_EQ("three tw", String(output2.Data(), output2.Size()))
-      << String::Format(message, 2, "three tw").Utf8().data();
-  iter2.CopyTextTo(&output2, 2, 1);
-  EXPECT_EQ("three two", String(output2.Data(), output2.Size()))
-      << String::Format(message, 2, "three two").Utf8().data();
-  iter2.Advance();
-  iter2.CopyTextTo(&output2, 0, 1);
-  EXPECT_EQ("three two ", String(output2.Data(), output2.Size()))
-      << String::Format(message, 2, "three two ").Utf8().data();
-  iter2.Advance();
-  iter2.CopyTextTo(&output2, 0, 1);
-  EXPECT_EQ("three two o", String(output2.Data(), output2.Size()))
-      << String::Format(message, 2, "three two o").Utf8().data();
-  iter2.CopyTextTo(&output2, 1, 2);
-  EXPECT_EQ("three two one", String(output2.Data(), output2.Size()))
-      << String::Format(message, 2, "three two one").Utf8().data();
-  iter2.Advance();
-  iter2.CopyTextTo(&output2, 0, 2);
-  EXPECT_EQ("three two one z", String(output2.Data(), output2.Size()))
-      << String::Format(message, 2, "three two one z").Utf8().data();
-  iter2.CopyTextTo(&output2, 2, 3);
-  EXPECT_EQ("three two one zero", String(output2.Data(), output2.Size()))
-      << String::Format(message, 2, "three two one zero").Utf8().data();
-}
-
-TEST_F(TextIteratorTest, characterAt) {
+TEST_P(TextIteratorTest, characterAt) {
   const char* body_content =
       "<a id=host><b id=one>one</b> not appeared <b id=two>two</b></a>";
   const char* shadow_content =
@@ -674,32 +609,8 @@ TEST_F(TextIteratorTest, characterAt) {
   EXPECT_EQ('o', iter2.CharacterAt(4)) << message2;
 }
 
-TEST_F(TextIteratorTest, CopyWholeCodePoints) {
-  const char* body_content = "&#x13000;&#x13001;&#x13002; &#x13140;&#x13141;.";
-  SetBodyContent(body_content);
-
-  const UChar kExpected[] = {0xD80C, 0xDC00, 0xD80C, 0xDC01, 0xD80C, 0xDC02,
-                             ' ',    0xD80C, 0xDD40, 0xD80C, 0xDD41, '.'};
-
-  EphemeralRange range(EphemeralRange::RangeOfContents(GetDocument()));
-  TextIterator iter(range.StartPosition(), range.EndPosition());
-  ForwardsTextBuffer buffer;
-  EXPECT_EQ(2, iter.CopyTextTo(&buffer, 0, 1))
-      << "Should emit 2 UChars for 'U+13000'.";
-  EXPECT_EQ(4, iter.CopyTextTo(&buffer, 2, 3))
-      << "Should emit 4 UChars for 'U+13001U+13002'.";
-  EXPECT_EQ(3, iter.CopyTextTo(&buffer, 6, 2))
-      << "Should emit 3 UChars for ' U+13140'.";
-  EXPECT_EQ(2, iter.CopyTextTo(&buffer, 9, 2))
-      << "Should emit 2 UChars for 'U+13141'.";
-  EXPECT_EQ(1, iter.CopyTextTo(&buffer, 11, 1))
-      << "Should emit 1 UChar for '.'.";
-  for (int i = 0; i < 12; i++)
-    EXPECT_EQ(kExpected[i], buffer[i]);
-}
-
 // Regression test for crbug.com/630921
-TEST_F(TextIteratorTest, EndingConditionWithDisplayNone) {
+TEST_P(TextIteratorTest, EndingConditionWithDisplayNone) {
   SetBodyContent(
       "<div style='display: none'><span>hello</span>world</div>Lorem ipsum "
       "dolor sit amet.");
@@ -710,7 +621,7 @@ TEST_F(TextIteratorTest, EndingConditionWithDisplayNone) {
 }
 
 // Trickier regression test for crbug.com/630921
-TEST_F(TextIteratorTest, EndingConditionWithDisplayNoneInShadowTree) {
+TEST_P(TextIteratorTest, EndingConditionWithDisplayNoneInShadowTree) {
   const char* body_content =
       "<div style='display: none'><span id=host><a></a></span>world</div>Lorem "
       "ipsum dolor sit amet.";
@@ -728,7 +639,7 @@ TEST_F(TextIteratorTest, EndingConditionWithDisplayNoneInShadowTree) {
   EXPECT_TRUE(iter.AtEnd());
 }
 
-TEST_F(TextIteratorTest, PreserveLeadingSpace) {
+TEST_P(TextIteratorTest, PreserveLeadingSpace) {
   SetBodyContent("<div style='width: 2em;'><b><i>foo</i></b> bar</div>");
   Element* div = GetDocument().QuerySelector("div");
   Position start(div->firstChild()->firstChild()->firstChild(), 0);
@@ -739,7 +650,7 @@ TEST_F(TextIteratorTest, PreserveLeadingSpace) {
 
 // We used to have a bug where the leading space was duplicated if we didn't
 // emit alt text, this tests for that bug
-TEST_F(TextIteratorTest, PreserveLeadingSpaceWithoutEmittingAltText) {
+TEST_P(TextIteratorTest, PreserveLeadingSpaceWithoutEmittingAltText) {
   SetBodyContent("<div style='width: 2em;'><b><i>foo</i></b> bar</div>");
   Element* div = GetDocument().QuerySelector("div");
   Position start(div->firstChild()->firstChild()->firstChild(), 0);
@@ -747,7 +658,7 @@ TEST_F(TextIteratorTest, PreserveLeadingSpaceWithoutEmittingAltText) {
   EXPECT_EQ("foo bar", PlainText(EphemeralRange(start, end)));
 }
 
-TEST_F(TextIteratorTest, PreserveOnlyLeadingSpace) {
+TEST_P(TextIteratorTest, PreserveOnlyLeadingSpace) {
   SetBodyContent(
       "<div style='width: 2em;'><b><i id='foo'>foo </i></b> bar</div>");
   Element* div = GetDocument().QuerySelector("div");
@@ -757,7 +668,7 @@ TEST_F(TextIteratorTest, PreserveOnlyLeadingSpace) {
             PlainText(EphemeralRange(start, end), EmitsImageAltTextBehavior()));
 }
 
-TEST_F(TextIteratorTest, StartAtFirstLetter) {
+TEST_P(TextIteratorTest, StartAtFirstLetter) {
   SetBodyContent("<style>div:first-letter {color:red;}</style><div>Axyz</div>");
 
   Element* div = GetDocument().QuerySelector("div");
@@ -765,30 +676,25 @@ TEST_F(TextIteratorTest, StartAtFirstLetter) {
   Position start(text, 0);
   Position end(text, 4);
   TextIterator iter(start, end);
-  ForwardsTextBuffer buffer;
 
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(1, iter.length());
-  EXPECT_EQ(1, iter.CopyTextTo(&buffer, 0)) << "Should emit 'A'.";
+  EXPECT_EQ("A", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 0), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 1), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(3, iter.length());
-  EXPECT_EQ(3, iter.CopyTextTo(&buffer, 0)) << "Should emit 'xyz'.";
+  EXPECT_EQ("xyz", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 1), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 4), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_TRUE(iter.AtEnd());
-
-  EXPECT_EQ("Axyz", String(buffer.Data()));
 }
 
-TEST_F(TextIteratorTest, StartInMultiCharFirstLetterWithCollapsedSpace) {
+TEST_P(TextIteratorTest, StartInMultiCharFirstLetterWithCollapsedSpace) {
   SetBodyContent(
       "<style>div:first-letter {color:red;}</style><div>  (A)  xyz</div>");
 
@@ -797,38 +703,32 @@ TEST_F(TextIteratorTest, StartInMultiCharFirstLetterWithCollapsedSpace) {
   Position start(text, 3);
   Position end(text, 10);
   TextIterator iter(start, end);
-  ForwardsTextBuffer buffer;
 
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(2, iter.length());
-  EXPECT_EQ(2, iter.CopyTextTo(&buffer, 0)) << "Should emit 'A)'.";
+  EXPECT_EQ("A)", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 3), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 5), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(1, iter.length());
-  EXPECT_EQ(1, iter.CopyTextTo(&buffer, 0)) << "Should emit ' '.";
+  EXPECT_EQ(" ", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 5), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 6), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(3, iter.length());
-  EXPECT_EQ(3, iter.CopyTextTo(&buffer, 0)) << "Should emit 'xyz'.";
+  EXPECT_EQ("xyz", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 7), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 10), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_TRUE(iter.AtEnd());
-
-  EXPECT_EQ("A) xyz", String(buffer.Data()));
 }
 
-TEST_F(TextIteratorTest, StartAndEndInMultiCharFirstLetterWithCollapsedSpace) {
+TEST_P(TextIteratorTest, StartAndEndInMultiCharFirstLetterWithCollapsedSpace) {
   SetBodyContent(
       "<style>div:first-letter {color:red;}</style><div>  (A)  xyz</div>");
 
@@ -837,22 +737,18 @@ TEST_F(TextIteratorTest, StartAndEndInMultiCharFirstLetterWithCollapsedSpace) {
   Position start(text, 3);
   Position end(text, 4);
   TextIterator iter(start, end);
-  ForwardsTextBuffer buffer;
 
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(1, iter.length());
-  EXPECT_EQ(1, iter.CopyTextTo(&buffer, 0)) << "Should emit 'A'.";
+  EXPECT_EQ("A", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 3), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 4), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_TRUE(iter.AtEnd());
-
-  EXPECT_EQ("A", String(buffer.Data()));
 }
 
-TEST_F(TextIteratorTest, StartAtRemainingText) {
+TEST_P(TextIteratorTest, StartAtRemainingText) {
   SetBodyContent("<style>div:first-letter {color:red;}</style><div>Axyz</div>");
 
   Element* div = GetDocument().QuerySelector("div");
@@ -860,22 +756,18 @@ TEST_F(TextIteratorTest, StartAtRemainingText) {
   Position start(text, 1);
   Position end(text, 4);
   TextIterator iter(start, end);
-  ForwardsTextBuffer buffer;
 
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(3, iter.length());
-  EXPECT_EQ(3, iter.CopyTextTo(&buffer, 0)) << "Should emit 'xyz'.";
+  EXPECT_EQ("xyz", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 1), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 4), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_TRUE(iter.AtEnd());
-
-  EXPECT_EQ("xyz", String(buffer.Data()));
 }
 
-TEST_F(TextIteratorTest, StartAtFirstLetterInPre) {
+TEST_P(TextIteratorTest, StartAtFirstLetterInPre) {
   SetBodyContent("<style>pre:first-letter {color:red;}</style><pre>Axyz</pre>");
 
   Element* pre = GetDocument().QuerySelector("pre");
@@ -883,30 +775,25 @@ TEST_F(TextIteratorTest, StartAtFirstLetterInPre) {
   Position start(text, 0);
   Position end(text, 4);
   TextIterator iter(start, end);
-  ForwardsTextBuffer buffer;
 
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(1, iter.length());
-  EXPECT_EQ(1, iter.CopyTextTo(&buffer, 0)) << "Should emit 'A'.";
+  EXPECT_EQ("A", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 0), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 1), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(3, iter.length());
-  EXPECT_EQ(3, iter.CopyTextTo(&buffer, 0)) << "Should emit 'xyz'.";
+  EXPECT_EQ("xyz", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 1), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 4), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_TRUE(iter.AtEnd());
-
-  EXPECT_EQ("Axyz", String(buffer.Data()));
 }
 
-TEST_F(TextIteratorTest, StartInMultiCharFirstLetterInPre) {
+TEST_P(TextIteratorTest, StartInMultiCharFirstLetterInPre) {
   SetBodyContent(
       "<style>pre:first-letter {color:red;}</style><pre>(A)xyz</pre>");
 
@@ -915,30 +802,25 @@ TEST_F(TextIteratorTest, StartInMultiCharFirstLetterInPre) {
   Position start(text, 1);
   Position end(text, 6);
   TextIterator iter(start, end);
-  ForwardsTextBuffer buffer;
 
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(2, iter.length());
-  EXPECT_EQ(2, iter.CopyTextTo(&buffer, 0)) << "Should emit 'A)'.";
+  EXPECT_EQ("A)", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 1), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 3), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(3, iter.length());
-  EXPECT_EQ(3, iter.CopyTextTo(&buffer, 0)) << "Should emit 'xyz'.";
+  EXPECT_EQ("xyz", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 3), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 6), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_TRUE(iter.AtEnd());
-
-  EXPECT_EQ("A)xyz", String(buffer.Data()));
 }
 
-TEST_F(TextIteratorTest, StartAndEndInMultiCharFirstLetterInPre) {
+TEST_P(TextIteratorTest, StartAndEndInMultiCharFirstLetterInPre) {
   SetBodyContent(
       "<style>pre:first-letter {color:red;}</style><pre>(A)xyz</pre>");
 
@@ -947,22 +829,18 @@ TEST_F(TextIteratorTest, StartAndEndInMultiCharFirstLetterInPre) {
   Position start(text, 1);
   Position end(text, 2);
   TextIterator iter(start, end);
-  ForwardsTextBuffer buffer;
 
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(1, iter.length());
-  EXPECT_EQ(1, iter.CopyTextTo(&buffer, 0)) << "Should emit 'A'.";
+  EXPECT_EQ("A", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 1), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 2), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_TRUE(iter.AtEnd());
-
-  EXPECT_EQ("A", String(buffer.Data()));
 }
 
-TEST_F(TextIteratorTest, StartAtRemainingTextInPre) {
+TEST_P(TextIteratorTest, StartAtRemainingTextInPre) {
   SetBodyContent("<style>pre:first-letter {color:red;}</style><pre>Axyz</pre>");
 
   Element* pre = GetDocument().QuerySelector("pre");
@@ -970,22 +848,18 @@ TEST_F(TextIteratorTest, StartAtRemainingTextInPre) {
   Position start(text, 1);
   Position end(text, 4);
   TextIterator iter(start, end);
-  ForwardsTextBuffer buffer;
 
   EXPECT_FALSE(iter.AtEnd());
-  EXPECT_EQ(3, iter.length());
-  EXPECT_EQ(3, iter.CopyTextTo(&buffer, 0)) << "Should emit 'xyz'.";
+  EXPECT_EQ("xyz", iter.GetText().GetTextForTesting());
   EXPECT_EQ(text, iter.CurrentContainer());
   EXPECT_EQ(Position(text, 1), iter.StartPositionInCurrentContainer());
   EXPECT_EQ(Position(text, 4), iter.EndPositionInCurrentContainer());
 
   iter.Advance();
   EXPECT_TRUE(iter.AtEnd());
-
-  EXPECT_EQ("xyz", String(buffer.Data()));
 }
 
-TEST_F(TextIteratorTest, VisitsDisplayContentsChildren) {
+TEST_P(TextIteratorTest, VisitsDisplayContentsChildren) {
   SetBodyContent(
       "<p>Hello, \ntext</p><p style='display: contents'>iterator.</p>");
 
@@ -993,27 +867,27 @@ TEST_F(TextIteratorTest, VisitsDisplayContentsChildren) {
   EXPECT_EQ("[Hello, ][text][iterator.]", Iterate<FlatTree>());
 }
 
-TEST_F(TextIteratorTest, BasicIterationEmptyContent) {
+TEST_P(TextIteratorTest, BasicIterationEmptyContent) {
   SetBodyContent("");
   EXPECT_EQ("", Iterate<DOMTree>());
 }
 
-TEST_F(TextIteratorTest, BasicIterationSingleCharacter) {
+TEST_P(TextIteratorTest, BasicIterationSingleCharacter) {
   SetBodyContent("a");
   EXPECT_EQ("[a]", Iterate<DOMTree>());
 }
 
-TEST_F(TextIteratorTest, BasicIterationSingleDiv) {
+TEST_P(TextIteratorTest, BasicIterationSingleDiv) {
   SetBodyContent("<div>a</div>");
   EXPECT_EQ("[a]", Iterate<DOMTree>());
 }
 
-TEST_F(TextIteratorTest, BasicIterationMultipleDivs) {
+TEST_P(TextIteratorTest, BasicIterationMultipleDivs) {
   SetBodyContent("<div>a</div><div>b</div>");
   EXPECT_EQ("[a][\n][b]", Iterate<DOMTree>());
 }
 
-TEST_F(TextIteratorTest, BasicIterationMultipleDivsWithStyle) {
+TEST_P(TextIteratorTest, BasicIterationMultipleDivsWithStyle) {
   SetBodyContent(
       "<div style='line-height: 18px; min-height: 436px; '>"
         "debugging this note"
@@ -1021,12 +895,12 @@ TEST_F(TextIteratorTest, BasicIterationMultipleDivsWithStyle) {
   EXPECT_EQ("[debugging this note]", Iterate<DOMTree>());
 }
 
-TEST_F(TextIteratorTest, BasicIterationMultipleDivsWithChildren) {
+TEST_P(TextIteratorTest, BasicIterationMultipleDivsWithChildren) {
   SetBodyContent("<div>Hello<div><br><span></span></div></div>");
   EXPECT_EQ("[Hello][\n][\n]", Iterate<DOMTree>());
 }
 
-TEST_F(TextIteratorTest, BasicIterationOnChildrenWithStyle) {
+TEST_P(TextIteratorTest, BasicIterationOnChildrenWithStyle) {
   SetBodyContent(
       "<div style='left:22px'>"
       "</div>"
@@ -1053,7 +927,7 @@ TEST_F(TextIteratorTest, BasicIterationOnChildrenWithStyle) {
   EXPECT_EQ("[hey]", Iterate<DOMTree>());
 }
 
-TEST_F(TextIteratorTest, BasicIterationInput) {
+TEST_P(TextIteratorTest, BasicIterationInput) {
   SetBodyContent("<input id='a' value='b'>");
   auto* input_element = ToTextControl(GetDocument().getElementById("a"));
   const ShadowRoot* shadow_root = input_element->UserAgentShadowRoot();
@@ -1062,11 +936,11 @@ TEST_F(TextIteratorTest, BasicIterationInput) {
   EXPECT_EQ("[b]", IteratePartial<DOMTree>(start, end));
 }
 
-TEST_F(TextIteratorTest, BasicIterationInputiWithBr) {
+TEST_P(TextIteratorTest, BasicIterationInputiWithBr) {
   SetBodyContent("<input id='a' value='b'>");
   auto* input_element = ToTextControl(GetDocument().getElementById("a"));
   Element* inner_editor = input_element->InnerEditorElement();
-  Element* br = GetDocument().CreateRawElement(HTMLNames::brTag);
+  Element* br = GetDocument().CreateRawElement(html_names::kBrTag);
   inner_editor->AppendChild(br);
   const ShadowRoot* shadow_root = input_element->UserAgentShadowRoot();
   const Position start = Position::FirstPositionInNode(*shadow_root);
@@ -1075,30 +949,30 @@ TEST_F(TextIteratorTest, BasicIterationInputiWithBr) {
   EXPECT_EQ("[b]", IteratePartial<DOMTree>(start, end));
 }
 
-TEST_P(ParameterizedTextIteratorTest, FloatLeft) {
+TEST_P(TextIteratorTest, FloatLeft) {
   SetBodyContent("abc<span style='float:left'>DEF</span>ghi");
   EXPECT_EQ("[abc][DEF][ghi]", Iterate<DOMTree>())
       << "float doesn't affect text iteration";
 }
 
-TEST_P(ParameterizedTextIteratorTest, FloatRight) {
+TEST_P(TextIteratorTest, FloatRight) {
   SetBodyContent("abc<span style='float:right'>DEF</span>ghi");
   EXPECT_EQ("[abc][DEF][ghi]", Iterate<DOMTree>())
       << "float doesn't affect text iteration";
 }
 
-TEST_P(ParameterizedTextIteratorTest, InlineBlock) {
+TEST_P(TextIteratorTest, InlineBlock) {
   SetBodyContent("abc<span style='display:inline-block'>DEF<br>GHI</span>jkl");
   EXPECT_EQ("[abc][DEF][\n][GHI][jkl]", Iterate<DOMTree>())
       << "inline-block doesn't insert newline around itself.";
 }
 
-TEST_P(ParameterizedTextIteratorTest, NoZWSForSpaceAfterNoWrapSpace) {
+TEST_P(TextIteratorTest, NoZWSForSpaceAfterNoWrapSpace) {
   SetBodyContent("<span style='white-space: nowrap'>foo </span> bar");
   EXPECT_EQ("[foo ][bar]", Iterate<DOMTree>());
 }
 
-TEST_P(ParameterizedTextIteratorTest, PositionInShadowTree) {
+TEST_P(TextIteratorTest, PositionInShadowTree) {
   // Flat Tree: <div id=host>A<slot name=c><img slot=c alt=C></slot></div>
   SetBodyContent("<div id=host><a></a><b></b><img slot=c alt=C></div>");
   Element& host = *GetDocument().getElementById("host");
@@ -1130,17 +1004,42 @@ TEST_P(ParameterizedTextIteratorTest, PositionInShadowTree) {
   ASSERT_TRUE(it.AtEnd());
 }
 
-TEST_P(ParameterizedTextIteratorTest, HiddenFirstLetter) {
+TEST_P(TextIteratorTest, HiddenFirstLetter) {
   InsertStyleElement("body::first-letter{visibility:hidden}");
   SetBodyContent("foo");
   EXPECT_EQ("[oo]", Iterate<DOMTree>());
 }
 
-TEST_P(ParameterizedTextIteratorTest, HiddenFirstLetterInPre) {
+TEST_P(TextIteratorTest, HiddenFirstLetterInPre) {
   InsertStyleElement(
       "body::first-letter{visibility:hidden} body{white-space:pre}");
   SetBodyContent("foo");
   EXPECT_EQ("[oo]", Iterate<DOMTree>());
+}
+
+TEST_P(TextIteratorTest, TextOffsetMappingAndFlatTree) {
+  // Tests that TextOffsetMapping should skip text control even though it runs
+  // on flat tree.
+  SetBodyContent("foo <input value='bla bla. bla bla.'> bar");
+  EXPECT_EQ(
+      "[foo ][,][ bar]",
+      Iterate<FlatTree>(EmitsCharactersBetweenAllVisiblePositionsBehavior()));
+}
+
+TEST_P(TextIteratorTest, EmitsSpaceForNbsp) {
+  SetBodyContent("foo &nbsp;bar");
+  EXPECT_EQ("[foo  bar]", Iterate<DOMTree>(EmitsSpaceForNbspBehavior()));
+}
+
+TEST_P(TextIteratorTest, IterateWithLockedSubtree) {
+  SetBodyContent("<div id='parent'>foo<div id='locked'>text</div>bar</div>");
+  auto* locked = GetDocument().getElementById("locked");
+  locked->setAttribute("rendersubtree", "invisible activatable");
+  GetDocument().UpdateStyleAndLayout();
+  auto* parent = GetDocument().getElementById("parent");
+  const Position start_position = Position::FirstPositionInNode(*parent);
+  const Position end_position = Position::LastPositionInNode(*parent);
+  EXPECT_EQ(6, TextIterator::RangeLength(start_position, end_position));
 }
 
 }  // namespace text_iterator_test

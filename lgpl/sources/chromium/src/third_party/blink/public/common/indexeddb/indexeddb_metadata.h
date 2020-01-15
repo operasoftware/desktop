@@ -11,7 +11,7 @@
 #include <string>
 
 #include "base/strings/string16.h"
-#include "third_party/blink/common/common_export.h"
+#include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/indexeddb/indexeddb_key_path.h"
 
 namespace blink {
@@ -88,6 +88,8 @@ struct BLINK_COMMON_EXPORT IndexedDBDatabaseMetadata {
   int64_t max_object_store_id;
 
   std::map<int64_t, IndexedDBObjectStoreMetadata> object_stores;
+
+  bool was_cold_open;
 };
 
 }  // namespace blink

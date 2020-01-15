@@ -36,18 +36,16 @@ enum SVGStitchOptions {
   kSvgStitchtypeStitch = 1,
   kSvgStitchtypeNostitch = 2
 };
-template <>
-const SVGEnumerationStringEntries& GetStaticStringEntries<SVGStitchOptions>();
+DECLARE_SVG_ENUM_MAP(SVGStitchOptions);
 
-template <>
-const SVGEnumerationStringEntries& GetStaticStringEntries<TurbulenceType>();
+DECLARE_SVG_ENUM_MAP(TurbulenceType);
 
 class SVGFETurbulenceElement final
     : public SVGFilterPrimitiveStandardAttributes {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(SVGFETurbulenceElement);
+  explicit SVGFETurbulenceElement(Document&);
 
   SVGAnimatedNumber* baseFrequencyX() { return base_frequency_->FirstNumber(); }
   SVGAnimatedNumber* baseFrequencyY() {
@@ -64,11 +62,9 @@ class SVGFETurbulenceElement final
 
   // Turbulence takes no inputs and doesn't taint origin, so we can always
   // return false.
-  bool TaintsOrigin(bool inputs_taint_origin) const override { return false; }
+  bool TaintsOrigin() const override { return false; }
 
  private:
-  explicit SVGFETurbulenceElement(Document&);
-
   bool SetFilterEffectAttribute(FilterEffect*,
                                 const QualifiedName& attr_name) override;
   void SvgAttributeChanged(const QualifiedName&) override;

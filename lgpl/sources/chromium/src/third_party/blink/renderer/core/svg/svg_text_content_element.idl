@@ -25,6 +25,7 @@
 
 // https://svgwg.org/svg2-draft/text.html#InterfaceSVGTextContentElement
 
+[Exposed=Window]
 interface SVGTextContentElement : SVGGraphicsElement {
     // lengthAdjust Types
     [MeasureAs=SVG1DOMText] const unsigned short LENGTHADJUST_UNKNOWN          = 0;
@@ -35,12 +36,12 @@ interface SVGTextContentElement : SVGGraphicsElement {
     [MeasureAs=SVG1DOMText] readonly attribute SVGAnimatedEnumeration lengthAdjust;
 
     long getNumberOfChars();
-    float getComputedTextLength();
-    [RaisesException] float getSubStringLength(unsigned long charnum, unsigned long nchars);
+    [HighEntropy, Measure] float getComputedTextLength();
+    [HighEntropy, Measure, RaisesException] float getSubStringLength(unsigned long charnum, unsigned long nchars);
     // TODO(foolip): SVGPoint/SVGRect should be DOMPoint/DOMRect.
-    [RaisesException] SVGPoint getStartPositionOfChar(unsigned long charnum);
-    [RaisesException] SVGPoint getEndPositionOfChar(unsigned long charnum);
-    [RaisesException] SVGRect getExtentOfChar(unsigned long charnum);
+    [HighEntropy, Measure, RaisesException] SVGPoint getStartPositionOfChar(unsigned long charnum);
+    [HighEntropy, Measure, RaisesException] SVGPoint getEndPositionOfChar(unsigned long charnum);
+    [HighEntropy, Measure, RaisesException] SVGRect getExtentOfChar(unsigned long charnum);
     [RaisesException] float getRotationOfChar(unsigned long charnum);
     [RaisesException] long getCharNumAtPosition(SVGPoint point);
     [RaisesException] void selectSubString(unsigned long charnum, unsigned long nchars);

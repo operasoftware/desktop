@@ -47,13 +47,10 @@ class StyleSheetContents;
 // and provides methods to collect the rules that apply to a given element,
 // broken down by what kind of scope they apply to (e.g. shadow host,
 // tree-boundary-crossing, etc).
-class ScopedStyleResolver final
-    : public GarbageCollectedFinalized<ScopedStyleResolver> {
-
+class CORE_EXPORT ScopedStyleResolver final
+    : public GarbageCollected<ScopedStyleResolver> {
  public:
-  static ScopedStyleResolver* Create(TreeScope& scope) {
-    return new ScopedStyleResolver(scope);
-  }
+  explicit ScopedStyleResolver(TreeScope& scope) : scope_(scope) {}
 
   const TreeScope& GetTreeScope() const { return *scope_; }
   ScopedStyleResolver* Parent() const;
@@ -88,14 +85,12 @@ class ScopedStyleResolver final
   bool NeedsAppendAllSheets() const { return needs_append_all_sheets_; }
   void SetNeedsAppendAllSheets() { needs_append_all_sheets_ = true; }
   static void KeyframesRulesAdded(const TreeScope&);
-  static ContainerNode& InvalidationRootForTreeScope(const TreeScope&);
+  static Element& InvalidationRootForTreeScope(const TreeScope&);
   void V0ShadowAddedOnV1Document();
 
   void Trace(blink::Visitor*);
 
  private:
-  explicit ScopedStyleResolver(TreeScope& scope) : scope_(scope) {}
-
   void AddTreeBoundaryCrossingRules(const RuleSet&,
                                     CSSStyleSheet*,
                                     unsigned sheet_index);
@@ -116,21 +111,14 @@ class ScopedStyleResolver final
 
   class RuleSubSet final : public GarbageCollected<RuleSubSet> {
    public:
-    static RuleSubSet* Create(CSSStyleSheet* sheet,
-                              unsigned index,
-                              RuleSet* rules) {
-      return new RuleSubSet(sheet, index, rules);
-    }
+    RuleSubSet(CSSStyleSheet* sheet, unsigned index, RuleSet* rules)
+        : parent_style_sheet_(sheet), parent_index_(index), rule_set_(rules) {}
 
     Member<CSSStyleSheet> parent_style_sheet_;
     unsigned parent_index_;
     Member<RuleSet> rule_set_;
 
     void Trace(blink::Visitor*);
-
-   private:
-    RuleSubSet(CSSStyleSheet* sheet, unsigned index, RuleSet* rules)
-        : parent_style_sheet_(sheet), parent_index_(index), rule_set_(rules) {}
   };
   using CSSStyleSheetRuleSubSet = HeapVector<Member<RuleSubSet>>;
 

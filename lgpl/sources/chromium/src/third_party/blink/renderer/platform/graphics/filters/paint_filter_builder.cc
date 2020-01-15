@@ -25,22 +25,22 @@
 
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 
-#include "SkBlurImageFilter.h"
-#include "SkColorFilterImageFilter.h"
-#include "SkColorMatrixFilter.h"
-#include "SkTableColorFilter.h"
 #include "third_party/blink/renderer/platform/graphics/box_reflection.h"
 #include "third_party/blink/renderer/platform/graphics/filters/filter_effect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
+#include "third_party/skia/include/effects/SkBlurImageFilter.h"
+#include "third_party/skia/include/effects/SkColorFilterImageFilter.h"
+#include "third_party/skia/include/effects/SkColorMatrixFilter.h"
 #include "third_party/skia/include/effects/SkImageSource.h"
 #include "third_party/skia/include/effects/SkOffsetImageFilter.h"
 #include "third_party/skia/include/effects/SkPictureImageFilter.h"
+#include "third_party/skia/include/effects/SkTableColorFilter.h"
 #include "third_party/skia/include/effects/SkXfermodeImageFilter.h"
 
 namespace blink {
-namespace PaintFilterBuilder {
+namespace paint_filter_builder {
 
 void PopulateSourceGraphicImageFilters(
     FilterEffect* source_graphic,
@@ -102,7 +102,7 @@ sk_sp<PaintFilter> TransformInterpolationSpace(
     InterpolationSpace src_interpolation_space,
     InterpolationSpace dst_interpolation_space) {
   sk_sp<SkColorFilter> color_filter =
-      InterpolationSpaceUtilities::CreateInterpolationSpaceFilter(
+      interpolation_space_utilities::CreateInterpolationSpaceFilter(
           src_interpolation_space, dst_interpolation_space);
   if (!color_filter)
     return input;
@@ -184,5 +184,5 @@ sk_sp<PaintFilter> BuildBoxReflectFilter(const BoxReflection& reflection,
                                          std::move(input), nullptr);
 }
 
-}  // namespace PaintFilterBuilder
+}  // namespace paint_filter_builder
 }  // namespace blink

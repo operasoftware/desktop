@@ -17,20 +17,20 @@
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/custom/ce_reactions_scope.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_definition.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_definition_builder.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_descriptor.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_reaction_stack.h"
-#include "third_party/blink/renderer/core/html/custom/custom_element_upgrade_reaction.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_upgrade_sorter.h"
 #include "third_party/blink/renderer/core/html/custom/v0_custom_element_registration_context.h"
 #include "third_party/blink/renderer/core/html_element_type_helpers.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -38,11 +38,10 @@ namespace {
 
 void CollectUpgradeCandidateInNode(Node& root,
                                    HeapVector<Member<Element>>& candidates) {
-  if (root.IsElementNode()) {
-    Element& root_element = ToElement(root);
-    if (root_element.GetCustomElementState() == CustomElementState::kUndefined)
+  if (auto* root_element = DynamicTo<Element>(root)) {
+    if (root_element->GetCustomElementState() == CustomElementState::kUndefined)
       candidates.push_back(root_element);
-    if (auto* shadow_root = root_element.GetShadowRoot()) {
+    if (auto* shadow_root = root_element->GetShadowRoot()) {
       if (shadow_root->GetType() != ShadowRootType::kUserAgent)
         CollectUpgradeCandidateInNode(*shadow_root, candidates);
     }
@@ -76,24 +75,19 @@ bool ThrowIfValidName(const AtomicString& name,
 
 }  // namespace
 
-CustomElementRegistry* CustomElementRegistry::Create(
-    const LocalDOMWindow* owner) {
-  CustomElementRegistry* registry = new CustomElementRegistry(owner);
-  Document* document = owner->document();
-  if (V0CustomElementRegistrationContext* v0 =
-          document ? document->RegistrationContext() : nullptr)
-    registry->Entangle(v0);
-  return registry;
-}
-
 CustomElementRegistry::CustomElementRegistry(const LocalDOMWindow* owner)
     : element_definition_is_running_(false),
       owner_(owner),
-      v0_(new V0RegistrySet()),
-      upgrade_candidates_(new UpgradeCandidateMap()),
-      reaction_stack_(&CustomElementReactionStack::Current()) {}
+      v0_(MakeGarbageCollected<V0RegistrySet>()),
+      upgrade_candidates_(MakeGarbageCollected<UpgradeCandidateMap>()),
+      reaction_stack_(&CustomElementReactionStack::Current()) {
+  Document* document = owner->document();
+  if (V0CustomElementRegistrationContext* v0 =
+          document ? document->RegistrationContext() : nullptr)
+    Entangle(v0);
+}
 
-void CustomElementRegistry::Trace(blink::Visitor* visitor) {
+void CustomElementRegistry::Trace(Visitor* visitor) {
   visitor->Trace(definitions_);
   visitor->Trace(owner_);
   visitor->Trace(v0_);
@@ -107,7 +101,7 @@ CustomElementDefinition* CustomElementRegistry::define(
     ScriptState* script_state,
     const AtomicString& name,
     V8CustomElementConstructor* constructor,
-    const ElementDefinitionOptions& options,
+    const ElementDefinitionOptions* options,
     ExceptionState& exception_state) {
   ScriptCustomElementDefinitionBuilder builder(script_state, this, constructor,
                                                exception_state);
@@ -119,7 +113,7 @@ CustomElementDefinition* CustomElementRegistry::DefineInternal(
     ScriptState* script_state,
     const AtomicString& name,
     CustomElementDefinitionBuilder& builder,
-    const ElementDefinitionOptions& options,
+    const ElementDefinitionOptions* options,
     ExceptionState& exception_state) {
   TRACE_EVENT1("blink", "CustomElementRegistry::define", "name", name.Utf8());
   if (!builder.CheckConstructorIntrinsics())
@@ -133,7 +127,7 @@ CustomElementDefinition* CustomElementRegistry::DefineInternal(
   if (NameIsDefined(name) || V0NameIsDefined(name)) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,
-        "this name has already been used with this registry");
+        "the name \"" + name + "\" has already been used with this registry");
     return nullptr;
   }
 
@@ -150,10 +144,10 @@ CustomElementDefinition* CustomElementRegistry::DefineInternal(
 
   // Step 7. customized built-in elements definition
   // element interface extends option checks
-  if (options.hasExtends()) {
+  if (options->hasExtends()) {
     // 7.1. If element interface is valid custom element name, throw exception
-    const AtomicString& extends = AtomicString(options.extends());
-    if (ThrowIfValidName(AtomicString(options.extends()), exception_state))
+    const AtomicString& extends = AtomicString(options->extends());
+    if (ThrowIfValidName(AtomicString(options->extends()), exception_state))
       return nullptr;
     // 7.2. If element interface is undefined element, throw exception
     if (htmlElementTypeForTag(extends) ==
@@ -212,9 +206,8 @@ CustomElementDefinition* CustomElementRegistry::DefineInternal(
   CHECK(!exception_state.HadException());
   CHECK(definition->Descriptor() == descriptor);
   if (RuntimeEnabledFeatures::CustomElementDefaultStyleEnabled() &&
-      options.hasStyles())
-    definition->SetDefaultStyleSheets(options.styles());
-
+      options->hasStyles())
+    definition->SetDefaultStyleSheets(options->styles());
   definitions_.emplace_back(definition);
   NameIdMap::AddResult result = name_id_map_.insert(descriptor.GetName(), id);
   CHECK(result.is_new_entry);
@@ -222,7 +215,7 @@ CustomElementDefinition* CustomElementRegistry::DefineInternal(
   HeapVector<Member<Element>> candidates;
   CollectCandidates(descriptor, &candidates);
   for (Element* candidate : candidates)
-    definition->EnqueueUpgradeReaction(candidate);
+    definition->EnqueueUpgradeReaction(*candidate);
 
   // 16: when-defined promise processing
   const auto& entry = when_defined_promise_map_.find(name);
@@ -234,7 +227,7 @@ CustomElementDefinition* CustomElementRegistry::DefineInternal(
   return definition;
 }
 
-// https://html.spec.whatwg.org/multipage/scripting.html#dom-customelementsregistry-get
+// https://html.spec.whatwg.org/C/#dom-customelementsregistry-get
 ScriptValue CustomElementRegistry::get(const AtomicString& name) {
   CustomElementDefinition* definition = DefinitionForName(name);
   if (!definition) {
@@ -245,7 +238,7 @@ ScriptValue CustomElementRegistry::get(const AtomicString& name) {
   return definition->GetConstructorForScript();
 }
 
-// https://html.spec.whatwg.org/multipage/scripting.html#look-up-a-custom-element-definition
+// https://html.spec.whatwg.org/C/#look-up-a-custom-element-definition
 // At this point, what the spec calls 'is' is 'name' from desc
 CustomElementDefinition* CustomElementRegistry::DefinitionFor(
     const CustomElementDescriptor& desc) const {
@@ -290,10 +283,10 @@ CustomElementDefinition* CustomElementRegistry::DefinitionForId(
   return id ? definitions_[id - 1].Get() : nullptr;
 }
 
-void CustomElementRegistry::AddCandidate(Element* candidate) {
-  AtomicString name = candidate->localName();
+void CustomElementRegistry::AddCandidate(Element& candidate) {
+  AtomicString name = candidate.localName();
   if (!CustomElement::IsValidName(name)) {
-    const AtomicString& is = candidate->IsValue();
+    const AtomicString& is = candidate.IsValue();
     if (!is.IsNull())
       name = is;
   }
@@ -304,13 +297,14 @@ void CustomElementRegistry::AddCandidate(Element* candidate) {
   if (it != upgrade_candidates_->end()) {
     set = it->value;
   } else {
-    set = upgrade_candidates_->insert(name, new UpgradeCandidateSet())
+    set = upgrade_candidates_
+              ->insert(name, MakeGarbageCollected<UpgradeCandidateSet>())
               .stored_value->value;
   }
-  set->insert(candidate);
+  set->insert(&candidate);
 }
 
-// https://html.spec.whatwg.org/multipage/scripting.html#dom-customelementsregistry-whendefined
+// https://html.spec.whatwg.org/C/#dom-customelementsregistry-whendefined
 ScriptPromise CustomElementRegistry::whenDefined(
     ScriptState* script_state,
     const AtomicString& name,
@@ -323,8 +317,8 @@ ScriptPromise CustomElementRegistry::whenDefined(
   ScriptPromiseResolver* resolver = when_defined_promise_map_.at(name);
   if (resolver)
     return resolver->Promise();
-  ScriptPromiseResolver* new_resolver =
-      ScriptPromiseResolver::Create(script_state);
+  auto* new_resolver =
+      MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   when_defined_promise_map_.insert(name, new_resolver);
   return new_resolver->Promise();
 }
@@ -351,7 +345,7 @@ void CustomElementRegistry::CollectCandidates(
   sorter.Sorted(elements, document);
 }
 
-// https://html.spec.whatwg.org/multipage/custom-elements.html#dom-customelementregistry-upgrade
+// https://html.spec.whatwg.org/C/#dom-customelementregistry-upgrade
 void CustomElementRegistry::upgrade(Node* root) {
   DCHECK(root);
 
@@ -362,7 +356,7 @@ void CustomElementRegistry::upgrade(Node* root) {
 
   // 2. For each candidate of candidates, try to upgrade candidate.
   for (auto& candidate : candidates) {
-    CustomElement::TryToUpgrade(candidate,
+    CustomElement::TryToUpgrade(*candidate,
                                 true /* upgrade_invisible_elements */);
   }
 }

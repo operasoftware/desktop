@@ -28,11 +28,13 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_image.h"
 #include "third_party/blink/renderer/platform/image-decoders/segment_reader.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
+#include "third_party/skia/include/core/SkYUVAIndex.h"
 
 class SkData;
 
@@ -58,13 +60,13 @@ class PLATFORM_EXPORT DecodingImageGenerator final
       scoped_refptr<ImageFrameGenerator>,
       const SkImageInfo&,
       scoped_refptr<SegmentReader>,
-      std::vector<FrameMetadata>,
+      WebVector<FrameMetadata>,
       PaintImage::ContentId,
-      bool all_data_received);
+      bool all_data_received,
+      bool can_yuv_decode,
+      const cc::ImageHeaderMetadata& image_metadata);
 
   ~DecodingImageGenerator() override;
-
-  void SetCanYUVDecode(bool yes) { can_yuv_decode_ = yes; }
 
   // PaintImageGenerator implementation.
   sk_sp<SkData> GetEncodedData() const override;
@@ -74,27 +76,40 @@ class PLATFORM_EXPORT DecodingImageGenerator final
                  size_t frame_index,
                  PaintImage::GeneratorClientId client_id,
                  uint32_t lazy_pixel_ref) override;
-  bool QueryYUV8(SkYUVSizeInfo*, SkYUVColorSpace*) const override;
-  bool GetYUV8Planes(const SkYUVSizeInfo&,
-                     void* planes[3],
-                     size_t frame_index,
-                     uint32_t lazy_pixel_ref) override;
+  bool QueryYUVA8(SkYUVASizeInfo*,
+                  SkYUVAIndex[SkYUVAIndex::kIndexCount],
+                  SkYUVColorSpace*) const override;
+  bool GetYUVA8Planes(const SkYUVASizeInfo&,
+                      const SkYUVAIndex[SkYUVAIndex::kIndexCount],
+                      void* planes[4],
+                      size_t frame_index,
+                      uint32_t lazy_pixel_ref) override;
   SkISize GetSupportedDecodeSize(const SkISize& requested_size) const override;
   PaintImage::ContentId GetContentIdForFrame(size_t frame_index) const override;
+  const cc::ImageHeaderMetadata* GetMetadataForDecodeAcceleration()
+      const override;
 
  private:
   DecodingImageGenerator(scoped_refptr<ImageFrameGenerator>,
                          const SkImageInfo&,
                          scoped_refptr<SegmentReader>,
-                         std::vector<FrameMetadata>,
+                         WebVector<FrameMetadata>,
                          PaintImage::ContentId,
-                         bool all_data_received);
+                         bool all_data_received,
+                         bool can_yuv_decode,
+                         const cc::ImageHeaderMetadata& image_metadata);
 
   scoped_refptr<ImageFrameGenerator> frame_generator_;
   const scoped_refptr<SegmentReader> data_;  // Data source.
   const bool all_data_received_;
-  bool can_yuv_decode_;
+  const bool can_yuv_decode_;
   const PaintImage::ContentId complete_frame_content_id_;
+
+  // Image metadata, such as format (e.g. Jpeg or WebP), YUV subsampling factor
+  // (e.g. 444, 422, 420, etc.), size, and format-specific information that is
+  // useful for deciding which kind of decoding can be used (i.e. hardware
+  // acceleration or normal).
+  const cc::ImageHeaderMetadata image_metadata_;
 
   DISALLOW_COPY_AND_ASSIGN(DecodingImageGenerator);
 };

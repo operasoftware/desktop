@@ -14,23 +14,23 @@ namespace blink {
 
 class ExecutionContext;
 class HTMLCanvasElement;
-class WebCanvasCaptureHandler;
+class CanvasCaptureHandler;
 
 class CanvasCaptureMediaStreamTrack final : public MediaStreamTrack {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static CanvasCaptureMediaStreamTrack* Create(
-      MediaStreamComponent*,
-      HTMLCanvasElement*,
-      ExecutionContext*,
-      std::unique_ptr<WebCanvasCaptureHandler>);
-  static CanvasCaptureMediaStreamTrack* Create(
-      MediaStreamComponent*,
-      HTMLCanvasElement*,
-      ExecutionContext*,
-      std::unique_ptr<WebCanvasCaptureHandler>,
-      double frame_rate);
+  CanvasCaptureMediaStreamTrack(const CanvasCaptureMediaStreamTrack&,
+                                MediaStreamComponent*);
+  CanvasCaptureMediaStreamTrack(MediaStreamComponent*,
+                                HTMLCanvasElement*,
+                                ExecutionContext*,
+                                std::unique_ptr<CanvasCaptureHandler>);
+  CanvasCaptureMediaStreamTrack(MediaStreamComponent*,
+                                HTMLCanvasElement*,
+                                ExecutionContext*,
+                                std::unique_ptr<CanvasCaptureHandler>,
+                                double frame_rate);
 
   HTMLCanvasElement* canvas() const;
   void requestFrame();
@@ -40,18 +40,6 @@ class CanvasCaptureMediaStreamTrack final : public MediaStreamTrack {
   void Trace(blink::Visitor*) override;
 
  private:
-  CanvasCaptureMediaStreamTrack(const CanvasCaptureMediaStreamTrack&,
-                                MediaStreamComponent*);
-  CanvasCaptureMediaStreamTrack(MediaStreamComponent*,
-                                HTMLCanvasElement*,
-                                ExecutionContext*,
-                                std::unique_ptr<WebCanvasCaptureHandler>);
-  CanvasCaptureMediaStreamTrack(MediaStreamComponent*,
-                                HTMLCanvasElement*,
-                                ExecutionContext*,
-                                std::unique_ptr<WebCanvasCaptureHandler>,
-                                double frame_rate);
-
   Member<HTMLCanvasElement> canvas_element_;
   Member<CanvasDrawListener> draw_listener_;
 };

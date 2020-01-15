@@ -20,6 +20,7 @@
 
 #include "third_party/blink/renderer/core/html/html_summary_element.h"
 
+#include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
@@ -31,22 +32,20 @@
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 #include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
-using namespace HTMLNames;
-
-HTMLSummaryElement* HTMLSummaryElement::Create(Document& document) {
-  HTMLSummaryElement* summary = new HTMLSummaryElement(document);
-  summary->EnsureUserAgentShadowRoot();
-  return summary;
-}
+using namespace html_names;
 
 HTMLSummaryElement::HTMLSummaryElement(Document& document)
-    : HTMLElement(summaryTag, document) {}
+    : HTMLElement(kSummaryTag, document) {
+  SetHasCustomStyleCallbacks();
+  EnsureUserAgentShadowRoot();
+}
 
-LayoutObject* HTMLSummaryElement::CreateLayoutObject(
-    const ComputedStyle& style) {
+LayoutObject* HTMLSummaryElement::CreateLayoutObject(const ComputedStyle& style,
+                                                     LegacyLayout legacy) {
   // See: crbug.com/603928 - We manually check for other dislay types, then
   // fallback to a regular LayoutBlockFlow as "display: inline;" should behave
   // as an "inline-block".
@@ -55,29 +54,29 @@ LayoutObject* HTMLSummaryElement::CreateLayoutObject(
       display == EDisplay::kGrid || display == EDisplay::kInlineGrid ||
       display == EDisplay::kLayoutCustom ||
       display == EDisplay::kInlineLayoutCustom)
-    return LayoutObject::CreateObject(this, style);
-  return LayoutObjectFactory::CreateBlockFlow(*this, style);
+    return LayoutObject::CreateObject(this, style, legacy);
+  return LayoutObjectFactory::CreateBlockFlow(*this, style, legacy);
 }
 
 void HTMLSummaryElement::DidAddUserAgentShadowRoot(ShadowRoot& root) {
-  DetailsMarkerControl* marker_control =
-      DetailsMarkerControl::Create(GetDocument());
-  marker_control->SetIdAttribute(ShadowElementNames::DetailsMarker());
+  auto* marker_control =
+      MakeGarbageCollected<DetailsMarkerControl>(GetDocument());
+  marker_control->SetIdAttribute(shadow_element_names::DetailsMarker());
   root.AppendChild(marker_control);
   root.AppendChild(HTMLSlotElement::CreateUserAgentDefaultSlot(GetDocument()));
 }
 
 HTMLDetailsElement* HTMLSummaryElement::DetailsElement() const {
-  if (auto* details = ToHTMLDetailsElementOrNull(parentNode()))
+  if (auto* details = DynamicTo<HTMLDetailsElement>(parentNode()))
     return details;
-  if (auto* details = ToHTMLDetailsElementOrNull(OwnerShadowHost()))
+  if (auto* details = DynamicTo<HTMLDetailsElement>(OwnerShadowHost()))
     return details;
   return nullptr;
 }
 
 Element* HTMLSummaryElement::MarkerControl() {
   return EnsureUserAgentShadowRoot().getElementById(
-      ShadowElementNames::DetailsMarker());
+      shadow_element_names::DetailsMarker());
 }
 
 bool HTMLSummaryElement::IsMainSummary() const {
@@ -88,9 +87,9 @@ bool HTMLSummaryElement::IsMainSummary() const {
 }
 
 static bool IsClickableControl(Node* node) {
-  if (!node->IsElementNode())
+  auto* element = DynamicTo<Element>(node);
+  if (!element)
     return false;
-  Element* element = ToElement(node);
   if (element->IsFormControlElement())
     return true;
   Element* host = element->OwnerShadowHost();
@@ -103,7 +102,7 @@ bool HTMLSummaryElement::SupportsFocus() const {
 
 void HTMLSummaryElement::DefaultEventHandler(Event& event) {
   if (IsMainSummary()) {
-    if (event.type() == EventTypeNames::DOMActivate &&
+    if (event.type() == event_type_names::kDOMActivate &&
         !IsClickableControl(event.target()->ToNode())) {
       if (HTMLDetailsElement* details = DetailsElement())
         details->ToggleOpen();
@@ -112,13 +111,13 @@ void HTMLSummaryElement::DefaultEventHandler(Event& event) {
     }
 
     if (event.IsKeyboardEvent()) {
-      if (event.type() == EventTypeNames::keydown &&
+      if (event.type() == event_type_names::kKeydown &&
           ToKeyboardEvent(event).key() == " ") {
         SetActive(true);
         // No setDefaultHandled() - IE dispatches a keypress in this case.
         return;
       }
-      if (event.type() == EventTypeNames::keypress) {
+      if (event.type() == event_type_names::kKeypress) {
         switch (ToKeyboardEvent(event).charCode()) {
           case '\r':
             DispatchSimulatedClick(&event);
@@ -130,7 +129,7 @@ void HTMLSummaryElement::DefaultEventHandler(Event& event) {
             return;
         }
       }
-      if (event.type() == EventTypeNames::keyup &&
+      if (event.type() == event_type_names::kKeyup &&
           ToKeyboardEvent(event).key() == " ") {
         if (IsActive())
           DispatchSimulatedClick(&event);
@@ -149,6 +148,16 @@ bool HTMLSummaryElement::HasActivationBehavior() const {
 
 bool HTMLSummaryElement::WillRespondToMouseClickEvents() {
   return IsMainSummary() || HTMLElement::WillRespondToMouseClickEvents();
+}
+
+void HTMLSummaryElement::WillRecalcStyle(const StyleRecalcChange) {
+  if (GetForceReattachLayoutTree() && IsMainSummary()) {
+    if (Element* marker = MarkerControl()) {
+      marker->SetNeedsStyleRecalc(
+          kLocalStyleChange,
+          StyleChangeReasonForTracing::Create(style_change_reason::kControl));
+    }
+  }
 }
 
 }  // namespace blink

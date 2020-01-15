@@ -6,10 +6,10 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/renderer/platform/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support_with_mock_scheduler.h"
-#include "third_party/blink/renderer/platform/web_task_runner.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
 
@@ -17,23 +17,23 @@ namespace {
 
 ResourceResponse CreateTestResponse() {
   ResourceResponse response;
-  response.AddHTTPHeaderField("age", "0");
-  response.AddHTTPHeaderField("cache-control", "no-cache");
-  response.AddHTTPHeaderField("date", "Tue, 17 Jan 2017 04:01:00 GMT");
-  response.AddHTTPHeaderField("expires", "Tue, 17 Jan 2017 04:11:00 GMT");
-  response.AddHTTPHeaderField("last-modified", "Tue, 17 Jan 2017 04:00:00 GMT");
-  response.AddHTTPHeaderField("pragma", "public");
-  response.AddHTTPHeaderField("etag", "abc");
-  response.AddHTTPHeaderField("content-disposition",
+  response.AddHttpHeaderField("age", "0");
+  response.AddHttpHeaderField("cache-control", "no-cache");
+  response.AddHttpHeaderField("date", "Tue, 17 Jan 2017 04:01:00 GMT");
+  response.AddHttpHeaderField("expires", "Tue, 17 Jan 2017 04:11:00 GMT");
+  response.AddHttpHeaderField("last-modified", "Tue, 17 Jan 2017 04:00:00 GMT");
+  response.AddHttpHeaderField("pragma", "public");
+  response.AddHttpHeaderField("etag", "abc");
+  response.AddHttpHeaderField("content-disposition",
                               "attachment; filename=a.txt");
   return response;
 }
 
 void RunHeaderRelatedTest(const ResourceResponse& response) {
-  EXPECT_EQ(0, response.Age());
-  EXPECT_NE(0, response.Date());
-  EXPECT_NE(0, response.Expires());
-  EXPECT_NE(0, response.LastModified());
+  EXPECT_EQ(base::TimeDelta(), response.Age());
+  EXPECT_NE(base::nullopt, response.Date());
+  EXPECT_NE(base::nullopt, response.Expires());
+  EXPECT_NE(base::nullopt, response.LastModified());
   EXPECT_EQ(true, response.CacheControlContainsNoCache());
 }
 
@@ -80,7 +80,7 @@ TEST(ResourceResponseTest, CrossThreadAtomicStrings) {
       ThreadCreationParams(WebThreadType::kTestThread)
           .SetThreadNameForTest("WorkerThread"));
   PostCrossThreadTask(*thread->GetTaskRunner(), FROM_HERE,
-                      CrossThreadBind(&RunInThread));
+                      CrossThreadBindOnce(&RunInThread));
   thread.reset();
 }
 

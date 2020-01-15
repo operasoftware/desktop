@@ -39,12 +39,10 @@ class ExceptionState;
 
 class DateTimeLocalInputType final : public BaseTemporalInputType {
  public:
-  static InputType* Create(HTMLInputElement&);
-
- private:
   explicit DateTimeLocalInputType(HTMLInputElement& element)
       : BaseTemporalInputType(element) {}
 
+ private:
   void CountUsage() override;
   const AtomicString& FormControlType() const override;
   double ValueAsDate() const override;

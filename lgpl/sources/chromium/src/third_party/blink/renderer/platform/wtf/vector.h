@@ -30,13 +30,12 @@
 #include "base/macros.h"
 #include "base/template_util.h"
 #include "build/build_config.h"
-#include "third_party/blink/renderer/platform/wtf/alignment.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partition_allocator.h"
+#include "third_party/blink/renderer/platform/wtf/conditional_destructor.h"
 #include "third_party/blink/renderer/platform/wtf/construct_traits.h"
 #include "third_party/blink/renderer/platform/wtf/container_annotations.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"  // For default Vector template parameters.
 #include "third_party/blink/renderer/platform/wtf/hash_table_deleted_value_type.h"
-#include "third_party/blink/renderer/platform/wtf/not_found.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/vector_traits.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
@@ -51,13 +50,13 @@
 
 namespace WTF {
 
-#if defined(MEMORY_SANITIZER_INITIAL_SIZE)
+#if defined(MEMORY_TOOL_REPLACES_ALLOCATOR)
+// The allocation pool for nodes is one big chunk that ASAN has no insight
+// into, so it can cloak errors. Make it as small as possible to force nodes
+// to be allocated individually where ASAN can see them.
 static const wtf_size_t kInitialVectorSize = 1;
 #else
-#ifndef WTF_VECTOR_INITIAL_SIZE
-#define WTF_VECTOR_INITIAL_SIZE 4
-#endif
-static const wtf_size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
+static const wtf_size_t kInitialVectorSize = 4;
 #endif
 
 template <typename T, wtf_size_t inlineBuffer, typename Allocator>
@@ -271,12 +270,7 @@ struct VectorFiller<true, T, Allocator> {
   STATIC_ONLY(VectorFiller);
   static void UninitializedFill(T* dst, T* dst_end, const T& val) {
     static_assert(sizeof(T) == sizeof(char), "size of type should be one");
-#if defined(COMPILER_GCC) && defined(_FORTIFY_SOURCE)
-    if (!__builtin_constant_p(dst_end - dst) || (!(dst_end - dst)))
-      memset(dst, val, dst_end - dst);
-#else
     memset(dst, val, dst_end - dst);
-#endif
   }
 };
 
@@ -401,7 +395,7 @@ class VectorBufferBase {
     else
       buffer_ = Allocator::template AllocateVectorBacking<T>(size_to_allocate);
     capacity_ = static_cast<wtf_size_t>(size_to_allocate / sizeof(T));
-    Allocator::BackingWriteBarrier(buffer_);
+    Allocator::BackingWriteBarrier(buffer_, 0);
   }
 
   void AllocateExpandedBuffer(wtf_size_t new_capacity) {
@@ -414,7 +408,7 @@ class VectorBufferBase {
       buffer_ = Allocator::template AllocateExpandedVectorBacking<T>(
           size_to_allocate);
     capacity_ = static_cast<wtf_size_t>(size_to_allocate / sizeof(T));
-    Allocator::BackingWriteBarrier(buffer_);
+    Allocator::BackingWriteBarrier(buffer_, 0);
   }
 
   size_t AllocationSize(size_t capacity) const {
@@ -540,12 +534,12 @@ class VectorBuffer<T, 0, Allocator>
                         OffsetRange this_hole,
                         OffsetRange other_hole) {
     static_assert(VectorTraits<T>::kCanSwapUsingCopyOrMove,
-                  "Cannot swap HeapVectors of TraceWrapperMembers.");
+                  "Cannot swap using copy or move.");
     std::swap(buffer_, other.buffer_);
-    Allocator::BackingWriteBarrier(buffer_);
-    Allocator::BackingWriteBarrier(other.buffer_);
     std::swap(capacity_, other.capacity_);
     std::swap(size_, other.size_);
+    Allocator::BackingWriteBarrier(buffer_, size_);
+    Allocator::BackingWriteBarrier(other.buffer_, other.size_);
   }
 
   using Base::AllocateBuffer;
@@ -683,16 +677,16 @@ class VectorBuffer : protected VectorBufferBase<T, true, Allocator> {
     using TypeOperations = VectorTypeOperations<T, Allocator>;
 
     static_assert(VectorTraits<T>::kCanSwapUsingCopyOrMove,
-                  "Cannot swap HeapVectors of TraceWrapperMembers.");
+                  "Cannot swap using copy or move.");
 
     if (Buffer() != InlineBuffer() && other.Buffer() != other.InlineBuffer()) {
       // The easiest case: both buffers are non-inline. We just need to swap the
       // pointers.
       std::swap(buffer_, other.buffer_);
-      Allocator::BackingWriteBarrier(buffer_);
-      Allocator::BackingWriteBarrier(other.buffer_);
       std::swap(capacity_, other.capacity_);
       std::swap(size_, other.size_);
+      Allocator::BackingWriteBarrier(buffer_, size_);
+      Allocator::BackingWriteBarrier(other.buffer_, other.size_);
       return;
     }
 
@@ -753,7 +747,7 @@ class VectorBuffer : protected VectorBufferBase<T, true, Allocator> {
       other.buffer_ = other.InlineBuffer();
       std::swap(size_, other.size_);
       ANNOTATE_NEW_BUFFER(other.buffer_, inlineCapacity, other.size_);
-      Allocator::BackingWriteBarrier(buffer_);
+      Allocator::BackingWriteBarrier(buffer_, size_);
     } else if (!this_source_begin &&
                other_source_begin) {  // Their buffer is inline, ours is not.
       DCHECK_NE(Buffer(), InlineBuffer());
@@ -763,7 +757,7 @@ class VectorBuffer : protected VectorBufferBase<T, true, Allocator> {
       buffer_ = InlineBuffer();
       std::swap(size_, other.size_);
       ANNOTATE_NEW_BUFFER(buffer_, inlineCapacity, size_);
-      Allocator::BackingWriteBarrier(other.buffer_);
+      Allocator::BackingWriteBarrier(other.buffer_, other.size_);
     } else {  // Both buffers are inline.
       DCHECK(this_source_begin);
       DCHECK(other_source_begin);
@@ -980,7 +974,11 @@ class VectorBuffer : protected VectorBufferBase<T, true, Allocator> {
 // store iterators in another heap object.
 
 template <typename T, wtf_size_t inlineCapacity, typename Allocator>
-class Vector : private VectorBuffer<T, INLINE_CAPACITY, Allocator> {
+class Vector
+    : private VectorBuffer<T, INLINE_CAPACITY, Allocator>,
+      public ConditionalDestructor<Vector<T, INLINE_CAPACITY, Allocator>,
+                                   (INLINE_CAPACITY == 0) &&
+                                       Allocator::kIsGarbageCollected> {
   USE_ALLOCATOR(Vector, Allocator);
   using Base = VectorBuffer<T, INLINE_CAPACITY, Allocator>;
   using TypeOperations = VectorTypeOperations<T, Allocator>;
@@ -1148,13 +1146,13 @@ class Vector : private VectorBuffer<T, INLINE_CAPACITY, Allocator> {
   //     Insert a single element constructed as T(args...) to the back. The
   //     element is constructed directly on the backing buffer with placement
   //     new.
-  // append(buffer, size)
-  // appendVector(vector)
-  // appendRange(begin, end)
+  // Append(buffer, size)
+  // AppendVector(vector)
+  // AppendRange(begin, end)
   //     Insert multiple elements represented by (1) |buffer| and |size|
-  //     (for append), (2) |vector| (for appendVector), or (3) a pair of
-  //     iterators (for appendRange) to the back. The elements will be copied.
-  // uncheckedAppend(value)
+  //     (for append), (2) |vector| (for AppendVector), or (3) a pair of
+  //     iterators (for AppendRange) to the back. The elements will be copied.
+  // UncheckedAppend(value)
   //     Insert a single element like push_back(), but this function assumes
   //     the vector has enough capacity such that it can store the new element
   //     without a reallocation. Using this function could improve the
@@ -1183,15 +1181,24 @@ class Vector : private VectorBuffer<T, INLINE_CAPACITY, Allocator> {
   // pointing to an element after |position| will be invalidated.
   //
   // insert(position, value)
-  //     Insert a single element at |position|.
+  //     Insert a single element at |position|, where |position| is an index.
   // insert(position, buffer, size)
   // InsertVector(position, vector)
+  //     Insert multiple elements represented by either |buffer| and |size|
+  //     or |vector| at |position|. The elements will be copied.
+  // InsertAt(position, value)
+  //     Insert a single element at |position|, where |position| is an iterator.
+  // InsertAt(position, buffer, size)
   //     Insert multiple elements represented by either |buffer| and |size|
   //     or |vector| at |position|. The elements will be copied.
   template <typename U>
   void insert(wtf_size_t position, U&&);
   template <typename U>
   void insert(wtf_size_t position, const U*, wtf_size_t);
+  template <typename U>
+  void InsertAt(iterator position, U&&);
+  template <typename U>
+  void InsertAt(iterator position, const U*, wtf_size_t);
   template <typename U, wtf_size_t otherCapacity, typename OtherAllocator>
   void InsertVector(wtf_size_t position,
                     const Vector<U, otherCapacity, OtherAllocator>&);
@@ -1204,7 +1211,7 @@ class Vector : private VectorBuffer<T, INLINE_CAPACITY, Allocator> {
   // push_front(value)
   //     Insert a single element to the front.
   // push_front(buffer, size)
-  // prependVector(vector)
+  // PrependVector(vector)
   //     Insert multiple elements represented by either |buffer| and |size| or
   //     |vector| to the front. The elements will be copied.
   template <typename U>
@@ -1234,10 +1241,10 @@ class Vector : private VectorBuffer<T, INLINE_CAPACITY, Allocator> {
   // growed as a result of this call, those events may invalidate some
   // iterators. See comments for shrink() and grow().
   //
-  // fill(value, size) will resize the Vector to |size|, and then copy-assign
+  // Fill(value, size) will resize the Vector to |size|, and then copy-assign
   // or copy-initialize all the elements.
   //
-  // fill(value) is a synonym for fill(value, size()).
+  // Fill(value) is a synonym for Fill(value, size()).
   void Fill(const T&, wtf_size_t);
   void Fill(const T& val) { Fill(val, size()); }
 
@@ -1255,12 +1262,12 @@ class Vector : private VectorBuffer<T, INLINE_CAPACITY, Allocator> {
     return Allocator::template MaxElementCountInBackingStore<T>();
   }
 
-  // For design of the destructor, please refer to
-  // [here](https://docs.google.com/document/d/1AoGTvb3tNLx2tD1hNqAfLRLmyM59GM0O-7rCHTT_7_U/)
-  ~Vector() {
-    if (!INLINE_CAPACITY) {
-      if (LIKELY(!Base::Buffer()))
-        return;
+  void Finalize() {
+    static_assert(!Allocator::kIsGarbageCollected || INLINE_CAPACITY,
+                  "GarbageCollected collections without inline capacity cannot "
+                  "be finalized.");
+    if (!INLINE_CAPACITY && LIKELY(!Base::Buffer())) {
+      return;
     }
     ANNOTATE_DELETE_BUFFER(begin(), capacity(), size_);
     if (LIKELY(size_) &&
@@ -1269,16 +1276,10 @@ class Vector : private VectorBuffer<T, INLINE_CAPACITY, Allocator> {
       size_ = 0;  // Partial protection against use-after-free.
     }
 
-    // If this is called during sweeping, it must not touch the OutOfLineBuffer.
-    if (Allocator::IsSweepForbidden())
-      return;
+    // For garbage collected vector HeapAllocator::BackingFree() will bail out
+    // during sweeping.
     Base::Destruct();
   }
-
-  // This method will be referenced when creating an on-heap HeapVector with
-  // inline capacity and elements requiring destruction. However usage of such a
-  // type is banned with a static assert.
-  void FinalizeGarbageCollectedObject() { NOTREACHED(); }
 
   template <typename VisitorDispatcher, typename A = Allocator>
   std::enable_if_t<A::kIsGarbageCollected> Trace(VisitorDispatcher);
@@ -1655,7 +1656,7 @@ void Vector<T, inlineCapacity, Allocator>::ReserveCapacity(
     return;
   }
   // Reallocating a backing buffer may resurrect a dead object.
-  CHECK(!Allocator::IsObjectResurrectionForbidden());
+  CHECK(Allocator::IsAllocationAllowed());
 
   T* old_end = end();
   Base::AllocateExpandedBuffer(new_capacity);
@@ -1697,7 +1698,7 @@ void Vector<T, inlineCapacity, Allocator>::ShrinkCapacity(
       return;
     }
 
-    if (Allocator::IsObjectResurrectionForbidden())
+    if (!Allocator::IsAllocationAllowed())
       return;
 
     T* old_end = end();
@@ -1857,6 +1858,20 @@ void Vector<T, inlineCapacity, Allocator>::insert(wtf_size_t position,
   VectorCopier<VectorTraits<T>::kCanCopyWithMemcpy, T,
                Allocator>::UninitializedCopy(data, &data[data_size], spot);
   size_ = new_size;
+}
+
+template <typename T, wtf_size_t inlineCapacity, typename Allocator>
+template <typename U>
+void Vector<T, inlineCapacity, Allocator>::InsertAt(T* position, U&& val) {
+  insert(position - begin(), val);
+}
+
+template <typename T, wtf_size_t inlineCapacity, typename Allocator>
+template <typename U>
+void Vector<T, inlineCapacity, Allocator>::InsertAt(T* position,
+                                                    const U* data,
+                                                    wtf_size_t data_size) {
+  insert(position - begin(), data, data_size);
 }
 
 template <typename T, wtf_size_t inlineCapacity, typename Allocator>

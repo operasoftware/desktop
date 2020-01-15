@@ -7,18 +7,14 @@
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/workers/worker_clients.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet_messaging_proxy.h"
-#include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet_node.h"
+#include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
 #include "third_party/blink/renderer/modules/webaudio/cross_thread_audio_worklet_processor_info.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
-
-AudioWorklet* AudioWorklet::Create(BaseAudioContext* context) {
-  return new AudioWorklet(context);
-}
 
 AudioWorklet::AudioWorklet(BaseAudioContext* context)
     : Worklet(To<Document>(context->GetExecutionContext())),
@@ -80,8 +76,10 @@ WorkletGlobalScopeProxy* AudioWorklet::CreateGlobalScope() {
   DCHECK_EQ(GetNumberOfGlobalScopes(), 0u);
 
   AudioWorkletMessagingProxy* proxy =
-      new AudioWorkletMessagingProxy(GetExecutionContext(), this);
-  proxy->Initialize(WorkerClients::Create(), ModuleResponsesMap());
+      MakeGarbageCollected<AudioWorkletMessagingProxy>(GetExecutionContext(),
+                                                       this);
+  proxy->Initialize(MakeGarbageCollected<WorkerClients>(),
+                    ModuleResponsesMap());
   return proxy;
 }
 

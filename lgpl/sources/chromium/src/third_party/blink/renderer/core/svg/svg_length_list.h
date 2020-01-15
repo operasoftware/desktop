@@ -44,10 +44,7 @@ class SVGLengthList final
  public:
   typedef SVGLengthListTearOff TearOffType;
 
-  static SVGLengthList* Create(SVGLengthMode mode = SVGLengthMode::kOther) {
-    return new SVGLengthList(mode);
-  }
-
+  explicit SVGLengthList(SVGLengthMode = SVGLengthMode::kOther);
   ~SVGLengthList() override;
 
   SVGParsingError SetValueAsString(const String&);
@@ -72,8 +69,6 @@ class SVGLengthList final
   AnimatedPropertyType GetType() const override { return ClassType(); }
 
  private:
-  explicit SVGLengthList(SVGLengthMode);
-
   // Create SVGLength items used to adjust the list length
   // when animation from/to lists are longer than this list.
   SVGLength* CreatePaddingItem() const override;

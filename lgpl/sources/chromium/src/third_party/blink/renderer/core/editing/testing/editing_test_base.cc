@@ -12,38 +12,14 @@
 #include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/editing/testing/selection_sample.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
-#include "third_party/blink/renderer/core/html/html_collection.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 
 namespace blink {
 
-namespace {
-
-Element* GetOrCreateElement(ContainerNode* parent,
-                            const HTMLQualifiedName& tag_name) {
-  HTMLCollection* elements = parent->getElementsByTagNameNS(
-      tag_name.NamespaceURI(), tag_name.LocalName());
-  if (!elements->IsEmpty())
-    return elements->item(0);
-  return parent->ownerDocument()->CreateRawElement(
-      tag_name, CreateElementFlags::ByCreateElement());
-}
-
-}  // namespace
-
 EditingTestBase::EditingTestBase() = default;
 
 EditingTestBase::~EditingTestBase() = default;
-
-void EditingTestBase::InsertStyleElement(const std::string& style_rules) {
-  Element* const head = GetOrCreateElement(&GetDocument(), HTMLNames::headTag);
-  DCHECK_EQ(head, GetOrCreateElement(&GetDocument(), HTMLNames::headTag));
-  Element* const style = GetDocument().CreateRawElement(
-      HTMLNames::styleTag, CreateElementFlags::ByCreateElement());
-  style->setTextContent(String(style_rules.data(), style_rules.size()));
-  head->appendChild(style);
-}
 
 Position EditingTestBase::SetCaretTextToBody(
     const std::string& selection_text) {
@@ -63,7 +39,7 @@ SelectionInDOMTree EditingTestBase::SetSelectionText(
     const std::string& selection_text) {
   const SelectionInDOMTree selection =
       SelectionSample::SetSelectionText(element, selection_text);
-  UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
   return selection;
 }
 
@@ -99,7 +75,8 @@ ShadowRoot* EditingTestBase::CreateShadowRootForElementWithIDAndSetInnerHTML(
           ->CreateV0ShadowRootForTesting();
   shadow_root.SetInnerHTMLFromString(String::FromUTF8(shadow_root_content),
                                      ASSERT_NO_EXCEPTION);
-  scope.GetDocument().View()->UpdateAllLifecyclePhases();
+  scope.GetDocument().View()->UpdateAllLifecyclePhases(
+      DocumentLifecycle::LifecycleUpdateReason::kTest);
   return &shadow_root;
 }
 

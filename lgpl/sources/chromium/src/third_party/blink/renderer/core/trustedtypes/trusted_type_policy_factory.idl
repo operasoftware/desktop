@@ -5,15 +5,24 @@
 // https://github.com/wicg/trusted-types
 
 [
-    Exposed=Window,
+    Exposed=(Window, Worker),
     RuntimeEnabled=TrustedDOMTypes
 ] interface TrustedTypePolicyFactory {
-    [RaisesException] TrustedTypePolicy createPolicy(DOMString policyName, TrustedTypePolicyOptions policyOptions, optional boolean exposed = false);
-    TrustedTypePolicy getExposedPolicy(DOMString policyName);
+    [RaisesException, Unforgeable] TrustedTypePolicy createPolicy(DOMString policyName, TrustedTypePolicyOptions policyOptions);
+    [Unforgeable] readonly attribute TrustedTypePolicy defaultPolicy;
     // All the policy object names that have been created
-    [Affects=Nothing] sequence<DOMString> getPolicyNames();
-    [CallWith=ScriptState] boolean isHTML(object? checkedObject);
-    [CallWith=ScriptState] boolean isScript(object? checkedObject);
-    [CallWith=ScriptState] boolean isScriptURL(object? checkedObject);
-    [CallWith=ScriptState] boolean isURL(object? checkedObject);
+    [Affects=Nothing, Unforgeable] sequence<DOMString> getPolicyNames();
+    [CallWith=ScriptState, Unforgeable] boolean isHTML(any checkedObject);
+    [CallWith=ScriptState, Unforgeable] boolean isScript(any checkedObject);
+    [CallWith=ScriptState, Unforgeable] boolean isScriptURL(any checkedObject);
+    [CallWith=ScriptState, Unforgeable] boolean isURL(any checkedObject);
+    [Unforgeable] readonly attribute TrustedHTML emptyHTML;
+
+    // Trusted Types metadata, following the proposal in:
+    // https://github.com/WICG/trusted-types/pull/149/commits/ecd9ab0b6993674951bfc7b44a04530fce7468a7
+    DOMString? getPropertyType(DOMString tagName, DOMString property,
+        optional DOMString elementNS);
+    DOMString? getAttributeType(DOMString tagName, DOMString attribute,
+        optional DOMString elementNS, optional DOMString attrNs);
+    [CallWith=ScriptState] object? getTypeMapping(optional DOMString ns);
 };

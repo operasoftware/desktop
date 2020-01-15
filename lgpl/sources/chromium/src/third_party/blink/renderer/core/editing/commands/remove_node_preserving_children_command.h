@@ -32,20 +32,12 @@ namespace blink {
 
 class RemoveNodePreservingChildrenCommand final : public CompositeEditCommand {
  public:
-  static RemoveNodePreservingChildrenCommand* Create(
-      Node* node,
-      ShouldAssumeContentIsAlwaysEditable
-          should_assume_content_is_always_editable) {
-    return new RemoveNodePreservingChildrenCommand(
-        node, should_assume_content_is_always_editable);
-  }
-
-  void Trace(blink::Visitor*) override;
-
- private:
   RemoveNodePreservingChildrenCommand(Node*,
                                       ShouldAssumeContentIsAlwaysEditable);
 
+  void Trace(Visitor*) override;
+
+ private:
   void DoApply(EditingState*) override;
 
   Member<Node> node_;

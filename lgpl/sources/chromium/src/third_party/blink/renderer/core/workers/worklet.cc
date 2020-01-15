@@ -5,31 +5,38 @@
 #include "third_party/blink/renderer/core/workers/worklet.h"
 
 #include "base/single_thread_task_runner.h"
-#include "services/network/public/mojom/fetch_api.mojom-shared.h"
+#include "services/network/public/mojom/fetch_api.mojom-blink.h"
+#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/public/platform/web_feature.mojom-shared.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/fetch/request.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/loader/worker_resource_timing_notifier_impl.h"
 #include "third_party/blink/renderer/core/workers/worklet_pending_tasks.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher_properties.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
 
 Worklet::Worklet(Document* document)
     : ContextLifecycleObserver(document),
-      module_responses_map_(new WorkletModuleResponsesMap) {
+      module_responses_map_(MakeGarbageCollected<WorkletModuleResponsesMap>()) {
   DCHECK(IsMainThread());
 }
 
 Worklet::~Worklet() {
+  DCHECK(!HasPendingTasks());
+}
+
+void Worklet::Dispose() {
   for (const auto& proxy : proxies_)
     proxy->WorkletObjectDestroyed();
-  DCHECK(!HasPendingTasks());
 }
 
 // Implementation of the first half of the "addModule(moduleURL, options)"
@@ -37,18 +44,19 @@ Worklet::~Worklet() {
 // https://drafts.css-houdini.org/worklets/#dom-worklet-addmodule
 ScriptPromise Worklet::addModule(ScriptState* script_state,
                                  const String& module_url,
-                                 const WorkletOptions& options) {
+                                 const WorkletOptions* options,
+                                 ExceptionState& exception_state) {
   DCHECK(IsMainThread());
   if (!GetExecutionContext()) {
-    return ScriptPromise::RejectWithDOMException(
-        script_state, DOMException::Create(DOMExceptionCode::kInvalidStateError,
-                                           "This frame is already detached"));
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      "This frame is already detached");
+    return ScriptPromise();
   }
   UseCounter::Count(GetExecutionContext(),
                     mojom::WebFeature::kWorkletAddModule);
 
   // Step 1: "Let promise be a new promise."
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
   // Step 2: "Let worklet be the current Worklet."
@@ -61,13 +69,14 @@ ScriptPromise Worklet::addModule(ScriptState* script_state,
   // Step 4: "If moduleURLRecord is failure, then reject promise with a
   // "SyntaxError" DOMException and return promise."
   if (!module_url_record.IsValid()) {
-    resolver->Reject(
-        DOMException::Create(DOMExceptionCode::kSyntaxError,
-                             "'" + module_url + "' is not a valid URL."));
+    resolver->Reject(MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kSyntaxError,
+        "'" + module_url + "' is not a valid URL."));
     return promise;
   }
 
-  WorkletPendingTasks* pending_tasks =  new WorkletPendingTasks(this, resolver);
+  WorkletPendingTasks* pending_tasks =
+      MakeGarbageCollected<WorkletPendingTasks>(this, resolver);
   pending_tasks_set_.insert(pending_tasks);
 
   // Step 5: "Return promise, and then continue running this algorithm in
@@ -78,7 +87,7 @@ ScriptPromise Worklet::addModule(ScriptState* script_state,
       ->GetTaskRunner(TaskType::kInternalLoading)
       ->PostTask(FROM_HERE,
                  WTF::Bind(&Worklet::FetchAndInvokeScript, WrapPersistent(this),
-                           module_url_record, options.credentials(),
+                           module_url_record, options->credentials(),
                            WrapPersistent(pending_tasks)));
   return promise;
 }
@@ -116,13 +125,21 @@ void Worklet::FetchAndInvokeScript(const KURL& module_url_record,
     return;
 
   // Step 6: "Let credentialOptions be the credentials member of options."
-  network::mojom::FetchCredentialsMode credentials_mode;
+  network::mojom::CredentialsMode credentials_mode;
   bool result = Request::ParseCredentialsMode(credentials, &credentials_mode);
   DCHECK(result);
 
   // Step 7: "Let outsideSettings be the relevant settings object of this."
   auto* outside_settings_object =
-      GetExecutionContext()->CreateFetchClientSettingsObjectSnapshot();
+      MakeGarbageCollected<FetchClientSettingsObjectSnapshot>(
+          GetExecutionContext()
+              ->Fetcher()
+              ->GetProperties()
+              .GetFetchClientSettingsObject());
+  // Worklets don't support resource timing APIs yet.
+  auto* outside_resource_timing_notifier =
+      MakeGarbageCollected<NullWorkerResourceTimingNotifier>();
+
   // Specify TaskType::kInternalLoading because it's commonly used for module
   // loading.
   scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner =
@@ -159,12 +176,13 @@ void Worklet::FetchAndInvokeScript(const KURL& module_url_record,
   // TODO(nhiroki): Queue a task instead of executing this here.
   for (const auto& proxy : proxies_) {
     proxy->FetchAndInvokeScript(module_url_record, credentials_mode,
-                                outside_settings_object,
+                                *outside_settings_object,
+                                *outside_resource_timing_notifier,
                                 outside_settings_task_runner, pending_tasks);
   }
 }
 
-size_t Worklet::SelectGlobalScope() {
+wtf_size_t Worklet::SelectGlobalScope() {
   DCHECK_EQ(GetNumberOfGlobalScopes(), 1u);
   return 0u;
 }

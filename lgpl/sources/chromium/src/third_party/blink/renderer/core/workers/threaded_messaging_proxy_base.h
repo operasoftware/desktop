@@ -6,13 +6,14 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_WORKERS_THREADED_MESSAGING_PROXY_BASE_H_
 
 #include "base/optional.h"
+#include "third_party/blink/public/mojom/devtools/console_message.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/web_feature_forward.h"
-#include "third_party/blink/renderer/core/inspector/console_types.h"
 #include "third_party/blink/renderer/core/workers/parent_execution_context_task_runners.h"
 #include "third_party/blink/renderer/core/workers/worker_backing_thread_startup_data.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
 #include "third_party/blink/renderer/platform/heap/self_keep_alive.h"
+#include "third_party/blink/renderer/platform/scheduler/public/frame_or_worker_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace base {
@@ -25,7 +26,6 @@ namespace blink {
 
 class ExecutionContext;
 class SourceLocation;
-class WorkerInspectorProxy;
 struct GlobalScopeCreationParams;
 
 // The base proxy class to talk to Worker/WorkletGlobalScope on a worker thread
@@ -42,7 +42,7 @@ struct GlobalScopeCreationParams;
 // living on the worker thread (e.g., WorkerGlobalScope) but the parent object
 // can be destroyed before the completion of worker thread termination.
 class CORE_EXPORT ThreadedMessagingProxyBase
-    : public GarbageCollectedFinalized<ThreadedMessagingProxyBase> {
+    : public GarbageCollected<ThreadedMessagingProxyBase> {
  public:
   virtual ~ThreadedMessagingProxyBase();
 
@@ -56,11 +56,10 @@ class CORE_EXPORT ThreadedMessagingProxyBase
   void CountFeature(WebFeature);
   void CountDeprecation(WebFeature);
 
-  void ReportConsoleMessage(MessageSource,
-                            MessageLevel,
+  void ReportConsoleMessage(mojom::ConsoleMessageSource,
+                            mojom::ConsoleMessageLevel,
                             const String& message,
                             std::unique_ptr<SourceLocation>);
-  void PostMessageToPageInspector(int session_id, const String&);
 
   void WorkerThreadTerminated();
 
@@ -79,7 +78,6 @@ class CORE_EXPORT ThreadedMessagingProxyBase
   ExecutionContext* GetExecutionContext() const;
   ParentExecutionContextTaskRunners* GetParentExecutionContextTaskRunners()
       const;
-  WorkerInspectorProxy* GetWorkerInspectorProxy() const;
 
   // May return nullptr after termination is requested.
   WorkerThread* GetWorkerThread() const;
@@ -93,7 +91,6 @@ class CORE_EXPORT ThreadedMessagingProxyBase
   virtual std::unique_ptr<WorkerThread> CreateWorkerThread() = 0;
 
   Member<ExecutionContext> execution_context_;
-  Member<WorkerInspectorProxy> worker_inspector_proxy_;
 
   // Accessed cross-thread when worker thread posts tasks to the parent.
   CrossThreadPersistent<ParentExecutionContextTaskRunners>
@@ -106,6 +103,9 @@ class CORE_EXPORT ThreadedMessagingProxyBase
   // Used to terminate the synchronous resource loading (XMLHttpRequest) on the
   // worker thread from the main thread.
   base::WaitableEvent terminate_sync_load_event_;
+
+  FrameOrWorkerScheduler::SchedulingAffectingFeatureHandle
+      feature_handle_for_scheduler_;
 
   // Used to keep this alive until the worker thread gets terminated. This is
   // necessary because the co-owner (i.e., Worker or Worklet object) can be

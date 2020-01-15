@@ -39,12 +39,12 @@
 
 namespace blink {
 
-void V8MessageChannel::constructorCustom(
+void V8MessageChannel::ConstructorCustom(
     const v8::FunctionCallbackInfo<v8::Value>& info) {
   v8::Isolate* isolate = info.GetIsolate();
 
   ExecutionContext* context = CurrentExecutionContext(isolate);
-  MessageChannel* channel = MessageChannel::Create(context);
+  auto* channel = MakeGarbageCollected<MessageChannel>(context);
 
   v8::Local<v8::Object> wrapper = info.Holder();
 
@@ -57,7 +57,7 @@ void V8MessageChannel::constructorCustom(
       wrapper, ToV8(channel->port2(), wrapper, isolate));
 
   V8SetReturnValue(info, V8DOMWrapper::AssociateObjectWithWrapper(
-                             isolate, channel, &wrapperTypeInfo, wrapper));
+                             isolate, channel, GetWrapperTypeInfo(), wrapper));
 }
 
 }  // namespace blink

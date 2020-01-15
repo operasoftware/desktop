@@ -4,8 +4,10 @@
 
 #include "third_party/blink/renderer/modules/shapedetection/face_detector.h"
 
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include <utility>
+
 #include "services/shape_detection/public/mojom/facedetection_provider.mojom-blink.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -17,32 +19,35 @@
 #include "third_party/blink/renderer/modules/shapedetection/face_detector_options.h"
 #include "third_party/blink/renderer/modules/shapedetection/landmark.h"
 #include "third_party/blink/renderer/modules/shapedetection/shape_detection_type_converter.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
 FaceDetector* FaceDetector::Create(ExecutionContext* context,
-                                   const FaceDetectorOptions& options) {
-  return new FaceDetector(context, options);
+                                   const FaceDetectorOptions* options) {
+  return MakeGarbageCollected<FaceDetector>(context, options);
 }
 
 FaceDetector::FaceDetector(ExecutionContext* context,
-                           const FaceDetectorOptions& options)
+                           const FaceDetectorOptions* options)
     : ShapeDetector() {
   auto face_detector_options =
       shape_detection::mojom::blink::FaceDetectorOptions::New();
-  face_detector_options->max_detected_faces = options.maxDetectedFaces();
-  face_detector_options->fast_mode = options.fastMode();
+  face_detector_options->max_detected_faces = options->maxDetectedFaces();
+  face_detector_options->fast_mode = options->fastMode();
 
-  shape_detection::mojom::blink::FaceDetectionProviderPtr provider;
-  auto request = mojo::MakeRequest(&provider);
-  if (auto* interface_provider = context->GetInterfaceProvider()) {
-    interface_provider->GetInterface(std::move(request));
-  }
-  provider->CreateFaceDetection(mojo::MakeRequest(&face_service_),
-                                std::move(face_detector_options));
+  mojo::Remote<shape_detection::mojom::blink::FaceDetectionProvider> provider;
+  // See https://bit.ly/2S0zRAS for task types.
+  auto task_runner = context->GetTaskRunner(TaskType::kMiscPlatformAPI);
+  context->GetBrowserInterfaceBroker().GetInterface(
+      provider.BindNewPipeAndPassReceiver(task_runner));
 
-  face_service_.set_connection_error_handler(WTF::Bind(
+  provider->CreateFaceDetection(
+      face_service_.BindNewPipeAndPassReceiver(task_runner),
+      std::move(face_detector_options));
+
+  face_service_.set_disconnect_handler(WTF::Bind(
       &FaceDetector::OnFaceServiceConnectionError, WrapWeakPersistent(this)));
 }
 
@@ -50,9 +55,9 @@ ScriptPromise FaceDetector::DoDetect(ScriptPromiseResolver* resolver,
                                      SkBitmap bitmap) {
   ScriptPromise promise = resolver->Promise();
   if (!face_service_) {
-    resolver->Reject(
-        DOMException::Create(DOMExceptionCode::kNotSupportedError,
-                             "Face detection service unavailable."));
+    resolver->Reject(MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kNotSupportedError,
+        "Face detection service unavailable."));
     return promise;
   }
   face_service_requests_.insert(resolver);
@@ -72,23 +77,23 @@ void FaceDetector::OnDetectFaces(
 
   HeapVector<Member<DetectedFace>> detected_faces;
   for (const auto& face : face_detection_results) {
-    HeapVector<Landmark> landmarks;
+    HeapVector<Member<Landmark>> landmarks;
     for (const auto& landmark : face->landmarks) {
-      HeapVector<Point2D> locations;
+      HeapVector<Member<Point2D>> locations;
       for (const auto& location : landmark->locations) {
-        Point2D web_location;
-        web_location.setX(location.x);
-        web_location.setY(location.y);
+        Point2D* web_location = Point2D::Create();
+        web_location->setX(location.x);
+        web_location->setY(location.y);
         locations.push_back(web_location);
       }
 
-      Landmark web_landmark;
-      web_landmark.setLocations(locations);
-      web_landmark.setType(mojo::ConvertTo<String>(landmark->type));
+      Landmark* web_landmark = Landmark::Create();
+      web_landmark->setLocations(locations);
+      web_landmark->setType(mojo::ConvertTo<String>(landmark->type));
       landmarks.push_back(web_landmark);
     }
 
-    detected_faces.push_back(DetectedFace::Create(
+    detected_faces.push_back(MakeGarbageCollected<DetectedFace>(
         DOMRectReadOnly::Create(face->bounding_box.x, face->bounding_box.y,
                                 face->bounding_box.width,
                                 face->bounding_box.height),
@@ -100,8 +105,9 @@ void FaceDetector::OnDetectFaces(
 
 void FaceDetector::OnFaceServiceConnectionError() {
   for (const auto& request : face_service_requests_) {
-    request->Reject(DOMException::Create(DOMExceptionCode::kNotSupportedError,
-                                         "Face Detection not implemented."));
+    request->Reject(
+        MakeGarbageCollected<DOMException>(DOMExceptionCode::kNotSupportedError,
+                                           "Face Detection not implemented."));
   }
   face_service_requests_.clear();
   face_service_.reset();

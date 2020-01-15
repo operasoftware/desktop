@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_FONT_FAMILY_VALUE_H_
 
 #include "third_party/blink/renderer/core/css/css_value.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -13,6 +14,8 @@ namespace blink {
 class CORE_EXPORT CSSFontFamilyValue : public CSSValue {
  public:
   static CSSFontFamilyValue* Create(const String& family_name);
+
+  CSSFontFamilyValue(const String&);
 
   String Value() const { return string_; }
 
@@ -27,13 +30,16 @@ class CORE_EXPORT CSSFontFamilyValue : public CSSValue {
  private:
   friend class CSSValuePool;
 
-  CSSFontFamilyValue(const String&);
-
   // TODO(sashab): Change this to an AtomicString.
   String string_;
 };
 
-DEFINE_CSS_VALUE_TYPE_CASTS(CSSFontFamilyValue, IsFontFamilyValue());
+template <>
+struct DowncastTraits<CSSFontFamilyValue> {
+  static bool AllowFrom(const CSSValue& value) {
+    return value.IsFontFamilyValue();
+  }
+};
 
 }  // namespace blink
 

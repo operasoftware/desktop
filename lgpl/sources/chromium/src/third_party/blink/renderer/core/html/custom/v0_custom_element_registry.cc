@@ -33,12 +33,13 @@
 #include "third_party/blink/renderer/bindings/core/v8/v0_custom_element_constructor_builder.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_registry.h"
 #include "third_party/blink/renderer/core/html/custom/v0_custom_element_exception.h"
 #include "third_party/blink/renderer/core/html/custom/v0_custom_element_registration_context.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/svg_names.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -73,8 +74,8 @@ V0CustomElementDefinition* V0CustomElementRegistry::RegisterElement(
   if (!constructor_builder->ValidateOptions(type, tag_name, exception_state))
     return nullptr;
 
-  DCHECK(tag_name.NamespaceURI() == HTMLNames::xhtmlNamespaceURI ||
-         tag_name.NamespaceURI() == SVGNames::svgNamespaceURI);
+  DCHECK(tag_name.NamespaceURI() == html_names::xhtmlNamespaceURI ||
+         tag_name.NamespaceURI() == svg_names::kNamespaceURI);
 
   DCHECK(!document_was_detached_);
 
@@ -92,8 +93,8 @@ V0CustomElementDefinition* V0CustomElementRegistry::RegisterElement(
 
   const V0CustomElementDescriptor descriptor(type, tag_name.NamespaceURI(),
                                              tag_name.LocalName());
-  V0CustomElementDefinition* definition =
-      V0CustomElementDefinition::Create(descriptor, lifecycle_callbacks);
+  auto* definition = MakeGarbageCollected<V0CustomElementDefinition>(
+      descriptor, lifecycle_callbacks);
 
   if (!constructor_builder->CreateConstructor(document, definition,
                                               exception_state))
@@ -109,7 +110,7 @@ V0CustomElementDefinition* V0CustomElementRegistry::RegisterElement(
     return nullptr;
   }
 
-  if (tag_name.NamespaceURI() == SVGNames::svgNamespaceURI) {
+  if (tag_name.NamespaceURI() == svg_names::kNamespaceURI) {
     UseCounter::Count(document,
                       WebFeature::kV0CustomElementsRegisterSVGElement);
   } else {
@@ -140,7 +141,7 @@ bool V0CustomElementRegistry::V1NameIsDefined(const AtomicString& name) const {
   return v1_.Get() && v1_->NameIsDefined(name);
 }
 
-void V0CustomElementRegistry::Trace(blink::Visitor* visitor) {
+void V0CustomElementRegistry::Trace(Visitor* visitor) {
   visitor->Trace(definitions_);
   visitor->Trace(v1_);
 }

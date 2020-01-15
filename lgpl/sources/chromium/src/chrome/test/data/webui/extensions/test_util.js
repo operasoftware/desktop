@@ -79,8 +79,9 @@ cr.define('extension_test_util', function() {
     verify: function() {
       const missingEvents = [];
       for (const key in this.listeners_) {
-        if (!this.listeners_[key].satisfied)
+        if (!this.listeners_[key].satisfied) {
           missingEvents.push(key);
+        }
       }
       expectEquals(0, missingEvents.length, JSON.stringify(missingEvents));
     },
@@ -149,23 +150,6 @@ cr.define('extension_test_util', function() {
   }
 
   /**
-   * Returns whether or not the element specified is visible. This is different
-   * from isElementVisible in that this function attempts to search for the
-   * element within a parent element, which means you can use it to check if
-   * the element exists at all.
-   * @param {!HTMLElement} parentEl
-   * @param {string} selector
-   * @param {boolean=} checkLightDom
-   * @return {boolean}
-   */
-  function isVisible(parentEl, selector, checkLightDom) {
-    const element = (checkLightDom ? parentEl.querySelector : parentEl.$$)
-                        .call(parentEl, selector);
-    const rect = element ? element.getBoundingClientRect() : null;
-    return !!rect && rect.width * rect.height > 0;
-  }
-
-  /**
    * Tests that the element's visibility matches |expectedVisible| and,
    * optionally, has specific content if it is visible.
    * @param {!HTMLElement} parentEl The parent element to query for the element.
@@ -175,7 +159,7 @@ cr.define('extension_test_util', function() {
    * @param {string=} opt_expectedText The expected textContent value.
    */
   function testVisible(parentEl, selector, expectedVisible, opt_expectedText) {
-    const visible = isVisible(parentEl, selector);
+    const visible = test_util.isVisible(parentEl, selector);
     expectEquals(expectedVisible, visible, selector);
     if (expectedVisible && visible && opt_expectedText) {
       const element = parentEl.$$(selector);
@@ -225,8 +209,7 @@ cr.define('extension_test_util', function() {
 
   /**
    * Tests that any visible iron-icon child of an HTML element has a
-   * corresponding non-empty svg element, and all the paper-icon-button-light
-   * elements have a valid CSS-class to apply an icon as background.
+   * corresponding non-empty svg element.
    * @param {HTMLElement} e The element to check the iron icons in.
    */
   function testIcons(e) {
@@ -238,15 +221,6 @@ cr.define('extension_test_util', function() {
             'icon "' + icon.icon + '" is not present');
       }
     });
-
-    e.querySelectorAll('* /deep/ paper-icon-button-light')
-        .forEach(function(button) {
-          if (isElementVisible(button)) {
-            expectTrue(
-                window.getComputedStyle(button)['background-image'] != 'none',
-                'button ' + button + ' doesn\'t have a valid icon class');
-          }
-        });
   }
 
   /**
@@ -261,8 +235,9 @@ cr.define('extension_test_util', function() {
     function doSearch(node) {
       if (node.nodeType == Node.ELEMENT_NODE) {
         const matches = node.querySelectorAll(query);
-        for (let match of matches)
+        for (let match of matches) {
           elements.add(match);
+        }
       }
       let child = node.firstChild;
       while (child !== null) {
@@ -270,8 +245,9 @@ cr.define('extension_test_util', function() {
         child = child.nextSibling;
       }
       const shadowRoot = node.shadowRoot;
-      if (shadowRoot)
+      if (shadowRoot) {
         doSearch(shadowRoot);
+      }
     }
     doSearch(root);
     return Array.from(elements);
@@ -283,7 +259,6 @@ cr.define('extension_test_util', function() {
     ListenerMock: ListenerMock,
     MockItemDelegate: MockItemDelegate,
     isElementVisible: isElementVisible,
-    isVisible: isVisible,
     testVisible: testVisible,
     createExtensionInfo: createExtensionInfo,
     testIcons: testIcons,

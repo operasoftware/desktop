@@ -30,6 +30,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOCUMENT_INIT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOCUMENT_INIT_H_
 
+#include "services/network/public/mojom/ip_address_space.mojom-shared.h"
 #include "third_party/blink/public/platform/web_insecure_request_policy.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
@@ -40,6 +41,7 @@
 
 namespace blink {
 
+class ContentSecurityPolicy;
 class Document;
 class DocumentLoader;
 class LocalFrame;
@@ -60,7 +62,7 @@ class CORE_EXPORT DocumentInit final {
   //       .WithDocumentLoader(loader)
   //       .WithContextDocument(context_document)
   //       .WithURL(url);
-  //   Document* document = Document::Create(init);
+  //   Document* document = MakeGarbageCollected<Document>(init);
   static DocumentInit Create();
   static DocumentInit CreateWithImportsController(HTMLImportsController*);
 
@@ -72,12 +74,13 @@ class CORE_EXPORT DocumentInit final {
   }
 
   bool HasSecurityContext() const { return MasterDocumentLoader(); }
-  bool ShouldTreatURLAsSrcdocDocument() const;
+  bool IsSrcdocDocument() const;
   bool ShouldSetURL() const;
-  SandboxFlags GetSandboxFlags() const;
-  bool IsHostedInReservedIPRange() const;
+  WebSandboxFlags GetSandboxFlags() const;
   WebInsecureRequestPolicy GetInsecureRequestPolicy() const;
-  SecurityContext::InsecureNavigationsSet* InsecureNavigationsToUpgrade() const;
+  const SecurityContext::InsecureNavigationsSet* InsecureNavigationsToUpgrade()
+      const;
+  bool GrantLoadLocalResources() const { return grant_load_local_resources_; }
 
   Settings* GetSettings() const;
 
@@ -93,17 +96,47 @@ class CORE_EXPORT DocumentInit final {
   DocumentInit& WithURL(const KURL&);
   const KURL& Url() const { return url_; }
 
+  scoped_refptr<SecurityOrigin> GetDocumentOrigin() const;
+
   // Specifies the Document to inherit security configurations from.
   DocumentInit& WithOwnerDocument(Document*);
   Document* OwnerDocument() const { return owner_document_.Get(); }
+
+  // Specifies the SecurityOrigin in which the URL was requested. This is
+  // relevant for determining properties of the resulting document's origin
+  // when loading data: and about: schemes.
+  DocumentInit& WithInitiatorOrigin(
+      scoped_refptr<const SecurityOrigin> initiator_origin);
+
+  DocumentInit& WithOriginToCommit(
+      scoped_refptr<SecurityOrigin> origin_to_commit);
+  const scoped_refptr<SecurityOrigin>& OriginToCommit() const {
+    return origin_to_commit_;
+  }
+
+  DocumentInit& WithIPAddressSpace(
+      network::mojom::IPAddressSpace ip_address_space);
+  network::mojom::IPAddressSpace GetIPAddressSpace() const;
+
+  DocumentInit& WithSrcdocDocument(bool is_srcdoc_document);
+  DocumentInit& WithBlockedByCSP(bool blocked_by_csp);
+  DocumentInit& WithGrantLoadLocalResources(bool grant_load_local_resources);
 
   DocumentInit& WithRegistrationContext(V0CustomElementRegistrationContext*);
   V0CustomElementRegistrationContext* RegistrationContext(Document*) const;
   DocumentInit& WithNewRegistrationContext();
 
-  DocumentInit& WithPreviousDocumentCSP(const ContentSecurityPolicy*);
-  const ContentSecurityPolicy* PreviousDocumentCSP() const {
-    return previous_csp_.Get();
+  DocumentInit& WithFeaturePolicyHeader(const String& header);
+  const String& FeaturePolicyHeader() const { return feature_policy_header_; }
+
+  DocumentInit& WithOriginTrialsHeader(const String& header);
+  const String& OriginTrialsHeader() const { return origin_trials_header_; }
+
+  DocumentInit& WithSandboxFlags(WebSandboxFlags flags);
+
+  DocumentInit& WithContentSecurityPolicy(ContentSecurityPolicy* policy);
+  ContentSecurityPolicy* GetContentSecurityPolicy() const {
+    return content_security_policy_;
   }
 
  private:
@@ -124,10 +157,54 @@ class CORE_EXPORT DocumentInit final {
   KURL url_;
   Member<Document> owner_document_;
 
+  // Initiator origin is used for calculating the document origin when the
+  // navigation is started in a different process. In such cases, the document
+  // which initiates the navigation sends its origin to the browser process and
+  // it is provided by the browser process here. It is used for cases such as
+  // data: URLs, which inherit their origin from the initiator of the
+  // navigation.
+  // Note: about:blank should also behave this way, however currently it
+  // inherits its origin from the parent frame or opener, regardless of whether
+  // it is the initiator or not.
+  scoped_refptr<const SecurityOrigin> initiator_origin_;
+
+  // The |origin_to_commit_| is to be used directly without calculating the
+  // document origin at initialization time. It is specified by the browser
+  // process for session history navigations. This allows us to preserve
+  // the origin across session history and ensure the exact same origin
+  // is present on such navigations to URLs that inherit their origins (e.g.
+  // about:blank and data: URLs).
+  scoped_refptr<SecurityOrigin> origin_to_commit_;
+
+  // Whether we should treat the new document as "srcdoc" document. This
+  // affects security checks, since srcdoc's content comes directly from
+  // the parent document, not from loading a URL.
+  bool is_srcdoc_document_ = false;
+
+  // Whether the actual document was blocked by csp and we are creating a dummy
+  // empty document instead.
+  bool blocked_by_csp_ = false;
+
+  // Whether the document should be able to access local file:// resources.
+  bool grant_load_local_resources_ = false;
+
   Member<V0CustomElementRegistrationContext> registration_context_;
   bool create_new_registration_context_;
 
-  Member<const ContentSecurityPolicy> previous_csp_;
+  // The feature policy set via response header.
+  String feature_policy_header_;
+
+  // The origin trial set via response header.
+  String origin_trials_header_;
+
+  // Additional sandbox flags
+  WebSandboxFlags sandbox_flags_ = WebSandboxFlags::kNone;
+
+  // Loader's CSP
+  Member<ContentSecurityPolicy> content_security_policy_;
+
+  network::mojom::IPAddressSpace ip_address_space_ =
+      network::mojom::IPAddressSpace::kUnknown;
 };
 
 }  // namespace blink

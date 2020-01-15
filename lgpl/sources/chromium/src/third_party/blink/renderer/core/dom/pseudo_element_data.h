@@ -13,12 +13,13 @@ namespace blink {
 
 class PseudoElementData final : public GarbageCollected<PseudoElementData> {
  public:
-  static PseudoElementData* Create();
+  PseudoElementData() = default;
+
   void SetPseudoElement(PseudoId, PseudoElement*);
   PseudoElement* GetPseudoElement(PseudoId) const;
   bool HasPseudoElements() const;
   void ClearPseudoElements();
-  void Trace(blink::Visitor* visitor) {
+  void Trace(Visitor* visitor) {
     visitor->Trace(generated_before_);
     visitor->Trace(generated_after_);
     visitor->Trace(generated_first_letter_);
@@ -26,17 +27,12 @@ class PseudoElementData final : public GarbageCollected<PseudoElementData> {
   }
 
  private:
-  PseudoElementData() = default;
   Member<PseudoElement> generated_before_;
   Member<PseudoElement> generated_after_;
   Member<PseudoElement> generated_first_letter_;
   Member<PseudoElement> backdrop_;
   DISALLOW_COPY_AND_ASSIGN(PseudoElementData);
 };
-
-inline PseudoElementData* PseudoElementData::Create() {
-  return new PseudoElementData();
-}
 
 inline bool PseudoElementData::HasPseudoElements() const {
   return generated_before_ || generated_after_ || backdrop_ ||

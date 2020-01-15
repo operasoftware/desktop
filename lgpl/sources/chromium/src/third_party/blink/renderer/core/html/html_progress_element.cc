@@ -21,43 +21,42 @@
 #include "third_party/blink/renderer/core/html/html_progress_element.h"
 
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html/shadow/progress_shadow_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 #include "third_party/blink/renderer/core/layout/layout_progress.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 const double HTMLProgressElement::kIndeterminatePosition = -1;
 const double HTMLProgressElement::kInvalidPosition = -2;
 
 HTMLProgressElement::HTMLProgressElement(Document& document)
-    : LabelableElement(progressTag, document), value_(nullptr) {
+    : HTMLElement(kProgressTag, document), value_(nullptr) {
   UseCounter::Count(document, WebFeature::kProgressElement);
+  EnsureUserAgentShadowRoot();
 }
 
 HTMLProgressElement::~HTMLProgressElement() = default;
 
-HTMLProgressElement* HTMLProgressElement::Create(Document& document) {
-  HTMLProgressElement* progress = new HTMLProgressElement(document);
-  progress->EnsureUserAgentShadowRoot();
-  return progress;
-}
-
 LayoutObject* HTMLProgressElement::CreateLayoutObject(
-    const ComputedStyle& style) {
-  if (!style.HasAppearance()) {
+    const ComputedStyle& style,
+    LegacyLayout legacy) {
+  if (!style.HasEffectiveAppearance()) {
     UseCounter::Count(GetDocument(),
                       WebFeature::kProgressElementWithNoneAppearance);
-    return LayoutObject::CreateObject(this, style);
+    return LayoutObject::CreateObject(this, style, legacy);
   }
   UseCounter::Count(GetDocument(),
                     WebFeature::kProgressElementWithProgressBarAppearance);
-  return new LayoutProgress(this);
+  return LayoutObjectFactory::CreateProgress(this, style, legacy);
 }
 
 LayoutProgress* HTMLProgressElement::GetLayoutProgress() const {
@@ -68,25 +67,25 @@ LayoutProgress* HTMLProgressElement::GetLayoutProgress() const {
 
 void HTMLProgressElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  if (params.name == valueAttr) {
+  if (params.name == kValueAttr) {
     if (params.old_value.IsNull() != params.new_value.IsNull())
       PseudoStateChanged(CSSSelector::kPseudoIndeterminate);
     DidElementStateChange();
-  } else if (params.name == maxAttr) {
+  } else if (params.name == kMaxAttr) {
     DidElementStateChange();
   } else {
-    LabelableElement::ParseAttribute(params);
+    HTMLElement::ParseAttribute(params);
   }
 }
 
 void HTMLProgressElement::AttachLayoutTree(AttachContext& context) {
-  LabelableElement::AttachLayoutTree(context);
+  HTMLElement::AttachLayoutTree(context);
   if (LayoutProgress* layout_progress = GetLayoutProgress())
     layout_progress->UpdateFromElement();
 }
 
 double HTMLProgressElement::value() const {
-  double value = GetFloatingPointAttribute(valueAttr);
+  double value = GetFloatingPointAttribute(kValueAttr);
   // Otherwise, if the parsed value was greater than or equal to the maximum
   // value, then the current value of the progress bar is the maximum value
   // of the progress bar. Otherwise, if parsing the value attribute's value
@@ -96,11 +95,11 @@ double HTMLProgressElement::value() const {
 }
 
 void HTMLProgressElement::setValue(double value) {
-  SetFloatingPointAttribute(valueAttr, std::max(value, 0.));
+  SetFloatingPointAttribute(kValueAttr, std::max(value, 0.));
 }
 
 double HTMLProgressElement::max() const {
-  double max = GetFloatingPointAttribute(maxAttr);
+  double max = GetFloatingPointAttribute(kMaxAttr);
   // Otherwise, if the element has no max attribute, or if it has one but
   // parsing it resulted in an error, or if the parsed value was less than or
   // equal to zero, then the maximum value of the progress bar is 1.0.
@@ -110,7 +109,7 @@ double HTMLProgressElement::max() const {
 void HTMLProgressElement::setMax(double max) {
   // FIXME: The specification says we should ignore the input value if it is
   // inferior or equal to 0.
-  SetFloatingPointAttribute(maxAttr, max > 0 ? max : 1);
+  SetFloatingPointAttribute(kMaxAttr, max > 0 ? max : 1);
 }
 
 double HTMLProgressElement::position() const {
@@ -120,7 +119,7 @@ double HTMLProgressElement::position() const {
 }
 
 bool HTMLProgressElement::IsDeterminate() const {
-  return FastHasAttribute(valueAttr);
+  return FastHasAttribute(kValueAttr);
 }
 
 void HTMLProgressElement::DidElementStateChange() {
@@ -132,13 +131,13 @@ void HTMLProgressElement::DidElementStateChange() {
 void HTMLProgressElement::DidAddUserAgentShadowRoot(ShadowRoot& root) {
   DCHECK(!value_);
 
-  ProgressShadowElement* inner = ProgressShadowElement::Create(GetDocument());
+  auto* inner = MakeGarbageCollected<ProgressShadowElement>(GetDocument());
   inner->SetShadowPseudoId(AtomicString("-webkit-progress-inner-element"));
   root.AppendChild(inner);
 
-  ProgressShadowElement* bar = ProgressShadowElement::Create(GetDocument());
+  auto* bar = MakeGarbageCollected<ProgressShadowElement>(GetDocument());
   bar->SetShadowPseudoId(AtomicString("-webkit-progress-bar"));
-  value_ = ProgressShadowElement::Create(GetDocument());
+  value_ = MakeGarbageCollected<ProgressShadowElement>(GetDocument());
   value_->SetShadowPseudoId(AtomicString("-webkit-progress-value"));
   SetValueWidthPercentage(HTMLProgressElement::kIndeterminatePosition * 100);
   bar->AppendChild(value_);
@@ -150,13 +149,13 @@ bool HTMLProgressElement::ShouldAppearIndeterminate() const {
   return !IsDeterminate();
 }
 
-void HTMLProgressElement::Trace(blink::Visitor* visitor) {
+void HTMLProgressElement::Trace(Visitor* visitor) {
   visitor->Trace(value_);
-  LabelableElement::Trace(visitor);
+  HTMLElement::Trace(visitor);
 }
 
 void HTMLProgressElement::SetValueWidthPercentage(double width) const {
-  value_->SetInlineStyleProperty(CSSPropertyWidth, width,
+  value_->SetInlineStyleProperty(CSSPropertyID::kWidth, width,
                                  CSSPrimitiveValue::UnitType::kPercentage);
 }
 

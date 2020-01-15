@@ -1,5 +1,9 @@
 # Chrome DevTools frontend
 
+<!-- [START badges] -->
+[![NPM package](https://img.shields.io/npm/v/chrome-devtools-frontend.svg)](https://npmjs.org/package/chrome-devtools-frontend)
+<!-- [END badges] -->
+
 The client-side of the Chrome DevTools, including all JS & CSS to run the DevTools webapp.
 
 It is available on NPM as the [chrome-devtools-frontend](https://www.npmjs.com/package/chrome-devtools-frontend) package. It's not currently available via CJS or ES2015 modules, so consuming this package in other tools may require [some effort](https://github.com/paulirish/devtools-timeline-model/blob/master/index.js).
@@ -57,11 +61,11 @@ One-time setup:
 npm run setup-dtrun
 ```
 
-Now, you can use any of the following commands by simply doing: `dtrun test`. 
+Now, you can use any of the following commands by simply doing: `dtrun test`.
 
 In addition, you no longer need to pass double dashes (e.g. `--`) before you pass in the flags. So you can do: `dtrun test -d inspector/test.html`.
 
-#### `npm run format` 
+#### `npm run format`
 Formats your code using clang-format
 
 ### `npm run format-py`
@@ -70,7 +74,7 @@ Formats your Python code using [yapf](https://github.com/google/yapf)
 > Note: Yapf is a command line tool. You will have to install this manually, either from PyPi through `pip install yapf` or if you want to enable multiprocessing in Python 2.7, `pip install futures`
 
 #### `npm test`
-Builds devtools and runs all inspector/devtools layout tests.
+Builds devtools and runs all inspector/devtools web tests.
 
 > Note: If you're using a full chromium checkout and compiled content shell in out/Release, then `npm test` uses that. Otherwise, with only a front-end checkout (i.e. cloning from GitHub), then `npm test` will fetch a previously compiled content shell from the cloud (and cache it for future test runs).
 
@@ -81,8 +85,8 @@ npm test -- inspector/sources inspector/console
 
 # debug a specific test. Any one of:
 npm run debug-test inspector/cookie-resource-match.html
-npm test -- --debug-devtools inspector/cookie-resource-match.html 
-npm test -- -d inspector/cookie-resource-match.html 
+npm test -- --debug-devtools inspector/cookie-resource-match.html
+npm test -- -d inspector/cookie-resource-match.html
 
 # pass in additional flags to the test harness
 npm test -- -f --child-processes=16
@@ -91,19 +95,19 @@ npm test -- -f --child-processes=16
 npm test -- --time-out-ms=6000000 <test_path>
 ```
 
-> **Tip**: [Learn about the test harness flags](https://chromium.googlesource.com/chromium/src/+/master/docs/testing/layout_tests.md#Test-Harness-Options)
+> **Tip**: [Learn about the test harness flags](https://chromium.googlesource.com/chromium/src/+/master/docs/testing/web_tests.md#Test-Harness-Options)
 
 #### `--fetch-content-shell`
 ```
-# If you're using a full chromium checkout and have a compiled content shell, 
-# this will fetch a pre-compiled content shell. This is useful if you 
+# If you're using a full chromium checkout and have a compiled content shell,
+# this will fetch a pre-compiled content shell. This is useful if you
 # haven't compiled your content shell recently
 npm test -- --fetch-content-shell
 ```
 
 #### `--target=SUB_DIRECTORY_NAME`
 ```
-# If you're using a build sub-directory that's not out/Release, 
+# If you're using a build sub-directory that's not out/Release,
 # such as out/Default, then use --target=SUB_DIRECTORY_NAME
 npm test -- --target=Default
 ```
@@ -123,3 +127,17 @@ npm test -- --target=Default
   [@ChromeDevTools]: http://twitter.com/ChromeDevTools
   [@DevToolsCommits]: http://twitter.com/DevToolsCommits
   [all open DevTools tickets]: https://bugs.chromium.org/p/chromium/issues/list?can=2&q=component%3APlatform%3EDevTools&sort=&groupby=&colspec=ID+Stars+Owner+Summary+Modified+Opened
+
+### Tests
+The tests are run through Karma.
+
+```
+python scripts/run_tests.py
+```
+
+You can also specify with which Chrome binary to run tests by setting the
+`chrome-binary` variable.
+
+```
+python scripts/run_tests.py --chrome-binary=/path/to/chromium/build/chromium
+```

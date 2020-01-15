@@ -6,6 +6,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
@@ -22,10 +23,11 @@ class MatchResultTest : public testing::Test {
 };
 
 void MatchResultTest::SetUp() {
-  property_sets = new HeapVector<Member<MutableCSSPropertyValueSet>, 8>();
+  property_sets =
+      MakeGarbageCollected<HeapVector<Member<MutableCSSPropertyValueSet>, 8>>();
   for (unsigned i = 0; i < 8; i++) {
     property_sets->push_back(
-        MutableCSSPropertyValueSet::Create(kHTMLQuirksMode));
+        MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLQuirksMode));
   }
 }
 

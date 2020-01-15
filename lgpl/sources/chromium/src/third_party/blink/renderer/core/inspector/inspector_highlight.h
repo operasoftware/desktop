@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_INSPECTOR_HIGHLIGHT_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/inspector/protocol/DOM.h"
 #include "third_party/blink/renderer/platform/geometry/float_quad.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
@@ -33,11 +34,17 @@ struct CORE_EXPORT InspectorHighlightConfig {
   Color css_grid;
 
   bool show_info;
+  bool show_styles;
   bool show_rulers;
   bool show_extension_lines;
-  bool display_as_material;
 
   String selector_list;
+};
+
+struct InspectorHighlightContrastInfo {
+  Color background_color;
+  String font_size;
+  String font_weight;
 };
 
 class CORE_EXPORT InspectorHighlight {
@@ -46,11 +53,16 @@ class CORE_EXPORT InspectorHighlight {
  public:
   InspectorHighlight(Node*,
                      const InspectorHighlightConfig&,
-                     bool append_element_info);
+                     const InspectorHighlightContrastInfo&,
+                     bool append_element_info,
+                     bool append_distance_info,
+                     bool is_locked_ancestor);
   explicit InspectorHighlight(float scale);
   ~InspectorHighlight();
 
-  static bool GetBoxModel(Node*, std::unique_ptr<protocol::DOM::BoxModel>*);
+  static bool GetBoxModel(Node*,
+                          std::unique_ptr<protocol::DOM::BoxModel>*,
+                          bool use_absolute_zoom);
   static bool GetContentQuads(
       Node*,
       std::unique_ptr<protocol::Array<protocol::Array<double>>>*);
@@ -78,12 +90,21 @@ class CORE_EXPORT InspectorHighlight {
   void AppendNodeHighlight(Node*, const InspectorHighlightConfig&);
   void AppendPathsForShapeOutside(Node*, const InspectorHighlightConfig&);
 
+  void AppendDistanceInfo(Node* node);
+  void VisitAndCollectDistanceInfo(Node* node);
+  void VisitAndCollectDistanceInfo(PseudoId pseudo_id,
+                                   LayoutObject* layout_object);
+  void AddLayoutBoxToDistanceInfo(LayoutObject* layout_object);
+
+  std::unique_ptr<protocol::Array<protocol::Array<double>>> boxes_;
+  std::unique_ptr<protocol::DictionaryValue> computed_style_;
+  std::unique_ptr<protocol::DOM::BoxModel> model_;
+  std::unique_ptr<protocol::DictionaryValue> distance_info_;
   std::unique_ptr<protocol::DictionaryValue> element_info_;
   std::unique_ptr<protocol::ListValue> highlight_paths_;
   std::unique_ptr<protocol::ListValue> grid_info_;
   bool show_rulers_;
   bool show_extension_lines_;
-  bool display_as_material_;
   float scale_;
 };
 

@@ -20,7 +20,7 @@ namespace blink {
 
 class CSSUnitValue;
 class ExceptionState;
-class CSSCalcExpressionNode;
+class CSSMathExpressionNode;
 
 class CSSNumericValue;
 class CSSMathSum;
@@ -50,7 +50,7 @@ class CORE_EXPORT CSSNumericValue : public CSSStyleValue {
   CSSUnitValue* to(const String&, ExceptionState&);
   CSSMathSum* toSum(const Vector<String>&, ExceptionState&);
 
-  void type(CSSNumericType&) const;
+  CSSNumericType* type() const;
 
   String toString() const final;
 
@@ -67,7 +67,7 @@ class CORE_EXPORT CSSNumericValue : public CSSStyleValue {
   virtual bool Equals(const CSSNumericValue&) const = 0;
   const CSSNumericValueType& Type() const { return type_; }
 
-  virtual CSSCalcExpressionNode* ToCalcExpressionNode() const = 0;
+  virtual CSSMathExpressionNode* ToCalcExpressionNode() const = 0;
 
   enum class Nested : bool { kYes, kNo };
   enum class ParenLess : bool { kYes, kNo };

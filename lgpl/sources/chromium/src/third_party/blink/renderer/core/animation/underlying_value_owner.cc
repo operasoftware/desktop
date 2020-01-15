@@ -13,6 +13,27 @@ struct NullValueWrapper {
   const InterpolationValue value;
 };
 
+InterpolableValue& UnderlyingValueOwner::MutableInterpolableValue() {
+  return *MutableValue().interpolable_value;
+}
+
+void UnderlyingValueOwner::SetInterpolableValue(
+    std::unique_ptr<InterpolableValue> interpolable_value) {
+  DCHECK(type_);
+  MutableValue().interpolable_value = std::move(interpolable_value);
+}
+
+const NonInterpolableValue* UnderlyingValueOwner::GetNonInterpolableValue()
+    const {
+  DCHECK(value_);
+  return value_->non_interpolable_value.get();
+}
+
+void UnderlyingValueOwner::SetNonInterpolableValue(
+    scoped_refptr<const NonInterpolableValue> non_interpolable_value) {
+  MutableValue().non_interpolable_value = non_interpolable_value;
+}
+
 const InterpolationValue& UnderlyingValueOwner::Value() const {
   DEFINE_STATIC_LOCAL(NullValueWrapper, null_value_wrapper, ());
   return *this ? *value_ : null_value_wrapper.value;
@@ -28,8 +49,8 @@ void UnderlyingValueOwner::Set(const InterpolationType& type,
                                const InterpolationValue& value) {
   DCHECK(value);
   type_ = &type;
-  // By clearing m_valueOwner we will perform a copy before attempting to mutate
-  // m_value, thus upholding the const contract for this instance of
+  // By clearing |value_owner_| we will perform a copy before attempting to
+  // mutate |value_|, thus upholding the const contract for this instance of
   // interpolationValue.
   value_owner_.Clear();
   value_ = &value;

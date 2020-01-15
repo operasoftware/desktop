@@ -26,31 +26,36 @@
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_linear_gradient.h"
 #include "third_party/blink/renderer/core/svg/linear_gradient_attributes.h"
 #include "third_party/blink/renderer/core/svg/svg_length.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
-inline SVGLinearGradientElement::SVGLinearGradientElement(Document& document)
-    : SVGGradientElement(SVGNames::linearGradientTag, document),
+SVGLinearGradientElement::SVGLinearGradientElement(Document& document)
+    : SVGGradientElement(svg_names::kLinearGradientTag, document),
       // Spec: If the x1|y1|y2 attribute is not specified, the effect is as if a
       // value of "0%" were specified.
       // Spec: If the x2 attribute is not specified, the effect is as if a value
       // of "100%" were specified.
-      x1_(SVGAnimatedLength::Create(this,
-                                    SVGNames::x1Attr,
-                                    SVGLengthMode::kWidth,
-                                    SVGLength::Initial::kPercent0)),
-      y1_(SVGAnimatedLength::Create(this,
-                                    SVGNames::y1Attr,
-                                    SVGLengthMode::kHeight,
-                                    SVGLength::Initial::kPercent0)),
-      x2_(SVGAnimatedLength::Create(this,
-                                    SVGNames::x2Attr,
-                                    SVGLengthMode::kWidth,
-                                    SVGLength::Initial::kPercent100)),
-      y2_(SVGAnimatedLength::Create(this,
-                                    SVGNames::y2Attr,
-                                    SVGLengthMode::kHeight,
-                                    SVGLength::Initial::kPercent0)) {
+      x1_(MakeGarbageCollected<SVGAnimatedLength>(
+          this,
+          svg_names::kX1Attr,
+          SVGLengthMode::kWidth,
+          SVGLength::Initial::kPercent0)),
+      y1_(MakeGarbageCollected<SVGAnimatedLength>(
+          this,
+          svg_names::kY1Attr,
+          SVGLengthMode::kHeight,
+          SVGLength::Initial::kPercent0)),
+      x2_(MakeGarbageCollected<SVGAnimatedLength>(
+          this,
+          svg_names::kX2Attr,
+          SVGLengthMode::kWidth,
+          SVGLength::Initial::kPercent100)),
+      y2_(MakeGarbageCollected<SVGAnimatedLength>(
+          this,
+          svg_names::kY2Attr,
+          SVGLengthMode::kHeight,
+          SVGLength::Initial::kPercent0)) {
   AddToPropertyMap(x1_);
   AddToPropertyMap(y1_);
   AddToPropertyMap(x2_);
@@ -65,23 +70,21 @@ void SVGLinearGradientElement::Trace(blink::Visitor* visitor) {
   SVGGradientElement::Trace(visitor);
 }
 
-DEFINE_NODE_FACTORY(SVGLinearGradientElement)
-
 void SVGLinearGradientElement::SvgAttributeChanged(
     const QualifiedName& attr_name) {
-  if (attr_name == SVGNames::x1Attr || attr_name == SVGNames::x2Attr ||
-      attr_name == SVGNames::y1Attr || attr_name == SVGNames::y2Attr) {
+  if (attr_name == svg_names::kX1Attr || attr_name == svg_names::kX2Attr ||
+      attr_name == svg_names::kY1Attr || attr_name == svg_names::kY2Attr) {
     SVGElement::InvalidationGuard invalidation_guard(this);
     UpdateRelativeLengthsInformation();
-    InvalidateGradient(LayoutInvalidationReason::kAttributeChanged);
+    InvalidateGradient(layout_invalidation_reason::kAttributeChanged);
     return;
   }
 
   SVGGradientElement::SvgAttributeChanged(attr_name);
 }
 
-LayoutObject* SVGLinearGradientElement::CreateLayoutObject(
-    const ComputedStyle&) {
+LayoutObject* SVGLinearGradientElement::CreateLayoutObject(const ComputedStyle&,
+                                                           LegacyLayout) {
   return new LayoutSVGResourceLinearGradient(this);
 }
 

@@ -27,7 +27,7 @@
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 LayoutDetailsMarker::LayoutDetailsMarker(Element* element)
     : LayoutBlockFlow(element) {}
@@ -64,8 +64,8 @@ bool LayoutDetailsMarker::IsOpen() const {
     if (!layout_object->GetNode())
       continue;
     if (IsHTMLDetailsElement(*layout_object->GetNode()))
-      return !ToElement(layout_object->GetNode())
-                  ->getAttribute(openAttr)
+      return !To<Element>(layout_object->GetNode())
+                  ->getAttribute(kOpenAttr)
                   .IsNull();
     if (IsHTMLInputElement(*layout_object->GetNode()))
       return true;

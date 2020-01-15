@@ -3,8 +3,8 @@
 
 {{source_files_for_generated_file(template_file, input_files)}}
 
-#ifndef InternalRuntimeFlags_h
-#define InternalRuntimeFlags_h
+#ifndef {{header_guard}}
+#define {{header_guard}}
 
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -18,10 +18,12 @@ class InternalRuntimeFlags : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
  public:
   static InternalRuntimeFlags* create() {
-    return new InternalRuntimeFlags;
+    return MakeGarbageCollected<InternalRuntimeFlags>();
   }
 
-  // These are reset between layout tests from Internals::resetToConsistentState
+  InternalRuntimeFlags() {}
+
+  // These are reset between web tests from Internals::resetToConsistentState
   // using RuntimeEnabledFeatures::Backup.
   {% for feature in standard_features if feature.settable_from_internals %}
   void set{{feature.name}}Enabled(bool isEnabled) {
@@ -31,18 +33,15 @@ class InternalRuntimeFlags : public ScriptWrappable {
 
   {% for feature in standard_features %}
   bool {{feature.name.to_lower_camel_case()}}Enabled() {
-    {% if feature.origin_trial_feature_name %}
+    {% if feature.in_origin_trial %}
     return RuntimeEnabledFeatures::{{feature.name}}EnabledByRuntimeFlag();
     {% else %}
     return RuntimeEnabledFeatures::{{feature.name}}Enabled();
     {% endif %}
   }
   {% endfor %}
-
- private:
-  InternalRuntimeFlags() {}
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // InternalRuntimeFlags_h
+#endif  // {{header_guard}}

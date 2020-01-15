@@ -34,13 +34,11 @@ class HTMLTableCaptionElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(HTMLTableCaptionElement);
+  HTMLTableCaptionElement(Document&);
 
   bool HasNonInBodyInsertionMode() const override { return true; }
 
  private:
-  HTMLTableCaptionElement(Document&);
-
   void CollectStyleForPresentationAttribute(
       const QualifiedName&,
       const AtomicString&,

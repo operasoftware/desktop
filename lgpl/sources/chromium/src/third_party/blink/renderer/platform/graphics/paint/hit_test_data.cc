@@ -4,32 +4,55 @@
 
 #include "third_party/blink/renderer/platform/graphics/paint/hit_test_data.h"
 
-#include "third_party/blink/renderer/platform/graphics/graphics_context.h"
-#include "third_party/blink/renderer/platform/graphics/paint/drawing_display_item.h"
-#include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
-void HitTestData::RecordHitTestRect(GraphicsContext& context,
-                                    const DisplayItemClient& client,
-                                    const HitTestRect& action) {
-  DCHECK(RuntimeEnabledFeatures::PaintTouchActionRectsEnabled());
+static String HitTestRectsAsString(const Vector<HitTestRect>& rects) {
+  StringBuilder sb;
+  sb.Append("[");
+  bool first = true;
+  for (const auto& rect : rects) {
+    if (!first)
+      sb.Append(", ");
+    first = false;
+    sb.Append("(");
+    sb.Append(rect.ToString());
+    sb.Append(")");
+  }
+  sb.Append("]");
+  return sb.ToString();
+}
 
-  PaintController& paint_controller = context.GetPaintController();
-  if (paint_controller.DisplayItemConstructionIsDisabled())
-    return;
+String HitTestData::ToString() const {
+  StringBuilder sb;
+  sb.Append("{");
 
-  if (!paint_controller.UseCachedDrawingIfPossible(client,
-                                                   DisplayItem::kHitTest)) {
-    // A display item must be created to ensure a paint chunk exists. For
-    // example, without this, an empty div with a transform will incorrectly use
-    // the parent paint chunk instead of creating a new one.
-    paint_controller.CreateAndAppend<DrawingDisplayItem>(
-        client, DisplayItem::kHitTest, nullptr, false);
+  bool printed_top_level_field = false;
+  if (!touch_action_rects.IsEmpty()) {
+    sb.Append("touch_action_rects: ");
+    sb.Append(HitTestRectsAsString(touch_action_rects));
+    printed_top_level_field = true;
   }
 
-  auto& chunk = paint_controller.CurrentPaintChunk();
-  chunk.EnsureHitTestData().touch_action_rects.push_back(action);
+  if (scroll_hit_test) {
+    if (printed_top_level_field)
+      sb.Append(", ");
+    sb.AppendFormat(
+        "scroll_hit_test: \"%s\" with offset %p",
+        scroll_hit_test->scroll_container_bounds.ToString().Utf8().data(),
+        scroll_hit_test->scroll_offset);
+    printed_top_level_field = true;
+  }
+
+  sb.Append("}");
+
+  return sb.ToString();
+}
+
+std::ostream& operator<<(std::ostream& os, const HitTestData& data) {
+  return os << data.ToString().Utf8();
 }
 
 }  // namespace blink

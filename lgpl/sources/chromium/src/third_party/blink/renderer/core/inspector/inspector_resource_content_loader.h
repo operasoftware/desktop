@@ -20,11 +20,9 @@ class LocalFrame;
 class Resource;
 
 class CORE_EXPORT InspectorResourceContentLoader final
-    : public GarbageCollectedFinalized<InspectorResourceContentLoader> {
+    : public GarbageCollected<InspectorResourceContentLoader> {
  public:
-  static InspectorResourceContentLoader* Create(LocalFrame* inspected_frame) {
-    return new InspectorResourceContentLoader(inspected_frame);
-  }
+  explicit InspectorResourceContentLoader(LocalFrame*);
   ~InspectorResourceContentLoader();
   void Dispose();
   void Trace(blink::Visitor*);
@@ -39,7 +37,6 @@ class CORE_EXPORT InspectorResourceContentLoader final
  private:
   class ResourceClient;
 
-  explicit InspectorResourceContentLoader(LocalFrame*);
   void ResourceFinished(ResourceClient*);
   void CheckDone();
   void Start();

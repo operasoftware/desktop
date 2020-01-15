@@ -57,6 +57,7 @@
 #include "third_party/blink/renderer/core/svg/radial_gradient_attributes.h"
 #include "third_party/blink/renderer/core/svg/svg_circle_element.h"
 #include "third_party/blink/renderer/core/svg/svg_ellipse_element.h"
+#include "third_party/blink/renderer/core/svg/svg_enumeration_map.h"
 #include "third_party/blink/renderer/core/svg/svg_filter_element.h"
 #include "third_party/blink/renderer/core/svg/svg_line_element.h"
 #include "third_party/blink/renderer/core/svg/svg_linear_gradient_element.h"
@@ -71,9 +72,7 @@
 #include "third_party/blink/renderer/platform/graphics/filters/filter.h"
 #include "third_party/blink/renderer/platform/graphics/filters/source_graphic.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
-
-#include <math.h>
-#include <memory>
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
@@ -172,40 +171,21 @@ static WTF::TextStream& operator<<(WTF::TextStream& ts, const WindRule rule) {
   return ts;
 }
 
-namespace {
-
-template <typename Enum>
-String SVGEnumerationToString(Enum value) {
-  const SVGEnumerationStringEntries& entries = GetStaticStringEntries<Enum>();
-
-  SVGEnumerationStringEntries::const_iterator it = entries.begin();
-  SVGEnumerationStringEntries::const_iterator it_end = entries.end();
-  for (; it != it_end; ++it) {
-    if (value == it->first)
-      return it->second;
-  }
-
-  NOTREACHED();
-  return String();
-}
-
-}  // namespace
-
 static WTF::TextStream& operator<<(WTF::TextStream& ts,
                                    const SVGUnitTypes::SVGUnitType& unit_type) {
-  ts << SVGEnumerationToString<SVGUnitTypes::SVGUnitType>(unit_type);
+  ts << GetEnumerationMap<SVGUnitTypes::SVGUnitType>().NameFromValue(unit_type);
   return ts;
 }
 
 static WTF::TextStream& operator<<(WTF::TextStream& ts,
                                    const SVGMarkerUnitsType& marker_unit) {
-  ts << SVGEnumerationToString<SVGMarkerUnitsType>(marker_unit);
+  ts << GetEnumerationMap<SVGMarkerUnitsType>().NameFromValue(marker_unit);
   return ts;
 }
 
 static WTF::TextStream& operator<<(WTF::TextStream& ts,
                                    const SVGMarkerOrientType& orient_type) {
-  ts << SVGEnumerationToString<SVGMarkerOrientType>(orient_type);
+  ts << GetEnumerationMap<SVGMarkerOrientType>().NameFromValue(orient_type);
   return ts;
 }
 
@@ -243,7 +223,8 @@ static WTF::TextStream& operator<<(WTF::TextStream& ts, LineJoin style) {
 
 static WTF::TextStream& operator<<(WTF::TextStream& ts,
                                    const SVGSpreadMethodType& type) {
-  ts << SVGEnumerationToString<SVGSpreadMethodType>(type).UpperASCII();
+  auto* name = GetEnumerationMap<SVGSpreadMethodType>().NameFromValue(type);
+  ts << String(name).UpperASCII();
   return ts;
 }
 
@@ -435,7 +416,7 @@ static void WriteLayoutSVGTextBox(WTF::TextStream& ts,
     return;
 
   // FIXME: Remove this hack, once the new text layout engine is completly
-  // landed. We want to preserve the old layout test results for now.
+  // landed. We want to preserve the old web test results for now.
   ts << " contains 1 chunk(s)";
 
   if (text.Parent() && (text.Parent()->ResolveColor(GetCSSPropertyColor()) !=
@@ -468,7 +449,7 @@ static inline void WriteSVGInlineTextBox(WTF::TextStream& ts,
     unsigned end_offset = fragment.character_offset + fragment.length;
 
     // FIXME: Remove this hack, once the new text layout engine is completly
-    // landed. We want to preserve the old layout test results for now.
+    // landed. We want to preserve the old web test results for now.
     ts << "chunk 1 ";
     ETextAnchor anchor = svg_style.TextAnchor();
     bool is_vertical_text =
@@ -564,7 +545,7 @@ void WriteSVGResourceContainer(WTF::TextStream& ts,
                                int indent) {
   WriteStandardPrefix(ts, object, indent);
 
-  Element* element = ToElement(object.GetNode());
+  auto* element = To<Element>(object.GetNode());
   const AtomicString& id = element->GetIdAttribute();
   WriteNameAndQuotedValue(ts, "id", id);
 
@@ -584,8 +565,8 @@ void WriteSVGResourceContainer(WTF::TextStream& ts,
     ts << "\n";
     // Creating a placeholder filter which is passed to the builder.
     FloatRect dummy_rect;
-    Filter* dummy_filter =
-        Filter::Create(dummy_rect, dummy_rect, 1, Filter::kBoundingBox);
+    auto* dummy_filter = MakeGarbageCollected<Filter>(dummy_rect, dummy_rect, 1,
+                                                      Filter::kBoundingBox);
     SVGFilterBuilder builder(dummy_filter->GetSourceGraphic());
     builder.BuildGraph(dummy_filter, ToSVGFilterElement(*filter->GetElement()),
                        dummy_rect);
@@ -751,7 +732,7 @@ void WriteResources(WTF::TextStream& ts,
     DCHECK(style.ClipPath());
     DCHECK_EQ(style.ClipPath()->GetType(), ClipPathOperation::REFERENCE);
     const ReferenceClipPathOperation& clip_path_reference =
-        ToReferenceClipPathOperation(*style.ClipPath());
+        To<ReferenceClipPathOperation>(*style.ClipPath());
     AtomicString id = SVGURIReference::FragmentIdentifierFromIRIString(
         clip_path_reference.Url(), tree_scope);
     WriteIndent(ts, indent);
@@ -767,7 +748,7 @@ void WriteResources(WTF::TextStream& ts,
     const FilterOperation& filter_operation = *style.Filter().at(0);
     DCHECK_EQ(filter_operation.GetType(), FilterOperation::REFERENCE);
     const auto& reference_filter_operation =
-        ToReferenceFilterOperation(filter_operation);
+        To<ReferenceFilterOperation>(filter_operation);
     AtomicString id = SVGURIReference::FragmentIdentifierFromIRIString(
         reference_filter_operation.Url(), tree_scope);
     WriteIndent(ts, indent);

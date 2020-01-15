@@ -13,9 +13,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/alignment.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/compiler.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/type_traits.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -138,6 +136,8 @@ class ContiguousContainer : public ContiguousContainerBase {
       IteratorWrapper<Vector<void*>::const_reverse_iterator,
                       const BaseElementType>;
 
+  using value_type = BaseElementType;
+
   explicit ContiguousContainer(size_t max_object_size)
       : ContiguousContainerBase(Align(max_object_size)) {}
 
@@ -166,12 +166,12 @@ class ContiguousContainer : public ContiguousContainerBase {
     return *this;
   }
 
-  using ContiguousContainerBase::size;
-  using ContiguousContainerBase::IsEmpty;
   using ContiguousContainerBase::CapacityInBytes;
-  using ContiguousContainerBase::UsedCapacityInBytes;
+  using ContiguousContainerBase::IsEmpty;
   using ContiguousContainerBase::MemoryUsageInBytes;
   using ContiguousContainerBase::ShrinkToFit;
+  using ContiguousContainerBase::size;
+  using ContiguousContainerBase::UsedCapacityInBytes;
 
   iterator begin() { return iterator(elements_.begin()); }
   iterator end() { return iterator(elements_.end()); }
@@ -199,7 +199,7 @@ class ContiguousContainer : public ContiguousContainerBase {
   DerivedElementType& AllocateAndConstruct(Args&&... args) {
     static_assert(WTF::IsSubclass<DerivedElementType, BaseElementType>::value,
                   "Must use subclass of BaseElementType.");
-    static_assert(alignment % WTF_ALIGN_OF(DerivedElementType) == 0,
+    static_assert(alignment % alignof(DerivedElementType) == 0,
                   "Derived type requires stronger alignment.");
     return *new (AlignedAllocate(sizeof(DerivedElementType)))
         DerivedElementType(std::forward<Args>(args)...);

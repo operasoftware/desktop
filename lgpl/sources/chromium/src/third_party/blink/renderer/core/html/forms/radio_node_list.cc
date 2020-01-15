@@ -36,18 +36,18 @@
 
 namespace blink {
 
-using namespace HTMLNames;
-
-RadioNodeList::RadioNodeList(ContainerNode& root_node,
-                             const AtomicString& name,
-                             CollectionType type)
-    : LiveNodeList(root_node,
+RadioNodeList::RadioNodeList(ContainerNode& owner_node,
+                             CollectionType type,
+                             const AtomicString& name)
+    : LiveNodeList(owner_node,
                    type,
                    kInvalidateForFormControls,
-                   IsHTMLFormElement(root_node)
+                   IsA<HTMLFormElement>(owner_node)
                        ? NodeListSearchRoot::kTreeScope
                        : NodeListSearchRoot::kOwnerNode),
-      name_(name) {}
+      name_(name) {
+  DCHECK(type == kRadioNodeListType || type == kRadioImgNodeListType);
+}
 
 RadioNodeList::~RadioNodeList() = default;
 
@@ -55,7 +55,7 @@ static inline HTMLInputElement* ToRadioButtonInputElement(Element& element) {
   if (!IsHTMLInputElement(element))
     return nullptr;
   HTMLInputElement& input_element = ToHTMLInputElement(element);
-  if (input_element.type() != InputTypeNames::radio ||
+  if (input_element.type() != input_type_names::kRadio ||
       input_element.value().IsEmpty())
     return nullptr;
   return &input_element;
@@ -97,8 +97,8 @@ bool RadioNodeList::CheckElementMatchesRadioNodeListFilter(
   DCHECK(!ShouldOnlyMatchImgElements());
   DCHECK(IsHTMLObjectElement(test_element) ||
          test_element.IsFormControlElement());
-  if (IsHTMLFormElement(ownerNode())) {
-    HTMLFormElement* form_element = ToHTMLElement(test_element).formOwner();
+  if (IsA<HTMLFormElement>(ownerNode())) {
+    auto* form_element = To<HTMLElement>(test_element).formOwner();
     if (!form_element || form_element != ownerNode())
       return false;
   }
@@ -121,7 +121,7 @@ bool RadioNodeList::ElementMatches(const Element& element) const {
     return false;
 
   if (IsHTMLInputElement(element) &&
-      ToHTMLInputElement(element).type() == InputTypeNames::image)
+      ToHTMLInputElement(element).type() == input_type_names::kImage)
     return false;
 
   return CheckElementMatchesRadioNodeListFilter(element);

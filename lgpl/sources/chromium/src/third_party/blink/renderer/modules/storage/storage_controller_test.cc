@@ -4,19 +4,22 @@
 
 #include "third_party/blink/renderer/modules/storage/storage_controller.h"
 
+#include "base/bind.h"
+#include "base/run_loop.h"
 #include "base/task/post_task.h"
-#include "base/test/scoped_feature_list.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/platform/scheduler/test/fake_renderer_scheduler.h"
+#include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/renderer/modules/storage/storage_namespace.h"
 #include "third_party/blink/renderer/modules/storage/testing/fake_area_source.h"
 #include "third_party/blink/renderer/modules/storage/testing/mock_storage_area.h"
-#include "third_party/blink/renderer/platform/cross_thread_functional.h"
-#include "third_party/blink/renderer/platform/uuid.h"
-#include "third_party/blink/renderer/platform/web_task_runner.h"
-#include "third_party/blink/renderer/platform/wtf/functional.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/wtf/uuid.h"
 
 namespace blink {
 namespace {
@@ -25,12 +28,14 @@ const size_t kTestCacheLimit = 100;
 class MockStoragePartitionService
     : public mojom::blink::StoragePartitionService {
  public:
-  void OpenLocalStorage(const scoped_refptr<const SecurityOrigin>& origin,
-                        mojom::blink::StorageAreaRequest request) override {}
+  void OpenLocalStorage(
+      const scoped_refptr<const SecurityOrigin>& origin,
+      mojo::PendingReceiver<mojom::blink::StorageArea> receiver) override {}
 
   void OpenSessionStorage(
       const String& namespace_id,
-      mojom::blink::SessionStorageNamespaceRequest request) override {
+      mojo::PendingReceiver<mojom::blink::SessionStorageNamespace> receiver)
+      override {
     session_storage_opens++;
   }
 
@@ -44,8 +49,6 @@ class MockStoragePartitionService
 }  // namespace
 
 TEST(StorageControllerTest, CacheLimit) {
-  base::test::ScopedFeatureList features;
-  features.InitAndEnableFeature(features::kOnionSoupDOMStorage);
   const auto kOrigin = SecurityOrigin::CreateFromString("http://dom_storage1/");
   const auto kOrigin2 =
       SecurityOrigin::CreateFromString("http://dom_storage2/");
@@ -54,23 +57,25 @@ TEST(StorageControllerTest, CacheLimit) {
   const String kKey("key");
   const String kValue("value");
   const KURL kPageUrl("http://dom_storage/page");
-  Persistent<FakeAreaSource> source_area = new FakeAreaSource(kPageUrl);
+  Persistent<FakeAreaSource> source_area =
+      MakeGarbageCollected<FakeAreaSource>(kPageUrl);
 
-  blink::scheduler::FakeRendererScheduler renderer_scheduler;
-
-  mojom::blink::StoragePartitionServicePtr storage_partition_service_ptr;
+  mojo::PendingRemote<mojom::blink::StoragePartitionService>
+      storage_partition_service_remote;
   PostCrossThreadTask(
-      *base::CreateSequencedTaskRunnerWithTraits({}), FROM_HERE,
-      CrossThreadBind(
-          [](mojom::blink::StoragePartitionServiceRequest request) {
-            mojo::MakeStrongBinding(
+      *base::CreateSequencedTaskRunner({base::ThreadPool()}), FROM_HERE,
+      CrossThreadBindOnce(
+          [](mojo::PendingReceiver<mojom::blink::StoragePartitionService>
+                 receiver) {
+            mojo::MakeSelfOwnedReceiver(
                 std::make_unique<MockStoragePartitionService>(),
-                std::move(request));
+                std::move(receiver));
           },
-          WTF::Passed(MakeRequest(&storage_partition_service_ptr))));
+          WTF::Passed(storage_partition_service_remote
+                          .InitWithNewPipeAndPassReceiver())));
 
-  StorageController controller(renderer_scheduler.IPCTaskRunner(),
-                               std::move(storage_partition_service_ptr),
+  StorageController controller(scheduler::GetSingleThreadTaskRunnerForTesting(),
+                               std::move(storage_partition_service_remote),
                                kTestCacheLimit);
 
   auto cached_area1 = controller.GetLocalStorageArea(kOrigin.get());
@@ -78,7 +83,7 @@ TEST(StorageControllerTest, CacheLimit) {
   cached_area1->SetItem(kKey, kValue, source_area);
   const auto* area1_ptr = cached_area1.get();
   size_t expected_total = (kKey.length() + kValue.length()) * 2;
-  EXPECT_EQ(expected_total, cached_area1->memory_used());
+  EXPECT_EQ(expected_total, cached_area1->quota_used());
   EXPECT_EQ(expected_total, controller.TotalCacheSize());
   cached_area1 = nullptr;
 
@@ -86,21 +91,19 @@ TEST(StorageControllerTest, CacheLimit) {
   cached_area2->RegisterSource(source_area);
   cached_area2->SetItem(kKey, kValue, source_area);
   // Area for kOrigin should still be alive.
-  EXPECT_EQ(2 * cached_area2->memory_used(), controller.TotalCacheSize());
+  EXPECT_EQ(2 * cached_area2->quota_used(), controller.TotalCacheSize());
   EXPECT_EQ(area1_ptr, controller.GetLocalStorageArea(kOrigin.get()));
 
   String long_value(Vector<UChar>(kTestCacheLimit, 'a'));
   cached_area2->SetItem(kKey, long_value, source_area);
   // Cache is cleared when a new area is opened.
   auto cached_area3 = controller.GetLocalStorageArea(kOrigin3.get());
-  EXPECT_EQ(cached_area2->memory_used(), controller.TotalCacheSize());
+  EXPECT_EQ(cached_area2->quota_used(), controller.TotalCacheSize());
 }
 
 TEST(StorageControllerTest, CacheLimitSessionStorage) {
-  base::test::ScopedFeatureList features;
-  features.InitAndEnableFeature(features::kOnionSoupDOMStorage);
-  const String kNamespace1 = CreateCanonicalUUIDString();
-  const String kNamespace2 = CreateCanonicalUUIDString();
+  const String kNamespace1 = WTF::CreateCanonicalUUIDString();
+  const String kNamespace2 = WTF::CreateCanonicalUUIDString();
   const auto kOrigin = SecurityOrigin::CreateFromString("http://dom_storage1/");
   const auto kOrigin2 =
       SecurityOrigin::CreateFromString("http://dom_storage2/");
@@ -110,30 +113,33 @@ TEST(StorageControllerTest, CacheLimitSessionStorage) {
   const String kValue("value");
   const KURL kPageUrl("http://dom_storage/page");
 
-  Persistent<FakeAreaSource> source_area = new FakeAreaSource(kPageUrl);
+  Persistent<FakeAreaSource> source_area =
+      MakeGarbageCollected<FakeAreaSource>(kPageUrl);
 
-  blink::scheduler::FakeRendererScheduler renderer_scheduler;
-  auto task_runner = base::CreateSequencedTaskRunnerWithTraits({});
+  auto task_runner = base::CreateSequencedTaskRunner({base::ThreadPool()});
 
   auto mock_storage_partition_service =
       std::make_unique<MockStoragePartitionService>();
   MockStoragePartitionService* storage_partition_ptr =
       mock_storage_partition_service.get();
 
-  mojom::blink::StoragePartitionServicePtr storage_partition_service_ptr;
+  mojo::PendingRemote<mojom::blink::StoragePartitionService>
+      storage_partition_service_remote;
   PostCrossThreadTask(
       *task_runner, FROM_HERE,
-      CrossThreadBind(
+      CrossThreadBindOnce(
           [](std::unique_ptr<MockStoragePartitionService> storage_partition_ptr,
-             mojom::blink::StoragePartitionServiceRequest request) {
-            mojo::MakeStrongBinding(std::move(storage_partition_ptr),
-                                    std::move(request));
+             mojo::PendingReceiver<mojom::blink::StoragePartitionService>
+                 receiver) {
+            mojo::MakeSelfOwnedReceiver(std::move(storage_partition_ptr),
+                                        std::move(receiver));
           },
           WTF::Passed(std::move(mock_storage_partition_service)),
-          WTF::Passed(MakeRequest(&storage_partition_service_ptr))));
-  StorageController controller(renderer_scheduler.IPCTaskRunner(),
-                               std::move(storage_partition_service_ptr),
-                               kTestCacheLimit);
+          WTF::Passed(storage_partition_service_remote
+                          .InitWithNewPipeAndPassReceiver())));
+
+  StorageController controller(
+      nullptr, std::move(storage_partition_service_remote), kTestCacheLimit);
 
   StorageNamespace* ns1 = controller.CreateSessionStorageNamespace(kNamespace1);
   StorageNamespace* ns2 = controller.CreateSessionStorageNamespace(kNamespace2);
@@ -143,7 +149,7 @@ TEST(StorageControllerTest, CacheLimitSessionStorage) {
   cached_area1->SetItem(kKey, kValue, source_area);
   const auto* area1_ptr = cached_area1.get();
   size_t expected_total = (kKey.length() + kValue.length()) * 2;
-  EXPECT_EQ(expected_total, cached_area1->memory_used());
+  EXPECT_EQ(expected_total, cached_area1->quota_used());
   EXPECT_EQ(expected_total, controller.TotalCacheSize());
   cached_area1 = nullptr;
 
@@ -151,14 +157,14 @@ TEST(StorageControllerTest, CacheLimitSessionStorage) {
   cached_area2->RegisterSource(source_area);
   cached_area2->SetItem(kKey, kValue, source_area);
   // Area for kOrigin should still be alive.
-  EXPECT_EQ(2 * cached_area2->memory_used(), controller.TotalCacheSize());
+  EXPECT_EQ(2 * cached_area2->quota_used(), controller.TotalCacheSize());
   EXPECT_EQ(area1_ptr, ns1->GetCachedArea(kOrigin.get()));
 
   String long_value(Vector<UChar>(kTestCacheLimit, 'a'));
   cached_area2->SetItem(kKey, long_value, source_area);
   // Cache is cleared when a new area is opened.
   auto cached_area3 = ns1->GetCachedArea(kOrigin3.get());
-  EXPECT_EQ(cached_area2->memory_used(), controller.TotalCacheSize());
+  EXPECT_EQ(cached_area2->quota_used(), controller.TotalCacheSize());
 
   int32_t opens = 0;
   {

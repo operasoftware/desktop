@@ -28,7 +28,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/geometry/layout_size.h"
 #include "third_party/blink/renderer/platform/transforms/transform_operation.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -48,10 +48,20 @@ class PLATFORM_EXPORT TransformOperations {
   bool operator==(const TransformOperations& o) const;
   bool operator!=(const TransformOperations& o) const { return !(*this == o); }
 
-  void Apply(const FloatSize& sz, TransformationMatrix& t) const {
+  // Constructs a transformation matrix from the operations. The parameter
+  // |border_box_size| is used when computing styles that are size-dependent.
+  void Apply(const FloatSize& border_box_size, TransformationMatrix& t) const {
     for (auto& operation : operations_)
-      operation->Apply(t, sz);
+      operation->Apply(t, border_box_size);
   }
+
+  // Constructs a transformation matrix from the operations starting from index
+  // |start|. This process facilitates mixing pairwise operations for a common
+  // prefix and matrix interpolation for the remainder.  The parameter
+  // |border_box_size| is used when computing styles that are size-dependent.
+  void ApplyRemaining(const FloatSize& border_box_size,
+                      wtf_size_t start,
+                      TransformationMatrix& t) const;
 
   // Return true if any of the operation types are 3D operation types (even if
   // the values describe affine transforms)
@@ -62,11 +72,39 @@ class PLATFORM_EXPORT TransformOperations {
     return false;
   }
 
+  // Return true if any of the operation types are non-perspective 3D operation
+  // types (even if the values describe affine transforms)
+  bool HasNonPerspective3DOperation() const {
+    for (auto& operation : operations_) {
+      if (operation->Is3DOperation() &&
+          operation->GetType() != TransformOperation::kPerspective)
+        return true;
+    }
+    return false;
+  }
+
+  bool PreservesAxisAlignment() const {
+    for (auto& operation : operations_) {
+      if (!operation->PreservesAxisAlignment())
+        return false;
+    }
+    return true;
+  }
+
   // Returns true if any operation has a non-trivial component in the Z
   // axis.
   bool HasNonTrivial3DComponent() const {
     for (auto& operation : operations_) {
       if (operation->HasNonTrivial3DComponent())
+        return true;
+    }
+    return false;
+  }
+
+  // Returns true if any operation is perspective.
+  bool HasPerspective() const {
+    for (auto& operation : operations_) {
+      if (operation->GetType() == TransformOperation::kPerspective)
         return true;
     }
     return false;
@@ -80,7 +118,7 @@ class PLATFORM_EXPORT TransformOperations {
     return false;
   }
 
-  bool OperationsMatch(const TransformOperations&) const;
+  wtf_size_t MatchingPrefixLength(const TransformOperations&) const;
 
   void clear() { operations_.clear(); }
 
@@ -101,11 +139,17 @@ class PLATFORM_EXPORT TransformOperations {
                            const double& min_progress,
                            const double& max_progress,
                            FloatBox* bounds) const;
-  TransformOperations BlendByMatchingOperations(const TransformOperations& from,
-                                                const double& progress) const;
-  scoped_refptr<TransformOperation> BlendByUsingMatrixInterpolation(
+
+  TransformOperations BlendPrefixByMatchingOperations(
       const TransformOperations& from,
+      wtf_size_t matching_prefix_length,
+      double progress,
+      bool* success) const;
+  scoped_refptr<TransformOperation> BlendRemainingByUsingMatrixInterpolation(
+      const TransformOperations& from,
+      wtf_size_t matching_prefix_length,
       double progress) const;
+
   TransformOperations Blend(const TransformOperations& from,
                             double progress) const;
   TransformOperations Add(const TransformOperations& addend) const;

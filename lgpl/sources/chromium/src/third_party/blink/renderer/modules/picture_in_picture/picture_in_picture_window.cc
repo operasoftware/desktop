@@ -6,7 +6,8 @@
 
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -24,17 +25,17 @@ void PictureInPictureWindow::OnResize(const WebSize& size) {
     return;
 
   size_ = size;
-  DispatchEvent(*Event::Create(EventTypeNames::resize));
+  DispatchEvent(*Event::Create(event_type_names::kResize));
 }
 
 const AtomicString& PictureInPictureWindow::InterfaceName() const {
-  return EventTargetNames::PictureInPictureWindow;
+  return event_target_names::kPictureInPictureWindow;
 }
 
 void PictureInPictureWindow::AddedEventListener(
     const AtomicString& event_type,
     RegisteredEventListener& registered_listener) {
-  if (event_type == EventTypeNames::resize) {
+  if (event_type == event_type_names::kResize) {
     UseCounter::Count(GetExecutionContext(),
                       WebFeature::kPictureInPictureWindowResizeEventListener);
   }

@@ -35,32 +35,30 @@ Devices.DevicesView = class extends UI.VBox {
 
     const discoveryFooter = this.contentElement.createChild('div', 'devices-footer');
     this._deviceCountSpan = discoveryFooter.createChild('span');
-    discoveryFooter.createChild('span').textContent = Common.UIString(' Read ');
-    discoveryFooter.appendChild(UI.XLink.create(
+    const documentationLink = UI.XLink.create(
         'https://developers.google.com/chrome-developer-tools/docs/remote-debugging',
-        Common.UIString('remote debugging documentation')));
-    discoveryFooter.createChild('span').textContent = Common.UIString(' for more information.');
+        ls`remote debugging documentation`);
+    discoveryFooter.appendChild(
+        UI.formatLocalized('%s Read %s for more information.', [this._deviceCountSpan, documentationLink]));
     this._updateFooter();
     this._selectSidebarListItem(this._discoveryListItem, this._discoveryView);
 
-    InspectorFrontendHost.events.addEventListener(
-        InspectorFrontendHostAPI.Events.DevicesUpdated, this._devicesUpdated, this);
-    InspectorFrontendHost.events.addEventListener(
-        InspectorFrontendHostAPI.Events.DevicesDiscoveryConfigChanged, this._devicesDiscoveryConfigChanged, this);
-    InspectorFrontendHost.events.addEventListener(
-        InspectorFrontendHostAPI.Events.DevicesPortForwardingStatusChanged, this._devicesPortForwardingStatusChanged,
-        this);
-
-    this.contentElement.tabIndex = 0;
-    this.setDefaultFocusedElement(this.contentElement);
+    Host.InspectorFrontendHost.events.addEventListener(
+        Host.InspectorFrontendHostAPI.Events.DevicesUpdated, this._devicesUpdated, this);
+    Host.InspectorFrontendHost.events.addEventListener(
+        Host.InspectorFrontendHostAPI.Events.DevicesDiscoveryConfigChanged, this._devicesDiscoveryConfigChanged, this);
+    Host.InspectorFrontendHost.events.addEventListener(
+        Host.InspectorFrontendHostAPI.Events.DevicesPortForwardingStatusChanged,
+        this._devicesPortForwardingStatusChanged, this);
   }
 
   /**
    * @return {!Devices.DevicesView}
    */
   static _instance() {
-    if (!Devices.DevicesView._instanceObject)
+    if (!Devices.DevicesView._instanceObject) {
       Devices.DevicesView._instanceObject = new Devices.DevicesView();
+    }
     return Devices.DevicesView._instanceObject;
   }
 
@@ -69,8 +67,9 @@ Devices.DevicesView = class extends UI.VBox {
    * @param {!UI.Widget} view
    */
   _selectSidebarListItem(listItem, view) {
-    if (this._selectedListItem === listItem)
+    if (this._selectedListItem === listItem) {
       return;
+    }
 
     if (this._selectedListItem) {
       this._selectedListItem.classList.remove('selected');
@@ -92,13 +91,15 @@ Devices.DevicesView = class extends UI.VBox {
             .slice()
             .filter(d => d.adbSerial.toUpperCase() !== 'WEBRTC' && d.adbSerial.toUpperCase() !== 'LOCALHOST');
     for (const device of this._devices) {
-      if (!device.adbConnected)
+      if (!device.adbConnected) {
         device.adbModel = Common.UIString('Unknown');
+      }
     }
 
     const ids = new Set();
-    for (const device of this._devices)
+    for (const device of this._devices) {
       ids.add(device.id);
+    }
 
     let selectedRemoved = false;
     for (const deviceId of this._viewById.keys()) {
@@ -107,8 +108,9 @@ Devices.DevicesView = class extends UI.VBox {
         this._listItemById.remove(deviceId);
         this._viewById.remove(deviceId);
         listItem.remove();
-        if (listItem === this._selectedListItem)
+        if (listItem === this._selectedListItem) {
           selectedRemoved = true;
+        }
       }
     }
 
@@ -131,8 +133,9 @@ Devices.DevicesView = class extends UI.VBox {
       view.update(device);
     }
 
-    if (selectedRemoved)
+    if (selectedRemoved) {
       this._selectSidebarListItem(this._discoveryListItem, this._discoveryView);
+    }
 
     this._updateFooter();
   }
@@ -164,13 +167,15 @@ Devices.DevicesView = class extends UI.VBox {
     const status = /** @type {!Adb.PortForwardingStatus} */ (event.data);
     for (const deviceId in status) {
       const view = this._viewById.get(deviceId);
-      if (view)
+      if (view) {
         view.portForwardingStatusChanged(status[deviceId]);
+      }
     }
     for (const deviceId of this._viewById.keys()) {
       const view = this._viewById.get(deviceId);
-      if (view && !(deviceId in status))
+      if (view && !(deviceId in status)) {
         view.portForwardingStatusChanged({ports: {}, browserId: ''});
+      }
     }
   }
 
@@ -186,7 +191,7 @@ Devices.DevicesView = class extends UI.VBox {
    */
   wasShown() {
     super.wasShown();
-    InspectorFrontendHost.setDevicesUpdatesEnabled(true);
+    Host.InspectorFrontendHost.setDevicesUpdatesEnabled(true);
   }
 
   /**
@@ -194,7 +199,7 @@ Devices.DevicesView = class extends UI.VBox {
    */
   willHide() {
     super.willHide();
-    InspectorFrontendHost.setDevicesUpdatesEnabled(false);
+    Host.InspectorFrontendHost.setDevicesUpdatesEnabled(false);
   }
 };
 
@@ -213,14 +218,14 @@ Devices.DevicesView.DiscoveryView = class extends UI.VBox {
     this._discoverUsbDevicesCheckbox = discoverUsbDevicesCheckbox.checkboxElement;
     this._discoverUsbDevicesCheckbox.addEventListener('click', () => {
       this._config.discoverUsbDevices = this._discoverUsbDevicesCheckbox.checked;
-      InspectorFrontendHost.setDevicesDiscoveryConfig(this._config);
+      Host.InspectorFrontendHost.setDevicesDiscoveryConfig(this._config);
     }, false);
 
     const help = this.element.createChild('div', 'discovery-help');
-    help.createChild('span').textContent = Common.UIString('Need help? Read Chrome ');
-    help.appendChild(UI.XLink.create(
+    const documentationLink = UI.XLink.create(
         'https://developers.google.com/chrome-developer-tools/docs/remote-debugging',
-        Common.UIString('remote debugging documentation.')));
+        ls`remote debugging documentation`);
+    help.appendChild(UI.formatLocalized('Need help? Read Chrome %s.', [documentationLink]));
 
     /** @type {!Adb.Config} */
     this._config;
@@ -228,9 +233,10 @@ Devices.DevicesView.DiscoveryView = class extends UI.VBox {
     this._portForwardingView = new Devices.DevicesView.PortForwardingView((enabled, config) => {
       this._config.portForwardingEnabled = enabled;
       this._config.portForwardingConfig = {};
-      for (const rule of config)
+      for (const rule of config) {
         this._config.portForwardingConfig[rule.port] = rule.address;
-      InspectorFrontendHost.setDevicesDiscoveryConfig(this._config);
+      }
+      Host.InspectorFrontendHost.setDevicesDiscoveryConfig(this._config);
     });
     this._portForwardingView.show(this.element);
   }
@@ -265,10 +271,12 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
     this._portForwardingEnabledCheckbox.addEventListener('click', this._update.bind(this), false);
 
     const portForwardingFooter = this.element.createChild('div', 'port-forwarding-footer');
-    portForwardingFooter.createChild('span').textContent = Common.UIString(
-        'Define the listening port on your device that maps to a port accessible from your development machine. ');
-    portForwardingFooter.appendChild(UI.XLink.create(
-        'https://developer.chrome.com/devtools/docs/remote-debugging#port-forwarding', Common.UIString('Learn more')));
+    const documentationLink = UI.XLink.create(
+        'https://developer.chrome.com/devtools/docs/remote-debugging#port-forwarding',
+        ls`remote debugging documentation`);
+    portForwardingFooter.appendChild(UI.formatLocalized(
+        'Define the listening port on your device that maps to a port accessible from your development machine. Read %s for more.',
+        [documentationLink]));
 
     /** @type {!UI.ListWidget<!Adb.PortForwardingRule>} */
     this._list = new UI.ListWidget(this);
@@ -281,8 +289,10 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
     /** @type {?UI.ListWidget.Editor<!Adb.PortForwardingRule>} */
     this._editor = null;
 
-    this.element.appendChild(
-        UI.createTextButton(Common.UIString('Add rule'), this._addRuleButtonClicked.bind(this), 'add-rule-button'));
+    const addButton =
+        UI.createTextButton(Common.UIString('Add rule'), this._addRuleButtonClicked.bind(this), 'add-rule-button');
+    this.element.appendChild(addButton);
+    this.setDefaultFocusedElement(addButton);
 
     /** @type {!Array<!Adb.PortForwardingRule>} */
     this._portForwardingConfig = [];
@@ -347,8 +357,9 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
   commitEdit(rule, editor, isNew) {
     rule.port = editor.control('port').value.trim();
     rule.address = editor.control('address').value.trim();
-    if (isNew)
+    if (isNew) {
       this._portForwardingConfig.push(rule);
+    }
     this._update();
   }
 
@@ -368,18 +379,20 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
    * @return {!UI.ListWidget.Editor<!Adb.PortForwardingRule>}
    */
   _createEditor() {
-    if (this._editor)
+    if (this._editor) {
       return this._editor;
+    }
 
     const editor = new UI.ListWidget.Editor();
     this._editor = editor;
     const content = editor.contentElement();
     const fields = content.createChild('div', 'port-forwarding-edit-row');
     fields.createChild('div', 'port-forwarding-value port-forwarding-port')
-        .appendChild(editor.createInput('port', 'text', 'Device port (3333)', portValidator.bind(this)));
+        .appendChild(editor.createInput('port', 'text', ls`Device port (3333)`, portValidator.bind(this)));
     fields.createChild('div', 'port-forwarding-separator port-forwarding-separator-invisible');
     fields.createChild('div', 'port-forwarding-value')
-        .appendChild(editor.createInput('address', 'text', 'Local address (dev.example.corp:3333)', addressValidator));
+        .appendChild(
+            editor.createInput('address', 'text', ls`Local address (dev.example.corp:3333)`, addressValidator));
     return editor;
 
     /**
@@ -387,35 +400,64 @@ Devices.DevicesView.PortForwardingView = class extends UI.VBox {
      * @param {number} index
      * @param {!HTMLInputElement|!HTMLSelectElement} input
      * @this {Devices.DevicesView.PortForwardingView}
-     * @return {boolean}
+     * @return {!UI.ListWidget.ValidatorResult}
      */
     function portValidator(rule, index, input) {
+      let errorMessage;
       const value = input.value.trim();
-      const match = value.match(/^(\d+)$/);
-      if (!match)
-        return false;
-      const port = parseInt(match[1], 10);
-      if (port < 1024 || port > 65535)
-        return false;
-      for (let i = 0; i < this._portForwardingConfig.length; ++i) {
-        if (i !== index && this._portForwardingConfig[i].port === value)
-          return false;
+      if (!value) {
+        errorMessage = ls`Device port number field is required`;
+        return {valid: false, errorMessage};
       }
-      return true;
+      const match = value.match(/^(\d+)$/);
+      if (!match) {
+        errorMessage = ls`Device port must be a number`;
+      } else {
+        const port = parseInt(match[1], 10);
+        if (port < 1024 || port > 65535) {
+          errorMessage = ls`Device port number must be between 1024 and 65535`;
+        }
+        for (let i = 0; i < this._portForwardingConfig.length; ++i) {
+          if (i !== index && this._portForwardingConfig[i].port === value) {
+            errorMessage = ls`Device port numbers can only be used once`;
+            break;
+          }
+        }
+      }
+
+      if (errorMessage) {
+        return {valid: false, errorMessage};
+      }
+      return {valid: true};
     }
 
     /**
      * @param {!Adb.PortForwardingRule} rule
      * @param {number} index
      * @param {!HTMLInputElement|!HTMLSelectElement} input
-     * @return {boolean}
+     * @return {!UI.ListWidget.ValidatorResult}
      */
     function addressValidator(rule, index, input) {
-      const match = input.value.trim().match(/^([a-zA-Z0-9\.\-_]+):(\d+)$/);
-      if (!match)
-        return false;
-      const port = parseInt(match[2], 10);
-      return port <= 65535;
+      let errorMessage;
+      const value = input.value.trim();
+      if (!value) {
+        errorMessage = ls`Local address field is required`;
+        return {valid: false, errorMessage};
+      }
+      const match = value.match(/^([a-zA-Z0-9\.\-_]+):(\d+)$/);
+      if (!match) {
+        errorMessage = ls`Local address must match this pattern: dev.example.corp:3333`;
+      } else {
+        const port = parseInt(match[2], 10);
+        if (port > 65535) {
+          errorMessage = ls`Port number must be not greater than 65535`;
+        }
+      }
+
+      if (errorMessage) {
+        return {valid: false, errorMessage};
+      }
+      return {valid: true};
     }
   }
 };
@@ -453,19 +495,22 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
    * @param {!Adb.Device} device
    */
   update(device) {
-    if (!this._device || this._device.adbModel !== device.adbModel)
+    if (!this._device || this._device.adbModel !== device.adbModel) {
       this._deviceTitle.textContent = device.adbModel;
+    }
 
-    if (!this._device || this._device.adbSerial !== device.adbSerial)
+    if (!this._device || this._device.adbSerial !== device.adbSerial) {
       this._deviceSerial.textContent = '#' + device.adbSerial;
+    }
 
     this._deviceOffline.classList.toggle('hidden', device.adbConnected);
     this._noBrowsers.classList.toggle('hidden', !device.adbConnected || !!device.browsers.length);
     this._browsers.classList.toggle('hidden', !device.adbConnected || !device.browsers.length);
 
     const browserIds = new Set();
-    for (const browser of device.browsers)
+    for (const browser of device.browsers) {
       browserIds.add(browser.id);
+    }
 
     for (const browserId of this._browserById.keys()) {
       if (!browserIds.has(browserId)) {
@@ -544,7 +589,7 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
 
     function openNewTab() {
       if (section.browser) {
-        InspectorFrontendHost.openRemotePage(section.browser.id, newTabInput.value.trim() || 'about:blank');
+        Host.InspectorFrontendHost.openRemotePage(section.browser.id, newTabInput.value.trim() || 'about:blank');
         newTabInput.value = '';
       }
     }
@@ -557,15 +602,17 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
   _updateBrowserSection(section, browser) {
     if (!section.browser || section.browser.adbBrowserName !== browser.adbBrowserName ||
         section.browser.adbBrowserVersion !== browser.adbBrowserVersion) {
-      if (browser.adbBrowserVersion)
+      if (browser.adbBrowserVersion) {
         section.title.textContent = String.sprintf('%s (%s)', browser.adbBrowserName, browser.adbBrowserVersion);
-      else
+      } else {
         section.title.textContent = browser.adbBrowserName;
+      }
     }
 
     const pageIds = new Set();
-    for (const page of browser.pages)
+    for (const page of browser.pages) {
       pageIds.add(page.id);
+    }
 
     for (const pageId of section.pageSections.keys()) {
       if (!pageIds.has(pageId)) {
@@ -583,13 +630,15 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
         section.pages.appendChild(pageSection.element);
       }
       this._updatePageSection(pageSection, page);
-      if (!index && section.pages.firstChild !== pageSection.element)
+      if (!index && section.pages.firstChild !== pageSection.element) {
         section.pages.insertBefore(pageSection.element, section.pages.firstChild);
+      }
     }
 
     const kViewMoreCount = 3;
-    for (let index = 0, element = section.pages.firstChild; element; element = element.nextSibling, ++index)
+    for (let index = 0, element = section.pages.firstChild; element; element = element.nextSibling, ++index) {
       element.classList.toggle('device-view-more-page', index >= kViewMoreCount);
+    }
     section.viewMore.classList.toggle('device-needs-view-more', browser.pages.length > kViewMoreCount);
     section.newTab.classList.toggle('hidden', !browser.adbBrowserChromeVersion);
     section.browser = browser;
@@ -627,8 +676,9 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
      * @param {string} action
      */
     function doAction(action) {
-      if (section.page)
-        InspectorFrontendHost.performActionOnRemotePage(section.page.id, action);
+      if (section.page) {
+        Host.InspectorFrontendHost.performActionOnRemotePage(section.page.id, action);
+      }
     }
   }
 
@@ -655,8 +705,9 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
    */
   portForwardingStatusChanged(status) {
     const json = JSON.stringify(status);
-    if (json === this._cachedPortStatus)
+    if (json === this._cachedPortStatus) {
       return;
+    }
     this._cachedPortStatus = json;
 
     this._portStatus.removeChildren();
@@ -666,17 +717,19 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
     const error = [];
     let empty = true;
     for (const port in status.ports) {
-      if (!status.ports.hasOwnProperty(port))
+      if (!status.ports.hasOwnProperty(port)) {
         continue;
+      }
 
       empty = false;
       const portStatus = status.ports[port];
       const portNumber = createElementWithClass('div', 'device-view-port-number monospace');
       portNumber.textContent = ':' + port;
-      if (portStatus >= 0)
+      if (portStatus >= 0) {
         this._portStatus.appendChild(portNumber);
-      else
+      } else {
         this._portStatus.insertBefore(portNumber, this._portStatus.firstChild);
+      }
 
       const portIcon = createElementWithClass('div', 'device-view-port-icon');
       if (portStatus >= 0) {
@@ -692,12 +745,15 @@ Devices.DevicesView.DeviceView = class extends UI.VBox {
     }
 
     const title = [];
-    if (connected.length)
+    if (connected.length) {
       title.push(Common.UIString('Connected: %s', connected.join(', ')));
-    if (transient.length)
+    }
+    if (transient.length) {
       title.push(Common.UIString('Transient: %s', transient.join(', ')));
-    if (error.length)
+    }
+    if (error.length) {
       title.push(Common.UIString('Error: %s', error.join(', ')));
+    }
     this._portStatus.title = title.join('; ');
     this._portStatus.classList.toggle('hidden', empty);
   }

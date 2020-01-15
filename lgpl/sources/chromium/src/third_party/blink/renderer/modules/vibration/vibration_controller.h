@@ -20,14 +20,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_VIBRATION_VIBRATION_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_VIBRATION_VIBRATION_CONTROLLER_H_
 
+#include "base/macros.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/vibration_manager.mojom-blink.h"
-#include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/page/page_visibility_observer.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/timer.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -36,11 +37,10 @@ class LocalFrame;
 class UnsignedLongOrUnsignedLongSequence;
 
 class MODULES_EXPORT VibrationController final
-    : public GarbageCollectedFinalized<VibrationController>,
+    : public GarbageCollected<VibrationController>,
       public ContextLifecycleObserver,
       public PageVisibilityObserver {
   USING_GARBAGE_COLLECTED_MIXIN(VibrationController);
-  WTF_MAKE_NONCOPYABLE(VibrationController);
 
  public:
   using VibrationPattern = Vector<unsigned>;
@@ -74,9 +74,9 @@ class MODULES_EXPORT VibrationController final
   // Inherited from PageVisibilityObserver.
   void PageVisibilityChanged() override;
 
-  // Ptr to VibrationManager mojo interface. This is reset in |contextDestroyed|
-  // and must not be called or recreated after it is reset.
-  device::mojom::blink::VibrationManagerPtr vibration_manager_;
+  // Remote to VibrationManager mojo interface. This is reset in
+  // |contextDestroyed| and must not be called or recreated after it is reset.
+  mojo::Remote<device::mojom::blink::VibrationManager> vibration_manager_;
 
   // Timer for calling |doVibrate| after a delay. It is safe to call
   // |startOneshot| when the timer is already running: it may affect the time
@@ -94,6 +94,8 @@ class MODULES_EXPORT VibrationController final
   bool is_calling_vibrate_;
 
   VibrationPattern pattern_;
+
+  DISALLOW_COPY_AND_ASSIGN(VibrationController);
 };
 
 }  // namespace blink

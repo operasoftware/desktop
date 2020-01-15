@@ -30,16 +30,17 @@
 
 #include "third_party/blink/renderer/core/html/forms/button_input_type.h"
 
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 
 namespace blink {
 
-InputType* ButtonInputType::Create(HTMLInputElement& element) {
-  return new ButtonInputType(element);
+void ButtonInputType::CountUsage() {
+  CountUsageIfVisible(WebFeature::kInputTypeButton);
 }
 
 const AtomicString& ButtonInputType::FormControlType() const {
-  return InputTypeNames::button;
+  return input_type_names::kButton;
 }
 
 bool ButtonInputType::SupportsValidation() const {

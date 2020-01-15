@@ -43,7 +43,7 @@ class AnalyserHandler final : public AudioBasicInspectorHandler {
   ~AnalyserHandler() override;
 
   // AudioHandler
-  void Process(size_t frames_to_process) override;
+  void Process(uint32_t frames_to_process) override;
 
   unsigned FftSize() const { return analyser_.FftSize(); }
   void SetFftSize(unsigned size, ExceptionState&);
@@ -103,8 +103,10 @@ class AnalyserNode final : public AudioBasicInspectorNode {
  public:
   static AnalyserNode* Create(BaseAudioContext&, ExceptionState&);
   static AnalyserNode* Create(BaseAudioContext*,
-                              const AnalyserOptions&,
+                              const AnalyserOptions*,
                               ExceptionState&);
+
+  AnalyserNode(BaseAudioContext&);
 
   unsigned fftSize() const;
   void setFftSize(unsigned size, ExceptionState&);
@@ -120,8 +122,11 @@ class AnalyserNode final : public AudioBasicInspectorNode {
   void getFloatTimeDomainData(NotShared<DOMFloat32Array>);
   void getByteTimeDomainData(NotShared<DOMUint8Array>);
 
+  // InspectorHelperMixin
+  void ReportDidCreate() final;
+  void ReportWillBeDestroyed() final;
+
  private:
-  AnalyserNode(BaseAudioContext&);
   AnalyserHandler& GetAnalyserHandler() const;
 
   void SetMinMaxDecibels(double min, double max, ExceptionState&);

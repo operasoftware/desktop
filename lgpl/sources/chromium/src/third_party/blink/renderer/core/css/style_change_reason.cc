@@ -10,15 +10,17 @@
 
 namespace blink {
 
-namespace StyleChangeReason {
+namespace style_change_reason {
 const char kActiveStylesheetsUpdate[] = "ActiveStylesheetsUpdate";
 const char kAnimation[] = "Animation";
 const char kAttribute[] = "Attribute";
-const char kCleanupPlaceholderStyles[] = "CleanupPlaceholderStyles";
 const char kControlValue[] = "ControlValue";
 const char kControl[] = "Control";
 const char kDeclarativeContent[] = "Extension declarativeContent.css";
 const char kDesignMode[] = "DesignMode";
+const char kDisplayLock[] = "DisplayLock";
+const char kFindInvisible[] = "FindInvisible";
+const char kFlatTreeChange[] = "FlatTreeChange";
 const char kFontSizeChange[] = "FontSizeChange";
 const char kFonts[] = "Fonts";
 const char kFrame[] = "Frame";
@@ -31,11 +33,11 @@ const char kInlineCSSStyleMutated[] =
 const char kInspector[] = "Inspector";
 const char kLanguage[] = "Language";
 const char kInvisibleChange[] = "InvisibleChange";
+const char kLazyReattach[] = "LazyReattach";
 const char kLinkColorChange[] = "LinkColorChange";
 const char kPlatformColorChange[] = "PlatformColorChange";
+const char kPluginChanged[] = "Plugin Changed";
 const char kPolicyViolation[] = "Feature Policy Violation";
-const char kPropagateInheritChangeToDistributedNodes[] =
-    "PropagateInheritChangeToDistributedNodes";
 const char kPropertyRegistration[] = "PropertyRegistration";
 const char kPropertyUnregistration[] = "PropertyUnregistration";
 const char kPseudoClass[] = "PseudoClass";
@@ -45,14 +47,15 @@ const char kSettings[] = "Settings";
 const char kShadow[] = "Shadow";
 const char kStyleInvalidator[] = "StyleInvalidator";
 const char kStyleSheetChange[] = "StyleSheetChange";
+const char kUseFallback[] = "UseFallback";
 const char kViewportUnits[] = "ViewportUnits";
 const char kVisitedLink[] = "VisitedLink";
 const char kVisuallyOrdered[] = "VisuallyOrdered";
 const char kWritingModeChange[] = "WritingModeChange";
 const char kZoom[] = "Zoom";
-}  // namespace StyleChangeReason
+}  // namespace style_change_reason
 
-namespace StyleChangeExtraData {
+namespace style_change_extra_data {
 DEFINE_GLOBAL(AtomicString, g_active);
 DEFINE_GLOBAL(AtomicString, g_disabled);
 DEFINE_GLOBAL(AtomicString, g_drag);
@@ -77,6 +80,6 @@ void Init() {
   new (NotNull, (void*)&g_unresolved) AtomicString(":unresolved");
 }
 
-}  // namespace StyleChangeExtraData
+}  // namespace style_change_extra_data
 
 }  // namespace blink

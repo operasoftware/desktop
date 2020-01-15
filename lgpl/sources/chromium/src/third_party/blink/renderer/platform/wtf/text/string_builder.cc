@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include "base/optional.h"
+#include "base/strings/string_util.h"
 #include "third_party/blink/renderer/platform/wtf/dtoa.h"
 #include "third_party/blink/renderer/platform/wtf/text/integer_to_string_conversion.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -38,7 +39,7 @@ String StringBuilder::ToString() {
   if (!length_)
     return g_empty_string;
   if (string_.IsNull()) {
-    if (is8_bit_)
+    if (is_8bit_)
       string_ = String(Characters8(), length_);
     else
       string_ = String(Characters16(), length_);
@@ -51,7 +52,7 @@ AtomicString StringBuilder::ToAtomicString() {
   if (!length_)
     return g_empty_atom;
   if (string_.IsNull()) {
-    if (is8_bit_)
+    if (is_8bit_)
       string_ = AtomicString(Characters8(), length_);
     else
       string_ = AtomicString(Characters16(), length_);
@@ -66,7 +67,7 @@ String StringBuilder::Substring(unsigned start, unsigned length) const {
   if (!string_.IsNull())
     return string_.Substring(start, length);
   length = std::min(length, length_ - start);
-  if (is8_bit_)
+  if (is_8bit_)
     return String(Characters8() + start, length);
   return String(Characters16() + start, length);
 }
@@ -75,7 +76,7 @@ void StringBuilder::Swap(StringBuilder& builder) {
   base::Optional<Buffer8> buffer8;
   base::Optional<Buffer16> buffer16;
   if (has_buffer_) {
-    if (is8_bit_) {
+    if (is_8bit_) {
       buffer8 = std::move(buffer8_);
       buffer8_.~Buffer8();
     } else {
@@ -85,7 +86,7 @@ void StringBuilder::Swap(StringBuilder& builder) {
   }
 
   if (builder.has_buffer_) {
-    if (builder.is8_bit_) {
+    if (builder.is_8bit_) {
       new (&buffer8_) Buffer8(std::move(builder.buffer8_));
       builder.buffer8_.~Buffer8();
     } else {
@@ -101,37 +102,41 @@ void StringBuilder::Swap(StringBuilder& builder) {
 
   std::swap(string_, builder.string_);
   std::swap(length_, builder.length_);
-  std::swap(is8_bit_, builder.is8_bit_);
+  std::swap(is_8bit_, builder.is_8bit_);
   std::swap(has_buffer_, builder.has_buffer_);
 }
 
 void StringBuilder::ClearBuffer() {
   if (!has_buffer_)
     return;
-  if (is8_bit_)
+  if (is_8bit_)
     buffer8_.~Buffer8();
   else
     buffer16_.~Buffer16();
   has_buffer_ = false;
 }
 
+void StringBuilder::Ensure16Bit() {
+  EnsureBuffer16(0);
+}
+
 void StringBuilder::Clear() {
   ClearBuffer();
   string_ = String();
   length_ = 0;
-  is8_bit_ = true;
+  is_8bit_ = true;
 }
 
 unsigned StringBuilder::Capacity() const {
   if (!HasBuffer())
     return 0;
-  if (is8_bit_)
+  if (is_8bit_)
     return buffer8_.capacity();
   return buffer16_.capacity();
 }
 
 void StringBuilder::ReserveCapacity(unsigned new_capacity) {
-  if (is8_bit_)
+  if (is_8bit_)
     EnsureBuffer8(new_capacity);
   else
     EnsureBuffer16(new_capacity);
@@ -142,7 +147,7 @@ void StringBuilder::Resize(unsigned new_size) {
   string_ = string_.Left(new_size);
   length_ = new_size;
   if (HasBuffer()) {
-    if (is8_bit_)
+    if (is_8bit_)
       buffer8_.resize(new_size);
     else
       buffer16_.resize(new_size);
@@ -151,7 +156,7 @@ void StringBuilder::Resize(unsigned new_size) {
 
 void StringBuilder::CreateBuffer8(unsigned added_size) {
   DCHECK(!HasBuffer());
-  DCHECK(is8_bit_);
+  DCHECK(is_8bit_);
   new (&buffer8_) Buffer8;
   has_buffer_ = true;
   // createBuffer is called right before appending addedSize more bytes. We
@@ -171,7 +176,7 @@ void StringBuilder::CreateBuffer8(unsigned added_size) {
 }
 
 void StringBuilder::CreateBuffer16(unsigned added_size) {
-  DCHECK(is8_bit_ || !HasBuffer());
+  DCHECK(is_8bit_ || !HasBuffer());
   Buffer8 buffer8;
   unsigned length = length_;
   if (has_buffer_) {
@@ -184,7 +189,7 @@ void StringBuilder::CreateBuffer16(unsigned added_size) {
   buffer16_.ReserveInitialCapacity(
       length_ +
       std::max<unsigned>(added_size, InitialBufferSize() / sizeof(UChar)));
-  is8_bit_ = false;
+  is_8bit_ = false;
   length_ = 0;
   if (!buffer8.IsEmpty()) {
     Append(buffer8.data(), length);
@@ -216,7 +221,7 @@ void StringBuilder::Append(const LChar* characters, unsigned length) {
     return;
   DCHECK(characters);
 
-  if (is8_bit_) {
+  if (is_8bit_) {
     EnsureBuffer8(length);
     buffer8_.Append(characters, length);
     length_ += length;
@@ -228,34 +233,12 @@ void StringBuilder::Append(const LChar* characters, unsigned length) {
   length_ += length;
 }
 
-template <typename IntegerType>
-static void AppendIntegerInternal(StringBuilder& builder, IntegerType input) {
-  IntegerToStringConverter<IntegerType> converter(input);
-  builder.Append(converter.Characters8(), converter.length());
+void StringBuilder::AppendNumber(bool number) {
+  AppendNumber(static_cast<uint8_t>(number));
 }
 
-void StringBuilder::AppendNumber(int number) {
-  AppendIntegerInternal(*this, number);
-}
-
-void StringBuilder::AppendNumber(unsigned number) {
-  AppendIntegerInternal(*this, number);
-}
-
-void StringBuilder::AppendNumber(long number) {
-  AppendIntegerInternal(*this, number);
-}
-
-void StringBuilder::AppendNumber(unsigned long number) {
-  AppendIntegerInternal(*this, number);
-}
-
-void StringBuilder::AppendNumber(long long number) {
-  AppendIntegerInternal(*this, number);
-}
-
-void StringBuilder::AppendNumber(unsigned long long number) {
-  AppendIntegerInternal(*this, number);
+void StringBuilder::AppendNumber(float number) {
+  AppendNumber(static_cast<double>(number));
 }
 
 void StringBuilder::AppendNumber(double number, unsigned precision) {
@@ -263,11 +246,33 @@ void StringBuilder::AppendNumber(double number, unsigned precision) {
   Append(NumberToFixedPrecisionString(number, precision, buffer));
 }
 
+void StringBuilder::AppendFormat(const char* format, ...) {
+  va_list args;
+
+  static constexpr unsigned kDefaultSize = 256;
+  Vector<char, kDefaultSize> buffer(kDefaultSize);
+
+  va_start(args, format);
+  int length = base::vsnprintf(buffer.data(), kDefaultSize, format, args);
+  va_end(args);
+  DCHECK_GE(length, 0);
+
+  if (length >= static_cast<int>(kDefaultSize)) {
+    buffer.Grow(length + 1);
+    va_start(args, format);
+    length = base::vsnprintf(buffer.data(), buffer.size(), format, args);
+    va_end(args);
+  }
+
+  DCHECK_LT(static_cast<wtf_size_t>(length), buffer.size());
+  Append(reinterpret_cast<const LChar*>(buffer.data()), length);
+}
+
 void StringBuilder::erase(unsigned index) {
   if (index >= length_)
     return;
 
-  if (is8_bit_) {
+  if (is_8bit_) {
     EnsureBuffer8(0);
     buffer8_.EraseAt(index);
   } else {

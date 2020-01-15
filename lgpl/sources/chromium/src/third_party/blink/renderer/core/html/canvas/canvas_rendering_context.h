@@ -35,9 +35,8 @@
 #include "third_party/blink/renderer/platform/graphics/canvas_color_params.h"
 #include "third_party/blink/renderer/platform/graphics/color_behavior.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
-#include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
+#include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 
 namespace blink {
@@ -47,12 +46,11 @@ class HTMLCanvasElement;
 class ImageBitmap;
 
 constexpr const char* kSRGBCanvasColorSpaceName = "srgb";
+constexpr const char* kLinearRGBCanvasColorSpaceName = "linear-rgb";
 constexpr const char* kRec2020CanvasColorSpaceName = "rec2020";
 constexpr const char* kP3CanvasColorSpaceName = "p3";
 
 constexpr const char* kRGBA8CanvasPixelFormatName = "uint8";
-constexpr const char* kRGB10A2CanvasPixelFormatName = "10-10-10-2";
-constexpr const char* kRGBA12CanvasPixelFormatName = "12-12-12-12";
 constexpr const char* kF16CanvasPixelFormatName = "float16";
 
 class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
@@ -67,14 +65,16 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
   enum ContextType {
     // Do not change assigned numbers of existing items: add new features to the
     // end of the list.
-    kContext2d = 0,
+    kContext2D = 0,
     kContextExperimentalWebgl = 2,
     kContextWebgl = 3,
     kContextWebgl2 = 4,
     kContextImageBitmap = 5,
     kContextXRPresent = 6,
     kContextWebgl2Compute = 7,
-    kContextTypeCount,
+    kContextGPUPresent = 8,
+    kContextTypeUnknown = 9,
+    kMaxValue = kContextTypeUnknown,
   };
 
   static ContextType ContextTypeFromId(const String& id);
@@ -87,21 +87,21 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
 
   const CanvasColorParams& ColorParams() const { return color_params_; }
 
-  virtual scoped_refptr<StaticBitmapImage> GetImage(AccelerationHint) const = 0;
+  virtual scoped_refptr<StaticBitmapImage> GetImage(AccelerationHint) = 0;
   virtual ContextType GetContextType() const = 0;
   virtual bool IsComposited() const = 0;
   virtual bool IsAccelerated() const = 0;
   virtual bool IsOriginTopLeft() const {
     // Canvas contexts have the origin of coordinates on the top left corner.
     // Accelerated resources (e.g. GPU textures) have their origin of
-    // coordinates in the uppper left corner.
+    // coordinates in the upper left corner.
     return !IsAccelerated();
   }
   virtual bool ShouldAntialias() const { return false; }
   virtual void SetIsHidden(bool) = 0;
   virtual bool isContextLost() const { return true; }
   // TODO(fserb): remove SetCanvasGetContextResult.
-  virtual void SetCanvasGetContextResult(RenderingContext&) { NOTREACHED(); };
+  virtual void SetCanvasGetContextResult(RenderingContext&) { NOTREACHED(); }
   virtual void SetOffscreenCanvasGetContextResult(OffscreenRenderingContext&) {
     NOTREACHED();
   }
@@ -135,11 +135,9 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
   // of a presentable frame.
   virtual void FinalizeFrame() {}
 
-  void NeedsFinalizeFrame();
-
   // Thread::TaskObserver implementation
-  void DidProcessTask() override;
-  void WillProcessTask() final {}
+  void DidProcessTask(const base::PendingTask&) override;
+  void WillProcessTask(const base::PendingTask&) final {}
 
   // Canvas2D-specific interface
   virtual bool Is2d() const { return false; }
@@ -153,23 +151,24 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
   virtual void StyleDidChange(const ComputedStyle* old_style,
                               const ComputedStyle& new_style) {}
   virtual HitTestCanvasResult* GetControlAndIdIfHitRegionExists(
-      const LayoutPoint& location) {
+      const PhysicalOffset& location) {
     NOTREACHED();
-    return HitTestCanvasResult::Create(String(), nullptr);
+    return MakeGarbageCollected<HitTestCanvasResult>(String(), nullptr);
   }
   virtual String GetIdFromControl(const Element* element) { return String(); }
-  virtual void ResetUsageTracking(){};
+  virtual void ResetUsageTracking() {}
 
   // WebGL-specific interface
   virtual bool Is3d() const { return false; }
+  virtual bool UsingSwapChain() const { return false; }
   virtual void SetFilterQuality(SkFilterQuality) { NOTREACHED(); }
   virtual void Reshape(int width, int height) { NOTREACHED(); }
   virtual void MarkLayerComposited() { NOTREACHED(); }
-  virtual scoped_refptr<Uint8Array> PaintRenderingResultsToDataArray(
-      SourceDrawingBuffer) {
+  virtual sk_sp<SkData> PaintRenderingResultsToDataArray(SourceDrawingBuffer) {
     NOTREACHED();
     return nullptr;
   }
+  virtual void ProvideBackBufferToResourceProvider() const { NOTREACHED(); }
   virtual int ExternallyAllocatedBufferCountPerPixel() {
     NOTREACHED();
     return 0;
@@ -180,10 +179,11 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
   }
 
   // OffscreenCanvas-specific methods
-  virtual void PushFrame() {}
+  virtual bool PushFrame() { return false; }
+  virtual bool IsDeferralEnabled() const { return false; }
   virtual ImageBitmap* TransferToImageBitmap(ScriptState*) { return nullptr; }
 
-  bool WouldTaintOrigin(CanvasImageSource*, const SecurityOrigin*);
+  bool WouldTaintOrigin(CanvasImageSource*);
   void DidMoveToNewDocument(Document*);
 
   void DetachHost() { host_ = nullptr; }
@@ -192,7 +192,7 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
     return creation_attributes_;
   }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
   virtual void Stop() = 0;
 
  protected:
@@ -203,11 +203,12 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
   void Dispose();
 
   Member<CanvasRenderingContextHost> host_;
-  HashSet<String> clean_urls_;
-  HashSet<String> dirty_urls_;
   CanvasColorParams color_params_;
   CanvasContextCreationAttributesCore creation_attributes_;
-  bool finalize_frame_scheduled_ = false;
+
+  void StartListeningForDidProcessTask();
+  void StopListeningForDidProcessTask();
+  bool listening_for_did_process_task_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(CanvasRenderingContext);
 };

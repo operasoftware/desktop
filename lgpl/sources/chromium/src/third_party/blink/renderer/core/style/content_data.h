@@ -31,18 +31,21 @@
 
 #include "third_party/blink/renderer/core/style/counter_content.h"
 #include "third_party/blink/renderer/core/style/style_image.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
 class ComputedStyle;
 class LayoutObject;
+enum class LegacyLayout;
 class PseudoElement;
 
-class ContentData : public GarbageCollectedFinalized<ContentData> {
+class ContentData : public GarbageCollected<ContentData> {
  public:
   static ContentData* Create(StyleImage*);
   static ContentData* Create(const String&);
   static ContentData* Create(std::unique_ptr<CounterContent>);
+  static ContentData* CreateAltText(const String&);
   static ContentData* Create(QuoteType);
 
   virtual ~ContentData() = default;
@@ -51,9 +54,11 @@ class ContentData : public GarbageCollectedFinalized<ContentData> {
   virtual bool IsImage() const { return false; }
   virtual bool IsQuote() const { return false; }
   virtual bool IsText() const { return false; }
+  virtual bool IsAltText() const { return false; }
 
   virtual LayoutObject* CreateLayoutObject(PseudoElement&,
-                                           ComputedStyle&) const = 0;
+                                           const ComputedStyle&,
+                                           LegacyLayout) const = 0;
 
   virtual ContentData* Clone() const;
 
@@ -70,14 +75,12 @@ class ContentData : public GarbageCollectedFinalized<ContentData> {
   Member<ContentData> next_;
 };
 
-#define DEFINE_CONTENT_DATA_TYPE_CASTS(typeName)                 \
-  DEFINE_TYPE_CASTS(typeName##ContentData, ContentData, content, \
-                    content->Is##typeName(), content.Is##typeName())
-
 class ImageContentData final : public ContentData {
   friend class ContentData;
 
  public:
+  ImageContentData(StyleImage* image) : image_(image) { DCHECK(image_); }
+
   const StyleImage* GetImage() const { return image_.Get(); }
   StyleImage* GetImage() { return image_.Get(); }
   void SetImage(StyleImage* image) {
@@ -87,7 +90,8 @@ class ImageContentData final : public ContentData {
 
   bool IsImage() const override { return true; }
   LayoutObject* CreateLayoutObject(PseudoElement&,
-                                   ComputedStyle&) const override;
+                                   const ComputedStyle&,
+                                   LegacyLayout) const override;
 
   bool Equals(const ContentData& data) const override {
     if (!data.IsImage())
@@ -99,8 +103,6 @@ class ImageContentData final : public ContentData {
   void Trace(blink::Visitor*) override;
 
  private:
-  ImageContentData(StyleImage* image) : image_(image) { DCHECK(image_); }
-
   ContentData* CloneInternal() const override {
     StyleImage* image = const_cast<StyleImage*>(this->GetImage());
     return Create(image);
@@ -109,18 +111,26 @@ class ImageContentData final : public ContentData {
   Member<StyleImage> image_;
 };
 
-DEFINE_CONTENT_DATA_TYPE_CASTS(Image);
+template <>
+struct DowncastTraits<ImageContentData> {
+  static bool AllowFrom(const ContentData& content) {
+    return content.IsImage();
+  }
+};
 
 class TextContentData final : public ContentData {
   friend class ContentData;
 
  public:
+  TextContentData(const String& text) : text_(text) {}
+
   const String& GetText() const { return text_; }
   void SetText(const String& text) { text_ = text; }
 
   bool IsText() const override { return true; }
   LayoutObject* CreateLayoutObject(PseudoElement&,
-                                   ComputedStyle&) const override;
+                                   const ComputedStyle&,
+                                   LegacyLayout) const override;
 
   bool Equals(const ContentData& data) const override {
     if (!data.IsText())
@@ -129,14 +139,47 @@ class TextContentData final : public ContentData {
   }
 
  private:
-  TextContentData(const String& text) : text_(text) {}
-
   ContentData* CloneInternal() const override { return Create(GetText()); }
 
   String text_;
 };
 
-DEFINE_CONTENT_DATA_TYPE_CASTS(Text);
+template <>
+struct DowncastTraits<TextContentData> {
+  static bool AllowFrom(const ContentData& content) { return content.IsText(); }
+};
+
+class AltTextContentData final : public ContentData {
+  friend class ContentData;
+
+ public:
+  AltTextContentData(const String& text) : text_(text) {}
+
+  String GetText() const { return text_; }
+  void SetText(const String& text) { text_ = text; }
+
+  bool IsAltText() const override { return true; }
+  LayoutObject* CreateLayoutObject(PseudoElement&,
+                                   const ComputedStyle&,
+                                   LegacyLayout) const override;
+
+  bool Equals(const ContentData& data) const override {
+    if (!data.IsAltText())
+      return false;
+    return static_cast<const AltTextContentData&>(data).GetText() == GetText();
+  }
+
+ private:
+  ContentData* CloneInternal() const override { return Create(GetText()); }
+  String text_;
+};
+
+template <>
+struct DowncastTraits<AltTextContentData> {
+  static bool AllowFrom(const ContentData& content) {
+    return content.IsAltText();
+  }
+};
 
 class CounterContentData final : public ContentData {
   friend class ContentData;
@@ -147,14 +190,15 @@ class CounterContentData final : public ContentData {
     counter_ = std::move(counter);
   }
 
-  bool IsCounter() const override { return true; }
-  LayoutObject* CreateLayoutObject(PseudoElement&,
-                                   ComputedStyle&) const override;
-
- private:
   CounterContentData(std::unique_ptr<CounterContent> counter)
       : counter_(std::move(counter)) {}
 
+  bool IsCounter() const override { return true; }
+  LayoutObject* CreateLayoutObject(PseudoElement&,
+                                   const ComputedStyle&,
+                                   LegacyLayout) const override;
+
+ private:
   ContentData* CloneInternal() const override {
     std::unique_ptr<CounterContent> counter_data =
         std::make_unique<CounterContent>(*Counter());
@@ -171,18 +215,26 @@ class CounterContentData final : public ContentData {
   std::unique_ptr<CounterContent> counter_;
 };
 
-DEFINE_CONTENT_DATA_TYPE_CASTS(Counter);
+template <>
+struct DowncastTraits<CounterContentData> {
+  static bool AllowFrom(const ContentData& content) {
+    return content.IsCounter();
+  }
+};
 
 class QuoteContentData final : public ContentData {
   friend class ContentData;
 
  public:
+  QuoteContentData(QuoteType quote) : quote_(quote) {}
+
   QuoteType Quote() const { return quote_; }
   void SetQuote(QuoteType quote) { quote_ = quote; }
 
   bool IsQuote() const override { return true; }
   LayoutObject* CreateLayoutObject(PseudoElement&,
-                                   ComputedStyle&) const override;
+                                   const ComputedStyle&,
+                                   LegacyLayout) const override;
 
   bool Equals(const ContentData& data) const override {
     if (!data.IsQuote())
@@ -191,14 +243,17 @@ class QuoteContentData final : public ContentData {
   }
 
  private:
-  QuoteContentData(QuoteType quote) : quote_(quote) {}
-
   ContentData* CloneInternal() const override { return Create(Quote()); }
 
   QuoteType quote_;
 };
 
-DEFINE_CONTENT_DATA_TYPE_CASTS(Quote);
+template <>
+struct DowncastTraits<QuoteContentData> {
+  static bool AllowFrom(const ContentData& content) {
+    return content.IsQuote();
+  }
+};
 
 inline bool operator==(const ContentData& a, const ContentData& b) {
   const ContentData* ptr_a = &a;

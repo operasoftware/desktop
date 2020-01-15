@@ -19,8 +19,9 @@ class MediaControlPlayButtonElement final : public MediaControlInputElement {
   // MediaControlInputElement overrides.
   bool WillRespondToMouseClickEvents() override;
   void UpdateDisplayType() override;
-  WebLocalizedString::Name GetOverflowStringName() const override;
+  int GetOverflowStringId() const override;
   bool HasOverflowButton() const override;
+  bool IsControlPanelButton() const override;
 
   void OnMediaKeyboardEvent(Event* event) { DefaultEventHandler(*event); }
 

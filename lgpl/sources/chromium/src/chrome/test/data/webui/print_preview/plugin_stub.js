@@ -6,13 +6,24 @@ cr.define('print_preview', function() {
   /**
    * Test version of the PluginProxy.
    */
-  class PDFPluginStub {
+  class PDFPluginStub extends TestBrowserProxy {
     constructor() {
+      super(['loadPreviewPage']);
+
       /** @type {?Function} The callback to call on load. */
       this.loadCallback_ = null;
 
+      /** @type {?Function} Callback to call before load. */
+      this.preloadCallback_ = null;
+
+      /** @type {?Function} The callback to call when the viewport changes. */
+      this.viewportChangedCallback_ = null;
+
       /** @type {boolean} Whether the plugin is compatible. */
       this.compatible_ = true;
+
+      /** @type {?HTMLDivElement} */
+      this.fakePlugin_ = null;
     }
 
     /** @param {boolean} Whether the PDF plugin should be compatible. */
@@ -21,11 +32,28 @@ cr.define('print_preview', function() {
     }
 
     /**
-     * @param {!Function} loadCallback Callback to call when the preview
+     * @param {?Function} loadCallback Callback to call when the preview
      *     loads.
      */
     setLoadCallback(loadCallback) {
+      assert(!this.loadCallback_);
       this.loadCallback_ = loadCallback;
+    }
+
+    /**
+     * @param {?Function} preloadCallback Callback to call before the preview
+     *     loads.
+     */
+    setPreloadCallback(preloadCallback) {
+      this.preloadCallback_ = preloadCallback;
+    }
+
+    /** @param {?Function} keyEventCallback */
+    setKeyEventCallback(keyEventCallback) {}
+
+    /** @param {?Function} viewportChangedCallback */
+    setViewportChangedCallback(viewportChangedCallback) {
+      this.viewportChangedCallback_ = viewportChangedCallback;
     }
 
     /**
@@ -38,17 +66,24 @@ cr.define('print_preview', function() {
 
     /** @return {boolean} Whether the plugin is ready. */
     pluginReady() {
-      return true;
+      return !!this.fakePlugin_;
     }
 
     /**
      * Sets the load callback to imitate the plugin.
      * @param {number} previewUid The unique ID of the preview UI.
      * @param {number} index The preview index to load.
-     * @return {?print_preview_new.PDFPlugin}
+     * @return {?print_preview.PDFPlugin}
      */
     createPlugin(previewUid, index) {
-      return null;
+      if (!this.compatible_) {
+        return null;
+      }
+
+      this.fakePlugin_ = document.createElement('div');
+      this.fakePlugin_.classList.add('preview-area-plugin');
+      this.fakePlugin_.id = 'pdf-viewer';
+      return this.fakePlugin_;
     }
 
     /**
@@ -60,8 +95,16 @@ cr.define('print_preview', function() {
      */
     resetPrintPreviewMode(previewUid, index, color, pages, modifiable) {}
 
+    /**
+     * @param {number} scrollX The amount to horizontally scroll in pixels.
+     * @param {number} scrollY The amount to vertically scroll in pixels.
+     */
+    scrollPosition(scrollX, scrollY) {}
+
     /** @param {!KeyEvent} e Keyboard event to forward to the plugin. */
     sendKeyEvent(e) {}
+
+    hideToolbars() {}
 
     /**
      * @param {boolean} eventsOn Whether pointer events should be captured by
@@ -77,8 +120,31 @@ cr.define('print_preview', function() {
      * @param {number} index The preview index.
      */
     loadPreviewPage(previewUid, pageIndex, index) {
-      if (this.loadCallback_)
+      this.methodCalled(
+          'loadPreviewPage',
+          {previewUid: previewUid, pageIndex: pageIndex, index: index});
+      if (this.preloadCallback_) {
+        this.preloadCallback_();
+      }
+      if (this.loadCallback_) {
         this.loadCallback_(true);
+      }
+    }
+
+    darkModeChanged(darkMode) {}
+
+    /**
+     * @param {number} pageX The horizontal offset for the page corner in
+     *     pixels.
+     * @param {number} pageY The vertical offset for the page corner in pixels.
+     * @param {number} pageWidth The page width in pixels.
+     * @param {number} viewportWidth The viewport width in pixels.
+     * @param {number} viewportHeight The viewport height in pixels.
+     * @private
+     */
+    triggerVisualStateChange(
+        pageX, pageY, pageWidth, viewportWidth, viewportHeight) {
+      this.viewportChangedCallback_.apply(this, arguments);
     }
   }
 

@@ -51,7 +51,7 @@ namespace blink {
 
 // A parser parsing mlutipart/x-mixed-replace resource.
 class CORE_EXPORT MultipartImageResourceParser final
-    : public GarbageCollectedFinalized<MultipartImageResourceParser> {
+    : public GarbageCollected<MultipartImageResourceParser> {
  public:
   class CORE_EXPORT Client : public GarbageCollectedMixin {
    public:
@@ -64,26 +64,28 @@ class CORE_EXPORT MultipartImageResourceParser final
   MultipartImageResourceParser(const ResourceResponse&,
                                const Vector<char>& boundary,
                                Client*);
-  void AppendData(const char* bytes, size_t);
+  void AppendData(const char* bytes, wtf_size_t);
   void Finish();
   void Cancel() { is_cancelled_ = true; }
 
   void Trace(blink::Visitor*);
 
-  static size_t SkippableLengthForTest(const Vector<char>& data, size_t size) {
+  static wtf_size_t SkippableLengthForTest(const Vector<char>& data,
+                                           wtf_size_t size) {
     return SkippableLength(data, size);
   }
-  static size_t FindBoundaryForTest(const Vector<char>& data,
-                                    Vector<char>* boundary) {
+  static wtf_size_t FindBoundaryForTest(const Vector<char>& data,
+                                        Vector<char>* boundary) {
     return FindBoundary(data, boundary);
   }
 
  private:
   bool ParseHeaders();
   bool IsCancelled() const { return is_cancelled_; }
-  static size_t SkippableLength(const Vector<char>&, size_t);
+  static wtf_size_t SkippableLength(const Vector<char>&, wtf_size_t);
   // This function updates |*boundary|.
-  static size_t FindBoundary(const Vector<char>& data, Vector<char>* boundary);
+  static wtf_size_t FindBoundary(const Vector<char>& data,
+                                 Vector<char>* boundary);
 
   const ResourceResponse original_response_;
   Vector<char> boundary_;

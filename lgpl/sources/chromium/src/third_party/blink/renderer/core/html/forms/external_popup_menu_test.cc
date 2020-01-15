@@ -5,8 +5,8 @@
 #include "third_party/blink/renderer/core/html/forms/external_popup_menu.h"
 
 #include <memory>
+
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/web/web_external_popup_menu.h"
 #include "third_party/blink/public/web/web_popup_menu_info.h"
@@ -20,6 +20,7 @@
 #include "third_party/blink/renderer/core/layout/layout_menu_list.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 
@@ -32,14 +33,14 @@ class ExternalPopupMenuDisplayNoneItemsTest : public PageTestBase {
  protected:
   void SetUp() override {
     PageTestBase::SetUp();
-    HTMLSelectElement* element = HTMLSelectElement::Create(GetDocument());
+    auto* element = MakeGarbageCollected<HTMLSelectElement>(GetDocument());
     // Set the 4th an 5th items to have "display: none" property
     element->SetInnerHTMLFromString(
         "<option><option><option><option style='display:none;'><option "
         "style='display:none;'><option><option>");
     GetDocument().body()->AppendChild(element, ASSERT_NO_EXCEPTION);
     owner_element_ = element;
-    GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+    GetDocument().UpdateStyleAndLayout();
   }
 
   Persistent<HTMLSelectElement> owner_element_;
@@ -65,7 +66,7 @@ TEST_F(ExternalPopupMenuDisplayNoneItemsTest, IndexMappingTest) {
 }
 
 class ExternalPopupMenuWebFrameClient
-    : public FrameTestHelpers::TestWebFrameClient {
+    : public frame_test_helpers::TestWebFrameClient {
  public:
   WebExternalPopupMenu* CreateExternalPopupMenu(
       const WebPopupMenuInfo&,
@@ -101,21 +102,22 @@ class ExternalPopupMenuTest : public testing::Test {
     WebView()->SetUseExternalPopupMenus(true);
   }
   void TearDown() override {
-    Platform::Current()
-        ->GetURLLoaderMockFactory()
-        ->UnregisterAllURLsAndClearMemoryCache();
+    url_test_helpers::UnregisterAllURLsAndClearMemoryCache();
   }
 
   void RegisterMockedURLLoad(const std::string& file_name) {
-    URLTestHelpers::RegisterMockedURLLoadFromBase(
+    // TODO(crbug.com/751425): We should use the mock functionality
+    // via |helper_|.
+    url_test_helpers::RegisterMockedURLLoadFromBase(
         WebString::FromUTF8(base_url_), test::CoreTestDataPath("popup"),
         WebString::FromUTF8(file_name), WebString::FromUTF8("text/html"));
   }
 
   void LoadFrame(const std::string& file_name) {
-    FrameTestHelpers::LoadFrame(MainFrame(), base_url_ + file_name);
-    WebView()->Resize(WebSize(800, 600));
-    WebView()->UpdateAllLifecyclePhases();
+    frame_test_helpers::LoadFrame(MainFrame(), base_url_ + file_name);
+    WebView()->MainFrameWidget()->Resize(WebSize(800, 600));
+    WebView()->MainFrameWidget()->UpdateAllLifecyclePhases(
+        WebWidget::LifecycleUpdateReason::kTest);
   }
 
   WebViewImpl* WebView() const { return helper_.GetWebView(); }
@@ -127,17 +129,18 @@ class ExternalPopupMenuTest : public testing::Test {
  private:
   std::string base_url_;
   ExternalPopupMenuWebFrameClient web_frame_client_;
-  FrameTestHelpers::WebViewHelper helper_;
+  frame_test_helpers::WebViewHelper helper_;
 };
 
 TEST_F(ExternalPopupMenuTest, PopupAccountsForVisualViewportTransform) {
   RegisterMockedURLLoad("select_mid_screen.html");
   LoadFrame("select_mid_screen.html");
 
-  WebView()->Resize(WebSize(100, 100));
-  WebView()->UpdateAllLifecyclePhases();
+  WebView()->MainFrameWidget()->Resize(WebSize(100, 100));
+  WebView()->MainFrameWidget()->UpdateAllLifecyclePhases(
+      WebWidget::LifecycleUpdateReason::kTest);
 
-  HTMLSelectElement* select = ToHTMLSelectElement(
+  auto* select = To<HTMLSelectElement>(
       MainFrame()->GetFrame()->GetDocument()->getElementById("select"));
   LayoutMenuList* menu_list = ToLayoutMenuList(select->GetLayoutObject());
   ASSERT_TRUE(menu_list);
@@ -166,7 +169,7 @@ TEST_F(ExternalPopupMenuTest, DidAcceptIndex) {
   RegisterMockedURLLoad("select.html");
   LoadFrame("select.html");
 
-  HTMLSelectElement* select = ToHTMLSelectElement(
+  auto* select = To<HTMLSelectElement>(
       MainFrame()->GetFrame()->GetDocument()->getElementById("select"));
   LayoutMenuList* menu_list = ToLayoutMenuList(select->GetLayoutObject());
   ASSERT_TRUE(menu_list);
@@ -178,7 +181,7 @@ TEST_F(ExternalPopupMenuTest, DidAcceptIndex) {
       static_cast<ExternalPopupMenu*>(select->Popup());
   client->DidAcceptIndex(2);
   EXPECT_FALSE(select->PopupIsVisible());
-  ASSERT_STREQ("2", menu_list->GetText().Utf8().data());
+  ASSERT_EQ("2", menu_list->GetText().Utf8());
   EXPECT_EQ(2, select->selectedIndex());
 }
 
@@ -186,7 +189,7 @@ TEST_F(ExternalPopupMenuTest, DidAcceptIndices) {
   RegisterMockedURLLoad("select.html");
   LoadFrame("select.html");
 
-  HTMLSelectElement* select = ToHTMLSelectElement(
+  auto* select = To<HTMLSelectElement>(
       MainFrame()->GetFrame()->GetDocument()->getElementById("select"));
   LayoutMenuList* menu_list = ToLayoutMenuList(select->GetLayoutObject());
   ASSERT_TRUE(menu_list);
@@ -200,7 +203,7 @@ TEST_F(ExternalPopupMenuTest, DidAcceptIndices) {
   WebVector<int> indices_vector(indices, 1);
   client->DidAcceptIndices(indices_vector);
   EXPECT_FALSE(select->PopupIsVisible());
-  EXPECT_STREQ("2", menu_list->GetText().Utf8().data());
+  EXPECT_EQ("2", menu_list->GetText());
   EXPECT_EQ(2, select->selectedIndex());
 }
 
@@ -208,7 +211,7 @@ TEST_F(ExternalPopupMenuTest, DidAcceptIndicesClearSelect) {
   RegisterMockedURLLoad("select.html");
   LoadFrame("select.html");
 
-  HTMLSelectElement* select = ToHTMLSelectElement(
+  auto* select = To<HTMLSelectElement>(
       MainFrame()->GetFrame()->GetDocument()->getElementById("select"));
   LayoutMenuList* menu_list = ToLayoutMenuList(select->GetLayoutObject());
   ASSERT_TRUE(menu_list);

@@ -17,6 +17,7 @@
 #include "third_party/blink/renderer/platform/fonts/shaping/caching_word_shape_iterator.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/harfbuzz_shaper.h"
 #include "third_party/blink/renderer/platform/fonts/text_run_paint_info.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/language.h"
 #include "third_party/blink/renderer/platform/testing/font_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
@@ -31,9 +32,9 @@ TSAN_TEST(FontObjectThreadedTest, Language) {
 
 TSAN_TEST(FontObjectThreadedTest, GetFontDefinition) {
   RunOnThreads([]() {
-    MutableCSSPropertyValueSet* style =
-        MutableCSSPropertyValueSet::Create(kHTMLStandardMode);
-    CSSParser::ParseValue(style, CSSPropertyFont, "15px Ahem", true,
+    auto* style =
+        MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+    CSSParser::ParseValue(style, CSSPropertyID::kFont, "15px Ahem", true,
                           SecureContextMode::kInsecureContext);
 
     FontDescription desc = FontStyleResolver::ComputeFont(*style, nullptr);
@@ -130,16 +131,16 @@ TSAN_TEST(FontObjectThreadedTest, WordShaperTest) {
     CachingWordShapeIterator iter(&cache, text_run, &font);
 
     ASSERT_TRUE(iter.Next(&result));
-    EXPECT_EQ(0u, result->StartIndexForResult());
-    EXPECT_EQ(3u, result->EndIndexForResult());
+    EXPECT_EQ(0u, result->StartIndex());
+    EXPECT_EQ(3u, result->EndIndex());
 
     ASSERT_TRUE(iter.Next(&result));
-    EXPECT_EQ(0u, result->StartIndexForResult());
-    EXPECT_EQ(1u, result->EndIndexForResult());
+    EXPECT_EQ(0u, result->StartIndex());
+    EXPECT_EQ(1u, result->EndIndex());
 
     ASSERT_TRUE(iter.Next(&result));
-    EXPECT_EQ(0u, result->StartIndexForResult());
-    EXPECT_EQ(4u, result->EndIndexForResult());
+    EXPECT_EQ(0u, result->StartIndex());
+    EXPECT_EQ(4u, result->EndIndex());
 
     ASSERT_FALSE(iter.Next(&result));
   });

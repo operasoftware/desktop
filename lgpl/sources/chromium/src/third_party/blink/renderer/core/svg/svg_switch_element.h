@@ -29,12 +29,10 @@ class SVGSwitchElement final : public SVGGraphicsElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(SVGSwitchElement);
-
- private:
   explicit SVGSwitchElement(Document&);
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+ private:
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 };
 
 }  // namespace blink

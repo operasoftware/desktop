@@ -5,8 +5,8 @@
 #include "third_party/blink/public/platform/web_canonical_cookie.h"
 
 #include <memory>
-#include <vector>
 
+#include "base/optional.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_constants.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -14,14 +14,16 @@
 #include "url/gurl.h"
 
 // Assumptions made by static_casts used in this file.
+STATIC_ASSERT_ENUM(net::CookieSameSite::UNSPECIFIED,
+                   network::mojom::CookieSameSite::UNSPECIFIED);
 STATIC_ASSERT_ENUM(net::CookieSameSite::NO_RESTRICTION,
                    network::mojom::CookieSameSite::NO_RESTRICTION);
 STATIC_ASSERT_ENUM(net::CookieSameSite::LAX_MODE,
                    network::mojom::CookieSameSite::LAX_MODE);
 STATIC_ASSERT_ENUM(net::CookieSameSite::STRICT_MODE,
                    network::mojom::CookieSameSite::STRICT_MODE);
-STATIC_ASSERT_ENUM(net::CookieSameSite::DEFAULT_MODE,
-                   blink::WebCanonicalCookie::kDefaultSameSiteMode);
+STATIC_ASSERT_ENUM(net::CookieSameSite::EXTENDED_MODE,
+                   network::mojom::CookieSameSite::EXTENDED_MODE);
 
 STATIC_ASSERT_ENUM(net::CookiePriority::COOKIE_PRIORITY_LOW,
                    network::mojom::CookiePriority::LOW);
@@ -84,16 +86,6 @@ WebCanonicalCookie& WebCanonicalCookie::operator=(
 
 WebCanonicalCookie::~WebCanonicalCookie() = default;
 
-// static
-String WebCanonicalCookie::BuildCookieLine(
-    const Vector<WebCanonicalCookie>& cookies) {
-  std::vector<net::CanonicalCookie> copy;
-  copy.reserve(cookies.size());
-  for (const auto& cookie : cookies)
-    copy.push_back(ToNetCanonicalCookie(cookie));
-  return WebString::FromUTF8(net::CanonicalCookie::BuildCookieLine(copy));
-}
-
 namespace {
 
 // TODO(crbug.com/851889): WebURL::operator GURL() is only available if
@@ -111,9 +103,9 @@ base::Optional<WebCanonicalCookie> WebCanonicalCookie::Create(
     const WebURL& url,
     const WebString& cookie_line,
     base::Time creation_time) {
-  net::CookieOptions options;
   std::unique_ptr<net::CanonicalCookie> cookie = net::CanonicalCookie::Create(
-      ToGURL(url), cookie_line.Utf8(), creation_time, options);
+      ToGURL(url), cookie_line.Utf8(), creation_time,
+      base::nullopt /* server_time */);
   if (!cookie)
     return base::nullopt;
   return WebCanonicalCookie(
@@ -153,8 +145,6 @@ base::Optional<WebCanonicalCookie> WebCanonicalCookie::Create(
                             same_site, priority);
 }
 
-constexpr const network::mojom::CookieSameSite
-    WebCanonicalCookie::kDefaultSameSiteMode;
 constexpr const network::mojom::CookiePriority
     WebCanonicalCookie::kDefaultPriority;
 

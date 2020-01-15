@@ -24,6 +24,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -31,13 +32,23 @@ class CORE_EXPORT CSSQuadValue : public CSSValue {
  public:
   enum TypeForSerialization { kSerializeAsRect, kSerializeAsQuad };
 
-  static CSSQuadValue* Create(CSSValue* top,
-                              CSSValue* right,
-                              CSSValue* bottom,
-                              CSSValue* left,
+  static CSSQuadValue* Create(CSSValue* value,
                               TypeForSerialization serialization_type) {
-    return new CSSQuadValue(top, right, bottom, left, serialization_type);
+    return MakeGarbageCollected<CSSQuadValue>(value, value, value, value,
+                                              serialization_type);
   }
+
+  CSSQuadValue(CSSValue* top,
+               CSSValue* right,
+               CSSValue* bottom,
+               CSSValue* left,
+               TypeForSerialization serialization_type)
+      : CSSValue(kQuadClass),
+        serialization_type_(serialization_type),
+        top_(top),
+        right_(right),
+        bottom_(bottom),
+        left_(left) {}
 
   CSSValue* Top() const { return top_.Get(); }
   CSSValue* Right() const { return right_.Get(); }
@@ -57,19 +68,6 @@ class CORE_EXPORT CSSQuadValue : public CSSValue {
 
   void TraceAfterDispatch(blink::Visitor*);
 
- protected:
-  CSSQuadValue(CSSValue* top,
-               CSSValue* right,
-               CSSValue* bottom,
-               CSSValue* left,
-               TypeForSerialization serialization_type)
-      : CSSValue(kQuadClass),
-        serialization_type_(serialization_type),
-        top_(top),
-        right_(right),
-        bottom_(bottom),
-        left_(left) {}
-
  private:
   TypeForSerialization serialization_type_;
   Member<CSSValue> top_;
@@ -78,7 +76,10 @@ class CORE_EXPORT CSSQuadValue : public CSSValue {
   Member<CSSValue> left_;
 };
 
-DEFINE_CSS_VALUE_TYPE_CASTS(CSSQuadValue, IsQuadValue());
+template <>
+struct DowncastTraits<CSSQuadValue> {
+  static bool AllowFrom(const CSSValue& value) { return value.IsQuadValue(); }
+};
 
 }  // namespace blink
 

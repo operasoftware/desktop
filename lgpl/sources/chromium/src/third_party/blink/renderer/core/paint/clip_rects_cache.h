@@ -8,7 +8,7 @@
 #include "third_party/blink/renderer/core/paint/clip_rects.h"
 
 #if DCHECK_IS_ON()
-#include "third_party/blink/renderer/platform/scroll/scroll_types.h"  // For OverlayScrollbarClipBehavior.
+#include "third_party/blink/renderer/platform/graphics/scroll_types.h"  // For OverlayScrollbarClipBehavior.
 #endif
 
 namespace blink {
@@ -16,16 +16,17 @@ namespace blink {
 class PaintLayer;
 
 enum ClipRectsCacheSlot {
-  // Relative to the LayoutView's layer. Used for compositing overlap testing.
+  // Relative to the LayoutView's layer. Used for pre-CompositeAfterPaint
+  // compositing overlap testing.
   // TODO(bokan): Overlap testing currently ignores the clip on the root layer.
   // Overlap testing has some bugs when inside non-root layers which extend to
   // the root layer when root-layer-scrolling is turned on unless we do this.
   // crbug.com/783532.
   kAbsoluteClipRectsIgnoringViewportClip,
 
-  // Relative to painting ancestor. Used for SPv1 compositing.
+  // Relative to painting ancestor. Used for pre-CompositeAfterPaint
+  // compositing.
   kPaintingClipRects,
-  kPaintingClipRectsIgnoringOverflowClip,
 
   kNumberOfClipRectsCacheSlots,
   kUncachedClipRects,

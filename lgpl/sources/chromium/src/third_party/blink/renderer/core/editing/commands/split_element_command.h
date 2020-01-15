@@ -32,16 +32,11 @@ namespace blink {
 
 class SplitElementCommand final : public SimpleEditCommand {
  public:
-  static SplitElementCommand* Create(Element* element,
-                                     Node* split_point_child) {
-    return new SplitElementCommand(element, split_point_child);
-  }
-
-  void Trace(blink::Visitor*) override;
-
- private:
   SplitElementCommand(Element*, Node* split_point_child);
 
+  void Trace(Visitor*) override;
+
+ private:
   void DoApply(EditingState*) override;
   void DoUnapply() override;
   void DoReapply() override;

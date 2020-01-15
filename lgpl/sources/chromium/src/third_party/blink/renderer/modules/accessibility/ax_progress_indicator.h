@@ -32,7 +32,7 @@ class LayoutProgress;
 
 class AXProgressIndicator final : public AXLayoutObject {
  public:
-  static AXProgressIndicator* Create(LayoutProgress*, AXObjectCacheImpl&);
+  AXProgressIndicator(LayoutProgress*, AXObjectCacheImpl&);
 
  private:
   ax::mojom::Role DetermineAccessibilityRole() final;
@@ -42,8 +42,6 @@ class AXProgressIndicator final : public AXLayoutObject {
   bool ValueForRange(float* out_value) const override;
   bool MaxValueForRange(float* out_value) const override;
   bool MinValueForRange(float* out_value) const override;
-
-  AXProgressIndicator(LayoutProgress*, AXObjectCacheImpl&);
 
   HTMLProgressElement* GetProgressElement() const;
   bool ComputeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;

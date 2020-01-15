@@ -14,10 +14,8 @@
 
 namespace blink {
 
-using namespace device::mojom::blink;
-
 SensorProxyInspectorImpl::SensorProxyInspectorImpl(
-    SensorType sensor_type,
+    device::mojom::blink::SensorType sensor_type,
     SensorProviderProxy* provider,
     Page* page)
     : SensorProxy(sensor_type, provider, page) {}
@@ -37,19 +35,18 @@ void SensorProxyInspectorImpl::Initialize() {
   auto callback = WTF::Bind(&SensorProxyInspectorImpl::OnSensorCreated,
                             WrapWeakPersistent(this));
 
-  Platform::Current()->CurrentThread()->GetTaskRunner()->PostTask(
-      FROM_HERE, std::move(callback));
+  Thread::Current()->GetTaskRunner()->PostTask(FROM_HERE, std::move(callback));
 }
 
 void SensorProxyInspectorImpl::AddConfiguration(
-    SensorConfigurationPtr configuration,
+    device::mojom::blink::SensorConfigurationPtr configuration,
     base::OnceCallback<void(bool)> callback) {
   DCHECK(IsInitialized());
   std::move(callback).Run(true);
 }
 
 void SensorProxyInspectorImpl::RemoveConfiguration(
-    SensorConfigurationPtr configuration) {
+    device::mojom::blink::SensorConfigurationPtr configuration) {
   DCHECK(IsInitialized());
 }
 

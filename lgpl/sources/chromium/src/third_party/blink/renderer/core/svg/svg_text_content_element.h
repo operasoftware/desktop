@@ -37,9 +37,7 @@ enum SVGLengthAdjustType {
   kSVGLengthAdjustSpacing,
   kSVGLengthAdjustSpacingAndGlyphs
 };
-template <>
-const SVGEnumerationStringEntries&
-GetStaticStringEntries<SVGLengthAdjustType>();
+DECLARE_SVG_ENUM_MAP(SVGLengthAdjustType);
 
 class CORE_EXPORT SVGTextContentElement : public SVGGraphicsElement {
   DEFINE_WRAPPERTYPEINFO();
@@ -98,7 +96,13 @@ inline bool IsSVGTextContentElement(const SVGElement& element) {
   return element.IsTextContent();
 }
 
-DEFINE_SVGELEMENT_TYPE_CASTS_WITH_FUNCTION(SVGTextContentElement);
+template <>
+struct DowncastTraits<SVGTextContentElement> {
+  static bool AllowFrom(const Node& node) {
+    auto* svg_element = DynamicTo<SVGElement>(node);
+    return svg_element && IsSVGTextContentElement(*svg_element);
+  }
+};
 
 }  // namespace blink
 

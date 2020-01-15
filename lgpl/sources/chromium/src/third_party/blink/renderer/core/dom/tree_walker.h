@@ -38,11 +38,7 @@ class TreeWalker final : public ScriptWrappable, public NodeIteratorBase {
   USING_GARBAGE_COLLECTED_MIXIN(TreeWalker);
 
  public:
-  static TreeWalker* Create(Node* root_node,
-                            unsigned what_to_show,
-                            V8NodeFilter* filter) {
-    return new TreeWalker(root_node, what_to_show, filter);
-  }
+  TreeWalker(Node*, unsigned what_to_show, V8NodeFilter*);
 
   Node* currentNode() const { return current_.Get(); }
   void setCurrentNode(Node*);
@@ -55,11 +51,9 @@ class TreeWalker final : public ScriptWrappable, public NodeIteratorBase {
   Node* previousNode(ExceptionState&);
   Node* nextNode(ExceptionState&);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  TreeWalker(Node*, unsigned what_to_show, V8NodeFilter*);
-
   Node* SetCurrent(Node*);
   template <typename Strategy>
   Node* TraverseSiblings(ExceptionState&);

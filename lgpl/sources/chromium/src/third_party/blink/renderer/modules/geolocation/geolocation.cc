@@ -27,6 +27,7 @@
 
 #include "third_party/blink/renderer/modules/geolocation/geolocation.h"
 
+#include "services/device/public/mojom/geoposition.mojom-blink.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -38,10 +39,9 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
-#include "third_party/blink/renderer/modules/geolocation/coordinates.h"
+#include "third_party/blink/renderer/modules/geolocation/geolocation_coordinates.h"
 #include "third_party/blink/renderer/modules/geolocation/geolocation_error.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 namespace {
@@ -55,34 +55,36 @@ const char kFeaturePolicyConsoleWarning[] =
 
 Geoposition* CreateGeoposition(
     const device::mojom::blink::Geoposition& position) {
-  Coordinates* coordinates = Coordinates::Create(
+  auto* coordinates = MakeGarbageCollected<GeolocationCoordinates>(
       position.latitude, position.longitude,
       // Lowest point on land is at approximately -400 meters.
       position.altitude > -10000., position.altitude, position.accuracy,
       position.altitude_accuracy >= 0., position.altitude_accuracy,
       position.heading >= 0. && position.heading <= 360., position.heading,
       position.speed >= 0., position.speed);
-  return Geoposition::Create(coordinates, ConvertSecondsToDOMTimeStamp(
-                                              position.timestamp.ToDoubleT()));
+  return MakeGarbageCollected<Geoposition>(
+      coordinates,
+      ConvertSecondsToDOMTimeStamp(position.timestamp.ToDoubleT()));
 }
 
-PositionError* CreatePositionError(
+GeolocationPositionError* CreatePositionError(
     device::mojom::blink::Geoposition::ErrorCode mojom_error_code,
     const String& error) {
-  PositionError::ErrorCode error_code = PositionError::kPositionUnavailable;
+  GeolocationPositionError::ErrorCode error_code =
+      GeolocationPositionError::kPositionUnavailable;
   switch (mojom_error_code) {
     case device::mojom::blink::Geoposition::ErrorCode::PERMISSION_DENIED:
-      error_code = PositionError::kPermissionDenied;
+      error_code = GeolocationPositionError::kPermissionDenied;
       break;
     case device::mojom::blink::Geoposition::ErrorCode::POSITION_UNAVAILABLE:
-      error_code = PositionError::kPositionUnavailable;
+      error_code = GeolocationPositionError::kPositionUnavailable;
       break;
     case device::mojom::blink::Geoposition::ErrorCode::NONE:
     case device::mojom::blink::Geoposition::ErrorCode::TIMEOUT:
       NOTREACHED();
       break;
   }
-  return PositionError::Create(error_code, error);
+  return MakeGarbageCollected<GeolocationPositionError>(error_code, error);
 }
 
 static void ReportGeolocationViolation(Document* doc) {
@@ -99,14 +101,13 @@ static void ReportGeolocationViolation(Document* doc) {
 }  // namespace
 
 Geolocation* Geolocation::Create(ExecutionContext* context) {
-  Geolocation* geolocation = new Geolocation(context);
-  return geolocation;
+  return MakeGarbageCollected<Geolocation>(context);
 }
 
 Geolocation::Geolocation(ExecutionContext* context)
     : ContextLifecycleObserver(context),
       PageVisibilityObserver(GetDocument()->GetPage()),
-      watchers_(new GeolocationWatchers()) {}
+      watchers_(MakeGarbageCollected<GeolocationWatchers>()) {}
 
 Geolocation::~Geolocation() = default;
 
@@ -137,6 +138,8 @@ void Geolocation::ContextDestroyed(ExecutionContext*) {
   StopUpdating();
 
   last_position_ = nullptr;
+  geolocation_.reset();
+  geolocation_service_.reset();
 }
 
 void Geolocation::RecordOriginTypeAccess() const {
@@ -150,8 +153,8 @@ void Geolocation::RecordOriginTypeAccess() const {
   String insecure_origin_msg;
   if (document->IsSecureContext(insecure_origin_msg)) {
     UseCounter::Count(document, WebFeature::kGeolocationSecureOrigin);
-    UseCounter::CountCrossOriginIframe(
-        *document, WebFeature::kGeolocationSecureOriginIframe);
+    document->CountUseOnlyInCrossOriginIframe(
+        WebFeature::kGeolocationSecureOriginIframe);
   } else if (GetFrame()
                  ->GetSettings()
                  ->GetAllowGeolocationOnInsecureOrigins()) {
@@ -178,14 +181,14 @@ void Geolocation::RecordOriginTypeAccess() const {
 
 void Geolocation::getCurrentPosition(V8PositionCallback* success_callback,
                                      V8PositionErrorCallback* error_callback,
-                                     const PositionOptions& options) {
+                                     const PositionOptions* options) {
   if (!GetFrame())
     return;
 
-  probe::breakableLocation(GetDocument(), "Geolocation.getCurrentPosition");
+  probe::BreakableLocation(GetDocument(), "Geolocation.getCurrentPosition");
 
-  GeoNotifier* notifier =
-      GeoNotifier::Create(this, success_callback, error_callback, options);
+  auto* notifier = MakeGarbageCollected<GeoNotifier>(this, success_callback,
+                                                     error_callback, options);
 
   one_shots_.insert(notifier);
 
@@ -194,14 +197,14 @@ void Geolocation::getCurrentPosition(V8PositionCallback* success_callback,
 
 int Geolocation::watchPosition(V8PositionCallback* success_callback,
                                V8PositionErrorCallback* error_callback,
-                               const PositionOptions& options) {
+                               const PositionOptions* options) {
   if (!GetFrame())
     return 0;
 
-  probe::breakableLocation(GetDocument(), "Geolocation.watchPosition");
+  probe::BreakableLocation(GetDocument(), "Geolocation.watchPosition");
 
-  GeoNotifier* notifier =
-      GeoNotifier::Create(this, success_callback, error_callback, options);
+  auto* notifier = MakeGarbageCollected<GeoNotifier>(this, success_callback,
+                                                     error_callback, options);
 
   int watch_id;
   // Keep asking for the next id until we're given one that we don't already
@@ -220,20 +223,19 @@ void Geolocation::StartRequest(GeoNotifier* notifier) {
   String error_message;
   if (!GetFrame()->GetSettings()->GetAllowGeolocationOnInsecureOrigins() &&
       !GetExecutionContext()->IsSecureContext(error_message)) {
-    notifier->SetFatalError(
-        PositionError::Create(PositionError::kPermissionDenied, error_message));
+    notifier->SetFatalError(MakeGarbageCollected<GeolocationPositionError>(
+        GeolocationPositionError::kPermissionDenied, error_message));
     return;
   }
 
   if (!GetDocument()->IsFeatureEnabled(
           mojom::FeaturePolicyFeature::kGeolocation,
-          ReportOptions::kReportOnFailure)) {
+          ReportOptions::kReportOnFailure, kFeaturePolicyConsoleWarning)) {
     UseCounter::Count(GetDocument(),
                       WebFeature::kGeolocationDisabledByFeaturePolicy);
-    GetDocument()->AddConsoleMessage(ConsoleMessage::Create(
-        kJSMessageSource, kErrorMessageLevel, kFeaturePolicyConsoleWarning));
-    notifier->SetFatalError(PositionError::Create(
-        PositionError::kPermissionDenied, kFeaturePolicyErrorMessage));
+    notifier->SetFatalError(MakeGarbageCollected<GeolocationPositionError>(
+        GeolocationPositionError::kPermissionDenied,
+        kFeaturePolicyErrorMessage));
     return;
   }
 
@@ -242,9 +244,7 @@ void Geolocation::StartRequest(GeoNotifier* notifier) {
   if (HaveSuitableCachedPosition(notifier->Options())) {
     notifier->SetUseCachedPosition();
   } else {
-    if (notifier->Options().timeout() > 0)
-      StartUpdating(notifier);
-    notifier->StartTimer();
+    StartUpdating(notifier);
   }
 }
 
@@ -269,9 +269,7 @@ void Geolocation::RequestUsesCachedPosition(GeoNotifier* notifier) {
   if (one_shots_.Contains(notifier)) {
     one_shots_.erase(notifier);
   } else if (watchers_->Contains(notifier)) {
-    if (notifier->Options().timeout() > 0)
-      StartUpdating(notifier);
-    notifier->StartTimer();
+    StartUpdating(notifier);
   }
 
   if (!HasListeners())
@@ -295,15 +293,15 @@ bool Geolocation::DoesOwnNotifier(GeoNotifier* notifier) const {
          watchers_being_invoked_.Contains(notifier);
 }
 
-bool Geolocation::HaveSuitableCachedPosition(const PositionOptions& options) {
+bool Geolocation::HaveSuitableCachedPosition(const PositionOptions* options) {
   if (!last_position_)
     return false;
-  if (!options.maximumAge())
+  if (!options->maximumAge())
     return false;
   DOMTimeStamp current_time_millis =
-      ConvertSecondsToDOMTimeStamp(CurrentTime());
+      ConvertSecondsToDOMTimeStamp(base::Time::Now().ToDoubleT());
   return last_position_->timestamp() >
-         current_time_millis - options.maximumAge();
+         current_time_millis - options->maximumAge();
 }
 
 void Geolocation::clearWatch(int watch_id) {
@@ -331,7 +329,7 @@ void Geolocation::StopTimers() {
   }
 }
 
-void Geolocation::HandleError(PositionError* error) {
+void Geolocation::HandleError(GeolocationPositionError* error) {
   DCHECK(error);
 
   DCHECK(one_shots_being_invoked_.IsEmpty());
@@ -435,39 +433,46 @@ void Geolocation::PositionChanged() {
 
 void Geolocation::StartUpdating(GeoNotifier* notifier) {
   updating_ = true;
-  if (notifier->Options().enableHighAccuracy() && !enable_high_accuracy_) {
+  if (notifier->Options()->enableHighAccuracy() && !enable_high_accuracy_) {
     enable_high_accuracy_ = true;
     if (geolocation_)
       geolocation_->SetHighAccuracy(true);
   }
-  UpdateGeolocationConnection();
+  UpdateGeolocationConnection(notifier);
 }
 
 void Geolocation::StopUpdating() {
   updating_ = false;
-  UpdateGeolocationConnection();
+  UpdateGeolocationConnection(nullptr);
   enable_high_accuracy_ = false;
 }
 
-void Geolocation::UpdateGeolocationConnection() {
+void Geolocation::UpdateGeolocationConnection(GeoNotifier* notifier) {
   if (!GetExecutionContext() || !GetPage() || !GetPage()->IsPageVisible() ||
       !updating_) {
     geolocation_.reset();
+    geolocation_service_.reset();
     disconnected_geolocation_ = true;
     return;
   }
-  if (geolocation_)
+  if (geolocation_) {
+    if (notifier)
+      notifier->StartTimer();
     return;
+  }
 
-  InterfaceInvalidator* invalidator =
-      GetExecutionContext()->GetInterfaceInvalidator();
-  GetFrame()->GetInterfaceProvider().GetInterface(&geolocation_service_,
-                                                  invalidator);
+  // See https://bit.ly/2S0zRAS for task types.
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+      GetExecutionContext()->GetTaskRunner(TaskType::kMiscPlatformAPI);
+  GetFrame()->GetInterfaceProvider().GetInterface(
+      geolocation_service_.BindNewPipeAndPassReceiver(task_runner));
   geolocation_service_->CreateGeolocation(
-      MakeRequest(&geolocation_, invalidator),
-      LocalFrame::HasTransientUserActivation(GetFrame()));
+      geolocation_.BindNewPipeAndPassReceiver(std::move(task_runner)),
+      LocalFrame::HasTransientUserActivation(GetFrame()),
+      WTF::Bind(&Geolocation::OnGeolocationPermissionStatusUpdated,
+                WrapWeakPersistent(this), WrapWeakPersistent(notifier)));
 
-  geolocation_.set_connection_error_handler(WTF::Bind(
+  geolocation_.set_disconnect_handler(WTF::Bind(
       &Geolocation::OnGeolocationConnectionError, WrapWeakPersistent(this)));
   if (enable_high_accuracy_)
     geolocation_->SetHighAccuracy(true);
@@ -494,7 +499,7 @@ void Geolocation::OnPositionUpdated(
 }
 
 void Geolocation::PageVisibilityChanged() {
-  UpdateGeolocationConnection();
+  UpdateGeolocationConnection(nullptr);
 }
 
 bool Geolocation::HasPendingActivity() const {
@@ -506,10 +511,22 @@ void Geolocation::OnGeolocationConnectionError() {
   StopUpdating();
   // The only reason that we would fail to get a ConnectionError is if we lack
   // sufficient permission.
-  PositionError* error = PositionError::Create(PositionError::kPermissionDenied,
-                                               kPermissionDeniedErrorMessage);
+  auto* error = MakeGarbageCollected<GeolocationPositionError>(
+      GeolocationPositionError::kPermissionDenied,
+      kPermissionDeniedErrorMessage);
   error->SetIsFatal(true);
   HandleError(error);
+}
+
+void Geolocation::OnGeolocationPermissionStatusUpdated(
+    GeoNotifier* notifier,
+    mojom::PermissionStatus status) {
+  if (notifier && status == mojom::PermissionStatus::GRANTED) {
+    // Avoid starting the notifier timer if the notifier has already been
+    // removed.
+    if (DoesOwnNotifier(notifier))
+      notifier->StartTimer();
+  }
 }
 
 }  // namespace blink

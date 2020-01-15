@@ -142,19 +142,19 @@ void LayoutSVGResourceContainer::InvalidateCacheAndMarkForLayout(
 void LayoutSVGResourceContainer::InvalidateCacheAndMarkForLayout(
     SubtreeLayoutScope* layout_scope) {
   InvalidateCacheAndMarkForLayout(
-      LayoutInvalidationReason::kSvgResourceInvalidated, layout_scope);
+      layout_invalidation_reason::kSvgResourceInvalidated, layout_scope);
 }
 
 static inline void RemoveFromCacheAndInvalidateDependencies(
     LayoutObject& object,
     bool needs_layout) {
-  if (!object.GetNode() || !object.GetNode()->IsSVGElement())
+  auto* element = DynamicTo<SVGElement>(object.GetNode());
+  if (!element)
     return;
-  SVGElement& element = ToSVGElement(*object.GetNode());
 
   if (SVGResources* resources =
           SVGResourcesCache::CachedResourcesForLayoutObject(object)) {
-    SVGResourceClient* client = element.GetSVGResourceClient();
+    SVGResourceClient* client = element->GetSVGResourceClient();
     if (InvalidationModeMask invalidation_mask =
             resources->RemoveClientFromCacheAffectingObjectBounds(*client)) {
       LayoutSVGResourceContainer::MarkClientForInvalidation(object,
@@ -162,7 +162,7 @@ static inline void RemoveFromCacheAndInvalidateDependencies(
     }
   }
 
-  element.NotifyIncomingReferences([needs_layout](SVGElement& element) {
+  element->NotifyIncomingReferences([needs_layout](SVGElement& element) {
     DCHECK(element.GetLayoutObject());
     LayoutSVGResourceContainer::MarkForLayoutAndParentResourceInvalidation(
         *element.GetLayoutObject(), needs_layout);
@@ -174,9 +174,10 @@ void LayoutSVGResourceContainer::MarkForLayoutAndParentResourceInvalidation(
     bool needs_layout) {
   DCHECK(object.GetNode());
 
-  if (needs_layout && !object.DocumentBeingDestroyed())
+  if (needs_layout && !object.DocumentBeingDestroyed()) {
     object.SetNeedsLayoutAndFullPaintInvalidation(
-        LayoutInvalidationReason::kSvgResourceInvalidated);
+        layout_invalidation_reason::kSvgResourceInvalidated);
+  }
 
   RemoveFromCacheAndInvalidateDependencies(object, needs_layout);
 

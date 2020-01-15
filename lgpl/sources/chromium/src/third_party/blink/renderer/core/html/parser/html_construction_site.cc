@@ -39,7 +39,6 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/html/custom/ce_reactions_scope.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_definition.h"
@@ -64,11 +63,13 @@
 #include "third_party/blink/renderer/core/svg/svg_script_element.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/text/text_break_iterator.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 static const unsigned kMaximumHTMLParserDOMTreeDepth = 512;
 
@@ -85,11 +86,11 @@ static inline void SetAttributes(Element* element,
 }
 
 static bool HasImpliedEndTag(const HTMLStackItem* item) {
-  return item->HasTagName(ddTag) || item->HasTagName(dtTag) ||
-         item->HasTagName(liTag) || item->HasTagName(optionTag) ||
-         item->HasTagName(optgroupTag) || item->HasTagName(pTag) ||
-         item->HasTagName(rbTag) || item->HasTagName(rpTag) ||
-         item->HasTagName(rtTag) || item->HasTagName(rtcTag);
+  return item->HasTagName(kDdTag) || item->HasTagName(kDtTag) ||
+         item->HasTagName(kLiTag) || item->HasTagName(kOptionTag) ||
+         item->HasTagName(kOptgroupTag) || item->HasTagName(kPTag) ||
+         item->HasTagName(kRbTag) || item->HasTagName(kRpTag) ||
+         item->HasTagName(kRtTag) || item->HasTagName(kRTCTag);
 }
 
 static bool ShouldUseLengthLimit(const ContainerNode& node) {
@@ -110,7 +111,7 @@ static inline void Insert(HTMLConstructionSiteTask& task) {
   if (auto* template_element = ToHTMLTemplateElementOrNull(*task.parent))
     task.parent = template_element->content();
 
-  // https://html.spec.whatwg.org/#insert-a-foreign-element
+  // https://html.spec.whatwg.org/C/#insert-a-foreign-element
   // 3.1, (3) Push (pop) an element queue
   CEReactionsScope reactions;
   if (task.next_child)
@@ -123,26 +124,22 @@ static inline void ExecuteInsertTask(HTMLConstructionSiteTask& task) {
   DCHECK_EQ(task.operation, HTMLConstructionSiteTask::kInsert);
 
   Insert(task);
-
-  if (task.child->IsElementNode()) {
-    Element& child = ToElement(*task.child);
-    child.BeginParsingChildren();
+  if (auto* child = DynamicTo<Element>(task.child.Get())) {
+    child->BeginParsingChildren();
     if (task.self_closing)
-      child.FinishParsingChildren();
+      child->FinishParsingChildren();
   }
 }
 
 static inline void ExecuteInsertTextTask(HTMLConstructionSiteTask& task) {
   DCHECK_EQ(task.operation, HTMLConstructionSiteTask::kInsertText);
-  DCHECK(task.child->IsTextNode());
 
   // Merge text nodes into previous ones if possible:
   // http://www.whatwg.org/specs/web-apps/current-work/multipage/tree-construction.html#insert-a-character
-  Text* new_text = ToText(task.child.Get());
+  auto* new_text = To<Text>(task.child.Get());
   Node* previous_child = task.next_child ? task.next_child->previousSibling()
                                          : task.parent->lastChild();
-  if (previous_child && previous_child->IsTextNode()) {
-    Text* previous_text = ToText(previous_child);
+  if (auto* previous_text = DynamicTo<Text>(previous_child)) {
     unsigned length_limit = TextLengthLimitForContainer(*task.parent);
     if (previous_text->length() + new_text->length() < length_limit) {
       previous_text->ParserAppendData(new_text->data());
@@ -282,7 +279,7 @@ void HTMLConstructionSite::FlushPendingText(FlushMode mode) {
 
     DCHECK_GT(break_index, current_position);
     DCHECK_EQ(break_index - current_position, substring.length());
-    DCHECK_EQ(ToText(task.child.Get())->length(), substring.length());
+    DCHECK_EQ(To<Text>(task.child.Get())->length(), substring.length());
     current_position = break_index;
   }
 }
@@ -296,8 +293,9 @@ void HTMLConstructionSite::QueueTask(const HTMLConstructionSiteTask& task) {
 void HTMLConstructionSite::AttachLater(ContainerNode* parent,
                                        Node* child,
                                        bool self_closing) {
-  DCHECK(ScriptingContentIsAllowed(parser_content_policy_) ||
-         !child->IsElementNode() || !ToElement(child)->IsScriptElement());
+  auto* element = DynamicTo<Element>(child);
+  DCHECK(ScriptingContentIsAllowed(parser_content_policy_) || !element ||
+         !element->IsScriptElement());
   DCHECK(PluginContentIsAllowed(parser_content_policy_) ||
          !IsHTMLPlugInElement(child));
 
@@ -385,7 +383,7 @@ HTMLConstructionSite::~HTMLConstructionSite() {
   DCHECK(pending_text_.IsEmpty());
 }
 
-void HTMLConstructionSite::Trace(blink::Visitor* visitor) {
+void HTMLConstructionSite::Trace(Visitor* visitor) {
   visitor->Trace(document_);
   visitor->Trace(attachment_root_);
   visitor->Trace(head_);
@@ -413,15 +411,16 @@ void HTMLConstructionSite::InsertHTMLHtmlStartTagBeforeHTML(
     AtomicHTMLToken* token) {
   DCHECK(document_);
   HTMLHtmlElement* element;
-  if (const auto* is_attribute = token->GetAttributeItem(HTMLNames::isAttr)) {
-    element = ToHTMLHtmlElement(document_->CreateElement(
-        HTMLNames::htmlTag, GetCreateElementFlags(), is_attribute->Value()));
+  if (const auto* is_attribute = token->GetAttributeItem(html_names::kIsAttr)) {
+    element = To<HTMLHtmlElement>(document_->CreateElement(
+        html_names::kHTMLTag, GetCreateElementFlags(), is_attribute->Value()));
   } else {
-    element = HTMLHtmlElement::Create(*document_);
+    element = MakeGarbageCollected<HTMLHtmlElement>(*document_);
   }
   SetAttributes(element, token, parser_content_policy_);
   AttachLater(attachment_root_, element);
-  open_elements_.PushHTMLHtmlElement(HTMLStackItem::Create(element, token));
+  open_elements_.PushHTMLHtmlElement(
+      MakeGarbageCollected<HTMLStackItem>(element, token));
 
   ExecuteQueuedTasks();
   element->InsertedByParser();
@@ -671,7 +670,8 @@ void HTMLConstructionSite::InsertCommentOnHTMLHtmlElement(
 
 void HTMLConstructionSite::InsertHTMLHeadElement(AtomicHTMLToken* token) {
   DCHECK(!ShouldFosterParent());
-  head_ = HTMLStackItem::Create(CreateElement(token, xhtmlNamespaceURI), token);
+  head_ = MakeGarbageCollected<HTMLStackItem>(
+      CreateElement(token, xhtmlNamespaceURI), token);
   AttachLater(CurrentNode(), head_->GetElement());
   open_elements_.PushHTMLHeadElement(head_);
 }
@@ -680,7 +680,8 @@ void HTMLConstructionSite::InsertHTMLBodyElement(AtomicHTMLToken* token) {
   DCHECK(!ShouldFosterParent());
   Element* body = CreateElement(token, xhtmlNamespaceURI);
   AttachLater(CurrentNode(), body);
-  open_elements_.PushHTMLBodyElement(HTMLStackItem::Create(body, token));
+  open_elements_.PushHTMLBodyElement(
+      MakeGarbageCollected<HTMLStackItem>(body, token));
   if (document_)
     document_->WillInsertBody();
 }
@@ -688,7 +689,7 @@ void HTMLConstructionSite::InsertHTMLBodyElement(AtomicHTMLToken* token) {
 void HTMLConstructionSite::InsertHTMLFormElement(AtomicHTMLToken* token,
                                                  bool is_demoted) {
   auto* form_element =
-      ToHTMLFormElement(CreateElement(token, xhtmlNamespaceURI));
+      To<HTMLFormElement>(CreateElement(token, xhtmlNamespaceURI));
   if (!OpenElements()->HasTemplateInHTMLScope())
     form_ = form_element;
   if (is_demoted) {
@@ -696,13 +697,13 @@ void HTMLConstructionSite::InsertHTMLFormElement(AtomicHTMLToken* token,
                       WebFeature::kDemotedFormElement);
   }
   AttachLater(CurrentNode(), form_element);
-  open_elements_.Push(HTMLStackItem::Create(form_element, token));
+  open_elements_.Push(MakeGarbageCollected<HTMLStackItem>(form_element, token));
 }
 
 void HTMLConstructionSite::InsertHTMLElement(AtomicHTMLToken* token) {
   Element* element = CreateElement(token, xhtmlNamespaceURI);
   AttachLater(CurrentNode(), element);
-  open_elements_.Push(HTMLStackItem::Create(element, token));
+  open_elements_.Push(MakeGarbageCollected<HTMLStackItem>(element, token));
 }
 
 void HTMLConstructionSite::InsertSelfClosingHTMLElementDestroyingToken(
@@ -737,16 +738,17 @@ void HTMLConstructionSite::InsertScriptElement(AtomicHTMLToken* token) {
                           kAllowScriptingContentAndDoNotMarkAlreadyStarted)
       .SetAlreadyStarted(is_parsing_fragment_ && flags.IsCreatedByParser());
   HTMLScriptElement* element = nullptr;
-  if (const auto* is_attribute = token->GetAttributeItem(HTMLNames::isAttr)) {
+  if (const auto* is_attribute = token->GetAttributeItem(html_names::kIsAttr)) {
     element = ToHTMLScriptElement(OwnerDocumentForCurrentNode().CreateElement(
-        HTMLNames::scriptTag, flags, is_attribute->Value()));
+        html_names::kScriptTag, flags, is_attribute->Value()));
   } else {
-    element = HTMLScriptElement::Create(OwnerDocumentForCurrentNode(), flags);
+    element = MakeGarbageCollected<HTMLScriptElement>(
+        OwnerDocumentForCurrentNode(), flags);
   }
   SetAttributes(element, token, parser_content_policy_);
   if (ScriptingContentIsAllowed(parser_content_policy_))
     AttachLater(CurrentNode(), element);
-  open_elements_.Push(HTMLStackItem::Create(element, token));
+  open_elements_.Push(MakeGarbageCollected<HTMLStackItem>(element, token));
 }
 
 void HTMLConstructionSite::InsertForeignElement(
@@ -761,8 +763,10 @@ void HTMLConstructionSite::InsertForeignElement(
       !element->IsScriptElement()) {
     AttachLater(CurrentNode(), element, token->SelfClosing());
   }
-  if (!token->SelfClosing())
-    open_elements_.Push(HTMLStackItem::Create(element, token, namespace_uri));
+  if (!token->SelfClosing()) {
+    open_elements_.Push(
+        MakeGarbageCollected<HTMLStackItem>(element, token, namespace_uri));
+  }
 }
 
 void HTMLConstructionSite::InsertTextNode(const StringView& string,
@@ -842,13 +846,13 @@ inline Document& HTMLConstructionSite::OwnerDocumentForCurrentNode() {
 }
 
 // "look up a custom element definition" for a token
-// https://html.spec.whatwg.org/#look-up-a-custom-element-definition
+// https://html.spec.whatwg.org/C/#look-up-a-custom-element-definition
 CustomElementDefinition* HTMLConstructionSite::LookUpCustomElementDefinition(
     Document& document,
     const QualifiedName& tag_name,
     const AtomicString& is) {
   // "1. If namespace is not the HTML namespace, return null."
-  if (tag_name.NamespaceURI() != HTMLNames::xhtmlNamespaceURI)
+  if (tag_name.NamespaceURI() != html_names::xhtmlNamespaceURI)
     return nullptr;
 
   // "2. If document does not have a browsing context, return null."
@@ -871,7 +875,7 @@ CustomElementDefinition* HTMLConstructionSite::LookUpCustomElementDefinition(
 }
 
 // "create an element for a token"
-// https://html.spec.whatwg.org/multipage/syntax.html#create-an-element-for-the-token
+// https://html.spec.whatwg.org/C/#create-an-element-for-the-token
 Element* HTMLConstructionSite::CreateElement(
     AtomicHTMLToken* token,
     const AtomicString& namespace_uri) {
@@ -881,7 +885,7 @@ Element* HTMLConstructionSite::CreateElement(
   // "2. Let local name be the tag name of the token."
   QualifiedName tag_name(g_null_atom, token->GetName(), namespace_uri);
   // "3. Let is be the value of the "is" attribute in the given token ..." etc.
-  const Attribute* is_attribute = token->GetAttributeItem(HTMLNames::isAttr);
+  const Attribute* is_attribute = token->GetAttributeItem(html_names::kIsAttr);
   const AtomicString& is = is_attribute ? is_attribute->Value() : g_null_atom;
   // "4. Let definition be the result of looking up a custom element ..." etc.
   auto* definition = LookUpCustomElementDefinition(document, tag_name, is);
@@ -957,10 +961,9 @@ Element* HTMLConstructionSite::CreateElement(
     // 12. If element is a form-associated element, and the form
     // element pointer is not null, and there is no template element
     // on the stack of open elements, ...
+    auto* html_element = DynamicTo<HTMLElement>(element);
     FormAssociated* form_associated_element =
-        element->IsHTMLElement()
-            ? ToHTMLElement(element)->ToFormAssociatedOrNull()
-            : nullptr;
+        html_element ? html_element->ToFormAssociatedOrNull() : nullptr;
     if (form_associated_element && document.GetFrame() && form_.Get()) {
       // ... and element is either not listed or doesn't have a form
       // attribute, and the intended parent is in the same tree as the
@@ -1000,7 +1003,8 @@ HTMLStackItem* HTMLConstructionSite::CreateElementFromSavedToken(
   AtomicHTMLToken fake_token(HTMLToken::kStartTag, item->LocalName(),
                              item->Attributes());
   element = CreateElement(&fake_token, item->NamespaceURI());
-  return HTMLStackItem::Create(element, &fake_token, item->NamespaceURI());
+  return MakeGarbageCollected<HTMLStackItem>(element, &fake_token,
+                                             item->NamespaceURI());
 }
 
 bool HTMLConstructionSite::IndexOfFirstUnopenFormattingElement(
@@ -1058,15 +1062,15 @@ bool HTMLConstructionSite::InQuirksMode() {
 
 // Adjusts |task| to match the "adjusted insertion location" determined by the
 // foster parenting algorithm, laid out as the substeps of step 2 of
-// https://html.spec.whatwg.org/#appropriate-place-for-inserting-a-node
+// https://html.spec.whatwg.org/C/#appropriate-place-for-inserting-a-node
 void HTMLConstructionSite::FindFosterSite(HTMLConstructionSiteTask& task) {
   // 2.1
   HTMLElementStack::ElementRecord* last_template =
-      open_elements_.Topmost(templateTag.LocalName());
+      open_elements_.Topmost(kTemplateTag.LocalName());
 
   // 2.2
   HTMLElementStack::ElementRecord* last_table =
-      open_elements_.Topmost(tableTag.LocalName());
+      open_elements_.Topmost(kTableTag.LocalName());
 
   // 2.3
   if (last_template && (!last_table || last_template->IsAbove(last_table))) {
@@ -1106,7 +1110,7 @@ void HTMLConstructionSite::FosterParent(Node* node) {
   QueueTask(task);
 }
 
-void HTMLConstructionSite::PendingText::Trace(blink::Visitor* visitor) {
+void HTMLConstructionSite::PendingText::Trace(Visitor* visitor) {
   visitor->Trace(parent);
   visitor->Trace(next_child);
 }

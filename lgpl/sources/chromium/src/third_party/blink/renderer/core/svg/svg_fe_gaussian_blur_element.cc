@@ -23,17 +23,18 @@
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/platform/graphics/filters/fe_gaussian_blur.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
-inline SVGFEGaussianBlurElement::SVGFEGaussianBlurElement(Document& document)
-    : SVGFilterPrimitiveStandardAttributes(SVGNames::feGaussianBlurTag,
+SVGFEGaussianBlurElement::SVGFEGaussianBlurElement(Document& document)
+    : SVGFilterPrimitiveStandardAttributes(svg_names::kFEGaussianBlurTag,
                                            document),
-      std_deviation_(
-          SVGAnimatedNumberOptionalNumber::Create(this,
-                                                  SVGNames::stdDeviationAttr,
-                                                  0.0f)),
-      in1_(SVGAnimatedString::Create(this, SVGNames::inAttr)) {
+      std_deviation_(MakeGarbageCollected<SVGAnimatedNumberOptionalNumber>(
+          this,
+          svg_names::kStdDeviationAttr,
+          0.0f)),
+      in1_(MakeGarbageCollected<SVGAnimatedString>(this, svg_names::kInAttr)) {
   AddToPropertyMap(std_deviation_);
   AddToPropertyMap(in1_);
 }
@@ -44,8 +45,6 @@ void SVGFEGaussianBlurElement::Trace(blink::Visitor* visitor) {
   SVGFilterPrimitiveStandardAttributes::Trace(visitor);
 }
 
-DEFINE_NODE_FACTORY(SVGFEGaussianBlurElement)
-
 void SVGFEGaussianBlurElement::setStdDeviation(float x, float y) {
   stdDeviationX()->BaseValue()->SetValue(x);
   stdDeviationY()->BaseValue()->SetValue(y);
@@ -54,8 +53,8 @@ void SVGFEGaussianBlurElement::setStdDeviation(float x, float y) {
 
 void SVGFEGaussianBlurElement::SvgAttributeChanged(
     const QualifiedName& attr_name) {
-  if (attr_name == SVGNames::inAttr ||
-      attr_name == SVGNames::stdDeviationAttr) {
+  if (attr_name == svg_names::kInAttr ||
+      attr_name == svg_names::kStdDeviationAttr) {
     SVGElement::InvalidationGuard invalidation_guard(this);
     Invalidate();
     return;
@@ -77,7 +76,8 @@ FilterEffect* SVGFEGaussianBlurElement::Build(SVGFilterBuilder* filter_builder,
   // => Clamp to non-negative.
   float std_dev_x = std::max(0.0f, stdDeviationX()->CurrentValue()->Value());
   float std_dev_y = std::max(0.0f, stdDeviationY()->CurrentValue()->Value());
-  FilterEffect* effect = FEGaussianBlur::Create(filter, std_dev_x, std_dev_y);
+  auto* effect =
+      MakeGarbageCollected<FEGaussianBlur>(filter, std_dev_x, std_dev_y);
   effect->InputEffects().push_back(input1);
   return effect;
 }

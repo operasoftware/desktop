@@ -127,8 +127,9 @@ class GranularityAdjuster final {
         // kNextWordIfOnBoundary);
         const VisiblePositionTemplate<Strategy> visible_start =
             CreateVisiblePosition(passed_start);
-        return StartOfWord(visible_start, ChooseWordSide(visible_start))
-            .DeepEquivalent();
+        const PositionTemplate<Strategy> word_start = StartOfWordPosition(
+            passed_start.GetPosition(), ChooseWordSide(visible_start));
+        return CreateVisiblePosition(word_start).DeepEquivalent();
       }
       case TextGranularity::kSentence:
         return StartOfSentence(CreateVisiblePosition(passed_start))
@@ -185,7 +186,8 @@ class GranularityAdjuster final {
         const VisiblePositionTemplate<Strategy> original_end =
             CreateVisiblePosition(passed_end);
         const VisiblePositionTemplate<Strategy> word_end =
-            EndOfWord(original_end, ChooseWordSide(original_end));
+            CreateVisiblePosition(EndOfWordPosition(
+                passed_end.GetPosition(), ChooseWordSide(original_end)));
         if (!IsEndOfParagraph(original_end))
           return word_end.DeepEquivalent();
         if (IsEmptyTableCell(start.AnchorNode()))
@@ -307,7 +309,7 @@ class GranularityAdjuster final {
 
  private:
   template <typename Strategy>
-  static EWordSide ChooseWordSide(
+  static WordSide ChooseWordSide(
       const VisiblePositionTemplate<Strategy>& position) {
     return IsEndOfEditableOrNonEditableContent(position) ||
                    (IsEndOfLine(position) && !IsStartOfLine(position) &&
@@ -407,7 +409,7 @@ class ShadowBoundaryAdjuster final {
 
   static bool IsSelectionBoundary(const Node& node) {
     return IsHTMLTextAreaElement(node) || IsHTMLInputElement(node) ||
-           IsHTMLSelectElement(node);
+           IsA<HTMLSelectElement>(node);
   }
 
   static Node* EnclosingShadowHostForStart(const PositionInFlatTree& position) {
@@ -610,7 +612,7 @@ class EditingBoundaryAdjuster final {
   // subtree.
   template <typename Strategy>
   static const Node& RootBoundaryElementOf(const Node& start) {
-    if (IsHTMLBodyElement(start))
+    if (IsA<HTMLBodyElement>(start))
       return start;
 
     const bool is_editable = HasEditableStyle(start);
@@ -619,7 +621,7 @@ class EditingBoundaryAdjuster final {
       if (IsEditingBoundary<Strategy>(ancestor, *result, is_editable))
         break;
       result = &ancestor;
-      if (IsHTMLBodyElement(*result))
+      if (IsA<HTMLBodyElement>(*result))
         break;
     }
 
@@ -671,7 +673,7 @@ class EditingBoundaryAdjuster final {
                                       previous_editable))
         boundary = previous_ancestor;
 
-      if (ancestor == base_rbe || IsHTMLBodyElement(ancestor))
+      if (ancestor == base_rbe || IsA<HTMLBodyElement>(ancestor))
         break;
       previous_editable = HasEditableStyle(ancestor);
       previous_ancestor = &ancestor;

@@ -43,10 +43,11 @@ namespace blink {
 class Element;
 
 class ContentEditablesState final
-    : public GarbageCollectedFinalized<ContentEditablesState> {
+    : public GarbageCollected<ContentEditablesState> {
  public:
-  static ContentEditablesState* Create() { return new ContentEditablesState; }
+  static ContentEditablesState* Create();
 
+  ContentEditablesState();
   ~ContentEditablesState();
 
   Vector<String> ToStateVector();
@@ -59,7 +60,6 @@ class ContentEditablesState final
   void Trace(Visitor*);
 
  private:
-  ContentEditablesState();
 
   HeapHashMap<Member<Element>, String> content_editables_with_paths_;
   HashMap<String, String> saved_contents_;
@@ -68,9 +68,8 @@ class ContentEditablesState final
 class ContentEditablesController final
     : public GarbageCollected<ContentEditablesController> {
  public:
-  static ContentEditablesController* Create() {
-    return new ContentEditablesController;
-  }
+  static ContentEditablesController* Create();
+  ContentEditablesController();
 
   void RegisterContentEditableElement(Element*);
   void RestoreContentsIn(Element*);
@@ -82,8 +81,6 @@ class ContentEditablesController final
   void Trace(Visitor*);
 
  private:
-  ContentEditablesController();
-
   Member<ContentEditablesState> state_;
 };
 

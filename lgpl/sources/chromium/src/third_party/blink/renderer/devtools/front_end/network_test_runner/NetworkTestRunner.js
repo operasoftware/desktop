@@ -8,8 +8,9 @@
  */
 
 NetworkTestRunner.waitForRequestResponse = function(request) {
-  if (request.responseReceivedTime !== -1)
+  if (request.responseReceivedTime !== -1) {
     return Promise.resolve(request);
+  }
 
   return TestRunner.waitForEvent(
       SDK.NetworkManager.Events.RequestUpdated, TestRunner.networkManager,
@@ -20,8 +21,9 @@ NetworkTestRunner.waitForNetworkLogViewNodeForRequest = function(request) {
   const networkLogView = UI.panels.network._networkLogView;
   const node = networkLogView.nodeForRequest(request);
 
-  if (node)
+  if (node) {
     return Promise.resolve(node);
+  }
 
   console.assert(networkLogView._staleRequests.has(request));
 
@@ -34,8 +36,9 @@ NetworkTestRunner.waitForNetworkLogViewNodeForRequest = function(request) {
 
 NetworkTestRunner.waitForWebsocketFrameReceived = function(wsRequest, message) {
   for (const frame of wsRequest.frames()) {
-    if (checkFrame(frame))
+    if (checkFrame(frame)) {
       return Promise.resolve(frame);
+    }
   }
 
   return TestRunner.waitForEvent(SDK.NetworkRequest.Events.WebsocketFrameAdded, wsRequest, checkFrame);
@@ -66,8 +69,9 @@ NetworkTestRunner.dumpNetworkRequests = function() {
 
   TestRunner.addResult('resources count = ' + requests.length);
 
-  for (i = 0; i < requests.length; i++)
+  for (i = 0; i < requests.length; i++) {
     TestRunner.addResult(requests[i].url());
+  }
 };
 
 NetworkTestRunner.dumpNetworkRequestsWithSignedExchangeInfo = function() {
@@ -81,8 +85,9 @@ NetworkTestRunner.dumpNetworkRequestsWithSignedExchangeInfo = function() {
       if (request.signedExchangeInfo().header) {
         const header = request.signedExchangeInfo().header;
         TestRunner.addResult(`    Request URL: ${header.requestUrl}`);
-        for (const signature of header.signatures)
+        for (const signature of header.signatures) {
           TestRunner.addResult(`    Certificate URL: ${signature.certUrl}`);
+        }
       }
       if (request.signedExchangeInfo().securityDetails) {
         const securityDetails = request.signedExchangeInfo().securityDetails;
@@ -90,8 +95,9 @@ NetworkTestRunner.dumpNetworkRequestsWithSignedExchangeInfo = function() {
         TestRunner.addResult(`    Certificate Issuer: ${securityDetails.issuer}`);
       }
       if (request.signedExchangeInfo().errors) {
-        for (const errorMessage of request.signedExchangeInfo().errors)
+        for (const errorMessage of request.signedExchangeInfo().errors) {
           TestRunner.addResult(`    Error: ${JSON.stringify(errorMessage)}`);
+        }
       }
     }
   }
@@ -111,24 +117,36 @@ NetworkTestRunner.makeSimpleXHRWithPayload = function(method, url, async, payloa
   NetworkTestRunner.makeXHR(method, url, async, undefined, undefined, [], false, payload, undefined, callback);
 };
 
+NetworkTestRunner.makeXHRWithTypedArrayPayload = function(method, url, async, payload, callback) {
+  const args = {};
+  args.typedArrayPayload = new TextDecoder('utf-8').decode(payload);
+  NetworkTestRunner.makeXHRImpl(method, url, async, args, callback);
+};
+
 NetworkTestRunner.makeXHR = function(
     method, url, async, user, password, headers, withCredentials, payload, type, callback) {
   const args = {};
-  args.method = method;
-  args.url = TestRunner.url(url);
-  args.async = async;
   args.user = user;
   args.password = password;
   args.headers = headers;
   args.withCredentials = withCredentials;
   args.payload = payload;
   args.type = type;
+  NetworkTestRunner.makeXHRImpl(method, url, async, args, callback);
+};
+
+NetworkTestRunner.makeXHRImpl = function(method, url, async, args, callback) {
+  args.method = method;
+  args.url = TestRunner.url(url);
+  args.async = async;
+
   const jsonArgs = JSON.stringify(args).replace(/\"/g, '\\"');
 
   function innerCallback(msg) {
     if (msg.messageText.indexOf('XHR loaded') !== -1) {
-      if (callback)
+      if (callback) {
         callback();
+      }
     } else {
       ConsoleTestRunner.addConsoleSniffer(innerCallback);
     }
@@ -219,6 +237,10 @@ TestRunner.deprecatedInitAsync(`
 
   function makeXHRForJSONArguments(jsonArgs) {
     let args = JSON.parse(jsonArgs);
+    let payload = args.payload;
+
+    if (args.typedArrayPayload)
+      payload = new TextEncoder('utf-8').encode(args.typedArrayPayload);
 
     makeXHR(
       args.method,
@@ -228,7 +250,7 @@ TestRunner.deprecatedInitAsync(`
       args.password,
       args.headers || [],
       args.withCredentials,
-      args.payload,
+      payload,
       args.type,
       xhrLoadedCallback
     );

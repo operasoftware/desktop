@@ -37,8 +37,7 @@
 namespace blink {
 
 class V0CustomElementProcessingStep
-    : public GarbageCollectedFinalized<V0CustomElementProcessingStep> {
-
+    : public GarbageCollected<V0CustomElementProcessingStep> {
  public:
   V0CustomElementProcessingStep() = default;
 
@@ -46,7 +45,7 @@ class V0CustomElementProcessingStep
   virtual void Dispatch(Element*) = 0;
   virtual bool IsCreatedCallback() const { return false; }
 
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) {}
 
   DISALLOW_COPY_AND_ASSIGN(V0CustomElementProcessingStep);
 };

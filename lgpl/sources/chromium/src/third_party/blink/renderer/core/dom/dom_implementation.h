@@ -39,9 +39,7 @@ class CORE_EXPORT DOMImplementation final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static DOMImplementation* Create(Document& document) {
-    return new DOMImplementation(document);
-  }
+  explicit DOMImplementation(Document&);
 
   // DOM methods & attributes for DOMImplementation
   bool hasFeature() { return true; }
@@ -66,11 +64,9 @@ class CORE_EXPORT DOMImplementation final : public ScriptWrappable {
   static bool IsTextMIMEType(const String&);
   static bool IsJSONMIMEType(const String&);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  explicit DOMImplementation(Document&);
-
   Member<Document> document_;
 };
 

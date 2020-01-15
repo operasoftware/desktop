@@ -4,13 +4,16 @@
 
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_toggle_closed_captions_button_element.h"
 
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/track/text_track.h"
 #include "third_party/blink/renderer/core/html/track/text_track_list.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
+#include "third_party/blink/renderer/modules/media_controls/media_controls_text_track_manager.h"
 #include "third_party/blink/renderer/platform/language.h"
+#include "third_party/blink/renderer/platform/text/platform_locale.h"
 
 namespace blink {
 
@@ -45,8 +48,11 @@ bool UseClosedCaptionsIcon() {
 MediaControlToggleClosedCaptionsButtonElement::
     MediaControlToggleClosedCaptionsButtonElement(
         MediaControlsImpl& media_controls)
-    : MediaControlInputElement(media_controls, kMediaShowClosedCaptionsButton) {
-  setType(InputTypeNames::button);
+    : MediaControlInputElement(media_controls) {
+  setAttribute(html_names::kAriaLabelAttr,
+               WTF::AtomicString(GetLocale().QueryString(
+                   IDS_AX_MEDIA_SHOW_CLOSED_CAPTIONS_MENU_BUTTON)));
+  setType(input_type_names::kButton);
   SetShadowPseudoId(
       AtomicString("-webkit-media-controls-toggle-closed-captions-button"));
   SetClass(kClosedCaptionClass, UseClosedCaptionsIcon());
@@ -59,17 +65,14 @@ bool MediaControlToggleClosedCaptionsButtonElement::
 
 void MediaControlToggleClosedCaptionsButtonElement::UpdateDisplayType() {
   bool captions_visible = MediaElement().TextTracksVisible();
-  SetDisplayType(captions_visible ? kMediaHideClosedCaptionsButton
-                                  : kMediaShowClosedCaptionsButton);
   SetClass("visible", captions_visible);
   UpdateOverflowString();
 
   MediaControlInputElement::UpdateDisplayType();
 }
 
-WebLocalizedString::Name
-MediaControlToggleClosedCaptionsButtonElement::GetOverflowStringName() const {
-  return WebLocalizedString::kOverflowMenuCaptions;
+int MediaControlToggleClosedCaptionsButtonElement::GetOverflowStringId() const {
+  return IDS_MEDIA_OVERFLOW_MENU_CLOSED_CAPTIONS;
 }
 
 bool MediaControlToggleClosedCaptionsButtonElement::HasOverflowButton() const {
@@ -89,11 +92,11 @@ MediaControlToggleClosedCaptionsButtonElement::GetOverflowMenuSubtitleString()
   for (unsigned i = 0; i < track_list->length(); i++) {
     TextTrack* track = track_list->AnonymousIndexedGetter(i);
     if (track && track->mode() == TextTrack::ShowingKeyword())
-      return GetMediaControls().GetTextTrackLabel(track);
+      return GetMediaControls().GetTextTrackManager().GetTextTrackLabel(track);
   }
 
   // Return the label for no text track.
-  return GetMediaControls().GetTextTrackLabel(nullptr);
+  return GetMediaControls().GetTextTrackManager().GetTextTrackLabel(nullptr);
 }
 
 const char*
@@ -104,13 +107,14 @@ MediaControlToggleClosedCaptionsButtonElement::GetNameForHistograms() const {
 
 void MediaControlToggleClosedCaptionsButtonElement::DefaultEventHandler(
     Event& event) {
-  if (event.type() == EventTypeNames::click) {
+  if (event.type() == event_type_names::kClick ||
+      event.type() == event_type_names::kGesturetap) {
     if (MediaElement().textTracks()->length() == 1) {
       // If only one track exists, toggle it on/off
       if (MediaElement().textTracks()->HasShowingTracks())
-        GetMediaControls().DisableShowingTextTracks();
+        GetMediaControls().GetTextTrackManager().DisableShowingTextTracks();
       else
-        GetMediaControls().ShowTextTrackAtIndex(0);
+        GetMediaControls().GetTextTrackManager().ShowTextTrackAtIndex(0);
     } else {
       GetMediaControls().ToggleTextTrackList();
     }

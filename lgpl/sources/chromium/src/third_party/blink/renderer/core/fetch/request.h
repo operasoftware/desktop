@@ -5,7 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_REQUEST_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_REQUEST_H_
 
-#include "services/network/public/mojom/fetch_api.mojom-shared.h"
+#include "services/network/public/mojom/fetch_api.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
 #include "third_party/blink/renderer/bindings/core/v8/request_or_usv_string.h"
@@ -24,7 +25,6 @@ class AbortSignal;
 class BodyStreamBuffer;
 class ExceptionState;
 class RequestInit;
-class WebServiceWorkerRequest;
 
 using RequestInfo = RequestOrUSVString;
 
@@ -32,35 +32,43 @@ class CORE_EXPORT Request final : public Body {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
+  using ForServiceWorkerFetchEvent =
+      FetchRequestData::ForServiceWorkerFetchEvent;
+
   // These "create" function must be called with entering an appropriate
   // V8 context.
   // From Request.idl:
   static Request* Create(ScriptState*,
                          const RequestInfo&,
-                         const RequestInit&,
+                         const RequestInit*,
                          ExceptionState&);
 
   static Request* Create(ScriptState*, const String&, ExceptionState&);
   static Request* Create(ScriptState*,
                          const String&,
-                         const RequestInit&,
+                         const RequestInit*,
                          ExceptionState&);
   static Request* Create(ScriptState*, Request*, ExceptionState&);
   static Request* Create(ScriptState*,
                          Request*,
-                         const RequestInit&,
+                         const RequestInit*,
                          ExceptionState&);
   static Request* Create(ScriptState*, FetchRequestData*);
-  static Request* Create(ScriptState*, const WebServiceWorkerRequest&);
+  static Request* Create(ScriptState*,
+                         const mojom::blink::FetchAPIRequest&,
+                         ForServiceWorkerFetchEvent);
+
+  Request(ScriptState*, FetchRequestData*, Headers*, AbortSignal*);
+  Request(ScriptState*, FetchRequestData*);
 
   // Returns false if |credentials_mode| doesn't represent a valid credentials
   // mode.
   static bool ParseCredentialsMode(const String& credentials_mode,
-                                   network::mojom::FetchCredentialsMode*);
+                                   network::mojom::CredentialsMode*);
 
   // From Request.idl:
   String method() const;
-  KURL url() const;
+  const KURL& url() const;
   Headers* getHeaders() const { return headers_; }
   String destination() const;
   String referrer() const;
@@ -79,7 +87,7 @@ class CORE_EXPORT Request final : public Body {
   Request* clone(ScriptState*, ExceptionState&);
 
   FetchRequestData* PassRequestData(ScriptState*, ExceptionState&);
-  void PopulateWebServiceWorkerRequest(WebServiceWorkerRequest&) const;
+  mojom::blink::FetchAPIRequestPtr CreateFetchAPIRequest() const;
   bool HasBody() const;
   BodyStreamBuffer* BodyBuffer() override { return request_->Buffer(); }
   const BodyStreamBuffer* BodyBuffer() const override {
@@ -89,20 +97,17 @@ class CORE_EXPORT Request final : public Body {
   void Trace(blink::Visitor*) override;
 
  private:
-  Request(ScriptState*, FetchRequestData*, Headers*, AbortSignal*);
-  Request(ScriptState*, FetchRequestData*);
-
   const FetchRequestData* GetRequest() const { return request_; }
   static Request* CreateRequestWithRequestOrString(ScriptState*,
                                                    Request*,
                                                    const String&,
-                                                   const RequestInit&,
+                                                   const RequestInit*,
                                                    ExceptionState&);
 
   String ContentType() const override;
   String MimeType() const override;
 
-  const TraceWrapperMember<FetchRequestData> request_;
+  const Member<FetchRequestData> request_;
   const Member<Headers> headers_;
   const Member<AbortSignal> signal_;
   DISALLOW_COPY_AND_ASSIGN(Request);

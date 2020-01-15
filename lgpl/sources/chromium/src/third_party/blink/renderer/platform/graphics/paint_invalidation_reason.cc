@@ -22,6 +22,8 @@ const char* PaintInvalidationReasonToString(PaintInvalidationReason reason) {
       return "full";
     case PaintInvalidationReason::kStyle:
       return "style change";
+    case PaintInvalidationReason::kBackplate:
+      return "backplate";
     case PaintInvalidationReason::kGeometry:
       return "geometry";
     case PaintInvalidationReason::kCompositing:
@@ -44,8 +46,6 @@ const char* PaintInvalidationReasonToString(PaintInvalidationReason reason) {
       return "subtree";
     case PaintInvalidationReason::kSVGResource:
       return "SVG resource change";
-    case PaintInvalidationReason::kBackgroundOnScrollingContentsLayer:
-      return "background on scrolling contents layer";
     case PaintInvalidationReason::kCaret:
       return "caret";
     case PaintInvalidationReason::kDocumentMarker:

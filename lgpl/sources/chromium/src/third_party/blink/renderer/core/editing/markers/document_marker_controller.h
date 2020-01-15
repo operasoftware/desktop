@@ -48,7 +48,6 @@
 namespace blink {
 
 class DocumentMarkerList;
-class Node;
 class SuggestionMarkerProperties;
 
 class CORE_EXPORT DocumentMarkerController final
@@ -67,14 +66,15 @@ class CORE_EXPORT DocumentMarkerController final
   void AddTextMatchMarker(const EphemeralRange&, TextMatchMarker::MatchStatus);
   void AddCompositionMarker(const EphemeralRange&,
                             Color underline_color,
-                            ws::mojom::ImeTextSpanThickness,
+                            ui::mojom::ImeTextSpanThickness,
                             Color background_color);
   void AddActiveSuggestionMarker(const EphemeralRange&,
                                  Color underline_color,
-                                 ws::mojom::ImeTextSpanThickness,
+                                 ui::mojom::ImeTextSpanThickness,
                                  Color background_color);
   void AddSuggestionMarker(const EphemeralRange&,
                            const SuggestionMarkerProperties&);
+  void AddTextFragmentMarker(const EphemeralRange&);
 
   void MoveMarkers(const Text& src_node, int length, const Text& dst_node);
 
@@ -86,13 +86,15 @@ class CORE_EXPORT DocumentMarkerController final
       DocumentMarker::MarkerTypes = DocumentMarker::MarkerTypes::All());
   void RemoveSpellingMarkersUnderWords(const Vector<String>& words);
   void RemoveSuggestionMarkerByTag(const Text&, int32_t marker_tag);
+  // Removes suggestion marker with |RemoveOnFinishComposing::kRemove|.
+  void RemoveSuggestionMarkerInRangeOnFinish(const EphemeralRangeInFlatTree&);
   void RepaintMarkers(
       DocumentMarker::MarkerTypes = DocumentMarker::MarkerTypes::All());
   // Returns true if markers within a range are found.
   bool SetTextMatchMarkersActive(const EphemeralRange&, bool);
-  // Returns true if markers within a range defined by a node, |startOffset| and
-  // |endOffset| are found.
-  bool SetTextMatchMarkersActive(const Node*,
+  // Returns true if markers within a range defined by a text node,
+  // |start_offset| and |end_offset| are found.
+  bool SetTextMatchMarkersActive(const Text&,
                                  unsigned start_offset,
                                  unsigned end_offset,
                                  bool);
@@ -133,7 +135,7 @@ class CORE_EXPORT DocumentMarkerController final
   // overlap with the specified range. Note that the range can be collapsed, in
   // in which case markers containing the position in their interiors are
   // returned.
-  HeapVector<std::pair<Member<Node>, Member<DocumentMarker>>>
+  HeapVector<std::pair<Member<const Text>, Member<DocumentMarker>>>
   MarkersIntersectingRange(const EphemeralRangeInFlatTree&,
                            DocumentMarker::MarkerTypes);
   DocumentMarkerVector MarkersFor(
@@ -142,13 +144,14 @@ class CORE_EXPORT DocumentMarkerController final
   DocumentMarkerVector Markers() const;
   DocumentMarkerVector ComputeMarkersToPaint(const Text&) const;
 
+  bool PossiblyHasTextMatchMarkers() const;
   Vector<IntRect> LayoutRectsForTextMatchMarkers();
   void InvalidateRectsForAllTextMatchMarkers();
-  void InvalidateRectsForTextMatchMarkersInNode(const Node&);
+  void InvalidateRectsForTextMatchMarkersInNode(const Text&);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
   void ShowMarkers() const;
 #endif
 
@@ -194,7 +197,7 @@ class CORE_EXPORT DocumentMarkerController final
 
 }  // namespace blink
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
 void showDocumentMarkers(const blink::DocumentMarkerController*);
 #endif
 

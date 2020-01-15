@@ -27,18 +27,14 @@
 
 namespace blink {
 
-inline SVGMPathElement::SVGMPathElement(Document& document)
-    : SVGElement(SVGNames::mpathTag, document), SVGURIReference(this) {
-  DCHECK(RuntimeEnabledFeatures::SMILEnabled());
-}
+SVGMPathElement::SVGMPathElement(Document& document)
+    : SVGElement(svg_names::kMPathTag, document), SVGURIReference(this) {}
 
 void SVGMPathElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(target_id_observer_);
   SVGElement::Trace(visitor);
   SVGURIReference::Trace(visitor);
 }
-
-DEFINE_NODE_FACTORY(SVGMPathElement)
 
 SVGMPathElement::~SVGMPathElement() = default;
 

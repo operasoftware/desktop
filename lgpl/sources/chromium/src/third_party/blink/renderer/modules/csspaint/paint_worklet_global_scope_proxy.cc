@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/csspaint/paint_worklet_global_scope_proxy.h"
 
+#include "third_party/blink/public/mojom/script/script_type.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -13,7 +14,6 @@
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
 #include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
-#include "third_party/blink/renderer/core/workers/worker_content_settings_client.h"
 #include "third_party/blink/renderer/core/workers/worklet_module_responses_map.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
@@ -28,42 +28,48 @@ PaintWorkletGlobalScopeProxy* PaintWorkletGlobalScopeProxy::From(
 PaintWorkletGlobalScopeProxy::PaintWorkletGlobalScopeProxy(
     LocalFrame* frame,
     WorkletModuleResponsesMap* module_responses_map,
-    PaintWorkletPendingGeneratorRegistry* pending_generator_registry,
     size_t global_scope_number) {
   DCHECK(IsMainThread());
   Document* document = frame->GetDocument();
   reporting_proxy_ =
       std::make_unique<MainThreadWorkletReportingProxy>(document);
 
-  WorkerClients* worker_clients = WorkerClients::Create();
-  ProvideWorkerFetchContextToWorker(
-      worker_clients, frame->Client()->CreateWorkerFetchContext());
-  ProvideContentSettingsClientToWorker(
-      worker_clients, frame->Client()->CreateWorkerContentSettingsClient());
+  String global_scope_name =
+      StringView("PaintWorklet #") + String::Number(global_scope_number);
 
   auto creation_params = std::make_unique<GlobalScopeCreationParams>(
-      document->Url(), ScriptType::kModule, document->UserAgent(document->Url()),
+      document->Url(), mojom::ScriptType::kModule,
+      OffMainThreadWorkerScriptFetchOption::kEnabled, global_scope_name,
+      document->UserAgent(document->Url()),
+      frame->Client()->CreateWorkerFetchContext(),
       document->GetContentSecurityPolicy()->Headers(),
       document->GetReferrerPolicy(), document->GetSecurityOrigin(),
-      document->IsSecureContext(), document->GetHttpsState(), worker_clients,
+      document->IsSecureContext(), document->GetHttpsState(),
+      nullptr /* worker_clients */,
+      frame->Client()->CreateWorkerContentSettingsClient(),
       document->AddressSpace(), OriginTrialContext::GetTokens(document).get(),
       base::UnguessableToken::Create(), nullptr /* worker_settings */,
-      kV8CacheOptionsDefault, module_responses_map);
+      kV8CacheOptionsDefault, module_responses_map,
+      service_manager::mojom::blink::InterfaceProviderPtrInfo(),
+      mojo::NullRemote(), BeginFrameProviderParams(),
+      nullptr /* parent_feature_policy */,
+      base::UnguessableToken() /* agent_cluster_id */);
   global_scope_ = PaintWorkletGlobalScope::Create(
-      frame, std::move(creation_params), *reporting_proxy_,
-      pending_generator_registry, global_scope_number);
+      frame, std::move(creation_params), *reporting_proxy_);
 }
 
 void PaintWorkletGlobalScopeProxy::FetchAndInvokeScript(
     const KURL& module_url_record,
-    network::mojom::FetchCredentialsMode credentials_mode,
-    FetchClientSettingsObjectSnapshot* outside_settings_object,
+    network::mojom::CredentialsMode credentials_mode,
+    const FetchClientSettingsObjectSnapshot& outside_settings_object,
+    WorkerResourceTimingNotifier& outside_resource_timing_notifier,
     scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner,
     WorkletPendingTasks* pending_tasks) {
   DCHECK(IsMainThread());
   global_scope_->FetchAndInvokeScript(
       module_url_record, credentials_mode, outside_settings_object,
-      std::move(outside_settings_task_runner), pending_tasks);
+      outside_resource_timing_notifier, std::move(outside_settings_task_runner),
+      pending_tasks);
 }
 
 void PaintWorkletGlobalScopeProxy::WorkletObjectDestroyed() {

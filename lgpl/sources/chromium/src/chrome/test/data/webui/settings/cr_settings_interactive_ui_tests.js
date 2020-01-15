@@ -4,12 +4,8 @@
 
 /** @fileoverview Runs the Polymer Settings interactive UI tests. */
 
-/** @const {string} Path to source root. */
-const ROOT_PATH = '../../../../../';
-
 // Polymer BrowserTest fixture.
-GEN_INCLUDE(
-    [ROOT_PATH + 'chrome/test/data/webui/polymer_interactive_ui_test.js']);
+GEN_INCLUDE(['//chrome/test/data/webui/polymer_interactive_ui_test.js']);
 
 /**
  * Test fixture for interactive Polymer Settings elements.
@@ -27,45 +23,12 @@ CrSettingsInteractiveUITest.prototype = {
   },
 
   /** @override */
-  extraLibraries: PolymerTest.getLibraries(ROOT_PATH),
-
-  /** @override */
   setUp: function() {
     PolymerTest.prototype.setUp.call(this);
     // We aren't loading the main document.
     this.accessibilityAuditConfig.ignoreSelectors('humanLangMissing', 'html');
-
-    // TODO(michaelpg): Re-enable after bringing in fix for
-    // https://github.com/PolymerElements/paper-slider/issues/131.
-    this.accessibilityAuditConfig.ignoreSelectors(
-        'badAriaAttributeValue', 'paper-slider');
   },
 };
-
-/**
- * Test fixture for FocusRowBehavior.
- * @constructor
- * @extends {CrSettingsInteractiveUITest}
- */
-function CrSettingsFocusRowBehavior() {}
-
-CrSettingsFocusRowBehavior.prototype = {
-  __proto__: CrSettingsInteractiveUITest.prototype,
-
-  /** @override */
-  browsePreload: 'chrome://settings/focus_row_behavior.html',
-
-  /** @override */
-  extraLibraries: CrSettingsInteractiveUITest.prototype.extraLibraries.concat([
-    ROOT_PATH + 'ui/webui/resources/js/util.js',
-    'focus_row_behavior_test.js',
-    'test_util.js',
-  ]),
-};
-
-TEST_F('CrSettingsFocusRowBehavior', 'FocusTest', function() {
-  mocha.run();
-});
 
 
 /**
@@ -83,6 +46,8 @@ CrSettingsSyncPageTest.prototype = {
 
   /** @override */
   extraLibraries: CrSettingsInteractiveUITest.prototype.extraLibraries.concat([
+    '../test_browser_proxy.js',
+    'test_sync_browser_proxy.js',
     'people_page_sync_page_interactive_test.js',
   ]),
 };

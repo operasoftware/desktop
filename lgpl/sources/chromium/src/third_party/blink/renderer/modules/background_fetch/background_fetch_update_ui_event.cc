@@ -13,21 +13,22 @@
 #include "third_party/blink/renderer/modules/background_fetch/background_fetch_event_init.h"
 #include "third_party/blink/renderer/modules/background_fetch/background_fetch_icon_loader.h"
 #include "third_party/blink/renderer/modules/background_fetch/background_fetch_registration.h"
-#include "third_party/blink/renderer/modules/background_fetch/background_fetch_settled_fetch.h"
 #include "third_party/blink/renderer/modules/background_fetch/background_fetch_ui_options.h"
-#include "third_party/blink/renderer/modules/event_modules_names.h"
+#include "third_party/blink/renderer/modules/event_interface_modules_names.h"
+#include "third_party/blink/renderer/modules/service_worker/wait_until_observer.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
 BackgroundFetchUpdateUIEvent::BackgroundFetchUpdateUIEvent(
     const AtomicString& type,
-    const BackgroundFetchEventInit& initializer)
+    const BackgroundFetchEventInit* initializer)
     : BackgroundFetchEvent(type, initializer, nullptr /* observer */) {}
 
 BackgroundFetchUpdateUIEvent::BackgroundFetchUpdateUIEvent(
     const AtomicString& type,
-    const BackgroundFetchEventInit& initializer,
+    const BackgroundFetchEventInit* initializer,
     WaitUntilObserver* observer,
     ServiceWorkerRegistration* registration)
     : BackgroundFetchEvent(type, initializer, observer),
@@ -43,13 +44,20 @@ void BackgroundFetchUpdateUIEvent::Trace(blink::Visitor* visitor) {
 
 ScriptPromise BackgroundFetchUpdateUIEvent::updateUI(
     ScriptState* script_state,
-    const BackgroundFetchUIOptions& ui_options) {
+    const BackgroundFetchUIOptions* ui_options) {
+  if (observer_ && !observer_->IsEventActive()) {
+    // Return a rejected promise as the event is no longer active.
+    return ScriptPromise::RejectWithDOMException(
+        script_state, MakeGarbageCollected<DOMException>(
+                          DOMExceptionCode::kInvalidStateError,
+                          "ExtendableEvent is no longer active."));
+  }
   if (update_ui_called_) {
     // Return a rejected promise as this method should only be called once.
-    return ScriptPromise::Reject(
-        script_state,
-        V8ThrowException::CreateTypeError(script_state->GetIsolate(),
-                                          "updateUI may only be called once."));
+    return ScriptPromise::RejectWithDOMException(
+        script_state, MakeGarbageCollected<DOMException>(
+                          DOMExceptionCode::kInvalidStateError,
+                          "updateUI may only be called once."));
   }
 
   update_ui_called_ = true;
@@ -61,28 +69,27 @@ ScriptPromise BackgroundFetchUpdateUIEvent::updateUI(
     // vs reacting eagerly.
     return ScriptPromise();
   }
-  DCHECK(!registration_->unique_id().IsEmpty());
 
-  if (!ui_options.hasTitle() && ui_options.icons().IsEmpty()) {
+  if (!ui_options->hasTitle() && ui_options->icons().IsEmpty()) {
     // Nothing to update, just return a resolved promise.
     return ScriptPromise::CastUndefined(script_state);
   }
 
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  if (ui_options.icons().IsEmpty()) {
-    DidGetIcon(resolver, ui_options.title(), SkBitmap(),
+  if (ui_options->icons().IsEmpty()) {
+    DidGetIcon(resolver, ui_options->title(), SkBitmap(),
                -1 /* ideal_to_chosen_icon_size */);
   } else {
     DCHECK(!loader_);
-    loader_ = new BackgroundFetchIconLoader();
+    loader_ = MakeGarbageCollected<BackgroundFetchIconLoader>();
     DCHECK(loader_);
     loader_->Start(BackgroundFetchBridge::From(service_worker_registration_),
-                   ExecutionContext::From(script_state), ui_options.icons(),
+                   ExecutionContext::From(script_state), ui_options->icons(),
                    WTF::Bind(&BackgroundFetchUpdateUIEvent::DidGetIcon,
                              WrapPersistent(this), WrapPersistent(resolver),
-                             ui_options.title()));
+                             ui_options->title()));
   }
 
   return promise;
@@ -93,10 +100,10 @@ void BackgroundFetchUpdateUIEvent::DidGetIcon(
     const String& title,
     const SkBitmap& icon,
     int64_t ideal_to_chosen_icon_size) {
-  BackgroundFetchBridge::From(service_worker_registration_)
-      ->UpdateUI(registration_->id(), registration_->unique_id(), title, icon,
-                 WTF::Bind(&BackgroundFetchUpdateUIEvent::DidUpdateUI,
-                           WrapPersistent(this), WrapPersistent(resolver)));
+  registration()->UpdateUI(
+      title, icon,
+      WTF::Bind(&BackgroundFetchUpdateUIEvent::DidUpdateUI,
+                WrapPersistent(this), WrapPersistent(resolver)));
 }
 
 void BackgroundFetchUpdateUIEvent::DidUpdateUI(
@@ -108,9 +115,9 @@ void BackgroundFetchUpdateUIEvent::DidUpdateUI(
       resolver->Resolve();
       return;
     case mojom::blink::BackgroundFetchError::STORAGE_ERROR:
-      resolver->Reject(
-          DOMException::Create(DOMExceptionCode::kAbortError,
-                               "Failed to update UI due to I/O error."));
+      resolver->Reject(MakeGarbageCollected<DOMException>(
+          DOMExceptionCode::kAbortError,
+          "Failed to update UI due to I/O error."));
       return;
     case mojom::blink::BackgroundFetchError::DUPLICATED_DEVELOPER_ID:
     case mojom::blink::BackgroundFetchError::INVALID_ARGUMENT:

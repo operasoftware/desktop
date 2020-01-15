@@ -6,10 +6,13 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_CANVAS_OFFSCREENCANVAS2D_OFFSCREEN_CANVAS_RENDERING_CONTEXT_2D_H_
 
 #include <memory>
+#include <random>
+
 #include "third_party/blink/renderer/core/html/canvas/canvas_context_creation_attributes_core.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context_factory.h"
 #include "third_party/blink/renderer/modules/canvas/canvas2d/base_rendering_context_2d.h"
+#include "third_party/blink/renderer/platform/graphics/paint/paint_recorder.h"
 
 namespace blink {
 
@@ -33,14 +36,18 @@ class MODULES_EXPORT OffscreenCanvasRenderingContext2D final
         CanvasRenderingContextHost* host,
         const CanvasContextCreationAttributesCore& attrs) override {
       DCHECK(host->IsOffscreenCanvas());
-      return new OffscreenCanvasRenderingContext2D(
+      return MakeGarbageCollected<OffscreenCanvasRenderingContext2D>(
           static_cast<OffscreenCanvas*>(host), attrs);
     }
 
     CanvasRenderingContext::ContextType GetContextType() const override {
-      return CanvasRenderingContext::kContext2d;
+      return CanvasRenderingContext::kContext2D;
     }
   };
+
+  OffscreenCanvasRenderingContext2D(
+      OffscreenCanvas*,
+      const CanvasContextCreationAttributesCore& attrs);
 
   OffscreenCanvas* offscreenCanvasForBinding() const {
     DCHECK(!Host() || Host()->IsOffscreenCanvas());
@@ -51,7 +58,7 @@ class MODULES_EXPORT OffscreenCanvasRenderingContext2D final
 
   // CanvasRenderingContext implementation
   ~OffscreenCanvasRenderingContext2D() override;
-  ContextType GetContextType() const override { return kContext2d; }
+  ContextType GetContextType() const override { return kContext2D; }
   bool Is2d() const override { return true; }
   bool IsComposited() const override { return false; }
   bool IsAccelerated() const override;
@@ -62,7 +69,7 @@ class MODULES_EXPORT OffscreenCanvasRenderingContext2D final
   void ClearRect(double x, double y, double width, double height) override {
     BaseRenderingContext2D::clearRect(x, y, width, height);
   }
-  scoped_refptr<StaticBitmapImage> GetImage(AccelerationHint) const final;
+  scoped_refptr<StaticBitmapImage> GetImage(AccelerationHint) final;
   void Reset() override;
   void RestoreCanvasMatrixClipStack(cc::PaintCanvas* c) const override {
     RestoreMatrixClipStack(c);
@@ -83,19 +90,19 @@ class MODULES_EXPORT OffscreenCanvasRenderingContext2D final
   // BaseRenderingContext2D implementation
   bool OriginClean() const final;
   void SetOriginTainted() final;
-  bool WouldTaintOrigin(CanvasImageSource*, ExecutionContext*) final;
+  bool WouldTaintOrigin(CanvasImageSource*) final;
 
   int Width() const final;
   int Height() const final;
 
   bool CanCreateCanvas2dResourceProvider() const final;
+  CanvasResourceProvider* GetOrCreateCanvasResourceProvider() const;
   CanvasResourceProvider* GetCanvasResourceProvider() const;
 
   bool ParseColorOrCurrentColor(Color&, const String& color_string) const final;
 
   cc::PaintCanvas* DrawingCanvas() const final;
   cc::PaintCanvas* ExistingDrawingCanvas() const final;
-  void DisableDeferral(DisableDeferralReason) final;
 
   void DidDraw() final;
   void DidDraw(const SkIRect& dirty_rect) final;
@@ -113,17 +120,12 @@ class MODULES_EXPORT OffscreenCanvasRenderingContext2D final
 
   void Trace(blink::Visitor*) override;
 
-  void PushFrame() override;
+  bool PushFrame() override;
+
+  bool HasRecordedDrawCommands() { return have_recorded_draw_commands_; }
+  bool IsDeferralEnabled() const final { return is_deferral_enabled_; }
 
  protected:
-  OffscreenCanvasRenderingContext2D(
-      OffscreenCanvas*,
-      const CanvasContextCreationAttributesCore& attrs);
-
-  void NeedsFinalizeFrame() override {
-    CanvasRenderingContext::NeedsFinalizeFrame();
-  }
-
   CanvasColorParams ColorParams() const override;
   bool WritePixels(const SkImageInfo& orig_info,
                    const void* pixels,
@@ -132,6 +134,13 @@ class MODULES_EXPORT OffscreenCanvasRenderingContext2D final
                    int y) override;
 
  private:
+  void StartRecording();
+  bool is_deferral_enabled_;
+  std::unique_ptr<PaintRecorder> recorder_;
+  bool have_recorded_draw_commands_;
+  void FinalizeFrame() final;
+  void FlushRecording();
+
   bool IsPaintable() const final;
   bool IsCanvas2DBufferValid() const override;
 
@@ -142,11 +151,16 @@ class MODULES_EXPORT OffscreenCanvasRenderingContext2D final
                         double* max_width = nullptr);
   const Font& AccessFont();
 
-  scoped_refptr<CanvasResource> ProduceFrame();
+  scoped_refptr<CanvasResource> ProduceCanvasResource();
 
   String ColorSpaceAsString() const override;
   CanvasPixelFormat PixelFormat() const override;
   SkIRect dirty_rect_for_commit_;
+
+  bool is_valid_size_ = false;
+
+  std::mt19937 random_generator_;
+  std::bernoulli_distribution bernoulli_distribution_;
 };
 
 DEFINE_TYPE_CASTS(OffscreenCanvasRenderingContext2D,

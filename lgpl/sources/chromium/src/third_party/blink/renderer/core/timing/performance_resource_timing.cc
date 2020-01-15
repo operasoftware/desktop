@@ -36,6 +36,7 @@
 #include "third_party/blink/renderer/core/performance_entry_names.h"
 #include "third_party/blink/renderer/core/timing/performance.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_load_timing.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_timing_info.h"
@@ -44,7 +45,7 @@ namespace blink {
 
 PerformanceResourceTiming::PerformanceResourceTiming(
     const WebResourceTimingInfo& info,
-    TimeTicks time_origin,
+    base::TimeTicks time_origin,
     const AtomicString& initiator_type)
     : PerformanceEntry(info.name,
                        Performance::MonotonicTimeToDOMHighResTimeStamp(
@@ -53,17 +54,18 @@ PerformanceResourceTiming::PerformanceResourceTiming(
                            info.allow_negative_values),
                        Performance::MonotonicTimeToDOMHighResTimeStamp(
                            time_origin,
-                           info.finish_time,
+                           info.response_end,
                            info.allow_negative_values)),
-      initiator_type_(initiator_type.IsEmpty() ? FetchInitiatorTypeNames::other
-                                               : initiator_type),
+      initiator_type_(initiator_type.IsEmpty()
+                          ? fetch_initiator_type_names::kOther
+                          : initiator_type),
       alpn_negotiated_protocol_(
           static_cast<String>(info.alpn_negotiated_protocol)),
       connection_info_(static_cast<String>(info.connection_info)),
       time_origin_(time_origin),
       timing_(info.timing),
       last_redirect_end_time_(info.last_redirect_end_time),
-      finish_time_(info.finish_time),
+      response_end_(info.response_end),
       transfer_size_(info.transfer_size),
       encoded_body_size_(info.encoded_body_size),
       decoded_body_size_(info.decoded_body_size),
@@ -71,6 +73,7 @@ PerformanceResourceTiming::PerformanceResourceTiming(
       allow_timing_details_(info.allow_timing_details),
       allow_redirect_details_(info.allow_redirect_details),
       allow_negative_value_(info.allow_negative_values),
+      is_secure_context_(info.is_secure_context),
       server_timing_(
           PerformanceServerTiming::FromParsedServerTiming(info.server_timing)) {
 }
@@ -78,19 +81,19 @@ PerformanceResourceTiming::PerformanceResourceTiming(
 // This constructor is for PerformanceNavigationTiming.
 PerformanceResourceTiming::PerformanceResourceTiming(
     const AtomicString& name,
-    TimeTicks time_origin,
-    const WebVector<WebServerTimingInfo>& server_timing,
-    bool was_cached)
+    base::TimeTicks time_origin,
+    bool is_secure_context,
+    const WebVector<WebServerTimingInfo>& server_timing)
     : PerformanceEntry(name, 0.0, 0.0),
       time_origin_(time_origin),
+      is_secure_context_(is_secure_context),
       server_timing_(
-          PerformanceServerTiming::FromParsedServerTiming(server_timing)),
-      was_cached_(was_cached) {}
+          PerformanceServerTiming::FromParsedServerTiming(server_timing)) {}
 
 PerformanceResourceTiming::~PerformanceResourceTiming() = default;
 
 AtomicString PerformanceResourceTiming::entryType() const {
-  return PerformanceEntryNames::resource;
+  return performance_entry_names::kResource;
 }
 
 PerformanceEntryType PerformanceResourceTiming::EntryTypeEnum() const {
@@ -109,15 +112,15 @@ bool PerformanceResourceTiming::DidReuseConnection() const {
   return did_reuse_connection_;
 }
 
-unsigned long long PerformanceResourceTiming::GetTransferSize() const {
+uint64_t PerformanceResourceTiming::GetTransferSize() const {
   return transfer_size_;
 }
 
-unsigned long long PerformanceResourceTiming::GetEncodedBodySize() const {
+uint64_t PerformanceResourceTiming::GetEncodedBodySize() const {
   return encoded_body_size_;
 }
 
-unsigned long long PerformanceResourceTiming::GetDecodedBodySize() const {
+uint64_t PerformanceResourceTiming::GetDecodedBodySize() const {
   return decoded_body_size_;
 }
 
@@ -235,7 +238,7 @@ DOMHighResTimeStamp PerformanceResourceTiming::connectStart() const {
     return domainLookupEnd();
 
   // connectStart includes any DNS time, so we may need to trim that off.
-  TimeTicks connect_start = timing->ConnectStart();
+  base::TimeTicks connect_start = timing->ConnectStart();
   if (!timing->DnsEnd().is_null())
     connect_start = timing->DnsEnd();
 
@@ -256,12 +259,19 @@ DOMHighResTimeStamp PerformanceResourceTiming::connectEnd() const {
 }
 
 DOMHighResTimeStamp PerformanceResourceTiming::secureConnectionStart() const {
-  if (!AllowTimingDetails())
+  if (!AllowTimingDetails() || !is_secure_context_)
     return 0.0;
+
+  // Step 2 of
+  // https://w3c.github.io/resource-timing/#dom-performanceresourcetiming-secureconnectionstart.
+  if (DidReuseConnection())
+    return fetchStart();
+
   ResourceLoadTiming* timing = GetResourceLoadTiming();
-  // SslStart will be zero when a secure connection is not negotiated.
-  if (!timing || timing->SslStart().is_null())
+  if (!timing || timing->SslStart().is_null()) {
+    // TODO(yoav): add DCHECK or use counter to make sure this never happens.
     return 0.0;
+  }
 
   return Performance::MonotonicTimeToDOMHighResTimeStamp(
       time_origin_, timing->SslStart(), allow_negative_value_);
@@ -285,39 +295,39 @@ DOMHighResTimeStamp PerformanceResourceTiming::responseStart() const {
   if (!timing)
     return requestStart();
 
-  // FIXME: This number isn't exactly correct. See the notes in
-  // PerformanceTiming::responseStart().
+  base::TimeTicks response_start = timing->ReceiveHeadersStart();
+  if (response_start.is_null())
+    response_start = timing->ReceiveHeadersEnd();
+  if (response_start.is_null())
+    return requestStart();
+
   return Performance::MonotonicTimeToDOMHighResTimeStamp(
-      time_origin_, timing->ReceiveHeadersEnd(), allow_negative_value_);
+      time_origin_, response_start, allow_negative_value_);
 }
 
 DOMHighResTimeStamp PerformanceResourceTiming::responseEnd() const {
-  if (finish_time_.is_null())
+  if (response_end_.is_null())
     return responseStart();
 
   return Performance::MonotonicTimeToDOMHighResTimeStamp(
-      time_origin_, finish_time_, allow_negative_value_);
+      time_origin_, response_end_, allow_negative_value_);
 }
 
-bool PerformanceResourceTiming::wasCached() const {
-  return was_cached_;
-}
-
-unsigned long long PerformanceResourceTiming::transferSize() const {
+uint64_t PerformanceResourceTiming::transferSize() const {
   if (!AllowTimingDetails())
     return 0;
 
   return GetTransferSize();
 }
 
-unsigned long long PerformanceResourceTiming::encodedBodySize() const {
+uint64_t PerformanceResourceTiming::encodedBodySize() const {
   if (!AllowTimingDetails())
     return 0;
 
   return GetEncodedBodySize();
 }
 
-unsigned long long PerformanceResourceTiming::decodedBodySize() const {
+uint64_t PerformanceResourceTiming::decodedBodySize() const {
   if (!AllowTimingDetails())
     return 0;
 
@@ -349,7 +359,7 @@ void PerformanceResourceTiming::BuildJSONValue(V8ObjectBuilder& builder) const {
   builder.AddNumber("encodedBodySize", encodedBodySize());
   builder.AddNumber("decodedBodySize", decodedBodySize());
 
-  Vector<ScriptValue> server_timing;
+  HeapVector<ScriptValue> server_timing;
   server_timing.ReserveCapacity(server_timing_.size());
   for (unsigned i = 0; i < server_timing_.size(); i++) {
     server_timing.push_back(

@@ -22,7 +22,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_DETAILS_ELEMENT_H_
 
 #include "third_party/blink/renderer/core/html/html_element.h"
-#include "third_party/blink/renderer/platform/web_task_runner.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 
 namespace blink {
 
@@ -30,8 +30,9 @@ class HTMLDetailsElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static HTMLDetailsElement* Create(Document&);
   void ToggleOpen();
+
+  explicit HTMLDetailsElement(Document&);
   ~HTMLDetailsElement() override;
 
   Element* FindMainSummary() const;
@@ -40,11 +41,9 @@ class HTMLDetailsElement final : public HTMLElement {
   static bool IsFirstSummary(const Node&);
 
  private:
-  explicit HTMLDetailsElement(Document&);
+  void DispatchPendingEvent(const AttributeModificationReason);
 
-  void DispatchPendingEvent();
-
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
   void ParseAttribute(const AttributeModificationParams&) override;
   void DidAddUserAgentShadowRoot(ShadowRoot&) override;
   bool IsInteractiveContent() const override;

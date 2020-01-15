@@ -27,11 +27,11 @@
 #include "third_party/blink/renderer/core/css/css_selector_list.h"
 
 #include <memory>
-#include <vector>
 #include "third_party/blink/renderer/core/css/parser/css_parser_selector.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace {
 // CSSSelector is one of the top types that consume renderer memory,
@@ -89,9 +89,8 @@ CSSSelectorList CSSSelectorList::ConcatenateListExpansion(
   return list;
 }
 
-std::vector<const CSSSelector*> SelectorBoundaries(
-    const CSSSelectorList& list) {
-  std::vector<const CSSSelector*> result;
+Vector<const CSSSelector*> SelectorBoundaries(const CSSSelectorList& list) {
+  Vector<const CSSSelector*> result;
   for (const CSSSelector* s = list.First(); s; s = list.Next(*s)) {
     result.push_back(s);
   }
@@ -122,7 +121,7 @@ void AddToList(CSSSelector*& destination,
       if (!selector_to_expand->IsLastInTagHistory())
         destination->SetLastInTagHistory(false);
     }
-    if (selector_to_expand->GetPseudoType() == CSSSelector::kPseudoIS ||
+    if (selector_to_expand->GetPseudoType() == CSSSelector::kPseudoWhere ||
         selector_to_expand->IgnoreSpecificity())
       destination->SetIgnoreSpecificity(true);
     destination->SetLastInSelectorList(false);
@@ -134,29 +133,28 @@ void AddToList(CSSSelector*& destination,
 CSSSelectorList CSSSelectorList::ExpandedFirstPseudoClass() const {
   DCHECK(this->RequiresExpansion());
   unsigned original_length = this->ComputeLength();
-  std::vector<const CSSSelector*> selector_boundaries =
-      SelectorBoundaries(*this);
+  Vector<const CSSSelector*> selector_boundaries = SelectorBoundaries(*this);
 
-  size_t i = 0;
+  size_t begin = 0;
   CSSSelectorList transformed = this->Copy();
-  while (!selector_boundaries[i]->HasPseudoMatches() &&
-         !selector_boundaries[i]->HasPseudoIS())
-    ++i;
+  while (!selector_boundaries[begin]->HasPseudoIs() &&
+         !selector_boundaries[begin]->HasPseudoWhere())
+    ++begin;
 
-  const CSSSelector* selector_to_expand_begin = selector_boundaries[i];
-  const CSSSelector* selector_to_expand_end = selector_boundaries[i + 1];
+  const CSSSelector* selector_to_expand_begin = selector_boundaries[begin];
+  const CSSSelector* selector_to_expand_end = selector_boundaries[begin + 1];
   unsigned selector_to_expand_length =
       static_cast<unsigned>(selector_to_expand_end - selector_to_expand_begin);
 
   const CSSSelector* simple_selector = selector_to_expand_begin;
-  while (simple_selector->GetPseudoType() != CSSSelector::kPseudoMatches &&
-         simple_selector->GetPseudoType() != CSSSelector::kPseudoIS) {
+  while (simple_selector->GetPseudoType() != CSSSelector::kPseudoIs &&
+         simple_selector->GetPseudoType() != CSSSelector::kPseudoWhere) {
     simple_selector = simple_selector->TagHistory();
   }
 
   unsigned inner_selector_length =
       simple_selector->SelectorList()->ComputeLength();
-  std::vector<const CSSSelector*> selector_arg_boundaries =
+  Vector<const CSSSelector*> selector_arg_boundaries =
       SelectorBoundaries(*simple_selector->SelectorList());
 
   wtf_size_t num_args =
@@ -217,17 +215,17 @@ CSSSelectorList CSSSelectorList::TransformForListExpansion() {
   return CSSSelectorList::ConcatenateListExpansion(transformed, *this);
 }
 
-bool CSSSelectorList::HasPseudoMatches() const {
+bool CSSSelectorList::HasPseudoIs() const {
   for (const CSSSelector* s = FirstForCSSOM(); s; s = Next(*s)) {
-    if (s->HasPseudoMatches())
+    if (s->HasPseudoIs())
       return true;
   }
   return false;
 }
 
-bool CSSSelectorList::HasPseudoIS() const {
+bool CSSSelectorList::HasPseudoWhere() const {
   for (const CSSSelector* s = FirstForCSSOM(); s; s = Next(*s)) {
-    if (s->HasPseudoIS())
+    if (s->HasPseudoWhere())
       return true;
   }
   return false;
@@ -235,7 +233,7 @@ bool CSSSelectorList::HasPseudoIS() const {
 
 bool CSSSelectorList::RequiresExpansion() const {
   for (const CSSSelector* s = FirstForCSSOM(); s; s = Next(*s)) {
-    if (s->HasPseudoMatches() || s->HasPseudoIS())
+    if (s->HasPseudoIs() || s->HasPseudoWhere())
       return true;
   }
   return false;

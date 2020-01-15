@@ -34,7 +34,7 @@
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/public/common/indexeddb/web_idb_types.h"
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_cursor.h"
+#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
@@ -44,17 +44,17 @@
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/events/event_queue.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
-#include "third_party/blink/renderer/core/dom/pausable_object.h"
+#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/modules/event_modules.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_any.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_transaction.h"
 #include "third_party/blink/renderer/modules/indexeddb/indexed_db.h"
+#include "third_party/blink/renderer/modules/indexeddb/web_idb_cursor.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -66,7 +66,7 @@ class IDBValue;
 
 class MODULES_EXPORT IDBRequest : public EventTargetWithInlineData,
                                   public ActiveScriptWrappable<IDBRequest>,
-                                  public PausableObject {
+                                  public ContextLifecycleObserver {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(IDBRequest);
 
@@ -154,7 +154,7 @@ class MODULES_EXPORT IDBRequest : public EventTargetWithInlineData,
     // cannot be null.
     const char* trace_event_name_ = nullptr;
     // Uniquely generated ID that ties an async trace's begin and end events.
-    size_t id_;
+    size_t id_ = 0;
 
     DISALLOW_COPY_AND_ASSIGN(AsyncTraceState);
   };
@@ -175,7 +175,10 @@ class MODULES_EXPORT IDBRequest : public EventTargetWithInlineData,
                             const Source&,
                             IDBTransaction*,
                             AsyncTraceState);
+
+  IDBRequest(ScriptState*, const Source&, IDBTransaction*, AsyncTraceState);
   ~IDBRequest() override;
+
   void Trace(blink::Visitor*) override;
 
   v8::Isolate* GetIsolate() const { return isolate_; }
@@ -214,10 +217,10 @@ class MODULES_EXPORT IDBRequest : public EventTargetWithInlineData,
   WebIDBCallbacks* WebCallbacks() const { return web_callbacks_; }
 #endif  // DCHECK_IS_ON()
 
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(success);
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(success, kSuccess)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(error, kError)
 
-  void SetCursorDetails(IndexedDB::CursorType, WebIDBCursorDirection);
+  void SetCursorDetails(indexed_db::CursorType, mojom::IDBCursorDirection);
   void SetPendingCursor(IDBCursor*);
   void Abort();
 
@@ -276,7 +279,7 @@ class MODULES_EXPORT IDBRequest : public EventTargetWithInlineData,
   virtual void EnqueueUpgradeNeeded(int64_t old_version,
                                     std::unique_ptr<WebIDBDatabase>,
                                     const IDBDatabaseMetadata&,
-                                    WebIDBDataLoss,
+                                    mojom::IDBDataLoss,
                                     String data_loss_message) {
     NOTREACHED();
   }
@@ -288,7 +291,7 @@ class MODULES_EXPORT IDBRequest : public EventTargetWithInlineData,
   // ScriptWrappable
   bool HasPendingActivity() const final;
 
-  // PausableObject
+  // ContextLifecycleObserver
   void ContextDestroyed(ExecutionContext*) override;
 
   // EventTarget
@@ -333,7 +336,6 @@ class MODULES_EXPORT IDBRequest : public EventTargetWithInlineData,
   }
 
  protected:
-  IDBRequest(ScriptState*, const Source&, IDBTransaction*, AsyncTraceState);
   void EnqueueEvent(Event*);
   virtual bool ShouldEnqueueEvent() const;
   void EnqueueResultInternal(IDBAny*);
@@ -390,8 +392,8 @@ class MODULES_EXPORT IDBRequest : public EventTargetWithInlineData,
   Member<EventQueue> event_queue_;
 
   // Only used if the result type will be a cursor.
-  IndexedDB::CursorType cursor_type_ = IndexedDB::kCursorKeyAndValue;
-  WebIDBCursorDirection cursor_direction_ = kWebIDBCursorDirectionNext;
+  indexed_db::CursorType cursor_type_ = indexed_db::kCursorKeyAndValue;
+  mojom::IDBCursorDirection cursor_direction_ = mojom::IDBCursorDirection::Next;
   // When a cursor is continued/advanced, |result_| is cleared and
   // |pendingCursor_| holds it.
   Member<IDBCursor> pending_cursor_;

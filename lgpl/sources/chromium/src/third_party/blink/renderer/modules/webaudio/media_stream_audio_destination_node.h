@@ -40,30 +40,35 @@ class MediaStreamAudioDestinationHandler final
  public:
   static scoped_refptr<MediaStreamAudioDestinationHandler> Create(
       AudioNode&,
-      size_t number_of_channels);
+      uint32_t number_of_channels);
   ~MediaStreamAudioDestinationHandler() override;
 
-  MediaStream* Stream() { return stream_.Get(); }
-
   // AudioHandler.
-  void Process(size_t frames_to_process) override;
-  void SetChannelCount(unsigned long, ExceptionState&) override;
+  void Process(uint32_t frames_to_process) override;
+  void SetChannelCount(unsigned, ExceptionState&) override;
 
-  unsigned long MaxChannelCount() const;
+  uint32_t MaxChannelCount() const;
 
   bool RequiresTailProcessing() const final { return false; }
 
+  // This node has no outputs, so we need methods that are different from the
+  // ones provided by AudioBasicInspectorHnadler, which assume an output.
+  void PullInputs(uint32_t frames_to_process) override;
+  void CheckNumberOfChannelsForInput(AudioNodeInput*) override;
+
+  // AudioNode
+  void UpdatePullStatusIfNeeded() override;
+
  private:
-  MediaStreamAudioDestinationHandler(AudioNode&, size_t number_of_channels);
+  MediaStreamAudioDestinationHandler(AudioNode&, uint32_t number_of_channels);
   // As an audio source, we will never propagate silence.
   bool PropagatesSilence() const override { return false; }
 
-  // This Persistent doesn't make a reference cycle.
-  Persistent<MediaStream> stream_;
+  // MediaStreamSource is held alive by MediaStreamAudioDestinationNode.
   // Accessed by main thread and during audio thread processing.
   //
   // TODO: try to avoid such access during audio thread processing.
-  CrossThreadPersistent<MediaStreamSource> source_;
+  CrossThreadWeakPersistent<MediaStreamSource> source_;
 
   // This synchronizes dynamic changes to the channel count with
   // process() to manage the mix bus.
@@ -79,16 +84,26 @@ class MediaStreamAudioDestinationNode final : public AudioBasicInspectorNode {
 
  public:
   static MediaStreamAudioDestinationNode* Create(AudioContext&,
-                                                 size_t number_of_channels,
+                                                 uint32_t number_of_channels,
                                                  ExceptionState&);
   static MediaStreamAudioDestinationNode* Create(AudioContext*,
-                                                 const AudioNodeOptions&,
+                                                 const AudioNodeOptions*,
                                                  ExceptionState&);
 
-  MediaStream* stream() const;
+  MediaStreamAudioDestinationNode(AudioContext&, uint32_t number_of_channels);
+
+  MediaStream* stream() const { return stream_; }
+  MediaStreamSource* source() const { return source_; }
+
+  void Trace(Visitor*) final;
+
+  // InspectorHelperMixin
+  void ReportDidCreate() final;
+  void ReportWillBeDestroyed() final;
 
  private:
-  MediaStreamAudioDestinationNode(AudioContext&, size_t number_of_channels);
+  const Member<MediaStreamSource> source_;
+  const Member<MediaStream> stream_;
 };
 
 }  // namespace blink

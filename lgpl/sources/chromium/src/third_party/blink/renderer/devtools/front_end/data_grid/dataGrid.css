@@ -173,6 +173,11 @@
     background-color: hsla(0, 0%, 90%, 1);
 }
 
+.data-grid .top-filler-td {
+    border-bottom: 0 none transparent;
+    line-height: 0;
+}
+
 .data-grid button {
     line-height: 18px;
     color: inherit;
@@ -180,7 +185,7 @@
 
 .data-grid td.disclosure::before {
     -webkit-user-select: none;
-    -webkit-mask-image: url(Images/treeoutlineTriangles.png);
+    -webkit-mask-image: url(Images/treeoutlineTriangles.svg);
     -webkit-mask-position: 0 0;
     -webkit-mask-size: 32px 24px;
     float: left;
@@ -197,11 +202,6 @@
     background-color: transparent;
 }
 
-@media (-webkit-min-device-pixel-ratio: 1.1) {
-.data-grid tr.parent td.disclosure::before {
-    -webkit-mask-image: url(Images/treeoutlineTriangles_2x.png);
-}
-} /* media */
 
 .data-grid tr.expanded td.disclosure::before {
     -webkit-mask-position: -16px 0;

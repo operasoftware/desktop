@@ -4,12 +4,12 @@
 
 #include "third_party/blink/renderer/core/frame/csp/source_list_directive.h"
 
-#include <vector>
-
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/document_init.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/csp/csp_source.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
@@ -18,7 +18,8 @@ namespace blink {
 
 class SourceListDirectiveTest : public testing::Test {
  public:
-  SourceListDirectiveTest() : csp(ContentSecurityPolicy::Create()) {}
+  SourceListDirectiveTest()
+      : csp(MakeGarbageCollected<ContentSecurityPolicy>()) {}
 
  protected:
   struct Source {
@@ -34,19 +35,21 @@ class SourceListDirectiveTest : public testing::Test {
     KURL secure_url("https://example.test/image.png");
     scoped_refptr<SecurityOrigin> secure_origin(
         SecurityOrigin::Create(secure_url));
-    document = Document::CreateForTest();
-    document->SetSecurityOrigin(secure_origin);
-    csp->BindToExecutionContext(document.Get());
+    DocumentInit init =
+        DocumentInit::Create().WithOriginToCommit(secure_origin);
+    document = MakeGarbageCollected<Document>(init);
+    csp->BindToDelegate(document->GetContentSecurityPolicyDelegate());
   }
 
   ContentSecurityPolicy* SetUpWithOrigin(const String& origin) {
     KURL secure_url(origin);
     scoped_refptr<SecurityOrigin> secure_origin(
         SecurityOrigin::Create(secure_url));
-    Document* document = Document::CreateForTest();
-    document->SetSecurityOrigin(secure_origin);
-    ContentSecurityPolicy* csp = ContentSecurityPolicy::Create();
-    csp->BindToExecutionContext(document);
+    DocumentInit init =
+        DocumentInit::Create().WithOriginToCommit(secure_origin);
+    auto* document = MakeGarbageCollected<Document>(init);
+    auto* csp = MakeGarbageCollected<ContentSecurityPolicy>();
+    csp->BindToDelegate(document->GetContentSecurityPolicyDelegate());
     return csp;
   }
 
@@ -349,7 +352,7 @@ TEST_F(SourceListDirectiveTest, Subsumes) {
   SourceListDirective required("script-src", required_sources, csp.Get());
 
   struct TestCase {
-    std::vector<String> sources_vector;
+    Vector<String> sources_vector;
     bool expected;
   } cases[] = {
       // Non-intersecting source lists give an effective policy of 'none', which
@@ -416,8 +419,8 @@ TEST_F(SourceListDirectiveTest, Subsumes) {
     HeapVector<Member<SourceListDirective>> returned;
 
     for (const auto& sources : test.sources_vector) {
-      SourceListDirective* member =
-          new SourceListDirective("script-src", sources, csp.Get());
+      SourceListDirective* member = MakeGarbageCollected<SourceListDirective>(
+          "script-src", sources, csp.Get());
       returned.push_back(member);
     }
 
@@ -432,7 +435,7 @@ TEST_F(SourceListDirectiveTest, SubsumesWithSelf) {
                         csp.Get());
 
   struct TestCase {
-    std::vector<const char*> sources_b;
+    Vector<const char*> sources_b;
     const char* origin_b;
     bool expected;
   } cases[] = {
@@ -533,8 +536,8 @@ TEST_F(SourceListDirectiveTest, SubsumesWithSelf) {
 
     HeapVector<Member<SourceListDirective>> vector_b;
     for (auto* const sources : test.sources_b) {
-      SourceListDirective* member =
-          new SourceListDirective("script-src", sources, csp_b);
+      SourceListDirective* member = MakeGarbageCollected<SourceListDirective>(
+          "script-src", sources, csp_b);
       vector_b.push_back(member);
     }
 
@@ -603,7 +606,7 @@ TEST_F(SourceListDirectiveTest, SubsumesAllowAllInline) {
   struct TestCase {
     bool is_script_src;
     String sources_a;
-    std::vector<String> sources_b;
+    Vector<String> sources_b;
     bool expected;
   } cases[] = {
       // `sourcesA` allows all inline behavior.
@@ -699,7 +702,7 @@ TEST_F(SourceListDirectiveTest, SubsumesAllowAllInline) {
 
     HeapVector<Member<SourceListDirective>> vector_b;
     for (const auto& sources : test.sources_b) {
-      SourceListDirective* member = new SourceListDirective(
+      SourceListDirective* member = MakeGarbageCollected<SourceListDirective>(
           test.is_script_src ? "script-src" : "style-src", sources, csp_b);
       vector_b.push_back(member);
     }
@@ -712,7 +715,7 @@ TEST_F(SourceListDirectiveTest, SubsumesUnsafeAttributes) {
   struct TestCase {
     bool is_script_src;
     String sources_a;
-    std::vector<String> sources_b;
+    Vector<String> sources_b;
     bool expected;
   } cases[] = {
       // A or policiesB contain `unsafe-eval`.
@@ -788,7 +791,7 @@ TEST_F(SourceListDirectiveTest, SubsumesUnsafeAttributes) {
 
     HeapVector<Member<SourceListDirective>> vector_b;
     for (const auto& sources : test.sources_b) {
-      SourceListDirective* member = new SourceListDirective(
+      SourceListDirective* member = MakeGarbageCollected<SourceListDirective>(
           test.is_script_src ? "script-src" : "style-src", sources, csp_b);
       vector_b.push_back(member);
     }
@@ -916,7 +919,7 @@ TEST_F(SourceListDirectiveTest, SubsumesNoncesAndHashes) {
   struct TestCase {
     bool is_script_src;
     String sources_a;
-    std::vector<String> sources_b;
+    Vector<String> sources_b;
     bool expected;
   } cases[] = {
       // Check nonces.
@@ -1051,7 +1054,7 @@ TEST_F(SourceListDirectiveTest, SubsumesNoncesAndHashes) {
 
     HeapVector<Member<SourceListDirective>> vector_b;
     for (const auto& sources : test.sources_b) {
-      SourceListDirective* member = new SourceListDirective(
+      SourceListDirective* member = MakeGarbageCollected<SourceListDirective>(
           test.is_script_src ? "script-src" : "style-src", sources, csp_b);
       vector_b.push_back(member);
     }
@@ -1064,7 +1067,7 @@ TEST_F(SourceListDirectiveTest, SubsumesStrictDynamic) {
   struct TestCase {
     bool is_script_src;
     String sources_a;
-    std::vector<String> sources_b;
+    Vector<String> sources_b;
     bool expected;
   } cases[] = {
       // Neither A nor effective policy of list B has `strict-dynamic`.
@@ -1227,7 +1230,7 @@ TEST_F(SourceListDirectiveTest, SubsumesStrictDynamic) {
 
     HeapVector<Member<SourceListDirective>> vector_b;
     for (const auto& sources : test.sources_b) {
-      SourceListDirective* member = new SourceListDirective(
+      SourceListDirective* member = MakeGarbageCollected<SourceListDirective>(
           test.is_script_src ? "script-src" : "style-src", sources, csp_b);
       vector_b.push_back(member);
     }
@@ -1239,7 +1242,7 @@ TEST_F(SourceListDirectiveTest, SubsumesStrictDynamic) {
 TEST_F(SourceListDirectiveTest, SubsumesListWildcard) {
   struct TestCase {
     const char* sources_a;
-    std::vector<const char*> sources_b;
+    Vector<const char*> sources_b;
     bool expected;
   } cases[] = {
       // `A` subsumes `policiesB`..
@@ -1270,7 +1273,7 @@ TEST_F(SourceListDirectiveTest, SubsumesListWildcard) {
        {"*", "http://a.com ws://b.com ftp://c.com"},
        true},
       // `A` does not subsume `policiesB`..
-      {"*", std::vector<const char*>(), false},
+      {"*", Vector<const char*>(), false},
       {"", {"*"}, false},
       {"'none'", {"*"}, false},
       {"*", {"data:"}, false},
@@ -1298,8 +1301,8 @@ TEST_F(SourceListDirectiveTest, SubsumesListWildcard) {
 
     HeapVector<Member<SourceListDirective>> vector_b;
     for (auto* const sources : test.sources_b) {
-      SourceListDirective* member =
-          new SourceListDirective("script-src", sources, csp_b);
+      SourceListDirective* member = MakeGarbageCollected<SourceListDirective>(
+          "script-src", sources, csp_b);
       vector_b.push_back(member);
     }
 
@@ -1405,6 +1408,22 @@ TEST_F(SourceListDirectiveTest, AllowHostWildcard) {
     String sources = "http://*";
     SourceListDirective source_list("default-src", sources, csp.Get());
     EXPECT_TRUE(source_list.Allows(KURL(base, "http://a.com")));
+  }
+}
+
+TEST_F(SourceListDirectiveTest, AllowHostMixedCase) {
+  KURL base;
+  // Non-wildcard sources should match hosts case-insensitively.
+  {
+    String sources = "http://ExAmPle.com";
+    SourceListDirective source_list("default-src", sources, csp.Get());
+    EXPECT_TRUE(source_list.Allows(KURL(base, "http://example.com")));
+  }
+  // Wildcard sources should match hosts case-insensitively.
+  {
+    String sources = "http://*.ExAmPle.com";
+    SourceListDirective source_list("default-src", sources, csp.Get());
+    EXPECT_TRUE(source_list.Allows(KURL(base, "http://www.example.com")));
   }
 }
 

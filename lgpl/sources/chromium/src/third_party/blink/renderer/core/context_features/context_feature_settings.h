@@ -17,9 +17,10 @@ class ExecutionContext;
 // pertaining to the enabled/disabled state of any platform API features which
 // are gated behind a ContextEnabled extended attribute in IDL.
 class CORE_EXPORT ContextFeatureSettings final
-    : public GarbageCollectedFinalized<ContextFeatureSettings>,
+    : public GarbageCollected<ContextFeatureSettings>,
       public Supplement<ExecutionContext> {
-  USING_GARBAGE_COLLECTED_MIXIN(ContextFeatureSettings)
+  USING_GARBAGE_COLLECTED_MIXIN(ContextFeatureSettings);
+
  public:
   static const char kSupplementName[];
 

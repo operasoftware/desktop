@@ -104,7 +104,7 @@ void FilterEffect::DisposeImageFiltersRecursive() {
 Color FilterEffect::AdaptColorToOperatingInterpolationSpace(
     const Color& device_color) {
   // |deviceColor| is assumed to be DeviceRGB.
-  return InterpolationSpaceUtilities::ConvertColor(
+  return interpolation_space_utilities::ConvertColor(
       device_color, OperatingInterpolationSpace());
 }
 
@@ -135,7 +135,7 @@ bool FilterEffect::InputsTaintOrigin() const {
 sk_sp<PaintFilter> FilterEffect::CreateTransparentBlack() const {
   PaintFilter::CropRect rect = GetCropRect();
   sk_sp<SkColorFilter> color_filter =
-      SkColorFilter::MakeModeFilter(0, SkBlendMode::kClear);
+      SkColorFilters::Blend(0, SkBlendMode::kClear);
   return sk_make_sp<ColorFilterPaintFilter>(std::move(color_filter), nullptr,
                                             &rect);
 }

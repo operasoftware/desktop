@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/css/style_rule_css_style_declaration.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -37,21 +38,22 @@ using SelectorTextCache = HeapHashMap<WeakMember<const CSSStyleRule>, String>;
 
 static SelectorTextCache& GetSelectorTextCache() {
   DEFINE_STATIC_LOCAL(Persistent<SelectorTextCache>, cache,
-                      (new SelectorTextCache));
+                      (MakeGarbageCollected<SelectorTextCache>()));
   return *cache;
 }
 
 CSSStyleRule::CSSStyleRule(StyleRule* style_rule, CSSStyleSheet* parent)
     : CSSRule(parent),
       style_rule_(style_rule),
-      style_map_(new DeclaredStylePropertyMap(this)) {}
+      style_map_(MakeGarbageCollected<DeclaredStylePropertyMap>(this)) {}
 
 CSSStyleRule::~CSSStyleRule() = default;
 
 CSSStyleDeclaration* CSSStyleRule::style() const {
   if (!properties_cssom_wrapper_) {
-    properties_cssom_wrapper_ = StyleRuleCSSStyleDeclaration::Create(
-        style_rule_->MutableProperties(), const_cast<CSSStyleRule*>(this));
+    properties_cssom_wrapper_ =
+        MakeGarbageCollected<StyleRuleCSSStyleDeclaration>(
+            style_rule_->MutableProperties(), const_cast<CSSStyleRule*>(this));
   }
   return properties_cssom_wrapper_.Get();
 }
@@ -71,8 +73,8 @@ String CSSStyleRule::selectorText() const {
 
 void CSSStyleRule::setSelectorText(const ExecutionContext* execution_context,
                                    const String& selector_text) {
-  const CSSParserContext* context = CSSParserContext::Create(
-      ParserContext(execution_context->GetSecureContextMode()), nullptr);
+  const auto* context = MakeGarbageCollected<CSSParserContext>(
+      ParserContext(execution_context->GetSecureContextMode()));
   CSSSelectorList selector_list = CSSParser::ParseSelector(
       context, parentStyleSheet() ? parentStyleSheet()->Contents() : nullptr,
       selector_text);
@@ -103,7 +105,7 @@ String CSSStyleRule::cssText() const {
 
 void CSSStyleRule::Reattach(StyleRuleBase* rule) {
   DCHECK(rule);
-  style_rule_ = ToStyleRule(rule);
+  style_rule_ = To<StyleRule>(rule);
   if (properties_cssom_wrapper_)
     properties_cssom_wrapper_->Reattach(style_rule_->MutableProperties());
 }

@@ -6,14 +6,15 @@
 
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_size.h"
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
-#include "third_party/blink/renderer/core/html/media/html_media_source.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_elements_helper.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/text/platform_locale.h"
 
 namespace {
 
@@ -32,30 +33,26 @@ namespace blink {
 // MediaControlOverlayPlayButtonElement
 //   (-webkit-media-controls-overlay-play-button)
 // +-div (-internal-media-controls-overlay-play-button-internal)
-//   {if MediaControlsImpl::IsModern}
 //   This contains the inner circle with the actual play/pause icon.
 MediaControlOverlayPlayButtonElement::MediaControlOverlayPlayButtonElement(
     MediaControlsImpl& media_controls)
-    : MediaControlInputElement(media_controls, kMediaPlayButton),
-      internal_button_(nullptr) {
+    : MediaControlInputElement(media_controls), internal_button_(nullptr) {
   EnsureUserAgentShadowRoot();
-  setType(InputTypeNames::button);
+  setType(input_type_names::kButton);
   SetShadowPseudoId(AtomicString("-webkit-media-controls-overlay-play-button"));
 
-  if (MediaControlsImpl::IsModern()) {
-    internal_button_ = MediaControlElementsHelper::CreateDiv(
-        "-internal-media-controls-overlay-play-button-internal",
-        GetShadowRoot());
-  }
+  internal_button_ = MediaControlElementsHelper::CreateDiv(
+      "-internal-media-controls-overlay-play-button-internal", GetShadowRoot());
 }
 
 void MediaControlOverlayPlayButtonElement::UpdateDisplayType() {
-  SetIsWanted(MediaElement().ShouldShowControls() &&
-              (MediaControlsImpl::IsModern() || MediaElement().paused()));
-  if (MediaControlsImpl::IsModern()) {
-    SetDisplayType(MediaElement().paused() ? kMediaPlayButton
-                                           : kMediaPauseButton);
-  }
+  SetIsWanted(MediaElement().ShouldShowControls());
+
+  int state = MediaElement().paused() ? IDS_AX_MEDIA_PLAY_BUTTON
+                                      : IDS_AX_MEDIA_PAUSE_BUTTON;
+  setAttribute(html_names::kAriaLabelAttr,
+               WTF::AtomicString(GetLocale().QueryString(state)));
+
   MediaControlInputElement::UpdateDisplayType();
 }
 
@@ -75,11 +72,8 @@ void MediaControlOverlayPlayButtonElement::MaybePlayPause() {
   // Allow play attempts for plain src= media to force a reload in the error
   // state. This allows potential recovery for transient network and decoder
   // resource issues.
-  const String& url = MediaElement().currentSrc().GetString();
-  if (MediaElement().error() && !HTMLMediaElement::IsMediaStreamURL(url) &&
-      !HTMLMediaSource::Lookup(url)) {
+  if (MediaElement().error() && !MediaElement().HasMediaSource())
     MediaElement().load();
-  }
 
   MediaElement().TogglePlayState();
 
@@ -92,7 +86,8 @@ void MediaControlOverlayPlayButtonElement::MaybePlayPause() {
 }
 
 void MediaControlOverlayPlayButtonElement::DefaultEventHandler(Event& event) {
-  if (event.type() == EventTypeNames::click) {
+  if (!IsDisabled() && (event.type() == event_type_names::kClick ||
+                        event.type() == event_type_names::kGesturetap)) {
     event.SetDefaultHandled();
     MaybePlayPause();
   }

@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // This file has been auto-generated from the Jinja2 template
-// third_party/blink/renderer/bindings/templates/callback_function.cpp.tmpl
+// third_party/blink/renderer/bindings/templates/callback_function.cc.tmpl
 // by the script code_generator_v8.py.
 // DO NOT MODIFY!
 
@@ -19,6 +19,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 
 namespace blink {
 
@@ -26,8 +27,16 @@ const char* V8TreatNonObjectAsNullBooleanFunction::NameInHeapSnapshot() const {
   return "V8TreatNonObjectAsNullBooleanFunction";
 }
 
-v8::Maybe<bool> V8TreatNonObjectAsNullBooleanFunction::Invoke(ScriptWrappable* callback_this_value) {
-  if (!IsCallbackFunctionRunnable(CallbackRelevantScriptState(),
+v8::Maybe<bool> V8TreatNonObjectAsNullBooleanFunction::Invoke(bindings::V8ValueOrScriptWrappableAdapter callback_this_value) {
+  ScriptState* callback_relevant_script_state =
+      CallbackRelevantScriptStateOrThrowException(
+          "TreatNonObjectAsNullBooleanFunction",
+          "invoke");
+  if (!callback_relevant_script_state) {
+    return v8::Nothing<bool>();
+  }
+
+  if (!IsCallbackFunctionRunnable(callback_relevant_script_state,
                                   IncumbentScriptState())) {
     // Wrapper-tracing for the callback function makes the function object and
     // its creation context alive. Thus it's safe to use the creation context
@@ -47,10 +56,15 @@ v8::Maybe<bool> V8TreatNonObjectAsNullBooleanFunction::Invoke(ScriptWrappable* c
 
   // step: Prepare to run script with relevant settings.
   ScriptState::Scope callback_relevant_context_scope(
-      CallbackRelevantScriptState());
+      callback_relevant_script_state);
   // step: Prepare to run a callback with stored settings.
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
+
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<bool>();
+  }
 
   v8::Local<v8::Function> function;
   // callback function's invoke:
@@ -75,7 +89,12 @@ v8::Maybe<bool> V8TreatNonObjectAsNullBooleanFunction::Invoke(ScriptWrappable* c
   function = CallbackFunction();
 
   v8::Local<v8::Value> this_arg;
-  this_arg = ToV8(callback_this_value, CallbackRelevantScriptState());
+  if (callback_this_value.IsEmpty()) {
+    // step 2. If thisArg was not given, let thisArg be undefined.
+    this_arg = v8::Undefined(GetIsolate());
+  } else {
+    this_arg = callback_this_value.V8Value(callback_relevant_script_state);
+  }
 
   // step: Let esArgs be the result of converting args to an ECMAScript
   //   arguments list. If this throws an exception, set completion to the
@@ -88,7 +107,7 @@ v8::Maybe<bool> V8TreatNonObjectAsNullBooleanFunction::Invoke(ScriptWrappable* c
   // step: Let callResult be Call(X, thisArg, esArgs).
   if (!V8ScriptRunner::CallFunction(
           function,
-          ExecutionContext::From(CallbackRelevantScriptState()),
+          ExecutionContext::From(callback_relevant_script_state),
           this_arg,
           argc,
           argv,
@@ -113,11 +132,6 @@ v8::Maybe<bool> V8TreatNonObjectAsNullBooleanFunction::Invoke(ScriptWrappable* c
     else
       return v8::Just<bool>(native_result);
   }
-}
-
-v8::Maybe<bool> V8PersistentCallbackFunction<V8TreatNonObjectAsNullBooleanFunction>::Invoke(ScriptWrappable* callback_this_value) {
-  return Proxy()->Invoke(
-      callback_this_value);
 }
 
 }  // namespace blink

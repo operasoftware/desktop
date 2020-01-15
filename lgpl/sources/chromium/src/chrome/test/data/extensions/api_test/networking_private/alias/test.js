@@ -34,7 +34,6 @@ chrome.test.runTests([
                 ActivationState: 'NotActivated',
                 AllowRoaming: false,
                 AutoConnect: true,
-                Carrier: 'Cellular1_Carrier',
                 Family: 'GSM',
                 HomeProvider: {
                   Code: '000000',
@@ -96,9 +95,6 @@ chrome.test.runTests([
       };
       chrome.networking.onc.verifyDestination(
           stubVerificationProperties, chrome.test.callbackFail(expectedError));
-      chrome.networking.onc.verifyAndEncryptCredentials(
-          stubVerificationProperties, '',
-          chrome.test.callbackFail(expectedError));
       chrome.networking.onc.verifyAndEncryptData(
           stubVerificationProperties, '',
           chrome.test.callbackFail(expectedError));

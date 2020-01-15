@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/platform/graphics/gpu/xr_frame_transport.h"
 
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "device/vr/public/mojom/vr_service.mojom-blink.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
@@ -15,7 +16,7 @@
 
 namespace blink {
 
-XRFrameTransport::XRFrameTransport() : submit_frame_client_binding_(this) {}
+XRFrameTransport::XRFrameTransport() : submit_frame_client_receiver_(this) {}
 
 XRFrameTransport::~XRFrameTransport() {
   CallPreviousFrameCallback();
@@ -35,9 +36,10 @@ void XRFrameTransport::SetTransportOptions(
 }
 
 void XRFrameTransport::BindSubmitFrameClient(
-    device::mojom::blink::XRPresentationClientRequest request) {
-  submit_frame_client_binding_.Close();
-  submit_frame_client_binding_.Bind(std::move(request));
+    mojo::PendingReceiver<device::mojom::blink::XRPresentationClient>
+        receiver) {
+  submit_frame_client_receiver_.reset();
+  submit_frame_client_receiver_.Bind(std::move(receiver));
 }
 
 bool XRFrameTransport::DrawingIntoSharedBuffer() {
@@ -57,7 +59,7 @@ bool XRFrameTransport::DrawingIntoSharedBuffer() {
 }
 
 void XRFrameTransport::FramePreImage(gpu::gles2::GLES2Interface* gl) {
-  frame_wait_time_ = WTF::TimeDelta();
+  frame_wait_time_ = base::TimeDelta();
 
   // If we're expecting a fence for the previous frame and it hasn't arrived
   // yet, wait for it to be received.
@@ -130,15 +132,20 @@ void XRFrameTransport::FrameSubmit(
     // for some out-of-memory situations.
     // TODO(billorr): Consider whether we should just drop the frame or exit
     // presentation.
-    if (gpu_memory_buffer) {
-      // We decompose the cloned handle, and use it to create a
-      // mojo::ScopedHandle which will own cleanup of the handle, and will be
-      // passed over IPC.
-      gfx::GpuMemoryBufferHandle gpu_handle = gpu_memory_buffer->CloneHandle();
-      vr_presentation_provider->SubmitFrameWithTextureHandle(
-          vr_frame_id,
-          mojo::WrapPlatformFile(gpu_handle.dxgi_handle.GetHandle()));
+    if (!gpu_memory_buffer) {
+      FrameSubmitMissing(vr_presentation_provider, gl, vr_frame_id);
+      // We didn't actually submit anything, so don't set
+      // the waiting_for_previous_frame_transfer_ and related state.
+      return;
     }
+
+    // We decompose the cloned handle, and use it to create a
+    // mojo::ScopedHandle which will own cleanup of the handle, and will be
+    // passed over IPC.
+    gfx::GpuMemoryBufferHandle gpu_handle = gpu_memory_buffer->CloneHandle();
+    vr_presentation_provider->SubmitFrameWithTextureHandle(
+        vr_frame_id,
+        mojo::WrapPlatformFile(gpu_handle.dxgi_handle.GetHandle()));
 #else
     NOTIMPLEMENTED();
 #endif
@@ -221,7 +228,7 @@ void XRFrameTransport::OnSubmitFrameTransferred(bool success) {
 void XRFrameTransport::WaitForPreviousTransfer() {
   TRACE_EVENT0("gpu", "waitForPreviousTransferToFinish");
   while (waiting_for_previous_frame_transfer_) {
-    if (!submit_frame_client_binding_.WaitForIncomingMethodCall()) {
+    if (!submit_frame_client_receiver_.WaitForIncomingCall()) {
       DLOG(ERROR) << __FUNCTION__ << ": Failed to receive response";
       break;
     }
@@ -233,16 +240,16 @@ void XRFrameTransport::OnSubmitFrameRendered() {
   waiting_for_previous_frame_render_ = false;
 }
 
-WTF::TimeDelta XRFrameTransport::WaitForPreviousRenderToFinish() {
+base::TimeDelta XRFrameTransport::WaitForPreviousRenderToFinish() {
   TRACE_EVENT0("gpu", "waitForPreviousRenderToFinish");
-  WTF::TimeTicks start = WTF::CurrentTimeTicks();
+  base::TimeTicks start = base::TimeTicks::Now();
   while (waiting_for_previous_frame_render_) {
-    if (!submit_frame_client_binding_.WaitForIncomingMethodCall()) {
+    if (!submit_frame_client_receiver_.WaitForIncomingCall()) {
       DLOG(ERROR) << __FUNCTION__ << ": Failed to receive response";
       break;
     }
   }
-  return WTF::CurrentTimeTicks() - start;
+  return base::TimeTicks::Now() - start;
 }
 
 void XRFrameTransport::OnSubmitFrameGpuFence(
@@ -252,16 +259,16 @@ void XRFrameTransport::OnSubmitFrameGpuFence(
   previous_frame_fence_ = std::make_unique<gfx::GpuFence>(handle);
 }
 
-WTF::TimeDelta XRFrameTransport::WaitForGpuFenceReceived() {
+base::TimeDelta XRFrameTransport::WaitForGpuFenceReceived() {
   TRACE_EVENT0("gpu", "WaitForGpuFenceReceived");
-  WTF::TimeTicks start = WTF::CurrentTimeTicks();
+  base::TimeTicks start = base::TimeTicks::Now();
   while (waiting_for_previous_frame_fence_) {
-    if (!submit_frame_client_binding_.WaitForIncomingMethodCall()) {
+    if (!submit_frame_client_receiver_.WaitForIncomingCall()) {
       DLOG(ERROR) << __FUNCTION__ << ": Failed to receive response";
       break;
     }
   }
-  return WTF::CurrentTimeTicks() - start;
+  return base::TimeTicks::Now() - start;
 }
 
 void XRFrameTransport::Trace(blink::Visitor* visitor) {}

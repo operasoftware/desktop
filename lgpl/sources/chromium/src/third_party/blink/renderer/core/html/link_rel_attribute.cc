@@ -94,14 +94,11 @@ LinkRelAttribute::LinkRelAttribute(const String& rel) : LinkRelAttribute() {
     } else if (DeprecatedEqualIgnoringCase(link_type, "manifest")) {
       is_manifest_ = true;
     } else if (DeprecatedEqualIgnoringCase(link_type, "modulepreload")) {
-      if (RuntimeEnabledFeatures::ModulePreloadEnabled())
-        is_module_preload_ = true;
+      is_module_preload_ = true;
     } else if (DeprecatedEqualIgnoringCase(link_type, "serviceworker")) {
       is_service_worker_ = true;
     } else if (DeprecatedEqualIgnoringCase(link_type, "canonical")) {
       is_canonical_ = true;
-    } else if (DeprecatedEqualIgnoringCase(link_type, "mask-icon")) {
-      icon_type_ = kPinnedIcon;
     }
     // Adding or removing a value here requires you to update
     // RelList::supportedTokens()

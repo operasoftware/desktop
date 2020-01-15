@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -41,19 +42,20 @@ namespace blink {
 class AudioBus;
 class AudioBufferOptions;
 class ExceptionState;
+class SharedAudioBuffer;
 
 class MODULES_EXPORT AudioBuffer final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static AudioBuffer* Create(unsigned number_of_channels,
-                             size_t number_of_frames,
+                             uint32_t number_of_frames,
                              float sample_rate);
   static AudioBuffer* Create(unsigned number_of_channels,
-                             size_t number_of_frames,
+                             uint32_t number_of_frames,
                              float sample_rate,
                              ExceptionState&);
-  static AudioBuffer* Create(const AudioBufferOptions&, ExceptionState&);
+  static AudioBuffer* Create(const AudioBufferOptions*, ExceptionState&);
 
   // Creates an AudioBuffer with uninitialized contents.  This should
   // only be used where we are guaranteed to initialize the contents
@@ -61,19 +63,23 @@ class MODULES_EXPORT AudioBuffer final : public ScriptWrappable {
   // is done.  |OfflineAudioContext::startRendering()| is one such
   // place.
   static AudioBuffer* CreateUninitialized(unsigned number_of_channels,
-                                          size_t number_of_frames,
+                                          uint32_t number_of_frames,
                                           float sample_rate);
-
-  // Returns 0 if data is not a valid audio file.
-  static AudioBuffer* CreateFromAudioFileData(const void* data,
-                                              size_t data_size,
-                                              bool mix_to_mono,
-                                              float sample_rate);
 
   static AudioBuffer* CreateFromAudioBus(AudioBus*);
 
+  explicit AudioBuffer(AudioBus*);
+  // How to initialize the contents of an AudioBuffer.  Default is to
+  // zero-initialize (|kZeroInitialize|).  Otherwise, leave the array
+  // uninitialized (|kDontInitialize|).
+  enum InitializationPolicy { kZeroInitialize, kDontInitialize };
+  AudioBuffer(unsigned number_of_channels,
+              uint32_t number_of_frames,
+              float sample_rate,
+              InitializationPolicy allocation_policy = kZeroInitialize);
+
   // Format
-  size_t length() const { return length_; }
+  uint32_t length() const { return length_; }
   double duration() const {
     return length() / static_cast<double>(sampleRate());
   }
@@ -85,18 +91,18 @@ class MODULES_EXPORT AudioBuffer final : public ScriptWrappable {
                                             ExceptionState&);
   NotShared<DOMFloat32Array> getChannelData(unsigned channel_index);
   void copyFromChannel(NotShared<DOMFloat32Array>,
-                       long channel_number,
+                       int32_t channel_number,
                        ExceptionState&);
   void copyFromChannel(NotShared<DOMFloat32Array>,
-                       long channel_number,
-                       unsigned long start_in_channel,
+                       int32_t channel_number,
+                       uint32_t buffer_offset,
                        ExceptionState&);
   void copyToChannel(NotShared<DOMFloat32Array>,
-                     long channel_number,
+                     int32_t channel_number,
                      ExceptionState&);
   void copyToChannel(NotShared<DOMFloat32Array>,
-                     long channel_number,
-                     unsigned long start_in_channel,
+                     int32_t channel_number,
+                     uint32_t buffer_offset,
                      ExceptionState&);
 
   void Zero();
@@ -106,28 +112,43 @@ class MODULES_EXPORT AudioBuffer final : public ScriptWrappable {
     ScriptWrappable::Trace(visitor);
   }
 
+  std::unique_ptr<SharedAudioBuffer> CreateSharedAudioBuffer();
+
  private:
-  // How to initialize the contents of an AudioBuffer.  Default is to
-  // zero-initialize (|kZeroInitialize|).  Otherwise, leave the array
-  // uninitialized (|kDontInitialize|).
-  enum InitializationPolicy { kZeroInitialize, kDontInitialize };
-
-  explicit AudioBuffer(AudioBus*);
-
   static DOMFloat32Array* CreateFloat32ArrayOrNull(
-      size_t length,
+      uint32_t length,
       InitializationPolicy allocation_policy = kZeroInitialize);
 
-  AudioBuffer(unsigned number_of_channels,
-              size_t number_of_frames,
-              float sample_rate,
-              InitializationPolicy allocation_policy = kZeroInitialize);
   bool CreatedSuccessfully(unsigned desired_number_of_channels) const;
 
   float sample_rate_;
-  size_t length_;
+  uint32_t length_;
 
   HeapVector<Member<DOMFloat32Array>> channels_;
+};
+
+// Shared data that audio threads can hold onto.
+class SharedAudioBuffer final {
+  USING_FAST_MALLOC(SharedAudioBuffer);
+
+ public:
+  explicit SharedAudioBuffer(AudioBuffer*);
+
+  unsigned numberOfChannels() const { return channels_.size(); }
+  uint32_t length() const { return length_; }
+  double duration() const {
+    return length() / static_cast<double>(sampleRate());
+  }
+  float sampleRate() const { return sample_rate_; }
+
+  const Vector<WTF::ArrayBufferContents>& channels() { return channels_; }
+
+  void Zero();
+
+ private:
+  float sample_rate_;
+  uint32_t length_;
+  Vector<WTF::ArrayBufferContents> channels_;
 };
 
 }  // namespace blink

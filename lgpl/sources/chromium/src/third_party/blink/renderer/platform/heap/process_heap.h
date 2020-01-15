@@ -5,9 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_PROCESS_HEAP_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_PROCESS_HEAP_H_
 
+#include <atomic>
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/atomics.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
 namespace blink {
@@ -32,41 +32,34 @@ class PLATFORM_EXPORT ProcessHeap {
   // - Iteration and processing of weak cross-thread Persistents. The lock
   //   needs to span both operations as iteration of weak persistents only
   //   registers memory regions that are then processed afterwards.
+  // - Marking phase in garbage collection: The whole phase requires locking
+  //   as CrossThreadWeakPersistents may be converted to CrossThreadPersistent
+  //   which must observe GC as an atomic operation.
   static Mutex& CrossThreadPersistentMutex();
 
   static void IncreaseTotalAllocatedObjectSize(size_t delta) {
-    AtomicAdd(&total_allocated_object_size_, static_cast<long>(delta));
+    total_allocated_object_size_.fetch_add(delta, std::memory_order_relaxed);
   }
   static void DecreaseTotalAllocatedObjectSize(size_t delta) {
-    AtomicSubtract(&total_allocated_object_size_, static_cast<long>(delta));
+    total_allocated_object_size_.fetch_sub(delta, std::memory_order_relaxed);
   }
   static size_t TotalAllocatedObjectSize() {
-    return AcquireLoad(&total_allocated_object_size_);
-  }
-  static void IncreaseTotalMarkedObjectSize(size_t delta) {
-    AtomicAdd(&total_marked_object_size_, static_cast<long>(delta));
-  }
-  static void DecreaseTotalMarkedObjectSize(size_t delta) {
-    AtomicSubtract(&total_marked_object_size_, static_cast<long>(delta));
-  }
-  static size_t TotalMarkedObjectSize() {
-    return AcquireLoad(&total_marked_object_size_);
+    return total_allocated_object_size_.load(std::memory_order_relaxed);
   }
   static void IncreaseTotalAllocatedSpace(size_t delta) {
-    AtomicAdd(&total_allocated_space_, static_cast<long>(delta));
+    total_allocated_space_.fetch_add(delta, std::memory_order_relaxed);
   }
   static void DecreaseTotalAllocatedSpace(size_t delta) {
-    AtomicSubtract(&total_allocated_space_, static_cast<long>(delta));
+    total_allocated_space_.fetch_sub(delta, std::memory_order_relaxed);
   }
   static size_t TotalAllocatedSpace() {
-    return AcquireLoad(&total_allocated_space_);
+    return total_allocated_space_.load(std::memory_order_relaxed);
   }
   static void ResetHeapCounters();
 
  private:
-  static size_t total_allocated_space_;
-  static size_t total_allocated_object_size_;
-  static size_t total_marked_object_size_;
+  static std::atomic_size_t total_allocated_space_;
+  static std::atomic_size_t total_allocated_object_size_;
 
   friend class ThreadState;
 };

@@ -27,11 +27,7 @@ LayoutMultiColumnSpannerPlaceholder::CreateAnonymous(
       new LayoutMultiColumnSpannerPlaceholder(&layout_object_in_flow_thread);
   Document& document = layout_object_in_flow_thread.GetDocument();
   new_spanner->SetDocumentForAnonymous(&document);
-  scoped_refptr<ComputedStyle> new_style =
-      ComputedStyle::CreateAnonymousStyleWithDisplay(parent_style,
-                                                     EDisplay::kBlock);
-  CopyMarginProperties(*new_style, layout_object_in_flow_thread.StyleRef());
-  new_spanner->SetStyle(new_style);
+  new_spanner->UpdateProperties(parent_style);
   return new_spanner;
 }
 
@@ -56,17 +52,20 @@ void LayoutMultiColumnSpannerPlaceholder::
       // its containing block chain, we need to mark it here, or we risk that
       // the object isn't laid out.
       object_in_flow_thread->Parent()->SetNeedsLayout(
-          LayoutInvalidationReason::kColumnsChanged);
+          layout_invalidation_reason::kColumnsChanged);
     }
     return;
   }
-  UpdateMarginProperties();
+  UpdateProperties(Parent()->StyleRef());
 }
 
-void LayoutMultiColumnSpannerPlaceholder::UpdateMarginProperties() {
-  scoped_refptr<ComputedStyle> new_style = ComputedStyle::Clone(StyleRef());
+void LayoutMultiColumnSpannerPlaceholder::UpdateProperties(
+    const ComputedStyle& parent_style) {
+  scoped_refptr<ComputedStyle> new_style =
+      ComputedStyle::CreateAnonymousStyleWithDisplay(parent_style,
+                                                     EDisplay::kBlock);
   CopyMarginProperties(*new_style, layout_object_in_flow_thread_->StyleRef());
-  SetStyle(new_style);
+  SetStyle(std::move(new_style));
 }
 
 void LayoutMultiColumnSpannerPlaceholder::InsertedIntoTree() {
@@ -74,7 +73,7 @@ void LayoutMultiColumnSpannerPlaceholder::InsertedIntoTree() {
   // The object may previously have been laid out as a non-spanner, but since
   // it's a spanner now, it needs to be relaid out.
   layout_object_in_flow_thread_->SetNeedsLayoutAndPrefWidthsRecalc(
-      LayoutInvalidationReason::kColumnsChanged);
+      layout_invalidation_reason::kColumnsChanged);
 }
 
 void LayoutMultiColumnSpannerPlaceholder::WillBeRemovedFromTree() {
@@ -85,7 +84,7 @@ void LayoutMultiColumnSpannerPlaceholder::WillBeRemovedFromTree() {
     // might live on. Since it's not a spanner anymore, it needs to be relaid
     // out.
     ex_spanner->SetNeedsLayoutAndPrefWidthsRecalc(
-        LayoutInvalidationReason::kColumnsChanged);
+        layout_invalidation_reason::kColumnsChanged);
   }
   LayoutBox::WillBeRemovedFromTree();
 }
@@ -95,13 +94,33 @@ bool LayoutMultiColumnSpannerPlaceholder::NeedsPreferredWidthsRecalculation()
   return layout_object_in_flow_thread_->NeedsPreferredWidthsRecalculation();
 }
 
+void LayoutMultiColumnSpannerPlaceholder::RecalcVisualOverflow() {
+  LayoutBox::RecalcVisualOverflow();
+  ClearVisualOverflow();
+  AddContentsVisualOverflow(
+      layout_object_in_flow_thread_->VisualOverflowRect());
+}
+
 LayoutUnit LayoutMultiColumnSpannerPlaceholder::MinPreferredLogicalWidth()
     const {
+  // There should be no contribution from a spanner if the multicol container is
+  // size-contained. Normally we'd stop at the object that has contain:size
+  // applied, but for multicol, we descend into the children, in order to get
+  // the flow thread to calculate the correct preferred width (to honor
+  // column-count, column-width and column-gap). Since spanner placeholders are
+  // siblings of the flow thread, we need this check.
+  // TODO(crbug.com/953919): What should we return for display-locked content?
+  if (MultiColumnBlockFlow()->ShouldApplySizeContainment())
+    return LayoutUnit();
   return layout_object_in_flow_thread_->MinPreferredLogicalWidth();
 }
 
 LayoutUnit LayoutMultiColumnSpannerPlaceholder::MaxPreferredLogicalWidth()
     const {
+  // See above.
+  // TODO(crbug.com/953919): What should we return for display-locked content?
+  if (MultiColumnBlockFlow()->ShouldApplySizeContainment())
+    return LayoutUnit();
   return layout_object_in_flow_thread_->MaxPreferredLogicalWidth();
 }
 
@@ -112,7 +131,11 @@ void LayoutMultiColumnSpannerPlaceholder::UpdateLayout() {
   // calculated and set before layout. Copy this to the actual column-span:all
   // object before laying it out, so that it gets paginated correctly, in case
   // we have an enclosing fragmentation context.
-  layout_object_in_flow_thread_->SetLogicalTop(LogicalTop());
+  if (layout_object_in_flow_thread_->LogicalTop() != LogicalTop()) {
+    layout_object_in_flow_thread_->SetLogicalTop(LogicalTop());
+    if (FlowThread()->EnclosingFragmentationContext())
+      layout_object_in_flow_thread_->SetChildNeedsLayout(kMarkOnlyThis);
+  }
 
   // Lay out the actual column-span:all element.
   layout_object_in_flow_thread_->LayoutIfNeeded();
@@ -124,9 +147,7 @@ void LayoutMultiColumnSpannerPlaceholder::UpdateLayout() {
 
   // Take the overflow from the spanner, so that it gets propagated to the
   // multicol container and beyond.
-  overflow_.reset();
-  AddContentsVisualOverflow(
-      layout_object_in_flow_thread_->VisualOverflowRect());
+  ClearLayoutOverflow();
   AddLayoutOverflow(layout_object_in_flow_thread_->LayoutOverflowRect());
 
   ClearNeedsLayout();
@@ -150,12 +171,12 @@ void LayoutMultiColumnSpannerPlaceholder::Paint(
 
 bool LayoutMultiColumnSpannerPlaceholder::NodeAtPoint(
     HitTestResult& result,
-    const HitTestLocation& location_in_container,
-    const LayoutPoint& accumulated_offset,
+    const HitTestLocation& hit_test_location,
+    const PhysicalOffset& accumulated_offset,
     HitTestAction action) {
   return !layout_object_in_flow_thread_->HasSelfPaintingLayer() &&
-         layout_object_in_flow_thread_->NodeAtPoint(
-             result, location_in_container, accumulated_offset, action);
+         layout_object_in_flow_thread_->NodeAtPoint(result, hit_test_location,
+                                                    accumulated_offset, action);
 }
 
 }  // namespace blink

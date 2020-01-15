@@ -35,22 +35,14 @@ class EditingStyle;
 class CORE_EXPORT InsertParagraphSeparatorCommand final
     : public CompositeEditCommand {
  public:
-  static InsertParagraphSeparatorCommand* Create(
-      Document& document,
+  InsertParagraphSeparatorCommand(
+      Document&,
       bool use_default_paragraph_element = false,
-      bool paste_blockquote_into_unquoted_area = false) {
-    return new InsertParagraphSeparatorCommand(
-        document, use_default_paragraph_element,
-        paste_blockquote_into_unquoted_area);
-  }
+      bool paste_blockquote_into_unquoted_area = false);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  InsertParagraphSeparatorCommand(Document&,
-                                  bool use_default_paragraph_element,
-                                  bool paste_blockquote_into_unquoted_area);
-
   void DoApply(EditingState*) override;
 
   void CalculateStyleBeforeInsertion(const Position&);

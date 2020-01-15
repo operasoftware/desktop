@@ -18,7 +18,7 @@
 namespace blink {
 
 void VideoPainter::PaintReplaced(const PaintInfo& paint_info,
-                                 const LayoutPoint& paint_offset) {
+                                 const PhysicalOffset& paint_offset) {
   WebMediaPlayer* media_player =
       layout_video_.MediaElement()->GetWebMediaPlayer();
   bool displaying_poster =
@@ -26,8 +26,8 @@ void VideoPainter::PaintReplaced(const PaintInfo& paint_info,
   if (!displaying_poster && !media_player)
     return;
 
-  LayoutRect replaced_rect(layout_video_.ReplacedContentRect());
-  replaced_rect.MoveBy(paint_offset);
+  PhysicalRect replaced_rect = layout_video_.ReplacedContentRect();
+  replaced_rect.Move(paint_offset);
   IntRect snapped_replaced_rect = PixelSnappedIntRect(replaced_rect);
 
   if (snapped_replaced_rect.IsEmpty())
@@ -38,8 +38,13 @@ void VideoPainter::PaintReplaced(const PaintInfo& paint_info,
     return;
 
   GraphicsContext& context = paint_info.context;
-  LayoutRect content_rect = layout_video_.PhysicalContentBoxRect();
-  content_rect.MoveBy(paint_offset);
+  PhysicalRect content_box_rect = layout_video_.PhysicalContentBoxRect();
+  content_box_rect.Move(paint_offset);
+
+  // Since we may have changed the location of the replaced content, we need to
+  // notify PaintArtifactCompositor.
+  if (layout_video_.GetFrameView())
+    layout_video_.GetFrameView()->SetPaintArtifactCompositorNeedsUpdate();
 
   // Video frames are only painted in software for printing or capturing node
   // images via web APIs.
@@ -48,21 +53,18 @@ void VideoPainter::PaintReplaced(const PaintInfo& paint_info,
 
   bool paint_with_foreign_layer =
       !displaying_poster && !force_software_video_paint &&
-      RuntimeEnabledFeatures::SlimmingPaintV2Enabled();
+      RuntimeEnabledFeatures::CompositeAfterPaintEnabled();
   if (paint_with_foreign_layer) {
     if (cc::Layer* layer = layout_video_.MediaElement()->CcLayer()) {
-      IntRect pixel_snapped_rect = PixelSnappedIntRect(content_rect);
-      layer->SetBounds(static_cast<gfx::Size>(pixel_snapped_rect.Size()));
+      layer->SetBounds(gfx::Size(snapped_replaced_rect.Size()));
       layer->SetIsDrawable(true);
-      RecordForeignLayer(
-          context, layout_video_, DisplayItem::kForeignLayerVideo, layer,
-          FloatPoint(pixel_snapped_rect.Location()), pixel_snapped_rect.Size());
+      layer->SetHitTestable(true);
+      RecordForeignLayer(context, DisplayItem::kForeignLayerVideo, layer,
+                         FloatPoint(snapped_replaced_rect.Location()));
       return;
     }
   }
 
-  // TODO(trchen): Video rect could overflow the content rect due to object-fit.
-  // Should apply a clip here like EmbeddedObjectPainter does.
   DrawingRecorder recorder(context, layout_video_, paint_info.phase);
 
   if (displaying_poster || !force_software_video_paint) {
@@ -70,8 +72,7 @@ void VideoPainter::PaintReplaced(const PaintInfo& paint_info,
     // paint nothing.
     DCHECK(paint_info.PaintContainer());
     ImagePainter(layout_video_)
-        .PaintIntoRect(context, replaced_rect, content_rect,
-                       paint_info.PaintContainer()->Layer());
+        .PaintIntoRect(context, replaced_rect, content_box_rect);
   } else {
     PaintFlags video_flags = context.FillFlags();
     video_flags.setColor(SK_ColorBLACK);

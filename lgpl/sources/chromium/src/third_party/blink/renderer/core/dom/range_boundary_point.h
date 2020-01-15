@@ -59,7 +59,7 @@ class RangeBoundaryPoint {
   void InvalidateOffset();
   void MarkValid() const;
 
-  void Trace(blink::Visitor* visitor) {
+  void Trace(Visitor* visitor) {
     visitor->Trace(container_node_);
     visitor->Trace(child_before_boundary_);
   }
@@ -176,8 +176,8 @@ inline void RangeBoundaryPoint::SetToStartOfNode(Node& container) {
 
 inline void RangeBoundaryPoint::SetToEndOfNode(Node& container) {
   container_node_ = &container;
-  if (container_node_->IsCharacterDataNode()) {
-    offset_in_container_ = ToCharacterData(container_node_)->length();
+  if (auto* character_data = DynamicTo<CharacterData>(container_node_.Get())) {
+    offset_in_container_ = character_data->length();
     child_before_boundary_ = nullptr;
   } else {
     child_before_boundary_ = container_node_->lastChild();

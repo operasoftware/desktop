@@ -34,32 +34,33 @@
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"
 #include "third_party/blink/renderer/modules/encoding/encoding.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/wtf/string_extras.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding_registry.h"
 
 namespace blink {
 
 TextDecoder* TextDecoder::Create(const String& label,
-                                 const TextDecoderOptions& options,
+                                 const TextDecoderOptions* options,
                                  ExceptionState& exception_state) {
   WTF::TextEncoding encoding(
-      label.StripWhiteSpace(&Encoding::IsASCIIWhiteSpace));
+      label.StripWhiteSpace(&encoding::IsASCIIWhiteSpace));
   // The replacement encoding is not valid, but the Encoding API also
   // rejects aliases of the replacement encoding.
-  if (!encoding.IsValid() || !strcasecmp(encoding.GetName(), "replacement")) {
+  if (!encoding.IsValid() ||
+      WTF::EqualIgnoringASCIICase(encoding.GetName(), "replacement")) {
     exception_state.ThrowRangeError("The encoding label provided ('" + label +
                                     "') is invalid.");
     return nullptr;
   }
 
-  return new TextDecoder(encoding, options.fatal(), options.ignoreBOM());
+  return MakeGarbageCollected<TextDecoder>(encoding, options->fatal(),
+                                           options->ignoreBOM());
 }
 
 TextDecoder::TextDecoder(const WTF::TextEncoding& encoding,
                          bool fatal,
                          bool ignore_bom)
     : encoding_(encoding),
-      codec_(NewTextCodec(encoding)),
       fatal_(fatal),
       ignore_bom_(ignore_bom),
       bom_seen_(false) {}
@@ -77,29 +78,37 @@ String TextDecoder::encoding() const {
 }
 
 String TextDecoder::decode(const BufferSource& input,
-                           const TextDecodeOptions& options,
+                           const TextDecodeOptions* options,
                            ExceptionState& exception_state) {
+  DCHECK(options);
   DCHECK(!input.IsNull());
   if (input.IsArrayBufferView()) {
     const char* start = static_cast<const char*>(
         input.GetAsArrayBufferView().View()->BaseAddress());
-    size_t length = input.GetAsArrayBufferView().View()->byteLength();
+    uint32_t length = input.GetAsArrayBufferView().View()->byteLength();
     return decode(start, length, options, exception_state);
   }
   DCHECK(input.IsArrayBuffer());
   const char* start =
       static_cast<const char*>(input.GetAsArrayBuffer()->Data());
-  size_t length = input.GetAsArrayBuffer()->ByteLength();
+  uint32_t length = input.GetAsArrayBuffer()->ByteLength();
   return decode(start, length, options, exception_state);
 }
 
 String TextDecoder::decode(const char* start,
-                           size_t length,
-                           const TextDecodeOptions& options,
+                           uint32_t length,
+                           const TextDecodeOptions* options,
                            ExceptionState& exception_state) {
-  WTF::FlushBehavior flush =
-      options.stream() ? WTF::FlushBehavior::kDoNotFlush
-                       : WTF::FlushBehavior::kDataEOF;
+  DCHECK(options);
+  if (!do_not_flush_) {
+    codec_ = NewTextCodec(encoding_);
+    bom_seen_ = false;
+  }
+
+  DCHECK(codec_);
+  do_not_flush_ = options->stream();
+  WTF::FlushBehavior flush = do_not_flush_ ? WTF::FlushBehavior::kDoNotFlush
+                                           : WTF::FlushBehavior::kDataEOF;
 
   bool saw_error = false;
   String s = codec_->Decode(start, length, flush, fatal_, saw_error);
@@ -117,14 +126,11 @@ String TextDecoder::decode(const char* start,
       s.Remove(0);
   }
 
-  if (flush != WTF::FlushBehavior::kDoNotFlush)
-    bom_seen_ = false;
-
   return s;
 }
 
 String TextDecoder::decode(ExceptionState& exception_state) {
-  TextDecodeOptions options;
+  TextDecodeOptions* options = TextDecodeOptions::Create();
   return decode(nullptr, 0, options, exception_state);
 }
 

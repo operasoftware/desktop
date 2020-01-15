@@ -24,13 +24,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-enum EffectiveConnectionType {
-    "slow-2g",
-    "2g",
-    "3g",
-    "4g"
-};
-
 [
     DoNotCheckConstants
 ] interface Internals {
@@ -41,8 +34,15 @@ enum EffectiveConnectionType {
     boolean isPreloadedBy(DOMString url, Document document);
     boolean isLoading(DOMString url);
     boolean isLoadingFromMemoryCache(DOMString url);
-    unsigned long getResourcePriority (DOMString url, Document document);
-    DOMString getResourceHeader (DOMString url, DOMString header, Document document);
+
+    // Call this function with the URL of a resource that has not yet been
+    // fetched. It returns a promise that resolves with the priority of the
+    // request, once it has been made.
+    [CallWith=ScriptState] Promise<unsigned long> getResourcePriority(DOMString url, Document document);
+
+    DOMString getResourceHeader(DOMString url, DOMString header, Document document);
+
+    boolean doesWindowHaveUrlFragment(Window window);
 
     CSSStyleDeclaration computedStyleIncludingVisitedInfo(Node node);
 
@@ -153,13 +153,13 @@ enum EffectiveConnectionType {
 
     unsigned long mediaKeysCount();
     unsigned long mediaKeySessionCount();
-    unsigned long pausableObjectCount(Document document);
+    unsigned long contextLifecycleStateObserverObjectCount(Document document);
     unsigned long wheelEventHandlerCount(Document document);
     unsigned long scrollEventHandlerCount(Document document);
     unsigned long touchStartOrMoveEventHandlerCount(Document document);
     unsigned long touchEndOrCancelEventHandlerCount(Document document);
     unsigned long pointerEventHandlerCount(Document document);
-    [RaisesException] LayerRectList touchEventTargetLayerRects(Document document);
+    [RaisesException] HitTestLayerRectList touchEventTargetLayerRects(Document document);
 
     [RaisesException] boolean executeCommand(Document document, DOMString name, DOMString value);
 
@@ -196,7 +196,6 @@ enum EffectiveConnectionType {
     const unsigned short LAYER_TREE_INCLUDES_PAINT_INVALIDATIONS = 2;
     const unsigned short LAYER_TREE_INCLUDES_PAINTING_PHASES = 4;
     const unsigned short LAYER_TREE_INCLUDES_ROOT_LAYER = 8;
-    const unsigned short LAYER_TREE_INCLUDES_CLIP_AND_SCROLL_PARENTS = 16;
     const unsigned short LAYER_TREE_INCLUDES_COMPOSITING_REASONS = 32;
     const unsigned short LAYER_TREE_INCLUDES_PAINT_RECORDS = 64;
     const unsigned short OUTPUT_AS_LAYER_TREE = 0x4000;
@@ -255,7 +254,7 @@ enum EffectiveConnectionType {
     // |node| should be Document, HTMLIFrameElement, or unspecified.
     // If |node| is an HTMLIFrameElement, it assumes node.contentDocument is
     // specified without security checks. Unspecified means this document.
-    [RaisesException] void updateLayoutIgnorePendingStylesheetsAndRunPostLayoutTasks(optional Node? node = null);
+    [RaisesException] void updateLayoutAndRunPostLayoutTasks(optional Node? node = null);
 
     [RaisesException] void forceFullRepaint(Document document);
 
@@ -289,6 +288,7 @@ enum EffectiveConnectionType {
     long selectPopupItemStyleFontHeight(Node select, long itemIndex);
     void resetTypeAheadSession(HTMLSelectElement select);
 
+    StaticSelection getDragCaret();
     [RaisesException] StaticSelection getSelectionInFlatTree(Window window);
     // TODO(editing-dev): We should change |visibleSelection*| to
     // |StaticSelection|.
@@ -303,31 +303,27 @@ enum EffectiveConnectionType {
 
     [RaisesException] void forceCompositingUpdate(Document document);
 
-    void setZoomFactor(float factor);
-
     [RaisesException] void setShouldRevealPassword(Element element, boolean reveal);
 
-    [CallWith=ScriptState] Promise createResolvedPromise(any value);
-    [CallWith=ScriptState] Promise createRejectedPromise(any reason);
-    [CallWith=ScriptState] Promise addOneToPromise(Promise promise);
-    [CallWith=ScriptState, RaisesException] Promise promiseCheck(long arg1, boolean arg2, object arg3, DOMString arg4, sequence<DOMString> arg5);
-    [CallWith=ScriptState] Promise promiseCheckWithoutExceptionState(object arg1, DOMString arg2, DOMString... variadic);
-    [CallWith=ScriptState] Promise promiseCheckRange([EnforceRange] octet arg1);
-    [CallWith=ScriptState] Promise promiseCheckOverload(Location arg1);
-    [CallWith=ScriptState] Promise promiseCheckOverload(Document arg1);
-    [CallWith=ScriptState] Promise promiseCheckOverload(Location arg1, long arg2, long arg3);
+    [CallWith=ScriptState] Promise<any> createResolvedPromise(any value);
+    [CallWith=ScriptState] Promise<any> createRejectedPromise(any reason);
+    [CallWith=ScriptState] Promise<any> addOneToPromise(Promise<any> promise);
+    [CallWith=ScriptState, RaisesException] Promise<any> promiseCheck(long arg1, boolean arg2, object arg3, DOMString arg4, sequence<DOMString> arg5);
+    [CallWith=ScriptState] Promise<any> promiseCheckWithoutExceptionState(object arg1, DOMString arg2, DOMString... variadic);
+    [CallWith=ScriptState] Promise<any> promiseCheckRange([EnforceRange] octet arg1);
+    [CallWith=ScriptState] Promise<any> promiseCheckOverload(Location arg1);
+    [CallWith=ScriptState] Promise<any> promiseCheckOverload(Document arg1);
+    [CallWith=ScriptState] Promise<any> promiseCheckOverload(Location arg1, long arg2, long arg3);
 
     void setValueForUser(HTMLInputElement element, DOMString value);
 
     void setFocused(boolean focused);
     void setInitialFocus(boolean reverse);
 
-    boolean ignoreLayoutWithPendingStylesheets(Document document);
-
-    // These functions are for testing NetInfo. You must call clearNetworkConnectionInfoOverride() at the end.
-    [RaisesException] void setNetworkConnectionInfoOverride(boolean onLine, DOMString type, EffectiveConnectionType effective_type, unsigned long http_rtt_msec, double downlink_max_mbps);
-    void setSaveDataEnabled(boolean enabled);
-    void clearNetworkConnectionInfoOverride();
+    // When the FocuslessSpatialNavigation feature is enabled, spatial
+    // navigation moves "interest" around a page, rather than focus. This
+    // attribute returns the currently interested element on the page.
+    readonly attribute Element? interestedElement;
 
     // This function is for testing HitRegions on Canvas2D.
     unsigned long countHitRegions(CanvasRenderingContext2D context);
@@ -341,14 +337,12 @@ enum EffectiveConnectionType {
     UnionTypesTest unionTypesTest();
     CallbackFunctionTest callbackFunctionTest();
     [RaisesException] void setScrollChain(ScrollState scrollState, sequence<Element> elements);
-    void forceBlinkGCWithoutV8GC();
+    void scheduleBlinkGC();
 
     DOMString selectedHTMLForClipboard();
     DOMString selectedTextForClipboard();
 
     void setVisualViewportOffset(long x, long y);
-
-    boolean magnifyScaleAroundAnchor(float offset, float x, float y);
 
     boolean isUseCounted(Document document, unsigned long feature);
     boolean isCSSPropertyUseCounted(Document document, DOMString propertyName);
@@ -362,7 +356,7 @@ enum EffectiveConnectionType {
     // Returns a promise that is resolved when |feature| is counted on
     // |document|'s UseCounter. When |feature| was already counted, it's
     // immediately resolved.
-    [CallWith=ScriptState] Promise<bool> observeUseCounter(Document document, unsigned long feature);
+    [CallWith=ScriptState] Promise<boolean> observeUseCounter(Document document, unsigned long feature);
 
     readonly attribute unsigned long length;
     getter long (unsigned long index);
@@ -371,15 +365,17 @@ enum EffectiveConnectionType {
     [Unscopable] readonly attribute DOMString unscopableAttribute;
     [Unscopable] DOMString unscopableMethod();
 
-    DOMRectList focusRingRects(Element element);
-    DOMRectList outlineRects(Element element);
     void setCapsLockState(boolean enabled);
+
+    // pseudo: One of ":focus", ":focus-within", ":active", and ":hover".
+    [RaisesException] void setPseudoClassState(Element element, DOMString pseudo, boolean enabled);
 
     // Returns whether the scrollbar was able to be shown or hidden; not all platforms
     // support overlay scrollbars.
     boolean setScrollbarVisibilityInScrollableArea(Node node, boolean visible);
 
     [RaisesException] double monotonicTimeToZeroBasedDocumentTime(double platformTime);
+    long long currentTimeTicks();
 
     DOMString getScrollAnimationState(Node node);
 
@@ -414,11 +410,39 @@ enum EffectiveConnectionType {
 
     // Disable the 'delay' option for IntersectionObserver, so that observations
     // are recomputed on every frame.  This eliminates the need to add
-    // setTimeout(..., delay_ms) calls to layout tests to wait for notifications
+    // setTimeout(..., delay_ms) calls to web tests to wait for notifications
     // to be generated.
     void DisableIntersectionObserverThrottleDelay();
+
+    // Reports whether an iframe's browsing context runs in a separate process
+    boolean isSiteIsolated(HTMLIFrameElement iframe);
+
+    // Reports whether a parent document is propagating occlusion information
+    // down to a child frame, for the purpose of servicing IntersectionObserver
+    // instances that track visibility.
+    boolean isTrackingOcclusionForIFrame(HTMLIFrameElement iframe);
 
     // Declare that the given |name| is in use by the embedder via the custom
     // element mechanism.
     [RaisesException] void addEmbedderCustomElementName(DOMString name);
+
+    // https://html.spec.whatwg.org/C/#resolve-a-module-specifier
+    // Throws TypeError on error.
+    // Used for testing Import Maps https://github.com/domenic/import-maps
+    [RaisesException] DOMString resolveModuleSpecifier(DOMString specifier, DOMString base_url, Document document);
+
+    // Returns the current serialized import map of the Document.
+    // TODO(crbug.com/927181): Currently this returns the "imports" value,
+    // because Blink doesn't support scopes yet. Update this once scopes are
+    // implemented.
+    [RaisesException] DOMString getParsedImportMap(Document document);
+
+    // Sets the scale for devtools device emulation.
+    [RaisesException] void setDeviceEmulationScale(float scale);
+
+    // Return a string that identifies |document|'s WindowAgent. You can use it
+    // to distinguish different Agent instances (perhaps in a remote process).
+    // The returned string is composed of the process ID and the memory address
+    // of the Agent object.
+    DOMString getDocumentAgentId(Document document);
 };

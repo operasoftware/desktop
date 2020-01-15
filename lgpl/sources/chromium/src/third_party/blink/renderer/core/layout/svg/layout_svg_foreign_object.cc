@@ -24,6 +24,7 @@
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources_cache.h"
+#include "third_party/blink/renderer/core/layout/svg/transformed_hit_test_location.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/svg_foreign_object_painter.h"
 #include "third_party/blink/renderer/core/svg/svg_foreign_object_element.h"
@@ -126,32 +127,22 @@ void LayoutSVGForeignObject::UpdateLayout() {
 
 bool LayoutSVGForeignObject::NodeAtPointFromSVG(
     HitTestResult& result,
-    const HitTestLocation& location_in_parent,
-    const LayoutPoint& accumulated_offset,
+    const HitTestLocation& hit_test_location,
+    const PhysicalOffset& accumulated_offset,
     HitTestAction) {
-  DCHECK_EQ(accumulated_offset, LayoutPoint());
-  AffineTransform local_transform = LocalSVGTransform();
-  if (!local_transform.IsInvertible())
+  DCHECK_EQ(accumulated_offset, PhysicalOffset());
+  TransformedHitTestLocation local_location(hit_test_location,
+                                            LocalSVGTransform());
+  if (!local_location)
     return false;
 
-  AffineTransform inverse = local_transform.Inverse();
-  base::Optional<HitTestLocation> local_location;
-  if (location_in_parent.IsRectBasedTest()) {
-    local_location.emplace(
-        inverse.MapPoint(location_in_parent.TransformedPoint()),
-        inverse.MapQuad(location_in_parent.TransformedRect()));
-  } else {
-    local_location.emplace(
-        (inverse.MapPoint(location_in_parent.TransformedPoint())));
-  }
-
-  // |local_point| already includes the offset of the <foreignObject> element,
-  // but PaintLayer::HitTestLayer assumes it has not been.
-  HitTestLocation local_without_offset(
-      *local_location, -ToLayoutSize(Layer()->LayoutBoxLocation()));
+  // |local_location| already includes the offset of the <foreignObject>
+  // element, but PaintLayer::HitTestLayer assumes it has not been.
+  HitTestLocation local_without_offset(*local_location, -PhysicalLocation());
   HitTestResult layer_result(result.GetHitTestRequest(), local_without_offset);
+  layer_result.SetInertNode(result.InertNode());
   bool retval = Layer()->HitTest(local_without_offset, layer_result,
-                                 LayoutRect(LayoutRect::InfiniteIntRect()));
+                                 PhysicalRect(PhysicalRect::InfiniteIntRect()));
 
   // Preserve the "point in inner node frame" from the original request,
   // since |layer_result| is a hit test rooted at the <foreignObject> element,
@@ -159,7 +150,7 @@ bool LayoutSVGForeignObject::NodeAtPointFromSVG(
   // |point_in_foreign_object| as its "point in inner node frame".
   // TODO(chrishtr): refactor the PaintLayer and HitTestResults code around
   // this, to better support hit tests that don't start at frame boundaries.
-  LayoutPoint original_point_in_inner_node_frame =
+  PhysicalOffset original_point_in_inner_node_frame =
       result.PointInInnerNodeFrame();
   if (result.GetHitTestRequest().ListBased())
     result.Append(layer_result);
@@ -171,11 +162,11 @@ bool LayoutSVGForeignObject::NodeAtPointFromSVG(
 
 bool LayoutSVGForeignObject::NodeAtPoint(
     HitTestResult& result,
-    const HitTestLocation& location_in_parent,
-    const LayoutPoint& accumulated_offset,
+    const HitTestLocation& hit_test_location,
+    const PhysicalOffset& accumulated_offset,
     HitTestAction hit_test_action) {
   // Skip LayoutSVGBlock's override.
-  return LayoutBlockFlow::NodeAtPoint(result, location_in_parent,
+  return LayoutBlockFlow::NodeAtPoint(result, hit_test_location,
                                       accumulated_offset, hit_test_action);
 }
 

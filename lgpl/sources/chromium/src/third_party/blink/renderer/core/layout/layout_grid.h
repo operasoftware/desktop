@@ -132,11 +132,6 @@ class LayoutGrid final : public LayoutBlock {
       LayoutUnit& min_logical_width,
       LayoutUnit& max_logical_width) const override;
 
-  LayoutUnit ComputeIntrinsicLogicalContentHeightUsing(
-      const Length& logical_height_length,
-      LayoutUnit intrinsic_content_height,
-      LayoutUnit border_and_padding) const override;
-
   void AddChild(LayoutObject* new_child,
                 LayoutObject* before_child = nullptr) override;
   void RemoveChild(LayoutObject*) override;
@@ -185,9 +180,7 @@ class LayoutGrid final : public LayoutBlock {
   GridTrackSizingDirection AutoPlacementMinorAxisDirection() const;
 
   void ComputeTrackSizesForIndefiniteSize(GridTrackSizingAlgorithm&,
-                                          GridTrackSizingDirection,
-                                          LayoutUnit& min_intrinsic_size,
-                                          LayoutUnit& max_intrinsic_size) const;
+                                          GridTrackSizingDirection) const;
   void ComputeTrackSizesForDefiniteSize(GridTrackSizingDirection,
                                         LayoutUnit free_space);
 
@@ -203,13 +196,11 @@ class LayoutGrid final : public LayoutBlock {
       PositionedLayoutBehavior = kDefaultLayout) override;
   void PopulateGridPositionsForDirection(GridTrackSizingDirection);
 
-  bool GridPositionIsAutoForOutOfFlow(GridPosition,
-                                      GridTrackSizingDirection) const;
   LayoutUnit ResolveAutoStartGridPosition(GridTrackSizingDirection) const;
   LayoutUnit ResolveAutoEndGridPosition(GridTrackSizingDirection) const;
-  LayoutUnit LogicalOffsetForChild(const LayoutBox&,
-                                   GridTrackSizingDirection,
-                                   LayoutUnit) const;
+  LayoutUnit LogicalOffsetForOutOfFlowChild(const LayoutBox&,
+                                            GridTrackSizingDirection,
+                                            LayoutUnit) const;
   LayoutUnit GridAreaBreadthForOutOfFlowChild(const LayoutBox&,
                                               GridTrackSizingDirection);
   void GridAreaPositionForOutOfFlowChild(const LayoutBox&,
@@ -234,14 +225,17 @@ class LayoutGrid final : public LayoutBlock {
       const LayoutUnit& available_free_space,
       unsigned number_of_grid_tracks);
   LayoutPoint GridAreaLogicalPosition(const GridArea&) const;
-  LayoutPoint FindChildLogicalPosition(const LayoutBox&) const;
+  void SetLogicalPositionForChild(LayoutBox&) const;
+  void SetLogicalOffsetForChild(LayoutBox&, GridTrackSizingDirection) const;
+  LayoutUnit LogicalOffsetForChild(const LayoutBox&,
+                                   GridTrackSizingDirection) const;
 
   LayoutUnit GridAreaBreadthForChildIncludingAlignmentOffsets(
       const LayoutBox&,
       GridTrackSizingDirection) const;
 
   void PaintChildren(const PaintInfo&,
-                     const LayoutPoint& paint_offset) const override;
+                     const PhysicalOffset& paint_offset) const override;
 
   LayoutUnit AvailableAlignmentSpaceForChildBeforeStretching(
       LayoutUnit grid_area_breadth_for_child,
@@ -300,8 +294,6 @@ class LayoutGrid final : public LayoutBlock {
   static LayoutUnit OverrideContainingBlockContentSizeForChild(
       const LayoutBox& child,
       GridTrackSizingDirection);
-  static LayoutUnit SynthesizedBaselineFromContentBox(const LayoutBox&,
-                                                      LineDirectionMode);
   static LayoutUnit SynthesizedBaselineFromBorderBox(const LayoutBox&,
                                                      LineDirectionMode);
   static const StyleContentAlignmentData& ContentAlignmentNormalBehavior();
@@ -318,9 +310,6 @@ class LayoutGrid final : public LayoutBlock {
       OutOfFlowPositionsMap;
   OutOfFlowPositionsMap column_of_positioned_item_;
   OutOfFlowPositionsMap row_of_positioned_item_;
-
-  LayoutUnit min_content_height_{-1};
-  LayoutUnit max_content_height_{-1};
 
   bool has_any_orthogonal_item_{false};
   bool baseline_items_cached_{false};

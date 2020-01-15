@@ -15,10 +15,12 @@
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 
-class SkMetaData;
-
 namespace cc {
 class PaintCanvas;
+}
+
+namespace paint_preview {
+class PaintPreviewTracker;
 }
 
 namespace blink {
@@ -26,7 +28,6 @@ class GraphicsContext;
 class PaintController;
 
 class PLATFORM_EXPORT PaintRecordBuilder final : public DisplayItemClient {
-
  public:
   // Constructs a new builder for the resulting paint record. If |metadata|
   // is specified, that metadata is propagated to the builder's internal canvas.
@@ -37,9 +38,12 @@ class PLATFORM_EXPORT PaintRecordBuilder final : public DisplayItemClient {
   // transient PaintController is used for the duration of the picture building,
   // which therefore has no caching. It also resets paint chunk state to
   // PropertyTreeState::Root() before beginning to record.
-  PaintRecordBuilder(SkMetaData* metadata = nullptr,
+  // TODO(wangxianzhu): Remove the input PaintController feature for
+  // CompositeAfterPaint.
+  PaintRecordBuilder(printing::MetafileSkia* metafile = nullptr,
                      GraphicsContext* containing_context = nullptr,
-                     PaintController* = nullptr);
+                     PaintController* = nullptr,
+                     paint_preview::PaintPreviewTracker* tracker = nullptr);
   ~PaintRecordBuilder() override;
 
   GraphicsContext& Context() { return *context_; }
@@ -58,7 +62,7 @@ class PLATFORM_EXPORT PaintRecordBuilder final : public DisplayItemClient {
 
   // DisplayItemClient methods
   String DebugName() const final { return "PaintRecordBuilder"; }
-  LayoutRect VisualRect() const final { return LayoutRect(); }
+  IntRect VisualRect() const final { return IntRect(); }
 
  private:
   PaintController* paint_controller_;

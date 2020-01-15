@@ -22,7 +22,7 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -38,7 +38,7 @@ class NavigatorMediaStream {
 
  public:
   static void getUserMedia(Navigator&,
-                           const MediaStreamConstraints&,
+                           const MediaStreamConstraints*,
                            V8NavigatorUserMediaSuccessCallback*,
                            V8NavigatorUserMediaErrorCallback*,
                            ExceptionState&);

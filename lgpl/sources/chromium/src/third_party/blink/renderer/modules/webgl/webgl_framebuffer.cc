@@ -39,12 +39,12 @@ class WebGLRenderbufferAttachment final
  public:
   static WebGLFramebuffer::WebGLAttachment* Create(WebGLRenderbuffer*);
 
+  explicit WebGLRenderbufferAttachment(WebGLRenderbuffer*);
+
   void Trace(blink::Visitor*) override;
   const char* NameInHeapSnapshot() const override { return "WebGLAttachment"; }
 
  private:
-  explicit WebGLRenderbufferAttachment(WebGLRenderbuffer*);
-
   WebGLSharedObject* Object() const override;
   bool IsSharedObject(WebGLSharedObject*) const override;
   bool Valid() const override;
@@ -56,12 +56,12 @@ class WebGLRenderbufferAttachment final
                 GLenum target,
                 GLenum attachment) override;
 
-  TraceWrapperMember<WebGLRenderbuffer> renderbuffer_;
+  Member<WebGLRenderbuffer> renderbuffer_;
 };
 
 WebGLFramebuffer::WebGLAttachment* WebGLRenderbufferAttachment::Create(
     WebGLRenderbuffer* renderbuffer) {
-  return new WebGLRenderbufferAttachment(renderbuffer);
+  return MakeGarbageCollected<WebGLRenderbufferAttachment>(renderbuffer);
 }
 
 void WebGLRenderbufferAttachment::Trace(blink::Visitor* visitor) {
@@ -110,17 +110,17 @@ class WebGLTextureAttachment final : public WebGLFramebuffer::WebGLAttachment {
                                                    GLint level,
                                                    GLint layer);
 
+  WebGLTextureAttachment(WebGLTexture*,
+                         GLenum target,
+                         GLint level,
+                         GLint layer);
+
   void Trace(blink::Visitor*) override;
   const char* NameInHeapSnapshot() const override {
     return "WebGLTextureAttachment";
   }
 
  private:
-  WebGLTextureAttachment(WebGLTexture*,
-                         GLenum target,
-                         GLint level,
-                         GLint layer);
-
   WebGLSharedObject* Object() const override;
   bool IsSharedObject(WebGLSharedObject*) const override;
   bool Valid() const override;
@@ -132,7 +132,7 @@ class WebGLTextureAttachment final : public WebGLFramebuffer::WebGLAttachment {
                 GLenum target,
                 GLenum attachment) override;
 
-  TraceWrapperMember<WebGLTexture> texture_;
+  Member<WebGLTexture> texture_;
   GLenum target_;
   GLint level_;
   GLint layer_;
@@ -143,7 +143,8 @@ WebGLFramebuffer::WebGLAttachment* WebGLTextureAttachment::Create(
     GLenum target,
     GLint level,
     GLint layer) {
-  return new WebGLTextureAttachment(texture, target, level, layer);
+  return MakeGarbageCollected<WebGLTextureAttachment>(texture, target, level,
+                                                      layer);
 }
 
 void WebGLTextureAttachment::Trace(blink::Visitor* visitor) {
@@ -200,12 +201,12 @@ void WebGLTextureAttachment::Unattach(gpu::gles2::GLES2Interface* gl,
 WebGLFramebuffer::WebGLAttachment::WebGLAttachment() = default;
 
 WebGLFramebuffer* WebGLFramebuffer::Create(WebGLRenderingContextBase* ctx) {
-  return new WebGLFramebuffer(ctx, false);
+  return MakeGarbageCollected<WebGLFramebuffer>(ctx, false);
 }
 
 WebGLFramebuffer* WebGLFramebuffer::CreateOpaque(
     WebGLRenderingContextBase* ctx) {
-  return new WebGLFramebuffer(ctx, true);
+  return MakeGarbageCollected<WebGLFramebuffer>(ctx, true);
 }
 
 WebGLFramebuffer::WebGLFramebuffer(WebGLRenderingContextBase* ctx, bool opaque)
@@ -218,9 +219,7 @@ WebGLFramebuffer::WebGLFramebuffer(WebGLRenderingContextBase* ctx, bool opaque)
   ctx->ContextGL()->GenFramebuffers(1, &object_);
 }
 
-WebGLFramebuffer::~WebGLFramebuffer() {
-  RunDestructor();
-}
+WebGLFramebuffer::~WebGLFramebuffer() = default;
 
 void WebGLFramebuffer::SetAttachmentForBoundFramebuffer(GLenum target,
                                                         GLenum attachment,
@@ -250,7 +249,7 @@ void WebGLFramebuffer::SetAttachmentForBoundFramebuffer(GLenum target,
       case GL_TEXTURE_2D_ARRAY:
         if (num_views > 0) {
           DCHECK_EQ(static_cast<GLenum>(GL_TEXTURE_2D_ARRAY), tex_target);
-          Context()->ContextGL()->FramebufferTextureMultiviewLayeredANGLE(
+          Context()->ContextGL()->FramebufferTextureMultiviewOVR(
               target, attachment, texture_id, level, layer, num_views);
         } else {
           Context()->ContextGL()->FramebufferTextureLayer(
@@ -416,7 +415,7 @@ bool WebGLFramebuffer::IsBound(GLenum target) const {
 void WebGLFramebuffer::DrawBuffers(const Vector<GLenum>& bufs) {
   draw_buffers_ = bufs;
   filtered_draw_buffers_.resize(draw_buffers_.size());
-  for (size_t i = 0; i < filtered_draw_buffers_.size(); ++i)
+  for (wtf_size_t i = 0; i < filtered_draw_buffers_.size(); ++i)
     filtered_draw_buffers_[i] = GL_NONE;
   DrawBuffersIfNecessary(true);
 }
@@ -426,7 +425,7 @@ void WebGLFramebuffer::DrawBuffersIfNecessary(bool force) {
       Context()->ExtensionEnabled(kWebGLDrawBuffersName)) {
     bool reset = force;
     // This filtering works around graphics driver bugs on Mac OS X.
-    for (size_t i = 0; i < draw_buffers_.size(); ++i) {
+    for (wtf_size_t i = 0; i < draw_buffers_.size(); ++i) {
       if (draw_buffers_[i] != GL_NONE && GetAttachment(draw_buffers_[i])) {
         if (filtered_draw_buffers_[i] != draw_buffers_[i]) {
           filtered_draw_buffers_[i] = draw_buffers_[i];

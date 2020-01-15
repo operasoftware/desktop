@@ -16,7 +16,7 @@ class WebRemoteFrameImpl;
 
 class RemoteFrameClientImpl final : public RemoteFrameClient {
  public:
-  static RemoteFrameClientImpl* Create(WebRemoteFrameImpl*);
+  explicit RemoteFrameClientImpl(WebRemoteFrameImpl*);
 
   void Trace(blink::Visitor*) override;
 
@@ -35,29 +35,31 @@ class RemoteFrameClientImpl final : public RemoteFrameClient {
   // RemoteFrameClient overrides:
   void Navigate(const ResourceRequest&,
                 bool should_replace_current_entry,
-                mojom::blink::BlobURLTokenPtr) override;
+                bool is_opener_navigation,
+                bool prevent_sandboxed_download,
+                bool initiator_frame_is_ad,
+                mojo::PendingRemote<mojom::blink::BlobURLToken>) override;
   unsigned BackForwardLength() override;
   void CheckCompleted() override;
   void ForwardPostMessage(MessageEvent*,
                           scoped_refptr<const SecurityOrigin> target,
-                          LocalFrame* source,
-                          bool has_user_gesture) const override;
+                          LocalFrame* source) const override;
   void FrameRectsChanged(const IntRect& local_frame_rect,
                          const IntRect& screen_space_rect) override;
-  void UpdateRemoteViewportIntersection(const IntRect&, bool) override;
+  void UpdateRemoteViewportIntersection(const IntRect&,
+                                        FrameOcclusionState) override;
   void AdvanceFocus(WebFocusType, LocalFrame*) override;
-  void VisibilityChanged(bool visible) override;
+  void VisibilityChanged(blink::mojom::FrameVisibility) override;
   void SetIsInert(bool) override;
   void SetInheritedEffectiveTouchAction(TouchAction) override;
   void UpdateRenderThrottlingStatus(bool is_throttled,
                                     bool subtree_throttled) override;
   uint32_t Print(const IntRect&, cc::PaintCanvas*) const override;
+  void Capture(const IntRect& rect, cc::PaintCanvas* canvas) const override;
 
   WebRemoteFrameImpl* GetWebFrame() const { return web_frame_; }
 
  private:
-  explicit RemoteFrameClientImpl(WebRemoteFrameImpl*);
-
   Member<WebRemoteFrameImpl> web_frame_;
 };
 

@@ -25,12 +25,10 @@
 
 #include "third_party/blink/renderer/core/timing/performance_user_timing.h"
 
-#include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/renderer/core/timing/performance.h"
 #include "third_party/blink/renderer/core/timing/performance_mark.h"
+#include "third_party/blink/renderer/core/timing/performance_mark_options.h"
 #include "third_party/blink/renderer/core/timing/performance_measure.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 
@@ -38,6 +36,7 @@ namespace blink {
 
 namespace {
 
+typedef uint64_t (PerformanceTiming::*NavigationTimingFunction)() const;
 using RestrictedKeyMap = HashMap<AtomicString, NavigationTimingFunction>;
 
 const RestrictedKeyMap& GetRestrictedKeyMap() {
@@ -99,12 +98,31 @@ static void ClearPeformanceEntries(PerformanceEntryMap& performance_entry_map,
     performance_entry_map.erase(name);
 }
 
-PerformanceMark* UserTiming::Mark(ScriptState* script_state,
-                                  const AtomicString& mark_name,
-                                  const DOMHighResTimeStamp& start_time,
-                                  const ScriptValue& detail,
-                                  ExceptionState& exception_state) {
-  if (GetRestrictedKeyMap().Contains(mark_name)) {
+PerformanceMark* UserTiming::CreatePerformanceMark(
+    ScriptState* script_state,
+    const AtomicString& mark_name,
+    PerformanceMarkOptions* mark_options,
+    ExceptionState& exception_state) {
+  DOMHighResTimeStamp start = 0.0;
+  if (mark_options && mark_options->hasStartTime()) {
+    start = mark_options->startTime();
+    if (start < 0.0) {
+      exception_state.ThrowTypeError("'" + mark_name +
+                                     "' cannot have a negative start time.");
+      return nullptr;
+    }
+  } else {
+    start = performance_->now();
+  }
+
+  ScriptValue detail = ScriptValue::CreateNull(script_state->GetIsolate());
+  if (mark_options)
+    detail = mark_options->detail();
+
+  bool is_worker_global_scope =
+      performance_->GetExecutionContext() &&
+      performance_->GetExecutionContext()->IsWorkerGlobalScope();
+  if (!is_worker_global_scope && GetRestrictedKeyMap().Contains(mark_name)) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kSyntaxError,
         "'" + mark_name +
@@ -113,15 +131,19 @@ PerformanceMark* UserTiming::Mark(ScriptState* script_state,
     return nullptr;
   }
 
-  TRACE_EVENT_COPY_MARK("blink.user_timing", mark_name.Utf8().data());
-  PerformanceMark* mark =
-      PerformanceMark::Create(script_state, mark_name, start_time, detail);
-  InsertPerformanceEntry(marks_map_, *mark);
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(CustomCountHistogram,
-                                  user_timing_mark_histogram,
-                                  ("PLT.UserTiming_Mark", 0, 600000, 100));
-  user_timing_mark_histogram.Count(static_cast<int>(start_time));
-  return mark;
+  return PerformanceMark::Create(script_state, mark_name, start, detail,
+                                 exception_state);
+}
+
+void UserTiming::AddMarkToPerformanceTimeline(PerformanceMark& mark) {
+  if (performance_->timing()) {
+    TRACE_EVENT_COPY_MARK1("blink.user_timing", mark.name().Utf8().c_str(),
+                           "data",
+                           performance_->timing()->GetNavigationTracingData());
+  } else {
+    TRACE_EVENT_COPY_MARK("blink.user_timing", mark.name().Utf8().c_str());
+  }
+  InsertPerformanceEntry(marks_map_, mark);
 }
 
 void UserTiming::ClearMarks(const AtomicString& mark_name) {
@@ -133,62 +155,87 @@ double UserTiming::FindExistingMarkStartTime(const AtomicString& mark_name,
   if (marks_map_.Contains(mark_name))
     return marks_map_.at(mark_name).back()->startTime();
 
-  if (GetRestrictedKeyMap().Contains(mark_name) && performance_->timing()) {
-    double value = static_cast<double>(
-        (performance_->timing()->*(GetRestrictedKeyMap().at(mark_name)))());
-    if (!value) {
-      exception_state.ThrowDOMException(
-          DOMExceptionCode::kInvalidAccessError,
-          "'" + mark_name +
-              "' is empty: either the event hasn't "
-              "happened yet, or it would provide "
-              "cross-origin timing information.");
-      return 0.0;
-    }
-    return value - performance_->timing()->navigationStart();
+  NavigationTimingFunction timing_function =
+      GetRestrictedKeyMap().at(mark_name);
+  if (!timing_function) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kSyntaxError,
+        "The mark '" + mark_name + "' does not exist.");
+    return 0.0;
   }
 
-  exception_state.ThrowDOMException(
-      DOMExceptionCode::kSyntaxError,
-      "The mark '" + mark_name + "' does not exist.");
-  return 0.0;
+  PerformanceTiming* timing = performance_->timing();
+  if (!timing) {
+    // According to
+    // https://w3c.github.io/user-timing/#convert-a-name-to-a-timestamp.
+    exception_state.ThrowTypeError(
+        "When converting a mark name ('" + mark_name +
+        "') to a timestamp given a name that is a read only attribute in the "
+        "PerformanceTiming interface, the global object has to be a Window "
+        "object.");
+    return 0.0;
+  }
+
+  double value = static_cast<double>((timing->*timing_function)());
+  if (!value) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidAccessError,
+                                      "'" + mark_name +
+                                          "' is empty: either the event hasn't "
+                                          "happened yet, or it would provide "
+                                          "cross-origin timing information.");
+    return 0.0;
+  }
+
+  return value - timing->navigationStart();
 }
 
-double UserTiming::FindStartMarkOrTime(const StringOrDouble& start,
-                                       ExceptionState& exception_state) {
-  if (start.IsString()) {
-    return FindExistingMarkStartTime(AtomicString(start.GetAsString()),
+double UserTiming::GetTimeOrFindMarkTime(const AtomicString& measure_name,
+                                         const StringOrDouble& mark_or_time,
+                                         ExceptionState& exception_state) {
+  if (mark_or_time.IsString()) {
+    return FindExistingMarkStartTime(AtomicString(mark_or_time.GetAsString()),
                                      exception_state);
   }
-  if (start.IsDouble())
-    return start.GetAsDouble();
-  NOTREACHED();
-  return 0;
+  DCHECK(mark_or_time.IsDouble());
+  const double time = mark_or_time.GetAsDouble();
+  if (time < 0.0) {
+    exception_state.ThrowTypeError("'" + measure_name +
+                                   "' cannot have a negative time stamp.");
+  }
+  return time;
 }
 
 PerformanceMeasure* UserTiming::Measure(ScriptState* script_state,
                                         const AtomicString& measure_name,
                                         const StringOrDouble& start,
+                                        base::Optional<double> duration,
                                         const StringOrDouble& end,
                                         const ScriptValue& detail,
                                         ExceptionState& exception_state) {
-  double start_time = 0.0;
-  double end_time = 0.0;
+  double start_time =
+      start.IsNull()
+          ? 0.0
+          : GetTimeOrFindMarkTime(measure_name, start, exception_state);
+  if (exception_state.HadException())
+    return nullptr;
 
-  if (start.IsNull()) {
-    end_time = performance_->now();
-  } else if (end.IsNull()) {
-    end_time = performance_->now();
-    start_time = FindStartMarkOrTime(start, exception_state);
-    if (exception_state.HadException())
-      return nullptr;
-  } else {
-    end_time = FindStartMarkOrTime(end, exception_state);
-    if (exception_state.HadException())
-      return nullptr;
-    start_time = FindStartMarkOrTime(start, exception_state);
-    if (exception_state.HadException())
-      return nullptr;
+  double end_time =
+      end.IsNull() ? performance_->now()
+                   : GetTimeOrFindMarkTime(measure_name, end, exception_state);
+  if (exception_state.HadException())
+    return nullptr;
+
+  if (duration.has_value()) {
+    // When |duration| is specified, we require that exactly one of |start| and
+    // |end| were specified. Then, since |start| + |duration| = |end|, we'll
+    // compute the missing boundary.
+    if (start.IsNull()) {
+      start_time = end_time - duration.value();
+    } else {
+      DCHECK(end.IsNull()) << "When duration is specified, one of 'start' or "
+                              "'end' must be unspecified";
+      end_time = start_time + duration.value();
+    }
   }
 
   // User timing events are stored as integer milliseconds from the start of
@@ -197,25 +244,23 @@ PerformanceMeasure* UserTiming::Measure(ScriptState* script_state,
   double start_time_monotonic =
       performance_->GetTimeOrigin() + start_time / 1000.0;
   double end_time_monotonic = performance_->GetTimeOrigin() + end_time / 1000.0;
+  unsigned hash = WTF::StringHash::GetHash(measure_name);
+  WTF::AddFloatToHash(hash, start_time);
+  WTF::AddFloatToHash(hash, end_time);
 
   TRACE_EVENT_COPY_NESTABLE_ASYNC_BEGIN_WITH_TIMESTAMP0(
-      "blink.user_timing", measure_name.Utf8().data(),
-      WTF::StringHash::GetHash(measure_name),
-      TraceEvent::ToTraceTimestamp(start_time_monotonic));
+      "blink.user_timing", measure_name.Utf8().c_str(), hash,
+      trace_event::ToTraceTimestamp(start_time_monotonic));
   TRACE_EVENT_COPY_NESTABLE_ASYNC_END_WITH_TIMESTAMP0(
-      "blink.user_timing", measure_name.Utf8().data(),
-      WTF::StringHash::GetHash(measure_name),
-      TraceEvent::ToTraceTimestamp(end_time_monotonic));
+      "blink.user_timing", measure_name.Utf8().c_str(), hash,
+      trace_event::ToTraceTimestamp(end_time_monotonic));
 
-  PerformanceMeasure* measure = PerformanceMeasure::Create(
-      script_state, measure_name, start_time, end_time, detail);
+  PerformanceMeasure* measure =
+      PerformanceMeasure::Create(script_state, measure_name, start_time,
+                                 end_time, detail, exception_state);
+  if (!measure)
+    return nullptr;
   InsertPerformanceEntry(measures_map_, *measure);
-  if (end_time >= start_time) {
-    DEFINE_THREAD_SAFE_STATIC_LOCAL(
-        CustomCountHistogram, measure_duration_histogram,
-        ("PLT.UserTiming_MeasureDuration", 0, 600000, 100));
-    measure_duration_histogram.Count(static_cast<int>(end_time - start_time));
-  }
   return measure;
 }
 

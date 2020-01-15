@@ -44,10 +44,8 @@ class SVGTransformList final
  public:
   typedef SVGTransformListTearOff TearOffType;
 
-  static SVGTransformList* Create() { return new SVGTransformList(); }
-
-  static SVGTransformList* Create(SVGTransformType, const String&);
-
+  SVGTransformList();
+  SVGTransformList(SVGTransformType, const String&);
   ~SVGTransformList() override;
 
   SVGTransform* Consolidate();
@@ -77,8 +75,6 @@ class SVGTransformList final
   const CSSValue* CssValue() const;
 
  private:
-  SVGTransformList();
-
   template <typename CharType>
   SVGParsingError ParseInternal(const CharType*& ptr, const CharType* end);
 };

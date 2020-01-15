@@ -34,7 +34,7 @@
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/traversal_range.h"
 #include "third_party/blink/renderer/core/dom/v0_insertion_point.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -57,9 +57,19 @@ class CORE_EXPORT FlatTreeTraversal {
   typedef LayoutTreeBuilderTraversal::ParentDetails ParentTraversalDetails;
   using TraversalNodeType = Node;
 
+#if DCHECK_IS_ON()
+  static void AssertFlatTreeNodeDataUpdated(
+      const Node& root,
+      int& assigned_nodes_in_slot_count,
+      int& nodes_which_have_assigned_slot_count);
+#endif
+
   static Node* Next(const Node&);
   static Node* Next(const Node&, const Node* stay_within);
   static Node* Previous(const Node&);
+  // Returns the previous of |node| in preorder. When |stay_within| is given,
+  // returns nullptr if the previous is not a descendant of |stay_within|.
+  static Node* Previous(const Node& node, const Node* stay_within);
 
   static Node* FirstChild(const Node&);
   static Node* LastChild(const Node&);
@@ -141,6 +151,7 @@ class CORE_EXPORT FlatTreeTraversal {
   };
 
   static void AssertPrecondition(const Node& node) {
+    DCHECK(!node.GetDocument().IsFlatTreeTraversalForbidden());
     DCHECK(!node.NeedsDistributionRecalc());
     DCHECK(node.CanParticipateInFlatTree());
   }
@@ -196,8 +207,7 @@ inline ContainerNode* FlatTreeTraversal::Parent(
 }
 
 inline Element* FlatTreeTraversal::ParentElement(const Node& node) {
-  ContainerNode* parent = FlatTreeTraversal::Parent(node);
-  return parent && parent->IsElementNode() ? ToElement(parent) : nullptr;
+  return DynamicTo<Element>(FlatTreeTraversal::Parent(node));
 }
 
 inline Node* FlatTreeTraversal::NextSibling(const Node& node) {
@@ -280,6 +290,17 @@ inline Node* FlatTreeTraversal::TraversePrevious(const Node& node) {
     return previous;
   }
   return TraverseParent(node);
+}
+
+inline Node* FlatTreeTraversal::Previous(const Node& node,
+                                         const Node* stay_within) {
+  if (!stay_within)
+    return Previous(node);
+  DCHECK(IsDescendantOf(node, *stay_within));
+  Node* previous = Previous(node);
+  if (previous == stay_within)
+    return nullptr;
+  return previous;
 }
 
 inline Node* FlatTreeTraversal::FirstChild(const Node& node) {

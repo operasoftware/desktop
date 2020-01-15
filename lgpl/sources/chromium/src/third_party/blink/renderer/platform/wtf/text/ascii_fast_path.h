@@ -23,9 +23,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_ASCII_FAST_PATH_H_
 
 #include <stdint.h>
+
+#include "base/compiler_specific.h"
 #include "build/build_config.h"
-#include "third_party/blink/renderer/platform/wtf/alignment.h"
-#include "third_party/blink/renderer/platform/wtf/cpu.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
 
@@ -117,7 +117,9 @@ inline void CopyLCharsFromUCharSource(LChar* destination,
   const uintptr_t kMemoryAccessMask = kMemoryAccessSize - 1;
 
   size_t i = 0;
-  for (; i < length && !IsAlignedTo<kMemoryAccessMask>(&source[i]); ++i) {
+  for (; i < length &&
+         reinterpret_cast<uintptr_t>(&source[i]) & kMemoryAccessMask;
+       ++i) {
     DCHECK(!(source[i] & 0xff00));
     destination[i] = static_cast<LChar>(source[i]);
   }
@@ -147,7 +149,7 @@ inline void CopyLCharsFromUCharSource(LChar* destination,
     DCHECK(!(source[i] & 0xff00));
     destination[i] = static_cast<LChar>(source[i]);
   }
-#elif defined(COMPILER_GCC) && WTF_CPU_ARM_NEON && \
+#elif defined(COMPILER_GCC) && defined(CPU_ARM_NEON) && \
     !defined(ARCH_CPU_BIG_ENDIAN) && defined(NDEBUG)
   const LChar* const end = destination + length;
   const uintptr_t kMemoryAccessSize = 8;
@@ -155,7 +157,7 @@ inline void CopyLCharsFromUCharSource(LChar* destination,
   if (length >= (2 * kMemoryAccessSize) - 1) {
     // Prefix: align dst on 64 bits.
     const uintptr_t kMemoryAccessMask = kMemoryAccessSize - 1;
-    while (!IsAlignedTo<kMemoryAccessMask>(destination))
+    while (reinterpret_cast<uintptr_t>(destination) & kMemoryAccessMask)
       *destination++ = static_cast<LChar>(*source++);
 
     // Vector interleaved unpack, we only store the lower 8 bits.

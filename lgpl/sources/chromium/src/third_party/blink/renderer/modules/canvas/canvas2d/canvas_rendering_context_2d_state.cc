@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/css/resolver/filter_operation_resolver.h"
 #include "third_party/blink/renderer/core/css/resolver/style_builder.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
 #include "third_party/blink/renderer/core/paint/filter_effect_builder.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
@@ -308,7 +309,7 @@ sk_sp<PaintFilter> CanvasRenderingContext2DState::GetFilterForOffscreenCanvas(
   if (last_effect) {
     // TODO(chrishtr): Taint the origin if needed. crbug.com/792506.
     resolved_filter_ =
-        PaintFilterBuilder::Build(last_effect, kInterpolationSpaceSRGB);
+        paint_filter_builder::Build(last_effect, kInterpolationSpaceSRGB);
   }
 
   return resolved_filter_;
@@ -334,11 +335,21 @@ sk_sp<PaintFilter> CanvasRenderingContext2DState::GetFilter(
 
     scoped_refptr<ComputedStyle> filter_style = ComputedStyle::Create();
     // Must set font in case the filter uses any font-relative units (em, ex)
-    filter_style->SetFont(font_for_filter_);
-
+    // If font_for_filter_ was never set (ie frame-less documents) use base font
+    if (LIKELY(font_for_filter_.GetFontSelector())) {
+      filter_style->SetFont(font_for_filter_);
+    } else {
+      const ComputedStyle* computed_style =
+          style_resolution_host->GetDocument().GetComputedStyle();
+      if (computed_style) {
+        filter_style->SetFont(computed_style->GetFont());
+      } else {
+        return nullptr;
+      }
+    }
     StyleResolverState resolver_state(style_resolution_host->GetDocument(),
-                                      style_resolution_host, filter_style.get(),
-                                      filter_style.get());
+                                      *style_resolution_host,
+                                      filter_style.get(), filter_style.get());
     resolver_state.SetStyle(filter_style);
 
     StyleBuilder::ApplyProperty(GetCSSPropertyFilter(), resolver_state,
@@ -359,10 +370,11 @@ sk_sp<PaintFilter> CanvasRenderingContext2DState::GetFilter(
         1.0f,  // Deliberately ignore zoom on the canvas element.
         &fill_flags_for_filter, &stroke_flags_for_filter);
 
-    if (FilterEffect* last_effect = filter_effect_builder.BuildFilterEffect(
-            filter_style->Filter(), !context->OriginClean())) {
+    FilterEffect* last_effect = filter_effect_builder.BuildFilterEffect(
+        filter_style->Filter(), !context->OriginClean());
+    if (last_effect) {
       resolved_filter_ =
-          PaintFilterBuilder::Build(last_effect, kInterpolationSpaceSRGB);
+          paint_filter_builder::Build(last_effect, kInterpolationSpaceSRGB);
       if (resolved_filter_) {
         context->UpdateFilterReferences(filter_style->Filter());
         if (last_effect->OriginTainted())
@@ -431,7 +443,7 @@ SkDrawLooper* CanvasRenderingContext2DState::ShadowAndForegroundDrawLooper()
 sk_sp<PaintFilter> CanvasRenderingContext2DState::ShadowOnlyImageFilter()
     const {
   if (!shadow_only_image_filter_) {
-    double sigma = SkBlurRadiusToSigma(shadow_blur_);
+    const auto sigma = BlurRadiusToStdDev(shadow_blur_);
     shadow_only_image_filter_ = sk_make_sp<DropShadowPaintFilter>(
         shadow_offset_.Width(), shadow_offset_.Height(), sigma, sigma,
         shadow_color_, SkDropShadowImageFilter::kDrawShadowOnly_ShadowMode,
@@ -443,7 +455,7 @@ sk_sp<PaintFilter> CanvasRenderingContext2DState::ShadowOnlyImageFilter()
 sk_sp<PaintFilter>
 CanvasRenderingContext2DState::ShadowAndForegroundImageFilter() const {
   if (!shadow_and_foreground_image_filter_) {
-    double sigma = SkBlurRadiusToSigma(shadow_blur_);
+    const auto sigma = BlurRadiusToStdDev(shadow_blur_);
     shadow_and_foreground_image_filter_ = sk_make_sp<DropShadowPaintFilter>(
         shadow_offset_.Width(), shadow_offset_.Height(), sigma, sigma,
         shadow_color_,
@@ -609,6 +621,17 @@ const PaintFlags* CanvasRenderingContext2DState::GetFlags(
   flags->setLooper(sk_ref_sp(ShadowAndForegroundDrawLooper()));
   flags->setImageFilter(nullptr);
   return flags;
+}
+
+bool CanvasRenderingContext2DState::HasPattern() const {
+  return FillStyle() && FillStyle()->GetCanvasPattern() &&
+         FillStyle()->GetCanvasPattern()->GetPattern();
+}
+
+// Only to be used if the CanvasRenderingContext2DState has Pattern
+bool CanvasRenderingContext2DState::PatternIsAccelerated() const {
+  DCHECK(HasPattern());
+  return FillStyle()->GetCanvasPattern()->GetPattern()->IsTextureBacked();
 }
 
 }  // namespace blink

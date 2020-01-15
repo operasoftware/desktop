@@ -40,16 +40,18 @@
 #include "third_party/blink/renderer/platform/audio/denormal_disabler.h"
 #include "third_party/blink/renderer/platform/audio/sinc_resampler.h"
 #include "third_party/blink/renderer/platform/audio/vector_math.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
+#include "ui/base/resource/scale_factor.h"
 
 namespace blink {
 
-using namespace VectorMath;
+using vector_math::Vadd;
+using vector_math::Vsma;
 
 const unsigned kMaxBusChannels = 32;
 
 scoped_refptr<AudioBus> AudioBus::Create(unsigned number_of_channels,
-                                         size_t length,
+                                         uint32_t length,
                                          bool allocate) {
   DCHECK_LE(number_of_channels, kMaxBusChannels);
   if (number_of_channels > kMaxBusChannels)
@@ -58,7 +60,7 @@ scoped_refptr<AudioBus> AudioBus::Create(unsigned number_of_channels,
   return base::AdoptRef(new AudioBus(number_of_channels, length, allocate));
 }
 
-AudioBus::AudioBus(unsigned number_of_channels, size_t length, bool allocate)
+AudioBus::AudioBus(unsigned number_of_channels, uint32_t length, bool allocate)
     : length_(length), sample_rate_(0) {
   channels_.ReserveInitialCapacity(number_of_channels);
 
@@ -74,7 +76,7 @@ AudioBus::AudioBus(unsigned number_of_channels, size_t length, bool allocate)
 
 void AudioBus::SetChannelMemory(unsigned channel_index,
                                 float* storage,
-                                size_t length) {
+                                uint32_t length) {
   if (channel_index < channels_.size()) {
     Channel(channel_index)->Set(storage, length);
     // FIXME: verify that this length matches all the other channel lengths
@@ -82,7 +84,7 @@ void AudioBus::SetChannelMemory(unsigned channel_index,
   }
 }
 
-void AudioBus::ResizeSmaller(size_t new_length) {
+void AudioBus::ResizeSmaller(uint32_t new_length) {
   DCHECK_LE(new_length, length_);
   if (new_length <= length_)
     length_ = new_length;
@@ -190,7 +192,7 @@ scoped_refptr<AudioBus> AudioBus::CreateBufferFromRange(
     const AudioBus* source_buffer,
     unsigned start_frame,
     unsigned end_frame) {
-  size_t number_of_source_frames = source_buffer->length();
+  uint32_t number_of_source_frames = source_buffer->length();
   unsigned number_of_channels = source_buffer->NumberOfChannels();
 
   // Sanity checking
@@ -200,7 +202,7 @@ scoped_refptr<AudioBus> AudioBus::CreateBufferFromRange(
   if (!is_range_safe)
     return nullptr;
 
-  size_t range_length = end_frame - start_frame;
+  uint32_t range_length = end_frame - start_frame;
 
   scoped_refptr<AudioBus> audio_bus = Create(number_of_channels, range_length);
   audio_bus->SetSampleRate(source_buffer->SampleRate());
@@ -526,8 +528,8 @@ void AudioBus::CopyWithGainFrom(const AudioBus& source_bus, float gain) {
   } else {
     for (unsigned channel_index = 0; channel_index < number_of_channels;
          ++channel_index) {
-      Vsmul(sources[channel_index], 1, &gain, destinations[channel_index], 1,
-            frames_to_process);
+      vector_math::Vsmul(sources[channel_index], 1, &gain,
+                         destinations[channel_index], 1, frames_to_process);
     }
   }
 }
@@ -561,7 +563,8 @@ void AudioBus::CopyWithSampleAccurateGainValuesFrom(
     if (source_bus.NumberOfChannels() == NumberOfChannels())
       source = source_bus.Channel(channel_index)->Data();
     float* destination = Channel(channel_index)->MutableData();
-    Vmul(source, 1, gain_values, 1, destination, 1, number_of_gain_values);
+    vector_math::Vmul(source, 1, gain_values, 1, destination, 1,
+                      number_of_gain_values);
   }
 }
 
@@ -686,9 +689,9 @@ scoped_refptr<AudioBus> DecodeAudioFileData(const char* data, size_t size) {
   return nullptr;
 }
 
-scoped_refptr<AudioBus> AudioBus::GetDataResource(const char* name,
+scoped_refptr<AudioBus> AudioBus::GetDataResource(int resource_id,
                                                   float sample_rate) {
-  const WebData& resource = Platform::Current()->GetDataResource(name);
+  const WebData& resource = Platform::Current()->GetDataResource(resource_id);
   if (resource.IsEmpty())
     return nullptr;
 

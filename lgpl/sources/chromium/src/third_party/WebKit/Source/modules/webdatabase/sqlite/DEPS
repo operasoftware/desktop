@@ -1,4 +1,0 @@
-include_rules = [
-    "+sql/initialization.h",
-    "+third_party/sqlite/sqlite3.h",
-]

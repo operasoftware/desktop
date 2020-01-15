@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/dom_string_list.h"
 #include "third_party/blink/renderer/core/frame/dom_window.h"
+#include "third_party/blink/renderer/core/frame/fragment_directive.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -53,66 +54,36 @@ class CORE_EXPORT Location final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static Location* Create(DOMWindow* dom_window) {
-    return new Location(dom_window);
-  }
+  explicit Location(DOMWindow*);
 
   DOMWindow* DomWindow() const { return dom_window_.Get(); }
 
-  void setHref(LocalDOMWindow* current_window,
-               LocalDOMWindow* entered_window,
-               const USVStringOrTrustedURL&,
-               ExceptionState&);
+  void setHref(v8::Isolate*, const USVStringOrTrustedURL&, ExceptionState&);
   void href(USVStringOrTrustedURL&) const;
 
-  void assign(LocalDOMWindow* current_window,
-              LocalDOMWindow* entered_window,
-              const USVStringOrTrustedURL&,
-              ExceptionState&);
-  void replace(LocalDOMWindow* current_window,
-               LocalDOMWindow* entered_window,
-               const USVStringOrTrustedURL&,
-               ExceptionState&);
-  void reload(LocalDOMWindow* current_window);
+  void assign(v8::Isolate*, const USVStringOrTrustedURL&, ExceptionState&);
+  void replace(v8::Isolate*, const USVStringOrTrustedURL&, ExceptionState&);
+  void reload();
 
-  void setProtocol(LocalDOMWindow* current_window,
-                   LocalDOMWindow* entered_window,
-                   const String&,
-                   ExceptionState&);
+  void setProtocol(v8::Isolate*, const String&, ExceptionState&);
   String protocol() const;
-  void setHost(LocalDOMWindow* current_window,
-               LocalDOMWindow* entered_window,
-               const String&,
-               ExceptionState&);
+  void setHost(v8::Isolate*, const String&, ExceptionState&);
   String host() const;
-  void setHostname(LocalDOMWindow* current_window,
-                   LocalDOMWindow* entered_window,
-                   const String&,
-                   ExceptionState&);
+  void setHostname(v8::Isolate*, const String&, ExceptionState&);
   String hostname() const;
-  void setPort(LocalDOMWindow* current_window,
-               LocalDOMWindow* entered_window,
-               const String&,
-               ExceptionState&);
+  void setPort(v8::Isolate*, const String&, ExceptionState&);
   String port() const;
-  void setPathname(LocalDOMWindow* current_window,
-                   LocalDOMWindow* entered_window,
-                   const String&,
-                   ExceptionState&);
+  void setPathname(v8::Isolate*, const String&, ExceptionState&);
   String pathname() const;
-  void setSearch(LocalDOMWindow* current_window,
-                 LocalDOMWindow* entered_window,
-                 const String&,
-                 ExceptionState&);
+  void setSearch(v8::Isolate*, const String&, ExceptionState&);
   String search() const;
-  void setHash(LocalDOMWindow* current_window,
-               LocalDOMWindow* entered_window,
-               const String&,
-               ExceptionState&);
+  void setHash(v8::Isolate*, const String&, ExceptionState&);
   String hash() const;
   String origin() const;
 
   DOMStringList* ancestorOrigins() const;
+
+  FragmentDirective* fragmentDirective() const;
 
   // Just return the |this| object the way the normal valueOf function on the
   // Object prototype would.  The valueOf function is only added to make sure
@@ -125,8 +96,6 @@ class CORE_EXPORT Location final : public ScriptWrappable {
   void Trace(blink::Visitor*) override;
 
  private:
-  explicit Location(DOMWindow*);
-
   // Note: it is only valid to call this if this is a Location object for a
   // LocalDOMWindow.
   Document* GetDocument() const;
@@ -134,6 +103,8 @@ class CORE_EXPORT Location final : public ScriptWrappable {
   // Returns true if the associated Window is the active Window in the frame.
   bool IsAttached() const;
 
+  // Note: SetLocation should be called synchronously from the DOM operation to
+  // ensure we use the correct Javascript world for CSP checks.
   enum class SetLocationPolicy { kNormal, kReplaceThisFrame };
   void SetLocation(const String&,
                    LocalDOMWindow* current_window,
@@ -144,6 +115,8 @@ class CORE_EXPORT Location final : public ScriptWrappable {
   const KURL& Url() const;
 
   const Member<DOMWindow> dom_window_;
+
+  Member<FragmentDirective> fragment_directive_;
 };
 
 }  // namespace blink

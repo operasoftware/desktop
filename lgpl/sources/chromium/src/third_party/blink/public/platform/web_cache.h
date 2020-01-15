@@ -31,6 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_CACHE_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_CACHE_H_
 
+#include "third_party/blink/public/common/web_cache/web_cache_resource_type_stats.h"
 #include "third_party/blink/public/platform/web_common.h"
 
 namespace blink {
@@ -43,23 +44,6 @@ class WebCache {
     size_t size;
   };
 
-  // A struct mirroring blink::MemoryCache::TypeStatistic.
-  struct ResourceTypeStat {
-    size_t count;
-    size_t size;
-    size_t decoded_size;
-  };
-
-  // A struct mirroring blink::MemoryCache::Statistics.
-  struct ResourceTypeStats {
-    ResourceTypeStat images;
-    ResourceTypeStat css_style_sheets;
-    ResourceTypeStat scripts;
-    ResourceTypeStat xsl_style_sheets;
-    ResourceTypeStat fonts;
-    ResourceTypeStat other;
-  };
-
   // Sets the capacities of the resource cache, evicting objects as necessary.
   BLINK_PLATFORM_EXPORT static void SetCapacity(size_t);
 
@@ -68,15 +52,12 @@ class WebCache {
   // only removes resources from live list, w/o releasing cache memory.
   BLINK_PLATFORM_EXPORT static void Clear();
 
-  // New image quailty. Removes images that were compressed with a
-  // lower quality setting.
-  BLINK_PLATFORM_EXPORT static void NewImageQuality(int image_quality);
-
   // Gets the usage statistics from the resource cache.
   BLINK_PLATFORM_EXPORT static void GetUsageStats(UsageStats*);
 
   // Get usage stats about the resource cache.
-  BLINK_PLATFORM_EXPORT static void GetResourceTypeStats(ResourceTypeStats*);
+  BLINK_PLATFORM_EXPORT static void GetResourceTypeStats(
+      WebCacheResourceTypeStats*);
 
  private:
   WebCache() = delete;  // Not intended to be instanced.

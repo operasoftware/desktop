@@ -14,24 +14,17 @@ class DetachedViewControlEvent final : public Event {
 public:
     ~DetachedViewControlEvent() override;
 
-    static DetachedViewControlEvent* Create()
-    {
-        return new DetachedViewControlEvent();
-    }
+    static DetachedViewControlEvent* Create();
+    static DetachedViewControlEvent* Create(const String& control_name);
 
-    static DetachedViewControlEvent* Create(const String& control_name)
-    {
-        return new DetachedViewControlEvent(control_name);
-    }
+    DetachedViewControlEvent();
+    explicit DetachedViewControlEvent(const String& control_name);
 
     const String& controlName() const { return control_name_; }
 
     void Trace(Visitor*) override;
 
    private:
-    DetachedViewControlEvent();
-    DetachedViewControlEvent(const String& control_name);
-
     const AtomicString& InterfaceName() const override;
 
     String control_name_;

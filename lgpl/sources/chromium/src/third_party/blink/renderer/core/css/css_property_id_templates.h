@@ -5,15 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_PROPERTY_ID_TEMPLATES_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_PROPERTY_ID_TEMPLATES_H_
 
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/platform/wtf/hash_functions.h"
 #include "third_party/blink/renderer/platform/wtf/hash_traits.h"
 
 namespace WTF {
-template <>
-struct DefaultHash<blink::CSSPropertyID> {
-  typedef IntHash<unsigned> Hash;
-};
 template <>
 struct HashTraits<blink::CSSPropertyID>
     : GenericHashTraits<blink::CSSPropertyID> {
@@ -22,7 +18,7 @@ struct HashTraits<blink::CSSPropertyID>
     slot = static_cast<blink::CSSPropertyID>(blink::numCSSPropertyIDs);
   }
   static bool IsDeletedValue(blink::CSSPropertyID value) {
-    return value == blink::numCSSPropertyIDs;
+    return static_cast<int>(value) == blink::numCSSPropertyIDs;
   }
 };
 }  // namespace WTF

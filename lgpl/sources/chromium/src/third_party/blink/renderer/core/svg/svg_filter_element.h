@@ -42,9 +42,9 @@ class CORE_EXPORT SVGFilterElement final : public SVGElement,
   USING_GARBAGE_COLLECTED_MIXIN(SVGFilterElement);
 
  public:
-  DECLARE_NODE_FACTORY(SVGFilterElement);
   void Trace(blink::Visitor*) override;
 
+  explicit SVGFilterElement(Document&);
   ~SVGFilterElement() override;
 
   SVGAnimatedLength* x() const { return x_.Get(); }
@@ -68,13 +68,15 @@ class CORE_EXPORT SVGFilterElement final : public SVGElement,
   // Get the associated SVGResource object, if any.
   LocalSVGResource* AssociatedResource() const;
 
- private:
-  explicit SVGFilterElement(Document&);
+  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override {
+    return SVGURIReference::GetCheckedAttributeTypes();
+  }
 
+ private:
   void SvgAttributeChanged(const QualifiedName&) override;
   void ChildrenChanged(const ChildrenChange&) override;
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 
   bool SelfHasRelativeLengths() const override;
 

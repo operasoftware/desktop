@@ -127,8 +127,6 @@ class BLINK_EXPORT WebFormControlElement : public WebElement {
   // string if it has no name and no id.
   WebString NameForAutofill() const;
 
-  WebString Id() const;
-
   WebFormElement Form() const;
 
   // Returns the identifier which is unique among all form control elements in
@@ -136,6 +134,10 @@ class BLINK_EXPORT WebFormControlElement : public WebElement {
   // consecutive numbers so their uniqueness might be broken in case of
   // overflow.
   unsigned UniqueRendererFormControlId() const;
+
+  // Returns the ax node id of the form control element in the accessibility
+  // tree. The ax node id is consistent across renderer and browser processes.
+  int32_t GetAxId() const;
 
 #if INSIDE_BLINK
   WebFormControlElement(HTMLFormControlElement*);

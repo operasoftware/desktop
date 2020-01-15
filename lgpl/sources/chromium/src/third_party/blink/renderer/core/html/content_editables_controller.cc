@@ -30,8 +30,9 @@
 
 #include "third_party/blink/renderer/core/html/content_editables_controller.h"
 
-#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
@@ -41,6 +42,11 @@ const char kContentEditablesSavedContentsSignature[] =
     "Blink's contentEditables saved content";
 const int kContentEditablesSavedContentsVersion = 1;
 }  // namespace
+
+// static
+ContentEditablesState* ContentEditablesState::Create() {
+  return MakeGarbageCollected<ContentEditablesState>();
+}
 
 void ContentEditablesState::RegisterContentEditableElement(Element* element) {
   content_editables_with_paths_.insert(element, element->GetPath());
@@ -104,6 +110,11 @@ ContentEditablesState::~ContentEditablesState() {}
 
 void ContentEditablesState::Trace(Visitor* visitor) {
   visitor->Trace(content_editables_with_paths_);
+}
+
+// static
+ContentEditablesController* ContentEditablesController::Create() {
+  return MakeGarbageCollected<ContentEditablesController>();
 }
 
 ContentEditablesController::ContentEditablesController()

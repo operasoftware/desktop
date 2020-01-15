@@ -66,7 +66,8 @@ DelayNode::DelayNode(BaseAudioContext& context, double max_delay_time)
     : AudioNode(context),
       delay_time_(
           AudioParam::Create(context,
-                             kParamTypeDelayDelayTime,
+                             Uuid(),
+                             AudioParamHandler::kParamTypeDelayDelayTime,
                              0.0,
                              AudioParamHandler::AutomationRate::kAudio,
                              AudioParamHandler::AutomationRateMode::kVariable,
@@ -89,11 +90,6 @@ DelayNode* DelayNode::Create(BaseAudioContext& context,
                              ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
-  if (context.IsContextClosed()) {
-    context.ThrowExceptionForClosedState(exception_state);
-    return nullptr;
-  }
-
   if (max_delay_time <= 0 || max_delay_time >= kMaximumAllowedDelayTime) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,
@@ -104,21 +100,21 @@ DelayNode* DelayNode::Create(BaseAudioContext& context,
     return nullptr;
   }
 
-  return new DelayNode(context, max_delay_time);
+  return MakeGarbageCollected<DelayNode>(context, max_delay_time);
 }
 
 DelayNode* DelayNode::Create(BaseAudioContext* context,
-                             const DelayOptions& options,
+                             const DelayOptions* options,
                              ExceptionState& exception_state) {
   // maxDelayTime has a default value specified.
-  DelayNode* node = Create(*context, options.maxDelayTime(), exception_state);
+  DelayNode* node = Create(*context, options->maxDelayTime(), exception_state);
 
   if (!node)
     return nullptr;
 
   node->HandleChannelOptions(options, exception_state);
 
-  node->delayTime()->setValue(options.delayTime());
+  node->delayTime()->setValue(options->delayTime());
 
   return node;
 }
@@ -130,6 +126,16 @@ AudioParam* DelayNode::delayTime() {
 void DelayNode::Trace(blink::Visitor* visitor) {
   visitor->Trace(delay_time_);
   AudioNode::Trace(visitor);
+}
+
+void DelayNode::ReportDidCreate() {
+  GraphTracer().DidCreateAudioNode(this);
+  GraphTracer().DidCreateAudioParam(delay_time_);
+}
+
+void DelayNode::ReportWillBeDestroyed() {
+  GraphTracer().WillDestroyAudioParam(delay_time_);
+  GraphTracer().WillDestroyAudioNode(this);
 }
 
 }  // namespace blink

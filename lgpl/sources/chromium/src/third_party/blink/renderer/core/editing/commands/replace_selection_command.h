@@ -48,24 +48,16 @@ class CORE_EXPORT ReplaceSelectionCommand final : public CompositeEditCommand {
 
   typedef unsigned CommandOptions;
 
-  static ReplaceSelectionCommand* Create(
-      Document& document,
-      DocumentFragment* fragment,
-      CommandOptions options,
-      InputEvent::InputType input_type = InputEvent::InputType::kNone) {
-    return new ReplaceSelectionCommand(document, fragment, options, input_type);
-  }
-
-  EphemeralRange InsertedRange() const;
-
-  void Trace(blink::Visitor*) override;
-
- private:
   ReplaceSelectionCommand(Document&,
                           DocumentFragment*,
                           CommandOptions,
-                          InputEvent::InputType);
+                          InputEvent::InputType = InputEvent::InputType::kNone);
 
+  EphemeralRange InsertedRange() const;
+
+  void Trace(Visitor*) override;
+
+ private:
   void DoApply(EditingState*) override;
   InputEvent::InputType GetInputType() const override;
   bool IsReplaceSelectionCommand() const override;
@@ -158,12 +150,6 @@ class CORE_EXPORT ReplaceSelectionCommand final : public CompositeEditCommand {
   Position start_of_inserted_range_;
   Position end_of_inserted_range_;
 };
-
-DEFINE_TYPE_CASTS(ReplaceSelectionCommand,
-                  CompositeEditCommand,
-                  command,
-                  command->IsReplaceSelectionCommand(),
-                  command.IsReplaceSelectionCommand());
 
 }  // namespace blink
 

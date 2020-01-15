@@ -13,17 +13,12 @@ namespace blink {
 // HTMLCollection.
 class DocumentAllNameCollection final : public HTMLNameCollection {
  public:
-  static DocumentAllNameCollection* Create(ContainerNode& document,
-                                           CollectionType type,
-                                           const AtomicString& name) {
-    DCHECK_EQ(type, kDocumentAllNamedItems);
-    return new DocumentAllNameCollection(document, name);
-  }
+  DocumentAllNameCollection(ContainerNode& document, const AtomicString& name);
+  DocumentAllNameCollection(ContainerNode& document,
+                            CollectionType type,
+                            const AtomicString& name);
 
   bool ElementMatches(const Element&) const;
-
- private:
-  DocumentAllNameCollection(ContainerNode& document, const AtomicString& name);
 };
 
 DEFINE_TYPE_CASTS(DocumentAllNameCollection,

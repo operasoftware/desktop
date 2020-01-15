@@ -23,8 +23,8 @@ TEST_F(InsertTextCommandTest, WithTypingStyle) {
   // Register typing style to make |InsertTextCommand| to attempt to apply
   // style to inserted text.
   GetDocument().execCommand("fontSizeDelta", false, "+3", ASSERT_NO_EXCEPTION);
-  CompositeEditCommand* const command =
-      InsertTextCommand::Create(GetDocument(), "x");
+  auto* const command =
+      MakeGarbageCollected<InsertTextCommand>(GetDocument(), "x");
   command->Apply();
 
   EXPECT_EQ(
@@ -278,8 +278,8 @@ TEST_F(InsertTextCommandTest, AnchorElementWithBlockCrash) {
   // Since the HTML parser rejects it as there are nested <a> elements.
   // We are contructing the remaining DOM manually.
   Element* const anchor = GetDocument().QuerySelector("a");
-  Element* nested_anchor = GetDocument().CreateRawElement(HTMLNames::aTag);
-  Element* iElement = GetDocument().CreateRawElement(HTMLNames::iTag);
+  Element* nested_anchor = GetDocument().CreateRawElement(html_names::kATag);
+  Element* iElement = GetDocument().CreateRawElement(html_names::kITag);
 
   nested_anchor->setAttribute("href", "www");
   iElement->SetInnerHTMLFromString("home");

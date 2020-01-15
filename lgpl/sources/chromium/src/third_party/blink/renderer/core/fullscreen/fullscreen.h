@@ -33,9 +33,9 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
@@ -50,16 +50,17 @@ class ScriptPromiseResolver;
 // https://fullscreen.spec.whatwg.org/, especially its algorithms. It is a
 // Document supplement as each document has some fullscreen state, and to
 // actually enter and exit fullscreen it (indirectly) uses FullscreenController.
-class CORE_EXPORT Fullscreen final
-    : public GarbageCollectedFinalized<Fullscreen>,
-      public Supplement<Document>,
-      public ContextLifecycleObserver {
+class CORE_EXPORT Fullscreen final : public GarbageCollected<Fullscreen>,
+                                     public Supplement<Document>,
+                                     public ContextLifecycleObserver {
   USING_GARBAGE_COLLECTED_MIXIN(Fullscreen);
 
  public:
   static const char kSupplementName[];
 
+  explicit Fullscreen(Document&);
   virtual ~Fullscreen();
+
   static Fullscreen& From(Document&);
   static Element* FullscreenElementFrom(Document&);
   static Element* FullscreenElementForBindingFrom(TreeScope&);
@@ -79,7 +80,7 @@ class CORE_EXPORT Fullscreen final
 
   static void RequestFullscreen(Element&);
   static ScriptPromise RequestFullscreen(Element&,
-                                         const FullscreenOptions&,
+                                         const FullscreenOptions*,
                                          RequestType,
                                          ScriptState* state = nullptr);
 
@@ -107,8 +108,6 @@ class CORE_EXPORT Fullscreen final
  private:
   static Fullscreen* FromIfExists(Document&);
 
-  explicit Fullscreen(Document&);
-
   Document* GetDocument();
 
   static void ContinueRequestFullscreen(Document&,
@@ -127,7 +126,7 @@ class CORE_EXPORT Fullscreen final
 
   // Stores the pending request, promise and the type for executing
   // the asynchronous portion of the request.
-  class PendingRequest : public GarbageCollectedFinalized<PendingRequest> {
+  class PendingRequest : public GarbageCollected<PendingRequest> {
    public:
     PendingRequest(Element* element,
                    RequestType type,

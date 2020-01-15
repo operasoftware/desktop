@@ -44,8 +44,7 @@ class SVGPointList final
  public:
   typedef SVGPointListTearOff TearOffType;
 
-  static SVGPointList* Create() { return new SVGPointList(); }
-
+  SVGPointList();
   ~SVGPointList() override;
 
   SVGParsingError SetValueAsString(const String&);
@@ -67,8 +66,6 @@ class SVGPointList final
   AnimatedPropertyType GetType() const override { return ClassType(); }
 
  private:
-  SVGPointList();
-
   template <typename CharType>
   SVGParsingError Parse(const CharType*& ptr, const CharType* end);
 };

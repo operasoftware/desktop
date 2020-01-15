@@ -66,7 +66,7 @@ class WindowToViewportScalingChromeClient : public EmptyChromeClient {
       : EmptyChromeClient(), scale_factor_(1.f) {}
 
   void SetScalingFactor(float s) { scale_factor_ = s; }
-  float WindowToViewportScalar(const float s) const override {
+  float WindowToViewportScalar(LocalFrame*, const float s) const override {
     return s * scale_factor_;
   }
 
@@ -76,7 +76,9 @@ class WindowToViewportScalingChromeClient : public EmptyChromeClient {
 
 class ImageDocumentTest : public testing::Test {
  protected:
-  void TearDown() override { ThreadState::Current()->CollectAllGarbage(); }
+  void TearDown() override {
+    ThreadState::Current()->CollectAllGarbageForTesting();
+  }
 
   void CreateDocumentWithoutLoadingImage(int view_width, int view_height);
   void CreateDocument(int view_width, int view_height);
@@ -99,16 +101,17 @@ void ImageDocumentTest::CreateDocumentWithoutLoadingImage(int view_width,
                                                           int view_height) {
   Page::PageClients page_clients;
   FillWithEmptyClients(page_clients);
-  chrome_client_ = new WindowToViewportScalingChromeClient();
+  chrome_client_ = MakeGarbageCollected<WindowToViewportScalingChromeClient>();
   page_clients.chrome_client = chrome_client_;
-  dummy_page_holder_ =
-      DummyPageHolder::Create(IntSize(view_width, view_height), &page_clients);
+  dummy_page_holder_ = std::make_unique<DummyPageHolder>(
+      IntSize(view_width, view_height), &page_clients);
 
   LocalFrame& frame = dummy_page_holder_->GetFrame();
   frame.GetDocument()->Shutdown();
   DocumentInit init = DocumentInit::Create().WithDocumentLoader(
       frame.Loader().GetDocumentLoader());
   frame.DomWindow()->InstallNewDocument("image/jpeg", init, false);
+  frame.GetDocument()->SetURL(KURL("http://www.example.com/image.jpg"));
 }
 
 void ImageDocumentTest::CreateDocument(int view_width, int view_height) {
@@ -234,16 +237,26 @@ TEST_F(ImageDocumentTest, MAYBE(ImageCenteredAtDeviceScaleFactor)) {
   GetDocument().ImageClicked(15, 27);
   ScrollOffset offset =
       GetDocument().GetFrame()->View()->LayoutViewport()->GetScrollOffset();
-  EXPECT_EQ(22, offset.Width());
-  EXPECT_EQ(42, offset.Height());
+  if (RuntimeEnabledFeatures::FractionalScrollOffsetsEnabled()) {
+    EXPECT_EQ(22.5f, offset.Width());
+    EXPECT_EQ(42, offset.Height());
+  } else {
+    EXPECT_EQ(22, offset.Width());
+    EXPECT_EQ(42, offset.Height());
+  }
 
   GetDocument().ImageClicked(20, 20);
 
   GetDocument().ImageClicked(12, 15);
   offset =
       GetDocument().GetFrame()->View()->LayoutViewport()->GetScrollOffset();
-  EXPECT_EQ(11, offset.Width());
-  EXPECT_EQ(22, offset.Height());
+  if (RuntimeEnabledFeatures::FractionalScrollOffsetsEnabled()) {
+    EXPECT_EQ(11.25f, offset.Width());
+    EXPECT_EQ(22.5f, offset.Height());
+  } else {
+    EXPECT_EQ(11, offset.Width());
+    EXPECT_EQ(22, offset.Height());
+  }
 }
 
 class ImageDocumentViewportTest : public SimTest {
@@ -264,8 +277,9 @@ class ImageDocumentViewportTest : public SimTest {
   }
 
   ImageDocument& GetDocument() {
-    Document* document =
-        ToLocalFrame(WebView().GetPage()->MainFrame())->DomWindow()->document();
+    Document* document = To<LocalFrame>(WebView().GetPage()->MainFrame())
+                             ->DomWindow()
+                             ->document();
     ImageDocument* image_document = static_cast<ImageDocument*>(document);
     return *image_document;
   }
@@ -326,7 +340,7 @@ TEST_F(ImageDocumentViewportTest, ZoomForDSFScaleImage) {
   HTMLImageElement* img = GetDocument().ImageElement();
 
   // no zoom
-  WebView().Resize(IntSize(100, 100));
+  WebView().MainFrameWidget()->Resize(IntSize(100, 100));
   WebView().SetZoomFactorForDeviceScaleFactor(1.f);
   Compositor().BeginFrame();
   EXPECT_EQ(50u, img->width());
@@ -340,7 +354,7 @@ TEST_F(ImageDocumentViewportTest, ZoomForDSFScaleImage) {
   // visual viewport should be same in CSS pixel, as no dsf applied.
   // This simulates running on two phones with different screen densities but
   // same (physical) screen size, image document should displayed the same.
-  WebView().Resize(IntSize(400, 400));
+  WebView().MainFrameWidget()->Resize(IntSize(400, 400));
   WebView().SetZoomFactorForDeviceScaleFactor(4.f);
   Compositor().BeginFrame();
   EXPECT_EQ(50u, img->width());
@@ -369,7 +383,7 @@ TEST_F(ImageDocumentViewportTest, DivWidthWithZoomForDSF) {
 
   // Image smaller then webview size, visual viewport is not zoomed, and image
   // will be centered in the viewport.
-  WebView().Resize(IntSize(200, 200));
+  WebView().MainFrameWidget()->Resize(IntSize(200, 200));
   Compositor().BeginFrame();
   EXPECT_EQ(50u, img->width());
   EXPECT_EQ(50u, img->height());
@@ -383,7 +397,7 @@ TEST_F(ImageDocumentViewportTest, DivWidthWithZoomForDSF) {
 
   // Image wider than webview size, image should fill the visual viewport, and
   // visual viewport zoom out to 0.5.
-  WebView().Resize(IntSize(50, 50));
+  WebView().MainFrameWidget()->Resize(IntSize(50, 50));
   Compositor().BeginFrame();
   EXPECT_EQ(50u, img->width());
   EXPECT_EQ(50u, img->height());
@@ -394,7 +408,7 @@ TEST_F(ImageDocumentViewportTest, DivWidthWithZoomForDSF) {
 
   // When image is more than 10X wider than webview, shrink the image to fit the
   // width of the screen.
-  WebView().Resize(IntSize(4, 20));
+  WebView().MainFrameWidget()->Resize(IntSize(4, 20));
   Compositor().BeginFrame();
   EXPECT_EQ(20u, img->width());
   EXPECT_EQ(20u, img->height());

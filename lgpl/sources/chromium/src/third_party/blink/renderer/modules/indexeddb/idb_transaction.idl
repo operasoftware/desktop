@@ -42,12 +42,14 @@ enum IDBTransactionMode {
     // Properties
     readonly attribute DOMStringList objectStoreNames;
     readonly attribute IDBTransactionMode mode;
+    [RuntimeEnabled=IDBRelaxedDurability] readonly attribute IDBTransactionDurability durability;
     [SameObject] readonly attribute IDBDatabase db;
     readonly attribute DOMException error;
 
     // Methods
-    [RaisesException] IDBObjectStore objectStore (DOMString name);
-    [RaisesException] void abort ();
+    [RaisesException] IDBObjectStore objectStore(DOMString name);
+    [RaisesException] void commit();
+    [RaisesException] void abort();
 
     // Events
     attribute EventHandler onabort;

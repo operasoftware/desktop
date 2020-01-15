@@ -25,8 +25,7 @@
 
 // https://svgwg.org/specs/animations/#InterfaceSVGMPathElement
 
-[RuntimeEnabled=SMIL]
 interface SVGMPathElement : SVGElement {
 };
 
-SVGMPathElement implements SVGURIReference;
+SVGMPathElement includes SVGURIReference;

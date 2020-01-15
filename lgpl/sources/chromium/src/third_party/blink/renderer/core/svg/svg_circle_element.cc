@@ -22,26 +22,30 @@
 
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_ellipse.h"
 #include "third_party/blink/renderer/core/svg/svg_length.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
-inline SVGCircleElement::SVGCircleElement(Document& document)
-    : SVGGeometryElement(SVGNames::circleTag, document),
-      cx_(SVGAnimatedLength::Create(this,
-                                    SVGNames::cxAttr,
-                                    SVGLengthMode::kWidth,
-                                    SVGLength::Initial::kUnitlessZero,
-                                    CSSPropertyCx)),
-      cy_(SVGAnimatedLength::Create(this,
-                                    SVGNames::cyAttr,
-                                    SVGLengthMode::kHeight,
-                                    SVGLength::Initial::kUnitlessZero,
-                                    CSSPropertyCy)),
-      r_(SVGAnimatedLength::Create(this,
-                                   SVGNames::rAttr,
-                                   SVGLengthMode::kOther,
-                                   SVGLength::Initial::kUnitlessZero,
-                                   CSSPropertyR)) {
+SVGCircleElement::SVGCircleElement(Document& document)
+    : SVGGeometryElement(svg_names::kCircleTag, document),
+      cx_(MakeGarbageCollected<SVGAnimatedLength>(
+          this,
+          svg_names::kCxAttr,
+          SVGLengthMode::kWidth,
+          SVGLength::Initial::kUnitlessZero,
+          CSSPropertyID::kCx)),
+      cy_(MakeGarbageCollected<SVGAnimatedLength>(
+          this,
+          svg_names::kCyAttr,
+          SVGLengthMode::kHeight,
+          SVGLength::Initial::kUnitlessZero,
+          CSSPropertyID::kCy)),
+      r_(MakeGarbageCollected<SVGAnimatedLength>(
+          this,
+          svg_names::kRAttr,
+          SVGLengthMode::kOther,
+          SVGLength::Initial::kUnitlessZero,
+          CSSPropertyID::kR)) {
   AddToPropertyMap(cx_);
   AddToPropertyMap(cy_);
   AddToPropertyMap(r_);
@@ -53,8 +57,6 @@ void SVGCircleElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(r_);
   SVGGeometryElement::Trace(visitor);
 }
-
-DEFINE_NODE_FACTORY(SVGCircleElement)
 
 Path SVGCircleElement::AsPath() const {
   Path path;
@@ -96,8 +98,8 @@ void SVGCircleElement::CollectStyleForPresentationAttribute(
 }
 
 void SVGCircleElement::SvgAttributeChanged(const QualifiedName& attr_name) {
-  if (attr_name == SVGNames::rAttr || attr_name == SVGNames::cxAttr ||
-      attr_name == SVGNames::cyAttr) {
+  if (attr_name == svg_names::kRAttr || attr_name == svg_names::kCxAttr ||
+      attr_name == svg_names::kCyAttr) {
     UpdateRelativeLengthsInformation();
     GeometryPresentationAttributeChanged(attr_name);
     return;
@@ -111,7 +113,8 @@ bool SVGCircleElement::SelfHasRelativeLengths() const {
          cy_->CurrentValue()->IsRelative() || r_->CurrentValue()->IsRelative();
 }
 
-LayoutObject* SVGCircleElement::CreateLayoutObject(const ComputedStyle&) {
+LayoutObject* SVGCircleElement::CreateLayoutObject(const ComputedStyle&,
+                                                   LegacyLayout) {
   return new LayoutSVGEllipse(this);
 }
 

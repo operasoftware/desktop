@@ -7,24 +7,25 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/paint/custom_scrollbar_theme.h"
 #include "third_party/blink/renderer/core/paint/object_paint_properties.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
-#include "third_party/blink/renderer/core/paint/scrollbar_painter.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/scoped_paint_chunk_properties.h"
+#include "third_party/blink/renderer/platform/graphics/paint/scroll_hit_test_display_item.h"
 
 namespace blink {
 
 void ScrollableAreaPainter::PaintResizer(GraphicsContext& context,
                                          const IntPoint& paint_offset,
                                          const CullRect& cull_rect) {
-  if (GetScrollableArea().GetLayoutBox()->StyleRef().Resize() == EResize::kNone)
+  if (!GetScrollableArea().GetLayoutBox()->StyleRef().HasResize())
     return;
 
   IntRect abs_rect = GetScrollableArea().ResizerCornerRect(
@@ -35,15 +36,24 @@ void ScrollableAreaPainter::PaintResizer(GraphicsContext& context,
     return;
   abs_rect.MoveBy(paint_offset);
 
+  const auto& client = DisplayItemClientForCorner();
+  IntRect touch_rect = scrollable_area_->ResizerCornerRect(
+      GetScrollableArea().GetLayoutBox()->PixelSnappedBorderBoxRect(
+          scrollable_area_->Layer()->SubpixelAccumulation()),
+      kResizerForTouch);
+  touch_rect.MoveBy(paint_offset);
+  ScrollHitTestDisplayItem::Record(
+      context, client, DisplayItem::kResizerScrollHitTest, nullptr, touch_rect);
+
   if (const auto* resizer = GetScrollableArea().Resizer()) {
-    if (!cull_rect.IntersectsCullRect(abs_rect))
+    if (!cull_rect.Intersects(abs_rect))
       return;
-    ScrollbarPainter::PaintIntoRect(*resizer, context, paint_offset,
-                                    LayoutRect(abs_rect));
+    CustomScrollbarTheme::PaintIntoRect(*resizer, context,
+                                        PhysicalOffset(paint_offset),
+                                        PhysicalRect(abs_rect));
     return;
   }
 
-  const auto& client = DisplayItemClientForCorner();
   if (DrawingRecorder::UseCachedDrawingIfPossible(context, client,
                                                   DisplayItem::kResizer))
     return;
@@ -54,8 +64,7 @@ void ScrollableAreaPainter::PaintResizer(GraphicsContext& context,
 
   // Draw a frame around the resizer (1px grey line) if there are any scrollbars
   // present.  Clipping will exclude the right and bottom edges of this frame.
-  if (!GetScrollableArea().HasOverlayScrollbars() &&
-      GetScrollableArea().HasScrollbar()) {
+  if (GetScrollableArea().HasNonOverlayOverflowControls()) {
     GraphicsContextStateSaver state_saver(context);
     context.Clip(abs_rect);
     IntRect larger_corner = abs_rect;
@@ -123,55 +132,23 @@ void ScrollableAreaPainter::DrawPlatformResizerImage(
 
 void ScrollableAreaPainter::PaintOverflowControls(
     const PaintInfo& paint_info,
-    const IntPoint& paint_offset,
-    bool painting_overlay_controls) {
+    const IntPoint& paint_offset) {
   // Don't do anything if we have no overflow.
-  if (!GetScrollableArea().GetLayoutBox()->HasOverflowClip())
+  const auto& box = *GetScrollableArea().GetLayoutBox();
+  if (!box.HasOverflowClip() ||
+      box.StyleRef().Visibility() != EVisibility::kVisible)
     return;
 
-  IntPoint adjusted_paint_offset = paint_offset;
-  if (painting_overlay_controls)
-    adjusted_paint_offset = GetScrollableArea().CachedOverlayScrollbarOffset();
-
-  CullRect adjusted_cull_rect(paint_info.GetCullRect(), -adjusted_paint_offset);
-  // Overlay scrollbars paint in a second pass through the layer tree so that
-  // they will paint on top of everything else. If this is the normal painting
-  // pass, paintingOverlayControls will be false, and we should just tell the
-  // root layer that there are overlay scrollbars that need to be painted. That
-  // will cause the second pass through the layer tree to run, and we'll paint
-  // the scrollbars then. In the meantime, cache tx and ty so that the second
-  // pass doesn't need to re-enter the LayoutTree to get it right.
-  if (GetScrollableArea().HasOverlayScrollbars() &&
-      !painting_overlay_controls) {
-    GetScrollableArea().SetCachedOverlayScrollbarOffset(paint_offset);
-    // It's not necessary to do the second pass if the scrollbars paint into
-    // layers.
-    if ((GetScrollableArea().HorizontalScrollbar() &&
-         GetScrollableArea().LayerForHorizontalScrollbar()) ||
-        (GetScrollableArea().VerticalScrollbar() &&
-         GetScrollableArea().LayerForVerticalScrollbar()))
+  // Overlay overflow controls are painted in the dedicated paint phase, and
+  // normal overflow controls are painted in the background paint phase.
+  if (GetScrollableArea().HasOverlayOverflowControls()) {
+    if (paint_info.phase != PaintPhase::kOverlayOverflowControls)
       return;
-    if (!OverflowControlsIntersectRect(adjusted_cull_rect))
-      return;
-
-    LayoutView* layout_view = GetScrollableArea().GetLayoutBox()->View();
-
-    PaintLayer* painting_root =
-        GetScrollableArea().Layer()->EnclosingLayerWithCompositedLayerMapping(
-            kIncludeSelf);
-    if (!painting_root)
-      painting_root = layout_view->Layer();
-
-    painting_root->SetContainsDirtyOverlayScrollbars(true);
+  } else if (!ShouldPaintSelfBlockBackground(paint_info.phase)) {
     return;
   }
 
-  // This check is required to avoid painting custom CSS scrollbars twice.
-  if (painting_overlay_controls && !GetScrollableArea().HasOverlayScrollbars())
-    return;
-
   GraphicsContext& context = paint_info.context;
-  const auto& box = *GetScrollableArea().GetLayoutBox();
   const auto* fragment = paint_info.FragmentToPaint(box);
   if (!fragment)
     return;
@@ -183,11 +160,14 @@ void ScrollableAreaPainter::PaintOverflowControls(
   DCHECK(properties);
   if (properties) {
     if (const auto* clip = properties->OverflowControlsClip()) {
-      scoped_paint_chunk_properties.emplace(context.GetPaintController(), clip,
+      scoped_paint_chunk_properties.emplace(context.GetPaintController(), *clip,
                                             box,
                                             DisplayItem::kOverflowControls);
     }
   }
+
+  CullRect adjusted_cull_rect = paint_info.GetCullRect();
+  adjusted_cull_rect.MoveBy(-paint_offset);
 
   if (GetScrollableArea().HorizontalScrollbar() &&
       !GetScrollableArea().LayerForHorizontalScrollbar()) {
@@ -198,54 +178,31 @@ void ScrollableAreaPainter::PaintOverflowControls(
       !GetScrollableArea().LayerForVerticalScrollbar()) {
     GetScrollableArea().VerticalScrollbar()->Paint(context, adjusted_cull_rect);
   }
+
   if (!GetScrollableArea().LayerForScrollCorner()) {
     // We fill our scroll corner with white if we have a scrollbar that doesn't
     // run all the way up to the edge of the box.
-    PaintScrollCorner(context, adjusted_paint_offset, paint_info.GetCullRect());
+    PaintScrollCorner(context, paint_offset, paint_info.GetCullRect());
 
     // Paint our resizer last, since it sits on top of the scroll corner.
-    PaintResizer(context, adjusted_paint_offset, paint_info.GetCullRect());
+    PaintResizer(context, paint_offset, paint_info.GetCullRect());
   }
 }
 
-bool ScrollableAreaPainter::OverflowControlsIntersectRect(
-    const CullRect& cull_rect) const {
-  const IntRect border_box =
-      GetScrollableArea().GetLayoutBox()->PixelSnappedBorderBoxRect(
-          GetScrollableArea().Layer()->SubpixelAccumulation());
-
-  if (cull_rect.IntersectsCullRect(
-          GetScrollableArea().RectForHorizontalScrollbar(border_box)))
-    return true;
-
-  if (cull_rect.IntersectsCullRect(
-          GetScrollableArea().RectForVerticalScrollbar(border_box)))
-    return true;
-
-  if (cull_rect.IntersectsCullRect(GetScrollableArea().ScrollCornerRect()))
-    return true;
-
-  if (cull_rect.IntersectsCullRect(GetScrollableArea().ResizerCornerRect(
-          border_box, kResizerForPointer)))
-    return true;
-
-  return false;
-}
-
-void ScrollableAreaPainter::PaintScrollCorner(
-    GraphicsContext& context,
-    const IntPoint& paint_offset,
-    const CullRect& adjusted_cull_rect) {
+void ScrollableAreaPainter::PaintScrollCorner(GraphicsContext& context,
+                                              const IntPoint& paint_offset,
+                                              const CullRect& cull_rect) {
   IntRect abs_rect = GetScrollableArea().ScrollCornerRect();
   if (abs_rect.IsEmpty())
     return;
   abs_rect.MoveBy(paint_offset);
 
   if (const auto* scroll_corner = GetScrollableArea().ScrollCorner()) {
-    if (!adjusted_cull_rect.IntersectsCullRect(abs_rect))
+    if (!cull_rect.Intersects(abs_rect))
       return;
-    ScrollbarPainter::PaintIntoRect(*scroll_corner, context, paint_offset,
-                                    LayoutRect(abs_rect));
+    CustomScrollbarTheme::PaintIntoRect(*scroll_corner, context,
+                                        PhysicalOffset(paint_offset),
+                                        PhysicalRect(abs_rect));
     return;
   }
 
@@ -265,7 +222,8 @@ void ScrollableAreaPainter::PaintScrollCorner(
   }
 
   const auto& client = DisplayItemClientForCorner();
-  theme->PaintScrollCorner(context, client, abs_rect);
+  theme->PaintScrollCorner(context, client, abs_rect,
+                           GetScrollableArea().UsedColorScheme());
 }
 
 PaintLayerScrollableArea& ScrollableAreaPainter::GetScrollableArea() const {

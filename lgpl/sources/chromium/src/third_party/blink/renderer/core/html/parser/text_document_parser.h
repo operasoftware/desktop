@@ -31,15 +31,10 @@ namespace blink {
 
 class TextDocumentParser final : public HTMLDocumentParser {
  public:
-  static TextDocumentParser* Create(HTMLDocument& document,
-                                    ParserSynchronizationPolicy sync_policy) {
-    return new TextDocumentParser(document, sync_policy);
-  }
+  explicit TextDocumentParser(HTMLDocument&, ParserSynchronizationPolicy);
   ~TextDocumentParser() override;
 
  private:
-  explicit TextDocumentParser(HTMLDocument&, ParserSynchronizationPolicy);
-
   void AppendBytes(const char*, size_t) override;
   void InsertFakePreElement();
 

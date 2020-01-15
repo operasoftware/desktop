@@ -34,28 +34,30 @@
 #include <memory>
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/hash_traits.h"
 #include "third_party/blink/renderer/platform/wtf/type_traits.h"
-#include "v8/include/v8.h"
+
+namespace base {
+class Location;
+}
+
+namespace v8 {
+class Value;
+}
 
 namespace blink {
 
 template <typename T>
 class GarbageCollected;
 template <typename T>
-class DOMWrapperMap;
-template <typename T>
 class TraceTrait;
 class ThreadState;
 class Visitor;
 template <typename T>
 class SameThreadCheckedMember;
-class ScriptWrappable;
-template <typename T>
-class TraceWrapperMember;
 template <typename T>
 class TraceWrapperV8Reference;
 
@@ -65,6 +67,9 @@ class TraceWrapperV8Reference;
 // specific trace method due an issue with the Windows compiler which
 // instantiates even unused variables. This causes problems
 // in header files where we have only forward declarations of classes.
+//
+// This interface is safe to use on concurrent threads. All accesses (reads)
+// from member are done atomically.
 template <typename T, void (T::*method)(Visitor*)>
 struct TraceMethodDelegate {
   STATIC_ONLY(TraceMethodDelegate);
@@ -75,6 +80,8 @@ struct TraceMethodDelegate {
 
 // Visitor is used to traverse Oilpan's object graph.
 class PLATFORM_EXPORT Visitor {
+  USING_FAST_MALLOC(Visitor);
+
  public:
   explicit Visitor(ThreadState* state) : state_(state) {}
   virtual ~Visitor() = default;
@@ -84,11 +91,22 @@ class PLATFORM_EXPORT Visitor {
 
   // Static visitor implementation forwarding to dynamic interface.
 
+  template <typename T>
+  void TraceRoot(const T* t, const base::Location& location) {
+    static_assert(sizeof(T), "T must be fully defined");
+    static_assert(IsGarbageCollectedType<T>::value,
+                  "T needs to be a garbage collected object");
+    if (!t)
+      return;
+    VisitRoot(const_cast<void*>(reinterpret_cast<const void*>(t)),
+              TraceDescriptorFor(t), location);
+  }
+
   // Member version of the one-argument templated trace method.
   template <typename T>
   void Trace(const Member<T>& t) {
-    DCHECK(!t.IsHashTableDeletedValue());
-    Trace(t.Get());
+    DCHECK(!t.IsHashTableDeletedValueSafe());
+    Trace(t.GetSafe());
   }
 
   template <typename T>
@@ -134,8 +152,6 @@ class PLATFORM_EXPORT Visitor {
     static_assert(IsGarbageCollectedType<T>::value,
                   "T needs to be a garbage collected object");
 
-    if (!backing_store)
-      return;
     VisitBackingStoreWeakly(reinterpret_cast<void*>(backing_store),
                             reinterpret_cast<void**>(backing_store_slot),
                             TraceTrait<T>::GetTraceDescriptor(
@@ -165,15 +181,16 @@ class PLATFORM_EXPORT Visitor {
     static_assert(IsGarbageCollectedType<T>::value,
                   "T needs to be a garbage collected object");
 
-    if (!t.Get())
+    T* weak_member = t.GetSafe();
+
+    if (!weak_member)
       return;
 
-    DCHECK(!t.IsHashTableDeletedValue());
-    VisitWeak(const_cast<void*>(reinterpret_cast<const void*>(t.Get())),
-              reinterpret_cast<void**>(
-                  const_cast<typename std::remove_const<T>::type**>(t.Cell())),
-              TraceTrait<T>::GetTraceDescriptor(
-                  const_cast<void*>(reinterpret_cast<const void*>(t.Get()))),
+    DCHECK(!t.IsHashTableDeletedValueSafe());
+    VisitWeak(const_cast<void*>(reinterpret_cast<const void*>(weak_member)),
+              reinterpret_cast<void*>(const_cast<WeakMember<T>*>(&t)),
+              TraceTrait<T>::GetTraceDescriptor(const_cast<void*>(
+                  reinterpret_cast<const void*>(weak_member))),
               &HandleWeakCell<T>);
   }
 
@@ -205,34 +222,6 @@ class PLATFORM_EXPORT Visitor {
 
   // Cross-component tracing interface.
 
-  template <typename T>
-  void Trace(const TraceWrapperMember<T>& t) {
-    DCHECK(!t.IsHashTableDeletedValue());
-    TraceWithWrappers(t.Get());
-  }
-
-  template <typename T>
-  void TraceWithWrappers(T* t) {
-    static_assert(sizeof(T), "T must be fully defined");
-    static_assert(IsGarbageCollectedType<T>::value,
-                  "T needs to be a garbage collected object");
-    if (!t)
-      return;
-
-    // Dispatch two both, the TraceDescritpor and the TraceWrapperDescriptor,
-    // versions of the visitor. This way the wrapper-tracing world can ignore
-    // the TraceDescriptor versions.
-    Visit(const_cast<void*>(reinterpret_cast<const void*>(t)),
-          TraceDescriptorFor(t));
-    VisitWithWrappers(const_cast<void*>(reinterpret_cast<const void*>(t)),
-                      TraceDescriptorFor(t));
-  }
-
-  void Trace(DOMWrapperMap<ScriptWrappable>* wrapper_map,
-             const ScriptWrappable* key) {
-    Visit(wrapper_map, key);
-  }
-
   template <typename V8Type>
   void Trace(const TraceWrapperV8Reference<V8Type>& v8reference) {
     Visit(v8reference.template Cast<v8::Value>());
@@ -240,14 +229,15 @@ class PLATFORM_EXPORT Visitor {
 
   // Dynamic visitor interface.
 
+  virtual void VisitRoot(void* t, TraceDescriptor desc, const base::Location&) {
+    Visit(t, desc);
+  }
+
   // Visits an object through a strong reference.
   virtual void Visit(void*, TraceDescriptor) = 0;
-  // Subgraph of objects that are interested in wrappers. Note that the same
-  // object is also passed to Visit(void*, TraceDescriptor).
-  virtual void VisitWithWrappers(void*, TraceDescriptor) = 0;
 
   // Visits an object through a weak reference.
-  virtual void VisitWeak(void*, void**, TraceDescriptor, WeakCallback) = 0;
+  virtual void VisitWeak(void*, void*, TraceDescriptor, WeakCallback) = 0;
 
   // Visitors for collection backing stores.
   virtual void VisitBackingStoreStrongly(void*, void**, TraceDescriptor) = 0;
@@ -261,14 +251,11 @@ class PLATFORM_EXPORT Visitor {
   // Visits cross-component references to V8.
 
   virtual void Visit(const TraceWrapperV8Reference<v8::Value>&) = 0;
-  virtual void Visit(DOMWrapperMap<ScriptWrappable>*,
-                     const ScriptWrappable* key) = 0;
 
   // Registers backing store pointers so that they can be moved and properly
   // updated.
-  virtual void RegisterBackingStoreCallback(void** slot,
-                                            MovingObjectCallback,
-                                            void* callback_data) = 0;
+  virtual void RegisterBackingStoreCallback(void* backing,
+                                            MovingObjectCallback) = 0;
 
   // Used to register ephemeron callbacks.
   virtual bool RegisterWeakTable(const void* closure,

@@ -30,7 +30,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_IMAGE_DECODERS_WEBP_WEBP_IMAGE_DECODER_H_
 
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
+
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "webp/decode.h"
 #include "webp/demux.h"
@@ -40,7 +40,7 @@ class SkData;
 namespace blink {
 
 class PLATFORM_EXPORT WEBPImageDecoder final : public ImageDecoder {
-  WTF_MAKE_NONCOPYABLE(WEBPImageDecoder);
+  DISALLOW_COPY_AND_ASSIGN(WEBPImageDecoder);
 
  public:
   WEBPImageDecoder(AlphaOption, const ColorBehavior&, size_t max_decoded_bytes);
@@ -51,7 +51,7 @@ class PLATFORM_EXPORT WEBPImageDecoder final : public ImageDecoder {
   void OnSetData(SegmentReader* data) override;
   int RepetitionCount() const override;
   bool FrameIsReceivedAtIndex(size_t) const override;
-  TimeDelta FrameDurationAtIndex(size_t) const override;
+  base::TimeDelta FrameDurationAtIndex(size_t) const override;
 
  private:
   // ImageDecoder:
@@ -59,7 +59,18 @@ class PLATFORM_EXPORT WEBPImageDecoder final : public ImageDecoder {
   size_t DecodeFrameCount() override;
   void InitializeNewFrame(size_t) override;
   void Decode(size_t) override;
+  void DecodeToYUV() override;
+  SkYUVColorSpace GetYUVColorSpace() const override;
+  cc::YUVSubsampling GetYUVSubsampling() const override;
+  cc::ImageHeaderMetadata MakeMetadataForDecodeAcceleration() const override;
 
+  WEBP_CSP_MODE RGBOutputMode();
+  // Returns true if the image data received so far (as stored in
+  // |consolidated_data_|) can potentially be decoded and rendered from YUV
+  // planes.
+  bool CanAllowYUVDecodingForWebP();
+  bool HasImagePlanes() const { return image_planes_.get(); }
+  bool DecodeSingleFrameToYUV(const uint8_t* data_bytes, size_t data_size);
   bool DecodeSingleFrame(const uint8_t* data_bytes,
                          size_t data_size,
                          size_t frame_index);
@@ -70,15 +81,29 @@ class PLATFORM_EXPORT WEBPImageDecoder final : public ImageDecoder {
   //
   // Before calling this, verify that frame |index| exists by checking that
   // |index| is smaller than |frame_buffer_cache_|.size().
-  bool FrameStatusSufficientForSuccessors(size_t index) override {
+  bool FrameStatusSufficientForSuccessors(wtf_size_t index) override {
     DCHECK(index < frame_buffer_cache_.size());
     return frame_buffer_cache_[index].GetStatus() == ImageFrame::kFrameComplete;
+  }
+
+  bool IsDoingYuvDecode() const {
+    if (image_planes_) {
+      DCHECK(allow_decode_to_yuv_);
+      return true;
+    }
+    return false;
   }
 
   WebPIDecoder* decoder_;
   WebPDecBuffer decoder_buffer_;
   int format_flags_;
   bool frame_background_has_alpha_;
+
+  // Provides the size of each component.
+  IntSize DecodedYUVSize(int component) const override;
+
+  // Returns the width of each row of the memory allocation.
+  size_t DecodedYUVWidthBytes(int component) const override;
 
   void ReadColorProfile();
   bool UpdateDemuxer();

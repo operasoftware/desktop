@@ -16,7 +16,7 @@ class MockAudioProcessor final : public AudioProcessor {
   MockAudioProcessor() : AudioProcessor(48000, 2) {}
   void Initialize() override { initialized_ = true; }
   void Uninitialize() override { initialized_ = false; }
-  void Process(const AudioBus*, AudioBus*, size_t) override {}
+  void Process(const AudioBus*, AudioBus*, uint32_t) override {}
   void Reset() override {}
   void SetNumberOfChannels(unsigned) override {}
   unsigned NumberOfChannels() const override { return number_of_channels_; }
@@ -47,13 +47,15 @@ class MockProcessorNode final : public AudioNode {
   MockProcessorNode(BaseAudioContext& context) : AudioNode(context) {
     SetHandler(MockProcessorHandler::Create(*this, 48000));
   }
+  void ReportDidCreate() final {}
+  void ReportWillBeDestroyed() final {}
 };
 
 TEST(AudioBasicProcessorHandlerTest, ProcessorFinalization) {
-  std::unique_ptr<DummyPageHolder> page = DummyPageHolder::Create();
+  auto page = std::make_unique<DummyPageHolder>();
   OfflineAudioContext* context = OfflineAudioContext::Create(
       &page->GetDocument(), 2, 1, 48000, ASSERT_NO_EXCEPTION);
-  MockProcessorNode* node = new MockProcessorNode(*context);
+  MockProcessorNode* node = MakeGarbageCollected<MockProcessorNode>(*context);
   AudioBasicProcessorHandler& handler =
       static_cast<AudioBasicProcessorHandler&>(node->Handler());
   EXPECT_TRUE(handler.Processor());

@@ -11,8 +11,10 @@ namespace blink {
 // renderer processes.
 enum class UserActivationUpdateType {
   kNotifyActivation,
+  kNotifyActivationPendingBrowserVerification,
   kConsumeTransientActivation,
-  kMaxValue = kConsumeTransientActivation
+  kClearActivation,
+  kMaxValue = kClearActivation
 };
 
 }  // namespace blink

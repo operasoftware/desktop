@@ -44,16 +44,20 @@ class CORE_EXPORT InspectorMemoryAgent final
     : public InspectorBaseAgent<protocol::Memory::Metainfo> {
  public:
   static InspectorMemoryAgent* Create(InspectedFrames* frames) {
-    return new InspectorMemoryAgent(frames);
+    return MakeGarbageCollected<InspectorMemoryAgent>(frames);
   }
-  ~InspectorMemoryAgent() override;
 
+  explicit InspectorMemoryAgent(InspectedFrames*);
+  ~InspectorMemoryAgent() override;
   void Trace(blink::Visitor*) override;
+
   void Restore() override;
 
   protocol::Response getDOMCounters(int* documents,
                                     int* nodes,
                                     int* js_event_listeners) override;
+
+  protocol::Response forciblyPurgeJavaScriptMemory() override;
 
   // Memory protocol domain:
   protocol::Response startSampling(
@@ -66,15 +70,13 @@ class CORE_EXPORT InspectorMemoryAgent final
       std::unique_ptr<protocol::Memory::SamplingProfile>*) override;
 
  private:
-  explicit InspectorMemoryAgent(InspectedFrames*);
-
-  std::vector<std::string> Symbolize(const std::vector<void*>& addresses);
+  Vector<String> Symbolize(const WebVector<void*>& addresses);
   std::unique_ptr<protocol::Memory::SamplingProfile> GetSamplingProfileById(
       uint32_t id);
 
   Member<InspectedFrames> frames_;
   uint32_t profile_id_ = 0;
-  HashMap<void*, std::string> symbols_cache_;
+  HashMap<void*, String> symbols_cache_;
 
   InspectorAgentState::Integer sampling_profile_interval_;
   DISALLOW_COPY_AND_ASSIGN(InspectorMemoryAgent);

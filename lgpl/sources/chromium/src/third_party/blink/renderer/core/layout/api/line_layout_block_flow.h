@@ -8,7 +8,7 @@
 #include "third_party/blink/renderer/core/layout/api/line_layout_box.h"
 #include "third_party/blink/renderer/core/layout/floating_objects.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
-#include "third_party/blink/renderer/platform/layout_unit.h"
+#include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 
 namespace blink {
 
@@ -122,6 +122,11 @@ class LineLayoutBlockFlow : public LineLayoutBox {
         *ToLayoutBox(box.GetLayoutObject()));
   }
 
+  FloatingObject* LastPlacedFloat(
+      FloatingObjectSetIterator* iterator = nullptr) const {
+    return ToBlockFlow()->LastPlacedFloat(iterator);
+  }
+
   bool PlaceNewFloats(LayoutUnit logical_top_margin_edge, LineWidth* width) {
     return ToBlockFlow()->PlaceNewFloats(logical_top_margin_edge, width);
   }
@@ -204,11 +209,11 @@ class LineLayoutBlockFlow : public LineLayoutBox {
 
  private:
   LayoutBlockFlow* ToBlockFlow() {
-    return ToLayoutBlockFlow(GetLayoutObject());
-  };
+    return To<LayoutBlockFlow>(GetLayoutObject());
+  }
   const LayoutBlockFlow* ToBlockFlow() const {
-    return ToLayoutBlockFlow(GetLayoutObject());
-  };
+    return To<LayoutBlockFlow>(GetLayoutObject());
+  }
 };
 
 }  // namespace blink

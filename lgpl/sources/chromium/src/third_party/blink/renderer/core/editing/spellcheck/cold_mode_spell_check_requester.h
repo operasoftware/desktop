@@ -20,10 +20,11 @@ class SpellCheckRequester;
 // mode invocation. Not to be confused with SpellCheckRequester. The class
 // iteratively checks the editing host currently focused when the document is
 // idle.
+// See design doc for details: https://goo.gl/zONC3v
 class ColdModeSpellCheckRequester
     : public GarbageCollected<ColdModeSpellCheckRequester> {
  public:
-  static ColdModeSpellCheckRequester* Create(LocalFrame&);
+  explicit ColdModeSpellCheckRequester(LocalFrame&);
 
   void SetNeedsMoreInvocationForTesting() {
     needs_more_invocation_for_testing_ = true;
@@ -34,11 +35,9 @@ class ColdModeSpellCheckRequester
   void ClearProgress();
   bool FullyChecked() const;
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
  private:
-  explicit ColdModeSpellCheckRequester(LocalFrame&);
-
   LocalFrame& GetFrame() const { return *frame_; }
   SpellCheckRequester& GetSpellCheckRequester() const;
 

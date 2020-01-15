@@ -33,7 +33,7 @@
 #include "third_party/blink/renderer/platform/geometry/float_rounded_rect.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/skia/include/core/SkPath.h"
@@ -77,6 +77,7 @@ class PLATFORM_EXPORT Path {
   Path& operator=(const Path&);
   Path& operator=(const SkPath&);
   bool operator==(const Path&) const;
+  bool operator!=(const Path& other) const { return !(*this == other); }
 
   bool Contains(const FloatPoint&) const;
   bool Contains(const FloatPoint&, WindRule) const;
@@ -144,16 +145,14 @@ class PLATFORM_EXPORT Path {
   void AddArc(const FloatPoint&,
               float radius,
               float start_angle,
-              float end_angle,
-              bool anticlockwise);
+              float end_angle);
   void AddRect(const FloatRect&);
   void AddEllipse(const FloatPoint&,
                   float radius_x,
                   float radius_y,
                   float rotation,
                   float start_angle,
-                  float end_angle,
-                  bool anticlockwise);
+                  float end_angle);
   void AddEllipse(const FloatRect&);
 
   void AddRoundedRect(const FloatRect&, const FloatSize& rounding_radii);
@@ -192,8 +191,7 @@ class PLATFORM_EXPORT Path {
                   float radius_x,
                   float radius_y,
                   float start_angle,
-                  float end_angle,
-                  bool anticlockwise);
+                  float end_angle);
   SkPath StrokePath(const StrokeData&) const;
 
   SkPath path_;

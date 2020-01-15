@@ -15,16 +15,12 @@ class CORE_EXPORT TrustedScript final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static TrustedScript* Create(const String& script) {
-    return new TrustedScript(script);
-  }
+  explicit TrustedScript(const String& script);
 
   // TrustedScript.idl
   String toString() const;
 
  private:
-  TrustedScript(const String& script);
-
   const String script_;
 };
 

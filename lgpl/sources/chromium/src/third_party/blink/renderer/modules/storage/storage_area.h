@@ -28,7 +28,8 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
-#include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/modules/storage/cached_storage_area.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -37,10 +38,10 @@ namespace blink {
 
 class ExceptionState;
 class LocalFrame;
-class WebStorageArea;
-class WebStorageNamespace;
 
-class StorageArea final : public ScriptWrappable, public ContextClient {
+class StorageArea final : public ScriptWrappable,
+                          public ContextClient,
+                          public CachedStorageArea::Source {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(StorageArea);
 
@@ -48,8 +49,19 @@ class StorageArea final : public ScriptWrappable, public ContextClient {
   enum class StorageType { kLocalStorage, kSessionStorage };
 
   static StorageArea* Create(LocalFrame*,
-                             std::unique_ptr<WebStorageArea>,
+                             scoped_refptr<CachedStorageArea>,
                              StorageType);
+
+  // This storage area doesn't enqueue any events. This avoids duplicate event
+  // dispatch when an inspector agent is present.
+  static StorageArea* CreateForInspectorAgent(LocalFrame*,
+                                              scoped_refptr<CachedStorageArea>,
+                                              StorageType);
+
+  StorageArea(LocalFrame*,
+              scoped_refptr<CachedStorageArea>,
+              StorageType,
+              bool should_enqueue_events);
 
   unsigned length(ExceptionState&) const;
   String key(unsigned index, ExceptionState&) const;
@@ -59,8 +71,6 @@ class StorageArea final : public ScriptWrappable, public ContextClient {
   void clear(ExceptionState&);
   bool Contains(const String& key, ExceptionState& ec) const;
 
-  WebStorageArea* Area() const { return storage_area_.get(); }
-
   void NamedPropertyEnumerator(Vector<String>&, ExceptionState&);
   bool NamedPropertyQuery(const AtomicString&, ExceptionState&);
 
@@ -68,28 +78,24 @@ class StorageArea final : public ScriptWrappable, public ContextClient {
 
   void Trace(blink::Visitor*) override;
 
-  static void DispatchLocalStorageEvent(const String& key,
-                                        const String& old_value,
-                                        const String& new_value,
-                                        const SecurityOrigin*,
-                                        const KURL& page_url,
-                                        WebStorageArea* source_area_instance);
-  static void DispatchSessionStorageEvent(const String& key,
-                                          const String& old_value,
-                                          const String& new_value,
-                                          const SecurityOrigin*,
-                                          const KURL& page_url,
-                                          const WebStorageNamespace&,
-                                          WebStorageArea* source_area_instance);
+  // CachedStorageArea::Source:
+  KURL GetPageUrl() const override;
+  bool EnqueueStorageEvent(const String& key,
+                           const String& old_value,
+                           const String& new_value,
+                           const String& url) override;
+
+  blink::WebScopedVirtualTimePauser CreateWebScopedVirtualTimePauser(
+      const char* name,
+      WebScopedVirtualTimePauser::VirtualTaskDuration duration) override;
 
  private:
-  StorageArea(LocalFrame*, std::unique_ptr<WebStorageArea>, StorageType);
-
-  std::unique_ptr<WebStorageArea> storage_area_;
+  const scoped_refptr<CachedStorageArea> cached_area_;
   StorageType storage_type_;
+  const bool should_enqueue_events_;
 
   mutable bool did_check_can_access_storage_ = false;
-  mutable bool can_access_storage_cached_result_;
+  mutable bool can_access_storage_cached_result_ = false;
 };
 
 }  // namespace blink

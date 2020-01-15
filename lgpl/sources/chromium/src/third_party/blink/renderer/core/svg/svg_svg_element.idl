@@ -22,6 +22,7 @@
 
 // https://svgwg.org/svg2-draft/struct.html#InterfaceSVGSVGElement
 
+[Exposed=Window]
 interface SVGSVGElement : SVGGraphicsElement {
     [MeasureAs=SVG1DOMSVGElement] readonly attribute SVGAnimatedLength x;
     [MeasureAs=SVG1DOMSVGElement] readonly attribute SVGAnimatedLength y;
@@ -59,12 +60,12 @@ interface SVGSVGElement : SVGGraphicsElement {
 
     // SVG Animations
     // https://svgwg.org/specs/animations/#InterfaceSVGSVGElement
-    [MeasureAs=SVGSMILPausing, RuntimeEnabled=SMIL] void pauseAnimations();
-    [MeasureAs=SVGSMILPausing, RuntimeEnabled=SMIL] void unpauseAnimations();
-    [MeasureAs=SVGSMILPausing, RuntimeEnabled=SMIL] boolean animationsPaused();
-    [MeasureAs=SVGSMILCurrentTime, RuntimeEnabled=SMIL] float getCurrentTime();
-    [MeasureAs=SVGSMILCurrentTime, RuntimeEnabled=SMIL] void setCurrentTime(float seconds);
+    [MeasureAs=SVGSMILPausing] void pauseAnimations();
+    [MeasureAs=SVGSMILPausing] void unpauseAnimations();
+    [MeasureAs=SVGSMILPausing] boolean animationsPaused();
+    [MeasureAs=SVGSMILCurrentTime] float getCurrentTime();
+    [MeasureAs=SVGSMILCurrentTime] void setCurrentTime(float seconds);
 };
 
-SVGSVGElement implements SVGFitToViewBox;
-SVGSVGElement implements SVGZoomAndPan;
+SVGSVGElement includes SVGFitToViewBox;
+SVGSVGElement includes SVGZoomAndPan;

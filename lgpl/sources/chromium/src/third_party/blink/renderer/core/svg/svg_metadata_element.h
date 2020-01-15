@@ -29,11 +29,9 @@ class SVGMetadataElement final : public SVGElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(SVGMetadataElement);
-
- private:
   explicit SVGMetadataElement(Document&);
 
+ private:
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override {
     return false;
   }

@@ -10,7 +10,6 @@
 #include "base/threading/thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace WTF {
 namespace {
@@ -28,23 +27,27 @@ class ThreadConditionTest : public testing::Test {
   ThreadConditionTest() : condition_(mutex_) {}
 
   void RunOtherThreadInfiniteWait() {
-    base::internal::SetBlockingObserverForCurrentThread(&observer_);
     MutexLocker lock(mutex_);
     ready_.Signal();
+
+    base::internal::SetBlockingObserverForCurrentThread(&observer_);
+    EXPECT_CALL(observer_, BlockingStarted(base::BlockingType::MAY_BLOCK));
+    EXPECT_CALL(observer_, BlockingEnded());
     condition_.Wait();
+    testing::Mock::VerifyAndClear(&observer_);
   }
 
  protected:
+  // Used to make sure that the other thread gets to wait before the main thread
+  // signals it. Otherwise it may wait forever.
   base::WaitableEvent ready_;
+
   testing::StrictMock<MockBlockingObserver> observer_;
   Mutex mutex_;
   ThreadCondition condition_;
 };
 
 TEST_F(ThreadConditionTest, WaitReportsBlockingCall) {
-  EXPECT_CALL(observer_, BlockingStarted(base::BlockingType::MAY_BLOCK));
-  EXPECT_CALL(observer_, BlockingEnded());
-
   base::Thread other_thread("other thread");
   other_thread.StartAndWaitForTesting();
   other_thread.task_runner()->PostTask(

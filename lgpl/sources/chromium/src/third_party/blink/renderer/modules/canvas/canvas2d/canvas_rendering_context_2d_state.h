@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_CANVAS_CANVAS2D_CANVAS_RENDERING_CONTEXT_2D_STATE_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_CANVAS_CANVAS2D_CANVAS_RENDERING_CONTEXT_2D_STATE_H_
 
+#include "base/macros.h"
 #include "third_party/blink/renderer/modules/canvas/canvas2d/clip_list.h"
 #include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/fonts/font_selector_client.h"
@@ -24,21 +25,19 @@ class CSSValue;
 class Element;
 
 class CanvasRenderingContext2DState final
-    : public GarbageCollectedFinalized<CanvasRenderingContext2DState>,
+    : public GarbageCollected<CanvasRenderingContext2DState>,
       public FontSelectorClient {
-  WTF_MAKE_NONCOPYABLE(CanvasRenderingContext2DState);
   USING_GARBAGE_COLLECTED_MIXIN(CanvasRenderingContext2DState);
 
  public:
-  static CanvasRenderingContext2DState* Create() {
-    return new CanvasRenderingContext2DState;
-  }
+  enum ClipListCopyMode { kCopyClipList, kDontCopyClipList };
 
+  CanvasRenderingContext2DState();
+  CanvasRenderingContext2DState(const CanvasRenderingContext2DState&,
+                                ClipListCopyMode);
   ~CanvasRenderingContext2DState() override;
 
   void Trace(blink::Visitor*) override;
-
-  enum ClipListCopyMode { kCopyClipList, kDontCopyClipList };
 
   enum PaintType {
     kFillPaintType,
@@ -49,7 +48,7 @@ class CanvasRenderingContext2DState final
   static CanvasRenderingContext2DState* Create(
       const CanvasRenderingContext2DState& other,
       ClipListCopyMode mode) {
-    return new CanvasRenderingContext2DState(other, mode);
+    return MakeGarbageCollected<CanvasRenderingContext2DState>(other, mode);
   }
 
   // FontSelectorClient implementation
@@ -117,6 +116,11 @@ class CanvasRenderingContext2DState final
   CanvasStyle* FillStyle() const { return fill_style_.Get(); }
 
   CanvasStyle* Style(PaintType) const;
+
+  bool HasPattern() const;
+
+  // Only to be used if the CanvasRenderingContext2DState has Pattern
+  bool PatternIsAccelerated() const;
 
   enum Direction { kDirectionInherit, kDirectionRTL, kDirectionLTR };
 
@@ -193,10 +197,6 @@ class CanvasRenderingContext2DState final
   const PaintFlags* GetFlags(PaintType, ShadowMode, ImageType = kNoImage) const;
 
  private:
-  CanvasRenderingContext2DState();
-  CanvasRenderingContext2DState(const CanvasRenderingContext2DState&,
-                                ClipListCopyMode);
-
   void UpdateLineDash() const;
   void UpdateStrokeStyle() const;
   void UpdateFillStyle() const;
@@ -259,6 +259,8 @@ class CanvasRenderingContext2DState final
   SkFilterQuality image_smoothing_quality_;
 
   ClipList clip_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(CanvasRenderingContext2DState);
 };
 
 }  // namespace blink

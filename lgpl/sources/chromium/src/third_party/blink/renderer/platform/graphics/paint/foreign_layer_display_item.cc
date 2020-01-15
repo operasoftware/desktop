@@ -13,62 +13,102 @@
 
 namespace blink {
 
-ForeignLayerDisplayItem::ForeignLayerDisplayItem(
-    const DisplayItemClient& client,
-    Type type,
-    scoped_refptr<cc::Layer> layer,
-    const FloatPoint& location,
-    const IntSize& bounds)
-    : DisplayItem(client, type, sizeof(*this)),
-      layer_(std::move(layer)),
-      location_(location),
-      bounds_(bounds) {
-  DCHECK(RuntimeEnabledFeatures::SlimmingPaintV2Enabled() ||
-         RuntimeEnabledFeatures::BlinkGenPropertyTreesEnabled());
+namespace {
+
+class ForeignLayerDisplayItemClient final : public DisplayItemClient {
+ public:
+  ForeignLayerDisplayItemClient(scoped_refptr<cc::Layer> layer,
+                                const FloatPoint& offset)
+      : layer_(std::move(layer)), offset_(offset) {
+    Invalidate(PaintInvalidationReason::kUncacheable);
+  }
+
+  String DebugName() const final {
+#if DCHECK_IS_ON()
+    return String("ForeignLayer for ") + layer_->DebugName().c_str();
+#else
+    return "ForeignLayer";
+#endif
+  }
+
+  DOMNodeId OwnerNodeId() const final { return layer_->owner_node_id(); }
+
+  IntRect VisualRect() const final {
+    const auto& bounds = layer_->bounds();
+    return EnclosingIntRect(
+        FloatRect(offset_.X(), offset_.Y(), bounds.width(), bounds.height()));
+  }
+
+  cc::Layer* GetLayer() const { return layer_.get(); }
+
+ private:
+  scoped_refptr<cc::Layer> layer_;
+  FloatPoint offset_;
+};
+
+}  // anonymous namespace
+
+ForeignLayerDisplayItem::ForeignLayerDisplayItem(Type type,
+                                                 scoped_refptr<cc::Layer> layer,
+                                                 const FloatPoint& offset)
+    : DisplayItem(*new ForeignLayerDisplayItemClient(std::move(layer), offset),
+                  type,
+                  sizeof(*this)),
+      offset_(offset) {
   DCHECK(IsForeignLayerType(type));
-  DCHECK(layer_);
+  DCHECK(GetLayer());
+  DCHECK(!IsCacheable());
+  // TODO(959734): This CHECK is intended to find stack traces that are causing
+  // a segfault.
+  CHECK(GetLayer());
 }
 
-ForeignLayerDisplayItem::~ForeignLayerDisplayItem() = default;
-
-void ForeignLayerDisplayItem::Replay(GraphicsContext&) const {
-  NOTREACHED();
+ForeignLayerDisplayItem::~ForeignLayerDisplayItem() {
+  delete &Client();
 }
 
-void ForeignLayerDisplayItem::AppendToDisplayItemList(
-    const FloatSize&,
-    cc::DisplayItemList&) const {
-  NOTREACHED();
-}
-
-bool ForeignLayerDisplayItem::DrawsContent() const {
-  return true;
+cc::Layer* ForeignLayerDisplayItem::GetLayer() const {
+  return static_cast<const ForeignLayerDisplayItemClient&>(Client()).GetLayer();
 }
 
 bool ForeignLayerDisplayItem::Equals(const DisplayItem& other) const {
-  return DisplayItem::Equals(other) &&
-         layer_ == static_cast<const ForeignLayerDisplayItem&>(other).layer_;
+  return GetType() == other.GetType() &&
+         GetLayer() ==
+             static_cast<const ForeignLayerDisplayItem&>(other).GetLayer();
 }
 
 #if DCHECK_IS_ON()
 void ForeignLayerDisplayItem::PropertiesAsJSON(JSONObject& json) const {
   DisplayItem::PropertiesAsJSON(json);
-  json.SetInteger("layer", layer_->id());
+  json.SetInteger("layer", GetLayer()->id());
+  json.SetDouble("offset_x", Offset().X());
+  json.SetDouble("offset_y", Offset().Y());
 }
 #endif
 
 void RecordForeignLayer(GraphicsContext& context,
-                        const DisplayItemClient& client,
                         DisplayItem::Type type,
                         scoped_refptr<cc::Layer> layer,
-                        const FloatPoint& location,
-                        const IntSize& bounds) {
+                        const FloatPoint& offset,
+                        const base::Optional<PropertyTreeState>& properties) {
   PaintController& paint_controller = context.GetPaintController();
   if (paint_controller.DisplayItemConstructionIsDisabled())
     return;
 
+  // This is like ScopedPaintChunkProperties but uses null id because foreign
+  // layer chunk doesn't need an id nor a client.
+  base::Optional<PropertyTreeState> previous_properties;
+  if (properties) {
+    previous_properties.emplace(paint_controller.CurrentPaintChunkProperties());
+    paint_controller.UpdateCurrentPaintChunkProperties(base::nullopt,
+                                                       *properties);
+  }
   paint_controller.CreateAndAppend<ForeignLayerDisplayItem>(
-      client, type, std::move(layer), location, bounds);
+      type, std::move(layer), offset);
+  if (properties) {
+    paint_controller.UpdateCurrentPaintChunkProperties(base::nullopt,
+                                                       *previous_properties);
+  }
 }
 
 }  // namespace blink

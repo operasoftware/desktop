@@ -36,7 +36,7 @@
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/audio/audio_array.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -52,7 +52,9 @@ class PLATFORM_EXPORT Biquad final {
   Biquad();
   ~Biquad();
 
-  void Process(const float* source_p, float* dest_p, size_t frames_to_process);
+  void Process(const float* source_p,
+               float* dest_p,
+               uint32_t frames_to_process);
 
   bool HasSampleAccurateValues() const { return has_sample_accurate_values_; }
   void SetHasSampleAccurateValues(bool is_sample_accurate) {
@@ -113,11 +115,11 @@ class PLATFORM_EXPORT Biquad final {
 #if defined(OS_MACOSX)
   void ProcessFast(const float* source_p,
                    float* dest_p,
-                   size_t frames_to_process);
+                   uint32_t frames_to_process);
   void ProcessSliceFast(double* source_p,
                         double* dest_p,
                         double* coefficients_p,
-                        size_t frames_to_process);
+                        uint32_t frames_to_process);
 
   AudioDoubleArray input_buffer_;
   AudioDoubleArray output_buffer_;

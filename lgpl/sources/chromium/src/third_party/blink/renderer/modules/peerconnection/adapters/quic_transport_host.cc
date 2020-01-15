@@ -7,13 +7,14 @@
 #include <utility>
 
 #include "third_party/blink/renderer/modules/peerconnection/adapters/ice_transport_host.h"
+#include "third_party/blink/renderer/modules/peerconnection/adapters/p2p_quic_transport.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/p2p_quic_transport_factory.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/quic_stream_host.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/quic_stream_proxy.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/quic_transport_proxy.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/web_rtc_cross_thread_copier.h"
-#include "third_party/blink/renderer/platform/cross_thread_functional.h"
-#include "third_party/blink/renderer/platform/web_task_runner.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
 
@@ -36,20 +37,16 @@ QuicTransportHost::~QuicTransportHost() {
   }
 }
 
-void QuicTransportHost::Initialize(
-    IceTransportHost* ice_transport_host,
-    quic::Perspective perspective,
-    const std::vector<rtc::scoped_refptr<rtc::RTCCertificate>>& certificates) {
+void QuicTransportHost::Initialize(IceTransportHost* ice_transport_host,
+                                   const P2PQuicTransportConfig& config) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(ice_transport_host);
   DCHECK(!ice_transport_host_);
   ice_transport_host_ = ice_transport_host;
-  P2PQuicTransportConfig config(
-      this, ice_transport_host->ConnectConsumer(this)->packet_transport(),
-      certificates);
-  config.is_server = (perspective == quic::Perspective::IS_SERVER);
-  quic_transport_ =
-      quic_transport_factory_->CreateQuicTransport(std::move(config));
+  IceTransportAdapter* ice_transport_adapter =
+      ice_transport_host_->ConnectConsumer(this);
+  quic_transport_ = quic_transport_factory_->CreateQuicTransport(
+      /*delegate=*/this, ice_transport_adapter->packet_transport(), config);
 }
 
 scoped_refptr<base::SingleThreadTaskRunner> QuicTransportHost::proxy_thread()
@@ -64,10 +61,9 @@ scoped_refptr<base::SingleThreadTaskRunner> QuicTransportHost::host_thread()
   return ice_transport_host_->host_thread();
 }
 
-void QuicTransportHost::Start(
-    std::vector<std::unique_ptr<rtc::SSLFingerprint>> remote_fingerprints) {
+void QuicTransportHost::Start(P2PQuicTransport::StartConfig config) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  quic_transport_->Start(std::move(remote_fingerprints));
+  quic_transport_->Start(std::move(config));
 }
 
 void QuicTransportHost::Stop() {
@@ -81,8 +77,22 @@ void QuicTransportHost::CreateStream(
 
   P2PQuicStream* p2p_stream = quic_transport_->CreateStream();
   stream_host->Initialize(this, p2p_stream);
-  stream_hosts_.insert(
-      std::make_pair(stream_host.get(), std::move(stream_host)));
+  stream_hosts_.insert(stream_host.get(), std::move(stream_host));
+}
+
+void QuicTransportHost::SendDatagram(Vector<uint8_t> datagram) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  quic_transport_->SendDatagram(std::move(datagram));
+}
+
+void QuicTransportHost::GetStats(uint32_t request_id) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  P2PQuicTransportStats stats = quic_transport_->GetStats();
+  PostCrossThreadTask(*proxy_thread(), FROM_HERE,
+                      CrossThreadBindOnce(&QuicTransportProxy::OnStats, proxy_,
+                                          request_id, stats));
 }
 
 void QuicTransportHost::OnRemoveStream(QuicStreamHost* stream_host_to_remove) {
@@ -98,23 +108,24 @@ void QuicTransportHost::OnRemoteStopped() {
   stream_hosts_.clear();
   PostCrossThreadTask(
       *proxy_thread(), FROM_HERE,
-      CrossThreadBind(&QuicTransportProxy::OnRemoteStopped, proxy_));
+      CrossThreadBindOnce(&QuicTransportProxy::OnRemoteStopped, proxy_));
 }
 
 void QuicTransportHost::OnConnectionFailed(const std::string& error_details,
                                            bool from_remote) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   stream_hosts_.clear();
-  PostCrossThreadTask(*proxy_thread(), FROM_HERE,
-                      CrossThreadBind(&QuicTransportProxy::OnConnectionFailed,
-                                      proxy_, error_details, from_remote));
-}
-
-void QuicTransportHost::OnConnected() {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   PostCrossThreadTask(
       *proxy_thread(), FROM_HERE,
-      CrossThreadBind(&QuicTransportProxy::OnConnected, proxy_));
+      CrossThreadBindOnce(&QuicTransportProxy::OnConnectionFailed, proxy_,
+                          error_details, from_remote));
+}
+
+void QuicTransportHost::OnConnected(P2PQuicNegotiatedParams negotiated_params) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  PostCrossThreadTask(*proxy_thread(), FROM_HERE,
+                      CrossThreadBindOnce(&QuicTransportProxy::OnConnected,
+                                          proxy_, negotiated_params));
 }
 
 void QuicTransportHost::OnStream(P2PQuicStream* p2p_stream) {
@@ -128,12 +139,29 @@ void QuicTransportHost::OnStream(P2PQuicStream* p2p_stream) {
 
   stream_host->Initialize(this, p2p_stream);
 
-  stream_hosts_.insert(
-      std::make_pair(stream_host.get(), std::move(stream_host)));
+  stream_hosts_.insert(stream_host.get(), std::move(stream_host));
 
-  PostCrossThreadTask(*proxy_thread(), FROM_HERE,
-                      CrossThreadBind(&QuicTransportProxy::OnStream, proxy_,
-                                      WTF::Passed(std::move(stream_proxy))));
+  PostCrossThreadTask(
+      *proxy_thread(), FROM_HERE,
+      CrossThreadBindOnce(&QuicTransportProxy::OnStream, proxy_,
+                          WTF::Passed(std::move(stream_proxy))));
+}
+
+void QuicTransportHost::OnDatagramSent() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  PostCrossThreadTask(
+      *proxy_thread(), FROM_HERE,
+      CrossThreadBindOnce(&QuicTransportProxy::OnDatagramSent, proxy_));
+}
+
+void QuicTransportHost::OnDatagramReceived(Vector<uint8_t> datagram) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  PostCrossThreadTask(
+      *proxy_thread(), FROM_HERE,
+      CrossThreadBindOnce(&QuicTransportProxy::OnDatagramReceived, proxy_,
+                          std::move(datagram)));
 }
 
 }  // namespace blink

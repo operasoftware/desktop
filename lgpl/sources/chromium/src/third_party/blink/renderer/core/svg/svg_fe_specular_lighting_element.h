@@ -35,7 +35,8 @@ class SVGFESpecularLightingElement final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(SVGFESpecularLightingElement);
+  explicit SVGFESpecularLightingElement(Document&);
+
   void LightElementAttributeChanged(const SVGFELightElement*,
                                     const QualifiedName&);
 
@@ -53,11 +54,10 @@ class SVGFESpecularLightingElement final
   void Trace(blink::Visitor*) override;
 
  private:
-  explicit SVGFESpecularLightingElement(Document&);
-
   bool SetFilterEffectAttribute(FilterEffect*, const QualifiedName&) override;
   void SvgAttributeChanged(const QualifiedName&) override;
   FilterEffect* Build(SVGFilterBuilder*, Filter*) override;
+  bool TaintsOrigin() const override;
 
   Member<SVGAnimatedNumber> specular_constant_;
   Member<SVGAnimatedNumber> specular_exponent_;

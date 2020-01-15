@@ -5,7 +5,7 @@
  */
 
 :host {
-    flex: 1 1;
+    flex: 1 1 auto;
     padding: 2px 0 0 0;
 }
 
@@ -25,7 +25,7 @@
     display: block;
     left: 3px;
     right: 3px;
-    background-color: rgba(56, 121, 217, 0.1);
+    background-color: var(--item-hover-color);
     border-radius: 5px;
 }
 
@@ -33,6 +33,10 @@
     display: none;
     z-index: -1;
     margin-left: -10000px;
+}
+
+.tree-outline:not(.hide-selection-when-blurred) li.selected {
+    color: var(--selection-inactive-fg-color);
 }
 
 .tree-outline:not(.hide-selection-when-blurred) li.selected .selection {
@@ -62,10 +66,6 @@ ol.tree-outline:not(.hide-selection-when-blurred) li.parent.selected:focus::befo
 ol.tree-outline,
 .tree-outline ol {
     list-style-type: none;
-}
-
-.tree-outline-no-padding {
-    padding: 0;
 }
 
 .tree-outline ol {
@@ -105,7 +105,7 @@ ol.tree-outline:not(.hide-selection-when-blurred) li.selected:focus * {
 
 .tree-outline li::before {
     -webkit-user-select: none;
-    -webkit-mask-image: url(Images/treeoutlineTriangles.png);
+    -webkit-mask-image: url(Images/treeoutlineTriangles.svg);
     -webkit-mask-size: 32px 24px;
     content: "\00a0\00a0";
     text-shadow: none;
@@ -117,12 +117,6 @@ ol.tree-outline:not(.hide-selection-when-blurred) li.selected:focus * {
 .tree-outline li:not(.parent)::before {
     background-color: transparent;
 }
-
-@media (-webkit-min-device-pixel-ratio: 1.1) {
-.tree-outline li::before {
-    -webkit-mask-image: url(Images/treeoutlineTriangles_2x.png);
-}
-} /* media */
 
 .tree-outline li::before {
     -webkit-mask-position: 0 0;
@@ -159,7 +153,7 @@ ol.tree-outline:not(.hide-selection-when-blurred) li.selected:focus * {
 }
 
 .tree-outline.hide-selection-when-blurred .selected:focus[data-keyboard-focus="true"] {
-    background: rgba(0, 0, 0, 0.08);
+    background: var(--focus-bg-color);
     border-radius: 2px;
 }
 

@@ -25,9 +25,7 @@
 namespace blink {
 
 SVGPolylineElement::SVGPolylineElement(Document& document)
-    : SVGPolyElement(SVGNames::polylineTag, document) {}
-
-DEFINE_NODE_FACTORY(SVGPolylineElement)
+    : SVGPolyElement(svg_names::kPolylineTag, document) {}
 
 Path SVGPolylineElement::AsPath() const {
   return AsPathFromPoints();

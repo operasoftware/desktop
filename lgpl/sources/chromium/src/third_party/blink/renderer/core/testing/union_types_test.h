@@ -17,7 +17,7 @@ class UnionTypesTest final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static UnionTypesTest* Create() { return new UnionTypesTest(); }
+  UnionTypesTest() : attribute_type_(kSpecificTypeNone) {}
   ~UnionTypesTest() override = default;
 
   void doubleOrStringOrStringSequenceAttribute(DoubleOrStringOrStringSequence&);
@@ -35,8 +35,6 @@ class UnionTypesTest final : public ScriptWrappable {
       const DoubleOrStringOrStringSequence&);
 
  private:
-  UnionTypesTest() : attribute_type_(kSpecificTypeNone) {}
-
   enum AttributeSpecificType {
     kSpecificTypeNone,
     kSpecificTypeDouble,

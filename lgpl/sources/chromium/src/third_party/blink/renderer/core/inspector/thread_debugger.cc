@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/inspector/thread_debugger.h"
 
 #include <memory>
+
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
@@ -12,7 +13,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_exception.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_token_list.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_event.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_event_listener_helper.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_event_listener.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_event_listener_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_html_all_collection.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_html_collection.h"
@@ -28,7 +29,6 @@
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -47,23 +47,23 @@ ThreadDebugger* ThreadDebugger::From(v8::Isolate* isolate) {
 }
 
 // static
-MessageLevel ThreadDebugger::V8MessageLevelToMessageLevel(
+mojom::ConsoleMessageLevel ThreadDebugger::V8MessageLevelToMessageLevel(
     v8::Isolate::MessageErrorLevel level) {
-  MessageLevel result = kInfoMessageLevel;
+  mojom::ConsoleMessageLevel result = mojom::ConsoleMessageLevel::kInfo;
   switch (level) {
     case v8::Isolate::kMessageDebug:
-      result = kVerboseMessageLevel;
+      result = mojom::ConsoleMessageLevel::kVerbose;
       break;
     case v8::Isolate::kMessageWarning:
-      result = kWarningMessageLevel;
+      result = mojom::ConsoleMessageLevel::kWarning;
       break;
     case v8::Isolate::kMessageError:
-      result = kErrorMessageLevel;
+      result = mojom::ConsoleMessageLevel::kError;
       break;
     case v8::Isolate::kMessageLog:
     case v8::Isolate::kMessageInfo:
     default:
-      result = kInfoMessageLevel;
+      result = mojom::ConsoleMessageLevel::kInfo;
       break;
   }
   return result;
@@ -134,8 +134,9 @@ unsigned ThreadDebugger::PromiseRejected(
   else if (message.StartsWith("Uncaught "))
     message = message.Substring(0, 8) + " (in promise)" + message.Substring(8);
 
-  ReportConsoleMessage(ToExecutionContext(context), kJSMessageSource,
-                       kErrorMessageLevel, message, location.get());
+  ReportConsoleMessage(
+      ToExecutionContext(context), mojom::ConsoleMessageSource::kJavaScript,
+      mojom::ConsoleMessageLevel::kError, message, location.get());
   String url = location->Url();
   return GetV8Inspector()->exceptionThrown(
       context, ToV8InspectorStringView(default_message), exception,
@@ -168,17 +169,17 @@ std::unique_ptr<v8_inspector::StringBuffer> ThreadDebugger::valueSubtype(
   static const char kArray[] = "array";
   static const char kError[] = "error";
   static const char kBlob[] = "blob";
-  if (V8Node::hasInstance(value, isolate_))
+  if (V8Node::HasInstance(value, isolate_))
     return ToV8InspectorStringBuffer(kNode);
-  if (V8NodeList::hasInstance(value, isolate_) ||
-      V8DOMTokenList::hasInstance(value, isolate_) ||
-      V8HTMLCollection::hasInstance(value, isolate_) ||
-      V8HTMLAllCollection::hasInstance(value, isolate_)) {
+  if (V8NodeList::HasInstance(value, isolate_) ||
+      V8DOMTokenList::HasInstance(value, isolate_) ||
+      V8HTMLCollection::HasInstance(value, isolate_) ||
+      V8HTMLAllCollection::HasInstance(value, isolate_)) {
     return ToV8InspectorStringBuffer(kArray);
   }
-  if (V8DOMException::hasInstance(value, isolate_))
+  if (V8DOMException::HasInstance(value, isolate_))
     return ToV8InspectorStringBuffer(kError);
-  if (V8Blob::hasInstance(value, isolate_))
+  if (V8Blob::HasInstance(value, isolate_))
     return ToV8InspectorStringBuffer(kBlob);
   return nullptr;
 }
@@ -188,7 +189,7 @@ bool ThreadDebugger::formatAccessorsAsProperties(v8::Local<v8::Value> value) {
 }
 
 double ThreadDebugger::currentTimeMS() {
-  return WTF::CurrentTimeMS();
+  return base::Time::Now().ToDoubleT() * 1000.0;
 }
 
 bool ThreadDebugger::isInspectableHeapObject(v8::Local<v8::Object> object) {
@@ -373,19 +374,14 @@ void ThreadDebugger::SetMonitorEventsCallback(
   if (!event_target)
     return;
   Vector<String> types = NormalizeEventTypes(info);
-  EventListener* event_listener = V8EventListenerHelper::GetEventListener(
-      ScriptState::Current(info.GetIsolate()),
-      v8::Local<v8::Function>::Cast(info.Data()),
-      enabled ? kListenerFindOrCreate : kListenerFindOnly);
-  if (!event_listener)
-    return;
+  DCHECK(!info.Data().IsEmpty() && info.Data()->IsFunction());
+  V8EventListener* event_listener =
+      V8EventListener::Create(info.Data().As<v8::Function>());
   for (wtf_size_t i = 0; i < types.size(); ++i) {
     if (enabled)
-      event_target->addEventListener(AtomicString(types[i]), event_listener,
-                                     false);
+      event_target->addEventListener(AtomicString(types[i]), event_listener);
     else
-      event_target->removeEventListener(AtomicString(types[i]), event_listener,
-                                        false);
+      event_target->removeEventListener(AtomicString(types[i]), event_listener);
   }
 }
 
@@ -463,24 +459,24 @@ void ThreadDebugger::consoleTime(const v8_inspector::StringView& title) {
   // TODO(dgozman): we can save on a copy here if trace macro would take a
   // pointer with length.
   TRACE_EVENT_COPY_ASYNC_BEGIN0("blink.console",
-                                ToCoreString(title).Utf8().data(), this);
+                                ToCoreString(title).Utf8().c_str(), this);
 }
 
 void ThreadDebugger::consoleTimeEnd(const v8_inspector::StringView& title) {
   // TODO(dgozman): we can save on a copy here if trace macro would take a
   // pointer with length.
   TRACE_EVENT_COPY_ASYNC_END0("blink.console",
-                              ToCoreString(title).Utf8().data(), this);
+                              ToCoreString(title).Utf8().c_str(), this);
 }
 
 void ThreadDebugger::consoleTimeStamp(const v8_inspector::StringView& title) {
   ExecutionContext* ec = CurrentExecutionContext(isolate_);
   // TODO(dgozman): we can save on a copy here if TracedValue would take a
   // StringView.
-  TRACE_EVENT_INSTANT1("devtools.timeline", "TimeStamp",
-                       TRACE_EVENT_SCOPE_THREAD, "data",
-                       InspectorTimeStampEvent::Data(ec, ToCoreString(title)));
-  probe::consoleTimeStamp(ec, ToCoreString(title));
+  TRACE_EVENT_INSTANT1(
+      "devtools.timeline", "TimeStamp", TRACE_EVENT_SCOPE_THREAD, "data",
+      inspector_time_stamp_event::Data(ec, ToCoreString(title)));
+  probe::ConsoleTimeStamp(ec, ToCoreString(title));
 }
 
 void ThreadDebugger::startRepeatingTimer(
@@ -492,11 +488,11 @@ void ThreadDebugger::startRepeatingTimer(
 
   std::unique_ptr<TaskRunnerTimer<ThreadDebugger>> timer =
       std::make_unique<TaskRunnerTimer<ThreadDebugger>>(
-          Platform::Current()->CurrentThread()->Scheduler()->V8TaskRunner(),
-          this, &ThreadDebugger::OnTimer);
+          ThreadScheduler::Current()->V8TaskRunner(), this,
+          &ThreadDebugger::OnTimer);
   TaskRunnerTimer<ThreadDebugger>* timer_ptr = timer.get();
   timers_.push_back(std::move(timer));
-  timer_ptr->StartRepeating(TimeDelta::FromSecondsD(interval), FROM_HERE);
+  timer_ptr->StartRepeating(base::TimeDelta::FromSecondsD(interval), FROM_HERE);
 }
 
 void ThreadDebugger::cancelTimer(void* data) {

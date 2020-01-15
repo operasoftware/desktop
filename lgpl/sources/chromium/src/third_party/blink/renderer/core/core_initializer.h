@@ -33,16 +33,17 @@
 
 #include "base/macros.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
+#include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
+class DevToolsSession;
 class Document;
 class HTMLMediaElement;
 class InspectedFrames;
 class InspectorDOMAgent;
-class InspectorSession;
 class LocalFrame;
 class MediaControls;
 class Page;
@@ -50,13 +51,12 @@ class PictureInPictureController;
 class Settings;
 class ShadowRoot;
 class WebLocalFrameClient;
-class WebLayerTreeView;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebMediaPlayerSource;
 class WebRemotePlaybackClient;
 class WebViewClient;
-class WorkerClients;
+class WorkerGlobalScope;
 
 class CORE_EXPORT CoreInitializer {
   USING_FAST_MALLOC(CoreInitializer);
@@ -83,8 +83,7 @@ class CORE_EXPORT CoreInitializer {
   virtual void InitLocalFrame(LocalFrame&) const = 0;
   // Supplements installed on a frame using ChromeClient
   virtual void InstallSupplements(LocalFrame&) const = 0;
-  virtual void ProvideLocalFileSystemToWorker(WorkerClients&) const = 0;
-  virtual void ProvideIndexedDBClientToWorker(WorkerClients&) const = 0;
+  virtual void ProvideLocalFileSystemToWorker(WorkerGlobalScope&) const = 0;
   virtual MediaControls* CreateMediaControls(HTMLMediaElement&,
                                              ShadowRoot&) const = 0;
   virtual PictureInPictureController* CreatePictureInPictureController(
@@ -93,7 +92,7 @@ class CORE_EXPORT CoreInitializer {
   // These methods typically create agents and append them to a session.
   // TODO(nverne): remove this and restore to WebDevToolsAgentImpl once that
   // class is a controller/ crbug:731490
-  virtual void InitInspectorAgentSession(InspectorSession*,
+  virtual void InitInspectorAgentSession(DevToolsSession*,
                                          bool,
                                          InspectorDOMAgent*,
                                          InspectedFrames*,
@@ -106,8 +105,7 @@ class CORE_EXPORT CoreInitializer {
       WebLocalFrameClient*,
       HTMLMediaElement&,
       const WebMediaPlayerSource&,
-      WebMediaPlayerClient*,
-      WebLayerTreeView*) const = 0;
+      WebMediaPlayerClient*) const = 0;
 
   virtual WebRemotePlaybackClient* CreateWebRemotePlaybackClient(
       HTMLMediaElement&) const = 0;
@@ -115,7 +113,15 @@ class CORE_EXPORT CoreInitializer {
   virtual void ProvideModulesToPage(Page&, WebViewClient*) const = 0;
   virtual void ForceNextWebGLContextCreationToFail() const = 0;
 
-  virtual void CollectAllGarbageForAnimationWorklet() const = 0;
+  virtual void CollectAllGarbageForAnimationAndPaintWorkletForTesting()
+      const = 0;
+
+  virtual void CloneSessionStorage(
+      Page* clone_from_page,
+      const SessionStorageNamespaceId& clone_to_namespace) = 0;
+
+  virtual void DidCommitLoad(LocalFrame&) = 0;
+  virtual void DidChangeManifest(LocalFrame&) = 0;
 
  protected:
   // CoreInitializer is only instantiated by subclass ModulesInitializer.

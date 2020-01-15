@@ -34,7 +34,7 @@
 #include "third_party/blink/renderer/core/animation/animation_time_delta.h"
 #include "third_party/blink/renderer/core/animation/property_handle.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
@@ -45,11 +45,12 @@ class Interpolation;
 // Time independent representation of an Animation's content.
 // Can be sampled for the active pairs of Keyframes (represented by
 // Interpolations) at a given time fraction.
-class CORE_EXPORT EffectModel : public GarbageCollectedFinalized<EffectModel> {
+class CORE_EXPORT EffectModel : public GarbageCollected<EffectModel> {
  public:
   enum CompositeOperation {
     kCompositeReplace,
     kCompositeAdd,
+    kCompositeAccumulate,
   };
   static base::Optional<CompositeOperation> StringToCompositeOperation(
       const String&);

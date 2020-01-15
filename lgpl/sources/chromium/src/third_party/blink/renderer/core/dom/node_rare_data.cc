@@ -33,28 +33,24 @@
 #include "third_party/blink/renderer/core/dom/container_node.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/element_rare_data.h"
+#include "third_party/blink/renderer/core/dom/flat_tree_node_data.h"
 #include "third_party/blink/renderer/core/dom/mutation_observer_registration.h"
 #include "third_party/blink/renderer/core/dom/node_lists_node_data.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable_visitor.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace blink {
 
 struct SameSizeAsNodeRareData {
   void* pointer_;
-  Member<void*> willbe_member_[2];
+  Member<void*> willbe_member_[3];
   unsigned bitfields_;
 };
-
-NodeMutationObserverData* NodeMutationObserverData::Create() {
-  return new NodeMutationObserverData;
-}
 
 static_assert(sizeof(NodeRareData) == sizeof(SameSizeAsNodeRareData),
               "NodeRareData should stay small");
 
-void NodeMutationObserverData::Trace(blink::Visitor* visitor) {
+void NodeMutationObserverData::Trace(Visitor* visitor) {
   visitor->Trace(registry_);
   visitor->Trace(transient_registry_);
 }
@@ -83,6 +79,7 @@ void NodeMutationObserverData::RemoveRegistration(
 
 void NodeRareData::TraceAfterDispatch(blink::Visitor* visitor) {
   visitor->Trace(mutation_observer_data_);
+  visitor->Trace(flat_tree_node_data_);
   // Do not keep empty NodeListsNodeData objects around.
   if (node_lists_ && node_lists_->IsEmpty())
     node_lists_.Clear();
@@ -90,7 +87,7 @@ void NodeRareData::TraceAfterDispatch(blink::Visitor* visitor) {
     visitor->Trace(node_lists_);
 }
 
-void NodeRareData::Trace(blink::Visitor* visitor) {
+void NodeRareData::Trace(Visitor* visitor) {
   if (is_element_rare_data_)
     static_cast<ElementRareData*>(this)->TraceAfterDispatch(visitor);
   else
@@ -110,8 +107,14 @@ void NodeRareData::IncrementConnectedSubframeCount() {
 }
 
 NodeListsNodeData& NodeRareData::CreateNodeLists() {
-  node_lists_ = NodeListsNodeData::Create();
+  node_lists_ = MakeGarbageCollected<NodeListsNodeData>();
   return *node_lists_;
+}
+
+FlatTreeNodeData& NodeRareData::EnsureFlatTreeNodeData() {
+  if (!flat_tree_node_data_)
+    flat_tree_node_data_ = MakeGarbageCollected<FlatTreeNodeData>();
+  return *flat_tree_node_data_;
 }
 
 // Ensure the 10 bits reserved for the connected_frame_count_ cannot overflow.

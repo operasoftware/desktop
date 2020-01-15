@@ -28,12 +28,18 @@ bool SimpleThreadScheduler::CanExceedIdleDeadlineIfRequired() const {
 void SimpleThreadScheduler::PostIdleTask(const base::Location& location,
                                          Thread::IdleTask task) {}
 
+void SimpleThreadScheduler::PostDelayedIdleTask(const base::Location&,
+                                                base::TimeDelta delay,
+                                                Thread::IdleTask) {}
+
 void SimpleThreadScheduler::PostNonNestableIdleTask(
     const base::Location& location,
     Thread::IdleTask task) {}
 
-void SimpleThreadScheduler::AddRAILModeObserver(WebRAILModeObserver* observer) {
-}
+void SimpleThreadScheduler::AddRAILModeObserver(RAILModeObserver* observer) {}
+
+void SimpleThreadScheduler::RemoveRAILModeObserver(
+    RAILModeObserver const* observer) {}
 
 scoped_refptr<base::SingleThreadTaskRunner>
 SimpleThreadScheduler::V8TaskRunner() {
@@ -47,6 +53,11 @@ SimpleThreadScheduler::CompositorTaskRunner() {
 
 scoped_refptr<base::SingleThreadTaskRunner>
 SimpleThreadScheduler::IPCTaskRunner() {
+  return base::ThreadTaskRunnerHandle::Get();
+}
+
+scoped_refptr<base::SingleThreadTaskRunner>
+SimpleThreadScheduler::DeprecatedDefaultTaskRunner() {
   return base::ThreadTaskRunnerHandle::Get();
 }
 
@@ -64,11 +75,11 @@ base::TimeTicks SimpleThreadScheduler::MonotonicallyIncreasingVirtualTime() {
   return base::TimeTicks::Now();
 }
 
-void SimpleThreadScheduler::AddTaskObserver(
-    base::MessageLoop::TaskObserver* task_observer) {}
+void SimpleThreadScheduler::AddTaskObserver(base::TaskObserver* task_observer) {
+}
 
 void SimpleThreadScheduler::RemoveTaskObserver(
-    base::MessageLoop::TaskObserver* task_observer) {}
+    base::TaskObserver* task_observer) {}
 
 NonMainThreadSchedulerImpl* SimpleThreadScheduler::AsNonMainThreadScheduler() {
   return nullptr;

@@ -33,23 +33,18 @@
 
 namespace blink {
 
-inline SVGScriptElement::SVGScriptElement(Document& document,
-                                          const CreateElementFlags flags)
-    : SVGElement(SVGNames::scriptTag, document),
+SVGScriptElement::SVGScriptElement(Document& document,
+                                   const CreateElementFlags flags)
+    : SVGElement(svg_names::kScriptTag, document),
       SVGURIReference(this),
       loader_(InitializeScriptLoader(flags.IsCreatedByParser(),
                                      flags.WasAlreadyStarted())) {}
 
-SVGScriptElement* SVGScriptElement::Create(Document& document,
-                                           const CreateElementFlags flags) {
-  return new SVGScriptElement(document, flags);
-}
-
 void SVGScriptElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  if (params.name == HTMLNames::onerrorAttr) {
+  if (params.name == html_names::kOnerrorAttr) {
     SetAttributeEventListener(
-        EventTypeNames::error,
+        event_type_names::kError,
         CreateAttributeEventListener(
             this, params.name, params.new_value,
             JSEventHandler::HandlerType::kOnErrorEventHandler));
@@ -109,7 +104,7 @@ String SVGScriptElement::SourceAttributeValue() const {
 }
 
 String SVGScriptElement::TypeAttributeValue() const {
-  return getAttribute(SVGNames::typeAttr).GetString();
+  return getAttribute(svg_names::kTypeAttr).GetString();
 }
 
 String SVGScriptElement::TextFromChildren() {
@@ -136,32 +131,31 @@ const AtomicString& SVGScriptElement::GetNonceForElement() const {
 bool SVGScriptElement::AllowInlineScriptForCSP(
     const AtomicString& nonce,
     const WTF::OrdinalNumber& context_line,
-    const String& script_content,
-    ContentSecurityPolicy::InlineType inline_type) {
-  return GetDocument().GetContentSecurityPolicy()->AllowInlineScript(
-      this, GetDocument().Url(), nonce, context_line, script_content,
-      inline_type);
+    const String& script_content) {
+  return GetDocument().GetContentSecurityPolicyForWorld()->AllowInline(
+      ContentSecurityPolicy::InlineType::kScript, this, script_content, nonce,
+      GetDocument().Url(), context_line);
 }
 
 Document& SVGScriptElement::GetDocument() const {
   return Node::GetDocument();
 }
 
-Element* SVGScriptElement::CloneWithoutAttributesAndChildren(
+Element& SVGScriptElement::CloneWithoutAttributesAndChildren(
     Document& factory) const {
   CreateElementFlags flags =
       CreateElementFlags::ByCloneNode().SetAlreadyStarted(
           loader_->AlreadyStarted());
-  return factory.CreateElement(TagQName(), flags, IsValue());
+  return *factory.CreateElement(TagQName(), flags, IsValue());
 }
 
 void SVGScriptElement::DispatchLoadEvent() {
-  DispatchEvent(*Event::Create(EventTypeNames::load));
+  DispatchEvent(*Event::Create(event_type_names::kLoad));
   have_fired_load_ = true;
 }
 
 void SVGScriptElement::DispatchErrorEvent() {
-  DispatchEvent(*Event::Create(EventTypeNames::error));
+  DispatchEvent(*Event::Create(event_type_names::kError));
 }
 
 void SVGScriptElement::SetScriptElementForBinding(
@@ -172,12 +166,22 @@ void SVGScriptElement::SetScriptElementForBinding(
 
 #if DCHECK_IS_ON()
 bool SVGScriptElement::IsAnimatableAttribute(const QualifiedName& name) const {
-  if (name == SVGNames::typeAttr || name == SVGNames::hrefAttr ||
-      name == XLinkNames::hrefAttr)
+  if (name == svg_names::kTypeAttr || name == svg_names::kHrefAttr ||
+      name == xlink_names::kHrefAttr)
     return false;
   return SVGElement::IsAnimatableAttribute(name);
 }
 #endif
+
+const AttrNameToTrustedType& SVGScriptElement::GetCheckedAttributeTypes()
+    const {
+  DEFINE_STATIC_LOCAL(AttrNameToTrustedType, attribute_map,
+                      ({
+                          {svg_names::kHrefAttr.LocalName(),
+                           SpecificTrustedType::kTrustedScriptURL},
+                      }));
+  return attribute_map;
+}
 
 void SVGScriptElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(loader_);

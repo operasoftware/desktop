@@ -41,7 +41,8 @@ class CORE_EXPORT SVGImageElement final
   USING_GARBAGE_COLLECTED_MIXIN(SVGImageElement);
 
  public:
-  DECLARE_NODE_FACTORY(SVGImageElement);
+  explicit SVGImageElement(Document&);
+
   void Trace(blink::Visitor*) override;
 
   bool CurrentFrameHasSingleSecurityOrigin() const;
@@ -73,9 +74,15 @@ class CORE_EXPORT SVGImageElement final
     return is_default_overridden_intrinsic_size_;
   }
 
- private:
-  explicit SVGImageElement(Document&);
+  void SetImageForTest(ImageResourceContent* content) {
+    GetImageLoader().SetImageForTest(content);
+  }
 
+  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override {
+    return SVGURIReference::GetCheckedAttributeTypes();
+  }
+
+ private:
   bool IsStructurallyExternal() const override {
     return !HrefString().IsNull();
   }
@@ -91,7 +98,7 @@ class CORE_EXPORT SVGImageElement final
   void AttachLayoutTree(AttachContext&) override;
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 
   const AtomicString ImageSourceURL() const override;
 

@@ -27,7 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_TREE_AS_TEXT_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
 
@@ -36,7 +36,6 @@ namespace blink {
 class Color;
 class PaintLayer;
 class Element;
-class LayoutRect;
 class LocalFrame;
 class LayoutBlockFlow;
 class LayoutObject;
@@ -94,7 +93,6 @@ class LayoutTreeAsText {
   static void WriteLayers(WTF::TextStream&,
                           const PaintLayer* root_layer,
                           PaintLayer*,
-                          const LayoutRect& paint_dirty_rect,
                           int indent = 0,
                           LayoutAsTextBehavior = kLayoutAsTextBehaviorNormal,
                           const PaintLayer* marked_layer = nullptr);

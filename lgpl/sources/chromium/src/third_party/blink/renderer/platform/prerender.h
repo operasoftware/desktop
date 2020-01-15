@@ -35,9 +35,11 @@
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -45,8 +47,7 @@ namespace blink {
 
 class PrerenderClient;
 
-class PLATFORM_EXPORT Prerender final
-    : public GarbageCollectedFinalized<Prerender> {
+class PLATFORM_EXPORT Prerender final : public GarbageCollected<Prerender> {
   DISALLOW_COPY_AND_ASSIGN(Prerender);
 
  public:
@@ -55,13 +56,11 @@ class PLATFORM_EXPORT Prerender final
     virtual ~ExtraData() = default;
   };
 
-  static Prerender* Create(PrerenderClient* client,
-                           const KURL& url,
-                           unsigned rel_types,
-                           const Referrer& referrer) {
-    return new Prerender(client, url, rel_types, referrer);
-  }
-
+  Prerender(PrerenderClient*,
+            const KURL&,
+            unsigned rel_types,
+            const Referrer&,
+            const SecurityOrigin* security_origin);
   ~Prerender();
   void Trace(blink::Visitor*);
 
@@ -74,7 +73,10 @@ class PLATFORM_EXPORT Prerender final
   const KURL& Url() const { return url_; }
   unsigned RelTypes() const { return rel_types_; }
   const String& GetReferrer() const { return referrer_.referrer; }
-  ReferrerPolicy GetReferrerPolicy() const { return referrer_.referrer_policy; }
+  network::mojom::ReferrerPolicy GetReferrerPolicy() const {
+    return referrer_.referrer_policy;
+  }
+  const SecurityOrigin* GetSecurityOrigin() const { return security_origin_; }
 
   void SetExtraData(scoped_refptr<ExtraData> extra_data) {
     extra_data_ = std::move(extra_data);
@@ -87,8 +89,6 @@ class PLATFORM_EXPORT Prerender final
   void DidSendDOMContentLoadedForPrerender();
 
  private:
-  Prerender(PrerenderClient*, const KURL&, unsigned rel_types, const Referrer&);
-
   // The embedder's prerendering support holds on to pending Prerender objects;
   // those references should not keep the PrerenderClient alive -- if the client
   // becomes otherwise unreachable it should be GCed (at which point it will
@@ -98,6 +98,7 @@ class PLATFORM_EXPORT Prerender final
   const KURL url_;
   const unsigned rel_types_;
   const Referrer referrer_;
+  const SecurityOrigin* const security_origin_;
 
   scoped_refptr<ExtraData> extra_data_;
 };

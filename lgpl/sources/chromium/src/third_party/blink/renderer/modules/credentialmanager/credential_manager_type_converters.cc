@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "build/build_config.h"
+#include "third_party/blink/public/mojom/webauthn/authenticator.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/array_buffer_or_array_buffer_view.h"
 #include "third_party/blink/renderer/modules/credentialmanager/authenticator_selection_criteria.h"
 #include "third_party/blink/renderer/modules/credentialmanager/cable_authentication_data.h"
@@ -21,16 +23,17 @@
 #include "third_party/blink/renderer/modules/credentialmanager/public_key_credential_request_options.h"
 #include "third_party/blink/renderer/modules/credentialmanager/public_key_credential_rp_entity.h"
 #include "third_party/blink/renderer/modules/credentialmanager/public_key_credential_user_entity.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace {
 // Time to wait for an authenticator to successfully complete an operation.
-constexpr TimeDelta kAdjustedTimeoutLower = TimeDelta::FromSeconds(1);
-constexpr TimeDelta kAdjustedTimeoutUpper = TimeDelta::FromMinutes(1);
+constexpr base::TimeDelta kAdjustedTimeoutLower =
+    base::TimeDelta::FromSeconds(10);
+constexpr base::TimeDelta kAdjustedTimeoutUpper =
+    base::TimeDelta::FromMinutes(10);
 
-WTF::TimeDelta AdjustTimeout(uint32_t timeout) {
-  WTF::TimeDelta adjusted_timeout;
-  adjusted_timeout = WTF::TimeDelta::FromMilliseconds(timeout);
+base::TimeDelta AdjustTimeout(uint32_t timeout) {
+  base::TimeDelta adjusted_timeout;
+  adjusted_timeout = base::TimeDelta::FromMilliseconds(timeout);
   return std::max(kAdjustedTimeoutLower,
                   std::min(kAdjustedTimeoutUpper, adjusted_timeout));
 }
@@ -116,12 +119,16 @@ TypeConverter<CredentialManagerError, AuthenticatorStatus>::Convert(
   switch (status) {
     case blink::mojom::blink::AuthenticatorStatus::NOT_ALLOWED_ERROR:
       return CredentialManagerError::NOT_ALLOWED;
+    case blink::mojom::blink::AuthenticatorStatus::ABORT_ERROR:
+      return CredentialManagerError::ABORT;
     case blink::mojom::blink::AuthenticatorStatus::UNKNOWN_ERROR:
       return CredentialManagerError::UNKNOWN;
     case blink::mojom::blink::AuthenticatorStatus::PENDING_REQUEST:
       return CredentialManagerError::PENDING_REQUEST;
     case blink::mojom::blink::AuthenticatorStatus::INVALID_DOMAIN:
       return CredentialManagerError::INVALID_DOMAIN;
+    case blink::mojom::blink::AuthenticatorStatus::INVALID_ICON_URL:
+      return CredentialManagerError::INVALID_ICON_URL;
     case blink::mojom::blink::AuthenticatorStatus::CREDENTIAL_EXCLUDED:
       return CredentialManagerError::CREDENTIAL_EXCLUDED;
     case blink::mojom::blink::AuthenticatorStatus::CREDENTIAL_NOT_RECOGNIZED:
@@ -143,6 +150,9 @@ TypeConverter<CredentialManagerError, AuthenticatorStatus>::Convert(
     case blink::mojom::blink::AuthenticatorStatus::
         USER_VERIFICATION_UNSUPPORTED:
       return CredentialManagerError::ANDROID_USER_VERIFICATION_UNSUPPORTED;
+    case blink::mojom::blink::AuthenticatorStatus::
+        PROTECTION_POLICY_INCONSISTENT:
+      return CredentialManagerError::PROTECTION_POLICY_INCONSISTENT;
     case blink::mojom::blink::AuthenticatorStatus::SUCCESS:
       NOTREACHED();
       break;
@@ -197,7 +207,8 @@ PublicKeyCredentialType TypeConverter<PublicKeyCredentialType, String>::Convert(
 }
 
 // static
-AuthenticatorTransport TypeConverter<AuthenticatorTransport, String>::Convert(
+base::Optional<AuthenticatorTransport>
+TypeConverter<base::Optional<AuthenticatorTransport>, String>::Convert(
     const String& transport) {
   if (transport == "usb")
     return AuthenticatorTransport::USB;
@@ -209,8 +220,7 @@ AuthenticatorTransport TypeConverter<AuthenticatorTransport, String>::Convert(
     return AuthenticatorTransport::CABLE;
   if (transport == "internal")
     return AuthenticatorTransport::INTERNAL;
-  NOTREACHED();
-  return AuthenticatorTransport::USB;
+  return base::nullopt;
 }
 
 // static
@@ -276,45 +286,57 @@ AuthenticatorAttachment TypeConverter<AuthenticatorAttachment, String>::Convert(
 // static
 AuthenticatorSelectionCriteriaPtr
 TypeConverter<AuthenticatorSelectionCriteriaPtr,
-              blink::AuthenticatorSelectionCriteria>::
-    Convert(const blink::AuthenticatorSelectionCriteria& criteria) {
+              blink::AuthenticatorSelectionCriteria*>::
+    Convert(const blink::AuthenticatorSelectionCriteria* criteria) {
   auto mojo_criteria =
       blink::mojom::blink::AuthenticatorSelectionCriteria::New();
   mojo_criteria->authenticator_attachment =
-      ConvertTo<AuthenticatorAttachment>(criteria.authenticatorAttachment());
-  mojo_criteria->require_resident_key = criteria.requireResidentKey();
-  mojo_criteria->user_verification =
-      ConvertTo<UserVerificationRequirement>(criteria.userVerification());
+      ConvertTo<AuthenticatorAttachment>(criteria->authenticatorAttachment());
+  mojo_criteria->require_resident_key = criteria->requireResidentKey();
+  mojo_criteria->user_verification = UserVerificationRequirement::PREFERRED;
+  if (criteria->hasUserVerification()) {
+    mojo_criteria->user_verification =
+        ConvertTo<UserVerificationRequirement>(criteria->userVerification());
+  }
   return mojo_criteria;
 }
 
 // static
 PublicKeyCredentialUserEntityPtr
 TypeConverter<PublicKeyCredentialUserEntityPtr,
-              blink::PublicKeyCredentialUserEntity>::
-    Convert(const blink::PublicKeyCredentialUserEntity& user) {
+              blink::PublicKeyCredentialUserEntity*>::
+    Convert(const blink::PublicKeyCredentialUserEntity* user) {
   auto entity = PublicKeyCredentialUserEntity::New();
-  entity->id = ConvertTo<Vector<uint8_t>>(user.id());
-  entity->name = user.name();
-  if (user.hasIcon()) {
-    entity->icon = blink::KURL(blink::KURL(), user.icon());
+  entity->id = ConvertTo<Vector<uint8_t>>(user->id());
+  entity->name = user->name();
+  if (user->hasIcon()) {
+    if (user->icon().IsEmpty())
+      entity->icon = blink::KURL();
+    else
+      entity->icon = blink::KURL(user->icon());
   }
-  entity->display_name = user.displayName();
+  entity->display_name = user->displayName();
   return entity;
 }
 
 // static
 PublicKeyCredentialRpEntityPtr
 TypeConverter<PublicKeyCredentialRpEntityPtr,
-              blink::PublicKeyCredentialRpEntity>::
-    Convert(const blink::PublicKeyCredentialRpEntity& rp) {
+              blink::PublicKeyCredentialRpEntity*>::
+    Convert(const blink::PublicKeyCredentialRpEntity* rp) {
   auto entity = PublicKeyCredentialRpEntity::New();
-  if (rp.hasId()) {
-    entity->id = rp.id();
+  if (rp->hasId()) {
+    entity->id = rp->id();
   }
-  entity->name = rp.name();
-  if (rp.hasIcon()) {
-    entity->icon = blink::KURL(blink::KURL(), rp.icon());
+  if (!rp->name()) {
+    return nullptr;
+  }
+  entity->name = rp->name();
+  if (rp->hasIcon()) {
+    if (rp->icon().IsEmpty())
+      entity->icon = blink::KURL();
+    else
+      entity->icon = blink::KURL(rp->icon());
   }
   return entity;
 }
@@ -322,16 +344,20 @@ TypeConverter<PublicKeyCredentialRpEntityPtr,
 // static
 PublicKeyCredentialDescriptorPtr
 TypeConverter<PublicKeyCredentialDescriptorPtr,
-              blink::PublicKeyCredentialDescriptor>::
-    Convert(const blink::PublicKeyCredentialDescriptor& descriptor) {
+              blink::PublicKeyCredentialDescriptor*>::
+    Convert(const blink::PublicKeyCredentialDescriptor* descriptor) {
   auto mojo_descriptor = PublicKeyCredentialDescriptor::New();
 
-  mojo_descriptor->type = ConvertTo<PublicKeyCredentialType>(descriptor.type());
-  mojo_descriptor->id = ConvertTo<Vector<uint8_t>>(descriptor.id());
-  if (descriptor.hasTransports()) {
-    for (const auto& transport : descriptor.transports()) {
-      mojo_descriptor->transports.push_back(
-          ConvertTo<AuthenticatorTransport>(transport));
+  mojo_descriptor->type =
+      ConvertTo<PublicKeyCredentialType>(descriptor->type());
+  mojo_descriptor->id = ConvertTo<Vector<uint8_t>>(descriptor->id());
+  if (descriptor->hasTransports() && !descriptor->transports().IsEmpty()) {
+    for (const auto& transport : descriptor->transports()) {
+      auto maybe_transport(
+          ConvertTo<base::Optional<AuthenticatorTransport>>(transport));
+      if (maybe_transport) {
+        mojo_descriptor->transports.push_back(*maybe_transport);
+      }
     }
   } else {
     mojo_descriptor->transports = {
@@ -345,35 +371,36 @@ TypeConverter<PublicKeyCredentialDescriptorPtr,
 // static
 PublicKeyCredentialParametersPtr
 TypeConverter<PublicKeyCredentialParametersPtr,
-              blink::PublicKeyCredentialParameters>::
-    Convert(const blink::PublicKeyCredentialParameters& parameter) {
+              blink::PublicKeyCredentialParameters*>::
+    Convert(const blink::PublicKeyCredentialParameters* parameter) {
   auto mojo_parameter = PublicKeyCredentialParameters::New();
-  mojo_parameter->type = ConvertTo<PublicKeyCredentialType>(parameter.type());
+  mojo_parameter->type = ConvertTo<PublicKeyCredentialType>(parameter->type());
 
   // A COSEAlgorithmIdentifier's value is a number identifying a cryptographic
   // algorithm. Values are registered in the IANA COSE Algorithms registry.
   // https://www.iana.org/assignments/cose/cose.xhtml#algorithms
-  mojo_parameter->algorithm_identifier = parameter.alg();
+  mojo_parameter->algorithm_identifier = parameter->alg();
   return mojo_parameter;
 }
 
 // static
 PublicKeyCredentialCreationOptionsPtr
 TypeConverter<PublicKeyCredentialCreationOptionsPtr,
-              blink::PublicKeyCredentialCreationOptions>::
-    Convert(const blink::PublicKeyCredentialCreationOptions& options) {
+              blink::PublicKeyCredentialCreationOptions*>::
+    Convert(const blink::PublicKeyCredentialCreationOptions* options) {
   auto mojo_options =
       blink::mojom::blink::PublicKeyCredentialCreationOptions::New();
-  mojo_options->relying_party = PublicKeyCredentialRpEntity::From(options.rp());
-  mojo_options->user = PublicKeyCredentialUserEntity::From(options.user());
+  mojo_options->relying_party =
+      PublicKeyCredentialRpEntity::From(options->rp());
+  mojo_options->user = PublicKeyCredentialUserEntity::From(options->user());
   if (!mojo_options->relying_party | !mojo_options->user) {
     return nullptr;
   }
-  mojo_options->challenge = ConvertTo<Vector<uint8_t>>(options.challenge());
+  mojo_options->challenge = ConvertTo<Vector<uint8_t>>(options->challenge());
 
   // Step 4 of https://w3c.github.io/webauthn/#createCredential
-  if (options.hasTimeout()) {
-    mojo_options->adjusted_timeout = AdjustTimeout(options.timeout());
+  if (options->hasTimeout()) {
+    mojo_options->adjusted_timeout = AdjustTimeout(options->timeout());
   } else {
     mojo_options->adjusted_timeout = kAdjustedTimeoutUpper;
   }
@@ -381,30 +408,30 @@ TypeConverter<PublicKeyCredentialCreationOptionsPtr,
   // Steps 8 and 9 of
   // https://www.w3.org/TR/2017/WD-webauthn-20170505/#createCredential
   Vector<PublicKeyCredentialParametersPtr> parameters;
-  for (const auto& parameter : options.pubKeyCredParams()) {
+  for (auto& parameter : options->pubKeyCredParams()) {
     PublicKeyCredentialParametersPtr normalized_parameter =
-        PublicKeyCredentialParameters::From(parameter);
+        PublicKeyCredentialParameters::From(parameter.Get());
     if (normalized_parameter) {
       parameters.push_back(std::move(normalized_parameter));
     }
   }
 
-  if (parameters.IsEmpty() && options.hasPubKeyCredParams()) {
+  if (parameters.IsEmpty() && options->hasPubKeyCredParams()) {
     return nullptr;
   }
 
   mojo_options->public_key_parameters = std::move(parameters);
 
-  if (options.hasAuthenticatorSelection()) {
+  if (options->hasAuthenticatorSelection()) {
     mojo_options->authenticator_selection =
-        AuthenticatorSelectionCriteria::From(options.authenticatorSelection());
+        AuthenticatorSelectionCriteria::From(options->authenticatorSelection());
   }
 
-  if (options.hasExcludeCredentials()) {
+  if (options->hasExcludeCredentials()) {
     // Adds the excludeCredentials members
-    for (const auto descriptor : options.excludeCredentials()) {
+    for (auto& descriptor : options->excludeCredentials()) {
       PublicKeyCredentialDescriptorPtr mojo_descriptor =
-          PublicKeyCredentialDescriptor::From(descriptor);
+          PublicKeyCredentialDescriptor::From(descriptor.Get());
       if (mojo_descriptor) {
         mojo_options->exclude_credentials.push_back(std::move(mojo_descriptor));
       }
@@ -413,8 +440,8 @@ TypeConverter<PublicKeyCredentialCreationOptionsPtr,
 
   mojo_options->attestation =
       blink::mojom::AttestationConveyancePreference::NONE;
-  if (options.hasAttestation()) {
-    const auto& attestation = options.attestation();
+  if (options->hasAttestation()) {
+    const auto& attestation = options->attestation();
     if (attestation == "none") {
       // Default value.
     } else if (attestation == "indirect") {
@@ -431,14 +458,45 @@ TypeConverter<PublicKeyCredentialCreationOptionsPtr,
     }
   }
 
-  if (options.hasExtensions()) {
-    const auto& extensions = options.extensions();
-    if (extensions.hasCableRegistration()) {
+  mojo_options->protection_policy = blink::mojom::ProtectionPolicy::UNSPECIFIED;
+  mojo_options->enforce_protection_policy = false;
+  if (options->hasExtensions()) {
+    auto* extensions = options->extensions();
+    if (extensions->hasCableRegistration()) {
       CableRegistrationPtr mojo_cable =
-          CableRegistration::From(extensions.cableRegistration());
+          CableRegistration::From(extensions->cableRegistration());
       if (mojo_cable) {
         mojo_options->cable_registration_data = std::move(mojo_cable);
       }
+    }
+    if (extensions->hasHmacCreateSecret()) {
+      mojo_options->hmac_create_secret = extensions->hmacCreateSecret();
+    }
+    if (extensions->hasAppidExclude()) {
+      mojo_options->appid_exclude = extensions->appidExclude();
+    }
+#if defined(OS_ANDROID)
+    if (extensions->hasUvm()) {
+      mojo_options->user_verification_methods = extensions->uvm();
+    }
+#endif
+    if (extensions->hasCredentialProtectionPolicy()) {
+      const auto& policy = extensions->credentialProtectionPolicy();
+      if (policy == "userVerificationOptional") {
+        mojo_options->protection_policy = blink::mojom::ProtectionPolicy::NONE;
+      } else if (policy == "userVerificationOptionalWithCredentialIDList") {
+        mojo_options->protection_policy =
+            blink::mojom::ProtectionPolicy::UV_OR_CRED_ID_REQUIRED;
+      } else if (policy == "userVerificationRequired") {
+        mojo_options->protection_policy =
+            blink::mojom::ProtectionPolicy::UV_REQUIRED;
+      } else {
+        return nullptr;
+      }
+    }
+    if (extensions->hasEnforceCredentialProtectionPolicy() &&
+        extensions->enforceCredentialProtectionPolicy()) {
+      mojo_options->enforce_protection_policy = true;
     }
   }
 
@@ -447,14 +505,14 @@ TypeConverter<PublicKeyCredentialCreationOptionsPtr,
 
 // static
 CableAuthenticationPtr
-TypeConverter<CableAuthenticationPtr, blink::CableAuthenticationData>::Convert(
-    const blink::CableAuthenticationData& data) {
+TypeConverter<CableAuthenticationPtr, blink::CableAuthenticationData*>::Convert(
+    const blink::CableAuthenticationData* data) {
   auto entity = CableAuthentication::New();
-  entity->version = data.version();
-  entity->client_eid = ConvertFixedSizeArray(data.clientEid(), 16);
+  entity->version = data->version();
+  entity->client_eid = ConvertFixedSizeArray(data->clientEid(), 16);
   entity->authenticator_eid =
-      ConvertFixedSizeArray(data.authenticatorEid(), 16);
-  entity->session_pre_key = ConvertFixedSizeArray(data.sessionPreKey(), 32);
+      ConvertFixedSizeArray(data->authenticatorEid(), 16);
+  entity->session_pre_key = ConvertFixedSizeArray(data->sessionPreKey(), 32);
   if (entity->client_eid.IsEmpty() || entity->authenticator_eid.IsEmpty() ||
       entity->session_pre_key.IsEmpty()) {
     return nullptr;
@@ -464,12 +522,12 @@ TypeConverter<CableAuthenticationPtr, blink::CableAuthenticationData>::Convert(
 
 // static
 CableRegistrationPtr
-TypeConverter<CableRegistrationPtr, blink::CableRegistrationData>::Convert(
-    const blink::CableRegistrationData& data) {
+TypeConverter<CableRegistrationPtr, blink::CableRegistrationData*>::Convert(
+    const blink::CableRegistrationData* data) {
   auto entity = CableRegistration::New();
-  entity->versions = data.versions();
+  entity->versions = data->versions();
   entity->relying_party_public_key =
-      ConvertFixedSizeArray(data.rpPublicKey(), 65);
+      ConvertFixedSizeArray(data->rpPublicKey(), 65);
   if (entity->relying_party_public_key.IsEmpty()) {
     return nullptr;
   }
@@ -479,49 +537,63 @@ TypeConverter<CableRegistrationPtr, blink::CableRegistrationData>::Convert(
 // static
 PublicKeyCredentialRequestOptionsPtr
 TypeConverter<PublicKeyCredentialRequestOptionsPtr,
-              blink::PublicKeyCredentialRequestOptions>::
-    Convert(const blink::PublicKeyCredentialRequestOptions& options) {
+              blink::PublicKeyCredentialRequestOptions*>::
+    Convert(const blink::PublicKeyCredentialRequestOptions* options) {
   auto mojo_options =
       blink::mojom::blink::PublicKeyCredentialRequestOptions::New();
-  mojo_options->challenge = ConvertTo<Vector<uint8_t>>(options.challenge());
+  mojo_options->challenge = ConvertTo<Vector<uint8_t>>(options->challenge());
 
-  if (options.hasTimeout()) {
-    mojo_options->adjusted_timeout = AdjustTimeout(options.timeout());
+  if (options->hasTimeout()) {
+    mojo_options->adjusted_timeout = AdjustTimeout(options->timeout());
   } else {
     mojo_options->adjusted_timeout = kAdjustedTimeoutUpper;
   }
 
-  mojo_options->relying_party_id = options.rpId();
+  mojo_options->relying_party_id = options->rpId();
 
-  if (options.hasAllowCredentials()) {
+  if (options->hasAllowCredentials()) {
     // Adds the allowList members
-    for (auto descriptor : options.allowCredentials()) {
+    for (auto descriptor : options->allowCredentials()) {
       PublicKeyCredentialDescriptorPtr mojo_descriptor =
-          PublicKeyCredentialDescriptor::From(descriptor);
+          PublicKeyCredentialDescriptor::From(descriptor.Get());
       if (mojo_descriptor) {
         mojo_options->allow_credentials.push_back(std::move(mojo_descriptor));
       }
     }
   }
 
-  mojo_options->user_verification =
-      ConvertTo<UserVerificationRequirement>(options.userVerification());
+  mojo_options->user_verification = UserVerificationRequirement::PREFERRED;
+  if (options->hasUserVerification()) {
+    mojo_options->user_verification =
+        ConvertTo<UserVerificationRequirement>(options->userVerification());
+  }
 
-  if (options.hasExtensions()) {
-    const auto& extensions = options.extensions();
-    if (extensions.hasAppid()) {
-      mojo_options->appid = extensions.appid();
+  if (options->hasExtensions()) {
+    auto* extensions = options->extensions();
+    if (extensions->hasAppid()) {
+      mojo_options->appid = extensions->appid();
     }
-    if (extensions.hasCableAuthentication()) {
+    if (extensions->hasCableAuthentication()) {
       Vector<CableAuthenticationPtr> mojo_data;
-      for (const auto& data : extensions.cableAuthentication()) {
-        CableAuthenticationPtr mojo_cable = CableAuthentication::From(data);
+      for (auto& data : extensions->cableAuthentication()) {
+        if (data->version() != 1) {
+          continue;
+        }
+        CableAuthenticationPtr mojo_cable =
+            CableAuthentication::From(data.Get());
         if (mojo_cable) {
           mojo_data.push_back(std::move(mojo_cable));
         }
       }
-      mojo_options->cable_authentication_data = std::move(mojo_data);
+      if (mojo_data.size() > 0) {
+        mojo_options->cable_authentication_data = std::move(mojo_data);
+      }
     }
+#if defined(OS_ANDROID)
+    if (extensions->hasUvm()) {
+      mojo_options->user_verification_methods = extensions->uvm();
+    }
+#endif
   }
 
   return mojo_options;

@@ -38,16 +38,16 @@ TEST_F(LayoutTextControlTest,
   auto* inputElement = GetHTMLInputElementById("input");
   inputElement->focus();
   inputElement->SetSelectionRange(1, 3);
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   auto* selectedText = GetInnerLayoutText(inputElement);
   EXPECT_FALSE(selectedText->ShouldInvalidateSelection());
 
-  inputElement->setAttribute(HTMLNames::classAttr, "pseudoSelection");
+  inputElement->setAttribute(html_names::kClassAttr, "pseudoSelection");
   GetDocument().View()->UpdateLifecycleToLayoutClean();
   EXPECT_TRUE(selectedText->ShouldInvalidateSelection());
 
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
   EXPECT_FALSE(selectedText->ShouldInvalidateSelection());
 }
 
@@ -63,16 +63,16 @@ TEST_F(LayoutTextControlTest,
   auto* inputElement = GetHTMLInputElementById("input");
   inputElement->focus();
   inputElement->SetSelectionRange(1, 3);
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   auto* selectedText = GetInnerLayoutText(inputElement);
   EXPECT_FALSE(selectedText->ShouldInvalidateSelection());
 
-  inputElement->setAttribute(HTMLNames::classAttr, "pseudoSelection");
+  inputElement->setAttribute(html_names::kClassAttr, "pseudoSelection");
   GetDocument().View()->UpdateLifecycleToLayoutClean();
   EXPECT_TRUE(selectedText->ShouldInvalidateSelection());
 
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
   EXPECT_FALSE(selectedText->ShouldInvalidateSelection());
 }
 
@@ -88,17 +88,32 @@ TEST_F(LayoutTextControlTest,
   auto* inputElement = GetHTMLInputElementById("input");
   inputElement->focus();
   inputElement->SetSelectionRange(1, 3);
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   auto* selectedText = GetInnerLayoutText(inputElement);
   EXPECT_FALSE(selectedText->ShouldInvalidateSelection());
 
-  inputElement->removeAttribute(HTMLNames::classAttr);
+  inputElement->removeAttribute(html_names::kClassAttr);
   GetDocument().View()->UpdateLifecycleToLayoutClean();
   EXPECT_TRUE(selectedText->ShouldInvalidateSelection());
 
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
   EXPECT_FALSE(selectedText->ShouldInvalidateSelection());
+}
+
+TEST_F(LayoutTextControlTest, HitTestSearchInput) {
+  SetBodyInnerHTML(R"HTML(
+    <input id="input" type="search"
+           style="border-width: 20px; font-size: 30px; padding: 0">
+  )HTML");
+
+  auto* input = GetHTMLInputElementById("input");
+  HitTestResult result;
+  HitTestLocation location(PhysicalOffset(40, 30));
+  EXPECT_TRUE(input->GetLayoutObject()->HitTestAllPhases(result, location,
+                                                         PhysicalOffset()));
+  EXPECT_EQ(PhysicalOffset(20, 10), result.LocalPoint());
+  EXPECT_EQ(input->InnerEditorElement(), result.InnerElement());
 }
 
 }  // anonymous namespace

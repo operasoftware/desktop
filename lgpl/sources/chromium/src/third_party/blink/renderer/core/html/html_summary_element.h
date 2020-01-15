@@ -29,19 +29,19 @@ class HTMLDetailsElement;
 
 class HTMLSummaryElement final : public HTMLElement {
  public:
-  static HTMLSummaryElement* Create(Document&);
+  explicit HTMLSummaryElement(Document&);
+
   bool IsMainSummary() const;
   bool WillRespondToMouseClickEvents() override;
 
   Element* MarkerControl();
 
  private:
-  explicit HTMLSummaryElement(Document&);
-
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
   void DefaultEventHandler(Event&) override;
   bool HasActivationBehavior() const override;
   void DidAddUserAgentShadowRoot(ShadowRoot&) override;
+  void WillRecalcStyle(const StyleRecalcChange) override;
   HTMLDetailsElement* DetailsElement() const;
 
   bool SupportsFocus() const override;

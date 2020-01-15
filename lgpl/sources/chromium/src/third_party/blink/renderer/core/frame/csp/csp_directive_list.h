@@ -28,8 +28,8 @@ enum class ResourceType : uint8_t;
 
 typedef HeapVector<Member<SourceListDirective>> SourceListDirectiveVector;
 
-class CORE_EXPORT CSPDirectiveList
-    : public GarbageCollectedFinalized<CSPDirectiveList> {
+class CORE_EXPORT CSPDirectiveList final
+    : public GarbageCollected<CSPDirectiveList> {
  public:
   static CSPDirectiveList* Create(ContentSecurityPolicy*,
                                   const UChar* begin,
@@ -37,6 +37,10 @@ class CORE_EXPORT CSPDirectiveList
                                   ContentSecurityPolicyHeaderType,
                                   ContentSecurityPolicyHeaderSource,
                                   bool should_parse_wasm_eval = false);
+
+  CSPDirectiveList(ContentSecurityPolicy*,
+                   ContentSecurityPolicyHeaderType,
+                   ContentSecurityPolicyHeaderSource);
 
   void Parse(const UChar* begin,
              const UChar* end,
@@ -48,35 +52,18 @@ class CORE_EXPORT CSPDirectiveList
     return header_source_;
   }
 
-  bool AllowJavaScriptURLs(Element*,
-                           const String& source,
-                           const String& context_url,
-                           const WTF::OrdinalNumber& context_line,
-                           SecurityViolationReportingPolicy) const;
-  bool AllowInlineEventHandlers(Element*,
-                                const String& source,
-                                const String& context_url,
-                                const WTF::OrdinalNumber& context_line,
-                                SecurityViolationReportingPolicy) const;
-  bool AllowInlineScript(Element*,
-                         const String& context_url,
-                         const String& nonce,
-                         const WTF::OrdinalNumber& context_line,
-                         SecurityViolationReportingPolicy,
-                         const String& script_content) const;
-  bool AllowInlineStyle(Element*,
-                        const String& context_url,
-                        const String& nonce,
-                        const WTF::OrdinalNumber& context_line,
-                        SecurityViolationReportingPolicy,
-                        const String& style_content,
-                        ContentSecurityPolicy::InlineType inline_type) const;
-  bool AllowEval(ScriptState*,
-                 SecurityViolationReportingPolicy,
+  bool AllowInline(ContentSecurityPolicy::InlineType,
+                   Element*,
+                   const String& content,
+                   const String& nonce,
+                   const String& context_url,
+                   const WTF::OrdinalNumber& context_line,
+                   SecurityViolationReportingPolicy) const;
+
+  bool AllowEval(SecurityViolationReportingPolicy,
                  ContentSecurityPolicy::ExceptionStatus,
                  const String& script_content) const;
-  bool AllowWasmEval(ScriptState*,
-                     SecurityViolationReportingPolicy,
+  bool AllowWasmEval(SecurityViolationReportingPolicy,
                      ContentSecurityPolicy::ExceptionStatus,
                      const String& script_content) const;
   bool AllowPluginType(const String& type,
@@ -84,51 +71,16 @@ class CORE_EXPORT CSPDirectiveList
                        const KURL&,
                        SecurityViolationReportingPolicy) const;
 
-  bool AllowScriptFromSource(const KURL&,
-                             const String& nonce,
-                             const IntegrityMetadataSet& hashes,
-                             ParserDisposition,
-                             ResourceRequest::RedirectStatus,
-                             SecurityViolationReportingPolicy) const;
-  bool AllowStyleFromSource(const KURL&,
-                            const String& nonce,
-                            ResourceRequest::RedirectStatus,
-                            SecurityViolationReportingPolicy) const;
-
-  bool AllowObjectFromSource(const KURL&,
-                             ResourceRequest::RedirectStatus,
-                             SecurityViolationReportingPolicy) const;
-  bool AllowPrefetchFromSource(const KURL&,
-                               ResourceRequest::RedirectStatus,
-                               SecurityViolationReportingPolicy) const;
-  bool AllowFrameFromSource(const KURL&,
-                            ResourceRequest::RedirectStatus,
-                            SecurityViolationReportingPolicy) const;
-  bool AllowImageFromSource(const KURL&,
-                            ResourceRequest::RedirectStatus,
-                            SecurityViolationReportingPolicy) const;
-  bool AllowFontFromSource(const KURL&,
-                           ResourceRequest::RedirectStatus,
-                           SecurityViolationReportingPolicy) const;
-  bool AllowMediaFromSource(const KURL&,
-                            ResourceRequest::RedirectStatus,
-                            SecurityViolationReportingPolicy) const;
-  bool AllowManifestFromSource(const KURL&,
-                               ResourceRequest::RedirectStatus,
-                               SecurityViolationReportingPolicy) const;
-  bool AllowConnectToSource(const KURL&,
-                            ResourceRequest::RedirectStatus,
-                            SecurityViolationReportingPolicy) const;
-  bool AllowFormAction(const KURL&,
+  bool AllowFromSource(ContentSecurityPolicy::DirectiveType,
+                       const KURL&,
                        ResourceRequest::RedirectStatus,
-                       SecurityViolationReportingPolicy) const;
-  bool AllowBaseURI(const KURL&,
-                    ResourceRequest::RedirectStatus,
-                    SecurityViolationReportingPolicy) const;
+                       SecurityViolationReportingPolicy,
+                       const String& nonce = String(),
+                       const IntegrityMetadataSet& = IntegrityMetadataSet(),
+                       ParserDisposition = kParserInserted) const;
+
   bool AllowTrustedTypePolicy(const String& policy_name) const;
-  bool AllowWorkerFromSource(const KURL&,
-                             ResourceRequest::RedirectStatus,
-                             SecurityViolationReportingPolicy) const;
+
   // |allowAncestors| does not need to know whether the resource was a
   // result of a redirect. After a redirect, source paths are usually
   // ignored to stop a page from learning the path to which the
@@ -138,10 +90,6 @@ class CORE_EXPORT CSPDirectiveList
   bool AllowAncestors(LocalFrame*,
                       const KURL&,
                       SecurityViolationReportingPolicy) const;
-  bool AllowScriptHash(const CSPHashValue&,
-                       ContentSecurityPolicy::InlineType) const;
-  bool AllowStyleHash(const CSPHashValue&,
-                      ContentSecurityPolicy::InlineType) const;
   bool AllowDynamic(ContentSecurityPolicy::DirectiveType) const;
   bool AllowDynamicWorker() const;
 
@@ -150,12 +98,21 @@ class CORE_EXPORT CSPDirectiveList
                                     ResourceRequest::RedirectStatus,
                                     SecurityViolationReportingPolicy) const;
 
+  bool AllowTrustedTypeAssignmentFailure(const String& message,
+                                         const String& sample) const;
+
   bool StrictMixedContentChecking() const {
     return strict_mixed_content_checking_enforced_;
   }
   void ReportMixedContent(const KURL& mixed_url,
                           ResourceRequest::RedirectStatus) const;
 
+  bool ShouldDisableEval() const {
+    return ShouldDisableEvalBecauseScriptSrc() ||
+           ShouldDisableEvalBecauseTrustedTypes();
+  }
+  bool ShouldDisableEvalBecauseScriptSrc() const;
+  bool ShouldDisableEvalBecauseTrustedTypes() const;
   const String& EvalDisabledErrorMessage() const {
     return eval_disabled_error_message_;
   }
@@ -179,6 +136,9 @@ class CORE_EXPORT CSPDirectiveList
   const String& PluginTypesText() const;
 
   bool ShouldSendCSPHeader(ResourceType) const;
+
+  bool AllowHash(const CSPHashValue& hash_value,
+                 const ContentSecurityPolicy::InlineType inline_type) const;
 
   // The algorithm is described here:
   // https://w3c.github.io/webappsec-csp/embedded/#subsume-policy
@@ -207,10 +167,6 @@ class CORE_EXPORT CSPDirectiveList
 
   enum RequireSRIForToken { kNone = 0, kScript = 1 << 0, kStyle = 1 << 1 };
 
-  CSPDirectiveList(ContentSecurityPolicy*,
-                   ContentSecurityPolicyHeaderType,
-                   ContentSecurityPolicyHeaderSource);
-
   bool ParseDirective(const UChar* begin,
                       const UChar* end,
                       String* name,
@@ -225,7 +181,6 @@ class CORE_EXPORT CSPDirectiveList
   void EnforceStrictMixedContentChecking(const String& name,
                                          const String& value);
   void EnableInsecureRequestsUpgrade(const String& name, const String& value);
-  void TreatAsPublicAddress(const String& name, const String& value);
   void RequireTrustedTypes(const String& name, const String& value);
 
   template <class CSPDirectiveType>
@@ -241,7 +196,10 @@ class CORE_EXPORT CSPDirectiveList
                        const ContentSecurityPolicy::DirectiveType,
                        const String& console_message,
                        const KURL& blocked_url,
-                       ResourceRequest::RedirectStatus) const;
+                       ResourceRequest::RedirectStatus,
+                       ContentSecurityPolicy::ViolationType violation_type =
+                           ContentSecurityPolicy::kURLViolation,
+                       const String& sample = String()) const;
   void ReportViolationWithFrame(const String& directive_text,
                                 const ContentSecurityPolicy::DirectiveType,
                                 const String& console_message,
@@ -259,7 +217,6 @@ class CORE_EXPORT CSPDirectiveList
                            const ContentSecurityPolicy::DirectiveType,
                            const String& message,
                            const KURL& blocked_url,
-                           ScriptState*,
                            const ContentSecurityPolicy::ExceptionStatus,
                            const String& content) const;
 
@@ -286,12 +243,10 @@ class CORE_EXPORT CSPDirectiveList
 
   bool CheckEvalAndReportViolation(SourceListDirective*,
                                    const String& console_message,
-                                   ScriptState*,
                                    ContentSecurityPolicy::ExceptionStatus,
                                    const String& script_content) const;
   bool CheckWasmEvalAndReportViolation(SourceListDirective*,
                                        const String& console_message,
-                                       ScriptState*,
                                        ContentSecurityPolicy::ExceptionStatus,
                                        const String& script_content) const;
   bool CheckInlineAndReportViolation(
@@ -336,11 +291,6 @@ class CORE_EXPORT CSPDirectiveList
       const ContentSecurityPolicy::DirectiveType,
       const CSPDirectiveListVector& policies);
 
-  bool AllowHash(
-      const CSPHashValue& hash_value,
-      const ContentSecurityPolicy::InlineType type,
-      const ContentSecurityPolicy::DirectiveType directive_type) const;
-
   Member<ContentSecurityPolicy> policy_;
 
   String header_;
@@ -352,7 +302,6 @@ class CORE_EXPORT CSPDirectiveList
   bool strict_mixed_content_checking_enforced_;
 
   bool upgrade_insecure_requests_;
-  bool treat_as_public_address_;
 
   Member<MediaListDirective> plugin_types_;
   Member<SourceListDirective> base_uri_;
@@ -380,6 +329,14 @@ class CORE_EXPORT CSPDirectiveList
 
   uint8_t require_sri_for_;
 
+  // If a "report-to" directive is used:
+  // - |report_endpoints_| is a list of token parsed from the "report-to"
+  //   directive's value, and
+  // - |use_reporting_api_| is true.
+  // Otherwise,
+  // - |report_endpoints_| is a list of uri-reference parsed from a
+  //   "report-uri" directive's value if any, and
+  // - |use_reporting_api_| is false.
   Vector<String> report_endpoints_;
   bool use_reporting_api_;
 

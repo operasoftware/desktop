@@ -6,7 +6,8 @@
 
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_stream.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -31,29 +32,8 @@ const CSSParserContext* CSSLazyParsingState::Context() {
     document_ = owning_contents_->AnyOwnerDocument();
 
   if (!context_->IsDocumentHandleEqual(document_))
-    context_ = CSSParserContext::Create(context_, document_);
+    context_ = MakeGarbageCollected<CSSParserContext>(context_, document_);
   return context_;
-}
-
-bool CSSLazyParsingState::ShouldLazilyParseProperties(
-    const CSSSelectorList& selectors) const {
-  //  Disallow lazy parsing for blocks which have before/after in their selector
-  //  list. This ensures we don't cause a collectFeatures() when we trigger
-  //  parsing for attr() functions which would trigger expensive invalidation
-  //  propagation.
-  for (const auto* s = selectors.FirstForCSSOM(); s;
-       s = CSSSelectorList::Next(*s)) {
-    for (const CSSSelector* current = s; current;
-         current = current->TagHistory()) {
-      const CSSSelector::PseudoType type(current->GetPseudoType());
-      if (type == CSSSelector::kPseudoBefore ||
-          type == CSSSelector::kPseudoAfter)
-        return false;
-      if (current->Relation() != CSSSelector::kSubSelector)
-        break;
-    }
-  }
-  return true;
 }
 
 void CSSLazyParsingState::Trace(blink::Visitor* visitor) {

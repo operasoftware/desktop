@@ -27,7 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_V8_INITIALIZER_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -44,7 +44,8 @@ enum class NearV8HeapLimitHandling {
   kIgnoredDueToSmallUptime = 1,
   kIgnoredDueToChangedHeapLimit = 2,
   kIgnoredDueToWorker = 3,
-  kMaxValue = kIgnoredDueToWorker
+  kIgnoredDueToCooldownTime = 4,
+  kMaxValue = kIgnoredDueToCooldownTime
 };
 
 // A callback function called when V8 reaches the heap limit.

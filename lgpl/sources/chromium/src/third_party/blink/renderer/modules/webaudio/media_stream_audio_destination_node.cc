@@ -26,53 +26,51 @@
 #include "third_party/blink/renderer/modules/webaudio/media_stream_audio_destination_node.h"
 
 #include "third_party/blink/public/platform/web_rtc_peer_connection_handler.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_utils.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_context.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_options.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/mediastream/media_stream_center.h"
-#include "third_party/blink/renderer/platform/uuid.h"
-#include "third_party/blink/renderer/platform/wtf/locker.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/wtf/uuid.h"
 
 namespace blink {
 
+namespace {
+
+void DidCreateMediaStreamAndTracks(MediaStreamDescriptor* stream) {
+  for (uint32_t i = 0; i < stream->NumberOfAudioComponents(); ++i)
+    MediaStreamUtils::DidCreateMediaStreamTrack(stream->AudioComponent(i));
+
+  for (uint32_t i = 0; i < stream->NumberOfVideoComponents(); ++i)
+    MediaStreamUtils::DidCreateMediaStreamTrack(stream->VideoComponent(i));
+}
+
+}  // namespace
+
 // WebAudioCapturerSource ignores the channel count beyond 8, so we set the
 // block here to avoid anything can cause the crash.
-static const unsigned long kMaxChannelCount = 8;
+static const uint32_t kMaxChannelCount = 8;
 
 MediaStreamAudioDestinationHandler::MediaStreamAudioDestinationHandler(
     AudioNode& node,
-    size_t number_of_channels)
+    uint32_t number_of_channels)
     : AudioBasicInspectorHandler(kNodeTypeMediaStreamAudioDestination,
                                  node,
-                                 node.context()->sampleRate(),
-                                 number_of_channels),
+                                 node.context()->sampleRate()),
+      source_(static_cast<MediaStreamAudioDestinationNode&>(node).source()),
       mix_bus_(AudioBus::Create(number_of_channels,
-                                AudioUtilities::kRenderQuantumFrames)) {
-  source_ = MediaStreamSource::Create("WebAudio-" + CreateCanonicalUUIDString(),
-                                      MediaStreamSource::kTypeAudio,
-                                      "MediaStreamAudioDestinationNode", false,
-                                      MediaStreamSource::kReadyStateLive, true);
-  MediaStreamSourceVector audio_sources;
-  audio_sources.push_back(source_.Get());
-  MediaStreamSourceVector video_sources;
-  stream_ = MediaStream::Create(
-      node.context()->GetExecutionContext(),
-      MediaStreamDescriptor::Create(audio_sources, video_sources));
-  MediaStreamCenter::Instance().DidCreateMediaStreamAndTracks(
-      stream_->Descriptor());
-
+                                audio_utilities::kRenderQuantumFrames)) {
   source_->SetAudioFormat(number_of_channels, node.context()->sampleRate());
-
   SetInternalChannelCountMode(kExplicit);
   Initialize();
 }
 
 scoped_refptr<MediaStreamAudioDestinationHandler>
 MediaStreamAudioDestinationHandler::Create(AudioNode& node,
-                                           size_t number_of_channels) {
+                                           uint32_t number_of_channels) {
   return base::AdoptRef(
       new MediaStreamAudioDestinationHandler(node, number_of_channels));
 }
@@ -81,7 +79,7 @@ MediaStreamAudioDestinationHandler::~MediaStreamAudioDestinationHandler() {
   Uninitialize();
 }
 
-void MediaStreamAudioDestinationHandler::Process(size_t number_of_frames) {
+void MediaStreamAudioDestinationHandler::Process(uint32_t number_of_frames) {
   // Conform the input bus into the internal mix bus, which represents
   // MediaStreamDestination's channel count.
 
@@ -95,7 +93,7 @@ void MediaStreamAudioDestinationHandler::Process(size_t number_of_frames) {
   if (try_locker.Locked()) {
     unsigned count = ChannelCount();
     if (count != mix_bus_->NumberOfChannels()) {
-      mix_bus_ = AudioBus::Create(count, AudioUtilities::kRenderQuantumFrames);
+      mix_bus_ = AudioBus::Create(count, audio_utilities::kRenderQuantumFrames);
       // setAudioFormat has an internal lock.  This can cause audio to
       // glitch.  This is outside of our control.
       source_->SetAudioFormat(count, Context()->sampleRate());
@@ -110,7 +108,7 @@ void MediaStreamAudioDestinationHandler::Process(size_t number_of_frames) {
 }
 
 void MediaStreamAudioDestinationHandler::SetChannelCount(
-    unsigned long channel_count,
+    unsigned channel_count,
     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
@@ -135,58 +133,118 @@ void MediaStreamAudioDestinationHandler::SetChannelCount(
   AudioHandler::SetChannelCount(channel_count, exception_state);
 }
 
-unsigned long MediaStreamAudioDestinationHandler::MaxChannelCount() const {
+uint32_t MediaStreamAudioDestinationHandler::MaxChannelCount() const {
   return kMaxChannelCount;
+}
+
+void MediaStreamAudioDestinationHandler::PullInputs(
+    uint32_t frames_to_process) {
+  DCHECK_EQ(NumberOfOutputs(), 0u);
+
+  // Just render the input; there's no output for this node.
+  Input(0).Pull(nullptr, frames_to_process);
+}
+
+void MediaStreamAudioDestinationHandler::CheckNumberOfChannelsForInput(
+    AudioNodeInput* input) {
+  DCHECK(Context()->IsAudioThread());
+  Context()->AssertGraphOwner();
+
+  DCHECK_EQ(input, &this->Input(0));
+
+  AudioHandler::CheckNumberOfChannelsForInput(input);
+
+  UpdatePullStatusIfNeeded();
+}
+
+void MediaStreamAudioDestinationHandler::UpdatePullStatusIfNeeded() {
+  Context()->AssertGraphOwner();
+
+  unsigned number_of_input_connections =
+      Input(0).NumberOfRenderingConnections();
+  if (number_of_input_connections && !need_automatic_pull_) {
+    // When an AudioBasicInspectorNode is not connected to any downstream node
+    // while still connected from upstream node(s), add it to the context's
+    // automatic pull list.
+    Context()->GetDeferredTaskHandler().AddAutomaticPullNode(this);
+    need_automatic_pull_ = true;
+  } else if (!number_of_input_connections && need_automatic_pull_) {
+    // The AudioBasicInspectorNode is connected to nothing and is
+    // not an AnalyserNode, remove it from the context's automatic
+    // pull list.  AnalyserNode's need to be pulled even with no
+    // inputs so that the internal state gets updated to hold the
+    // right time and FFT data.
+    Context()->GetDeferredTaskHandler().RemoveAutomaticPullNode(this);
+    need_automatic_pull_ = false;
+  }
 }
 
 // ----------------------------------------------------------------
 
 MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(
     AudioContext& context,
-    size_t number_of_channels)
-    : AudioBasicInspectorNode(context) {
+    uint32_t number_of_channels)
+    : AudioBasicInspectorNode(context),
+      source_(MakeGarbageCollected<MediaStreamSource>(
+          "WebAudio-" + WTF::CreateCanonicalUUIDString(),
+          MediaStreamSource::kTypeAudio,
+          "MediaStreamAudioDestinationNode",
+          false,
+          MediaStreamSource::kReadyStateLive,
+          true)),
+      stream_(MediaStream::Create(context.GetExecutionContext(),
+                                  MakeGarbageCollected<MediaStreamDescriptor>(
+                                      MediaStreamSourceVector({source_.Get()}),
+                                      MediaStreamSourceVector()))) {
+  DidCreateMediaStreamAndTracks(stream_->Descriptor());
   SetHandler(
       MediaStreamAudioDestinationHandler::Create(*this, number_of_channels));
 }
 
 MediaStreamAudioDestinationNode* MediaStreamAudioDestinationNode::Create(
     AudioContext& context,
-    size_t number_of_channels,
+    uint32_t number_of_channels,
     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
-  if (context.IsContextClosed()) {
-    context.ThrowExceptionForClosedState(exception_state);
-    return nullptr;
-  }
-
-  return new MediaStreamAudioDestinationNode(context, number_of_channels);
+  return MakeGarbageCollected<MediaStreamAudioDestinationNode>(
+      context, number_of_channels);
 }
 
 MediaStreamAudioDestinationNode* MediaStreamAudioDestinationNode::Create(
     AudioContext* context,
-    const AudioNodeOptions& options,
+    const AudioNodeOptions* options,
     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
   // Default to stereo; |options| will update it approriately if needed.
   MediaStreamAudioDestinationNode* node =
-      new MediaStreamAudioDestinationNode(*context, 2);
+      MakeGarbageCollected<MediaStreamAudioDestinationNode>(*context, 2);
 
   // Need to handle channelCount here ourselves because the upper
   // limit is different from the normal AudioNode::setChannelCount
   // limit of 32.  Error messages will sometimes show the wrong
   // limits.
-  if (options.hasChannelCount())
-    node->setChannelCount(options.channelCount(), exception_state);
+  if (options->hasChannelCount())
+    node->setChannelCount(options->channelCount(), exception_state);
 
   node->HandleChannelOptions(options, exception_state);
 
   return node;
 }
 
-MediaStream* MediaStreamAudioDestinationNode::stream() const {
-  return static_cast<MediaStreamAudioDestinationHandler&>(Handler()).Stream();
+void MediaStreamAudioDestinationNode::Trace(Visitor* visitor) {
+  visitor->Trace(stream_);
+  visitor->Trace(source_);
+  AudioBasicInspectorNode::Trace(visitor);
+}
+
+void MediaStreamAudioDestinationNode::ReportDidCreate() {
+  GraphTracer().DidCreateAudioNode(this);
+}
+
+void MediaStreamAudioDestinationNode::ReportWillBeDestroyed() {
+  GraphTracer().WillDestroyAudioNode(this);
 }
 
 }  // namespace blink

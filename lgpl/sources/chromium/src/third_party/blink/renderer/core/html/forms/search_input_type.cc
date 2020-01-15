@@ -41,32 +41,30 @@
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/layout/layout_search_field.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-inline SearchInputType::SearchInputType(HTMLInputElement& element)
+SearchInputType::SearchInputType(HTMLInputElement& element)
     : BaseTextInputType(element),
       search_event_timer_(
           element.GetDocument().GetTaskRunner(TaskType::kUserInteraction),
           this,
           &SearchInputType::SearchEventTimerFired) {}
 
-InputType* SearchInputType::Create(HTMLInputElement& element) {
-  return new SearchInputType(element);
-}
-
 void SearchInputType::CountUsage() {
   CountUsageIfVisible(WebFeature::kInputTypeSearch);
 }
 
-LayoutObject* SearchInputType::CreateLayoutObject(const ComputedStyle&) const {
+LayoutObject* SearchInputType::CreateLayoutObject(const ComputedStyle&,
+                                                  LegacyLayout) const {
   return new LayoutSearchField(&GetElement());
 }
 
 const AtomicString& SearchInputType::FormControlType() const {
-  return InputTypeNames::search;
+  return input_type_names::kSearch;
 }
 
 bool SearchInputType::NeedsContainer() const {
@@ -77,12 +75,12 @@ void SearchInputType::CreateShadowSubtree() {
   TextFieldInputType::CreateShadowSubtree();
   Element* container = ContainerElement();
   Element* view_port = GetElement().UserAgentShadowRoot()->getElementById(
-      ShadowElementNames::EditingViewPort());
+      shadow_element_names::EditingViewPort());
   DCHECK(container);
   DCHECK(view_port);
-  container->InsertBefore(
-      SearchFieldCancelButtonElement::Create(GetElement().GetDocument()),
-      view_port->nextSibling());
+  container->InsertBefore(MakeGarbageCollected<SearchFieldCancelButtonElement>(
+                              GetElement().GetDocument()),
+                          view_port->nextSibling());
 }
 
 void SearchInputType::HandleKeydownEvent(KeyboardEvent& event) {
@@ -117,13 +115,13 @@ void SearchInputType::StartSearchEventTimer() {
   // After typing the first key, we wait 500ms.
   // After the second key, 400ms, then 300, then 200 from then on.
   unsigned step = std::min(length, 4u) - 1;
-  TimeDelta timeout = TimeDelta::FromMilliseconds(500 - 100 * step);
+  base::TimeDelta timeout = base::TimeDelta::FromMilliseconds(500 - 100 * step);
   search_event_timer_.StartOneShot(timeout, FROM_HERE);
 }
 
 void SearchInputType::DispatchSearchEvent() {
   search_event_timer_.Stop();
-  GetElement().DispatchEvent(*Event::CreateBubble(EventTypeNames::search));
+  GetElement().DispatchEvent(*Event::CreateBubble(event_type_names::kSearch));
 }
 
 void SearchInputType::SearchEventTimerFired(TimerBase*) {
@@ -131,7 +129,7 @@ void SearchInputType::SearchEventTimerFired(TimerBase*) {
 }
 
 bool SearchInputType::SearchEventsShouldBeDispatched() const {
-  return GetElement().hasAttribute(incrementalAttr);
+  return GetElement().hasAttribute(kIncrementalAttr);
 }
 
 void SearchInputType::DidSetValueByUserEdit() {
@@ -151,16 +149,17 @@ void SearchInputType::UpdateView() {
 
 void SearchInputType::UpdateCancelButtonVisibility() {
   Element* button = GetElement().UserAgentShadowRoot()->getElementById(
-      ShadowElementNames::SearchClearButton());
+      shadow_element_names::SearchClearButton());
   if (!button)
     return;
   if (GetElement().value().IsEmpty()) {
-    button->SetInlineStyleProperty(CSSPropertyOpacity, 0.0,
+    button->SetInlineStyleProperty(CSSPropertyID::kOpacity, 0.0,
                                    CSSPrimitiveValue::UnitType::kNumber);
-    button->SetInlineStyleProperty(CSSPropertyPointerEvents, CSSValueNone);
+    button->SetInlineStyleProperty(CSSPropertyID::kPointerEvents,
+                                   CSSValueID::kNone);
   } else {
-    button->RemoveInlineStyleProperty(CSSPropertyOpacity);
-    button->RemoveInlineStyleProperty(CSSPropertyPointerEvents);
+    button->RemoveInlineStyleProperty(CSSPropertyID::kOpacity);
+    button->RemoveInlineStyleProperty(CSSPropertyID::kPointerEvents);
   }
 }
 

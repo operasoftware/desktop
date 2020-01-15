@@ -44,6 +44,7 @@ class HTMLOptGroupElement;
 class HTMLOptionElement;
 class HTMLOptionElementOrHTMLOptGroupElement;
 class HTMLElementOrLong;
+class LayoutUnit;
 class PopupMenu;
 
 class CORE_EXPORT HTMLSelectElement final
@@ -52,7 +53,7 @@ class CORE_EXPORT HTMLSelectElement final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static HTMLSelectElement* Create(Document&);
+  explicit HTMLSelectElement(Document&);
   ~HTMLSelectElement() override;
 
   int selectedIndex() const;
@@ -172,12 +173,9 @@ class CORE_EXPORT HTMLSelectElement final
 
   bool HasNonInBodyInsertionMode() const override { return true; }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
   void CloneNonAttributePropertiesFrom(const Element&,
                                        CloneChildrenFlag) override;
-
- protected:
-  explicit HTMLSelectElement(Document&);
 
  private:
   const AtomicString& FormControlType() const override;
@@ -196,8 +194,7 @@ class CORE_EXPORT HTMLSelectElement final
 
   bool IsEnumeratable() const override { return true; }
   bool IsInteractiveContent() const override;
-  bool SupportsAutofocus() const override;
-  bool SupportLabels() const override { return true; }
+  bool IsLabelable() const override { return true; }
 
   FormControlState SaveFormControlState() const override;
   void RestoreFormControlState(const FormControlState&) override;
@@ -205,9 +202,10 @@ class CORE_EXPORT HTMLSelectElement final
   void ParseAttribute(const AttributeModificationParams&) override;
   bool IsPresentationAttribute(const QualifiedName&) const override;
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
-  void DidRecalcStyle(StyleRecalcChange) override;
-  void DetachLayoutTree(const AttachContext& = AttachContext()) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
+  void DidRecalcStyle(const StyleRecalcChange) override;
+  void AttachLayoutTree(AttachContext&) override;
+  void DetachLayoutTree(bool performing_reattach = false) override;
   void AppendToFormData(FormData&) override;
   void DidAddUserAgentShadowRoot(ShadowRoot&) override;
 
@@ -233,9 +231,9 @@ class CORE_EXPORT HTMLSelectElement final
   bool HasPlaceholderLabelOption() const;
 
   enum SelectOptionFlag {
-    kDeselectOtherOptions = 1 << 0,
-    kDispatchInputAndChangeEvent = 1 << 1,
-    kMakeOptionDirty = 1 << 2,
+    kDeselectOtherOptionsFlag = 1 << 0,
+    kDispatchInputAndChangeEventFlag = 1 << 1,
+    kMakeOptionDirtyFlag = 1 << 2,
   };
   typedef unsigned SelectOptionFlags;
   void SelectOption(HTMLOptionElement*, SelectOptionFlags);
@@ -284,6 +282,10 @@ class CORE_EXPORT HTMLSelectElement final
 
   void ObserveTreeMutation();
   void UnobserveTreeMutation();
+
+  // Apply changes to rendering as a result of attribute changes (multiple,
+  // size).
+  void ChangeRendering();
 
   // list_items_ contains HTMLOptionElement, HTMLOptGroupElement, and
   // HTMLHRElement objects.

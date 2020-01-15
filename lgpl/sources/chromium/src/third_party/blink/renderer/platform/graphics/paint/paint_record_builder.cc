@@ -10,9 +10,11 @@
 
 namespace blink {
 
-PaintRecordBuilder::PaintRecordBuilder(SkMetaData* meta_data,
-                                       GraphicsContext* containing_context,
-                                       PaintController* paint_controller)
+PaintRecordBuilder::PaintRecordBuilder(
+    printing::MetafileSkia* metafile,
+    GraphicsContext* containing_context,
+    PaintController* paint_controller,
+    paint_preview::PaintPreviewTracker* tracker)
     : paint_controller_(nullptr) {
   GraphicsContext::DisabledMode disabled_mode =
       GraphicsContext::kNothingDisabled;
@@ -23,24 +25,20 @@ PaintRecordBuilder::PaintRecordBuilder(SkMetaData* meta_data,
     paint_controller_ = paint_controller;
   } else {
     own_paint_controller_ =
-        PaintController::Create(PaintController::kTransient);
+        std::make_unique<PaintController>(PaintController::kTransient);
     paint_controller_ = own_paint_controller_.get();
   }
 
   paint_controller_->UpdateCurrentPaintChunkProperties(
       base::nullopt, PropertyTreeState::Root());
 
-  const HighContrastSettings* high_contrast_settings =
-      containing_context ? &containing_context->high_contrast_settings()
-                         : nullptr;
-  context_ = std::make_unique<GraphicsContext>(*paint_controller_,
-                                               disabled_mode, meta_data);
-  if (high_contrast_settings)
-    context_->SetHighContrast(*high_contrast_settings);
-
+  context_ = std::make_unique<GraphicsContext>(
+      *paint_controller_, disabled_mode, metafile, tracker);
   if (containing_context) {
+    context_->SetDarkMode(containing_context->dark_mode_settings());
     context_->SetDeviceScaleFactor(containing_context->DeviceScaleFactor());
     context_->SetPrinting(containing_context->Printing());
+    context_->SetIsPaintingPreview(containing_context->IsPaintingPreview());
   }
 }
 
@@ -48,11 +46,9 @@ PaintRecordBuilder::~PaintRecordBuilder() = default;
 
 sk_sp<PaintRecord> PaintRecordBuilder::EndRecording(
     const PropertyTreeState& replay_state) {
-  context_->BeginRecording(FloatRect());
   paint_controller_->CommitNewDisplayItems();
   paint_controller_->FinishCycle();
-  paint_controller_->GetPaintArtifact().Replay(*context_, replay_state);
-  return context_->EndRecording();
+  return paint_controller_->GetPaintArtifact().GetPaintRecord(replay_state);
 }
 
 void PaintRecordBuilder::EndRecording(cc::PaintCanvas& canvas,

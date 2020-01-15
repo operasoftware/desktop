@@ -29,8 +29,8 @@ class DataView final : public ArrayBufferView {
   unsigned TypeSize() const override { return 1; }
 
  protected:
-  void Neuter() override {
-    ArrayBufferView::Neuter();
+  void Detach() override {
+    ArrayBufferView::Detach();
     byte_length_ = 0;
   }
 
@@ -48,7 +48,7 @@ DOMDataView* DOMDataView::Create(DOMArrayBufferBase* buffer,
                                  unsigned byte_length) {
   scoped_refptr<DataView> data_view =
       DataView::Create(buffer->Buffer(), byte_offset, byte_length);
-  return new DOMDataView(data_view, buffer);
+  return MakeGarbageCollected<DOMDataView>(data_view, buffer);
 }
 
 v8::Local<v8::Object> DOMDataView::Wrap(

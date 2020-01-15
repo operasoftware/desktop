@@ -36,7 +36,6 @@ from blinkpy.common.host import Host
 from blinkpy.common.system.log_utils import configure_logging
 from blinkpy.web_tests.models import test_expectations
 from blinkpy.web_tests.port.factory import platform_options
-from blinkpy.w3c.wpt_manifest import WPTManifest
 
 _log = logging.getLogger(__name__)
 
@@ -82,15 +81,38 @@ def lint(host, options):
 def check_virtual_test_suites(host, options):
     port = host.port_factory.get(options=options)
     fs = host.filesystem
-    layout_tests_dir = port.layout_tests_dir()
+    web_tests_dir = port.web_tests_dir()
     virtual_suites = port.virtual_test_suites()
+    # Make sure ancestors come first (e.g. "virtual/foo/bar", "virtual/foo/bar/baz").
+    virtual_suites.sort(key=lambda s: s.name)
 
+    seen = set()
     failures = []
     for suite in virtual_suites:
-        comps = [layout_tests_dir] + suite.name.split('/') + ['README.txt']
-        path_to_readme = fs.join(*comps)
-        if not fs.exists(path_to_readme):
-            failure = '{} is missing (each virtual suite must have one).'.format(path_to_readme)
+        suite_comps = suite.name.split(port.TEST_PATH_SEPARATOR)
+        # E.g. virtual/foo/fast/css/a.html will execute twice if
+        # both virtual/foo/fast and virtual/foo/fast/css are both defined.
+        for i in range(3, len(suite_comps)):
+            ancestor = port.TEST_PATH_SEPARATOR.join(suite_comps[:i])
+            if ancestor in seen:
+                failure = ('{} is a subset of {}; you will see tests under the '
+                           'former running multiple times (potentially with '
+                           'different args).'.format(suite.name, ancestor))
+                _log.error(failure)
+                failures.append(failure)
+        seen.add(suite.name)
+
+        # A virtual test suite needs either
+        # - a top-level README.md (e.g. virtual/foo/README.md)
+        # - a README.txt for each covered dir/file (e.g.
+        #   virtual/foo/http/tests/README.txt, virtual/foo/fast/README.txt, ...)
+        comps = [web_tests_dir] + suite_comps + ['README.txt']
+        path_to_readme_txt = fs.join(*comps)
+        comps = [web_tests_dir] + suite_comps[:2] + ['README.md']
+        path_to_readme_md = fs.join(*comps)
+        if not fs.exists(path_to_readme_txt) and not fs.exists(path_to_readme_md):
+            failure = '{} and {} are both missing (each virtual suite must have one).'.format(
+                path_to_readme_txt, path_to_readme_md)
             _log.error(failure)
             failures.append(failure)
     if failures:
@@ -100,7 +122,7 @@ def check_virtual_test_suites(host, options):
 
 def check_smoke_tests(host, options):
     port = host.port_factory.get(options=options)
-    smoke_tests_file = host.filesystem.join(port.layout_tests_dir(), 'SmokeTests')
+    smoke_tests_file = host.filesystem.join(port.web_tests_dir(), 'SmokeTests')
     failures = []
     if not host.filesystem.exists(smoke_tests_file):
         return failures
@@ -171,10 +193,6 @@ def main(argv, stderr, host=None):
         configure_logging(logging_level=logging.INFO, stream=stderr, include_time=False)
 
     try:
-        # Need to generate MANIFEST.json since some expectations correspond to WPT
-        # tests that aren't files and only exist in the manifest.
-        _log.debug('Generating MANIFEST.json for web-platform-tests ...')
-        WPTManifest.ensure_manifest(host)
         exit_status = run_checks(host, options)
     except KeyboardInterrupt:
         exit_status = exit_codes.INTERRUPTED_EXIT_STATUS

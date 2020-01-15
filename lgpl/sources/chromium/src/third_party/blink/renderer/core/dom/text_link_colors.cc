@@ -31,6 +31,7 @@
 
 #include "third_party/blink/renderer/core/css/css_color_value.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
+#include "third_party/blink/renderer/core/css/css_light_dark_color_pair.h"
 #include "third_party/blink/renderer/core/css/style_color.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -59,27 +60,37 @@ void TextLinkColors::ResetActiveLinkColor() {
 
 Color TextLinkColors::ColorFromCSSValue(const CSSValue& value,
                                         Color current_color,
+                                        WebColorScheme color_scheme,
                                         bool for_visited_link) const {
-  if (value.IsColorValue())
-    return ToCSSColorValue(value).Value();
+  if (auto* color_value = DynamicTo<CSSColorValue>(value))
+    return color_value->Value();
 
-  CSSValueID value_id = ToCSSIdentifierValue(value).GetValueID();
+  if (auto* pair = DynamicTo<CSSLightDarkColorPair>(value)) {
+    const CSSValue& color_value =
+        color_scheme == WebColorScheme::kLight ? pair->First() : pair->Second();
+    return ColorFromCSSValue(color_value, current_color, color_scheme,
+                             for_visited_link);
+  }
+
+  CSSValueID value_id = To<CSSIdentifierValue>(value).GetValueID();
   switch (value_id) {
-    case CSSValueInvalid:
+    case CSSValueID::kInvalid:
       NOTREACHED();
       return Color();
-    case CSSValueInternalQuirkInherit:
+    case CSSValueID::kInternalQuirkInherit:
       return TextColor();
-    case CSSValueWebkitLink:
+    case CSSValueID::kWebkitLink:
       return for_visited_link ? VisitedLinkColor() : LinkColor();
-    case CSSValueWebkitActivelink:
+    case CSSValueID::kWebkitActivelink:
       return ActiveLinkColor();
-    case CSSValueWebkitFocusRingColor:
+    case CSSValueID::kWebkitFocusRingColor:
       return LayoutTheme::GetTheme().FocusRingColor();
-    case CSSValueCurrentcolor:
+    case CSSValueID::kCurrentcolor:
       return current_color;
+    case CSSValueID::kInternalRootColor:
+      return LayoutTheme::GetTheme().RootElementColor(color_scheme);
     default:
-      return StyleColor::ColorFromKeyword(value_id);
+      return StyleColor::ColorFromKeyword(value_id, color_scheme);
   }
 }
 

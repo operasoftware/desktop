@@ -34,17 +34,10 @@
 
 namespace blink {
 
-using namespace HTMLNames;
-
 AXList::AXList(LayoutObject* layout_object, AXObjectCacheImpl& ax_object_cache)
     : AXLayoutObject(layout_object, ax_object_cache) {}
 
 AXList::~AXList() = default;
-
-AXList* AXList::Create(LayoutObject* layout_object,
-                       AXObjectCacheImpl& ax_object_cache) {
-  return new AXList(layout_object, ax_object_cache);
-}
 
 bool AXList::ComputeAccessibilityIsIgnored(
     IgnoredReasons* ignored_reasons) const {
@@ -56,7 +49,7 @@ bool AXList::IsDescriptionList() const {
     return false;
 
   Node* node = layout_object_->GetNode();
-  return node && node->HasTagName(dlTag);
+  return node && node->HasTagName(html_names::kDlTag);
 }
 
 ax::mojom::Role AXList::RoleValue() const {

@@ -32,7 +32,7 @@ namespace blink {
 class IntRect;
 class LayoutObject;
 class LayoutText;
-class NGPaintFragment;
+class NGInlineCursor;
 class FrameSelection;
 struct LayoutSelectionStatus;
 struct LayoutTextSelectionStatus;
@@ -40,9 +40,7 @@ class SelectionPaintRange;
 
 class LayoutSelection final : public GarbageCollected<LayoutSelection> {
  public:
-  static LayoutSelection* Create(FrameSelection& frame_selection) {
-    return new LayoutSelection(frame_selection);
-  }
+  explicit LayoutSelection(FrameSelection&);
 
   void SetHasPendingSelection();
   void Commit();
@@ -51,15 +49,15 @@ class LayoutSelection final : public GarbageCollected<LayoutSelection> {
   void InvalidatePaintForSelection();
 
   LayoutTextSelectionStatus ComputeSelectionStatus(const LayoutText&) const;
-  LayoutSelectionStatus ComputeSelectionStatus(const NGPaintFragment&) const;
+  LayoutSelectionStatus ComputeSelectionStatus(const NGInlineCursor&) const;
   static bool IsSelected(const LayoutObject&);
 
   void OnDocumentShutdown();
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
  private:
-  LayoutSelection(FrameSelection&);
+  void AssertIsValid() const;
 
   Member<FrameSelection> frame_selection_;
   bool has_pending_selection_ : 1;

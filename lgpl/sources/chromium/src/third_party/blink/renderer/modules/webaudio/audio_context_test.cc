@@ -6,9 +6,11 @@
 
 #include <memory>
 
+#include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/web_audio_device.h"
 #include "third_party/blink/public/platform/web_audio_latency_hint.h"
+#include "third_party/blink/renderer/core/core_initializer.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
@@ -17,6 +19,7 @@
 namespace blink {
 
 namespace {
+static bool web_audio_device_paused_;
 
 class MockWebAudioDeviceForAudioContext : public WebAudioDevice {
  public:
@@ -27,6 +30,8 @@ class MockWebAudioDeviceForAudioContext : public WebAudioDevice {
 
   void Start() override {}
   void Stop() override {}
+  void Pause() override { web_audio_device_paused_ = true; }
+  void Resume() override { web_audio_device_paused_ = false; }
   double SampleRate() override { return sample_rate_; }
   int FramesPerBuffer() override { return frames_per_buffer_; }
 
@@ -85,7 +90,19 @@ class AudioContextTest : public PageTestBase {
 
   ~AudioContextTest() override { platform_.reset(); }
 
-  void SetUp() override { PageTestBase::SetUp(IntSize()); }
+  void SetUp() override {
+    PageTestBase::SetUp(IntSize());
+    CoreInitializer::GetInstance().ProvideModulesToPage(GetPage(), nullptr);
+  }
+
+  void ResetAudioContextManagerForAudioContext(AudioContext* audio_context) {
+    audio_context->audio_context_manager_.reset();
+  }
+
+  void SetContextState(AudioContext* audio_context,
+                       AudioContext::AudioContextState state) {
+    audio_context->SetContextState(state);
+  }
 
  private:
   std::unique_ptr<ScopedTestingPlatformSupport<AudioContextTestPlatform>>
@@ -93,15 +110,15 @@ class AudioContextTest : public PageTestBase {
 };
 
 TEST_F(AudioContextTest, AudioContextOptions_WebAudioLatencyHint) {
-  AudioContextOptions interactive_options;
-  interactive_options.setLatencyHint(
+  AudioContextOptions* interactive_options = AudioContextOptions::Create();
+  interactive_options->setLatencyHint(
       AudioContextLatencyCategoryOrDouble::FromAudioContextLatencyCategory(
           "interactive"));
   AudioContext* interactive_context = AudioContext::Create(
       GetDocument(), interactive_options, ASSERT_NO_EXCEPTION);
 
-  AudioContextOptions balanced_options;
-  balanced_options.setLatencyHint(
+  AudioContextOptions* balanced_options = AudioContextOptions::Create();
+  balanced_options->setLatencyHint(
       AudioContextLatencyCategoryOrDouble::FromAudioContextLatencyCategory(
           "balanced"));
   AudioContext* balanced_context = AudioContext::Create(
@@ -109,16 +126,16 @@ TEST_F(AudioContextTest, AudioContextOptions_WebAudioLatencyHint) {
   EXPECT_GT(balanced_context->baseLatency(),
             interactive_context->baseLatency());
 
-  AudioContextOptions playback_options;
-  playback_options.setLatencyHint(
+  AudioContextOptions* playback_options = AudioContextOptions::Create();
+  playback_options->setLatencyHint(
       AudioContextLatencyCategoryOrDouble::FromAudioContextLatencyCategory(
           "playback"));
   AudioContext* playback_context = AudioContext::Create(
       GetDocument(), playback_options, ASSERT_NO_EXCEPTION);
   EXPECT_GT(playback_context->baseLatency(), balanced_context->baseLatency());
 
-  AudioContextOptions exact_too_small_options;
-  exact_too_small_options.setLatencyHint(
+  AudioContextOptions* exact_too_small_options = AudioContextOptions::Create();
+  exact_too_small_options->setLatencyHint(
       AudioContextLatencyCategoryOrDouble::FromDouble(
           interactive_context->baseLatency() / 2));
   AudioContext* exact_too_small_context = AudioContext::Create(
@@ -129,21 +146,47 @@ TEST_F(AudioContextTest, AudioContextOptions_WebAudioLatencyHint) {
   const double exact_latency_sec =
       (interactive_context->baseLatency() + playback_context->baseLatency()) /
       2;
-  AudioContextOptions exact_ok_options;
-  exact_ok_options.setLatencyHint(
+  AudioContextOptions* exact_ok_options = AudioContextOptions::Create();
+  exact_ok_options->setLatencyHint(
       AudioContextLatencyCategoryOrDouble::FromDouble(exact_latency_sec));
   AudioContext* exact_ok_context = AudioContext::Create(
       GetDocument(), exact_ok_options, ASSERT_NO_EXCEPTION);
   EXPECT_EQ(exact_ok_context->baseLatency(), exact_latency_sec);
 
-  AudioContextOptions exact_too_big_options;
-  exact_too_big_options.setLatencyHint(
+  AudioContextOptions* exact_too_big_options = AudioContextOptions::Create();
+  exact_too_big_options->setLatencyHint(
       AudioContextLatencyCategoryOrDouble::FromDouble(
           playback_context->baseLatency() * 2));
   AudioContext* exact_too_big_context = AudioContext::Create(
       GetDocument(), exact_too_big_options, ASSERT_NO_EXCEPTION);
   EXPECT_EQ(exact_too_big_context->baseLatency(),
             playback_context->baseLatency());
+}
+
+TEST_F(AudioContextTest, AudioContextAudibility_ServiceUnbind) {
+  AudioContextOptions* options = AudioContextOptions::Create();
+  AudioContext* audio_context =
+      AudioContext::Create(GetDocument(), options, ASSERT_NO_EXCEPTION);
+
+  audio_context->set_was_audible_for_testing(true);
+  ResetAudioContextManagerForAudioContext(audio_context);
+  SetContextState(audio_context, AudioContext::AudioContextState::kSuspended);
+
+  ScopedTestingPlatformSupport<TestingPlatformSupport> platform;
+  platform->RunUntilIdle();
+}
+
+TEST_F(AudioContextTest, ExecutionContextPaused) {
+  AudioContextOptions* options = AudioContextOptions::Create();
+  AudioContext* audio_context =
+      AudioContext::Create(GetDocument(), options, ASSERT_NO_EXCEPTION);
+
+  audio_context->set_was_audible_for_testing(true);
+  EXPECT_FALSE(web_audio_device_paused_);
+  GetDocument().SetLifecycleState(mojom::FrameLifecycleState::kFrozen);
+  EXPECT_TRUE(web_audio_device_paused_);
+  GetDocument().SetLifecycleState(mojom::FrameLifecycleState::kRunning);
+  EXPECT_FALSE(web_audio_device_paused_);
 }
 
 }  // namespace blink

@@ -36,7 +36,7 @@ class CORE_EXPORT HTMLOptGroupElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static HTMLOptGroupElement* Create(Document&);
+  explicit HTMLOptGroupElement(Document&);
 
   bool IsDisabledFormControl() const override;
   String DefaultToolTip() const override;
@@ -49,7 +49,6 @@ class CORE_EXPORT HTMLOptGroupElement final : public HTMLElement {
   static bool CanAssignToOptGroupSlot(const Node&);
 
  private:
-  explicit HTMLOptGroupElement(Document&);
   ~HTMLOptGroupElement() override;
 
   bool SupportsFocus() const override;

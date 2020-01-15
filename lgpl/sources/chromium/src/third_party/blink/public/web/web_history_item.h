@@ -31,10 +31,10 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_HISTORY_ITEM_H_
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_HISTORY_ITEM_H_
 
+#include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_history_scroll_restoration_type.h"
 #include "third_party/blink/public/platform/web_private_ptr.h"
-#include "third_party/blink/public/platform/web_referrer_policy.h"
 #include "third_party/blink/public/platform/web_scroll_anchor_data.h"
 #include "third_party/blink/public/platform/web_string.h"
 
@@ -75,8 +75,9 @@ class WebHistoryItem {
   BLINK_EXPORT void SetURLString(const WebString&);
 
   BLINK_EXPORT WebString GetReferrer() const;
-  BLINK_EXPORT WebReferrerPolicy GetReferrerPolicy() const;
-  BLINK_EXPORT void SetReferrer(const WebString&, WebReferrerPolicy);
+  BLINK_EXPORT network::mojom::ReferrerPolicy GetReferrerPolicy() const;
+  BLINK_EXPORT void SetReferrer(const WebString&,
+                                network::mojom::ReferrerPolicy);
 
   BLINK_EXPORT const WebString& Target() const;
   BLINK_EXPORT void SetTarget(const WebString&);
@@ -93,11 +94,11 @@ class WebHistoryItem {
   BLINK_EXPORT WebVector<WebString> GetDocumentState() const;
   BLINK_EXPORT void SetDocumentState(const WebVector<WebString>&);
 
-  BLINK_EXPORT long long ItemSequenceNumber() const;
-  BLINK_EXPORT void SetItemSequenceNumber(long long);
+  BLINK_EXPORT int64_t ItemSequenceNumber() const;
+  BLINK_EXPORT void SetItemSequenceNumber(int64_t);
 
-  BLINK_EXPORT long long DocumentSequenceNumber() const;
-  BLINK_EXPORT void SetDocumentSequenceNumber(long long);
+  BLINK_EXPORT int64_t DocumentSequenceNumber() const;
+  BLINK_EXPORT void SetDocumentSequenceNumber(int64_t);
 
   BLINK_EXPORT WebHistoryScrollRestorationType ScrollRestorationType() const;
   BLINK_EXPORT void SetScrollRestorationType(WebHistoryScrollRestorationType);
@@ -109,7 +110,7 @@ class WebHistoryItem {
   BLINK_EXPORT void SetHTTPContentType(const WebString&);
 
   BLINK_EXPORT WebHTTPBody HttpBody() const;
-  BLINK_EXPORT void SetHTTPBody(const WebHTTPBody&);
+  BLINK_EXPORT void SetHttpBody(const WebHTTPBody&);
 
   BLINK_EXPORT WebVector<WebString> GetReferencedFilePaths() const;
 

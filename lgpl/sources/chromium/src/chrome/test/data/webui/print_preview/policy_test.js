@@ -29,13 +29,12 @@ cr.define('policy_tests', function() {
       nativeLayer.setPageCount(3);
       print_preview.NativeLayer.setInstance(nativeLayer);
       const pluginProxy = new print_preview.PDFPluginStub();
-      print_preview_new.PluginProxy.setInstance(pluginProxy);
+      print_preview.PluginProxy.setInstance(pluginProxy);
 
       PolymerTest.clearBody();
       page = document.createElement('print-preview-app');
       document.body.appendChild(page);
       const previewArea = page.$.previewArea;
-      pluginProxy.setLoadCallback(previewArea.onPluginLoad_.bind(previewArea));
 
       // Wait for initialization to complete.
       return Promise
@@ -72,12 +71,14 @@ cr.define('policy_tests', function() {
     }
 
     function toggleMoreSettings() {
-      const moreSettingsElement = page.$$('print-preview-more-settings');
+      const moreSettingsElement =
+          page.$$('print-preview-sidebar').$$('print-preview-more-settings');
       moreSettingsElement.$.label.click();
     }
 
     function getCheckbox() {
-      return page.$$('print-preview-other-options-settings')
+      return page.$$('print-preview-sidebar')
+          .$$('print-preview-other-options-settings')
           .$$('#headerFooter');
     }
 

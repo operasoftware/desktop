@@ -4,14 +4,17 @@
 
 #include "third_party/blink/renderer/modules/notifications/notification_data.h"
 
+#include "base/stl_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/notifications/notification_constants.h"
 #include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/modules/notifications/notification.h"
 #include "third_party/blink/renderer/modules/notifications/notification_options.h"
+#include "third_party/blink/renderer/modules/notifications/timestamp_trigger.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
+
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -30,12 +33,12 @@ const char kNotificationIcon[] = "/icon.png";
 const char kNotificationIconInvalid[] = "https://invalid:icon:url";
 const char kNotificationBadge[] = "badge.png";
 const unsigned kNotificationVibration[] = {42, 10, 20, 30, 40};
-const unsigned long long kNotificationTimestamp = 621046800ull;
+const uint64_t kNotificationTimestamp = 621046800ull;
 const bool kNotificationRenotify = true;
 const bool kNotificationSilent = false;
 const bool kNotificationRequireInteraction = true;
 
-const mojom::blink::NotificationActionType kWebNotificationActionType =
+const mojom::blink::NotificationActionType kBlinkNotificationActionType =
     mojom::blink::NotificationActionType::TEXT;
 const char kNotificationActionType[] = "text";
 const char kNotificationActionAction[] = "my_action";
@@ -66,7 +69,8 @@ class CompleteUrlExecutionContext final : public NullExecutionContext {
 class NotificationDataTest : public testing::Test {
  public:
   void SetUp() override {
-    execution_context_ = new CompleteUrlExecutionContext(kNotificationBaseUrl);
+    execution_context_ =
+        MakeGarbageCollected<CompleteUrlExecutionContext>(kNotificationBaseUrl);
   }
 
   ExecutionContext* GetExecutionContext() { return execution_context_.Get(); }
@@ -77,38 +81,42 @@ class NotificationDataTest : public testing::Test {
 
 TEST_F(NotificationDataTest, ReflectProperties) {
   Vector<unsigned> vibration_pattern;
-  for (size_t i = 0; i < arraysize(kNotificationVibration); ++i)
+  for (size_t i = 0; i < base::size(kNotificationVibration); ++i)
     vibration_pattern.push_back(kNotificationVibration[i]);
 
   UnsignedLongOrUnsignedLongSequence vibration_sequence;
   vibration_sequence.SetUnsignedLongSequence(vibration_pattern);
 
-  HeapVector<NotificationAction> actions;
+  HeapVector<Member<NotificationAction>> actions;
   for (size_t i = 0; i < Notification::maxActions(); ++i) {
-    NotificationAction action;
-    action.setType(kNotificationActionType);
-    action.setAction(kNotificationActionAction);
-    action.setTitle(kNotificationActionTitle);
-    action.setIcon(kNotificationActionIcon);
-    action.setPlaceholder(kNotificationActionPlaceholder);
+    NotificationAction* action = NotificationAction::Create();
+    action->setType(kNotificationActionType);
+    action->setAction(kNotificationActionAction);
+    action->setTitle(kNotificationActionTitle);
+    action->setIcon(kNotificationActionIcon);
+    action->setPlaceholder(kNotificationActionPlaceholder);
 
     actions.push_back(action);
   }
 
-  NotificationOptions options;
-  options.setDir(kNotificationDir);
-  options.setLang(kNotificationLang);
-  options.setBody(kNotificationBody);
-  options.setTag(kNotificationTag);
-  options.setImage(kNotificationImage);
-  options.setIcon(kNotificationIcon);
-  options.setBadge(kNotificationBadge);
-  options.setVibrate(vibration_sequence);
-  options.setTimestamp(kNotificationTimestamp);
-  options.setRenotify(kNotificationRenotify);
-  options.setSilent(kNotificationSilent);
-  options.setRequireInteraction(kNotificationRequireInteraction);
-  options.setActions(actions);
+  DOMTimeStamp showTimestamp = base::Time::Now().ToDoubleT() * 1000.0;
+  TimestampTrigger* showTrigger = TimestampTrigger::Create(showTimestamp);
+
+  NotificationOptions* options = NotificationOptions::Create();
+  options->setDir(kNotificationDir);
+  options->setLang(kNotificationLang);
+  options->setBody(kNotificationBody);
+  options->setTag(kNotificationTag);
+  options->setImage(kNotificationImage);
+  options->setIcon(kNotificationIcon);
+  options->setBadge(kNotificationBadge);
+  options->setVibrate(vibration_sequence);
+  options->setTimestamp(kNotificationTimestamp);
+  options->setRenotify(kNotificationRenotify);
+  options->setSilent(kNotificationSilent);
+  options->setRequireInteraction(kNotificationRequireInteraction);
+  options->setActions(actions);
+  options->setShowTrigger(showTrigger);
 
   // TODO(peter): Test |options.data| and |notificationData.data|.
 
@@ -124,6 +132,8 @@ TEST_F(NotificationDataTest, ReflectProperties) {
   EXPECT_EQ(kNotificationLang, notification_data->lang);
   EXPECT_EQ(kNotificationBody, notification_data->body);
   EXPECT_EQ(kNotificationTag, notification_data->tag);
+  EXPECT_EQ(base::Time::FromJsTime(showTimestamp),
+            notification_data->show_trigger_timestamp);
 
   KURL base(kNotificationBaseUrl);
 
@@ -147,7 +157,7 @@ TEST_F(NotificationDataTest, ReflectProperties) {
             notification_data->require_interaction);
   EXPECT_EQ(actions.size(), notification_data->actions->size());
   for (const auto& action : notification_data->actions.value()) {
-    EXPECT_EQ(kWebNotificationActionType, action->type);
+    EXPECT_EQ(kBlinkNotificationActionType, action->type);
     EXPECT_EQ(kNotificationActionAction, action->action);
     EXPECT_EQ(kNotificationActionTitle, action->title);
     EXPECT_EQ(kNotificationActionPlaceholder, action->placeholder);
@@ -156,15 +166,15 @@ TEST_F(NotificationDataTest, ReflectProperties) {
 
 TEST_F(NotificationDataTest, SilentNotificationWithVibration) {
   Vector<unsigned> vibration_pattern;
-  for (size_t i = 0; i < arraysize(kNotificationVibration); ++i)
+  for (size_t i = 0; i < base::size(kNotificationVibration); ++i)
     vibration_pattern.push_back(kNotificationVibration[i]);
 
   UnsignedLongOrUnsignedLongSequence vibration_sequence;
   vibration_sequence.SetUnsignedLongSequence(vibration_pattern);
 
-  NotificationOptions options;
-  options.setVibrate(vibration_sequence);
-  options.setSilent(true);
+  NotificationOptions* options = NotificationOptions::Create();
+  options->setVibrate(vibration_sequence);
+  options->setSilent(true);
 
   DummyExceptionStateForTesting exception_state;
   mojom::blink::NotificationDataPtr notification_data = CreateNotificationData(
@@ -176,14 +186,14 @@ TEST_F(NotificationDataTest, SilentNotificationWithVibration) {
 }
 
 TEST_F(NotificationDataTest, ActionTypeButtonWithPlaceholder) {
-  HeapVector<NotificationAction> actions;
-  NotificationAction action;
-  action.setType("button");
-  action.setPlaceholder("I'm afraid I can't do that...");
+  HeapVector<Member<NotificationAction>> actions;
+  NotificationAction* action = NotificationAction::Create();
+  action->setType("button");
+  action->setPlaceholder("I'm afraid I can't do that...");
   actions.push_back(action);
 
-  NotificationOptions options;
-  options.setActions(actions);
+  NotificationOptions* options = NotificationOptions::Create();
+  options->setActions(actions);
 
   DummyExceptionStateForTesting exception_state;
   mojom::blink::NotificationDataPtr notification_data = CreateNotificationData(
@@ -195,9 +205,9 @@ TEST_F(NotificationDataTest, ActionTypeButtonWithPlaceholder) {
 }
 
 TEST_F(NotificationDataTest, RenotifyWithEmptyTag) {
-  NotificationOptions options;
-  options.setTag(kNotificationEmptyTag);
-  options.setRenotify(true);
+  NotificationOptions* options = NotificationOptions::Create();
+  options->setTag(kNotificationEmptyTag);
+  options->setRenotify(true);
 
   DummyExceptionStateForTesting exception_state;
   mojom::blink::NotificationDataPtr notification_data = CreateNotificationData(
@@ -210,20 +220,20 @@ TEST_F(NotificationDataTest, RenotifyWithEmptyTag) {
 }
 
 TEST_F(NotificationDataTest, InvalidIconUrls) {
-  HeapVector<NotificationAction> actions;
+  HeapVector<Member<NotificationAction>> actions;
   for (size_t i = 0; i < Notification::maxActions(); ++i) {
-    NotificationAction action;
-    action.setAction(kNotificationActionAction);
-    action.setTitle(kNotificationActionTitle);
-    action.setIcon(kNotificationIconInvalid);
+    NotificationAction* action = NotificationAction::Create();
+    action->setAction(kNotificationActionAction);
+    action->setTitle(kNotificationActionTitle);
+    action->setIcon(kNotificationIconInvalid);
     actions.push_back(action);
   }
 
-  NotificationOptions options;
-  options.setImage(kNotificationIconInvalid);
-  options.setIcon(kNotificationIconInvalid);
-  options.setBadge(kNotificationIconInvalid);
-  options.setActions(actions);
+  NotificationOptions* options = NotificationOptions::Create();
+  options->setImage(kNotificationIconInvalid);
+  options->setIcon(kNotificationIconInvalid);
+  options->setBadge(kNotificationIconInvalid);
+  options->setActions(actions);
 
   DummyExceptionStateForTesting exception_state;
   mojom::blink::NotificationDataPtr notification_data = CreateNotificationData(
@@ -239,14 +249,14 @@ TEST_F(NotificationDataTest, InvalidIconUrls) {
 
 TEST_F(NotificationDataTest, VibrationNormalization) {
   Vector<unsigned> unnormalized_pattern;
-  for (size_t i = 0; i < arraysize(kNotificationVibrationUnnormalized); ++i)
+  for (size_t i = 0; i < base::size(kNotificationVibrationUnnormalized); ++i)
     unnormalized_pattern.push_back(kNotificationVibrationUnnormalized[i]);
 
   UnsignedLongOrUnsignedLongSequence vibration_sequence;
   vibration_sequence.SetUnsignedLongSequence(unnormalized_pattern);
 
-  NotificationOptions options;
-  options.setVibrate(vibration_sequence);
+  NotificationOptions* options = NotificationOptions::Create();
+  options->setVibrate(vibration_sequence);
 
   DummyExceptionStateForTesting exception_state;
   mojom::blink::NotificationDataPtr notification_data = CreateNotificationData(
@@ -254,7 +264,7 @@ TEST_F(NotificationDataTest, VibrationNormalization) {
   EXPECT_FALSE(exception_state.HadException());
 
   Vector<int> normalized_pattern;
-  for (size_t i = 0; i < arraysize(kNotificationVibrationNormalized); ++i)
+  for (size_t i = 0; i < base::size(kNotificationVibrationNormalized); ++i)
     normalized_pattern.push_back(kNotificationVibrationNormalized[i]);
 
   ASSERT_EQ(normalized_pattern.size(),
@@ -266,7 +276,7 @@ TEST_F(NotificationDataTest, VibrationNormalization) {
 }
 
 TEST_F(NotificationDataTest, DefaultTimestampValue) {
-  NotificationOptions options;
+  NotificationOptions* options = NotificationOptions::Create();
 
   DummyExceptionStateForTesting exception_state;
   mojom::blink::NotificationDataPtr notification_data = CreateNotificationData(
@@ -276,7 +286,8 @@ TEST_F(NotificationDataTest, DefaultTimestampValue) {
   // The timestamp should be set to the current time since the epoch if it
   // wasn't supplied by the developer. "32" has no significance, but an equal
   // comparison of the value could lead to flaky failures.
-  EXPECT_NEAR(notification_data->timestamp, WTF::CurrentTimeMS(), 32);
+  EXPECT_NEAR(notification_data->timestamp,
+              base::Time::Now().ToDoubleT() * 1000.0, 32);
 }
 
 TEST_F(NotificationDataTest, DirectionValues) {
@@ -289,8 +300,8 @@ TEST_F(NotificationDataTest, DirectionValues) {
   mappings.insert("peter", mojom::blink::NotificationDirection::AUTO);
 
   for (const String& direction : mappings.Keys()) {
-    NotificationOptions options;
-    options.setDir(direction);
+    NotificationOptions* options = NotificationOptions::Create();
+    options->setDir(direction);
 
     DummyExceptionStateForTesting exception_state;
     mojom::blink::NotificationDataPtr notification_data =
@@ -303,17 +314,17 @@ TEST_F(NotificationDataTest, DirectionValues) {
 }
 
 TEST_F(NotificationDataTest, MaximumActionCount) {
-  HeapVector<NotificationAction> actions;
+  HeapVector<Member<NotificationAction>> actions;
   for (size_t i = 0; i < Notification::maxActions() + 2; ++i) {
-    NotificationAction action;
-    action.setAction(String::Number(i));
-    action.setTitle(kNotificationActionTitle);
+    NotificationAction* action = NotificationAction::Create();
+    action->setAction(String::Number(i));
+    action->setTitle(kNotificationActionTitle);
 
     actions.push_back(action);
   }
 
-  NotificationOptions options;
-  options.setActions(actions);
+  NotificationOptions* options = NotificationOptions::Create();
+  options->setActions(actions);
 
   DummyExceptionStateForTesting exception_state;
   mojom::blink::NotificationDataPtr notification_data = CreateNotificationData(
@@ -327,6 +338,25 @@ TEST_F(NotificationDataTest, MaximumActionCount) {
     String expected_action = String::Number(i);
     EXPECT_EQ(expected_action, notification_data->actions.value()[i]->action);
   }
+}
+
+TEST_F(NotificationDataTest, RejectsTriggerTimestampOverAYear) {
+  base::Time show_timestamp = base::Time::Now() +
+                              kMaxNotificationShowTriggerDelay +
+                              base::TimeDelta::FromDays(1);
+  TimestampTrigger* show_trigger =
+      TimestampTrigger::Create(show_timestamp.ToJsTime());
+
+  NotificationOptions* options = NotificationOptions::Create();
+  options->setShowTrigger(show_trigger);
+
+  DummyExceptionStateForTesting exception_state;
+  mojom::blink::NotificationDataPtr notification_data = CreateNotificationData(
+      GetExecutionContext(), kNotificationTitle, options, exception_state);
+  ASSERT_TRUE(exception_state.HadException());
+
+  EXPECT_EQ("Notification trigger timestamp too far ahead in the future.",
+            exception_state.Message());
 }
 
 }  // namespace

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/device_orientation/device_motion_controller.h"
 
+#include "third_party/blink/public/mojom/feature_policy/feature_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
@@ -14,6 +15,7 @@
 #include "third_party/blink/renderer/modules/device_orientation/device_motion_event_pump.h"
 #include "third_party/blink/renderer/modules/device_orientation/device_orientation_controller.h"
 #include "third_party/blink/renderer/modules/event_modules.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
@@ -30,7 +32,7 @@ DeviceMotionController& DeviceMotionController::From(Document& document) {
   DeviceMotionController* controller =
       Supplement<Document>::From<DeviceMotionController>(document);
   if (!controller) {
-    controller = new DeviceMotionController(document);
+    controller = MakeGarbageCollected<DeviceMotionController>(document);
     ProvideTo(document, controller);
   }
   return *controller;
@@ -42,20 +44,22 @@ void DeviceMotionController::DidAddEventListener(
   if (event_type != EventTypeName())
     return;
 
-  LocalFrame* frame = GetDocument().GetFrame();
-  if (frame) {
-    if (GetDocument().IsSecureContext()) {
-      UseCounter::Count(frame, WebFeature::kDeviceMotionSecureOrigin);
-    } else {
-      Deprecation::CountDeprecation(frame,
-                                    WebFeature::kDeviceMotionInsecureOrigin);
-      HostsUsingFeatures::CountAnyWorld(
-          GetDocument(),
-          HostsUsingFeatures::Feature::kDeviceMotionInsecureHost);
-      if (frame->GetSettings()->GetStrictPowerfulFeatureRestrictions())
-        return;
-    }
-  }
+  // The document could be detached, e.g. if it is the `contentDocument` of an
+  // <iframe> that has been removed from the DOM of its parent frame.
+  if (GetDocument().IsContextDestroyed())
+    return;
+
+  // The API is not exposed to Workers or Worklets, so if the current realm
+  // execution context is valid, it must have a responsible browsing context.
+  SECURITY_CHECK(GetDocument().GetFrame());
+
+  // The event handler property on `window` is restricted to [SecureContext],
+  // but nothing prevents a site from calling `window.addEventListener(...)`
+  // from a non-secure browsing context.
+  if (!GetDocument().IsSecureContext())
+    return;
+
+  UseCounter::Count(GetDocument(), WebFeature::kDeviceMotionSecureOrigin);
 
   if (!has_event_listener_) {
     Platform::Current()->RecordRapporURL("DeviceSensors.DeviceMotion",
@@ -69,7 +73,7 @@ void DeviceMotionController::DidAddEventListener(
     if (!CheckPolicyFeatures({mojom::FeaturePolicyFeature::kAccelerometer,
                               mojom::FeaturePolicyFeature::kGyroscope})) {
       DeviceOrientationController::LogToConsolePolicyFeaturesDisabled(
-          frame, EventTypeName());
+          GetDocument().GetFrame(), EventTypeName());
       return;
     }
   }
@@ -90,7 +94,8 @@ void DeviceMotionController::RegisterWithDispatcher() {
       return;
     scoped_refptr<base::SingleThreadTaskRunner> task_runner =
         frame->GetTaskRunner(TaskType::kSensor);
-    motion_event_pump_ = new DeviceMotionEventPump(task_runner);
+    motion_event_pump_ =
+        MakeGarbageCollected<DeviceMotionEventPump>(task_runner);
   }
   motion_event_pump_->SetController(this);
 }
@@ -102,7 +107,7 @@ void DeviceMotionController::UnregisterWithDispatcher() {
 
 Event* DeviceMotionController::LastEvent() const {
   return DeviceMotionEvent::Create(
-      EventTypeNames::devicemotion,
+      event_type_names::kDevicemotion,
       motion_event_pump_ ? motion_event_pump_->LatestDeviceMotionData()
                          : nullptr);
 }
@@ -113,7 +118,7 @@ bool DeviceMotionController::IsNullEvent(Event* event) const {
 }
 
 const AtomicString& DeviceMotionController::EventTypeName() const {
-  return EventTypeNames::devicemotion;
+  return event_type_names::kDevicemotion;
 }
 
 void DeviceMotionController::Trace(blink::Visitor* visitor) {

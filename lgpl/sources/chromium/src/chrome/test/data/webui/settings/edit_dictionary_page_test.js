@@ -91,6 +91,22 @@ suite('settings-edit-dictionary-page', function() {
         'none');  // Make sure add-word button actually clickable.
   });
 
+  test('add duplicate word', function() {
+    const WORD = 'unique';
+    languageSettingsPrivate.onCustomDictionaryChanged.callListeners([WORD], []);
+    editDictPage.$.newWord.value = `${WORD} ${WORD}`;
+    Polymer.dom.flush();
+    assertFalse(editDictPage.$.addWord.disabled);
+
+    editDictPage.$.newWord.value = WORD;
+    Polymer.dom.flush();
+    assertTrue(editDictPage.$.addWord.disabled);
+
+    languageSettingsPrivate.onCustomDictionaryChanged.callListeners([], [WORD]);
+    Polymer.dom.flush();
+    assertFalse(editDictPage.$.addWord.disabled);
+  });
+
   test('spellcheck edit dictionary page message when empty', function() {
     assertTrue(!!editDictPage);
     return languageSettingsPrivate.whenCalled('getSpellcheckWords')
@@ -115,4 +131,33 @@ suite('settings-edit-dictionary-page', function() {
     assertEquals(2, editDictPage.$$('#list').items.length);
   });
 
+  test('spellcheck edit dictionary page remove is in tab order', function() {
+    const addWordButton = editDictPage.$$('#addWord');
+    editDictPage.$.newWord.value = 'valid word';
+    addWordButton.click();
+    Polymer.dom.flush();
+
+    assertTrue(editDictPage.$.noWordsLabel.hidden);
+    assertTrue(!!editDictPage.$$('#list'));
+    assertEquals(1, editDictPage.$$('#list').items.length);
+
+    const removeWordButton = editDictPage.$$('cr-icon-button');
+    // Button should be reachable in the tab order.
+    assertEquals('0', removeWordButton.getAttribute('tabindex'));
+    removeWordButton.click();
+    Polymer.dom.flush();
+
+    assertFalse(editDictPage.$.noWordsLabel.hidden);
+
+    editDictPage.$.newWord.value = 'valid word2';
+    addWordButton.click();
+    Polymer.dom.flush();
+
+    assertTrue(editDictPage.$.noWordsLabel.hidden);
+    assertTrue(!!editDictPage.$$('#list'));
+    assertEquals(1, editDictPage.$$('#list').items.length);
+    const newRemoveWordButton = editDictPage.$$('cr-icon-button');
+    // Button should be reachable in the tab order.
+    assertEquals('0', newRemoveWordButton.getAttribute('tabindex'));
+  });
 });

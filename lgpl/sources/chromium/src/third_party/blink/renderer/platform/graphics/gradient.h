@@ -36,18 +36,19 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_flags.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_shader.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 
 class SkMatrix;
-class SkShader;
 
 namespace blink {
 
 class FloatPoint;
 
 class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
+  USING_FAST_MALLOC(Gradient);
 
  public:
   enum class Type { kLinear, kRadial, kConic };
@@ -57,11 +58,17 @@ class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
     kUnpremultiplied,
   };
 
+  enum class DegenerateHandling {
+    kAllow,
+    kDisallow,
+  };
+
   static scoped_refptr<Gradient> CreateLinear(
       const FloatPoint& p0,
       const FloatPoint& p1,
       GradientSpreadMethod = kSpreadMethodPad,
-      ColorInterpolation = ColorInterpolation::kUnpremultiplied);
+      ColorInterpolation = ColorInterpolation::kUnpremultiplied,
+      DegenerateHandling = DegenerateHandling::kAllow);
 
   static scoped_refptr<Gradient> CreateRadial(
       const FloatPoint& p0,
@@ -70,7 +77,8 @@ class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
       float r1,
       float aspect_ratio = 1,
       GradientSpreadMethod = kSpreadMethodPad,
-      ColorInterpolation = ColorInterpolation::kUnpremultiplied);
+      ColorInterpolation = ColorInterpolation::kUnpremultiplied,
+      DegenerateHandling = DegenerateHandling::kAllow);
 
   static scoped_refptr<Gradient> CreateConic(
       const FloatPoint& position,
@@ -78,7 +86,8 @@ class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
       float start_angle,
       float end_angle,
       GradientSpreadMethod = kSpreadMethodPad,
-      ColorInterpolation = ColorInterpolation::kUnpremultiplied);
+      ColorInterpolation = ColorInterpolation::kUnpremultiplied,
+      DegenerateHandling = DegenerateHandling::kAllow);
 
   virtual ~Gradient();
 
@@ -86,13 +95,13 @@ class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
 
   struct ColorStop {
     DISALLOW_NEW();
-    float stop;
+    double stop;
     Color color;
 
-    ColorStop(float s, const Color& c) : stop(s), color(c) {}
+    ColorStop(double s, const Color& c) : stop(s), color(c) {}
   };
   void AddColorStop(const ColorStop&);
-  void AddColorStop(float value, const Color& color) {
+  void AddColorStop(double value, const Color& color) {
     AddColorStop(ColorStop(value, color));
   }
   void AddColorStops(const Vector<Gradient::ColorStop>&);
@@ -100,16 +109,20 @@ class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
   void ApplyToFlags(PaintFlags&, const SkMatrix& local_matrix);
 
  protected:
-  Gradient(Type, GradientSpreadMethod, ColorInterpolation);
+  Gradient(Type, GradientSpreadMethod, ColorInterpolation, DegenerateHandling);
 
   using ColorBuffer = Vector<SkColor, 8>;
   using OffsetBuffer = Vector<SkScalar, 8>;
   virtual sk_sp<PaintShader> CreateShader(const ColorBuffer&,
                                           const OffsetBuffer&,
-                                          SkShader::TileMode,
+                                          SkTileMode,
                                           uint32_t flags,
                                           const SkMatrix&,
                                           SkColor) const = 0;
+
+  DegenerateHandling GetDegenerateHandling() const {
+    return degenerate_handling_;
+  }
 
  private:
   sk_sp<PaintShader> CreateShaderInternal(const SkMatrix& local_matrix);
@@ -122,6 +135,7 @@ class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
   const Type type_;
   const GradientSpreadMethod spread_method_;
   const ColorInterpolation color_interpolation_;
+  const DegenerateHandling degenerate_handling_;
 
   Vector<ColorStop, 2> stops_;
   bool stops_sorted_;

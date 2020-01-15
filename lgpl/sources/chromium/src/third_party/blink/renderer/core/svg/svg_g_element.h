@@ -29,12 +29,10 @@ class CORE_EXPORT SVGGElement final : public SVGGraphicsElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(SVGGElement);
-
- protected:
   explicit SVGGElement(Document&, ConstructionType = kCreateSVGElement);
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+ protected:
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 
  private:
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override;

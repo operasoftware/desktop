@@ -4,13 +4,20 @@
 
 #include "third_party/blink/renderer/modules/storage/cached_storage_area.h"
 
+#include <inttypes.h>
+
 #include "base/metrics/histogram_macros.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/rand_util.h"
-#include "mojo/public/cpp/bindings/strong_associated_binding.h"
+#include "base/task/post_task.h"
+#include "base/trace_event/memory_dump_manager.h"
+#include "mojo/public/cpp/bindings/self_owned_associated_receiver.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
 #include "third_party/blink/renderer/platform/wtf/text/utf8.h"
 
@@ -24,14 +31,14 @@ enum class StorageFormat : uint8_t { UTF16 = 0, Latin1 = 1 };
 
 class GetAllCallback : public mojom::blink::StorageAreaGetAllCallback {
  public:
-  static mojom::blink::StorageAreaGetAllCallbackAssociatedPtrInfo CreateAndBind(
-      base::OnceCallback<void(bool)> callback) {
-    mojom::blink::StorageAreaGetAllCallbackAssociatedPtrInfo ptr_info;
-    auto request = mojo::MakeRequest(&ptr_info);
-    mojo::MakeStrongAssociatedBinding(
+  static mojo::PendingAssociatedRemote<mojom::blink::StorageAreaGetAllCallback>
+  CreateAndBind(base::OnceCallback<void(bool)> callback) {
+    mojo::PendingAssociatedRemote<mojom::blink::StorageAreaGetAllCallback>
+        pending_remote;
+    mojo::MakeSelfOwnedAssociatedReceiver(
         base::WrapUnique(new GetAllCallback(std::move(callback))),
-        std::move(request));
-    return ptr_info;
+        pending_remote.InitWithNewEndpointAndPassReceiver());
+    return pending_remote;
   }
 
  private:
@@ -63,7 +70,7 @@ void UnpackSource(const String& source,
 // static
 scoped_refptr<CachedStorageArea> CachedStorageArea::CreateForLocalStorage(
     scoped_refptr<const SecurityOrigin> origin,
-    mojo::InterfacePtr<mojom::blink::StorageArea> area,
+    mojo::PendingRemote<mojom::blink::StorageArea> area,
     scoped_refptr<base::SingleThreadTaskRunner> ipc_runner,
     InspectorEventListener* listener) {
   return base::AdoptRef(new CachedStorageArea(
@@ -73,7 +80,7 @@ scoped_refptr<CachedStorageArea> CachedStorageArea::CreateForLocalStorage(
 // static
 scoped_refptr<CachedStorageArea> CachedStorageArea::CreateForSessionStorage(
     scoped_refptr<const SecurityOrigin> origin,
-    mojo::AssociatedInterfacePtr<mojom::blink::StorageArea> area,
+    mojo::PendingAssociatedRemote<mojom::blink::StorageArea> area,
     scoped_refptr<base::SingleThreadTaskRunner> ipc_runner,
     InspectorEventListener* listener) {
   return base::AdoptRef(new CachedStorageArea(
@@ -221,40 +228,43 @@ String CachedStorageArea::RegisterSource(Source* source) {
 // LocalStorage constructor.
 CachedStorageArea::CachedStorageArea(
     scoped_refptr<const SecurityOrigin> origin,
-    mojo::InterfacePtr<mojom::blink::StorageArea> area,
+    mojo::PendingRemote<mojom::blink::StorageArea> area,
     scoped_refptr<base::SingleThreadTaskRunner> ipc_runner,
     InspectorEventListener* listener)
     : origin_(std::move(origin)),
       inspector_event_listener_(listener),
-      mojo_area_(area.get()),
-      mojo_area_ptr_(std::move(area)),
-      binding_(this),
-      areas_(new HeapHashMap<WeakMember<Source>, String>),
-      weak_factory_(this) {
-  mojom::blink::StorageAreaObserverAssociatedPtrInfo ptr_info;
-  binding_.Bind(mojo::MakeRequest(&ptr_info), std::move(ipc_runner));
-  mojo_area_->AddObserver(std::move(ptr_info));
+      mojo_area_remote_(std::move(area), ipc_runner),
+      mojo_area_(mojo_area_remote_.get()),
+      areas_(MakeGarbageCollected<HeapHashMap<WeakMember<Source>, String>>()) {
+  mojo_area_->AddObserver(
+      receiver_.BindNewEndpointAndPassRemote(std::move(ipc_runner)));
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      this, "DOMStorage",
+      ThreadScheduler::Current()->DeprecatedDefaultTaskRunner());
 }
 
 // SessionStorage constructor.
 CachedStorageArea::CachedStorageArea(
     scoped_refptr<const SecurityOrigin> origin,
-    mojo::AssociatedInterfacePtr<mojom::blink::StorageArea> area,
+    mojo::PendingAssociatedRemote<mojom::blink::StorageArea> area,
     scoped_refptr<base::SingleThreadTaskRunner> ipc_runner,
     InspectorEventListener* listener)
     : origin_(std::move(origin)),
       inspector_event_listener_(listener),
-      mojo_area_(area.get()),
-      mojo_area_associated_ptr_(std::move(area)),
-      binding_(this),
-      areas_(new HeapHashMap<WeakMember<Source>, String>),
-      weak_factory_(this) {
-  mojom::blink::StorageAreaObserverAssociatedPtrInfo ptr_info;
-  binding_.Bind(mojo::MakeRequest(&ptr_info), std::move(ipc_runner));
-  mojo_area_->AddObserver(std::move(ptr_info));
+      mojo_area_associated_remote_(std::move(area), ipc_runner),
+      mojo_area_(mojo_area_associated_remote_.get()),
+      areas_(MakeGarbageCollected<HeapHashMap<WeakMember<Source>, String>>()) {
+  mojo_area_->AddObserver(
+      receiver_.BindNewEndpointAndPassRemote(std::move(ipc_runner)));
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      this, "DOMStorage",
+      ThreadScheduler::Current()->DeprecatedDefaultTaskRunner());
 }
 
-CachedStorageArea::~CachedStorageArea() = default;
+CachedStorageArea::~CachedStorageArea() {
+  base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
+      this);
+}
 
 void CachedStorageArea::KeyAdded(const Vector<uint8_t>& key,
                                  const Vector<uint8_t>& value,
@@ -342,6 +352,23 @@ void CachedStorageArea::ShouldSendOldValueOnMutations(bool value) {
   should_send_old_value_on_mutations_ = value;
 }
 
+bool CachedStorageArea::OnMemoryDump(
+    const base::trace_event::MemoryDumpArgs& args,
+    base::trace_event::ProcessMemoryDump* pmd) {
+  using base::trace_event::MemoryAllocatorDump;
+
+  WTF::String dump_name = WTF::String::Format(
+      "site_storage/%s/0x%" PRIXPTR "/cache_size",
+      IsSessionStorage() ? "session_storage" : "local_storage",
+      reinterpret_cast<uintptr_t>(this));
+  MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(dump_name.Utf8());
+  dump->AddScalar(MemoryAllocatorDump::kNameSize,
+                  MemoryAllocatorDump::kUnitsBytes, memory_used());
+  pmd->AddSuballocation(dump->guid(),
+                        WTF::Partitions::kAllocatedObjectPoolName);
+  return true;
+}
+
 void CachedStorageArea::KeyAddedOrChanged(const Vector<uint8_t>& key,
                                           const Vector<uint8_t>& new_value,
                                           const String& old_value,
@@ -423,8 +450,11 @@ void CachedStorageArea::EnsureLoaded() {
   if (map_)
     return;
 
+  // There might be something weird happening during the sync call that destroys
+  // this object. Keep a reference to either fix or rule out that this is the
+  // problem. See https://crbug.com/915577.
+  scoped_refptr<CachedStorageArea> keep_alive(this);
   base::TimeTicks before = base::TimeTicks::Now();
-
   ignore_all_mutations_ = true;
   bool success = false;
   Vector<mojom::blink::KeyValuePtr> data;
@@ -451,8 +481,10 @@ void CachedStorageArea::EnsureLoaded() {
   // Track localStorage size, from 0-6MB. Note that the maximum size should be
   // 10MB, but we add some slop since we want to make sure the max size is
   // always above what we see in practice, since histograms can't change.
-  UMA_HISTOGRAM_CUSTOM_COUNTS("LocalStorage.MojoSizeInKB",
-                              local_storage_size_kb, 1, 6 * 1024, 50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS(
+      "LocalStorage.MojoSizeInKB",
+      base::saturated_cast<base::Histogram::Sample>(local_storage_size_kb), 1,
+      6 * 1024, 50);
   if (local_storage_size_kb < 100) {
     UMA_HISTOGRAM_TIMES("LocalStorage.MojoTimeToPrimeForUnder100KB",
                         time_to_prime);
@@ -483,7 +515,7 @@ CachedStorageArea::FormatOption CachedStorageArea::GetValueFormat() const {
 }
 
 bool CachedStorageArea::IsSessionStorage() const {
-  return mojo_area_associated_ptr_.is_bound();
+  return mojo_area_associated_remote_.is_bound();
 }
 
 void CachedStorageArea::EnqueueStorageEvent(const String& key,
@@ -509,7 +541,7 @@ String CachedStorageArea::Uint8VectorToString(const Vector<uint8_t>& input,
                                               FormatOption format_option) {
   if (input.IsEmpty())
     return g_empty_string;
-  const size_t input_size = input.size();
+  const wtf_size_t input_size = input.size();
   String result;
   bool corrupt = false;
   switch (format_option) {
@@ -536,7 +568,7 @@ String CachedStorageArea::Uint8VectorToString(const Vector<uint8_t>& input,
     }
     case FormatOption::kLocalStorageDetectFormat: {
       StorageFormat format = static_cast<StorageFormat>(input[0]);
-      const size_t payload_size = input_size - 1;
+      const wtf_size_t payload_size = input_size - 1;
       switch (format) {
         case StorageFormat::UTF16: {
           if (payload_size % sizeof(UChar) != 0) {
@@ -580,7 +612,7 @@ Vector<uint8_t> CachedStorageArea::StringToUint8Vector(
     }
     case FormatOption::kSessionStorageForceUTF8: {
       unsigned length = input.length();
-      if (input.Is8Bit() && input.ContainsOnlyASCII()) {
+      if (input.Is8Bit() && input.ContainsOnlyASCIIOrEmpty()) {
         Vector<uint8_t> result(length);
         std::memcpy(result.data(), input.Characters8(), length);
         return result;
@@ -589,35 +621,36 @@ Vector<uint8_t> CachedStorageArea::StringToUint8Vector(
       if (input.Is8Bit()) {
         // This code is copied from WTF::String::Utf8(), except the vector
         // doesn't have a stack-allocated capacity.
-        // We do this because there isn't a way to transform the CString we get
-        // from WTF::String::Utf8() to a Vector without an extra copy.
+        // We do this because there isn't a way to transform the std::string we
+        // get from WTF::String::Utf8() to a Vector without an extra copy.
         if (length > std::numeric_limits<unsigned>::max() / 3)
           return Vector<uint8_t>();
         Vector<uint8_t> buffer_vector(length * 3);
         uint8_t* buffer = buffer_vector.data();
         const LChar* characters = input.Characters8();
 
-        WTF::Unicode::ConversionResult result =
-            WTF::Unicode::ConvertLatin1ToUTF8(
+        WTF::unicode::ConversionResult result =
+            WTF::unicode::ConvertLatin1ToUTF8(
                 &characters, characters + length,
                 reinterpret_cast<char**>(&buffer),
                 reinterpret_cast<char*>(buffer + buffer_vector.size()));
         // (length * 3) should be sufficient for any conversion
-        DCHECK_NE(result, WTF::Unicode::kTargetExhausted);
-        buffer_vector.Shrink(buffer - buffer_vector.data());
+        DCHECK_NE(result, WTF::unicode::kTargetExhausted);
+        buffer_vector.Shrink(
+            static_cast<wtf_size_t>(buffer - buffer_vector.data()));
         return buffer_vector;
       }
 
       // TODO(dmurph): Figure out how to avoid a copy here.
       // TODO(dmurph): Handle invalid UTF16 better. https://crbug.com/873280.
-      CString utf8 = input.Utf8(
-          WTF::kStrictUTF8ConversionReplacingUnpairedSurrogatesWithFFFD);
-      Vector<uint8_t> result(utf8.length());
-      std::memcpy(result.data(), utf8.data(), utf8.length());
+      StringUTF8Adaptor utf8(
+          input, WTF::kStrictUTF8ConversionReplacingUnpairedSurrogatesWithFFFD);
+      Vector<uint8_t> result(utf8.size());
+      std::memcpy(result.data(), utf8.data(), utf8.size());
       return result;
     }
     case FormatOption::kLocalStorageDetectFormat: {
-      if (input.ContainsOnlyLatin1()) {
+      if (input.ContainsOnlyLatin1OrEmpty()) {
         Vector<uint8_t> result(input.length() + 1);
         result[0] = static_cast<uint8_t>(StorageFormat::Latin1);
         if (input.Is8Bit()) {

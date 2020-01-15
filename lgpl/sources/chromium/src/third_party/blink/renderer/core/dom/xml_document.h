@@ -28,6 +28,7 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
@@ -35,21 +36,18 @@ class XMLDocument final : public Document {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static XMLDocument* Create(const DocumentInit& initializer) {
-    return new XMLDocument(initializer, kXMLDocumentClass);
-  }
-
   static XMLDocument* CreateXHTML(const DocumentInit& initializer) {
-    return new XMLDocument(initializer,
-                           kXMLDocumentClass | kXHTMLDocumentClass);
+    return MakeGarbageCollected<XMLDocument>(
+        initializer, kXMLDocumentClass | kXHTMLDocumentClass);
   }
 
   static XMLDocument* CreateSVG(const DocumentInit& initializer) {
-    return new XMLDocument(initializer, kXMLDocumentClass | kSVGDocumentClass);
+    return MakeGarbageCollected<XMLDocument>(
+        initializer, kXMLDocumentClass | kSVGDocumentClass);
   }
 
- protected:
-  XMLDocument(const DocumentInit&, DocumentClassFlags document_classes);
+  XMLDocument(const DocumentInit&,
+              DocumentClassFlags document_classes = kXMLDocumentClass);
 };
 
 DEFINE_DOCUMENT_TYPE_CASTS(XMLDocument);

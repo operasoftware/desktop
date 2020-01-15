@@ -25,6 +25,7 @@
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/core/css/parser/css_variable_parser.h"
 #include "third_party/blink/renderer/core/css/parser/media_query_parser.h"
+#include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
 #include "third_party/blink/renderer/core/css/property_registry.h"
 #include "third_party/blink/renderer/core/css/style_rule_import.h"
 #include "third_party/blink/renderer/core/css/style_rule_keyframe.h"
@@ -33,8 +34,9 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -93,7 +95,6 @@ MutableCSSPropertyValueSet::SetResult CSSParserImpl::ParseValue(
 MutableCSSPropertyValueSet::SetResult CSSParserImpl::ParseVariableValue(
     MutableCSSPropertyValueSet* declaration,
     const AtomicString& property_name,
-    const PropertyRegistry* registry,
     const String& value,
     bool important,
     const CSSParserContext* context,
@@ -108,18 +109,6 @@ MutableCSSPropertyValueSet::SetResult CSSParserImpl::ParseVariableValue(
   bool did_parse = false;
   bool did_change = false;
   if (!parser.parsed_properties_.IsEmpty()) {
-    const CSSCustomPropertyDeclaration* parsed_declaration =
-        ToCSSCustomPropertyDeclaration(parser.parsed_properties_[0].Value());
-    if (parsed_declaration->Value() && registry) {
-      const PropertyRegistration* registration =
-          registry->Registration(property_name);
-      // TODO(timloh): This is a bit wasteful, we parse the registered property
-      // to validate but throw away the result.
-      if (registration &&
-          !registration->Syntax().Parse(range, context, is_animation_tainted)) {
-        return MutableCSSPropertyValueSet::SetResult{did_parse, did_change};
-      }
-    }
     did_parse = true;
     did_change = declaration->AddParsedProperties(parser.parsed_properties_);
   }
@@ -139,15 +128,14 @@ static inline void FilterProperties(
     const CSSPropertyValue& property = input[i];
     if (property.IsImportant() != important)
       continue;
-    const unsigned property_id_index = property.Id() - firstCSSProperty;
-
-    if (property.Id() == CSSPropertyVariable) {
+    if (property.Id() == CSSPropertyID::kVariable) {
       const AtomicString& name =
-          ToCSSCustomPropertyDeclaration(property.Value())->GetName();
+          To<CSSCustomPropertyDeclaration>(property.Value())->GetName();
       if (seen_custom_properties.Contains(name))
         continue;
       seen_custom_properties.insert(name);
     } else {
+      const unsigned property_id_index = GetCSSPropertyIDIndex(property.Id());
       if (seen_properties.test(property_id_index))
         continue;
       seen_properties.set(property_id_index);
@@ -179,7 +167,7 @@ ImmutableCSSPropertyValueSet* CSSParserImpl::ParseInlineStyleDeclaration(
     const String& string,
     Element* element) {
   Document& document = element->GetDocument();
-  CSSParserContext* context = CSSParserContext::Create(
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       document.ElementSheet().Contents()->ParserContext(), &document);
   CSSParserMode mode = element->IsHTMLElement() && !document.InQuirksMode()
                            ? kHTMLStandardMode
@@ -190,6 +178,19 @@ ImmutableCSSPropertyValueSet* CSSParserImpl::ParseInlineStyleDeclaration(
   CSSParserTokenStream stream(tokenizer);
   parser.ConsumeDeclarationList(stream, StyleRule::kStyle);
   return CreateCSSPropertyValueSet(parser.parsed_properties_, mode);
+}
+
+ImmutableCSSPropertyValueSet* CSSParserImpl::ParseInlineStyleDeclaration(
+    const String& string,
+    CSSParserMode parser_mode,
+    SecureContextMode secure_context_mode) {
+  auto* context =
+      MakeGarbageCollected<CSSParserContext>(parser_mode, secure_context_mode);
+  CSSParserImpl parser(context);
+  CSSTokenizer tokenizer(string);
+  CSSParserTokenStream stream(tokenizer);
+  parser.ConsumeDeclarationList(stream, StyleRule::kStyle);
+  return CreateCSSPropertyValueSet(parser.parsed_properties_, parser_mode);
 }
 
 bool CSSParserImpl::ParseDeclarationList(
@@ -258,8 +259,8 @@ ParseSheetResult CSSParserImpl::ParseStyleSheet(
   CSSParserTokenStream stream(tokenizer);
   CSSParserImpl parser(context, style_sheet);
   if (defer_property_parsing == CSSDeferPropertyParsing::kYes) {
-    parser.lazy_state_ =
-        new CSSLazyParsingState(context, string, parser.style_sheet_);
+    parser.lazy_state_ = MakeGarbageCollected<CSSLazyParsingState>(
+        context, string, parser.style_sheet_);
   }
   ParseSheetResult result = ParseSheetResult::kSucceeded;
   bool first_rule_valid = parser.ConsumeRuleList(
@@ -305,10 +306,10 @@ CSSSelectorList CSSParserImpl::ParsePageSelector(
 
   std::unique_ptr<CSSParserSelector> selector;
   if (!type_selector.IsNull() && pseudo.IsNull()) {
-    selector = CSSParserSelector::Create(QualifiedName(
-        g_null_atom, type_selector, style_sheet->DefaultNamespace()));
+    selector = std::make_unique<CSSParserSelector>(
+        QualifiedName(g_null_atom, type_selector, g_star_atom));
   } else {
-    selector = CSSParserSelector::Create();
+    selector = std::make_unique<CSSParserSelector>();
     if (!pseudo.IsNull()) {
       selector->SetMatch(CSSSelector::kPagePseudoClass);
       selector->UpdatePseudoPage(pseudo.LowerASCII());
@@ -316,8 +317,8 @@ CSSSelectorList CSSParserImpl::ParsePageSelector(
         return CSSSelectorList();
     }
     if (!type_selector.IsNull()) {
-      selector->PrependTagSelector(QualifiedName(
-          g_null_atom, type_selector, style_sheet->DefaultNamespace()));
+      selector->PrependTagSelector(
+          QualifiedName(g_null_atom, type_selector, g_star_atom));
     }
   }
 
@@ -397,6 +398,7 @@ static CSSParserImpl::AllowedRulesType ComputeNewAllowedRules(
     CSSParserImpl::AllowedRulesType allowed_rules,
     StyleRuleBase* rule) {
   if (!rule || allowed_rules == CSSParserImpl::kKeyframeRules ||
+      allowed_rules == CSSParserImpl::kFontFeatureRules ||
       allowed_rules == CSSParserImpl::kNoRules)
     return allowed_rules;
   DCHECK_LE(allowed_rules, CSSParserImpl::kRegularRules);
@@ -421,6 +423,9 @@ bool CSSParserImpl::ConsumeRuleList(CSSParserTokenStream& stream,
       break;
     case kKeyframesRuleList:
       allowed_rules = kKeyframeRules;
+      break;
+    case kFontFeatureRuleList:
+      allowed_rules = kFontFeatureRules;
       break;
     default:
       NOTREACHED();
@@ -502,6 +507,9 @@ StyleRuleBase* CSSParserImpl::ConsumeAtRule(CSSParserTokenStream& stream,
 
   if (allowed_rules == kKeyframeRules)
     return nullptr;  // Parse error, no at-rules supported inside @keyframes
+  // Parse error, no at-rules currently supported inside @font-feature-values
+  if (allowed_rules == kFontFeatureRules)
+    return nullptr;
   if (allowed_rules == kNoRules)
     return nullptr;  // Parse error, no at-rules with blocks supported inside
                      // declaration lists
@@ -523,6 +531,8 @@ StyleRuleBase* CSSParserImpl::ConsumeAtRule(CSSParserTokenStream& stream,
       return ConsumeKeyframesRule(false, prelude, prelude_offset, stream);
     case kCSSAtRulePage:
       return ConsumePageRule(prelude, prelude_offset, stream);
+    case kCSSAtRuleProperty:
+      return ConsumePropertyRule(prelude, prelude_offset, stream);
     default:
       return nullptr;  // Parse error, unrecognised at-rule with block
   }
@@ -547,7 +557,33 @@ StyleRuleBase* CSSParserImpl::ConsumeQualifiedRule(
       return nullptr;  // Parse error, EOF instead of qualified rule block
 
     CSSParserTokenStream::BlockGuard guard(stream);
-    return ConsumeKeyframeStyleRule(prelude, prelude_offset, stream);
+    StyleRuleKeyframe* keyframe_style_rule =
+        ConsumeKeyframeStyleRule(prelude, prelude_offset, stream);
+    if (keyframe_style_rule)
+      context_->ReportLayoutAnimationsViolationIfNeeded(*keyframe_style_rule);
+    return keyframe_style_rule;
+  }
+  if (allowed_rules == kFontFeatureRules) {
+    stream.ConsumeWhitespace();
+    if (stream.AtEnd())
+      return nullptr;  // Parse error, EOF instead of qualified rule block
+    bool prelude_invalid = false;
+    stream.EnsureLookAhead();
+    if (stream.UncheckedPeek().GetType() != kLeftBraceToken) {
+      prelude_invalid = true;
+      while (!stream.AtEnd() &&
+             stream.UncheckedPeek().GetType() != kLeftBraceToken)
+        stream.UncheckedConsumeComponentValue();
+      if (stream.AtEnd())
+        return nullptr;
+    }
+
+    CSSParserTokenStream::BlockGuard guard(stream);
+    if (prelude_invalid)
+      return nullptr;
+    ConsumeDeclarationList(stream, StyleRule::kFontFace);
+    return MakeGarbageCollected<StyleRuleFontFace>(
+        CreateCSSPropertyValueSet(parsed_properties_, kCSSFontFaceRuleMode));
   }
 
   NOTREACHED();
@@ -578,7 +614,7 @@ StyleRuleCharset* CSSParserImpl::ConsumeCharsetRule(
   const CSSParserToken& string = prelude.ConsumeIncludingWhitespace();
   if (string.GetType() != kStringToken || !prelude.AtEnd())
     return nullptr;  // Parse error, expected a single string
-  return StyleRuleCharset::Create();
+  return MakeGarbageCollected<StyleRuleCharset>();
 }
 
 StyleRuleImport* CSSParserImpl::ConsumeImportRule(
@@ -595,8 +631,9 @@ StyleRuleImport* CSSParserImpl::ConsumeImportRule(
     observer_->EndRuleBody(prelude_offset.end);
   }
 
-  return StyleRuleImport::Create(uri,
-                                 MediaQueryParser::ParseMediaQuerySet(prelude));
+  return MakeGarbageCollected<StyleRuleImport>(
+      uri, MediaQueryParser::ParseMediaQuerySet(prelude),
+      context_->IsOriginClean() ? OriginClean::kTrue : OriginClean::kFalse);
 }
 
 StyleRuleNamespace* CSSParserImpl::ConsumeNamespaceRule(
@@ -610,7 +647,7 @@ StyleRuleNamespace* CSSParserImpl::ConsumeNamespaceRule(
   if (uri.IsNull() || !prelude.AtEnd())
     return nullptr;  // Parse error, expected string or URI
 
-  return StyleRuleNamespace::Create(namespace_prefix, uri);
+  return MakeGarbageCollected<StyleRuleNamespace>(namespace_prefix, uri);
 }
 
 StyleRuleMedia* CSSParserImpl::ConsumeMediaRule(
@@ -636,7 +673,7 @@ StyleRuleMedia* CSSParserImpl::ConsumeMediaRule(
   if (observer_)
     observer_->EndRuleBody(block.Offset());
 
-  return StyleRuleMedia::Create(media, rules);
+  return MakeGarbageCollected<StyleRuleMedia>(media, rules);
 }
 
 StyleRuleSupports* CSSParserImpl::ConsumeSupportsRule(
@@ -664,7 +701,8 @@ StyleRuleSupports* CSSParserImpl::ConsumeSupportsRule(
   if (observer_)
     observer_->EndRuleBody(block.Offset());
 
-  return StyleRuleSupports::Create(prelude_serialized, supported, rules);
+  return MakeGarbageCollected<StyleRuleSupports>(prelude_serialized, supported,
+                                                 rules);
 }
 
 StyleRuleViewport* CSSParserImpl::ConsumeViewportRule(
@@ -690,7 +728,7 @@ StyleRuleViewport* CSSParserImpl::ConsumeViewportRule(
     style_sheet_->SetHasViewportRule();
 
   ConsumeDeclarationList(block, StyleRule::kViewport);
-  return StyleRuleViewport::Create(
+  return MakeGarbageCollected<StyleRuleViewport>(
       CreateCSSPropertyValueSet(parsed_properties_, kCSSViewportRuleMode));
 }
 
@@ -712,7 +750,7 @@ StyleRuleFontFace* CSSParserImpl::ConsumeFontFaceRule(
     style_sheet_->SetHasFontFaceRule();
 
   ConsumeDeclarationList(stream, StyleRule::kFontFace);
-  return StyleRuleFontFace::Create(
+  return MakeGarbageCollected<StyleRuleFontFace>(
       CreateCSSPropertyValueSet(parsed_properties_, kCSSFontFaceRuleMode));
 }
 
@@ -742,10 +780,10 @@ StyleRuleKeyframes* CSSParserImpl::ConsumeKeyframesRule(
     observer_->StartRuleBody(block.Offset());
   }
 
-  StyleRuleKeyframes* keyframe_rule = StyleRuleKeyframes::Create();
+  auto* keyframe_rule = MakeGarbageCollected<StyleRuleKeyframes>();
   ConsumeRuleList(
       block, kKeyframesRuleList, [keyframe_rule](StyleRuleBase* keyframe) {
-        keyframe_rule->ParserAppendKeyframe(ToStyleRuleKeyframe(keyframe));
+        keyframe_rule->ParserAppendKeyframe(To<StyleRuleKeyframe>(keyframe));
       });
   keyframe_rule->SetName(name);
   keyframe_rule->SetVendorPrefixed(webkit_prefixed);
@@ -770,9 +808,33 @@ StyleRulePage* CSSParserImpl::ConsumePageRule(const CSSParserTokenRange prelude,
 
   ConsumeDeclarationList(block, StyleRule::kStyle);
 
-  return StyleRulePage::Create(
+  return MakeGarbageCollected<StyleRulePage>(
       std::move(selector_list),
       CreateCSSPropertyValueSet(parsed_properties_, context_->Mode()));
+}
+
+StyleRuleProperty* CSSParserImpl::ConsumePropertyRule(
+    CSSParserTokenRange prelude,
+    const RangeOffset& prelude_offset,
+    CSSParserTokenStream& block) {
+  if (!RuntimeEnabledFeatures::CSSVariables2AtPropertyEnabled())
+    return nullptr;
+
+  const CSSParserToken& name_token = prelude.ConsumeIncludingWhitespace();
+  if (!prelude.AtEnd())
+    return nullptr;
+  if (!CSSVariableParser::IsValidVariableName(name_token))
+    return nullptr;
+  String name = name_token.Value().ToString();
+
+  if (observer_) {
+    observer_->StartRuleHeader(StyleRule::kProperty, prelude_offset.start);
+    observer_->EndRuleHeader(prelude_offset.end);
+  }
+
+  ConsumeDeclarationList(block, StyleRule::kProperty);
+  return StyleRuleProperty::Create(
+      name, CreateCSSPropertyValueSet(parsed_properties_, context_->Mode()));
 }
 
 StyleRuleKeyframe* CSSParserImpl::ConsumeKeyframeStyleRule(
@@ -790,7 +852,7 @@ StyleRuleKeyframe* CSSParserImpl::ConsumeKeyframeStyleRule(
 
   ConsumeDeclarationList(block, StyleRule::kKeyframe);
 
-  return StyleRuleKeyframe::Create(
+  return MakeGarbageCollected<StyleRuleKeyframe>(
       std::move(key_list),
       CreateCSSPropertyValueSet(parsed_properties_, context_->Mode()));
 }
@@ -824,16 +886,16 @@ StyleRule* CSSParserImpl::ConsumeStyleRule(CSSParserTokenStream& stream) {
     return nullptr;  // Parse error, invalid selector list
 
   // TODO(csharrison): How should we lazily parse css that needs the observer?
-  if (!observer_ && lazy_state_ &&
-      lazy_state_->ShouldLazilyParseProperties(selector_list)) {
+  if (!observer_ && lazy_state_) {
     DCHECK(style_sheet_);
-    return StyleRule::CreateLazy(
+    return MakeGarbageCollected<StyleRule>(
         std::move(selector_list),
-        new CSSLazyPropertyParserImpl(stream.Offset() - 1, lazy_state_));
+        MakeGarbageCollected<CSSLazyPropertyParserImpl>(stream.Offset() - 1,
+                                                        lazy_state_));
   }
   ConsumeDeclarationList(stream, StyleRule::kStyle);
 
-  return StyleRule::Create(
+  return MakeGarbageCollected<StyleRule>(
       std::move(selector_list),
       CreateCSSPropertyValueSet(parsed_properties_, context_->Mode()));
 }
@@ -929,23 +991,23 @@ void CSSParserImpl::ConsumeDeclaration(CSSParserTokenRange range,
 
   size_t properties_count = parsed_properties_.size();
 
-  CSSPropertyID unresolved_property = CSSPropertyInvalid;
+  CSSPropertyID unresolved_property = CSSPropertyID::kInvalid;
   AtRuleDescriptorID atrule_id = AtRuleDescriptorID::Invalid;
-  if (rule_type == StyleRule::kFontFace) {
+  if (rule_type == StyleRule::kFontFace || rule_type == StyleRule::kProperty) {
     if (important)  // Invalid
       return;
     atrule_id = lhs.ParseAsAtRuleDescriptorID();
     AtRuleDescriptorParser::ParseAtRule(atrule_id, range, *context_,
                                         parsed_properties_);
   } else {
-    unresolved_property = lhs.ParseAsUnresolvedCSSPropertyID();
+    unresolved_property = lhs.ParseAsUnresolvedCSSPropertyID(context_->Mode());
   }
 
   // @rules other than FontFace still handled with legacy code.
   if (important && rule_type == StyleRule::kKeyframe)
     return;
 
-  if (unresolved_property == CSSPropertyVariable) {
+  if (unresolved_property == CSSPropertyID::kVariable) {
     if (rule_type != StyleRule::kStyle && rule_type != StyleRule::kKeyframe)
       return;
     AtomicString variable_name = lhs.Value().ToAtomicString();
@@ -953,7 +1015,7 @@ void CSSParserImpl::ConsumeDeclaration(CSSParserTokenRange range,
     ConsumeVariableValue(
         range.MakeSubRange(&range.Peek(), declaration_value_end), variable_name,
         important, is_animation_tainted);
-  } else if (unresolved_property != CSSPropertyInvalid) {
+  } else if (unresolved_property != CSSPropertyID::kInvalid) {
     if (style_sheet_ && style_sheet_->SingleOwnerDocument())
       Deprecation::WarnOnDeprecatedProperties(
           style_sheet_->SingleOwnerDocument()->GetFrame(), unresolved_property);
@@ -978,7 +1040,7 @@ void CSSParserImpl::ConsumeVariableValue(CSSParserTokenRange range,
               variable_name, range, is_animation_tainted, *context_)) {
     parsed_properties_.push_back(
         CSSPropertyValue(GetCSSPropertyVariable(), *value, important));
-    context_->Count(context_->Mode(), CSSPropertyVariable);
+    context_->Count(context_->Mode(), CSSPropertyID::kVariable);
   }
 }
 

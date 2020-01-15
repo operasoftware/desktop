@@ -4,38 +4,37 @@
 
 #include "third_party/blink/renderer/core/mojo/mojo_watcher.h"
 
+#include "base/single_thread_task_runner.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_mojo_watch_callback.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/mojo/mojo_handle_signals.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/cross_thread_functional.h"
-#include "third_party/blink/renderer/platform/web_task_runner.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
 
 // static
 MojoWatcher* MojoWatcher::Create(mojo::Handle handle,
-                                 const MojoHandleSignals& signals_dict,
+                                 const MojoHandleSignals* signals_dict,
                                  V8MojoWatchCallback* callback,
                                  ExecutionContext* context) {
-  MojoWatcher* watcher = new MojoWatcher(context, callback);
+  MojoWatcher* watcher = MakeGarbageCollected<MojoWatcher>(context, callback);
   MojoResult result = watcher->Watch(handle, signals_dict);
   // TODO(alokp): Consider raising an exception.
   // Current clients expect to recieve the initial error returned by MojoWatch
   // via watch callback.
   //
-  // Note that the usage of wrapPersistent is intentional so that the intial
+  // Note that the usage of WrapPersistent is intentional so that the initial
   // error is guaranteed to be reported to the client in case where the given
   // handle is invalid and garbage collection happens before the callback
   // is scheduled.
   if (result != MOJO_RESULT_OK) {
     watcher->task_runner_->PostTask(
         FROM_HERE,
-        WTF::Bind(&V8PersistentCallbackFunction<
-                      V8MojoWatchCallback>::InvokeAndReportException,
-                  WrapPersistent(ToV8PersistentCallbackFunction(callback)),
-                  WrapPersistent(watcher), result));
+        WTF::Bind(&V8MojoWatchCallback::InvokeAndReportException,
+                  WrapPersistent(callback), WrapPersistent(watcher), result));
   }
   return watcher;
 }
@@ -71,13 +70,13 @@ MojoWatcher::MojoWatcher(ExecutionContext* context,
       callback_(callback) {}
 
 MojoResult MojoWatcher::Watch(mojo::Handle handle,
-                              const MojoHandleSignals& signals_dict) {
+                              const MojoHandleSignals* signals_dict) {
   ::MojoHandleSignals signals = MOJO_HANDLE_SIGNAL_NONE;
-  if (signals_dict.readable())
+  if (signals_dict->readable())
     signals |= MOJO_HANDLE_SIGNAL_READABLE;
-  if (signals_dict.writable())
+  if (signals_dict->writable())
     signals |= MOJO_HANDLE_SIGNAL_WRITABLE;
-  if (signals_dict.peerClosed())
+  if (signals_dict->peerClosed())
     signals |= MOJO_HANDLE_SIGNAL_PEER_CLOSED;
 
   MojoResult result =
@@ -145,8 +144,9 @@ void MojoWatcher::OnHandleReady(const MojoTrapEvent* event) {
   MojoWatcher* watcher = reinterpret_cast<MojoWatcher*>(event->trigger_context);
   PostCrossThreadTask(
       *watcher->task_runner_, FROM_HERE,
-      CrossThreadBind(&MojoWatcher::RunReadyCallback,
-                      WrapCrossThreadWeakPersistent(watcher), event->result));
+      CrossThreadBindOnce(&MojoWatcher::RunReadyCallback,
+                          WrapCrossThreadWeakPersistent(watcher),
+                          event->result));
 }
 
 void MojoWatcher::RunReadyCallback(MojoResult result) {

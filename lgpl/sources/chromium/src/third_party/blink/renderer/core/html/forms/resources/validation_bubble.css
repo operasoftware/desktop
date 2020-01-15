@@ -17,6 +17,7 @@
   opacity: 0;
   position: absolute;
   will-change: opacity, transform;
+  word-break: break-word;
 }
 
 #container.shown-initially {
@@ -124,7 +125,7 @@
 #icon {
   grid-row: 1 / 3;
   grid-column: 1;
-  -webkit-margin-end: 8px;
+  margin-inline-end: 8px;
 }
 
 #main-message {

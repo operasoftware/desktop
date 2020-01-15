@@ -25,8 +25,10 @@ except IOError:
 
 
 _EXCLUDED_PATHS = (
-    # This directory is created and updated via a script.
-    r'^third_party[\\\/]blink[\\\/]tools[\\\/]blinkpy[\\\/]third_party[\\\/]wpt[\\\/]wpt[\\\/].*',
+    # These are third-party dependencies that we don't directly control.
+    r'^third_party[\\/]blink[\\/]tools[\\/]blinkpy[\\/]third_party[\\/]wpt[\\/]wpt[\\/].*',
+    r'^third_party[\\/]blink[\\/]web_tests[\\/]external[\\/]wpt[\\/]tools[\\/].*',
+    r'^third_party[\\/]blink[\\/]web_tests[\\/]external[\\/]wpt[\\/]resources[\\/]webidl2[\\/].*',
 )
 
 
@@ -37,10 +39,6 @@ def _CheckForWrongMojomIncludes(input_api, output_api):
     def source_file_filter(path):
         return input_api.FilterSourceFile(path,
                                           black_list=[r'third_party/blink/common/', r'third_party/blink/public/common'])
-
-    # The list of files that we specifically want to allow including
-    # -blink variant files (e.g. because it has #if INSIDE_BLINK).
-    allow_blink_files = [r'third_party/blink/public/platform/modules/service_worker/web_service_worker_request.h']
 
     pattern = input_api.re.compile(r'#include\s+.+\.mojom(.*)\.h[>"]')
     public_folder = input_api.os_path.normpath('third_party/blink/public/')
@@ -55,11 +53,10 @@ def _CheckForWrongMojomIncludes(input_api, output_api):
             match = pattern.match(line)
             if match:
                 if match.group(1) != '-shared':
-                    if f.LocalPath().startswith(public_folder) and \
-                            not f.LocalPath() in allow_blink_files:
+                    if f.LocalPath().startswith(public_folder):
                         error_list = public_blink_mojom_errors
-                    elif match.group(1) != '-blink':
-                        # Neither -shared.h, nor -blink.h.
+                    elif match.group(1) not in ('-blink', '-blink-forward', '-blink-test-utils'):
+                        # Neither -shared.h, -blink.h, -blink-forward.h nor -blink-test-utils.h.
                         error_list = non_blink_mojom_errors
 
             if error_list is not None:
@@ -192,82 +189,4 @@ def CheckChangeOnCommit(input_api, output_api):
         json_url='http://chromium-status.appspot.com/current?format=json'))
     results.extend(input_api.canned_checks.CheckChangeHasDescription(
         input_api, output_api))
-    return results
-
-
-def _ArePaintOrCompositingDirectoriesModified(change):  # pylint: disable=C0103
-    """Checks whether CL has changes to paint or compositing directories."""
-    paint_or_compositing_paths = [
-        os.path.join('third_party', 'blink', 'renderer', 'platform', 'graphics'),
-        os.path.join('third_party', 'blink', 'renderer', 'core', 'layout',
-                     'compositing'),
-        os.path.join('third_party', 'blink', 'renderer', 'core', 'svg'),
-        os.path.join('third_party', 'blink', 'renderer', 'core', 'paint'),
-        os.path.join('third_party', 'blink', 'web_tests', 'FlagExpectations',
-                     'enable-slimming-paint-v2'),
-        os.path.join('third_party', 'blink', 'web_tests', 'flag-specific',
-                     'enable-slimming-paint-v2'),
-        os.path.join('third_party', 'blink', 'web_tests', 'FlagExpectations',
-                     'enable-blink-gen-property-trees'),
-        os.path.join('third_party', 'blink', 'web_tests', 'flag-specific',
-                     'enable-blink-gen-property-trees'),
-    ]
-    for affected_file in change.AffectedFiles():
-        file_path = affected_file.LocalPath()
-        if any(x in file_path for x in paint_or_compositing_paths):
-            return True
-    return False
-
-
-def _AreLayoutNGDirectoriesModified(change):  # pylint: disable=C0103
-    """Checks whether CL has changes to a layout ng directory."""
-    layout_ng_paths = [
-        os.path.join('third_party', 'blink', 'renderer', 'core', 'editing'),
-        os.path.join('third_party', 'blink', 'renderer', 'core', 'layout',
-                     'ng'),
-        os.path.join('third_party', 'blink', 'renderer', 'core', 'paint',
-                     'ng'),
-        os.path.join('third_party', 'blink', 'renderer', 'platform', 'fonts',
-                     'shaping'),
-        os.path.join('third_party', 'blink', 'web_tests', 'FlagExpectations',
-                     'enable-blink-features=LayoutNG'),
-        os.path.join('third_party', 'blink', 'web_tests', 'flag-specific',
-                     'enable-blink-features=LayoutNG'),
-    ]
-    for affected_file in change.AffectedFiles():
-        file_path = affected_file.LocalPath()
-        if any(x in file_path for x in layout_ng_paths):
-            return True
-    return False
-
-
-def PostUploadHook(cl, change, output_api):  # pylint: disable=C0103
-    """git cl upload will call this hook after the issue is created/modified.
-
-    This hook adds extra try bots to the CL description in order to run slimming
-    paint v2 tests or LayoutNG tests in addition to the CQ try bots if the
-    change contains changes in a relevant direcotry (see:
-    _ArePaintOrCompositingDirectoriesModified and
-    _AreLayoutNGDirectoriesModified). For more information about
-    slimming-paint-v2 tests see https://crbug.com/601275 and for information
-    about the LayoutNG tests see https://crbug.com/706183.
-    """
-    results = []
-    if _ArePaintOrCompositingDirectoriesModified(change):
-        results.extend(output_api.EnsureCQIncludeTrybotsAreAdded(
-            cl,
-            ['luci.chromium.try:'
-             'linux_layout_tests_slimming_paint_v2',
-             # TODO(kojii): Update linux_trusty_blink_rel to luci when migrated.
-             'master.tryserver.blink:linux_trusty_blink_rel'],
-            'Automatically added linux_layout_tests_slimming_paint_v2 and '
-            'linux_trusty_blink_rel to run on CQ due to changes in paint or '
-            'compositing directories.'))
-    if _AreLayoutNGDirectoriesModified(change):
-        results.extend(output_api.EnsureCQIncludeTrybotsAreAdded(
-            cl,
-            ['luci.chromium.try:'
-             'linux_layout_tests_layout_ng'],
-            'Automatically added linux_layout_tests_layout_ng to run on CQ due '
-            'to changes in LayoutNG directories.'))
     return results

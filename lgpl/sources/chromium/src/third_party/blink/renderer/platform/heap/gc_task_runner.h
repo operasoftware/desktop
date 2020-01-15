@@ -33,9 +33,9 @@
 
 #include <memory>
 #include "base/location.h"
-#include "third_party/blink/renderer/platform/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
 
@@ -51,9 +51,9 @@ class GCTaskObserver final : public Thread::TaskObserver {
     DCHECK(!nesting_ || nesting_ == 1);
   }
 
-  void WillProcessTask() override { nesting_++; }
+  void WillProcessTask(const base::PendingTask&) override { nesting_++; }
 
-  void DidProcessTask() override {
+  void DidProcessTask(const base::PendingTask&) override {
     // In the production code WebKit::initialize is called from inside the
     // message loop so we can get didProcessTask() without corresponding
     // willProcessTask once. This is benign.

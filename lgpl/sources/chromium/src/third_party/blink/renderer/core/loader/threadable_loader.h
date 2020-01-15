@@ -37,7 +37,6 @@
 #include "base/macros.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/cross_thread_copier.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/raw_resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_error.h"
@@ -45,10 +44,10 @@
 #include "third_party/blink/renderer/platform/network/http_header_map.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -68,7 +67,7 @@ class ThreadableLoaderClient;
 // the constructor.
 // In either case, Start() must be called to actaully begin the request.
 class CORE_EXPORT ThreadableLoader final
-    : public GarbageCollectedFinalized<ThreadableLoader>,
+    : public GarbageCollected<ThreadableLoader>,
       private RawResourceClient {
   USING_GARBAGE_COLLECTED_MIXIN(ThreadableLoader);
 
@@ -89,10 +88,6 @@ class CORE_EXPORT ThreadableLoader final
   // After any of these methods is called, the loader won't call any of the
   // ThreadableLoaderClient methods.
   //
-  // A user must guarantee that the loading completes before the attached
-  // client gets invalid. Also, a user must guarantee that the loading
-  // completes before the ThreadableLoader is destructed.
-  //
   // When ThreadableLoader::Cancel() is called,
   // ThreadableLoaderClient::DidFail() is called with a ResourceError
   // with IsCancellation() returning true, if any of DidFinishLoading()
@@ -100,10 +95,14 @@ class CORE_EXPORT ThreadableLoader final
   // called with a ResourceError with IsCancellation() returning true
   // also for cancellation happened inside the loader.)
   //
-  // ThreadableLoaderClient methods may call cancel().
+  // ThreadableLoaderClient methods may call Cancel().
+  //
+  // The specified ResourceFetcher if non-null, or otherwise
+  // ExecutionContext::Fetcher() is used.
   ThreadableLoader(ExecutionContext&,
                    ThreadableLoaderClient*,
-                   const ResourceLoaderOptions&);
+                   const ResourceLoaderOptions&,
+                   ResourceFetcher* = nullptr);
   ~ThreadableLoader() override;
 
   // Exposed for testing. Code outside this class should not call this function.
@@ -121,7 +120,7 @@ class CORE_EXPORT ThreadableLoader final
   // time the request started.
   //
   // Passing a timeout of zero means there should be no timeout.
-  void SetTimeout(const TimeDelta& timeout);
+  void SetTimeout(const base::TimeDelta& timeout);
 
   void Cancel();
 
@@ -151,25 +150,23 @@ class CORE_EXPORT ThreadableLoader final
 
   // RawResourceClient
   void DataSent(Resource*,
-                unsigned long long bytes_sent,
-                unsigned long long total_bytes_to_be_sent) override;
-  void ResponseReceived(Resource*,
-                        const ResourceResponse&,
-                        std::unique_ptr<WebDataConsumerHandle>) override;
-  void SetSerializedCachedMetadata(Resource*, const char*, size_t) override;
+                uint64_t bytes_sent,
+                uint64_t total_bytes_to_be_sent) override;
+  void ResponseReceived(Resource*, const ResourceResponse&) override;
+  void ResponseBodyReceived(Resource*, BytesConsumer& body) override;
+  void SetSerializedCachedMetadata(Resource*, const uint8_t*, size_t) override;
   void DataReceived(Resource*, const char* data, size_t data_length) override;
   bool RedirectReceived(Resource*,
                         const ResourceRequest&,
                         const ResourceResponse&) override;
   void RedirectBlocked() override;
-  void DataDownloaded(Resource*, int) override;
+  void DataDownloaded(Resource*, uint64_t) override;
   void DidReceiveResourceTiming(Resource*, const ResourceTimingInfo&) override;
   void DidDownloadToBlob(Resource*, scoped_refptr<BlobDataHandle>) override;
 
   // Notify Inspector and log to console about resource response. Use this
   // method if response is not going to be finished normally.
-  void ReportResponseReceived(unsigned long identifier,
-                              const ResourceResponse&);
+  void ReportResponseReceived(uint64_t identifier, const ResourceResponse&);
 
   void DidTimeout(TimerBase*);
   // Calls the appropriate loading method according to policy and data about
@@ -187,7 +184,7 @@ class CORE_EXPORT ThreadableLoader final
   void LoadActualRequest();
   // Clears actual_request_ and reports access control check failure to
   // m_client.
-  void HandlePreflightFailure(const KURL&, const network::CORSErrorStatus&);
+  void HandlePreflightFailure(const KURL&, const network::CorsErrorStatus&);
   // Investigates the response for the preflight request. If successful,
   // the actual request will be made later in NotifyFinished().
   void HandlePreflightResponse(const ResourceResponse&);
@@ -211,25 +208,23 @@ class CORE_EXPORT ThreadableLoader final
   // TODO(kinuko): Remove dependency to document.
   Document* GetDocument() const;
 
-  ThreadableLoaderClient* client_;
+  Member<ThreadableLoaderClient> client_;
   Member<ExecutionContext> execution_context_;
+  Member<ResourceFetcher> resource_fetcher_;
 
-  TimeDelta timeout_;
+  base::TimeDelta timeout_;
   // Some items may be overridden by m_forceDoNotAllowStoredCredentials and
   // m_securityOrigin. In such a case, build a ResourceLoaderOptions with
   // up-to-date values from them and this variable, and use it.
   const ResourceLoaderOptions resource_loader_options_;
 
-  // True when feature OutOfBlinkCORS is enabled (https://crbug.com/736308).
+  // True when feature OutOfBlinkCors is enabled (https://crbug.com/736308).
   bool out_of_blink_cors_;
 
   // Corresponds to the CORS flag in the Fetch spec.
   bool cors_flag_ = false;
   scoped_refptr<const SecurityOrigin> security_origin_;
   scoped_refptr<const SecurityOrigin> original_security_origin_;
-
-  // Set to true when the response data is given to a data consumer handle.
-  bool is_using_data_consumer_handle_;
 
   const bool async_;
 
@@ -239,8 +234,8 @@ class CORE_EXPORT ThreadableLoader final
   // Saved so that we can use the original value for the modes in
   // ResponseReceived() where |resource| might be a reused one (e.g. preloaded
   // resource) which can have different modes.
-  network::mojom::FetchRequestMode fetch_request_mode_;
-  network::mojom::FetchCredentialsMode fetch_credentials_mode_;
+  network::mojom::RequestMode request_mode_;
+  network::mojom::CredentialsMode credentials_mode_;
 
   // Holds the original request for fallback in case the Service Worker
   // does not respond.
@@ -260,12 +255,13 @@ class CORE_EXPORT ThreadableLoader final
   HTTPHeaderMap request_headers_;
 
   TaskRunnerTimer<ThreadableLoader> timeout_timer_;
-  TimeTicks request_started_;  // Time an asynchronous fetch request is started
+  base::TimeTicks
+      request_started_;  // Time an asynchronous fetch request is started
 
   // Max number of times that this ThreadableLoader can follow.
   int redirect_limit_;
 
-  network::mojom::FetchRedirectMode redirect_mode_;
+  network::mojom::RedirectMode redirect_mode_;
 
   // Holds the referrer after a redirect response was received. This referrer is
   // used to populate the HTTP Referer header when following the redirect.

@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/modules/webaudio/convolver_options.h"
 #include "third_party/blink/renderer/platform/audio/reverb.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 
 // Note about empirical tuning:
 // The maximum FFT size affects reverb performance and accuracy.
@@ -54,6 +55,13 @@ ConvolverHandler::ConvolverHandler(AudioNode& node, float sample_rate)
   SetInternalChannelInterpretation(AudioBus::kSpeakers);
 
   Initialize();
+
+  // Until something is connected, we're not actively processing, so disable
+  // outputs so that we produce a single channel of silence.  The graph lock is
+  // needed to be able to disable outputs.
+  BaseAudioContext::GraphAutoLocker context_locker(Context());
+
+  DisableOutputs();
 }
 
 scoped_refptr<ConvolverHandler> ConvolverHandler::Create(AudioNode& node,
@@ -65,7 +73,7 @@ ConvolverHandler::~ConvolverHandler() {
   Uninitialize();
 }
 
-void ConvolverHandler::Process(size_t frames_to_process) {
+void ConvolverHandler::Process(uint32_t frames_to_process) {
   AudioBus* output_bus = Output(0).Bus();
   DCHECK(output_bus);
 
@@ -95,8 +103,10 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
   DCHECK(IsMainThread());
 
   if (!buffer) {
+    BaseAudioContext::GraphAutoLocker context_locker(Context());
+    MutexLocker locker(process_lock_);
     reverb_.reset();
-    buffer_ = buffer;
+    shared_buffer_ = nullptr;
     return;
   }
 
@@ -110,7 +120,7 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
   }
 
   unsigned number_of_channels = buffer->numberOfChannels();
-  size_t buffer_length = buffer->length();
+  uint32_t buffer_length = buffer->length();
 
   // The current implementation supports only 1-, 2-, or 4-channel impulse
   // responses, with the 4-channel response being interpreted as true-stereo
@@ -127,20 +137,27 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
     return;
   }
 
+  {
+    // Get some statistics on the size of the impulse response.
+    UMA_HISTOGRAM_LONG_TIMES("WebAudio.ConvolverNode.ImpulseResponseLength",
+                             base::TimeDelta::FromSecondsD(buffer->duration()));
+  }
+
   // Wrap the AudioBuffer by an AudioBus. It's an efficient pointer set and not
   // a memcpy().  This memory is simply used in the Reverb constructor and no
   // reference to it is kept for later use in that class.
   scoped_refptr<AudioBus> buffer_bus =
       AudioBus::Create(number_of_channels, buffer_length, false);
-  for (unsigned i = 0; i < number_of_channels; ++i)
+  for (unsigned i = 0; i < number_of_channels; ++i) {
     buffer_bus->SetChannelMemory(i, buffer->getChannelData(i).View()->Data(),
                                  buffer_length);
+  }
 
   buffer_bus->SetSampleRate(buffer->sampleRate());
 
   // Create the reverb with the given impulse response.
   std::unique_ptr<Reverb> reverb = std::make_unique<Reverb>(
-      buffer_bus.get(), AudioUtilities::kRenderQuantumFrames, MaxFFTSize,
+      buffer_bus.get(), audio_utilities::kRenderQuantumFrames, MaxFFTSize,
       Context() && Context()->HasRealtimeConstraint(), normalize_);
 
   {
@@ -151,19 +168,14 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
     // Synchronize with process().
     MutexLocker locker(process_lock_);
     reverb_ = std::move(reverb);
-    buffer_ = buffer;
+    shared_buffer_ = buffer->CreateSharedAudioBuffer();
     if (buffer) {
       // This will propagate the channel count to any nodes connected further
       // downstream in the graph.
       Output(0).SetNumberOfChannels(ComputeNumberOfOutputChannels(
-          Input(0).NumberOfChannels(), buffer_->numberOfChannels()));
+          Input(0).NumberOfChannels(), shared_buffer_->numberOfChannels()));
     }
   }
-}
-
-AudioBuffer* ConvolverHandler::Buffer() {
-  DCHECK(IsMainThread());
-  return buffer_.Get();
 }
 
 bool ConvolverHandler::RequiresTailProcessing() const {
@@ -202,7 +214,7 @@ unsigned ConvolverHandler::ComputeNumberOfOutputChannels(
   return clampTo(std::max(input_channels, response_channels), 1, 2);
 }
 
-void ConvolverHandler::SetChannelCount(unsigned long channel_count,
+void ConvolverHandler::SetChannelCount(unsigned channel_count,
                                        ExceptionState& exception_state) {
   DCHECK(IsMainThread());
   BaseAudioContext::GraphAutoLocker locker(Context());
@@ -234,12 +246,10 @@ void ConvolverHandler::CheckNumberOfChannelsForInput(AudioNodeInput* input) {
 
   DCHECK(input);
   DCHECK_EQ(input, &this->Input(0));
-  if (input != &this->Input(0))
-    return;
 
-  if (buffer_) {
+  if (shared_buffer_) {
     unsigned number_of_output_channels = ComputeNumberOfOutputChannels(
-        input->NumberOfChannels(), buffer_->numberOfChannels());
+        input->NumberOfChannels(), shared_buffer_->numberOfChannels());
 
     if (IsInitialized() &&
         number_of_output_channels != Output(0).NumberOfChannels()) {
@@ -268,16 +278,11 @@ ConvolverNode* ConvolverNode::Create(BaseAudioContext& context,
                                      ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
-  if (context.IsContextClosed()) {
-    context.ThrowExceptionForClosedState(exception_state);
-    return nullptr;
-  }
-
-  return new ConvolverNode(context);
+  return MakeGarbageCollected<ConvolverNode>(context);
 }
 
 ConvolverNode* ConvolverNode::Create(BaseAudioContext* context,
-                                     const ConvolverOptions& options,
+                                     const ConvolverOptions* options,
                                      ExceptionState& exception_state) {
   ConvolverNode* node = Create(*context, exception_state);
 
@@ -288,9 +293,9 @@ ConvolverNode* ConvolverNode::Create(BaseAudioContext* context,
 
   // It is important to set normalize first because setting the buffer will
   // examing the normalize attribute to see if normalization needs to be done.
-  node->setNormalize(!options.disableNormalization());
-  if (options.hasBuffer())
-    node->setBuffer(options.buffer(), exception_state);
+  node->setNormalize(!options->disableNormalization());
+  if (options->hasBuffer())
+    node->setBuffer(options->buffer(), exception_state);
   return node;
 }
 
@@ -299,12 +304,14 @@ ConvolverHandler& ConvolverNode::GetConvolverHandler() const {
 }
 
 AudioBuffer* ConvolverNode::buffer() const {
-  return GetConvolverHandler().Buffer();
+  return buffer_;
 }
 
 void ConvolverNode::setBuffer(AudioBuffer* new_buffer,
                               ExceptionState& exception_state) {
   GetConvolverHandler().SetBuffer(new_buffer, exception_state);
+  if (!exception_state.HadException())
+    buffer_ = new_buffer;
 }
 
 bool ConvolverNode::normalize() const {
@@ -313,6 +320,19 @@ bool ConvolverNode::normalize() const {
 
 void ConvolverNode::setNormalize(bool normalize) {
   GetConvolverHandler().SetNormalize(normalize);
+}
+
+void ConvolverNode::Trace(Visitor* visitor) {
+  visitor->Trace(buffer_);
+  AudioNode::Trace(visitor);
+}
+
+void ConvolverNode::ReportDidCreate() {
+  GraphTracer().DidCreateAudioNode(this);
+}
+
+void ConvolverNode::ReportWillBeDestroyed() {
+  GraphTracer().WillDestroyAudioNode(this);
 }
 
 }  // namespace blink

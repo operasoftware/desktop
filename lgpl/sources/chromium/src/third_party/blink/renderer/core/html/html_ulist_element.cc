@@ -22,21 +22,20 @@
 
 #include "third_party/blink/renderer/core/html/html_ulist_element.h"
 
-#include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
+#include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/html_names.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-inline HTMLUListElement::HTMLUListElement(Document& document)
-    : HTMLElement(ulTag, document) {}
-
-DEFINE_NODE_FACTORY(HTMLUListElement)
+HTMLUListElement::HTMLUListElement(Document& document)
+    : HTMLElement(kUlTag, document) {}
 
 bool HTMLUListElement::IsPresentationAttribute(
     const QualifiedName& name) const {
-  if (name == typeAttr)
+  if (name == kTypeAttr)
     return true;
   return HTMLElement::IsPresentationAttribute(name);
 }
@@ -45,19 +44,20 @@ void HTMLUListElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
     MutableCSSPropertyValueSet* style) {
-  if (name == typeAttr) {
-    if (DeprecatedEqualIgnoringCase(value, "disc"))
-      AddPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType,
-                                              CSSValueDisc);
-    else if (DeprecatedEqualIgnoringCase(value, "circle"))
-      AddPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType,
-                                              CSSValueCircle);
-    else if (DeprecatedEqualIgnoringCase(value, "square"))
-      AddPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType,
-                                              CSSValueSquare);
-    else if (DeprecatedEqualIgnoringCase(value, "none"))
-      AddPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType,
-                                              CSSValueNone);
+  if (name == kTypeAttr) {
+    if (DeprecatedEqualIgnoringCase(value, "disc")) {
+      AddPropertyToPresentationAttributeStyle(
+          style, CSSPropertyID::kListStyleType, CSSValueID::kDisc);
+    } else if (DeprecatedEqualIgnoringCase(value, "circle")) {
+      AddPropertyToPresentationAttributeStyle(
+          style, CSSPropertyID::kListStyleType, CSSValueID::kCircle);
+    } else if (DeprecatedEqualIgnoringCase(value, "square")) {
+      AddPropertyToPresentationAttributeStyle(
+          style, CSSPropertyID::kListStyleType, CSSValueID::kSquare);
+    } else if (DeprecatedEqualIgnoringCase(value, "none")) {
+      AddPropertyToPresentationAttributeStyle(
+          style, CSSPropertyID::kListStyleType, CSSValueID::kNone);
+    }
   } else {
     HTMLElement::CollectStyleForPresentationAttribute(name, value, style);
   }

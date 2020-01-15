@@ -3,57 +3,41 @@
 // found in the LICENSE file.
 
 ColorPicker.ContrastInfo = class extends Common.Object {
-  constructor() {
-    super();
-
-    /** @type {?Array<number>} */
-    this._hsva = null;
-
-    /** @type {?Common.Color} */
-    this._fgColor = null;
-
-    /** @type {?Common.Color} */
-    this._bgColor = null;
-
-    /** @type {?number} */
-    this._contrastRatio = null;
-
-    /** @type {?Object<string, number>} */
-    this._contrastRatioThresholds = null;
-
-    /** @type {string} */
-    this._colorString = '';
-
-    /** @type {boolean} */
-    this._isNull = true;
-  }
-
   /**
    * @param {?SDK.CSSModel.ContrastInfo} contrastInfo
    */
-  update(contrastInfo) {
+  constructor(contrastInfo) {
+    super();
     this._isNull = true;
+    /** @type {?number} */
     this._contrastRatio = null;
+    /** @type {?Object<string, number>} */
     this._contrastRatioThresholds = null;
+    /** @type {?Common.Color} */
+    this._fgColor = null;
+    /** @type {?Common.Color} */
     this._bgColor = null;
 
-    if (contrastInfo.computedFontSize && contrastInfo.computedFontWeight && contrastInfo.computedBodyFontSize) {
-      this._isNull = false;
-      const isLargeFont = ColorPicker.ContrastInfo.computeIsLargeFont(
-          contrastInfo.computedFontSize, contrastInfo.computedFontWeight, contrastInfo.computedBodyFontSize);
-
-      this._contrastRatioThresholds =
-          ColorPicker.ContrastInfo._ContrastThresholds[(isLargeFont ? 'largeFont' : 'normalFont')];
+    if (!contrastInfo) {
+      return;
     }
 
-    if (contrastInfo.backgroundColors && contrastInfo.backgroundColors.length === 1) {
-      const bgColorText = contrastInfo.backgroundColors[0];
-      const bgColor = Common.Color.parse(bgColorText);
-      if (bgColor)
-        this._setBgColorInternal(bgColor);
+    if (!contrastInfo.computedFontSize || !contrastInfo.computedFontWeight || !contrastInfo.backgroundColors ||
+        contrastInfo.backgroundColors.length !== 1) {
+      return;
     }
 
-    this.dispatchEventToListeners(ColorPicker.ContrastInfo.Events.ContrastInfoUpdated);
+    this._isNull = false;
+    const isLargeFont =
+        ColorPicker.ContrastInfo.computeIsLargeFont(contrastInfo.computedFontSize, contrastInfo.computedFontWeight);
+
+    this._contrastRatioThresholds =
+        ColorPicker.ContrastInfo._ContrastThresholds[(isLargeFont ? 'largeFont' : 'normalFont')];
+    const bgColorText = contrastInfo.backgroundColors[0];
+    const bgColor = Common.Color.parse(bgColorText);
+    if (bgColor) {
+      this._setBgColorInternal(bgColor);
+    }
   }
 
   /**
@@ -64,15 +48,19 @@ ColorPicker.ContrastInfo = class extends Common.Object {
   }
 
   /**
-   * @param {!Array<number>} hsva
-   * @param {string} colorString
+   * @param {!Common.Color} fgColor
    */
-  setColor(hsva, colorString) {
-    this._hsva = hsva;
-    this._fgColor = Common.Color.fromHSVA(hsva);
-    this._colorString = colorString;
+  setColor(fgColor) {
+    this._fgColor = fgColor;
     this._updateContrastRatio();
     this.dispatchEventToListeners(ColorPicker.ContrastInfo.Events.ContrastInfoUpdated);
+  }
+
+  /**
+   * @return {?Common.Color}
+   */
+  color() {
+    return this._fgColor;
   }
 
   /**
@@ -80,20 +68,6 @@ ColorPicker.ContrastInfo = class extends Common.Object {
    */
   contrastRatio() {
     return this._contrastRatio;
-  }
-
-  /**
-   * @return {string}
-   */
-  colorString() {
-    return this._colorString;
-  }
-
-  /**
-   * @return {?Array<number>}
-   */
-  hsva() {
-    return this._hsva;
   }
 
   /**
@@ -110,15 +84,16 @@ ColorPicker.ContrastInfo = class extends Common.Object {
   _setBgColorInternal(bgColor) {
     this._bgColor = bgColor;
 
-    if (!this._fgColor)
+    if (!this._fgColor) {
       return;
+    }
 
     const fgRGBA = this._fgColor.rgba();
 
     // If we have a semi-transparent background color over an unknown
     // background, draw the line for the "worst case" scenario: where
     // the unknown background is the same color as the text.
-    if (bgColor.hasAlpha) {
+    if (bgColor.hasAlpha()) {
       const blendedRGBA = [];
       Common.Color.blendColors(bgColor.rgba(), fgRGBA, blendedRGBA);
       this._bgColor = new Common.Color(blendedRGBA, Common.Color.Format.RGBA);
@@ -135,8 +110,9 @@ ColorPicker.ContrastInfo = class extends Common.Object {
   }
 
   _updateContrastRatio() {
-    if (!this._bgColor || !this._fgColor)
+    if (!this._bgColor || !this._fgColor) {
       return;
+    }
     this._contrastRatio = Common.Color.calculateContrastRatio(this._fgColor.rgba(), this._bgColor.rgba());
   }
 
@@ -145,28 +121,29 @@ ColorPicker.ContrastInfo = class extends Common.Object {
    * @return {?number}
    */
   contrastRatioThreshold(level) {
-    if (!this._contrastRatioThresholds)
+    if (!this._contrastRatioThresholds) {
       return null;
+    }
     return this._contrastRatioThresholds[level];
   }
 
   /**
    * @param {string} fontSize
    * @param {string} fontWeight
-   * @param {?string} bodyFontSize
    * @return {boolean}
    */
-  static computeIsLargeFont(fontSize, fontWeight, bodyFontSize) {
+  static computeIsLargeFont(fontSize, fontWeight) {
     const boldWeights = ['bold', 'bolder', '600', '700', '800', '900'];
 
     const fontSizePx = parseFloat(fontSize.replace('px', ''));
     const isBold = (boldWeights.indexOf(fontWeight) !== -1);
 
     const fontSizePt = fontSizePx * 72 / 96;
-    if (isBold)
+    if (isBold) {
       return fontSizePt >= 14;
-    else
+    } else {
       return fontSizePt >= 18;
+    }
   }
 };
 

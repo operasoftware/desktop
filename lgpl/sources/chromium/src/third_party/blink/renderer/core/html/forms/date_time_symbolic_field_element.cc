@@ -49,10 +49,11 @@ static AtomicString MakeVisibleEmptyValue(const Vector<String>& symbols) {
 DateTimeSymbolicFieldElement::DateTimeSymbolicFieldElement(
     Document& document,
     FieldOwner& field_owner,
+    DateTimeField type,
     const Vector<String>& symbols,
     int minimum,
     int maximum)
-    : DateTimeFieldElement(document, field_owner),
+    : DateTimeFieldElement(document, field_owner, type),
       symbols_(symbols),
       visible_empty_value_(MakeVisibleEmptyValue(symbols)),
       selected_index_(-1),
@@ -75,10 +76,10 @@ float DateTimeSymbolicFieldElement::MaximumWidth(const ComputedStyle& style) {
 
 void DateTimeSymbolicFieldElement::HandleKeyboardEvent(
     KeyboardEvent& keyboard_event) {
-  if (keyboard_event.type() != EventTypeNames::keypress)
+  if (keyboard_event.type() != event_type_names::kKeypress)
     return;
 
-  const UChar char_code = WTF::Unicode::ToLower(keyboard_event.charCode());
+  const UChar char_code = WTF::unicode::ToLower(keyboard_event.charCode());
   if (char_code < ' ')
     return;
 

@@ -43,12 +43,9 @@ class FontFace;
 class SegmentedFontData;
 
 class CSSSegmentedFontFace final
-    : public GarbageCollectedFinalized<CSSSegmentedFontFace> {
+    : public GarbageCollected<CSSSegmentedFontFace> {
  public:
-  static CSSSegmentedFontFace* Create(
-      FontSelectionCapabilities font_selection_capabilities) {
-    return new CSSSegmentedFontFace(font_selection_capabilities);
-  }
+  CSSSegmentedFontFace(FontSelectionCapabilities);
   ~CSSSegmentedFontFace();
 
   FontSelectionCapabilities GetFontSelectionCapabilities() const {
@@ -76,8 +73,6 @@ class CSSSegmentedFontFace final
   void Trace(blink::Visitor*);
 
  private:
-  CSSSegmentedFontFace(FontSelectionCapabilities);
-
   void PruneTable();
   bool IsValid() const;
 

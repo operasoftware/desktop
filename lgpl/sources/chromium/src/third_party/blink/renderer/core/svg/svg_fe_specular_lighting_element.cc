@@ -26,24 +26,30 @@
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
 #include "third_party/blink/renderer/platform/graphics/filters/fe_specular_lighting.h"
 #include "third_party/blink/renderer/platform/graphics/filters/filter.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
-inline SVGFESpecularLightingElement::SVGFESpecularLightingElement(
-    Document& document)
-    : SVGFilterPrimitiveStandardAttributes(SVGNames::feSpecularLightingTag,
+SVGFESpecularLightingElement::SVGFESpecularLightingElement(Document& document)
+    : SVGFilterPrimitiveStandardAttributes(svg_names::kFESpecularLightingTag,
                                            document),
-      specular_constant_(
-          SVGAnimatedNumber::Create(this, SVGNames::specularConstantAttr, 1)),
-      specular_exponent_(
-          SVGAnimatedNumber::Create(this, SVGNames::specularExponentAttr, 1)),
-      surface_scale_(
-          SVGAnimatedNumber::Create(this, SVGNames::surfaceScaleAttr, 1)),
-      kernel_unit_length_(SVGAnimatedNumberOptionalNumber::Create(
+      specular_constant_(MakeGarbageCollected<SVGAnimatedNumber>(
           this,
-          SVGNames::kernelUnitLengthAttr,
+          svg_names::kSpecularConstantAttr,
+          1)),
+      specular_exponent_(MakeGarbageCollected<SVGAnimatedNumber>(
+          this,
+          svg_names::kSpecularExponentAttr,
+          1)),
+      surface_scale_(
+          MakeGarbageCollected<SVGAnimatedNumber>(this,
+                                                  svg_names::kSurfaceScaleAttr,
+                                                  1)),
+      kernel_unit_length_(MakeGarbageCollected<SVGAnimatedNumberOptionalNumber>(
+          this,
+          svg_names::kKernelUnitLengthAttr,
           0.0f)),
-      in1_(SVGAnimatedString::Create(this, SVGNames::inAttr)) {
+      in1_(MakeGarbageCollected<SVGAnimatedString>(this, svg_names::kInAttr)) {
   AddToPropertyMap(specular_constant_);
   AddToPropertyMap(specular_exponent_);
   AddToPropertyMap(surface_scale_);
@@ -60,26 +66,24 @@ void SVGFESpecularLightingElement::Trace(blink::Visitor* visitor) {
   SVGFilterPrimitiveStandardAttributes::Trace(visitor);
 }
 
-DEFINE_NODE_FACTORY(SVGFESpecularLightingElement)
-
 bool SVGFESpecularLightingElement::SetFilterEffectAttribute(
     FilterEffect* effect,
     const QualifiedName& attr_name) {
   FESpecularLighting* specular_lighting =
       static_cast<FESpecularLighting*>(effect);
 
-  if (attr_name == SVGNames::lighting_colorAttr) {
+  if (attr_name == svg_names::kLightingColorAttr) {
     const ComputedStyle& style = ComputedStyleRef();
     return specular_lighting->SetLightingColor(
         style.VisitedDependentColor(GetCSSPropertyLightingColor()));
   }
-  if (attr_name == SVGNames::surfaceScaleAttr)
+  if (attr_name == svg_names::kSurfaceScaleAttr)
     return specular_lighting->SetSurfaceScale(
         surface_scale_->CurrentValue()->Value());
-  if (attr_name == SVGNames::specularConstantAttr)
+  if (attr_name == svg_names::kSpecularConstantAttr)
     return specular_lighting->SetSpecularConstant(
         specular_constant_->CurrentValue()->Value());
-  if (attr_name == SVGNames::specularExponentAttr)
+  if (attr_name == svg_names::kSpecularExponentAttr)
     return specular_lighting->SetSpecularExponent(
         specular_exponent_->CurrentValue()->Value());
 
@@ -90,25 +94,25 @@ bool SVGFESpecularLightingElement::SetFilterEffectAttribute(
   DCHECK(light_element);
   DCHECK(effect->GetFilter());
 
-  if (attr_name == SVGNames::azimuthAttr)
+  if (attr_name == svg_names::kAzimuthAttr)
     return light_source->SetAzimuth(
         light_element->azimuth()->CurrentValue()->Value());
-  if (attr_name == SVGNames::elevationAttr)
+  if (attr_name == svg_names::kElevationAttr)
     return light_source->SetElevation(
         light_element->elevation()->CurrentValue()->Value());
-  if (attr_name == SVGNames::xAttr || attr_name == SVGNames::yAttr ||
-      attr_name == SVGNames::zAttr)
+  if (attr_name == svg_names::kXAttr || attr_name == svg_names::kYAttr ||
+      attr_name == svg_names::kZAttr)
     return light_source->SetPosition(
         effect->GetFilter()->Resolve3dPoint(light_element->GetPosition()));
-  if (attr_name == SVGNames::pointsAtXAttr ||
-      attr_name == SVGNames::pointsAtYAttr ||
-      attr_name == SVGNames::pointsAtZAttr)
+  if (attr_name == svg_names::kPointsAtXAttr ||
+      attr_name == svg_names::kPointsAtYAttr ||
+      attr_name == svg_names::kPointsAtZAttr)
     return light_source->SetPointsAt(
         effect->GetFilter()->Resolve3dPoint(light_element->PointsAt()));
-  if (attr_name == SVGNames::specularExponentAttr)
+  if (attr_name == svg_names::kSpecularExponentAttr)
     return light_source->SetSpecularExponent(
         light_element->specularExponent()->CurrentValue()->Value());
-  if (attr_name == SVGNames::limitingConeAngleAttr)
+  if (attr_name == svg_names::kLimitingConeAngleAttr)
     return light_source->SetLimitingConeAngle(
         light_element->limitingConeAngle()->CurrentValue()->Value());
 
@@ -118,15 +122,15 @@ bool SVGFESpecularLightingElement::SetFilterEffectAttribute(
 
 void SVGFESpecularLightingElement::SvgAttributeChanged(
     const QualifiedName& attr_name) {
-  if (attr_name == SVGNames::surfaceScaleAttr ||
-      attr_name == SVGNames::specularConstantAttr ||
-      attr_name == SVGNames::specularExponentAttr) {
+  if (attr_name == svg_names::kSurfaceScaleAttr ||
+      attr_name == svg_names::kSpecularConstantAttr ||
+      attr_name == svg_names::kSpecularExponentAttr) {
     SVGElement::InvalidationGuard invalidation_guard(this);
     PrimitiveAttributeChanged(attr_name);
     return;
   }
 
-  if (attr_name == SVGNames::inAttr) {
+  if (attr_name == svg_names::kInAttr) {
     SVGElement::InvalidationGuard invalidation_guard(this);
     Invalidate();
     return;
@@ -164,12 +168,20 @@ FilterEffect* SVGFESpecularLightingElement::Build(
   scoped_refptr<LightSource> light_source =
       light_node ? light_node->GetLightSource(filter) : nullptr;
 
-  FilterEffect* effect = FESpecularLighting::Create(
+  auto* effect = MakeGarbageCollected<FESpecularLighting>(
       filter, color, surface_scale_->CurrentValue()->Value(),
       specular_constant_->CurrentValue()->Value(),
       specular_exponent_->CurrentValue()->Value(), std::move(light_source));
   effect->InputEffects().push_back(input1);
   return effect;
+}
+
+bool SVGFESpecularLightingElement::TaintsOrigin() const {
+  const ComputedStyle* style = GetComputedStyle();
+  // TaintsOrigin() is only called after a successful call to Build()
+  // (see above), so we should have a ComputedStyle here.
+  DCHECK(style);
+  return style->SvgStyle().LightingColor().IsCurrentColor();
 }
 
 }  // namespace blink

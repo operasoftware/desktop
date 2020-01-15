@@ -29,12 +29,12 @@ namespace blink {
 
 class PLATFORM_EXPORT FESpecularLighting final : public FELighting {
  public:
-  static FESpecularLighting* Create(Filter*,
-                                    const Color&,
-                                    float,
-                                    float,
-                                    float,
-                                    scoped_refptr<LightSource>);
+  FESpecularLighting(Filter*,
+                     const Color&,
+                     float,
+                     float,
+                     float,
+                     scoped_refptr<LightSource>);
   ~FESpecularLighting() override;
 
   Color LightingColor() const;
@@ -54,14 +54,6 @@ class PLATFORM_EXPORT FESpecularLighting final : public FELighting {
 
   WTF::TextStream& ExternalRepresentation(WTF::TextStream&,
                                           int indention) const override;
-
- private:
-  FESpecularLighting(Filter*,
-                     const Color&,
-                     float,
-                     float,
-                     float,
-                     scoped_refptr<LightSource>);
 };
 
 }  // namespace blink

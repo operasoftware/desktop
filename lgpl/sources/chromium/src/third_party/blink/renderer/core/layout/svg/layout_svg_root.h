@@ -38,7 +38,7 @@ class CORE_EXPORT LayoutSVGRoot final : public LayoutReplaced {
   bool IsEmbeddedThroughSVGImage() const;
   bool IsEmbeddedThroughFrameContainingSVGDocument() const;
 
-  void IntrinsicSizingInfoChanged() const;
+  void IntrinsicSizingInfoChanged();
   void UnscaledIntrinsicSizingInfo(IntrinsicSizingInfo&) const;
 
   // If you have a LayoutSVGRoot, use firstChild or lastChild instead.
@@ -72,7 +72,7 @@ class CORE_EXPORT LayoutSVGRoot final : public LayoutReplaced {
     // the layout may be incorrectly using the old size.
     if (container_size_ != container_size) {
       SetNeedsLayoutAndFullPaintInvalidation(
-          LayoutInvalidationReason::kSizeChanged);
+          layout_invalidation_reason::kSizeChanged);
     }
     container_size_ = container_size;
   }
@@ -85,18 +85,17 @@ class CORE_EXPORT LayoutSVGRoot final : public LayoutReplaced {
 
   bool ShouldApplyViewportClip() const;
 
-  LayoutRect VisualOverflowRect() const override;
+  void RecalcVisualOverflow() override;
 
   bool HasNonIsolatedBlendingDescendants() const final;
 
   const char* GetName() const override { return "LayoutSVGRoot"; }
 
-  bool PaintedOutputOfObjectHasNoEffectRegardlessOfSize() const final;
-
  private:
   bool ComputeShouldClipOverflow() const override {
     return LayoutBox::ComputeShouldClipOverflow() || ShouldApplyViewportClip();
   }
+  LayoutRect ComputeContentsVisualOverflow() const;
 
   const LayoutObjectChildList* Children() const { return &children_; }
   LayoutObjectChildList* Children() { return &children_; }
@@ -118,7 +117,7 @@ class CORE_EXPORT LayoutSVGRoot final : public LayoutReplaced {
       LayoutUnit estimated_used_width = LayoutUnit()) const override;
   void UpdateLayout() override;
   void PaintReplaced(const PaintInfo&,
-                     const LayoutPoint& paint_offset) const override;
+                     const PhysicalOffset& paint_offset) const override;
 
   void WillBeDestroyed() override;
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
@@ -139,16 +138,13 @@ class CORE_EXPORT LayoutSVGRoot final : public LayoutReplaced {
   }
 
   bool NodeAtPoint(HitTestResult&,
-                   const HitTestLocation& location_in_container,
-                   const LayoutPoint& accumulated_offset,
+                   const HitTestLocation&,
+                   const PhysicalOffset& accumulated_offset,
                    HitTestAction) override;
 
-  LayoutRect LocalVisualRectIgnoringVisibility() const override;
-
-  void MapLocalToAncestor(
-      const LayoutBoxModelObject* ancestor,
-      TransformState&,
-      MapCoordinatesFlags = kApplyContainerFlip) const override;
+  void MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
+                          TransformState&,
+                          MapCoordinatesFlags) const override;
   const LayoutObject* PushMappingToContainer(
       const LayoutBoxModelObject* ancestor_to_stop_at,
       LayoutGeometryMap&) const override;
@@ -163,7 +159,7 @@ class CORE_EXPORT LayoutSVGRoot final : public LayoutReplaced {
   void UpdateCachedBoundaries();
   SVGTransformChange BuildLocalToBorderBoxTransform();
 
-  PositionWithAffinity PositionForPoint(const LayoutPoint&) const final;
+  PositionWithAffinity PositionForPoint(const PhysicalOffset&) const final;
 
   LayoutObjectChildList children_;
   IntSize container_size_;

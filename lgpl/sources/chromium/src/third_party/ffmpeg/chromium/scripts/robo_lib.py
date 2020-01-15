@@ -13,6 +13,17 @@ import subprocess
 def log(msg):
   print "[ %s ]" % msg
 
+class UserInstructions(Exception):
+  """Handy exception subclass that just prints very verbose instructions to the
+  user.  Normal exceptions tend to lose the message in the stack trace, which we
+  probably don't care about."""
+  def __init__ (self, msg):
+    self._msg = msg
+
+  def __str__(self):
+    sep = "=" * 78
+    return "\n\n%s\n%s\n%s\n\n" % (sep, self._msg, sep)
+
 class RoboConfiguration:
   def __init__(self):
     """Ensure that our config has basic fields fill in, and passes some sanity
@@ -21,16 +32,22 @@ class RoboConfiguration:
     Important: We might be doing --setup, so these sanity checks should only be
     for things that we don't plan for fix as part of that.
     """
+    self.set_prompt_on_call(False)
     # This is the prefix that our branches start with.
     self._sushi_branch_prefix = "sushi-"
     # This is the title that we use for the commit with GN configs.
     self._gn_commit_title = "GN Configuration"
     # Title of the commit with chromium/patches/README.
     self._patches_commit_title = "Chromium patches file"
-    # Title of the commit with chromium/patches/config_flag_changes.txt
-    self._build_changes_commit_title = "Build Config Changes Summary"
+    # Title of the commit with README.chromium
+    self._readme_chromium_commit_title = "README.chromium file"
     self.EnsureHostInfo()
     self.EnsureChromeSrc()
+
+    # Directory where llvm lives.
+    self._llvm_path = os.path.join(self.chrome_src(), "third_party",
+            "llvm-build", "Release+Asserts", "bin")
+
     self.EnsurePathContainsLLVM()
     log("Using chrome src: %s" % self.chrome_src())
     self.EnsureFFmpegHome()
@@ -40,6 +57,14 @@ class RoboConfiguration:
     log("On branch: %s" % self.branch_name())
     if self.sushi_branch_name():
       log("On sushi branch: %s" % self.sushi_branch_name())
+
+    # Filename that we'll ask generate_gn.py to write git commands to.
+    self._autorename_git_file = os.path.join(
+                                  self.ffmpeg_home(),
+                                  "chromium",
+                                  "scripts",
+                                  ".git_commands.sh")
+
 
   def chrome_src(self):
     """Return /path/to/chromium/src"""
@@ -89,8 +114,11 @@ class RoboConfiguration:
   def patches_commit_title(self):
     return self._patches_commit_title
 
-  def build_changes_commit_title(self):
-    return self._build_changes_commit_title
+  def readme_chromium_commit_title(self):
+    return self._readme_chromium_commit_title
+
+  def nasm_path(self):
+    return self._nasm_path
 
   def EnsureHostInfo(self):
     """Ensure that the host architecture and platform are set."""
@@ -129,8 +157,12 @@ class RoboConfiguration:
 
     llvm_path = os.path.join(self.chrome_src(), "third_party",
             "llvm-build", "Release+Asserts", "bin")
-    if llvm_path not in os.environ["PATH"]:
-      raise Exception("Please add %s to the beginning of $PATH" % llvm_path)
+    if self.llvm_path() not in os.environ["PATH"]:
+      raise UserInstructions(
+                          "Please add:\n%s\nto the beginning of $PATH" %
+                          self.llvm_path())
+  def llvm_path(self):
+    return self._llvm_path
 
   def ComputeBranchName(self):
     """Get the current branch name and set it."""
@@ -146,3 +178,23 @@ class RoboConfiguration:
     if name and not name.startswith(self.sushi_branch_prefix()):
       name = None
     self._sushi_branch_name = name
+
+  def autorename_git_file(self):
+    return self._autorename_git_file
+
+  def prompt_on_call(self):
+    """ Return True if and only if we're supposed to ask the user before running
+    any command that might have a side-effect."""
+    return self._prompt_on_call
+
+  def set_prompt_on_call(self, value):
+    self._prompt_on_call = value
+
+  def Call(self, args, shell=False):
+    """Run the command specified by |args| (see subprocess.call), optionally
+    prompting the user."""
+    if self.prompt_on_call():
+      print("[%s] About to run: %s " % (os.getcwd(), args))
+      raw_input("Press ENTER to continue, or interrupt the script: ")
+    return call(args, shell=shell)
+

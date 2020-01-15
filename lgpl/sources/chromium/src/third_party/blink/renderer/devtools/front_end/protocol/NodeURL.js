@@ -2,28 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-Protocol.NodeURL = class {
+export default class NodeURL {
   /**
-   * @param {!Protocol.TargetBase} target
    * @param {!Object} object
    */
-  static patch(target, object) {
-    if (target.isNodeJS())
-      process(object, '');
+  static patch(object) {
+    process(object, '');
 
     /**
      * @param {!Object} object
      * @param {string} path
      */
     function process(object, path) {
-      if (object.url && Protocol.NodeURL._isPlatformPath(object.url, Host.isWin()))
+      if (object.url && NodeURL._isPlatformPath(object.url, Host.isWin())) {
         object.url = Common.ParsedURL.platformPathToURL(object.url);
+      }
       for (const entry of Object.entries(object)) {
         const key = entry[0];
         const value = entry[1];
         const entryPath = path + '.' + key;
-        if (entryPath !== '.result.result.value' && value !== null && typeof value === 'object')
+        if (entryPath !== '.result.result.value' && value !== null && typeof value === 'object') {
           process(value, entryPath);
+        }
       }
     }
   }
@@ -41,4 +41,13 @@ Protocol.NodeURL = class {
       return fileSystemPath.length ? fileSystemPath[0] === '/' : false;
     }
   }
-};
+}
+
+/* Legacy exported object */
+self.Protocol = self.Protocol || {};
+
+/* Legacy exported object */
+Protocol = Protocol || {};
+
+/** @constructor */
+Protocol.NodeURL = NodeURL;

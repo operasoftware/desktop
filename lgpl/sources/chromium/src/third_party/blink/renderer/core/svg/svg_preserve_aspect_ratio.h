@@ -55,9 +55,7 @@ class SVGPreserveAspectRatio final
 
   typedef SVGPreserveAspectRatioTearOff TearOffType;
 
-  static SVGPreserveAspectRatio* Create() {
-    return new SVGPreserveAspectRatio();
-  }
+  SVGPreserveAspectRatio();
 
   virtual SVGPreserveAspectRatio* Clone() const;
 
@@ -106,8 +104,6 @@ class SVGPreserveAspectRatio final
   void SetDefault();
 
  private:
-  SVGPreserveAspectRatio();
-
   template <typename CharType>
   SVGParsingError ParseInternal(const CharType*& ptr,
                                 const CharType* end,

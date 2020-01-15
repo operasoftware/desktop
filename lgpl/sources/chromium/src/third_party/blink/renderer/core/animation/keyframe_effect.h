@@ -42,6 +42,7 @@ namespace blink {
 class Element;
 class ExceptionState;
 class KeyframeEffectModelBase;
+class PaintArtifactCompositor;
 class SampledEffect;
 class UnrestrictedDoubleOrKeyframeEffectOptions;
 
@@ -53,11 +54,6 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
  public:
   enum Priority { kDefaultPriority, kTransitionPriority };
 
-  static KeyframeEffect* Create(Element*,
-                                KeyframeEffectModelBase*,
-                                const Timing&,
-                                Priority = kDefaultPriority,
-                                EventDelegate* = nullptr);
   // Web Animations API Bindings constructors.
   static KeyframeEffect* Create(
       ScriptState*,
@@ -71,6 +67,11 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
                                 ExceptionState&);
   static KeyframeEffect* Create(ScriptState*, KeyframeEffect*, ExceptionState&);
 
+  KeyframeEffect(Element*,
+                 KeyframeEffectModelBase*,
+                 const Timing&,
+                 Priority = kDefaultPriority,
+                 EventDelegate* = nullptr);
   ~KeyframeEffect() override;
 
   bool IsKeyframeEffect() const override { return true; }
@@ -80,7 +81,7 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
   void setTarget(Element*);
   String composite() const;
   void setComposite(String);
-  Vector<ScriptValue> getKeyframes(ScriptState*);
+  HeapVector<ScriptValue> getKeyframes(ScriptState*);
   void setKeyframes(ScriptState*,
                     const ScriptValue& keyframes,
                     ExceptionState&);
@@ -98,8 +99,8 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
 
   void NotifySampledEffectRemovedFromEffectStack();
 
-  CompositorAnimations::FailureCode CheckCanStartAnimationOnCompositor(
-      const base::Optional<CompositorElementIdSet>& composited_element_ids,
+  CompositorAnimations::FailureReasons CheckCanStartAnimationOnCompositor(
+      const PaintArtifactCompositor*,
       double animation_playback_rate) const;
   // Must only be called once.
   void StartAnimationOnCompositor(int group,
@@ -115,11 +116,6 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
 
   void AttachCompositedLayers();
 
-  void SetCompositorKeyframeModelIdsForTesting(
-      const Vector<int>& compositor_keyframe_model_ids) {
-    compositor_keyframe_model_ids_ = compositor_keyframe_model_ids;
-  }
-
   void DowngradeToNormal() { priority_ = kDefaultPriority; }
 
   bool HasAnimation() const;
@@ -127,13 +123,9 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
 
   void Trace(blink::Visitor*) override;
 
- private:
-  KeyframeEffect(Element*,
-                 KeyframeEffectModelBase*,
-                 const Timing&,
-                 Priority,
-                 EventDelegate*);
+  bool AnimationsPreserveAxisAlignment() const;
 
+ private:
   EffectModel::CompositeOperation CompositeInternal() const;
 
   void ApplyEffects();
@@ -143,12 +135,14 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
   void Detach() override;
   void AttachTarget(Animation*);
   void DetachTarget(Animation*);
-  double CalculateTimeToEffectChange(
+  AnimationTimeDelta CalculateTimeToEffectChange(
       bool forwards,
       double inherited_time,
       double time_to_next_iteration) const override;
   bool HasIncompatibleStyle() const;
   bool HasMultipleTransformProperties() const;
+
+  bool AnimationsPreserveAxisAlignment(const PropertyHandle&) const;
 
   Member<Element> target_;
   Member<KeyframeEffectModelBase> model_;

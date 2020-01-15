@@ -38,7 +38,7 @@ Network.RequestHTMLView = class extends UI.VBox {
   constructor(dataURL) {
     super(true);
     this.registerRequiredCSS('network/requestHTMLView.css');
-    this._dataURL = dataURL;
+    this._dataURL = encodeURI(dataURL).replace(/#/g, '%23');
     this.contentElement.classList.add('html', 'request-view');
   }
 
@@ -65,6 +65,7 @@ Network.RequestHTMLView = class extends UI.VBox {
     iframe.setAttribute('sandbox', '');  // Forbid to run JavaScript and set unique origin.
     iframe.setAttribute('src', this._dataURL);
     iframe.setAttribute('tabIndex', -1);
+    UI.ARIAUtils.markAsPresentation(iframe);
     this.contentElement.appendChild(iframe);
   }
 };

@@ -24,6 +24,7 @@
 #include "third_party/blink/renderer/core/svg/svg_rect.h"
 #include "third_party/blink/renderer/core/svg/svg_transform_list.h"
 #include "third_party/blink/renderer/core/svg/svg_view_element.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/text/parsing_utilities.h"
 
 namespace blink {
@@ -37,21 +38,21 @@ void SVGViewSpec::Trace(Visitor* visitor) {
 }
 
 SVGViewSpec* SVGViewSpec::CreateFromFragment(const String& fragment) {
-  SVGViewSpec* view_spec = new SVGViewSpec();
+  SVGViewSpec* view_spec = MakeGarbageCollected<SVGViewSpec>();
   if (!view_spec->ParseViewSpec(fragment))
     return nullptr;
   return view_spec;
 }
 
 SVGViewSpec* SVGViewSpec::CreateForViewElement(const SVGViewElement& view) {
-  SVGViewSpec* view_spec = new SVGViewSpec();
+  SVGViewSpec* view_spec = MakeGarbageCollected<SVGViewSpec>();
   if (view.HasValidViewBox())
     view_spec->view_box_ = view.viewBox()->CurrentValue()->Clone();
   if (view.preserveAspectRatio()->IsSpecified()) {
     view_spec->preserve_aspect_ratio_ =
         view.preserveAspectRatio()->CurrentValue()->Clone();
   }
-  if (view.hasAttribute(SVGNames::zoomAndPanAttr))
+  if (view.hasAttribute(svg_names::kZoomAndPanAttr))
     view_spec->zoom_and_pan_ = view.zoomAndPan();
   return view_spec;
 }
@@ -136,7 +137,8 @@ bool SVGViewSpec::ParseViewSpecInternal(const CharType* ptr,
               ParseNumber(ptr, end, width) &&
               ParseNumber(ptr, end, height, kDisallowWhitespace)))
           return false;
-        view_box_ = SVGRect::Create(FloatRect(x, y, width, height));
+        view_box_ =
+            MakeGarbageCollected<SVGRect>(FloatRect(x, y, width, height));
         break;
       }
       case kViewTarget: {
@@ -150,12 +152,12 @@ bool SVGViewSpec::ParseViewSpecInternal(const CharType* ptr,
           return false;
         break;
       case kPreserveAspectRatio:
-        preserve_aspect_ratio_ = SVGPreserveAspectRatio::Create();
+        preserve_aspect_ratio_ = MakeGarbageCollected<SVGPreserveAspectRatio>();
         if (!preserve_aspect_ratio_->Parse(ptr, end, false))
           return false;
         break;
       case kTransform:
-        transform_ = SVGTransformList::Create();
+        transform_ = MakeGarbageCollected<SVGTransformList>();
         transform_->Parse(ptr, end);
         break;
       default:

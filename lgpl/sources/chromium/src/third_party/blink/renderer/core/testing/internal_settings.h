@@ -27,14 +27,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_TESTING_INTERNAL_SETTINGS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_TESTING_INTERNAL_SETTINGS_H_
 
-#include "third_party/blink/public/common/manifest/web_display_mode.h"
+#include "third_party/blink/public/mojom/manifest/display_mode.mojom-shared.h"
 #include "third_party/blink/renderer/core/editing/editing_behavior_types.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/testing/internal_settings_generated.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/image_animation_policy.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -51,6 +51,8 @@ class InternalSettings final : public InternalSettingsGenerated,
  public:
   static const char kSupplementName[];
 
+  static void PrepareForLeakDetection();
+
   class Backup {
     DISALLOW_NEW();
 
@@ -65,7 +67,7 @@ class InternalSettings final : public InternalSettingsGenerated,
     IntSize original_text_autosizing_window_size_override_;
     float original_accessibility_font_scale_factor_;
     String original_media_type_override_;
-    WebDisplayMode original_display_mode_override_;
+    blink::mojom::DisplayMode original_display_mode_override_;
     bool original_mock_scrollbars_enabled_;
     bool original_mock_gesture_tap_highlights_enabled_;
     bool lang_attribute_aware_form_control_ui_enabled_;
@@ -75,12 +77,11 @@ class InternalSettings final : public InternalSettingsGenerated,
     bool original_scroll_top_left_interop_enabled_;
   };
 
-  static InternalSettings* Create(Page& page) {
-    return new InternalSettings(page);
-  }
   static InternalSettings* From(Page&);
 
+  explicit InternalSettings(Page&);
   ~InternalSettings() override;
+
   void ResetToConsistentState();
 
   void setStandardFontFamily(const AtomicString& family,
@@ -126,6 +127,7 @@ class InternalSettings final : public InternalSettingsGenerated,
   void setViewportStyle(const String& preference, ExceptionState&);
   void setPresentationReceiver(bool, ExceptionState&);
   void setAutoplayPolicy(const String&, ExceptionState&);
+  void setUniversalAccessFromFileURLs(bool, ExceptionState&);
 
   // FIXME: The following are RuntimeEnabledFeatures and likely
   // cannot be changed after process start. These setters should
@@ -145,8 +147,6 @@ class InternalSettings final : public InternalSettingsGenerated,
   void SetPreloadLogging(bool, ExceptionState&);
 
  private:
-  explicit InternalSettings(Page&);
-
   Settings* GetSettings() const;
   Page* GetPage() const { return GetSupplementable(); }
 

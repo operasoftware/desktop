@@ -38,19 +38,29 @@ class CORE_EXPORT ScrollbarLayerDelegate : public cc::Scrollbar {
   gfx::Point Location() const override;
   int ThumbThickness() const override;
   int ThumbLength() const override;
+  bool SupportsDragSnapBack() const override;
+
+  // Returns the track rect relative to the scrollbar's origin.
   gfx::Rect TrackRect() const override;
+
+  // Returns the back button rect relative to the scrollbar's origin.
+  gfx::Rect BackButtonRect() const override;
+
+  // Returns the forward button rect relative to the scrollbar's origin.
+  gfx::Rect ForwardButtonRect() const override;
+
   float ThumbOpacity() const override;
   bool NeedsPaintPart(cc::ScrollbarPart part) const override;
   bool HasTickmarks() const override;
-  void PaintPart(cc::PaintCanvas* canvas,
-                 cc::ScrollbarPart part,
-                 const gfx::Rect& content_rect) override;
+  void PaintPart(cc::PaintCanvas* canvas, cc::ScrollbarPart part) override;
 
   bool UsesNinePatchThumbResource() const override;
   gfx::Size NinePatchThumbCanvasSize() const override;
   gfx::Rect NinePatchThumbAperture() const override;
 
  private:
+  bool ShouldPaint() const;
+
   // Accessed by main and compositor threads, e.g., the compositor thread
   // checks |Orientation()|.
   CrossThreadPersistent<blink::Scrollbar> scrollbar_;

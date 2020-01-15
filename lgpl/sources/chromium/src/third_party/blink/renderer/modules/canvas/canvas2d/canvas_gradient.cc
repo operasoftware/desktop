@@ -33,19 +33,31 @@
 namespace blink {
 
 CanvasGradient::CanvasGradient(const FloatPoint& p0, const FloatPoint& p1)
-    : gradient_(Gradient::CreateLinear(p0, p1)), is_zero_size_(p0 == p1) {}
+    : gradient_(
+          Gradient::CreateLinear(p0,
+                                 p1,
+                                 kSpreadMethodPad,
+                                 Gradient::ColorInterpolation::kUnpremultiplied,
+                                 Gradient::DegenerateHandling::kDisallow)) {}
 
 CanvasGradient::CanvasGradient(const FloatPoint& p0,
                                float r0,
                                const FloatPoint& p1,
                                float r1)
-    : gradient_(Gradient::CreateRadial(p0, r0, p1, r1)),
-      is_zero_size_(p0 == p1 && r0 == r1) {}
+    : gradient_(
+          Gradient::CreateRadial(p0,
+                                 r0,
+                                 p1,
+                                 r1,
+                                 1,
+                                 kSpreadMethodPad,
+                                 Gradient::ColorInterpolation::kUnpremultiplied,
+                                 Gradient::DegenerateHandling::kDisallow)) {}
 
-void CanvasGradient::addColorStop(float value,
+void CanvasGradient::addColorStop(double value,
                                   const String& color_string,
                                   ExceptionState& exception_state) {
-  if (!(value >= 0 && value <= 1.0f)) {
+  if (!(value >= 0 && value <= 1.0)) {
     exception_state.ThrowDOMException(DOMExceptionCode::kIndexSizeError,
                                       "The provided value (" +
                                           String::Number(value) +

@@ -25,21 +25,17 @@
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_parsing_error.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 
 namespace blink {
 
 class SVGAnimatedViewBoxRect : public SVGAnimatedRect {
  public:
-  static SVGAnimatedRect* Create(SVGElement* context_element) {
-    return new SVGAnimatedViewBoxRect(context_element);
-  }
+  SVGAnimatedViewBoxRect(SVGElement* context_element)
+      : SVGAnimatedRect(context_element, svg_names::kViewBoxAttr) {}
 
   SVGParsingError AttributeChanged(const String&) override;
-
- protected:
-  SVGAnimatedViewBoxRect(SVGElement* context_element)
-      : SVGAnimatedRect(context_element, SVGNames::viewBoxAttr) {}
 };
 
 SVGParsingError SVGAnimatedViewBoxRect::AttributeChanged(const String& value) {
@@ -54,10 +50,11 @@ SVGParsingError SVGAnimatedViewBoxRect::AttributeChanged(const String& value) {
 }
 
 SVGFitToViewBox::SVGFitToViewBox(SVGElement* element)
-    : view_box_(SVGAnimatedViewBoxRect::Create(element)),
-      preserve_aspect_ratio_(SVGAnimatedPreserveAspectRatio::Create(
-          element,
-          SVGNames::preserveAspectRatioAttr)) {
+    : view_box_(MakeGarbageCollected<SVGAnimatedViewBoxRect>(element)),
+      preserve_aspect_ratio_(
+          MakeGarbageCollected<SVGAnimatedPreserveAspectRatio>(
+              element,
+              svg_names::kPreserveAspectRatioAttr)) {
   DCHECK(element);
   element->AddToPropertyMap(view_box_);
   element->AddToPropertyMap(preserve_aspect_ratio_);
@@ -83,8 +80,8 @@ AffineTransform SVGFitToViewBox::ViewBoxToViewTransform(
 }
 
 bool SVGFitToViewBox::IsKnownAttribute(const QualifiedName& attr_name) {
-  return attr_name == SVGNames::viewBoxAttr ||
-         attr_name == SVGNames::preserveAspectRatioAttr;
+  return attr_name == svg_names::kViewBoxAttr ||
+         attr_name == svg_names::kPreserveAspectRatioAttr;
 }
 
 }  // namespace blink

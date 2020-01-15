@@ -31,8 +31,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_SERVICE_WORKER_SERVICE_WORKER_THREAD_H_
 
 #include <memory>
-#include "third_party/blink/public/platform/modules/cache_storage/cache_storage.mojom-blink.h"
-#include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 
@@ -48,16 +48,18 @@ class MODULES_EXPORT ServiceWorkerThread final : public WorkerThread {
  public:
   // ServiceWorkerThread owns a given ServiceWorkerGlobalScopeProxy via
   // Persistent.
-  ServiceWorkerThread(ServiceWorkerGlobalScopeProxy*,
-                      std::unique_ptr<ServiceWorkerInstalledScriptsManager>,
-                      mojom::blink::CacheStoragePtrInfo cache_storage_info);
+  ServiceWorkerThread(
+      std::unique_ptr<ServiceWorkerGlobalScopeProxy>,
+      std::unique_ptr<ServiceWorkerInstalledScriptsManager>,
+      mojo::PendingRemote<mojom::blink::CacheStorage> cache_storage_remote,
+      scoped_refptr<base::SingleThreadTaskRunner>
+          parent_thread_default_task_runner);
   ~ServiceWorkerThread() override;
 
   WorkerBackingThread& GetWorkerBackingThread() override {
     return *worker_backing_thread_;
   }
   void ClearWorkerBackingThread() override;
-  InstalledScriptsManager* GetInstalledScriptsManager() override;
   void TerminateForTesting() override;
 
  private:
@@ -68,11 +70,13 @@ class MODULES_EXPORT ServiceWorkerThread final : public WorkerThread {
     return WebThreadType::kServiceWorkerThread;
   }
 
-  Persistent<ServiceWorkerGlobalScopeProxy> global_scope_proxy_;
+  std::unique_ptr<ServiceWorkerGlobalScopeProxy> global_scope_proxy_;
   std::unique_ptr<WorkerBackingThread> worker_backing_thread_;
+
+  // Ownership of these members is moved out in CreateWorkerGlobalScope().
   std::unique_ptr<ServiceWorkerInstalledScriptsManager>
       installed_scripts_manager_;
-  mojom::blink::CacheStoragePtrInfo cache_storage_info_;
+  mojo::PendingRemote<mojom::blink::CacheStorage> cache_storage_remote_;
 };
 
 }  // namespace blink

@@ -62,7 +62,8 @@ class CORE_EXPORT SpinButtonElement final : public HTMLDivElement,
   // The owner of SpinButtonElement must call removeSpinButtonOwner
   // because SpinButtonElement can be outlive SpinButtonOwner
   // implementation, e.g. during event handling.
-  static SpinButtonElement* Create(Document&, SpinButtonOwner&);
+  SpinButtonElement(Document&, SpinButtonOwner&);
+
   UpDownState GetUpDownState() const { return up_down_state_; }
   void ReleaseCapture(EventDispatch = kEventDispatchAllowed);
   void RemoveSpinButtonOwner() { spin_button_owner_ = nullptr; }
@@ -74,12 +75,10 @@ class CORE_EXPORT SpinButtonElement final : public HTMLDivElement,
 
   void ForwardEvent(Event&);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  SpinButtonElement(Document&, SpinButtonOwner&);
-
-  void DetachLayoutTree(const AttachContext&) override;
+  void DetachLayoutTree(bool performing_reattach) override;
   bool IsSpinButtonElement() const override { return true; }
   bool IsDisabledFormControl() const override {
     return OwnerShadowHost() && OwnerShadowHost()->IsDisabledFormControl();
@@ -92,7 +91,7 @@ class CORE_EXPORT SpinButtonElement final : public HTMLDivElement,
   void StartRepeatingTimer();
   void StopRepeatingTimer();
   void RepeatingTimerFired(TimerBase*);
-  void SetHovered(bool = true) override;
+  void SetHovered(bool hovered) override;
   bool ShouldRespondToMouseEvents();
   bool IsMouseFocusable() const override { return false; }
 
@@ -103,11 +102,13 @@ class CORE_EXPORT SpinButtonElement final : public HTMLDivElement,
   TaskRunnerTimer<SpinButtonElement> repeating_timer_;
 };
 
-DEFINE_TYPE_CASTS(SpinButtonElement,
-                  Node,
-                  node,
-                  ToElement(node)->IsSpinButtonElement(),
-                  ToElement(node).IsSpinButtonElement());
+template <>
+struct DowncastTraits<SpinButtonElement> {
+  static bool AllowFrom(const Node& node) {
+    auto* element = DynamicTo<Element>(node);
+    return element && element->IsSpinButtonElement();
+  }
+};
 
 }  // namespace blink
 

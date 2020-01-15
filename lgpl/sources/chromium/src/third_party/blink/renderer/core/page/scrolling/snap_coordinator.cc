@@ -11,24 +11,19 @@
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
-#include "third_party/blink/renderer/platform/length_functions.h"
-#include "third_party/blink/renderer/platform/scroll/scroll_snap_data.h"
+#include "third_party/blink/renderer/platform/geometry/length_functions.h"
 
 namespace blink {
 namespace {
 // This is experimentally determined and corresponds to the UA decided
 // parameter as mentioned in spec.
-constexpr float kProximityRaio = 1.0 / 3.0;
+constexpr float kProximityRatio = 1.0 / 3.0;
 }  // namespace
 // TODO(sunyunjia): Move the static functions to an anonymous namespace.
 
-SnapCoordinator::SnapCoordinator() : snap_container_map_() {}
+SnapCoordinator::SnapCoordinator() : snap_containers_() {}
 
 SnapCoordinator::~SnapCoordinator() = default;
-
-SnapCoordinator* SnapCoordinator::Create() {
-  return new SnapCoordinator();
-}
 
 // Returns the scroll container that can be affected by this snap area.
 static LayoutBox* FindSnapContainer(const LayoutBox& snap_area) {
@@ -36,25 +31,97 @@ static LayoutBox* FindSnapContainer(const LayoutBox& snap_area) {
   // https://drafts.csswg.org/css-scroll-snap/#snap-model
   // "Snap positions must only affect the nearest ancestor (on the element’s
   // containing block chain) scroll container".
-  Element* viewport_defining_element =
-      snap_area.GetDocument().ViewportDefiningElement();
+  Element* document_element = snap_area.GetDocument().documentElement();
   LayoutBox* box = snap_area.ContainingBlock();
   while (box && !box->HasOverflowClip() && !box->IsLayoutView() &&
-         box->GetNode() != viewport_defining_element)
+         box->GetNode() != document_element)
     box = box->ContainingBlock();
 
-  // If we reach to viewportDefiningElement then we dispatch to viewport
-  if (box && box->GetNode() == viewport_defining_element)
+  // If we reach to document element then we dispatch to viewport
+  if (box && box->GetNode() == document_element)
     return snap_area.GetDocument().GetLayoutView();
 
   return box;
 }
 
+static ScrollableArea* ScrollableAreaForSnapping(const LayoutBox& layout_box) {
+  return layout_box.IsLayoutView()
+             ? layout_box.GetFrameView()->GetScrollableArea()
+             : layout_box.GetScrollableArea();
+}
+
+// Snap types are categorized according to the spec
+// https://drafts.csswg.org/css-scroll-snap-1/#snap-axis
+static cc::ScrollSnapType GetPhysicalSnapType(const LayoutBox& snap_container) {
+  cc::ScrollSnapType scroll_snap_type =
+      snap_container.Style()->GetScrollSnapType();
+  if (scroll_snap_type.axis == cc::SnapAxis::kInline) {
+    if (snap_container.Style()->IsHorizontalWritingMode())
+      scroll_snap_type.axis = cc::SnapAxis::kX;
+    else
+      scroll_snap_type.axis = cc::SnapAxis::kY;
+  }
+  if (scroll_snap_type.axis == cc::SnapAxis::kBlock) {
+    if (snap_container.Style()->IsHorizontalWritingMode())
+      scroll_snap_type.axis = cc::SnapAxis::kY;
+    else
+      scroll_snap_type.axis = cc::SnapAxis::kX;
+  }
+  // Writing mode does not affect the cases where axis is kX, kY or kBoth.
+  return scroll_snap_type;
+}
+
+void SnapCoordinator::AddSnapContainer(LayoutBox& snap_container) {
+  snap_containers_.insert(&snap_container);
+}
+
+void SnapCoordinator::RemoveSnapContainer(LayoutBox& snap_container) {
+  // TODO(majidvp): The snap areas assigned to this container may need to be
+  // re-assigned. http://crbug.com/1007456
+  snap_container.ClearSnapAreas();
+  snap_container.SetNeedsPaintPropertyUpdate();
+  snap_containers_.erase(&snap_container);
+}
+
+void SnapCoordinator::SnapContainerDidChange(LayoutBox& snap_container) {
+  // Scroll snap properties have no effect on the document element instead they
+  // are propagated to (See Document::PropagateStyleToViewport) and handled by
+  // the LayoutView.
+  if (snap_container.GetNode() ==
+      snap_container.GetDocument().documentElement())
+    return;
+
+  bool is_scroll_container =
+      snap_container.IsLayoutView() || snap_container.HasOverflowClip();
+  if (!is_scroll_container) {
+    DCHECK(!ScrollableAreaForSnapping(snap_container));
+    DCHECK(!snap_containers_.Contains(&snap_container));
+    return;
+  }
+
+  // Note that even if scroll snap type is 'none' we continue to maintain its
+  // snap container entry as long as the element is a scroller. This is because
+  // while the scroller does not snap, it still captures the snap areas in its
+  // subtree for whom it is the nearest ancestor scroll container per spec [1].
+  //
+  // [1] https://drafts.csswg.org/css-scroll-snap/#overview
+
+  // TODO(sunyunjia): Only update when the localframe doesn't need layout.
+  UpdateSnapContainerData(snap_container);
+
+  // TODO(majidvp): Add logic to correctly handle orphaned snap areas here.
+  // 1. Removing container: find a new snap container for its orphan snap
+  // areas (most likely nearest ancestor of current container) otherwise add
+  // them to an orphan list.
+  // 2. Adding container: may take over snap areas from nearest ancestor snap
+  // container or from existing areas in orphan pool.
+}
+
 void SnapCoordinator::SnapAreaDidChange(LayoutBox& snap_area,
-                                        ScrollSnapAlign scroll_snap_align) {
+                                        cc::ScrollSnapAlign scroll_snap_align) {
   LayoutBox* old_container = snap_area.SnapContainer();
-  if (scroll_snap_align.alignment_inline == SnapAlignment::kNone &&
-      scroll_snap_align.alignment_block == SnapAlignment::kNone) {
+  if (scroll_snap_align.alignment_inline == cc::SnapAlignment::kNone &&
+      scroll_snap_align.alignment_block == cc::SnapAlignment::kNone) {
     snap_area.SetSnapContainer(nullptr);
     if (old_container)
       UpdateSnapContainerData(*old_container);
@@ -77,147 +144,140 @@ void SnapCoordinator::SnapAreaDidChange(LayoutBox& snap_area,
 }
 
 void SnapCoordinator::UpdateAllSnapContainerData() {
-  for (const auto& entry : snap_container_map_) {
-    UpdateSnapContainerData(*entry.key);
-  }
+  for (auto* container : snap_containers_)
+    UpdateSnapContainerData(*container);
 }
 
-static ScrollableArea* ScrollableAreaForSnapping(const LayoutBox& layout_box) {
-  return layout_box.IsLayoutView()
-             ? layout_box.GetFrameView()->GetScrollableArea()
-             : layout_box.GetScrollableArea();
-}
-
-static ScrollSnapType GetPhysicalSnapType(const LayoutBox& snap_container) {
-  ScrollSnapType scroll_snap_type = snap_container.Style()->GetScrollSnapType();
-  if (scroll_snap_type.axis == SnapAxis::kInline) {
-    if (snap_container.Style()->IsHorizontalWritingMode())
-      scroll_snap_type.axis = SnapAxis::kX;
-    else
-      scroll_snap_type.axis = SnapAxis::kY;
-  }
-  if (scroll_snap_type.axis == SnapAxis::kBlock) {
-    if (snap_container.Style()->IsHorizontalWritingMode())
-      scroll_snap_type.axis = SnapAxis::kY;
-    else
-      scroll_snap_type.axis = SnapAxis::kX;
-  }
-  // Writing mode does not affect the cases where axis kX, kY or kBoth.
-  return scroll_snap_type;
-}
-
-void SnapCoordinator::UpdateSnapContainerData(const LayoutBox& snap_container) {
-  if (snap_container.Style()->GetScrollSnapType().is_none)
-    return;
-
-  SnapContainerData snap_container_data(GetPhysicalSnapType(snap_container));
+void SnapCoordinator::UpdateSnapContainerData(LayoutBox& snap_container) {
 
   ScrollableArea* scrollable_area = ScrollableAreaForSnapping(snap_container);
-  if (!scrollable_area)
+  const auto* old_snap_container_data = scrollable_area->GetSnapContainerData();
+  auto snap_type = GetPhysicalSnapType(snap_container);
+
+  // Scrollers that don't have any snap areas assigned to them and don't snap
+  // require no further processing. These are the most common types and thus
+  // returning as early as possible ensures efficiency.
+  if (!old_snap_container_data && snap_type.is_none)
     return;
-  FloatPoint max_position = scrollable_area->ScrollOffsetToPosition(
-      scrollable_area->MaximumScrollOffset());
-  snap_container_data.set_max_position(
-      gfx::ScrollOffset(max_position.X(), max_position.Y()));
 
-  // Scroll-padding represents inward offsets from the corresponding edge of the
-  // scrollport. https://drafts.csswg.org/css-scroll-snap-1/#scroll-padding
-  // Scrollport is the visual viewport of the scroll container (through which
-  // the scrollable overflow region can be viewed) coincides with its padding
-  // box. https://drafts.csswg.org/css-overflow-3/#scrollport. So we use the
-  // LayoutRect of the padding box here. The coordinate is relative to the
-  // container's border box.
-  LayoutRect container_rect(snap_container.PhysicalPaddingBoxRect());
+  cc::SnapContainerData snap_container_data(snap_type);
 
-  const ComputedStyle* container_style = snap_container.Style();
-  LayoutRectOutsets container_padding(
-      // The percentage of scroll-padding is different from that of normal
-      // padding, as scroll-padding resolves the percentage against
-      // corresponding dimension of the scrollport[1], while the normal padding
-      // resolves that against "width".[2,3]
-      // We use MinimumValueForLength here to ensure kAuto is resolved to
-      // LayoutUnit() which is the correct behavior for padding.
-      // [1] https://drafts.csswg.org/css-scroll-snap-1/#scroll-padding
-      //     "relative to the corresponding dimension of the scroll container’s
-      //      scrollport"
-      // [2] https://drafts.csswg.org/css-box/#padding-props
-      // [3] See for example LayoutBoxModelObject::ComputedCSSPadding where it
-      //     uses |MinimumValueForLength| but against the "width".
-      MinimumValueForLength(container_style->ScrollPaddingTop(),
-                            container_rect.Height()),
-      MinimumValueForLength(container_style->ScrollPaddingRight(),
-                            container_rect.Width()),
-      MinimumValueForLength(container_style->ScrollPaddingBottom(),
-                            container_rect.Height()),
-      MinimumValueForLength(container_style->ScrollPaddingLeft(),
-                            container_rect.Width()));
-  container_rect.Contract(container_padding);
-  snap_container_data.set_rect(FloatRect(container_rect));
+  DCHECK(scrollable_area);
+  DCHECK(snap_containers_.Contains(&snap_container));
 
-  if (snap_container_data.scroll_snap_type().strictness ==
-      SnapStrictness::kProximity) {
-    LayoutSize size = container_rect.Size();
-    size.Scale(kProximityRaio);
-    gfx::ScrollOffset range(size.Width().ToFloat(), size.Height().ToFloat());
-    snap_container_data.set_proximity_range(range);
-  }
+  // When snap type is 'none' we don't perform any snapping so there is no need
+  // to keep the area data up to date. So just update the type and skip updating
+  // areas as an optimization.
+  if (!snap_container_data.scroll_snap_type().is_none) {
+    FloatPoint max_position = scrollable_area->ScrollOffsetToPosition(
+        scrollable_area->MaximumScrollOffset());
+    snap_container_data.set_max_position(
+        gfx::ScrollOffset(max_position.X(), max_position.Y()));
 
-  if (SnapAreaSet* snap_areas = snap_container.SnapAreas()) {
-    for (const LayoutBox* snap_area : *snap_areas) {
-      snap_container_data.AddSnapAreaData(
-          CalculateSnapAreaData(*snap_area, snap_container));
+    // Scroll-padding represents inward offsets from the corresponding edge of
+    // the scrollport.
+    // https://drafts.csswg.org/css-scroll-snap-1/#scroll-padding Scrollport is
+    // the visual viewport of the scroll container (through which the scrollable
+    // overflow region can be viewed) coincides with its padding box.
+    // https://drafts.csswg.org/css-overflow-3/#scrollport. So we use the
+    // LayoutRect of the padding box here. The coordinate is relative to the
+    // container's border box.
+    PhysicalRect container_rect(snap_container.PhysicalPaddingBoxRect());
+
+    const ComputedStyle* container_style = snap_container.Style();
+    LayoutRectOutsets container_padding(
+        // The percentage of scroll-padding is different from that of normal
+        // padding, as scroll-padding resolves the percentage against
+        // corresponding dimension of the scrollport[1], while the normal
+        // padding resolves that against "width".[2,3] We use
+        // MinimumValueForLength here to ensure kAuto is resolved to
+        // LayoutUnit() which is the correct behavior for padding.
+        // [1] https://drafts.csswg.org/css-scroll-snap-1/#scroll-padding
+        //     "relative to the corresponding dimension of the scroll
+        //     container’s
+        //      scrollport"
+        // [2] https://drafts.csswg.org/css-box/#padding-props
+        // [3] See for example LayoutBoxModelObject::ComputedCSSPadding where it
+        //     uses |MinimumValueForLength| but against the "width".
+        MinimumValueForLength(container_style->ScrollPaddingTop(),
+                              container_rect.Height()),
+        MinimumValueForLength(container_style->ScrollPaddingRight(),
+                              container_rect.Width()),
+        MinimumValueForLength(container_style->ScrollPaddingBottom(),
+                              container_rect.Height()),
+        MinimumValueForLength(container_style->ScrollPaddingLeft(),
+                              container_rect.Width()));
+    container_rect.Contract(container_padding);
+    snap_container_data.set_rect(FloatRect(container_rect));
+
+    if (snap_container_data.scroll_snap_type().strictness ==
+        cc::SnapStrictness::kProximity) {
+      PhysicalSize size = container_rect.size;
+      size.Scale(kProximityRatio);
+      gfx::ScrollOffset range(size.width.ToFloat(), size.height.ToFloat());
+      snap_container_data.set_proximity_range(range);
+    }
+
+    if (SnapAreaSet* snap_areas = snap_container.SnapAreas()) {
+      for (const LayoutBox* snap_area : *snap_areas) {
+        snap_container_data.AddSnapAreaData(
+            CalculateSnapAreaData(*snap_area, snap_container));
+      }
     }
   }
-  snap_container_map_.Set(&snap_container, snap_container_data);
+
+  if (!old_snap_container_data ||
+      *old_snap_container_data != snap_container_data) {
+    snap_container.SetNeedsPaintPropertyUpdate();
+    scrollable_area->SetSnapContainerData(snap_container_data);
+  }
 }
 
-static ScrollSnapAlign GetPhysicalAlignment(
+static cc::ScrollSnapAlign GetPhysicalAlignment(
     const ComputedStyle& area_style,
     const ComputedStyle& container_style) {
-  ScrollSnapAlign align = area_style.GetScrollSnapAlign();
+  cc::ScrollSnapAlign align = area_style.GetScrollSnapAlign();
   if (container_style.IsHorizontalWritingMode())
     return align;
 
-  SnapAlignment tmp = align.alignment_inline;
+  cc::SnapAlignment tmp = align.alignment_inline;
   align.alignment_inline = align.alignment_block;
   align.alignment_block = tmp;
 
   if (container_style.IsFlippedBlocksWritingMode()) {
-    if (align.alignment_inline == SnapAlignment::kStart) {
-      align.alignment_inline = SnapAlignment::kEnd;
-    } else if (align.alignment_inline == SnapAlignment::kEnd) {
-      align.alignment_inline = SnapAlignment::kStart;
+    if (align.alignment_inline == cc::SnapAlignment::kStart) {
+      align.alignment_inline = cc::SnapAlignment::kEnd;
+    } else if (align.alignment_inline == cc::SnapAlignment::kEnd) {
+      align.alignment_inline = cc::SnapAlignment::kStart;
     }
   }
   return align;
 }
 
-SnapAreaData SnapCoordinator::CalculateSnapAreaData(
+cc::SnapAreaData SnapCoordinator::CalculateSnapAreaData(
     const LayoutBox& snap_area,
     const LayoutBox& snap_container) {
   const ComputedStyle* container_style = snap_container.Style();
   const ComputedStyle* area_style = snap_area.Style();
-  SnapAreaData snap_area_data;
+  cc::SnapAreaData snap_area_data;
 
   // We assume that the snap_container is the snap_area's ancestor in layout
   // tree, as the snap_container is found by walking up the layout tree in
   // FindSnapContainer(). Under this assumption,
-  // snap_area.LocalToAncestorQuad() returns the snap_area's position relative
+  // snap_area.LocalToAncestorRect() returns the snap_area's position relative
   // to its container's border box. And the |area| below represents the
   // snap_area rect in respect to the snap_container.
-  LayoutRect area_rect(LayoutPoint(), LayoutSize(snap_area.OffsetWidth(),
-                                                 snap_area.OffsetHeight()));
-  area_rect = EnclosingLayoutRect(
-      snap_area
-          .LocalToAncestorQuad(FloatRect(area_rect), &snap_container,
-                               kUseTransforms | kTraverseDocumentBoundaries)
-          .BoundingBox());
+  PhysicalRect area_rect = snap_area.PhysicalBorderBoxRect();
+  area_rect = snap_area.LocalToAncestorRect(area_rect, &snap_container,
+                                            kTraverseDocumentBoundaries);
   ScrollableArea* scrollable_area = ScrollableAreaForSnapping(snap_container);
   if (scrollable_area) {
-    if (snap_container.IsLayoutView())
+    if (snap_container.IsLayoutView()) {
       area_rect = snap_container.GetFrameView()->FrameToDocument(area_rect);
-    else
-      area_rect.MoveBy(LayoutPoint(scrollable_area->ScrollPosition()));
+    } else {
+      area_rect.Move(PhysicalOffset::FromFloatPointRound(
+          scrollable_area->ScrollPosition()));
+    }
   }
 
   LayoutRectOutsets area_margin(
@@ -226,7 +286,8 @@ SnapAreaData SnapCoordinator::CalculateSnapAreaData(
   area_rect.Expand(area_margin);
   snap_area_data.rect = FloatRect(area_rect);
 
-  ScrollSnapAlign align = GetPhysicalAlignment(*area_style, *container_style);
+  cc::ScrollSnapAlign align =
+      GetPhysicalAlignment(*area_style, *container_style);
   snap_area_data.scroll_snap_align = align;
 
   snap_area_data.must_snap =
@@ -235,107 +296,100 @@ SnapAreaData SnapCoordinator::CalculateSnapAreaData(
   return snap_area_data;
 }
 
-base::Optional<FloatPoint> SnapCoordinator::GetSnapPositionForPoint(
+base::Optional<FloatPoint> SnapCoordinator::GetSnapPosition(
     const LayoutBox& snap_container,
-    const FloatPoint& point,
-    bool did_scroll_x,
-    bool did_scroll_y) {
-  auto iter = snap_container_map_.find(&snap_container);
-  if (iter == snap_container_map_.end())
+    const cc::SnapSelectionStrategy& strategy) const {
+  const auto* optional_data =
+      snap_container.GetScrollableArea()
+          ? snap_container.GetScrollableArea()->GetSnapContainerData()
+          : nullptr;
+  if (!optional_data)
     return base::nullopt;
 
-  const SnapContainerData& data = iter->value;
+  const cc::SnapContainerData& data = *optional_data;
   if (!data.size())
     return base::nullopt;
 
   gfx::ScrollOffset snap_position;
-  if (data.FindSnapPosition(gfx::ScrollOffset(point.X(), point.Y()),
-                            did_scroll_x, did_scroll_y, &snap_position)) {
+  if (data.FindSnapPosition(strategy, &snap_position)) {
     FloatPoint snap_point(snap_position.x(), snap_position.y());
     return snap_point;
   }
+
   return base::nullopt;
 }
 
-void SnapCoordinator::PerformSnapping(const LayoutBox& snap_container,
-                                      bool did_scroll_x,
-                                      bool did_scroll_y) {
+bool SnapCoordinator::SnapAtCurrentPosition(const LayoutBox& snap_container,
+                                            bool scrolled_x,
+                                            bool scrolled_y) const {
   ScrollableArea* scrollable_area = ScrollableAreaForSnapping(snap_container);
   if (!scrollable_area)
-    return;
-
+    return false;
   FloatPoint current_position = scrollable_area->ScrollPosition();
-  base::Optional<FloatPoint> snap_point = GetSnapPositionForPoint(
-      snap_container, current_position, did_scroll_x, did_scroll_y);
-  if (!snap_point.has_value())
-    return;
+  return SnapForEndPosition(snap_container, current_position, scrolled_x,
+                            scrolled_y);
+}
+
+bool SnapCoordinator::SnapForEndPosition(const LayoutBox& snap_container,
+                                         const FloatPoint& end_position,
+                                         bool scrolled_x,
+                                         bool scrolled_y) const {
+  std::unique_ptr<cc::SnapSelectionStrategy> strategy =
+      cc::SnapSelectionStrategy::CreateForEndPosition(
+          gfx::ScrollOffset(end_position), scrolled_x, scrolled_y);
+  return PerformSnapping(snap_container, *strategy);
+}
+
+bool SnapCoordinator::SnapForDirection(const LayoutBox& snap_container,
+                                       const ScrollOffset& delta) const {
+  ScrollableArea* scrollable_area = ScrollableAreaForSnapping(snap_container);
+  if (!scrollable_area)
+    return false;
+  FloatPoint current_position = scrollable_area->ScrollPosition();
+  std::unique_ptr<cc::SnapSelectionStrategy> strategy =
+      cc::SnapSelectionStrategy::CreateForDirection(
+          gfx::ScrollOffset(current_position),
+          gfx::ScrollOffset(delta.Width(), delta.Height()));
+  return PerformSnapping(snap_container, *strategy);
+}
+
+bool SnapCoordinator::SnapForEndAndDirection(const LayoutBox& snap_container,
+                                             const ScrollOffset& delta) const {
+  ScrollableArea* scrollable_area = ScrollableAreaForSnapping(snap_container);
+  if (!scrollable_area)
+    return false;
+  FloatPoint current_position = scrollable_area->ScrollPosition();
+  std::unique_ptr<cc::SnapSelectionStrategy> strategy =
+      cc::SnapSelectionStrategy::CreateForEndAndDirection(
+          gfx::ScrollOffset(current_position),
+          gfx::ScrollOffset(delta.Width(), delta.Height()));
+  return PerformSnapping(snap_container, *strategy);
+}
+
+bool SnapCoordinator::PerformSnapping(
+    const LayoutBox& snap_container,
+    const cc::SnapSelectionStrategy& strategy) const {
+  ScrollableArea* scrollable_area = ScrollableAreaForSnapping(snap_container);
+  if (!scrollable_area)
+    return false;
+
+  base::Optional<FloatPoint> snap_point =
+      GetSnapPosition(snap_container, strategy);
+  if (!snap_point)
+    return false;
 
   scrollable_area->CancelScrollAnimation();
   scrollable_area->CancelProgrammaticScrollAnimation();
-  if (snap_point.value() != current_position) {
-    scrollable_area->SetScrollOffset(
-        scrollable_area->ScrollPositionToOffset(snap_point.value()),
-        kProgrammaticScroll, kScrollBehaviorSmooth);
-  }
-}
-
-void SnapCoordinator::SnapContainerDidChange(LayoutBox& snap_container,
-                                             ScrollSnapType scroll_snap_type) {
-  snap_container.SetNeedsPaintPropertyUpdate();
-  if (scroll_snap_type.is_none) {
-    snap_container_map_.erase(&snap_container);
-    snap_container.ClearSnapAreas();
-    return;
-  }
-
-  // TODO(sunyunjia): Only update when the localframe doesn't need layout.
-  UpdateSnapContainerData(snap_container);
-
-  // TODO(majidvp): Add logic to correctly handle orphaned snap areas here.
-  // 1. Removing container: find a new snap container for its orphan snap
-  // areas (most likely nearest ancestor of current container) otherwise add
-  // them to an orphan list.
-  // 2. Adding container: may take over snap areas from nearest ancestor snap
-  // container or from existing areas in orphan pool.
-}
-
-base::Optional<SnapContainerData> SnapCoordinator::GetSnapContainerData(
-    const LayoutBox& snap_container) const {
-  auto iter = snap_container_map_.find(&snap_container);
-  if (iter != snap_container_map_.end()) {
-    return iter->value;
-  }
-  return base::nullopt;
-}
-
-bool SnapCoordinator::GetSnapFlingInfo(
-    const LayoutBox& snap_container,
-    const gfx::Vector2dF& natural_displacement,
-    gfx::Vector2dF* out_initial_offset,
-    gfx::Vector2dF* out_target_offset) {
-  ScrollableArea* scrollable_area = ScrollableAreaForSnapping(snap_container);
-  if (!scrollable_area)
-    return false;
-
-  FloatPoint current_position = scrollable_area->ScrollPosition();
-  *out_initial_offset = gfx::Vector2dF(current_position);
-  FloatPoint original_end =
-      current_position +
-      FloatPoint(natural_displacement.x(), natural_displacement.y());
-  bool did_scroll_x = natural_displacement.x() != 0;
-  bool did_scroll_y = natural_displacement.y() != 0;
-  base::Optional<FloatPoint> snap_end = GetSnapPositionForPoint(
-      snap_container, original_end, did_scroll_x, did_scroll_y);
-  if (!snap_end.has_value())
-    return false;
-  *out_target_offset = gfx::Vector2dF(snap_end.value());
+  scrollable_area->SetScrollOffset(
+      scrollable_area->ScrollPositionToOffset(snap_point.value()),
+      kProgrammaticScroll, kScrollBehaviorSmooth);
   return true;
 }
 
 #ifndef NDEBUG
 
 void SnapCoordinator::ShowSnapAreaMap() {
-  for (auto* const container : snap_container_map_.Keys())
+  for (auto* const container : snap_containers_)
     ShowSnapAreasFor(container);
 }
 
@@ -349,10 +403,12 @@ void SnapCoordinator::ShowSnapAreasFor(const LayoutBox* container) {
 }
 
 void SnapCoordinator::ShowSnapDataFor(const LayoutBox* snap_container) {
-  auto iter = snap_container_map_.find(snap_container);
-  if (iter == snap_container_map_.end())
-    return;
-  LOG(INFO) << iter->value;
+  const auto* optional_data =
+      ScrollableAreaForSnapping(*snap_container)
+          ? ScrollableAreaForSnapping(*snap_container)->GetSnapContainerData()
+          : nullptr;
+  if (optional_data)
+    LOG(INFO) << *optional_data;
 }
 
 #endif

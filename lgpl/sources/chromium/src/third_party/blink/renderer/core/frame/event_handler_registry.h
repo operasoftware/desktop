@@ -24,7 +24,7 @@ typedef HashCountedSet<UntracedMember<EventTarget>> EventTargetSet;
 // event targets for a frame may only be registered with the
 // EventHandlerRegistry of its corresponding local root.
 class CORE_EXPORT EventHandlerRegistry final
-    : public GarbageCollectedFinalized<EventHandlerRegistry> {
+    : public GarbageCollected<EventHandlerRegistry> {
  public:
   explicit EventHandlerRegistry(LocalFrame&);
   virtual ~EventHandlerRegistry();
@@ -41,8 +41,9 @@ class CORE_EXPORT EventHandlerRegistry final
     kTouchStartOrMoveEventPassive,
     kTouchEndOrCancelEventBlocking,
     kTouchEndOrCancelEventPassive,
-    kPointerEvent,  // This includes all pointerevents excluding pointerrawmove.
-    kPointerRawMoveEvent,
+    kPointerEvent,  // This includes all pointerevents excluding
+                    // pointerrawupdate.
+    kPointerRawUpdateEvent,
 #if DCHECK_IS_ON()
     // Additional event categories for verifying handler tracking logic.
     kEventsForTesting,
@@ -60,11 +61,11 @@ class CORE_EXPORT EventHandlerRegistry final
   // Registration and management of event handlers attached to EventTargets.
   void DidAddEventHandler(EventTarget&,
                           const AtomicString& event_type,
-                          const AddEventListenerOptions&);
+                          const AddEventListenerOptions*);
   void DidAddEventHandler(EventTarget&, EventHandlerClass);
   void DidRemoveEventHandler(EventTarget&,
                              const AtomicString& event_type,
-                             const AddEventListenerOptions&);
+                             const AddEventListenerOptions*);
   void DidRemoveEventHandler(EventTarget&, EventHandlerClass);
   void DidRemoveAllEventHandlers(EventTarget&);
 
@@ -90,7 +91,7 @@ class CORE_EXPORT EventHandlerRegistry final
 
   // Returns true if |eventType| belongs to a class this registry tracks.
   static bool EventTypeToClass(const AtomicString& event_type,
-                               const AddEventListenerOptions&,
+                               const AddEventListenerOptions*,
                                EventHandlerClass* result);
 
   // Returns true if the operation actually added a new target or completely
@@ -100,12 +101,12 @@ class CORE_EXPORT EventHandlerRegistry final
                                  EventTarget*);
 
   // Called on the EventHandlerRegistry of the root Document to notify
-  // clients when we have added the first handler or removed the last one for
-  // a given event class. |hasActiveHandlers| can be used to distinguish
-  // between the two cases.
-  void NotifyHasHandlersChanged(EventTarget*,
-                                EventHandlerClass,
-                                bool has_active_handlers);
+  // clients when we have added or remove a handler for a given event class.
+  // |hasActiveHandlers| can be used to distinguish between having and not
+  // having an active handler.
+  void NotifyHandlersChanged(EventTarget*,
+                             EventHandlerClass,
+                             bool has_active_handlers);
 
   // Called to notify clients whenever a single event handler target is
   // registered or unregistered. If several handlers are registered for the
@@ -116,7 +117,7 @@ class CORE_EXPORT EventHandlerRegistry final
   // parent registry and other clients accordingly.
   void UpdateEventHandlerOfType(ChangeOperation,
                                 const AtomicString& event_type,
-                                const AddEventListenerOptions&,
+                                const AddEventListenerOptions*,
                                 EventTarget*);
 
   bool UpdateEventHandlerInternal(ChangeOperation,

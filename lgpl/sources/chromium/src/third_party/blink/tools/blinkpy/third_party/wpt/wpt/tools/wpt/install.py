@@ -6,6 +6,8 @@ import sys
 latest_channels = {
     'firefox': 'nightly',
     'chrome': 'dev',
+    'edgechromium': 'dev',
+    'safari': 'preview',
     'servo': 'nightly'
 }
 
@@ -17,6 +19,7 @@ channel_by_name = {
     'dev': latest_channels,
     'preview': latest_channels,
     'experimental': latest_channels,
+    'canary': 'canary',
 }
 
 
@@ -46,7 +49,7 @@ def get_parser():
 def get_channel(browser, channel):
     channel = channel_by_name[channel]
     if isinstance(channel, dict):
-        channel = channel[browser]
+        channel = channel.get(browser)
     return channel
 
 
@@ -56,8 +59,8 @@ def run(venv, **kwargs):
     channel = get_channel(browser, kwargs["channel"])
 
     if channel != kwargs["channel"]:
-        print "Interpreting channel '%s' as '%s'" % (kwargs["channel"],
-                                                     channel)
+        print("Interpreting channel '%s' as '%s'" % (kwargs["channel"],
+                                                     channel))
 
     if destination is None:
         if venv:
@@ -72,7 +75,11 @@ def run(venv, **kwargs):
     install(browser, kwargs["component"], destination, channel)
 
 
-def install(name, component, destination, channel="nightly"):
+def install(name, component, destination, channel="nightly", logger=None):
+    if logger is None:
+        import logging
+        logger = logging.getLogger("install")
+
     if component == 'webdriver':
         method = 'install_webdriver'
     else:
@@ -80,6 +87,6 @@ def install(name, component, destination, channel="nightly"):
 
     subclass = getattr(browser, name.title())
     sys.stdout.write('Now installing %s %s...\n' % (name, component))
-    path = getattr(subclass(), method)(dest=destination, channel=channel)
+    path = getattr(subclass(logger), method)(dest=destination, channel=channel)
     if path:
         sys.stdout.write('Binary installed as %s\n' % (path,))

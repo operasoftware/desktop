@@ -4,12 +4,8 @@
 
 /** @fileoverview Tests for shared Polymer elements. */
 
-/** @const {string} Path to source root. */
-const ROOT_PATH = '../../../../../';
-
 // Polymer BrowserTest fixture.
-GEN_INCLUDE(
-    [ROOT_PATH + 'chrome/test/data/webui/polymer_browser_test_base.js']);
+GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 
 /**
  * Test fixture for shared Polymer elements.
@@ -22,9 +18,10 @@ CrElementsBrowserTest.prototype = {
   __proto__: PolymerTest.prototype,
 
   /** @override */
-  extraLibraries: PolymerTest.getLibraries(ROOT_PATH).concat([
-    ROOT_PATH + 'ui/webui/resources/js/assert.js',
-  ]),
+  extraLibraries: [
+    ...PolymerTest.prototype.extraLibraries,
+    '//ui/webui/resources/js/assert.js',
+  ],
 
   /** @override */
   get browsePreload() {
@@ -96,6 +93,30 @@ TEST_F('CrElementsProfileAvatarSelectorTest', 'All', function() {
  * @constructor
  * @extends {CrElementsBrowserTest}
  */
+function CrElementsSearchFieldTest() {}
+
+CrElementsSearchFieldTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload:
+      'chrome://resources/cr_elements/cr_search_field/cr_search_field.html',
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    '../test_util.js',
+    'cr_search_field_tests.js',
+  ]),
+};
+
+TEST_F('CrElementsSearchFieldTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
 function CrElementsToolbarSearchFieldTest() {}
 
 CrElementsToolbarSearchFieldTest.prototype = {
@@ -112,7 +133,6 @@ CrElementsToolbarSearchFieldTest.prototype = {
 };
 
 TEST_F('CrElementsToolbarSearchFieldTest', 'All', function() {
-  cr_toolbar_search_field.registerTests();
   mocha.run();
 });
 
@@ -130,12 +150,19 @@ CrElementsDrawerTest.prototype = {
 
   /** @override */
   extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
-    '../settings/test_util.js',
+    '../test_util.js',
     'cr_drawer_tests.js',
   ]),
 };
 
-TEST_F('CrElementsDrawerTest', 'All', function() {
+// https://crbug.com/1013656 - Flaky on Linux CFI.
+GEN('#if defined(OS_LINUX) && defined(IS_CFI)');
+GEN('#define MAYBE_Drawer DISABLED_Drawer');
+GEN('#else');
+GEN('#define MAYBE_Drawer Drawer');
+GEN('#endif');
+
+TEST_F('CrElementsDrawerTest', 'MAYBE_Drawer', function() {
   mocha.run();
 });
 
@@ -153,11 +180,35 @@ CrElementsScrollableBehaviorTest.prototype = {
 
   /** @override */
   extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    '../test_util.js',
     'cr_scrollable_behavior_tests.js',
   ]),
 };
 
 TEST_F('CrElementsScrollableBehaviorTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
+function CrElementsContainerShadowBehaviorTest() {}
+
+CrElementsContainerShadowBehaviorTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload:
+      'chrome://resources/cr_elements/cr_container_shadow_behavior.html',
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    'cr_container_shadow_behavior_test.js',
+  ]),
+};
+
+TEST_F('CrElementsContainerShadowBehaviorTest', 'All', function() {
   mocha.run();
 });
 
@@ -239,26 +290,77 @@ GEN('#if defined(OS_CHROMEOS)');
  * @constructor
  * @extends {CrElementsBrowserTest}
  */
-function CrElementsPolicyNetworkIndicatorTest() {}
+function CrPolicyNetworkBehaviorMojoTest() {}
 
-CrElementsPolicyNetworkIndicatorTest.prototype = {
+CrPolicyNetworkBehaviorMojoTest.prototype = {
   __proto__: CrElementsBrowserTest.prototype,
 
   /** @override */
-  browsePreload:
-      'chrome://resources/cr_elements/policy/cr_policy_network_indicator.html',
+  browsePreload: 'chrome://settings/internet_page/internet_page.html',
 
   /** @override */
   extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
     'cr_policy_strings.js',
-    'cr_policy_network_indicator_tests.js',
+    'cr_policy_network_behavior_mojo_tests.js',
   ]),
 };
 
-TEST_F('CrElementsPolicyNetworkIndicatorTest', 'All', function() {
+TEST_F('CrPolicyNetworkBehaviorMojoTest', 'All', function() {
   mocha.run();
 });
+
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
+function CrElementsPolicyNetworkIndicatorMojoTest() {}
+
+CrElementsPolicyNetworkIndicatorMojoTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://settings/internet_page/internet_page.html',
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    'cr_policy_strings.js',
+    'cr_policy_network_indicator_mojo_tests.js',
+  ]),
+};
+
+TEST_F('CrElementsPolicyNetworkIndicatorMojoTest', 'All', function() {
+  mocha.run();
+});
+
 GEN('#endif');
+
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
+function CrElementsFingerprintProgressArcTest() {}
+
+CrElementsFingerprintProgressArcTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://resources/cr_elements/cr_fingerprint/' +
+      'cr_fingerprint_progress_arc.html',
+
+  /** @override */
+  commandLineSwitches: [{
+    switchName: 'enable-pixel-output-in-tests',
+  }],
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    'cr_fingerprint_progress_arc_tests.js',
+  ]),
+};
+
+TEST_F('CrElementsFingerprintProgressArcTest', 'DISABLED_All', function() {
+  mocha.run();
+});
 
 /**
  * @constructor
@@ -274,7 +376,7 @@ CrElementsDialogTest.prototype = {
 
   /** @override */
   extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
-    '../settings/test_util.js',
+    '../test_util.js',
     'cr_dialog_test.js',
   ]),
 };
@@ -297,7 +399,7 @@ CrElementsSliderTest.prototype = {
 
   /** @override */
   extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
-    '../settings/test_util.js',
+    '../test_util.js',
     'cr_slider_test.js',
   ]),
 };
@@ -320,12 +422,36 @@ CrElementsToastTest.prototype = {
 
   /** @override */
   extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
-    ROOT_PATH + 'chrome/test/data/webui/mock_timer.js',
+    '//chrome/test/data/webui/mock_timer.js',
     'cr_toast_test.js',
   ]),
 };
 
 TEST_F('CrElementsToastTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
+function CrElementsToastManagerTest() {}
+
+CrElementsToastManagerTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload:
+      'chrome://resources/cr_elements/cr_toast/cr_toast_manager.html',
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    '../test_util.js',
+    'cr_toast_manager_test.js',
+  ]),
+};
+
+TEST_F('CrElementsToastManagerTest', 'All', function() {
   mocha.run();
 });
 
@@ -344,7 +470,6 @@ CrElementsRadioButtonTest.prototype = {
 
   /** @override */
   extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
-    '../settings/test_util.js',
     'cr_radio_button_test.js',
   ]),
 };
@@ -353,6 +478,123 @@ TEST_F('CrElementsRadioButtonTest', 'All', function() {
   mocha.run();
 });
 
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
+function CrElementsRadioGroupTest() {}
+
+CrElementsRadioGroupTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload:
+      'chrome://resources/cr_elements/cr_radio_group/cr_radio_group.html',
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    '../test_util.js',
+    'cr_radio_group_test.js',
+  ]),
+};
+
+TEST_F('CrElementsRadioGroupTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
+function CrElementsButtonTest() {}
+
+CrElementsButtonTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://resources/cr_elements/cr_button/cr_button.html',
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    '../test_util.js',
+    'cr_button_tests.js',
+  ]),
+};
+
+TEST_F('CrElementsButtonTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
+function CrElementsIconButtonTest() {}
+
+CrElementsIconButtonTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload:
+      'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.html',
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    '../test_util.js',
+    'cr_icon_button_tests.js',
+  ]),
+};
+
+TEST_F('CrElementsIconButtonTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
+function CrElementsLinkRowTest() {}
+
+CrElementsLinkRowTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://resources/cr_elements/cr_link_row/cr_link_row.html',
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    'cr_link_row_tests.js',
+  ]),
+};
+
+TEST_F('CrElementsLinkRowTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
+function CrElementsExpandButtonTest() {}
+
+CrElementsExpandButtonTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload:
+      'chrome://resources/cr_elements/cr_expand_button/cr_expand_button.html',
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    'cr_expand_button_tests.js',
+  ]),
+};
+
+TEST_F('CrElementsExpandButtonTest', 'All', function() {
+  mocha.run();
+});
+
+GEN('#if defined(OS_CHROMEOS)');
 /**
  * @constructor
  * @extends {CrElementsBrowserTest}
@@ -368,7 +610,7 @@ CrElementsSearchableDropDownTest.prototype = {
 
   /** @override */
   extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
-    '../settings/test_util.js',
+    '../test_util.js',
     'cr_searchable_drop_down_tests.js',
   ]),
 };
@@ -376,11 +618,13 @@ CrElementsSearchableDropDownTest.prototype = {
 TEST_F('CrElementsSearchableDropDownTest', 'All', function() {
   mocha.run();
 });
+GEN('#endif');
 
 ////////////////////////////////////////////////////////////////////////////////
 // View Manager Tests
 
-CrElementsViewManagerTest = class extends CrElementsBrowserTest {
+// eslint-disable-next-line no-var
+var CrElementsViewManagerTest = class extends CrElementsBrowserTest {
   /** @override */
   get browsePreload() {
     return 'chrome://resources/cr_elements/cr_view_manager/cr_view_manager.html';
@@ -389,7 +633,7 @@ CrElementsViewManagerTest = class extends CrElementsBrowserTest {
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
-      '../extensions/test_util.js',
+      '../test_util.js',
       'cr_view_manager_test.js',
     ]);
   }
@@ -407,3 +651,34 @@ TEST_F('CrElementsViewManagerTest', 'VisibilityTest', function() {
 TEST_F('CrElementsViewManagerTest', 'EventFiringTest', function() {
   runMochaTest(this.suiteName, cr_view_manager_test.TestNames.EventFiring);
 });
+
+GEN('#if defined(OS_CHROMEOS)');
+/**
+ * @constructor
+ * @extends {CrElementsBrowserTest}
+ */
+function CrElementsLottieTest() {}
+
+CrElementsLottieTest.prototype = {
+  __proto__: CrElementsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://resources/cr_elements/chromeos/cr_lottie/' +
+      'cr_lottie.html',
+
+  /** @override */
+  commandLineSwitches: [{
+    switchName: 'enable-pixel-output-in-tests',
+  }],
+
+  /** @override */
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
+    '../test_util.js',
+    'cr_lottie_tests.js',
+  ]),
+};
+
+TEST_F('CrElementsLottieTest', 'All', function() {
+  mocha.run();
+});
+GEN('#endif');

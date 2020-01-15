@@ -6,11 +6,12 @@
 
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/loader/image_loader.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image_for_container.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -38,6 +39,10 @@ const Element& ImageElementBase::GetElement() const {
 
 bool ImageElementBase::IsSVGSource() const {
   return CachedImage() && CachedImage()->GetImage()->IsSVGImage();
+}
+
+bool ImageElementBase::IsImageElement() const {
+  return CachedImage() && !CachedImage()->GetImage()->IsSVGImage();
 }
 
 scoped_refptr<Image> ImageElementBase::GetSourceImageForCanvas(
@@ -69,10 +74,8 @@ scoped_refptr<Image> ImageElementBase::GetSourceImageForCanvas(
   return source_image->ImageForDefaultFrame();
 }
 
-bool ImageElementBase::WouldTaintOrigin(
-    const SecurityOrigin* destination_security_origin) const {
-  return CachedImage() &&
-         !CachedImage()->IsAccessAllowed(destination_security_origin);
+bool ImageElementBase::WouldTaintOrigin() const {
+  return CachedImage() && !CachedImage()->IsAccessAllowed();
 }
 
 FloatSize ImageElementBase::ElementSize(
@@ -110,7 +113,7 @@ bool ImageElementBase::IsAccelerated() const {
 }
 
 const KURL& ImageElementBase::SourceURL() const {
-  return CachedImage()->GetResponse().Url();
+  return CachedImage()->GetResponse().CurrentRequestUrl();
 }
 
 bool ImageElementBase::IsOpaque() const {
@@ -133,14 +136,14 @@ ScriptPromise ImageElementBase::CreateImageBitmap(
     ScriptState* script_state,
     EventTarget& event_target,
     base::Optional<IntRect> crop_rect,
-    const ImageBitmapOptions& options) {
+    const ImageBitmapOptions* options) {
   DCHECK(event_target.ToLocalDOMWindow());
 
   ImageResourceContent* image_content = CachedImage();
   if (!image_content) {
     return ScriptPromise::RejectWithDOMException(
         script_state,
-        DOMException::Create(
+        MakeGarbageCollected<DOMException>(
             DOMExceptionCode::kInvalidStateError,
             "No image can be retrieved from the provided element."));
   }
@@ -148,18 +151,15 @@ ScriptPromise ImageElementBase::CreateImageBitmap(
   if (image->IsSVGImage()) {
     if (!ToSVGImage(image)->HasIntrinsicDimensions() &&
         (!crop_rect &&
-         (!options.hasResizeWidth() || !options.hasResizeHeight()))) {
+         (!options->hasResizeWidth() || !options->hasResizeHeight()))) {
       return ScriptPromise::RejectWithDOMException(
           script_state,
-          DOMException::Create(
+          MakeGarbageCollected<DOMException>(
               DOMExceptionCode::kInvalidStateError,
               "The image element contains an SVG image without intrinsic "
               "dimensions, and no resize options or crop region are "
               "specified."));
     }
-  }
-
-  if (IsSVGSource()) {
     return ImageBitmap::CreateAsync(this, crop_rect,
                                     event_target.ToLocalDOMWindow()->document(),
                                     script_state, options);

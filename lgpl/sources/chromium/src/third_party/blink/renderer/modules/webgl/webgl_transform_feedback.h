@@ -23,6 +23,7 @@ class WebGLTransformFeedback : public WebGLContextObject {
     TFTypeUser,
   };
 
+  explicit WebGLTransformFeedback(WebGL2RenderingContextBase*, TFType);
   ~WebGLTransformFeedback() override;
 
   GLuint Object() const { return object_; }
@@ -54,7 +55,7 @@ class WebGLTransformFeedback : public WebGLContextObject {
 
   bool active() const { return active_; }
   bool paused() const { return paused_; }
-  const HeapVector<TraceWrapperMember<WebGLBuffer>>&
+  const HeapVector<Member<WebGLBuffer>>&
   bound_indexed_transform_feedback_buffers() const {
     return bound_indexed_transform_feedback_buffers_;
   }
@@ -70,9 +71,6 @@ class WebGLTransformFeedback : public WebGLContextObject {
 
   bool ValidateProgramForResume(WebGLProgram*) const;
 
- protected:
-  explicit WebGLTransformFeedback(WebGL2RenderingContextBase*, TFType);
-
  private:
   void DispatchDetached(gpu::gles2::GLES2Interface*);
   bool HasObject() const override { return object_ != 0; }
@@ -83,8 +81,7 @@ class WebGLTransformFeedback : public WebGLContextObject {
   TFType type_;
   GLenum target_;
 
-  HeapVector<TraceWrapperMember<WebGLBuffer>>
-      bound_indexed_transform_feedback_buffers_;
+  HeapVector<Member<WebGLBuffer>> bound_indexed_transform_feedback_buffers_;
 
   Member<WebGLProgram> program_;
   unsigned program_link_count_;

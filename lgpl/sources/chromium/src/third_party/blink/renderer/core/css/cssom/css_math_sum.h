@@ -22,17 +22,17 @@ class CORE_EXPORT CSSMathSum final : public CSSMathVariadic {
   // Blink-internal constructor.
   static CSSMathSum* Create(CSSNumericValueVector);
 
+  CSSMathSum(CSSNumericArray* values, const CSSNumericValueType& type)
+      : CSSMathVariadic(values, type) {}
+
   String getOperator() const final { return "sum"; }
 
   // From CSSStyleValue.
   StyleValueType GetType() const final { return CSSStyleValue::kSumType; }
 
-  CSSCalcExpressionNode* ToCalcExpressionNode() const final;
+  CSSMathExpressionNode* ToCalcExpressionNode() const final;
 
  private:
-  CSSMathSum(CSSNumericArray* values, const CSSNumericValueType& type)
-      : CSSMathVariadic(values, type) {}
-
   void BuildCSSText(Nested, ParenLess, StringBuilder&) const final;
 
   base::Optional<CSSNumericSumValue> SumValue() const final;

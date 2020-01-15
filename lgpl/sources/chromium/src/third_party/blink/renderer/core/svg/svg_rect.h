@@ -23,7 +23,7 @@
 #include "third_party/blink/renderer/core/svg/properties/svg_property_helper.h"
 #include "third_party/blink/renderer/core/svg/svg_parsing_error.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -33,15 +33,14 @@ class SVGRect final : public SVGPropertyHelper<SVGRect> {
  public:
   typedef SVGRectTearOff TearOffType;
 
-  static SVGRect* Create() { return new SVGRect(); }
-
   static SVGRect* CreateInvalid() {
-    SVGRect* rect = new SVGRect();
+    SVGRect* rect = MakeGarbageCollected<SVGRect>();
     rect->SetInvalid();
     return rect;
   }
 
-  static SVGRect* Create(const FloatRect& rect) { return new SVGRect(rect); }
+  SVGRect();
+  SVGRect(const FloatRect&);
 
   SVGRect* Clone() const;
 
@@ -77,9 +76,6 @@ class SVGRect final : public SVGPropertyHelper<SVGRect> {
   static AnimatedPropertyType ClassType() { return kAnimatedRect; }
 
  private:
-  SVGRect();
-  SVGRect(const FloatRect&);
-
   template <typename CharType>
   SVGParsingError Parse(const CharType*& ptr, const CharType* end);
 

@@ -15,7 +15,8 @@ function sendTouchStart(touches) {
     return new window.Touch(touchInit);
   });
 
-  viewer.plugin_.dispatchEvent(new TouchEvent('touchstart', {
+  const target = document.getElementById('content');
+  target.dispatchEvent(new TouchEvent('touchstart', {
     touches: touchList,
     targetTouches: touchList,
     changedtouches: touchList
@@ -37,8 +38,9 @@ var tests = [
     let event = createContextMenuEvent();
     // Dispatch event will be false if the event is cancellable and one of the
     // handlers called preventDefault.
-    chrome.test.assertFalse(document.dispatchEvent(event),
-        "Should have called preventDefault() for single touch.");
+    chrome.test.assertFalse(
+        document.dispatchEvent(event),
+        'Should have called preventDefault() for single touch.');
     chrome.test.succeed();
   },
 
@@ -47,8 +49,9 @@ var tests = [
     sendTouchStart([{x: 10, y: 10}, {x: 15, y: 15}]);
 
     let event = createContextMenuEvent();
-    chrome.test.assertTrue(document.dispatchEvent(event),
-        "Should not have called preventDefault() for double touch.");
+    chrome.test.assertTrue(
+        document.dispatchEvent(event),
+        'Should not have called preventDefault() for double touch.');
     chrome.test.succeed();
   },
 

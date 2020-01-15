@@ -7,6 +7,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
@@ -23,7 +24,7 @@ class AttrTest : public testing::Test {
 };
 
 void AttrTest::SetUp() {
-  document_ = Document::CreateForTest();
+  document_ = MakeGarbageCollected<Document>();
   value_ = "value";
 }
 
@@ -33,32 +34,36 @@ Attr* AttrTest::CreateAttribute() {
 
 TEST_F(AttrTest, InitialValueState) {
   Attr* attr = CreateAttribute();
+  Node* node = attr;
   EXPECT_EQ(g_empty_atom, attr->value());
-  EXPECT_EQ(g_empty_string, attr->ToNode()->nodeValue());
+  EXPECT_EQ(g_empty_string, node->nodeValue());
   EXPECT_EQ(g_empty_string, attr->textContent());
 }
 
 TEST_F(AttrTest, SetValue) {
   Attr* attr = CreateAttribute();
+  Node* node = attr;
   attr->setValue(Value());
   EXPECT_EQ(Value(), attr->value());
-  EXPECT_EQ(Value(), attr->ToNode()->nodeValue());
+  EXPECT_EQ(Value(), node->nodeValue());
   EXPECT_EQ(Value(), attr->textContent());
 }
 
 TEST_F(AttrTest, SetNodeValue) {
   Attr* attr = CreateAttribute();
-  attr->ToNode()->setNodeValue(Value());
+  Node* node = attr;
+  node->setNodeValue(Value());
   EXPECT_EQ(Value(), attr->value());
-  EXPECT_EQ(Value(), attr->ToNode()->nodeValue());
+  EXPECT_EQ(Value(), node->nodeValue());
   EXPECT_EQ(Value(), attr->textContent());
 }
 
 TEST_F(AttrTest, SetTextContent) {
   Attr* attr = CreateAttribute();
+  Node* node = attr;
   attr->setTextContent(Value());
   EXPECT_EQ(Value(), attr->value());
-  EXPECT_EQ(Value(), attr->ToNode()->nodeValue());
+  EXPECT_EQ(Value(), node->nodeValue());
   EXPECT_EQ(Value(), attr->textContent());
 }
 

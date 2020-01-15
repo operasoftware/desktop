@@ -165,7 +165,7 @@ TextTrackCueList* TextTrack::cues() {
   return nullptr;
 }
 
-void TextTrack::RemoveAllCues() {
+void TextTrack::Reset() {
   if (!cues_)
     return;
 
@@ -178,6 +178,8 @@ void TextTrack::RemoveAllCues() {
   cues_->RemoveAll();
   if (active_cues_)
     active_cues_->RemoveAll();
+
+  style_sheets_.clear();
 }
 
 void TextTrack::AddListOfCues(
@@ -204,7 +206,7 @@ TextTrackCueList* TextTrack::activeCues() {
     return nullptr;
 
   if (!active_cues_) {
-    active_cues_ = TextTrackCueList::Create();
+    active_cues_ = MakeGarbageCollected<TextTrackCueList>();
   }
 
   cues_->CollectActiveCues(*active_cues_);
@@ -217,7 +219,7 @@ void TextTrack::addCue(TextTrackCue* cue) {
   if (std::isnan(cue->startTime()) || std::isnan(cue->endTime()))
     return;
 
-  // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-texttrack-addcue
+  // https://html.spec.whatwg.org/C/#dom-texttrack-addcue
 
   // The addCue(cue) method of TextTrack objects, when invoked, must run the
   // following steps:
@@ -239,10 +241,16 @@ void TextTrack::addCue(TextTrackCue* cue) {
     GetCueTimeline()->AddCue(this, cue);
 }
 
+void TextTrack::SetCSSStyleSheets(
+    HeapVector<Member<CSSStyleSheet>> style_sheets) {
+  DCHECK(style_sheets_.IsEmpty());
+  style_sheets_ = std::move(style_sheets);
+}
+
 void TextTrack::removeCue(TextTrackCue* cue, ExceptionState& exception_state) {
   DCHECK(cue);
 
-  // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-texttrack-removecue
+  // https://html.spec.whatwg.org/C/#dom-texttrack-removecue
 
   // The removeCue(cue) method of TextTrack objects, when invoked, must run the
   // following steps:
@@ -331,7 +339,7 @@ bool TextTrack::CanBeRendered() const {
 
 TextTrackCueList* TextTrack::EnsureTextTrackCueList() {
   if (!cues_) {
-    cues_ = TextTrackCueList::Create();
+    cues_ = MakeGarbageCollected<TextTrackCueList>();
   }
 
   return cues_.Get();
@@ -348,7 +356,7 @@ int TextTrack::TrackIndexRelativeToRenderedTracks() {
 }
 
 const AtomicString& TextTrack::InterfaceName() const {
-  return EventTargetNames::TextTrack;
+  return event_target_names::kTextTrack;
 }
 
 ExecutionContext* TextTrack::GetExecutionContext() const {
@@ -368,10 +376,11 @@ Node* TextTrack::Owner() const {
   return MediaElement();
 }
 
-void TextTrack::Trace(blink::Visitor* visitor) {
+void TextTrack::Trace(Visitor* visitor) {
   visitor->Trace(cues_);
   visitor->Trace(active_cues_);
   visitor->Trace(track_list_);
+  visitor->Trace(style_sheets_);
   TrackBase::Trace(visitor);
   EventTargetWithInlineData::Trace(visitor);
 }

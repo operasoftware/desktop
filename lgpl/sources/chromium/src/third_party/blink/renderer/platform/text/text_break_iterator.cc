@@ -23,9 +23,10 @@
 
 #include "third_party/blink/renderer/platform/text/text_break_iterator.h"
 
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/platform/text/character.h"
-#include "third_party/blink/renderer/platform/wtf/ascii_ctype.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
+#include "third_party/blink/renderer/platform/wtf/text/ascii_ctype.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 
 #include <unicode/uchar.h>
@@ -223,11 +224,11 @@ static const unsigned char kBreakAllLineBreakClassTable[][BA_LB_COUNT / 8 + 1] =
 #undef DI
 #undef AL
 
-static_assert(arraysize(kAsciiLineBreakTable) ==
+static_assert(base::size(kAsciiLineBreakTable) ==
                   kAsciiLineBreakTableLastChar - kAsciiLineBreakTableFirstChar +
                       1,
               "asciiLineBreakTable should be consistent");
-static_assert(arraysize(kBreakAllLineBreakClassTable) == BA_LB_COUNT,
+static_assert(base::size(kBreakAllLineBreakClassTable) == BA_LB_COUNT,
               "breakAllLineBreakClassTable should be consistent");
 
 static inline bool ShouldBreakAfter(UChar last_ch, UChar ch, UChar next_ch) {
@@ -284,9 +285,9 @@ static inline bool ShouldKeepAfterKeepAll(UChar last_ch,
                                           UChar next_ch) {
   UChar pre_ch = U_MASK(u_charType(ch)) & U_GC_M_MASK ? last_ch : ch;
   return U_MASK(u_charType(pre_ch)) & (U_GC_L_MASK | U_GC_N_MASK) &&
-         !WTF::Unicode::HasLineBreakingPropertyComplexContext(pre_ch) &&
+         !WTF::unicode::HasLineBreakingPropertyComplexContext(pre_ch) &&
          U_MASK(u_charType(next_ch)) & (U_GC_L_MASK | U_GC_N_MASK) &&
-         !WTF::Unicode::HasLineBreakingPropertyComplexContext(next_ch);
+         !WTF::unicode::HasLineBreakingPropertyComplexContext(next_ch);
 }
 
 inline bool NeedsLineBreakIterator(UChar ch) {
@@ -300,8 +301,9 @@ inline int LazyLineBreakIterator::NextBreakablePosition(
     int pos,
     const CharacterType* str,
     int len) const {
-  DCHECK_GE(pos, 0);
+  CHECK_GE(pos, 0);
   DCHECK_GE(static_cast<unsigned>(pos), start_offset_);
+  CHECK_LE(pos, len);
   int next_break = -1;
   UChar last_last_ch = pos > 1 ? str[pos - 2] : SecondToLastCharacter();
   UChar last_ch = pos > 0 ? str[pos - 1] : LastCharacter();
@@ -331,6 +333,12 @@ inline int LazyLineBreakIterator::NextBreakablePosition(
             return i;
           continue;
         }
+        break;
+      case BreakSpaceType::kAfterEverySpace:
+        if (is_last_space)
+          return i;
+        if (is_space)
+          continue;
         break;
     }
 
@@ -390,6 +398,10 @@ inline int LazyLineBreakIterator::NextBreakablePosition(
       return NextBreakablePosition<CharacterType, lineBreakType,
                                    BreakSpaceType::kBeforeSpaceRun>(pos, str,
                                                                     len);
+    case BreakSpaceType::kAfterEverySpace:
+      return NextBreakablePosition<CharacterType, lineBreakType,
+                                   BreakSpaceType::kAfterEverySpace>(pos, str,
+                                                                     len);
   }
   NOTREACHED();
   return NextBreakablePosition<CharacterType, lineBreakType,
@@ -445,6 +457,7 @@ int LazyLineBreakIterator::NextBreakablePosition(
 }
 
 unsigned LazyLineBreakIterator::NextBreakOpportunity(unsigned offset) const {
+  DCHECK_LE(offset, string_.length());
   int next_break = NextBreakablePosition(offset, break_type_);
   DCHECK_GE(next_break, 0);
   return next_break;
@@ -452,6 +465,7 @@ unsigned LazyLineBreakIterator::NextBreakOpportunity(unsigned offset) const {
 
 unsigned LazyLineBreakIterator::NextBreakOpportunity(unsigned offset,
                                                      unsigned len) const {
+  DCHECK_LE(offset, string_.length());
   DCHECK_LE(len, string_.length());
   int next_break = NextBreakablePosition(offset, break_type_, len);
   DCHECK_GE(next_break, 0);
@@ -498,6 +512,8 @@ std::ostream& operator<<(std::ostream& ostream, BreakSpaceType break_space) {
   switch (break_space) {
     case BreakSpaceType::kBeforeEverySpace:
       return ostream << "kBeforeEverySpace";
+    case BreakSpaceType::kAfterEverySpace:
+      return ostream << "kAfterEverySpace";
     case BreakSpaceType::kBeforeSpaceRun:
       return ostream << "kBeforeSpaceRun";
   }

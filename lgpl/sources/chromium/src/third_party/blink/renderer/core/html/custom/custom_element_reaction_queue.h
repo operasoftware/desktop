@@ -15,15 +15,15 @@ class CustomElementReaction;
 class Element;
 
 class CORE_EXPORT CustomElementReactionQueue final
-    : public GarbageCollectedFinalized<CustomElementReactionQueue> {
+    : public GarbageCollected<CustomElementReactionQueue> {
  public:
   CustomElementReactionQueue();
   ~CustomElementReactionQueue();
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
-  void Add(CustomElementReaction*);
-  void InvokeReactions(Element*);
+  void Add(CustomElementReaction&);
+  void InvokeReactions(Element&);
   bool IsEmpty() { return reactions_.IsEmpty(); }
   void Clear();
 

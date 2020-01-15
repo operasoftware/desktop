@@ -24,7 +24,7 @@ class CSSLazyParsingTest : public testing::Test {
   }
 
   StyleRule* RuleAt(StyleSheetContents* sheet, wtf_size_t index) {
-    return ToStyleRule(sheet->ChildRules()[index]);
+    return To<StyleRule>(sheet->ChildRules()[index].Get());
   }
 
  protected:
@@ -32,9 +32,9 @@ class CSSLazyParsingTest : public testing::Test {
 };
 
 TEST_F(CSSLazyParsingTest, Simple) {
-  CSSParserContext* context = CSSParserContext::Create(
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);
-  StyleSheetContents* style_sheet = StyleSheetContents::Create(context);
+  auto* style_sheet = MakeGarbageCollected<StyleSheetContents>(context);
 
   String sheet_text = "body { background-color: red; }";
   CSSParser::ParseSheet(context, style_sheet, sheet_text,
@@ -45,20 +45,18 @@ TEST_F(CSSLazyParsingTest, Simple) {
   EXPECT_TRUE(HasParsedProperties(rule));
 }
 
-// Avoid parsing rules with ::before or ::after to avoid causing
-// collectFeatures() when we trigger parsing for attr();
-TEST_F(CSSLazyParsingTest, DontLazyParseBeforeAfter) {
-  CSSParserContext* context = CSSParserContext::Create(
+TEST_F(CSSLazyParsingTest, LazyParseBeforeAfter) {
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);
-  StyleSheetContents* style_sheet = StyleSheetContents::Create(context);
+  auto* style_sheet = MakeGarbageCollected<StyleSheetContents>(context);
 
   String sheet_text =
       "p::before { content: 'foo' } p .class::after { content: 'bar' } ";
   CSSParser::ParseSheet(context, style_sheet, sheet_text,
                         CSSDeferPropertyParsing::kYes);
 
-  EXPECT_TRUE(HasParsedProperties(RuleAt(style_sheet, 0)));
-  EXPECT_TRUE(HasParsedProperties(RuleAt(style_sheet, 1)));
+  EXPECT_FALSE(HasParsedProperties(RuleAt(style_sheet, 0)));
+  EXPECT_FALSE(HasParsedProperties(RuleAt(style_sheet, 1)));
 }
 
 // Test for crbug.com/664115 where |shouldConsiderForMatchingRules| would flip
@@ -66,9 +64,9 @@ TEST_F(CSSLazyParsingTest, DontLazyParseBeforeAfter) {
 // dangerous API because callers will expect the set of matching rules to be
 // identical if the stylesheet is not mutated.
 TEST_F(CSSLazyParsingTest, ShouldConsiderForMatchingRulesDoesntChange1) {
-  CSSParserContext* context = CSSParserContext::Create(
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);
-  StyleSheetContents* style_sheet = StyleSheetContents::Create(context);
+  auto* style_sheet = MakeGarbageCollected<StyleSheetContents>(context);
 
   String sheet_text = "p::first-letter { ,badness, } ";
   CSSParser::ParseSheet(context, style_sheet, sheet_text,
@@ -88,16 +86,16 @@ TEST_F(CSSLazyParsingTest, ShouldConsiderForMatchingRulesDoesntChange1) {
       rule->ShouldConsiderForMatchingRules(false /* includeEmptyRules */));
 }
 
-// Test the same thing as above, with a property that does not get lazy parsed,
-// to ensure that we perform the optimization where possible.
+// Test the same thing as above with lazy parsing off to ensure that we perform
+// the optimization where possible.
 TEST_F(CSSLazyParsingTest, ShouldConsiderForMatchingRulesSimple) {
-  CSSParserContext* context = CSSParserContext::Create(
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);
-  StyleSheetContents* style_sheet = StyleSheetContents::Create(context);
+  auto* style_sheet = MakeGarbageCollected<StyleSheetContents>(context);
 
   String sheet_text = "p::before { ,badness, } ";
   CSSParser::ParseSheet(context, style_sheet, sheet_text,
-                        CSSDeferPropertyParsing::kYes);
+                        CSSDeferPropertyParsing::kNo);
 
   StyleRule* rule = RuleAt(style_sheet, 0);
   EXPECT_TRUE(HasParsedProperties(rule));
@@ -109,17 +107,16 @@ TEST_F(CSSLazyParsingTest, ShouldConsiderForMatchingRulesSimple) {
 // document from the StyleSheetContents without changing the UseCounter. This
 // test ensures that the new UseCounter is used when doing new parsing work.
 TEST_F(CSSLazyParsingTest, ChangeDocuments) {
-  std::unique_ptr<DummyPageHolder> dummy_holder =
-      DummyPageHolder::Create(IntSize(500, 500));
+  auto dummy_holder = std::make_unique<DummyPageHolder>(IntSize(500, 500));
   Page::InsertOrdinaryPageForTesting(&dummy_holder->GetPage());
 
-  CSSParserContext* context = CSSParserContext::Create(
+  auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext,
       CSSParserContext::kLiveProfile, &dummy_holder->GetDocument());
-  cached_contents_ = StyleSheetContents::Create(context);
+  cached_contents_ = MakeGarbageCollected<StyleSheetContents>(context);
   {
-    CSSStyleSheet* sheet =
-        CSSStyleSheet::Create(cached_contents_, dummy_holder->GetDocument());
+    auto* sheet = MakeGarbageCollected<CSSStyleSheet>(
+        cached_contents_, dummy_holder->GetDocument());
     DCHECK(sheet);
 
     String sheet_text = "body { background-color: red; } p { color: orange;  }";
@@ -134,23 +131,25 @@ TEST_F(CSSLazyParsingTest, ChangeDocuments) {
 
     EXPECT_EQ(&dummy_holder->GetDocument(),
               cached_contents_->SingleOwnerDocument());
-    UseCounter& use_counter1 =
-        dummy_holder->GetDocument().Loader()->GetUseCounter();
-    EXPECT_TRUE(use_counter1.IsCounted(CSSPropertyBackgroundColor));
-    EXPECT_FALSE(use_counter1.IsCounted(CSSPropertyColor));
+    UseCounterHelper& use_counter1 =
+        dummy_holder->GetDocument().Loader()->GetUseCounterHelper();
+    EXPECT_TRUE(
+        use_counter1.IsCounted(CSSPropertyID::kBackgroundColor,
+                               UseCounterHelper::CSSPropertyType::kDefault));
+    EXPECT_FALSE(use_counter1.IsCounted(
+        CSSPropertyID::kColor, UseCounterHelper::CSSPropertyType::kDefault));
 
     // Change owner document.
     cached_contents_->UnregisterClient(sheet);
     dummy_holder.reset();
   }
   // Ensure no stack references to oilpan objects.
-  ThreadState::Current()->CollectAllGarbage();
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
-  std::unique_ptr<DummyPageHolder> dummy_holder2 =
-      DummyPageHolder::Create(IntSize(500, 500));
+  auto dummy_holder2 = std::make_unique<DummyPageHolder>(IntSize(500, 500));
   Page::InsertOrdinaryPageForTesting(&dummy_holder2->GetPage());
-  CSSStyleSheet* sheet2 =
-      CSSStyleSheet::Create(cached_contents_, dummy_holder2->GetDocument());
+  auto* sheet2 = MakeGarbageCollected<CSSStyleSheet>(
+      cached_contents_, dummy_holder2->GetDocument());
 
   EXPECT_EQ(&dummy_holder2->GetDocument(),
             cached_contents_->SingleOwnerDocument());
@@ -161,11 +160,15 @@ TEST_F(CSSLazyParsingTest, ChangeDocuments) {
   rule2->Properties();
   EXPECT_TRUE(HasParsedProperties(rule2));
 
-  UseCounter& use_counter2 =
-      dummy_holder2->GetDocument().Loader()->GetUseCounter();
+  UseCounterHelper& use_counter2 =
+      dummy_holder2->GetDocument().Loader()->GetUseCounterHelper();
   EXPECT_TRUE(sheet2);
-  EXPECT_TRUE(use_counter2.IsCounted(CSSPropertyColor));
-  EXPECT_FALSE(use_counter2.IsCounted(CSSPropertyBackgroundColor));
+  EXPECT_TRUE(use_counter2.IsCounted(
+      CSSPropertyID::kColor, UseCounterHelper::CSSPropertyType::kDefault));
+
+  EXPECT_FALSE(
+      use_counter2.IsCounted(CSSPropertyID::kBackgroundColor,
+                             UseCounterHelper::CSSPropertyType::kDefault));
 }
 
 }  // namespace blink

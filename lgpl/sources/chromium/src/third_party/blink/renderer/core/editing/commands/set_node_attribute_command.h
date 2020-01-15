@@ -33,19 +33,13 @@ namespace blink {
 
 class SetNodeAttributeCommand final : public SimpleEditCommand {
  public:
-  static SetNodeAttributeCommand* Create(Element* element,
-                                         const QualifiedName& attribute,
-                                         const AtomicString& value) {
-    return new SetNodeAttributeCommand(element, attribute, value);
-  }
-
-  void Trace(blink::Visitor*) override;
-
- private:
   SetNodeAttributeCommand(Element*,
                           const QualifiedName& attribute,
                           const AtomicString& value);
 
+  void Trace(Visitor*) override;
+
+ private:
   void DoApply(EditingState*) override;
   void DoUnapply() override;
 

@@ -36,7 +36,7 @@ import unittest
 # ensure that blink/tools is in sys.path for the next imports to work correctly.
 script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 if script_dir not in sys.path:
-    sys.path.append(script_dir)
+    sys.path.insert(0, script_dir)
 
 from blinkpy.common.system.executive import Executive, ScriptError
 
@@ -138,7 +138,11 @@ class ExecutiveTest(unittest.TestCase):
 
     def test_kill_process(self):
         executive = Executive()
-        process = subprocess.Popen(never_ending_command(), stdout=subprocess.PIPE)
+        if sys.platform == 'win32':
+            process = subprocess.Popen(never_ending_command(), stdout=subprocess.PIPE)
+        else:
+            process = subprocess.Popen(never_ending_command(), stdout=subprocess.PIPE, preexec_fn=lambda: os.setpgid(0, 0))
+
         self.assertEqual(process.poll(), None)  # Process is running
         executive.kill_process(process.pid)
 

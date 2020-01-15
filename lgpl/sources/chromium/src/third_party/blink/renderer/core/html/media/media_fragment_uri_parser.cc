@@ -112,27 +112,31 @@ void MediaFragmentURIParser::ParseFragments() {
     //  a. Decode percent-encoded octets in name and value as defined by RFC
     //     3986. If either name or value are not valid percent-encoded strings,
     //     then remove the name-value pair from the list.
-    String name = DecodeURLEscapeSequences(fragment_string.Substring(
-        parameter_start, equal_offset - parameter_start));
+    String name = DecodeURLEscapeSequences(
+        fragment_string.Substring(parameter_start,
+                                  equal_offset - parameter_start),
+        DecodeURLMode::kUTF8OrIsomorphic);
     String value;
     if (equal_offset != parameter_end) {
-      value = DecodeURLEscapeSequences(fragment_string.Substring(
-          equal_offset + 1, parameter_end - equal_offset - 1));
+      value = DecodeURLEscapeSequences(
+          fragment_string.Substring(equal_offset + 1,
+                                    parameter_end - equal_offset - 1),
+          DecodeURLMode::kUTF8OrIsomorphic);
     }
 
     //  b. Convert name and value to Unicode strings by interpreting them as
     //     UTF-8. If either name or value are not valid UTF-8 strings, then
     //     remove the name-value pair from the list.
     bool valid_utf8 = true;
-    CString utf8_name;
+    std::string utf8_name;
     if (!name.IsEmpty()) {
       utf8_name = name.Utf8(kStrictUTF8Conversion);
-      valid_utf8 = !utf8_name.IsNull();
+      valid_utf8 = !utf8_name.empty();
     }
-    CString utf8_value;
+    std::string utf8_value;
     if (valid_utf8 && !value.IsEmpty()) {
       utf8_value = value.Utf8(kStrictUTF8Conversion);
-      valid_utf8 = !utf8_value.IsNull();
+      valid_utf8 = !utf8_value.empty();
     }
 
     if (valid_utf8)

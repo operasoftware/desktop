@@ -41,12 +41,12 @@
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 BaseButtonInputType::BaseButtonInputType(HTMLInputElement& element)
     : InputType(element), KeyboardClickableInputTypeView(element) {}
 
-void BaseButtonInputType::Trace(blink::Visitor* visitor) {
+void BaseButtonInputType::Trace(Visitor* visitor) {
   KeyboardClickableInputTypeView::Trace(visitor);
   InputType::Trace(visitor);
 }
@@ -62,7 +62,7 @@ void BaseButtonInputType::CreateShadowSubtree() {
 }
 
 void BaseButtonInputType::ValueAttributeChanged() {
-  ToTextOrDie(GetElement().UserAgentShadowRoot()->firstChild())
+  To<Text>(GetElement().UserAgentShadowRoot()->firstChild())
       ->setData(DisplayValue());
 }
 
@@ -76,8 +76,8 @@ bool BaseButtonInputType::ShouldSaveAndRestoreFormControlState() const {
 
 void BaseButtonInputType::AppendToFormData(FormData&) const {}
 
-LayoutObject* BaseButtonInputType::CreateLayoutObject(
-    const ComputedStyle&) const {
+LayoutObject* BaseButtonInputType::CreateLayoutObject(const ComputedStyle&,
+                                                      LegacyLayout) const {
   return new LayoutButton(&GetElement());
 }
 
@@ -89,7 +89,7 @@ void BaseButtonInputType::SetValue(const String& sanitized_value,
                                    bool,
                                    TextFieldEventBehavior,
                                    TextControlSetValueSelection) {
-  GetElement().setAttribute(valueAttr, AtomicString(sanitized_value));
+  GetElement().setAttribute(kValueAttr, AtomicString(sanitized_value));
 }
 
 bool BaseButtonInputType::MatchesDefaultPseudoClass() {

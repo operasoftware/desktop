@@ -6,10 +6,11 @@
 
     { "name": "accessibility", "type": "remote" },
     { "name": "animation" },
-    { "name": "audits2" },
-    { "name": "browser_console" },
+    { "name": "audits" },
     { "name": "browser_debugger" },
+    { "name": "css_overview" },
     { "name": "cookie_table" },
+    { "name": "dagre_layout", "type": "remote" },
     { "name": "devices" },
     { "name": "elements" },
     { "name": "emulated_devices" , "type": "remote" },
@@ -23,7 +24,9 @@
     { "name": "resources" },
     { "name": "security" },
     { "name": "timeline" },
-    { "name": "timeline_model" }
+    { "name": "timeline_model" },
+    { "name": "web_audio" },
+    { "name": "media" }
   ],
   "extends": "shell",
   "has_html": true

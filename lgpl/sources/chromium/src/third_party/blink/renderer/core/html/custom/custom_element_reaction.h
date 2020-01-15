@@ -15,14 +15,14 @@ class CustomElementDefinition;
 class Element;
 
 class CORE_EXPORT CustomElementReaction
-    : public GarbageCollectedFinalized<CustomElementReaction> {
+    : public GarbageCollected<CustomElementReaction> {
  public:
-  CustomElementReaction(CustomElementDefinition*);
+  CustomElementReaction(CustomElementDefinition&);
   virtual ~CustomElementReaction() = default;
 
-  virtual void Invoke(Element*) = 0;
+  virtual void Invoke(Element&) = 0;
 
-  virtual void Trace(blink::Visitor*);
+  virtual void Trace(Visitor*);
 
  protected:
   Member<CustomElementDefinition> definition_;

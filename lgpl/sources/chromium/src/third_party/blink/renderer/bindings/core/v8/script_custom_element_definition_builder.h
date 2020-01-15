@@ -5,30 +5,20 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SCRIPT_CUSTOM_ELEMENT_DEFINITION_BUILDER_H_
 #define THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SCRIPT_CUSTOM_ELEMENT_DEFINITION_BUILDER_H_
 
-#include "base/memory/scoped_refptr.h"
+#include "base/macros.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_custom_element_definition_data.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_definition_builder.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
-#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
-#include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
-#include "third_party/blink/renderer/platform/wtf/text/string_view.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
-class CustomElementRegistry;
 class ExceptionState;
-class ScriptState;
-class V8CustomElementConstructor;
-class V8Function;
 
 class CORE_EXPORT ScriptCustomElementDefinitionBuilder
     : public CustomElementDefinitionBuilder {
   STACK_ALLOCATED();
-  WTF_MAKE_NONCOPYABLE(ScriptCustomElementDefinitionBuilder);
 
  public:
   ScriptCustomElementDefinitionBuilder(ScriptState*,
@@ -44,10 +34,12 @@ class CORE_EXPORT ScriptCustomElementDefinitionBuilder
                                  CustomElementDefinition::Id) override;
 
  private:
-  Member<ScriptState> script_state_;
+  ScriptState* GetScriptState() { return data_.script_state_; }
+  v8::Isolate* Isolate();
+  V8CustomElementConstructor* Constructor() { return data_.constructor_; }
+
   ExceptionState& exception_state_;
-  Member<CustomElementRegistry> registry_;
-  const Member<V8CustomElementConstructor> constructor_;
+  ScriptCustomElementDefinitionData data_;
   // These v8::Local handles on stack make the function objects alive until we
   // finish building the CustomElementDefinition and wrapper-tracing on it gets
   // available.
@@ -55,11 +47,12 @@ class CORE_EXPORT ScriptCustomElementDefinitionBuilder
   v8::Local<v8::Value> v8_disconnected_callback_;
   v8::Local<v8::Value> v8_adopted_callback_;
   v8::Local<v8::Value> v8_attribute_changed_callback_;
-  Member<V8Function> connected_callback_;
-  Member<V8Function> disconnected_callback_;
-  Member<V8Function> adopted_callback_;
-  Member<V8Function> attribute_changed_callback_;
-  HashSet<AtomicString> observed_attributes_;
+  v8::Local<v8::Value> v8_form_associated_callback_;
+  v8::Local<v8::Value> v8_form_reset_callback_;
+  v8::Local<v8::Value> v8_form_disabled_callback_;
+  v8::Local<v8::Value> v8_form_state_restore_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScriptCustomElementDefinitionBuilder);
 };
 
 }  // namespace blink

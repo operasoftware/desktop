@@ -30,10 +30,10 @@
 #include <memory>
 #include <utility>
 
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "base/macros.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -45,6 +45,8 @@ namespace WTF {
 // destructors.
 
 class PODArena final : public RefCounted<PODArena> {
+  USING_FAST_MALLOC(PODArena);
+
  public:
   // The arena is configured with an allocator, which is responsible
   // for allocating and freeing chunks of memory at a time.
@@ -115,17 +117,13 @@ class PODArena final : public RefCounted<PODArena> {
         current_(nullptr),
         current_chunk_size_(kDefaultChunkSize) {}
 
-  // Returns the alignment requirement for classes and structs on the
-  // current platform.
-  template <class T>
-  static size_t MinAlignment() {
-    return WTF_ALIGN_OF(T);
-  }
-
   template <class T>
   void* AllocateBase() {
+    static_assert(
+        sizeof(T) % alignof(T) == 0,
+        "We are guaranteed that sizeof(T) is a multiple of alignof(T).");
     void* ptr = nullptr;
-    size_t rounded_size = RoundUp(sizeof(T), MinAlignment<T>());
+    size_t rounded_size = sizeof(T);
     if (current_)
       ptr = current_->Allocate(rounded_size);
 
@@ -140,16 +138,9 @@ class PODArena final : public RefCounted<PODArena> {
     return ptr;
   }
 
-  // Rounds up the given allocation size to the specified alignment.
-  size_t RoundUp(size_t size, size_t alignment) {
-    DCHECK(!(alignment % 2));
-    return (size + alignment - 1) & ~(alignment - 1);
-  }
-
   // Manages a chunk of memory and individual allocations out of it.
   class Chunk final {
     USING_FAST_MALLOC(Chunk);
-    WTF_MAKE_NONCOPYABLE(Chunk);
 
    public:
     // Allocates a block of memory of the given size from the passed
@@ -183,6 +174,9 @@ class PODArena final : public RefCounted<PODArena> {
     uint8_t* base_;
     size_t size_;
     size_t current_offset_;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(Chunk);
   };
 
   scoped_refptr<Allocator> allocator_;

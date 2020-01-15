@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_PEERCONNECTION_ADAPTERS_P2P_QUIC_TRANSPORT_FACTORY_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_PEERCONNECTION_ADAPTERS_P2P_QUIC_TRANSPORT_FACTORY_IMPL_H_
 
-#include "net/third_party/quic/core/quic_connection.h"
+#include "net/third_party/quiche/src/quic/core/quic_connection.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/p2p_quic_transport_factory.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/p2p_quic_transport_impl.h"
@@ -26,7 +26,9 @@ class MODULES_EXPORT P2PQuicTransportFactoryImpl final
 
   // QuicTransportFactoryInterface override.
   std::unique_ptr<P2PQuicTransport> CreateQuicTransport(
-      P2PQuicTransportConfig config) override;
+      P2PQuicTransport::Delegate* delegate,
+      P2PQuicPacketTransport* packet_transport,
+      const P2PQuicTransportConfig& config) override;
 
  private:
   // This is used to create a QuicChromiumConnectionHelper for the session.

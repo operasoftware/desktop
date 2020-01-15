@@ -33,19 +33,17 @@ class HTMLQuoteElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_ELEMENT_FACTORY_WITH_TAGNAME(HTMLQuoteElement);
-
- private:
   HTMLQuoteElement(const QualifiedName&, Document&);
 
+ private:
   bool IsURLAttribute(const Attribute&) const override;
   bool HasLegalLinkAttribute(const QualifiedName&) const override;
   const QualifiedName& SubResourceAttributeName() const override;
 };
 
 inline bool IsHTMLQuoteElement(const HTMLElement& element) {
-  return element.HasTagName(HTMLNames::qTag) ||
-         element.HasTagName(HTMLNames::blockquoteTag);
+  return element.HasTagName(html_names::kQTag) ||
+         element.HasTagName(html_names::kBlockquoteTag);
 }
 
 DEFINE_HTMLELEMENT_TYPE_CASTS_WITH_FUNCTION(HTMLQuoteElement);

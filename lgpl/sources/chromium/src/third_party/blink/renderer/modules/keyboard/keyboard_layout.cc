@@ -4,14 +4,14 @@
 
 #include "third_party/blink/renderer/modules/keyboard/keyboard_layout.h"
 
-#include "services/service_manager/public/cpp/interface_provider.h"
-#include "third_party/blink/public/mojom/page/page_visibility_state.mojom-blink.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
@@ -29,8 +29,6 @@ constexpr char kKeyboardMapRequestFailedErrorMsg[] =
 
 }  // namespace
 
-using mojom::PageVisibilityState;
-
 KeyboardLayout::KeyboardLayout(ExecutionContext* context)
     : ContextLifecycleObserver(context) {}
 
@@ -43,23 +41,27 @@ ScriptPromise KeyboardLayout::GetKeyboardLayoutMap(ScriptState* script_state) {
 
   if (!IsLocalFrameAttached()) {
     return ScriptPromise::RejectWithDOMException(
-        script_state, DOMException::Create(DOMExceptionCode::kInvalidStateError,
+        script_state,
+        MakeGarbageCollected<DOMException>(DOMExceptionCode::kInvalidStateError,
                                            kKeyboardMapFrameDetachedErrorMsg));
   }
 
   if (!CalledFromSupportedContext(ExecutionContext::From(script_state))) {
     return ScriptPromise::RejectWithDOMException(
-        script_state, DOMException::Create(DOMExceptionCode::kInvalidStateError,
+        script_state,
+        MakeGarbageCollected<DOMException>(DOMExceptionCode::kInvalidStateError,
                                            kKeyboardMapChildFrameErrorMsg));
   }
 
   if (!EnsureServiceConnected()) {
     return ScriptPromise::RejectWithDOMException(
-        script_state, DOMException::Create(DOMExceptionCode::kInvalidStateError,
+        script_state,
+        MakeGarbageCollected<DOMException>(DOMExceptionCode::kInvalidStateError,
                                            kKeyboardMapRequestFailedErrorMsg));
   }
 
-  script_promise_resolver_ = ScriptPromiseResolver::Create(script_state);
+  script_promise_resolver_ =
+      MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   service_->GetKeyboardLayoutMap(
       WTF::Bind(&KeyboardLayout::GotKeyboardLayoutMap, WrapPersistent(this),
                 WrapPersistent(script_promise_resolver_.Get())));
@@ -78,7 +80,8 @@ bool KeyboardLayout::EnsureServiceConnected() {
     if (!frame) {
       return false;
     }
-    frame->GetInterfaceProvider().GetInterface(mojo::MakeRequest(&service_));
+    frame->GetBrowserInterfaceBroker().GetInterface(
+        service_.BindNewPipeAndPassReceiver());
     DCHECK(service_);
   }
   return true;
@@ -99,12 +102,12 @@ void KeyboardLayout::GotKeyboardLayoutMap(
   switch (result->status) {
     case mojom::blink::GetKeyboardLayoutMapStatus::kSuccess:
       script_promise_resolver_->Resolve(
-          new KeyboardLayoutMap(result->layout_map));
+          MakeGarbageCollected<KeyboardLayoutMap>(result->layout_map));
       break;
     case mojom::blink::GetKeyboardLayoutMapStatus::kFail:
-      script_promise_resolver_->Reject(
-          DOMException::Create(DOMExceptionCode::kInvalidStateError,
-                               kKeyboardMapRequestFailedErrorMsg));
+      script_promise_resolver_->Reject(MakeGarbageCollected<DOMException>(
+          DOMExceptionCode::kInvalidStateError,
+          kKeyboardMapRequestFailedErrorMsg));
       break;
   }
 

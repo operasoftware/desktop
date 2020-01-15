@@ -36,6 +36,7 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/inspector/inspector_base_agent.h"
 #include "third_party/blink/renderer/core/inspector/protocol/Page.h"
+#include "third_party/blink/renderer/core/loader/frame_loader_types.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -54,9 +55,7 @@ class DocumentLoader;
 class InspectedFrames;
 class InspectorResourceContentLoader;
 class LocalFrame;
-class ScheduledNavigation;
 class ScriptSourceCode;
-class SharedBuffer;
 enum class ResourceType : uint8_t;
 
 using blink::protocol::Maybe;
@@ -68,6 +67,7 @@ class CORE_EXPORT InspectorPageAgent final
    public:
     virtual ~Client() = default;
     virtual void PageLayoutInvalidated(bool resized) {}
+    virtual void WaitForDebugger() {}
   };
 
   enum ResourceType {
@@ -87,13 +87,8 @@ class CORE_EXPORT InspectorPageAgent final
     kOtherResource
   };
 
-  static InspectorPageAgent* Create(InspectedFrames*,
-                                    Client*,
-                                    InspectorResourceContentLoader*,
-                                    v8_inspector::V8InspectorSession*);
-
   static HeapVector<Member<Document>> ImportsForFrame(LocalFrame*);
-  static bool CachedResourceContent(Resource*,
+  static bool CachedResourceContent(const Resource*,
                                     String* result,
                                     bool* base64_encoded);
   static bool SharedBufferContent(scoped_refptr<const SharedBuffer>,
@@ -105,6 +100,11 @@ class CORE_EXPORT InspectorPageAgent final
   static String ResourceTypeJson(ResourceType);
   static ResourceType ToResourceType(const blink::ResourceType);
   static String CachedResourceTypeJson(const Resource&);
+
+  InspectorPageAgent(InspectedFrames*,
+                     Client*,
+                     InspectorResourceContentLoader*,
+                     v8_inspector::V8InspectorSession*);
 
   // Page API for frontend
   protocol::Response enable() override;
@@ -164,20 +164,27 @@ class CORE_EXPORT InspectorPageAgent final
 
   protocol::Response setProduceCompilationCache(bool enabled) override;
   protocol::Response addCompilationCache(const String& url,
-                                         const String& data) override;
+                                         const protocol::Binary& data) override;
   protocol::Response clearCompilationCache() override;
+  protocol::Response waitForDebugger() override;
 
   // InspectorInstrumentation API
   void DidClearDocumentOfWindowObject(LocalFrame*);
   void DidNavigateWithinDocument(LocalFrame*);
-  void DOMContentLoadedEventFired(LocalFrame*);
+  void DomContentLoadedEventFired(LocalFrame*);
   void LoadEventFired(LocalFrame*);
   void WillCommitLoad(LocalFrame*, DocumentLoader*);
   void FrameAttachedToParent(LocalFrame*);
   void FrameDetachedFromParent(LocalFrame*);
   void FrameStartedLoading(LocalFrame*);
   void FrameStoppedLoading(LocalFrame*);
-  void FrameScheduledNavigation(LocalFrame*, ScheduledNavigation*);
+  void FrameRequestedNavigation(Frame* target_frame,
+                                const KURL&,
+                                ClientNavigationReason);
+  void FrameScheduledNavigation(LocalFrame*,
+                                const KURL&,
+                                base::TimeDelta delay,
+                                ClientNavigationReason);
   void FrameClearedScheduledNavigation(LocalFrame*);
   void WillRunJavaScriptDialog();
   void DidRunJavaScriptDialog();
@@ -209,11 +216,6 @@ class CORE_EXPORT InspectorPageAgent final
   void Trace(blink::Visitor*) override;
 
  private:
-  InspectorPageAgent(InspectedFrames*,
-                     Client*,
-                     InspectorResourceContentLoader*,
-                     v8_inspector::V8InspectorSession*);
-
   void GetResourceContentAfterResourcesContentLoaded(
       const String& frame_id,
       const String& url,
@@ -225,6 +227,10 @@ class CORE_EXPORT InspectorPageAgent final
       bool case_sensitive,
       bool is_regex,
       std::unique_ptr<SearchInResourceCallback>);
+  scoped_refptr<DOMWrapperWorld> EnsureDOMWrapperWorld(
+      LocalFrame* frame,
+      const String& world_name,
+      bool grant_universal_access);
 
   static KURL UrlWithoutFragment(const KURL&);
 
@@ -236,7 +242,9 @@ class CORE_EXPORT InspectorPageAgent final
   std::unique_ptr<protocol::Page::FrameResourceTree> BuildObjectForResourceTree(
       LocalFrame*);
   Member<InspectedFrames> inspected_frames_;
-  HashMap<String, Vector<char>> compilation_cache_;
+  HashMap<String, protocol::Binary> compilation_cache_;
+  using FrameIsolatedWorlds = HashMap<String, scoped_refptr<DOMWrapperWorld>>;
+  HeapHashMap<WeakMember<LocalFrame>, FrameIsolatedWorlds> isolated_worlds_;
   v8_inspector::V8InspectorSession* v8_session_;
   Client* client_;
   String pending_script_to_evaluate_on_load_once_;

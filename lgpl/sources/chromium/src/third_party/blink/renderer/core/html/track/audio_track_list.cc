@@ -6,10 +6,6 @@
 
 namespace blink {
 
-AudioTrackList* AudioTrackList::Create(HTMLMediaElement& media_element) {
-  return new AudioTrackList(media_element);
-}
-
 AudioTrackList::~AudioTrackList() = default;
 
 AudioTrackList::AudioTrackList(HTMLMediaElement& media_element)
@@ -25,7 +21,7 @@ bool AudioTrackList::HasEnabledTrack() const {
 }
 
 const AtomicString& AudioTrackList::InterfaceName() const {
-  return EventTargetNames::AudioTrackList;
+  return event_target_names::kAudioTrackList;
 }
 
 }  // namespace blink

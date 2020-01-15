@@ -29,19 +29,15 @@
 #include "base/macros.h"
 #include "third_party/blink/renderer/core/html/forms/date_time_numeric_field_element.h"
 #include "third_party/blink/renderer/core/html/forms/date_time_symbolic_field_element.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
 class DateTimeAMPMFieldElement final : public DateTimeSymbolicFieldElement {
  public:
-  static DateTimeAMPMFieldElement* Create(Document&,
-                                          FieldOwner&,
-                                          const Vector<String>&);
-
- private:
   DateTimeAMPMFieldElement(Document&, FieldOwner&, const Vector<String>&);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsDate(const DateComponents&) override;
@@ -52,17 +48,12 @@ class DateTimeAMPMFieldElement final : public DateTimeSymbolicFieldElement {
 
 class DateTimeDayFieldElement final : public DateTimeNumericFieldElement {
  public:
-  static DateTimeDayFieldElement* Create(Document&,
-                                         FieldOwner&,
-                                         const String& placeholder,
-                                         const Range&);
-
- private:
   DateTimeDayFieldElement(Document&,
                           FieldOwner&,
                           const String& placeholder,
                           const Range&);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsDate(const DateComponents&) override;
@@ -90,17 +81,12 @@ class DateTimeHourFieldElementBase : public DateTimeNumericFieldElement {
 
 class DateTimeHour11FieldElement final : public DateTimeHourFieldElementBase {
  public:
-  static DateTimeHour11FieldElement* Create(Document&,
-                                            FieldOwner&,
-                                            const Range&,
-                                            const Step&);
-
- private:
   DateTimeHour11FieldElement(Document&,
                              FieldOwner&,
                              const Range& hour23_range,
                              const Step&);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsInteger(int, EventBehavior = kDispatchNoEvent) override;
@@ -110,17 +96,12 @@ class DateTimeHour11FieldElement final : public DateTimeHourFieldElementBase {
 
 class DateTimeHour12FieldElement final : public DateTimeHourFieldElementBase {
  public:
-  static DateTimeHour12FieldElement* Create(Document&,
-                                            FieldOwner&,
-                                            const Range&,
-                                            const Step&);
-
- private:
   DateTimeHour12FieldElement(Document&,
                              FieldOwner&,
                              const Range& hour23_range,
                              const Step&);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsInteger(int, EventBehavior = kDispatchNoEvent) override;
@@ -130,17 +111,12 @@ class DateTimeHour12FieldElement final : public DateTimeHourFieldElementBase {
 
 class DateTimeHour23FieldElement final : public DateTimeHourFieldElementBase {
  public:
-  static DateTimeHour23FieldElement* Create(Document&,
-                                            FieldOwner&,
-                                            const Range&,
-                                            const Step&);
-
- private:
   DateTimeHour23FieldElement(Document&,
                              FieldOwner&,
                              const Range& hour23_range,
                              const Step&);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsInteger(int, EventBehavior = kDispatchNoEvent) override;
@@ -150,17 +126,12 @@ class DateTimeHour23FieldElement final : public DateTimeHourFieldElementBase {
 
 class DateTimeHour24FieldElement final : public DateTimeHourFieldElementBase {
  public:
-  static DateTimeHour24FieldElement* Create(Document&,
-                                            FieldOwner&,
-                                            const Range&,
-                                            const Step&);
-
- private:
   DateTimeHour24FieldElement(Document&,
                              FieldOwner&,
                              const Range& hour23_range,
                              const Step&);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsInteger(int, EventBehavior = kDispatchNoEvent) override;
@@ -171,17 +142,12 @@ class DateTimeHour24FieldElement final : public DateTimeHourFieldElementBase {
 class DateTimeMillisecondFieldElement final
     : public DateTimeNumericFieldElement {
  public:
-  static DateTimeMillisecondFieldElement* Create(Document&,
-                                                 FieldOwner&,
-                                                 const Range&,
-                                                 const Step&);
-
- private:
   DateTimeMillisecondFieldElement(Document&,
                                   FieldOwner&,
                                   const Range&,
                                   const Step&);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsDate(const DateComponents&) override;
@@ -192,14 +158,9 @@ class DateTimeMillisecondFieldElement final
 
 class DateTimeMinuteFieldElement final : public DateTimeNumericFieldElement {
  public:
-  static DateTimeMinuteFieldElement* Create(Document&,
-                                            FieldOwner&,
-                                            const Range&,
-                                            const Step&);
-
- private:
   DateTimeMinuteFieldElement(Document&, FieldOwner&, const Range&, const Step&);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsDate(const DateComponents&) override;
@@ -210,17 +171,12 @@ class DateTimeMinuteFieldElement final : public DateTimeNumericFieldElement {
 
 class DateTimeMonthFieldElement final : public DateTimeNumericFieldElement {
  public:
-  static DateTimeMonthFieldElement* Create(Document&,
-                                           FieldOwner&,
-                                           const String& placeholder,
-                                           const Range&);
-
- private:
   DateTimeMonthFieldElement(Document&,
                             FieldOwner&,
                             const String& placeholder,
                             const Range&);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsDate(const DateComponents&) override;
@@ -231,14 +187,9 @@ class DateTimeMonthFieldElement final : public DateTimeNumericFieldElement {
 
 class DateTimeSecondFieldElement final : public DateTimeNumericFieldElement {
  public:
-  static DateTimeSecondFieldElement* Create(Document&,
-                                            FieldOwner&,
-                                            const Range&,
-                                            const Step&);
-
- private:
   DateTimeSecondFieldElement(Document&, FieldOwner&, const Range&, const Step&);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsDate(const DateComponents&) override;
@@ -250,19 +201,13 @@ class DateTimeSecondFieldElement final : public DateTimeNumericFieldElement {
 class DateTimeSymbolicMonthFieldElement final
     : public DateTimeSymbolicFieldElement {
  public:
-  static DateTimeSymbolicMonthFieldElement* Create(Document&,
-                                                   FieldOwner&,
-                                                   const Vector<String>&,
-                                                   int minimum,
-                                                   int maximum);
-
- private:
   DateTimeSymbolicMonthFieldElement(Document&,
                                     FieldOwner&,
                                     const Vector<String>&,
                                     int minimum,
                                     int maximum);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsDate(const DateComponents&) override;
@@ -273,11 +218,9 @@ class DateTimeSymbolicMonthFieldElement final
 
 class DateTimeWeekFieldElement final : public DateTimeNumericFieldElement {
  public:
-  static DateTimeWeekFieldElement* Create(Document&, FieldOwner&, const Range&);
-
- private:
   DateTimeWeekFieldElement(Document&, FieldOwner&, const Range&);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsDate(const DateComponents&) override;
@@ -305,13 +248,9 @@ class DateTimeYearFieldElement final : public DateTimeNumericFieldElement {
           max_is_specified(false) {}
   };
 
-  static DateTimeYearFieldElement* Create(Document&,
-                                          FieldOwner&,
-                                          const Parameters&);
-
- private:
   DateTimeYearFieldElement(Document&, FieldOwner&, const Parameters&);
 
+ private:
   // DateTimeFieldElement functions.
   void PopulateDateTimeFieldsState(DateTimeFieldsState&) override;
   void SetValueAsDate(const DateComponents&) override;

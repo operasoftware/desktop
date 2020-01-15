@@ -25,7 +25,7 @@ A class that wants the lifetime management of its instances to be managed by Bli
 
 ```c++
 class YourClass : public GarbageCollected<YourClass> {
-    // ...
+  // ...
 };
 ```
 
@@ -40,8 +40,13 @@ You may not allocate an on-heap object on stack.
 
 Your class may need to have a tracing method. See [Tracing](#Tracing) for details.
 
-If your class needs finalization (i.e. some work needs to be done on destruction), use
-[GarbageCollectedFinalized](#GarbageCollectedFinalized) instead.
+Your class will be automatically finalized as long as it is non-trivially destructible. Non-final classes are
+required to have a virtual destructor.
+
+Note that finalization is done at an arbitrary time after the object becomes unreachable.
+
+Any destructor executed within the finalization period must not touch any other on-heap object, because destructors
+can be executed in any order.
 
 `GarbageCollected<T>` or any class deriving from `GarbageCollected<T>`, directly or indirectly, must be the first
 element in its base class list (called "leftmost derivation rule"). This rule is needed to assure each on-heap object
@@ -68,48 +73,18 @@ void someFunction(P*);
 
 class A : public GarbageCollected<A>, public P {
 public:
-    void someMemberFunction()
-    {
-        someFunction(this); // DANGEROUS, a raw pointer to an on-heap object.
-    }
+  void someMemberFunction()
+  {
+    someFunction(this); // DANGEROUS, a raw pointer to an on-heap object.
+  }
 };
 ```
-
-### GarbageCollectedFinalized
-
-If you want to make your class garbage-collected and the class needs finalization, your class needs to inherit from
-`GarbageCollectedFinalized<YourClass>` instead of `GarbageCollected<YourClass>`.
-
-A class is said to *need finalization* when it meets either of the following criteria:
-
-*   It has non-empty destructor; or
-*   It has a member that needs finalization.
-
-```c++
-class YourClass : public GarbageCollectedFinalized<YourClass> {
-public:
-    ~YourClass() { ... } // Non-empty destructor means finalization is needed.
-
-private:
-    scoped_refptr<Something> m_something; // scoped_refptr<> has non-empty destructor, so finalization is needed.
-};
-```
-
-Note that finalization is done at an arbitrary time after the object becomes unreachable.
-
-Any destructor executed within the finalization period must not touch any other on-heap object, because destructors
-can be executed in any order. If there is a need of having such destructor, consider using
-[EAGERLY_FINALIZE](#EAGERLY_FINALIZE).
-
-Because `GarbageCollectedFinalized<T>` is a special case of `GarbageCollected<T>`, all the restrictions that apply
-to `GarbageCollected<T>` classes also apply to `GarbageCollectedFinalized<T>`.
 
 ### GarbageCollectedMixin
 
 A non-leftmost base class of a garbage-collected class may derive from `GarbageCollectedMixin`. If a direct child
-class of `GarbageCollected<T>` or `GarbageCollectedFinalized<T>` has a non-leftmost base class deriving from
-`GarbageCollectedMixin`, the garbage-collected class must declare the `USING_GARBAGE_COLLECTED_MIXIN(ClassName)` macro
-in its class declaration.
+class of `GarbageCollected<T>` has a non-leftmost base class deriving from `GarbageCollectedMixin`, the
+garbage-collected class must declare the `USING_GARBAGE_COLLECTED_MIXIN(ClassName)` macro in its class declaration.
 
 A class deriving from `GarbageCollectedMixin` can be treated similarly as garbage-collected classes. Specifically, it
 can have `Member<T>`s and `WeakMember<T>`s, and a tracing method. A pointer to such a class must be retained in the
@@ -146,17 +121,17 @@ class Q : public GarbageCollectedMixin { };
 class R : public Q { };
 
 class A : public GarbageCollected<A>, public P, public R {
-    USING_GARBAGE_COLLECTED_MIXIN(A); // OK, resolving pure virtual functions of P and R.
+  USING_GARBAGE_COLLECTED_MIXIN(A); // OK, resolving pure virtual functions of P and R.
 };
 
 class B : public GarbageCollected<B>, public P {
-    USING_GARBAGE_COLLECTED_MIXIN(B); // OK, different garbage-collected classes may inherit from the same mixin (P).
+  USING_GARBAGE_COLLECTED_MIXIN(B); // OK, different garbage-collected classes may inherit from the same mixin (P).
 };
 
 void someFunction()
 {
-    new A; // OK, A can be instantiated.
-    // new R; // BAD, R has pure virtual functions.
+  MakeGarbageCollected<A>(); // OK, A can be instantiated.
+  // MakeGarbageCollected<R>(); // BAD, R has pure virtual functions.
 }
 ```
 
@@ -171,54 +146,62 @@ See [GarbageCollectedMixin](#GarbageCollectedMixin) for the use of `GarbageColle
 
 ### USING_PRE_FINALIZER
 
-`USING_PRE_FINALIZER(ClassName, functionName)` in a class declaration declares the class has a *pre-finalizer* of name
-`functionName`.
+`USING_PRE_FINALIZER(ClassName, FunctionName)` in a class declaration declares the class has a *pre-finalizer* of name
+`FunctionName`.
+A pre-finalizer must have the function signature `void()` but can have any name.
 
-A pre-finalizer is a user-defined member function of a garbage-collected class that is called when the object is going
-to be swept but before the garbage collector actually sweeps any objects. Therefore, it is allowed for a pre-finalizer
-to touch any other on-heap objects, while a destructor is not. It is useful for doing some cleanups that cannot be done
-with a destructor.
-
-A pre-finalizer must have the following function signature: `void preFinalizer()`. You can change the function name.
+A pre-finalizer is a user-defined member function of a garbage-collected class that is called when the object is going to be reclaimed.
+It is invoked before the sweeping phase starts to allow a pre-finalizer to touch any other on-heap objects which is forbidden from destructors.
+It is useful for doing cleanups that cannot be done with a destructor.
 
 ```c++
-class YourClass : public GarbageCollectedFinalized<YourClass> {
-    USING_PRE_FINALIZER(YourClass, dispose);
+class YourClass : public GarbageCollected<YourClass> {
+  USING_PRE_FINALIZER(YourClass, Dispose);
 public:
-    void dispose()
-    {
-        m_other->dispose(); // OK; you can touch other on-heap objects in a pre-finalizer.
-    }
-    ~YourClass()
-    {
-        // m_other->dispose(); // BAD.
-    }
+  void Dispose() {
+    // OK: Other on-heap objects can be touched in a pre-finalizer.
+    other_->Dispose();
+  }
+
+  ~YourClass() {
+    // BAD: Not allowed.
+    // other_->Dispose();
+  }
 
 private:
-    Member<OtherClass> m_other;
+  Member<OtherClass> other_;
+};
+```
+Sometimes it is necessary to further delegate pre-finalizers up the class hierarchy, similar to how destructors destruct in reverse order wrt. to construction.
+It is possible to construct such delegations using virtual methods.
+
+```c++
+class Parent : public GarbageCollected<Parent> {
+  USING_PRE_FINALIZER(Parent, Dispose);
+ public:
+  void Dispose() { DisposeImpl(); }
+
+  virtual void DisposeImpl() {
+    // Pre-finalizer for {Parent}.
+  }
+  // ...
+};
+
+class Child : public Parent {
+ public:
+  void DisposeImpl() {
+    // Pre-finalizer for {Child}.
+    Parent::DisposeImpl();
+  }
+  // ...
 };
 ```
 
-Pre-finalizers have some implications on the garbage collector's performance: the garbage-collector needs to iterate
-all registered pre-finalizers at every GC. Therefore, a pre-finalizer should be avoided unless it is really necessary.
+*Notes*
+- Pre-finalizers are not allowed to allocate new on-heap objects or resurrect objects (i.e., they are not allowed to relink dead objects into the object graph).
+- Pre-finalizers have some implications on the garbage collector's performance: the garbage-collector needs to iterate all registered pre-finalizers at every GC.
+Therefore, a pre-finalizer should be avoided unless it is really necessary.
 Especially, avoid defining a pre-finalizer in a class that can be allocated a lot.
-
-### EAGERLY_FINALIZE
-
-A class-level annotation to indicate that class instances that the GC have determined as unreachable, should be eagerly
-swept and finalized by the garbage collector, before the Blink thread (the mutator) resumes after a garbage
-collection. The C++ destructor runs as part of this step. The default sweeping behavior is incremental, sweeping
-pages as demanded by later heap allocations.
-
-Like for the pre-finalizer mechanism, an `EAGERLY_FINALIZE()`d class is allowed to touch other heap objects, which
-is sometimes required, but the main use case for eager finalization is to promptly let go of off-heap resources
-and associations, by unregistering and destructing those eagerly. If not done, these external references would
-otherwise attempt to unsafely access an effectively-dead object (pending lazy sweeping of its heap page.)
-
-`EAGERLY_FINALIZE()` solves the same problem as pre-finalizers, but it arguably fits more naturally with the host
-language's mechanism for finalization (C++ destructors.) One `EAGERLY_FINALIZE()` caveat is that the destructor
-is not allowed to touch another eagerly finalized object (their finalization ordering isn't deterministic) nor
-any pre-finalized objects. Choose the one you think best fits your need for prompt finalization.
 
 ### STACK_ALLOCATED
 
@@ -229,7 +212,7 @@ a conservative GC be required.
 
 Classes with this annotation do not need a `Trace()` method, and should not inherit a garbage collected class.
 
-### DISALLOW_NEW()
+### DISALLOW_NEW
 
 Class-level annotation declaring the class cannot be separately allocated using `operator new`.
 It can be used on stack, as a part of object, or as a value in a heap collection.
@@ -254,8 +237,8 @@ On-stack references to on-heap objects must be raw pointers.
 ```c++
 void someFunction()
 {
-    SomeGarbageCollectedClass* object = new SomeGarbageCollectedClass; // OK, retained by a pointer.
-    ...
+  SomeGarbageCollectedClass* object = MakeGarbageCollected<SomeGarbageCollectedClass>(); // OK, retained by a pointer.
+  ...
 }
 // OK to leave the object behind. The Blink GC system will free it up when it becomes unused.
 ```
@@ -276,10 +259,10 @@ because this rewrite is only done within Blink GC's garbage collection period.
 
 ```c++
 class SomeGarbageCollectedClass : public GarbageCollected<GarbageCollectedSomething> {
-    ...
+  ...
 private:
-    Member<AnotherGarbageCollectedClass> m_another; // OK, retained by Member<T>.
-    WeakMember<AnotherGarbageCollectedClass> m_anotherWeak; // OK, weak reference.
+  Member<AnotherGarbageCollectedClass> another_; // OK, retained by Member<T>.
+  WeakMember<AnotherGarbageCollectedClass> anotherWeak_; // OK, weak reference.
 };
 ```
 
@@ -309,9 +292,9 @@ garbage-collected, just like `WeakMember<T>`.
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 ...
 class NonGarbageCollectedClass {
-    ...
+  ...
 private:
-    Persistent<SomeGarbageCollectedClass> m_something; // OK, the object will be alive while this persistent is alive.
+  Persistent<SomeGarbageCollectedClass> something_; // OK, the object will be alive while this persistent is alive.
 };
 ```
 
@@ -399,10 +382,10 @@ class C : public B {
 };
 
 void C::Trace(Visitor* visitor) {
-    visitor->Trace(x_);
-    visitor->Trace(y_); // Weak member needs to be traced.
-    visitor->Trace(z_); // Heap collection does, too.
-    B::Trace(visitor); // Delegate to the parent. In this case it's empty, but this is required.
+  visitor->Trace(x_);
+  visitor->Trace(y_); // Weak member needs to be traced.
+  visitor->Trace(z_); // Heap collection does, too.
+  B::Trace(visitor); // Delegate to the parent. In this case it's empty, but this is required.
 }
 ```
 
@@ -414,26 +397,26 @@ phase:
 
 void C::ClearWeakMembers(Visitor* visitor)
 {
-    if (ThreadHeap::isHeapObjectAlive(y_))
-        return;
+  if (ThreadHeap::isHeapObjectAlive(y_))
+    return;
 
-    // |m_y| is not referred to by anyone else, clear the weak
-    // reference along with updating state / clearing any other
-    // resources at the same time. None of those operations are
-    // allowed to perform heap allocations:
-    y_->detach();
+  // |y_| is not referred to by anyone else, clear the weak
+  // reference along with updating state / clearing any other
+  // resources at the same time. None of those operations are
+  // allowed to perform heap allocations:
+  y_->detach();
 
-    // Note: if the weak callback merely clears the weak reference,
-    // it is much simpler to just |trace| the field rather than
-    // install a custom weak callback.
-    y_ = nullptr;
+  // Note: if the weak callback merely clears the weak reference,
+  // it is much simpler to just |trace| the field rather than
+  // install a custom weak callback.
+  y_ = nullptr;
 }
 
 void C::Trace(Visitor* visitor) {
-    visitor->template registerWeakMembers<C, &C::ClearWeakMembers>(this);
-    visitor->Trace(x_);
-    visitor->Trace(z_); // Heap collection does, too.
-    B::Trace(visitor); // Delegate to the parent. In this case it's empty, but this is required.
+  visitor->template registerWeakMembers<C, &C::ClearWeakMembers>(this);
+  visitor->Trace(x_);
+  visitor->Trace(z_); // Heap collection does, too.
+  B::Trace(visitor); // Delegate to the parent. In this case it's empty, but this is required.
 }
 ```
 

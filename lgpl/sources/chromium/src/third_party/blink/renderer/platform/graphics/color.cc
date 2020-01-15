@@ -30,7 +30,6 @@
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/decimal.h"
 #include "third_party/blink/renderer/platform/wtf/dtoa.h"
-#include "third_party/blink/renderer/platform/wtf/hex_number.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
@@ -225,50 +224,9 @@ bool Color::SetFromString(const String& name) {
   return ParseHexColor(name.Characters16() + 1, name.length() - 1, color_);
 }
 
-String Color::SerializedAsCSSComponentValue() const {
-  StringBuilder result;
-  result.ReserveCapacity(32);
-  bool color_has_alpha = HasAlpha();
-  if (color_has_alpha)
-    result.Append("rgba(");
-  else
-    result.Append("rgb(");
-
-  result.AppendNumber(static_cast<unsigned char>(Red()));
-  result.Append(", ");
-
-  result.AppendNumber(static_cast<unsigned char>(Green()));
-  result.Append(", ");
-
-  result.AppendNumber(static_cast<unsigned char>(Blue()));
-  if (color_has_alpha) {
-    result.Append(", ");
-    // See <alphavalue> section in
-    // https://drafts.csswg.org/cssom/#serializing-css-values
-    int alphavalue = Alpha();
-    float rounded = round(alphavalue * 100 / 255.0f) / 100;
-    if (round(rounded * 255) == alphavalue) {
-      result.AppendNumber(rounded, 2);
-    } else {
-      rounded = round(alphavalue * 1000 / 255.0f) / 1000;
-      result.AppendNumber(rounded, 3);
-    }
-  }
-
-  result.Append(')');
-  return result.ToString();
-}
-
 String Color::Serialized() const {
-  if (!HasAlpha()) {
-    StringBuilder builder;
-    builder.ReserveCapacity(7);
-    builder.Append('#');
-    HexNumber::AppendByteAsHex(Red(), builder, HexNumber::kLowercase);
-    HexNumber::AppendByteAsHex(Green(), builder, HexNumber::kLowercase);
-    HexNumber::AppendByteAsHex(Blue(), builder, HexNumber::kLowercase);
-    return builder.ToString();
-  }
+  if (!HasAlpha())
+    return String::Format("#%02x%02x%02x", Red(), Green(), Blue());
 
   StringBuilder result;
   result.ReserveCapacity(28);

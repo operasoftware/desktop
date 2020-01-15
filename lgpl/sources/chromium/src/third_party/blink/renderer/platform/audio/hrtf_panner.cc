@@ -23,11 +23,13 @@
  * DAMAGE.
  */
 
+#include "third_party/blink/renderer/platform/audio/hrtf_panner.h"
+
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
+#include "third_party/blink/renderer/platform/audio/fft_frame.h"
 #include "third_party/blink/renderer/platform/audio/hrtf_database.h"
-#include "third_party/blink/renderer/platform/audio/hrtf_panner.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 namespace blink {
@@ -56,10 +58,10 @@ HRTFPanner::HRTFPanner(float sample_rate, HRTFDatabaseLoader* database_loader)
       convolver_r2_(FftSizeForSampleRate(sample_rate)),
       delay_line_l_(kMaxDelayTimeSeconds, sample_rate),
       delay_line_r_(kMaxDelayTimeSeconds, sample_rate),
-      temp_l1_(AudioUtilities::kRenderQuantumFrames),
-      temp_r1_(AudioUtilities::kRenderQuantumFrames),
-      temp_l2_(AudioUtilities::kRenderQuantumFrames),
-      temp_r2_(AudioUtilities::kRenderQuantumFrames) {
+      temp_l1_(audio_utilities::kRenderQuantumFrames),
+      temp_r1_(audio_utilities::kRenderQuantumFrames),
+      temp_l2_(audio_utilities::kRenderQuantumFrames),
+      temp_r2_(audio_utilities::kRenderQuantumFrames) {
   DCHECK(database_loader);
 }
 
@@ -75,13 +77,25 @@ size_t HRTFPanner::FftSizeForSampleRate(float sample_rate) {
   // of two that is greater than or equal the resampled length. This power of
   // two is doubled to get the actual FFT size.
 
-  DCHECK(AudioUtilities::IsValidAudioBufferSampleRate(sample_rate));
+  DCHECK(audio_utilities::IsValidAudioBufferSampleRate(sample_rate));
 
   int truncated_impulse_length = 256;
   double sample_rate_ratio = sample_rate / 44100;
   double resampled_length = truncated_impulse_length * sample_rate_ratio;
 
-  return 2 * (1 << static_cast<unsigned>(log2(resampled_length)));
+  // This is the size used for analysis frames in the HRTF kernel.  The
+  // convolvers used by the kernel are twice this size.
+  int analysis_fft_size = 1 << static_cast<unsigned>(log2(resampled_length));
+
+  // Don't let the analysis size be smaller than the supported size
+  analysis_fft_size = std::max(analysis_fft_size, FFTFrame::MinFFTSize());
+
+  int convolver_fft_size = 2 * analysis_fft_size;
+
+  // Make sure this size of convolver is supported.
+  DCHECK_LE(convolver_fft_size, FFTFrame::MaxFFTSize());
+
+  return convolver_fft_size;
 }
 
 void HRTFPanner::Reset() {
@@ -121,23 +135,17 @@ void HRTFPanner::Pan(double desired_azimuth,
                      double elevation,
                      const AudioBus* input_bus,
                      AudioBus* output_bus,
-                     size_t frames_to_process,
+                     uint32_t frames_to_process,
                      AudioBus::ChannelInterpretation channel_interpretation) {
   unsigned num_input_channels = input_bus ? input_bus->NumberOfChannels() : 0;
 
-  bool is_input_good =
-      input_bus && num_input_channels >= 1 && num_input_channels <= 2;
-  DCHECK(is_input_good);
+  DCHECK(input_bus);
+  DCHECK_GE(num_input_channels, 1u);
+  DCHECK_LE(num_input_channels, 2u);
 
-  bool is_output_good = output_bus && output_bus->NumberOfChannels() == 2 &&
-                        frames_to_process <= output_bus->length();
-  DCHECK(is_output_good);
-
-  if (!is_input_good || !is_output_good) {
-    if (output_bus)
-      output_bus->Zero();
-    return;
-  }
+  DCHECK(output_bus);
+  DCHECK_EQ(output_bus->NumberOfChannels(), 2u);
+  DCHECK_LE(frames_to_process, output_bus->length());
 
   HRTFDatabase* database = database_loader_->Database();
   if (!database) {
@@ -149,12 +157,8 @@ void HRTFPanner::Pan(double desired_azimuth,
   // panner's notion of azimuth.
   double azimuth = -desired_azimuth;
 
-  bool is_azimuth_good = azimuth >= -180.0 && azimuth <= 180.0;
-  DCHECK(is_azimuth_good);
-  if (!is_azimuth_good) {
-    output_bus->Zero();
-    return;
-  }
+  DCHECK_GE(azimuth, -180.0);
+  DCHECK_LE(azimuth, 180.0);
 
   // Normally, we'll just be dealing with mono sources.
   // If we have a stereo input, implement stereo panning with left source
@@ -212,12 +216,12 @@ void HRTFPanner::Pan(double desired_azimuth,
   }
 
   // This algorithm currently requires that we process in power-of-two size
-  // chunks at least AudioUtilities::kRenderQuantumFrames.
+  // chunks at least audio_utilities::kRenderQuantumFrames.
   DCHECK_EQ(1UL << static_cast<int>(log2(frames_to_process)),
             frames_to_process);
-  DCHECK_GE(frames_to_process, AudioUtilities::kRenderQuantumFrames);
+  DCHECK_GE(frames_to_process, audio_utilities::kRenderQuantumFrames);
 
-  const unsigned kFramesPerSegment = AudioUtilities::kRenderQuantumFrames;
+  const unsigned kFramesPerSegment = audio_utilities::kRenderQuantumFrames;
   const unsigned number_of_segments = frames_to_process / kFramesPerSegment;
 
   for (unsigned segment = 0; segment < number_of_segments; ++segment) {
@@ -237,13 +241,10 @@ void HRTFPanner::Pan(double desired_azimuth,
                                              elevation2_, kernel_l2, kernel_r2,
                                              frame_delay_l2, frame_delay_r2);
 
-    bool are_kernels_good = kernel_l1 && kernel_r1 && kernel_l2 && kernel_r2;
-    DCHECK(are_kernels_good);
-    if (!are_kernels_good) {
-      output_bus->Zero();
-      return;
-    }
-
+    DCHECK(kernel_l1);
+    DCHECK(kernel_r1);
+    DCHECK(kernel_l2);
+    DCHECK(kernel_r2);
     DCHECK_LT(frame_delay_l1 / SampleRate(), kMaxDelayTimeSeconds);
     DCHECK_LT(frame_delay_r1 / SampleRate(), kMaxDelayTimeSeconds);
     DCHECK_LT(frame_delay_l2 / SampleRate(), kMaxDelayTimeSeconds);
@@ -335,7 +336,7 @@ void HRTFPanner::PanWithSampleAccurateValues(
     double* elevation,
     const AudioBus* input_bus,
     AudioBus* output_bus,
-    size_t frames_to_process,
+    uint32_t frames_to_process,
     AudioBus::ChannelInterpretation channel_interpretation) {
   // Sample-accurate (a-rate) HRTF panner is not implemented, just k-rate.  Just
   // grab the current azimuth/elevation and use that.

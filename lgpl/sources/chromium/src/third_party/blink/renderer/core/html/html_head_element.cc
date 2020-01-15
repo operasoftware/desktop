@@ -27,11 +27,9 @@
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-inline HTMLHeadElement::HTMLHeadElement(Document& document)
-    : HTMLElement(headTag, document) {}
-
-DEFINE_NODE_FACTORY(HTMLHeadElement)
+HTMLHeadElement::HTMLHeadElement(Document& document)
+    : HTMLElement(kHeadTag, document) {}
 
 }  // namespace blink

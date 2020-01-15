@@ -30,7 +30,7 @@ class AnimationTimingInputTest : public testing::Test {
                                 bool is_keyframeeffectoptions = true);
 
  private:
-  void SetUp() override { page_holder_ = DummyPageHolder::Create(); }
+  void SetUp() override { page_holder_ = std::make_unique<DummyPageHolder>(); }
 
   Document* GetDocument() const { return &page_holder_->GetDocument(); }
 
@@ -49,7 +49,8 @@ Timing AnimationTimingInputTest::ApplyTimingInputNumber(
   DummyExceptionStateForTesting exception_state;
   Timing result;
   if (is_keyframeeffectoptions) {
-    KeyframeEffectOptions timing_input_dictionary;
+    KeyframeEffectOptions* timing_input_dictionary =
+        KeyframeEffectOptions::Create();
     V8KeyframeEffectOptions::ToImpl(isolate, timing_input,
                                     timing_input_dictionary, exception_state);
     UnrestrictedDoubleOrKeyframeEffectOptions timing_input =
@@ -57,7 +58,8 @@ Timing AnimationTimingInputTest::ApplyTimingInputNumber(
             timing_input_dictionary);
     result = TimingInput::Convert(timing_input, GetDocument(), exception_state);
   } else {
-    KeyframeAnimationOptions timing_input_dictionary;
+    KeyframeAnimationOptions* timing_input_dictionary =
+        KeyframeAnimationOptions::Create();
     V8KeyframeAnimationOptions::ToImpl(
         isolate, timing_input, timing_input_dictionary, exception_state);
     UnrestrictedDoubleOrKeyframeAnimationOptions timing_input =
@@ -82,7 +84,8 @@ Timing AnimationTimingInputTest::ApplyTimingInputString(
   DummyExceptionStateForTesting exception_state;
   Timing result;
   if (is_keyframeeffectoptions) {
-    KeyframeEffectOptions timing_input_dictionary;
+    KeyframeEffectOptions* timing_input_dictionary =
+        KeyframeEffectOptions::Create();
     V8KeyframeEffectOptions::ToImpl(isolate, timing_input,
                                     timing_input_dictionary, exception_state);
     UnrestrictedDoubleOrKeyframeEffectOptions timing_input =
@@ -90,7 +93,8 @@ Timing AnimationTimingInputTest::ApplyTimingInputString(
             timing_input_dictionary);
     result = TimingInput::Convert(timing_input, GetDocument(), exception_state);
   } else {
-    KeyframeAnimationOptions timing_input_dictionary;
+    KeyframeAnimationOptions* timing_input_dictionary =
+        KeyframeAnimationOptions::Create();
     V8KeyframeAnimationOptions::ToImpl(
         isolate, timing_input, timing_input_dictionary, exception_state);
     UnrestrictedDoubleOrKeyframeAnimationOptions timing_input =
@@ -376,12 +380,6 @@ TEST_F(AnimationTimingInputTest, TimingInputTimingFunction) {
            .timing_function);
   EXPECT_TRUE(success);
   EXPECT_EQ(
-      *StepsTimingFunction::Preset(StepsTimingFunction::StepPosition::MIDDLE),
-      *ApplyTimingInputString(scope.GetIsolate(), "easing", "step-middle",
-                              success)
-           .timing_function);
-  EXPECT_TRUE(success);
-  EXPECT_EQ(
       *StepsTimingFunction::Preset(StepsTimingFunction::StepPosition::END),
       *ApplyTimingInputString(scope.GetIsolate(), "easing", "step-end", success)
            .timing_function);
@@ -397,22 +395,11 @@ TEST_F(AnimationTimingInputTest, TimingInputTimingFunction) {
                               success)
            .timing_function);
   EXPECT_TRUE(success);
-  EXPECT_EQ(*StepsTimingFunction::Create(
-                5, StepsTimingFunction::StepPosition::MIDDLE),
-            *ApplyTimingInputString(scope.GetIsolate(), "easing",
-                                    "steps(5, middle)", success)
-                 .timing_function);
-  EXPECT_TRUE(success);
   EXPECT_EQ(
       *StepsTimingFunction::Create(5, StepsTimingFunction::StepPosition::END),
       *ApplyTimingInputString(scope.GetIsolate(), "easing", "steps(5, end)",
                               success)
            .timing_function);
-  EXPECT_TRUE(success);
-  EXPECT_EQ(*FramesTimingFunction::Create(5),
-            *ApplyTimingInputString(scope.GetIsolate(), "easing", "frames(5)",
-                                    success)
-                 .timing_function);
   EXPECT_TRUE(success);
 
   ApplyTimingInputString(scope.GetIsolate(), "easing", "", success);
@@ -422,11 +409,6 @@ TEST_F(AnimationTimingInputTest, TimingInputTimingFunction) {
   EXPECT_FALSE(success);
   ApplyTimingInputString(scope.GetIsolate(), "easing",
                          "cubic-bezier(2, 2, 0.3, 0.3)", success);
-  EXPECT_FALSE(success);
-  ApplyTimingInputString(scope.GetIsolate(), "easing", "frames(1)", success);
-  EXPECT_FALSE(success);
-  ApplyTimingInputString(scope.GetIsolate(), "easing", "frames(3, start)",
-                         success);
   EXPECT_FALSE(success);
   ApplyTimingInputString(scope.GetIsolate(), "easing", "rubbish", success);
   EXPECT_FALSE(success);
@@ -441,7 +423,7 @@ TEST_F(AnimationTimingInputTest, TimingInputEmpty) {
   Timing control_timing;
   UnrestrictedDoubleOrKeyframeEffectOptions timing_input =
       UnrestrictedDoubleOrKeyframeEffectOptions::FromKeyframeEffectOptions(
-          KeyframeEffectOptions());
+          KeyframeEffectOptions::Create());
   Timing updated_timing =
       TimingInput::Convert(timing_input, nullptr, exception_state);
   EXPECT_FALSE(exception_state.HadException());
@@ -460,7 +442,7 @@ TEST_F(AnimationTimingInputTest, TimingInputEmptyKeyframeAnimationOptions) {
   Timing control_timing;
   UnrestrictedDoubleOrKeyframeAnimationOptions input_timing =
       UnrestrictedDoubleOrKeyframeAnimationOptions::
-          FromKeyframeAnimationOptions(KeyframeAnimationOptions());
+          FromKeyframeAnimationOptions(KeyframeAnimationOptions::Create());
   Timing updated_timing =
       TimingInput::Convert(input_timing, nullptr, exception_state);
   EXPECT_FALSE(exception_state.HadException());

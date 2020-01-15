@@ -61,9 +61,9 @@ bool ScopedSVGPaintState::ApplyClipMaskAndFilterIfNecessary() {
   DCHECK(!apply_clip_mask_and_filter_if_necessary_called_);
   apply_clip_mask_and_filter_if_necessary_called_ = true;
 #endif
-  // In SPv2 we should early exit once the paint property state has been
+  // In CAP we should early exit once the paint property state has been
   // applied, because all meta (non-drawing) display items are ignored in
-  // SPv2. However we can't simply omit them because there are still
+  // CAP. However we can't simply omit them because there are still
   // non-composited painting (e.g. SVG filters in particular) that rely on
   // these meta display items.
   ApplyPaintPropertyState();
@@ -77,9 +77,12 @@ bool ScopedSVGPaintState::ApplyClipMaskAndFilterIfNecessary() {
     return true;
   }
 
-  bool is_svg_root = object_.IsSVGRoot();
-  if (is_svg_root) {
-    // Layer takes care of root opacity and blend mode.
+  // LayoutSVGRoot and LayoutSVGForeignObject always have a self-painting
+  // PaintLayer (hence comments below about PaintLayerPainter).
+  bool is_svg_root_or_foreign_object =
+      object_.IsSVGRoot() || object_.IsSVGForeignObject();
+  if (is_svg_root_or_foreign_object) {
+    // PaintLayerPainter takes care of opacity and blend mode.
     DCHECK(object_.HasLayer() || !(object_.StyleRef().HasOpacity() ||
                                    object_.StyleRef().HasBlendMode() ||
                                    object_.StyleRef().ClipPath()));
@@ -93,8 +96,8 @@ bool ScopedSVGPaintState::ApplyClipMaskAndFilterIfNecessary() {
   if (!ApplyMaskIfNecessary(resources))
     return false;
 
-  if (is_svg_root) {
-    // Layer takes care of root filter.
+  if (is_svg_root_or_foreign_object) {
+    // PaintLayerPainter takes care of filter.
     DCHECK(object_.HasLayer() || !object_.StyleRef().HasFilter());
   } else if (!ApplyFilterIfNecessary(resources)) {
     return false;
@@ -120,19 +123,21 @@ void ScopedSVGPaintState::ApplyPaintPropertyState() {
   auto& paint_controller = GetPaintInfo().context.GetPaintController();
   PropertyTreeState state = paint_controller.CurrentPaintChunkProperties();
   if (const auto* effect = properties->Effect())
-    state.SetEffect(effect);
+    state.SetEffect(*effect);
   if (const auto* mask_clip = properties->MaskClip())
-    state.SetClip(mask_clip);
+    state.SetClip(*mask_clip);
   else if (const auto* clip_path_clip = properties->ClipPathClip())
-    state.SetClip(clip_path_clip);
+    state.SetClip(*clip_path_clip);
   scoped_paint_chunk_properties_.emplace(
       paint_controller, state, object_,
       DisplayItem::PaintPhaseToSVGEffectType(GetPaintInfo().phase));
 }
 
 void ScopedSVGPaintState::ApplyClipIfNecessary() {
-  if (object_.StyleRef().ClipPath())
-    clip_path_clipper_.emplace(GetPaintInfo().context, object_, LayoutPoint());
+  if (object_.StyleRef().ClipPath()) {
+    clip_path_clipper_.emplace(GetPaintInfo().context, object_,
+                               PhysicalOffset());
+  }
 }
 
 bool ScopedSVGPaintState::ApplyMaskIfNecessary(SVGResources* resources) {
@@ -177,7 +182,7 @@ bool ScopedSVGPaintState::ApplyFilterIfNecessary(SVGResources* resources) {
   // Because we cache the filter contents and do not invalidate on paint
   // invalidation rect changes, we need to paint the entire filter region
   // so elements outside the initial paint (due to scrolling, etc) paint.
-  filter_paint_info_->cull_rect_ = CullRect(LayoutRect::InfiniteIntRect());
+  filter_paint_info_->ApplyInfiniteCullRect();
   return true;
 }
 

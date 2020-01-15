@@ -19,17 +19,16 @@ class ScriptState;
 // context should be implemented in this class, not in ModulatorImplBase.
 class WorkletModulatorImpl final : public ModulatorImplBase {
  public:
-  static ModulatorImplBase* Create(ScriptState*);
+  explicit WorkletModulatorImpl(ScriptState*);
 
   // Implements ModulatorImplBase.
   ModuleScriptFetcher* CreateModuleScriptFetcher(
       ModuleScriptCustomFetchType) override;
 
  private:
-  explicit WorkletModulatorImpl(ScriptState*);
-
   // Implements ModulatorImplBase.
   bool IsDynamicImportForbidden(String* reason) override;
+  V8CacheOptions GetV8CacheOptions() const override;
 };
 
 }  // namespace blink

@@ -4,10 +4,11 @@
 
 #include "third_party/blink/renderer/modules/presentation/presentation_connection_list.h"
 
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_connection.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_connection_available_event.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -16,7 +17,7 @@ PresentationConnectionList::PresentationConnectionList(
     : ContextClient(context) {}
 
 const AtomicString& PresentationConnectionList::InterfaceName() const {
-  return EventTargetNames::PresentationConnectionList;
+  return event_target_names::kPresentationConnectionList;
 }
 
 const HeapVector<Member<ReceiverPresentationConnection>>&
@@ -29,7 +30,7 @@ void PresentationConnectionList::AddedEventListener(
     RegisteredEventListener& registered_listener) {
   EventTargetWithInlineData::AddedEventListener(event_type,
                                                 registered_listener);
-  if (event_type == EventTypeNames::connectionavailable) {
+  if (event_type == event_type_names::kConnectionavailable) {
     UseCounter::Count(
         GetExecutionContext(),
         WebFeature::kPresentationRequestConnectionAvailableEventListener);
@@ -55,7 +56,7 @@ bool PresentationConnectionList::RemoveConnection(
 void PresentationConnectionList::DispatchConnectionAvailableEvent(
     PresentationConnection* connection) {
   DispatchEvent(*PresentationConnectionAvailableEvent::Create(
-      EventTypeNames::connectionavailable, connection));
+      event_type_names::kConnectionavailable, connection));
 }
 
 bool PresentationConnectionList::IsEmpty() {

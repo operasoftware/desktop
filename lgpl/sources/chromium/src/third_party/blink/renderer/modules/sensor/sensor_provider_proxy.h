@@ -5,9 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_SENSOR_SENSOR_PROVIDER_PROXY_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_SENSOR_SENSOR_PROVIDER_PROXY_H_
 
-#include "services/device/public/mojom/sensor.mojom-blink.h"
+#include "base/macros.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/device/public/mojom/sensor.mojom-blink-forward.h"
 #include "services/device/public/mojom/sensor_provider.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
@@ -17,17 +20,17 @@ class SensorProxy;
 
 // This class wraps 'SensorProvider' mojo interface and it manages
 // 'SensorProxy' instances.
-class SensorProviderProxy final
-    : public GarbageCollectedFinalized<SensorProviderProxy>,
+class MODULES_EXPORT SensorProviderProxy final
+    : public GarbageCollected<SensorProviderProxy>,
       public Supplement<Document> {
   USING_GARBAGE_COLLECTED_MIXIN(SensorProviderProxy);
-  WTF_MAKE_NONCOPYABLE(SensorProviderProxy);
 
  public:
   static const char kSupplementName[];
 
   static SensorProviderProxy* From(Document*);
 
+  explicit SensorProviderProxy(Document&);
   ~SensorProviderProxy();
 
   SensorProxy* CreateSensorProxy(device::mojom::blink::SensorType, Page*);
@@ -50,14 +53,15 @@ class SensorProviderProxy final
   const SensorsSet& sensor_proxies() const { return sensor_proxies_; }
 
   // For SensorProviderProxy personal use.
-  explicit SensorProviderProxy(Document&);
   void InitializeIfNeeded();
   bool IsInitialized() const { return sensor_provider_.is_bound(); }
   void OnSensorProviderConnectionError();
   SensorsSet sensor_proxies_;
 
-  device::mojom::blink::SensorProviderPtr sensor_provider_;
+  mojo::Remote<device::mojom::blink::SensorProvider> sensor_provider_;
   bool inspector_mode_;
+
+  DISALLOW_COPY_AND_ASSIGN(SensorProviderProxy);
 };
 
 }  // namespace blink

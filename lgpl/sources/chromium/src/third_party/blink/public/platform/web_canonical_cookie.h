@@ -10,8 +10,7 @@
 #include "services/network/public/mojom/restricted_cookie_manager.mojom-shared.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
-#include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/forward.h"
+#include "third_party/blink/renderer/platform/platform_export.h"  // nogncheck
 
 namespace blink {
 
@@ -60,11 +59,6 @@ class BLINK_PLATFORM_EXPORT WebCanonicalCookie {
                                                    const WebString& cookie_line,
                                                    base::Time creation_time);
 
-  // Serializing, for the document.cookie API.
-  static String BuildCookieLine(const Vector<WebCanonicalCookie>& cookies);
-
-  static constexpr const network::mojom::CookieSameSite kDefaultSameSiteMode =
-      network::mojom::CookieSameSite::NO_RESTRICTION;
   static constexpr const network::mojom::CookiePriority kDefaultPriority =
       network::mojom::CookiePriority::MEDIUM;
 
@@ -92,7 +86,8 @@ class BLINK_PLATFORM_EXPORT WebCanonicalCookie {
   base::Time last_access_;
   bool is_secure_ = false;
   bool is_http_only_ = false;
-  network::mojom::CookieSameSite same_site_ = kDefaultSameSiteMode;
+  network::mojom::CookieSameSite same_site_ =
+      network::mojom::CookieSameSite::NO_RESTRICTION;
   network::mojom::CookiePriority priority_ = kDefaultPriority;
 };
 

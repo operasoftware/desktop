@@ -6,10 +6,11 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_PROPERTY_HANDLE_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/css_property_name.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
-#include "third_party/blink/renderer/core/css_property_names.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -23,7 +24,7 @@ class CORE_EXPORT PropertyHandle {
       : handle_type_(is_presentation_attribute ? kHandlePresentationAttribute
                                                : kHandleCSSProperty),
         css_property_(&property) {
-    DCHECK_NE(CSSPropertyVariable, property.PropertyID());
+    DCHECK_NE(CSSPropertyID::kVariable, property.PropertyID());
   }
 
   explicit PropertyHandle(const AtomicString& property_name)
@@ -71,6 +72,13 @@ class CORE_EXPORT PropertyHandle {
     return *svg_attribute_;
   }
 
+  CSSPropertyName GetCSSPropertyName() const {
+    if (handle_type_ == kHandleCSSCustomProperty)
+      return CSSPropertyName(property_name_);
+    DCHECK(IsCSSProperty() || IsPresentationAttribute());
+    return CSSPropertyName(css_property_->PropertyID());
+  }
+
  private:
   enum HandleType {
     kHandleEmptyValueForHashTraits,
@@ -92,7 +100,7 @@ class CORE_EXPORT PropertyHandle {
     return PropertyHandle(kHandleDeletedValueForHashTraits);
   }
 
-  bool IsDeletedValueForHashTraits() {
+  bool IsDeletedValueForHashTraits() const {
     return handle_type_ == kHandleDeletedValueForHashTraits;
   }
 
@@ -135,7 +143,7 @@ struct HashTraits<blink::PropertyHandle>
     new (NotNull, &slot) blink::PropertyHandle(
         blink::PropertyHandle::DeletedValueForHashTraits());
   }
-  static bool IsDeletedValue(blink::PropertyHandle value) {
+  static bool IsDeletedValue(const blink::PropertyHandle& value) {
     return value.IsDeletedValueForHashTraits();
   }
 

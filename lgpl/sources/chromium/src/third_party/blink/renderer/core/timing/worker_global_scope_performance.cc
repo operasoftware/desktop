@@ -48,7 +48,8 @@ WorkerGlobalScopePerformance& WorkerGlobalScopePerformance::From(
       Supplement<WorkerGlobalScope>::From<WorkerGlobalScopePerformance>(
           worker_global_scope);
   if (!supplement) {
-    supplement = new WorkerGlobalScopePerformance(worker_global_scope);
+    supplement =
+        MakeGarbageCollected<WorkerGlobalScopePerformance>(worker_global_scope);
     ProvideTo(worker_global_scope, supplement);
   }
   return *supplement;
@@ -62,7 +63,7 @@ WorkerPerformance* WorkerGlobalScopePerformance::performance(
 WorkerPerformance* WorkerGlobalScopePerformance::performance(
     WorkerGlobalScope* worker_global_scope) {
   if (!performance_)
-    performance_ = WorkerPerformance::Create(worker_global_scope);
+    performance_ = MakeGarbageCollected<WorkerPerformance>(worker_global_scope);
   return performance_.Get();
 }
 

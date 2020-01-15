@@ -4,18 +4,30 @@
 
 #include "third_party/blink/renderer/platform/bindings/callback_function_base.h"
 
+#include "third_party/blink/renderer/platform/bindings/binding_security_for_platform.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+
 namespace blink {
 
 CallbackFunctionBase::CallbackFunctionBase(
     v8::Local<v8::Object> callback_function) {
   DCHECK(!callback_function.IsEmpty());
 
-  callback_relevant_script_state_ =
-      ScriptState::From(callback_function->CreationContext());
-  v8::Isolate* isolate = callback_relevant_script_state_->GetIsolate();
-
+  v8::Isolate* isolate = callback_function->GetIsolate();
   callback_function_.Set(isolate, callback_function);
+
   incumbent_script_state_ = ScriptState::From(isolate->GetIncumbentContext());
+
+  // Set |callback_relevant_script_state_| iff the creation context and the
+  // incumbent context are the same origin-domain. Otherwise, leave it as
+  // nullptr.
+  v8::Local<v8::Context> creation_context =
+      callback_function->CreationContext();
+  if (BindingSecurityForPlatform::ShouldAllowAccessToV8Context(
+          incumbent_script_state_->GetContext(), creation_context,
+          BindingSecurityForPlatform::ErrorReportOption::kDoNotReport)) {
+    callback_relevant_script_state_ = ScriptState::From(creation_context);
+  }
 }
 
 void CallbackFunctionBase::Trace(Visitor* visitor) {
@@ -24,15 +36,54 @@ void CallbackFunctionBase::Trace(Visitor* visitor) {
   visitor->Trace(incumbent_script_state_);
 }
 
-V8PersistentCallbackFunctionBase::V8PersistentCallbackFunctionBase(
-    CallbackFunctionBase* callback_function)
-    : callback_function_(callback_function) {
-  v8_function_.Reset(callback_function_->GetIsolate(),
-                     callback_function_->callback_function_.Get());
+ScriptState* CallbackFunctionBase::CallbackRelevantScriptStateOrReportError(
+    const char* interface,
+    const char* operation) {
+  if (callback_relevant_script_state_)
+    return callback_relevant_script_state_;
+
+  // Report a SecurityError due to a cross origin callback object.
+  ScriptState::Scope incumbent_scope(incumbent_script_state_);
+  v8::TryCatch try_catch(GetIsolate());
+  try_catch.SetVerbose(true);
+  ExceptionState exception_state(
+      GetIsolate(), ExceptionState::kExecutionContext, interface, operation);
+  exception_state.ThrowSecurityError(
+      "An invocation of the provided callback failed due to cross origin "
+      "access.");
+  return nullptr;
 }
 
-void V8PersistentCallbackFunctionBase::Trace(blink::Visitor* visitor) {
-  visitor->Trace(callback_function_);
+ScriptState* CallbackFunctionBase::CallbackRelevantScriptStateOrThrowException(
+    const char* interface,
+    const char* operation) {
+  if (callback_relevant_script_state_)
+    return callback_relevant_script_state_;
+
+  // Throw a SecurityError due to a cross origin callback object.
+  ScriptState::Scope incumbent_scope(incumbent_script_state_);
+  ExceptionState exception_state(
+      GetIsolate(), ExceptionState::kExecutionContext, interface, operation);
+  exception_state.ThrowSecurityError(
+      "An invocation of the provided callback failed due to cross origin "
+      "access.");
+  return nullptr;
+}
+
+void CallbackFunctionBase::EvaluateAsPartOfCallback(
+    base::OnceCallback<void()> closure) {
+  if (!callback_relevant_script_state_)
+    return;
+
+  // https://heycam.github.io/webidl/#es-invoking-callback-functions
+  // step 8: Prepare to run script with relevant settings.
+  ScriptState::Scope callback_relevant_context_scope(
+      callback_relevant_script_state_);
+  // step 9: Prepare to run a callback with stored settings.
+  v8::Context::BackupIncumbentScope backup_incumbent_scope(
+      IncumbentScriptState()->GetContext());
+
+  std::move(closure).Run();
 }
 
 }  // namespace blink

@@ -26,7 +26,6 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_REGISTERED_EVENT_LISTENER_H_
 
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace blink {
@@ -44,12 +43,12 @@ class RegisteredEventListener final {
  public:
   RegisteredEventListener();
   RegisteredEventListener(EventListener* listener,
-                          const AddEventListenerOptionsResolved& options);
+                          const AddEventListenerOptionsResolved* options);
   RegisteredEventListener& operator=(const RegisteredEventListener& that);
 
   void Trace(Visitor* visitor);
 
-  AddEventListenerOptionsResolved Options() const;
+  AddEventListenerOptionsResolved* Options() const;
 
   const EventListener* Callback() const { return callback_; }
 
@@ -78,14 +77,12 @@ class RegisteredEventListener final {
   }
 
   bool Matches(const EventListener* listener,
-               const EventListenerOptions& options) const;
+               const EventListenerOptions* options) const;
 
   bool ShouldFire(const Event&) const;
 
-  bool operator==(const RegisteredEventListener& other) const;
-
  private:
-  TraceWrapperMember<EventListener> callback_;
+  Member<EventListener> callback_;
   unsigned use_capture_ : 1;
   unsigned passive_ : 1;
   unsigned once_ : 1;
@@ -94,8 +91,10 @@ class RegisteredEventListener final {
   unsigned passive_specified_ : 1;
 };
 
+bool operator==(const RegisteredEventListener&, const RegisteredEventListener&);
+
 }  // namespace blink
 
-WTF_ALLOW_CLEAR_UNUSED_SLOTS_WITH_MEM_FUNCTIONS(blink::RegisteredEventListener);
+WTF_ALLOW_CLEAR_UNUSED_SLOTS_WITH_MEM_FUNCTIONS(blink::RegisteredEventListener)
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_REGISTERED_EVENT_LISTENER_H_

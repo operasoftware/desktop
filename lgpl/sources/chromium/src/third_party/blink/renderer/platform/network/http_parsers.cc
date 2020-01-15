@@ -43,7 +43,6 @@
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
-#include "third_party/blink/renderer/platform/wtf/text/cstring.h"
 #include "third_party/blink/renderer/platform/wtf/text/parsing_utilities.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
@@ -98,8 +97,8 @@ inline bool IsASCIILowerAlphaOrDigitOrHyphen(CharType c) {
 }
 
 // Parse a number with ignoring trailing [0-9.].
-// Returns NaN if the source contains invalid characters.
-double ParseRefreshTime(const String& source) {
+// Returns false if the source contains invalid characters.
+bool ParseRefreshTime(const String& source, base::TimeDelta& delay) {
   int full_stop_count = 0;
   unsigned number_end = source.length();
   for (unsigned i = 0; i < source.length(); ++i) {
@@ -110,12 +109,15 @@ double ParseRefreshTime(const String& source) {
       if (++full_stop_count == 2)
         number_end = i;
     } else if (!IsASCIIDigit(ch)) {
-      return std::numeric_limits<double>::quiet_NaN();
+      return false;
     }
   }
   bool ok;
   double time = source.Left(number_end).ToDouble(&ok);
-  return ok ? time : std::numeric_limits<double>::quiet_NaN();
+  if (!ok)
+    return false;
+  delay = base::TimeDelta::FromSecondsD(time);
+  return true;
 }
 
 }  // namespace
@@ -124,7 +126,7 @@ bool IsValidHTTPHeaderValue(const String& name) {
   // FIXME: This should really match name against
   // field-value in section 4.2 of RFC 2616.
 
-  return name.ContainsOnlyLatin1() && !name.Contains('\r') &&
+  return name.ContainsOnlyLatin1OrEmpty() && !name.Contains('\r') &&
          !name.Contains('\n') && !name.Contains('\0');
 }
 
@@ -141,15 +143,14 @@ bool IsValidHTTPToken(const String& characters) {
 }
 
 bool IsContentDispositionAttachment(const String& content_disposition) {
-  CString cstring(content_disposition.Utf8());
-  std::string string(cstring.data(), cstring.length());
-  return net::HttpContentDisposition(string, std::string()).is_attachment();
+  return net::HttpContentDisposition(content_disposition.Utf8(), std::string())
+      .is_attachment();
 }
 
-// https://html.spec.whatwg.org/multipage/semantics.html#attr-meta-http-equiv-refresh
+// https://html.spec.whatwg.org/C/#attr-meta-http-equiv-refresh
 bool ParseHTTPRefresh(const String& refresh,
                       WTF::CharacterMatchFunctionPtr matcher,
-                      double& delay,
+                      base::TimeDelta& delay,
                       String& url) {
   unsigned len = refresh.length();
   unsigned pos = 0;
@@ -164,11 +165,9 @@ bool ParseHTTPRefresh(const String& refresh,
 
   if (pos == len) {  // no URL
     url = String();
-    delay = ParseRefreshTime(refresh.StripWhiteSpace());
-    return std::isfinite(delay);
+    return ParseRefreshTime(refresh.StripWhiteSpace(), delay);
   } else {
-    delay = ParseRefreshTime(refresh.Left(pos).StripWhiteSpace());
-    if (!std::isfinite(delay))
+    if (!ParseRefreshTime(refresh.Left(pos).StripWhiteSpace(), delay))
       return false;
 
     SkipWhiteSpace(refresh, pos, matcher);
@@ -213,8 +212,8 @@ bool ParseHTTPRefresh(const String& refresh,
   }
 }
 
-double ParseDate(const String& value) {
-  return ParseDateFromNullTerminatedCharacters(value.Utf8().data());
+base::Optional<base::Time> ParseDate(const String& value) {
+  return ParseDateFromNullTerminatedCharacters(value.Utf8().c_str());
 }
 
 AtomicString ExtractMIMETypeFromMediaType(const AtomicString& media_type) {
@@ -259,121 +258,6 @@ AtomicString ExtractMIMETypeFromMediaType(const AtomicString& media_type) {
       media_type.GetString().Substring(type_start, type_end - type_start));
 }
 
-ReflectedXSSDisposition ParseXSSProtectionHeader(const String& header,
-                                                 String& failure_reason,
-                                                 unsigned& failure_position,
-                                                 String& report_url) {
-  DEFINE_STATIC_LOCAL(String, failure_reason_invalid_toggle,
-                      ("expected token to be 0 or 1"));
-  DEFINE_STATIC_LOCAL(String, failure_reason_invalid_separator,
-                      ("expected semicolon"));
-  DEFINE_STATIC_LOCAL(String, failure_reason_invalid_equals,
-                      ("expected equals sign"));
-  DEFINE_STATIC_LOCAL(String, failure_reason_invalid_mode,
-                      ("invalid mode directive"));
-  DEFINE_STATIC_LOCAL(String, failure_reason_invalid_report,
-                      ("invalid report directive"));
-  DEFINE_STATIC_LOCAL(String, failure_reason_duplicate_mode,
-                      ("duplicate mode directive"));
-  DEFINE_STATIC_LOCAL(String, failure_reason_duplicate_report,
-                      ("duplicate report directive"));
-  DEFINE_STATIC_LOCAL(String, failure_reason_invalid_directive,
-                      ("unrecognized directive"));
-
-  HeaderFieldTokenizer tokenizer(header);
-
-  StringView toggle;
-  if (!tokenizer.ConsumeToken(Mode::kNormal, toggle)) {
-    if (tokenizer.IsConsumed())
-      return kReflectedXSSUnset;
-  }
-
-  if (toggle.length() != 1 || (toggle[0] != '0' && toggle[0] != '1')) {
-    failure_reason = failure_reason_invalid_toggle;
-    return kReflectedXSSInvalid;
-  }
-
-  if (toggle[0] == '0')
-    return kAllowReflectedXSS;
-
-  ReflectedXSSDisposition result = kFilterReflectedXSS;
-  bool mode_directive_seen = false;
-  bool report_directive_seen = false;
-
-  while (!tokenizer.IsConsumed()) {
-    // At end of previous directive: consume whitespace, semicolon, and
-    // whitespace.
-    if (!tokenizer.Consume(';')) {
-      failure_reason = failure_reason_invalid_separator;
-      failure_position = tokenizer.Index();
-      return kReflectedXSSInvalid;
-    }
-
-    // Give a pass to a trailing semicolon.
-    if (tokenizer.IsConsumed())
-      return result;
-
-    // At start of next directive.
-    StringView token;
-    unsigned token_start = tokenizer.Index();
-    if (!tokenizer.ConsumeToken(Mode::kNormal, token)) {
-      failure_reason = failure_reason_invalid_directive;
-      failure_position = token_start;
-      return kReflectedXSSInvalid;
-    }
-    if (EqualIgnoringASCIICase(token, "mode")) {
-      if (mode_directive_seen) {
-        failure_reason = failure_reason_duplicate_mode;
-        failure_position = token_start;
-        return kReflectedXSSInvalid;
-      }
-      mode_directive_seen = true;
-      if (!tokenizer.Consume('=')) {
-        failure_reason = failure_reason_invalid_equals;
-        failure_position = tokenizer.Index();
-        return kReflectedXSSInvalid;
-      }
-      String value;
-      unsigned value_start = tokenizer.Index();
-      if (!tokenizer.ConsumeTokenOrQuotedString(Mode::kNormal, value) ||
-          !EqualIgnoringASCIICase(value, "block")) {
-        failure_reason = failure_reason_invalid_mode;
-        failure_position = value_start;
-        return kReflectedXSSInvalid;
-      }
-      result = kBlockReflectedXSS;
-    } else if (EqualIgnoringASCIICase(token, "report")) {
-      if (report_directive_seen) {
-        failure_reason = failure_reason_duplicate_report;
-        failure_position = token_start;
-        return kReflectedXSSInvalid;
-      }
-      report_directive_seen = true;
-      if (!tokenizer.Consume('=')) {
-        failure_reason = failure_reason_invalid_equals;
-        failure_position = tokenizer.Index();
-        return kReflectedXSSInvalid;
-      }
-      // Set, just in case later semantic check deems unacceptable.
-      failure_position = tokenizer.Index();
-      String value;
-      // Relaxed mode - unquoted URLs contain colons and such.
-      if (!tokenizer.ConsumeTokenOrQuotedString(Mode::kRelaxed, value)) {
-        failure_reason = failure_reason_invalid_report;
-        return kReflectedXSSInvalid;
-      }
-      report_url = value;
-    } else {
-      // Unrecognized directive
-      failure_reason = failure_reason_invalid_directive;
-      failure_position = token_start;
-      return kReflectedXSSInvalid;
-    }
-  }
-
-  return result;
-}
-
 ContentTypeOptionsDisposition ParseContentTypeOptionsHeader(
     const String& value) {
   if (value.IsEmpty())
@@ -381,7 +265,7 @@ ContentTypeOptionsDisposition ParseContentTypeOptionsHeader(
 
   Vector<String> results;
   value.Split(",", results);
-  if (results[0].StripWhiteSpace().LowerASCII() == "nosniff")
+  if (results.size() && results[0].StripWhiteSpace().LowerASCII() == "nosniff")
     return kContentTypeOptionsNosniff;
   return kContentTypeOptionsNone;
 }
@@ -425,10 +309,10 @@ static inline String TrimToNextSeparator(const String& str) {
 static void ParseCacheHeader(const String& header,
                              Vector<std::pair<String, String>>& result) {
   const String safe_header = header.RemoveCharacters(IsControlCharacter);
-  unsigned max = safe_header.length();
-  for (unsigned pos = 0; pos < max; /* pos incremented in loop */) {
-    size_t next_comma_position = safe_header.find(',', pos);
-    size_t next_equal_sign_position = safe_header.find('=', pos);
+  wtf_size_t max = safe_header.length();
+  for (wtf_size_t pos = 0; pos < max; /* pos incremented in loop */) {
+    wtf_size_t next_comma_position = safe_header.find(',', pos);
+    wtf_size_t next_equal_sign_position = safe_header.find('=', pos);
     if (next_equal_sign_position != kNotFound &&
         (next_equal_sign_position < next_comma_position ||
          next_comma_position == kNotFound)) {
@@ -442,7 +326,7 @@ static void ParseCacheHeader(const String& header,
       String value = safe_header.Substring(pos, max - pos).StripWhiteSpace();
       if (value[0] == '"') {
         // The value is a quoted string
-        size_t next_double_quote_position = value.find('"', 1);
+        wtf_size_t next_double_quote_position = value.find('"', 1);
         if (next_double_quote_position != kNotFound) {
           // Store the value as a quoted string without quotes
           result.push_back(std::pair<String, String>(
@@ -451,7 +335,7 @@ static void ParseCacheHeader(const String& header,
           pos += (safe_header.find('"', pos) - pos) +
                  next_double_quote_position + 1;
           // Move past next comma, if there is one
-          size_t next_comma_position2 = safe_header.find(',', pos);
+          wtf_size_t next_comma_position2 = safe_header.find(',', pos);
           if (next_comma_position2 != kNotFound)
             pos += next_comma_position2 - pos + 1;
           else
@@ -466,7 +350,7 @@ static void ParseCacheHeader(const String& header,
         }
       } else {
         // The value is a token until the next comma
-        size_t next_comma_position2 = value.find(',');
+        wtf_size_t next_comma_position2 = value.find(',');
         if (next_comma_position2 != kNotFound) {
           // The value is delimited by the next comma
           result.push_back(std::pair<String, String>(
@@ -507,9 +391,8 @@ CacheControlHeader ParseCacheControlDirectives(
     const AtomicString& pragma_value) {
   CacheControlHeader cache_control_header;
   cache_control_header.parsed = true;
-  cache_control_header.max_age = std::numeric_limits<double>::quiet_NaN();
-  cache_control_header.stale_while_revalidate =
-      std::numeric_limits<double>::quiet_NaN();
+  cache_control_header.max_age = base::nullopt;
+  cache_control_header.stale_while_revalidate = base::nullopt;
 
   static const char kNoCacheDirective[] = "no-cache";
   static const char kNoStoreDirective[] = "no-store";
@@ -521,8 +404,8 @@ CacheControlHeader ParseCacheControlDirectives(
     Vector<std::pair<String, String>> directives;
     ParseCacheHeader(cache_control_value, directives);
 
-    size_t directives_size = directives.size();
-    for (size_t i = 0; i < directives_size; ++i) {
+    wtf_size_t directives_size = directives.size();
+    for (wtf_size_t i = 0; i < directives_size; ++i) {
       // RFC2616 14.9.1: A no-cache directive with a value is only meaningful
       // for proxy caches.  It should be ignored by a browser level cache.
       if (DeprecatedEqualIgnoringCase(directives[i].first, kNoCacheDirective) &&
@@ -536,25 +419,27 @@ CacheControlHeader ParseCacheControlDirectives(
         cache_control_header.contains_must_revalidate = true;
       } else if (DeprecatedEqualIgnoringCase(directives[i].first,
                                              kMaxAgeDirective)) {
-        if (!std::isnan(cache_control_header.max_age)) {
+        if (cache_control_header.max_age) {
           // First max-age directive wins if there are multiple ones.
           continue;
         }
         bool ok;
         double max_age = directives[i].second.ToDouble(&ok);
         if (ok)
-          cache_control_header.max_age = max_age;
+          cache_control_header.max_age = base::TimeDelta::FromSecondsD(max_age);
       } else if (DeprecatedEqualIgnoringCase(directives[i].first,
                                              kStaleWhileRevalidateDirective)) {
-        if (!std::isnan(cache_control_header.stale_while_revalidate)) {
+        if (cache_control_header.stale_while_revalidate) {
           // First stale-while-revalidate directive wins if there are multiple
           // ones.
           continue;
         }
         bool ok;
         double stale_while_revalidate = directives[i].second.ToDouble(&ok);
-        if (ok)
-          cache_control_header.stale_while_revalidate = stale_while_revalidate;
+        if (ok) {
+          cache_control_header.stale_while_revalidate =
+              base::TimeDelta::FromSecondsD(stale_while_revalidate);
+        }
       }
     }
   }
@@ -564,7 +449,7 @@ CacheControlHeader ParseCacheControlDirectives(
     // This is deprecated and equivalent to Cache-control: no-cache
     // Don't bother tokenizing the value, it is not important
     cache_control_header.contains_no_cache =
-        pragma_value.DeprecatedLower().Contains(kNoCacheDirective);
+        pragma_value.LowerASCII().Contains(kNoCacheDirective);
   }
   return cache_control_header;
 }
@@ -578,27 +463,26 @@ void ParseCommaDelimitedHeader(const String& header_value,
 }
 
 bool ParseMultipartHeadersFromBody(const char* bytes,
-                                   size_t size,
+                                   wtf_size_t size,
                                    ResourceResponse* response,
-                                   size_t* end) {
+                                   wtf_size_t* end) {
   DCHECK(IsMainThread());
 
-  int headers_end_pos =
+  size_t headers_end_pos =
       net::HttpUtil::LocateEndOfAdditionalHeaders(bytes, size, 0);
 
-  if (headers_end_pos < 0)
+  if (headers_end_pos == std::string::npos)
     return false;
 
-  *end = headers_end_pos;
+  *end = static_cast<wtf_size_t>(headers_end_pos);
 
   // Eat headers and prepend a status line as is required by
   // HttpResponseHeaders.
   std::string headers("HTTP/1.1 200 OK\r\n");
   headers.append(bytes, headers_end_pos);
 
-  scoped_refptr<net::HttpResponseHeaders> response_headers =
-      new net::HttpResponseHeaders(
-          net::HttpUtil::AssembleRawHeaders(headers.data(), headers.length()));
+  auto response_headers = base::MakeRefCounted<net::HttpResponseHeaders>(
+      net::HttpUtil::AssembleRawHeaders(headers));
 
   std::string mime_type, charset;
   response_headers->GetMimeTypeAndCharset(&mime_type, &charset);
@@ -612,41 +496,40 @@ bool ParseMultipartHeadersFromBody(const char* bytes,
     base::StringPiece header_string_piece(adaptor.AsStringPiece());
     size_t iterator = 0;
 
-    response->ClearHTTPHeaderField(header);
+    response->ClearHttpHeaderField(header);
     while (response_headers->EnumerateHeader(&iterator, header_string_piece,
                                              &value)) {
-      response->AddHTTPHeaderField(header, WebString::FromLatin1(value));
+      response->AddHttpHeaderField(header, WebString::FromLatin1(value));
     }
   }
   return true;
 }
 
 bool ParseMultipartFormHeadersFromBody(const char* bytes,
-                                       size_t size,
+                                       wtf_size_t size,
                                        HTTPHeaderMap* header_fields,
-                                       size_t* end) {
+                                       wtf_size_t* end) {
   DCHECK_EQ(0u, header_fields->size());
 
-  int headersEndPos =
+  size_t headers_end_pos =
       net::HttpUtil::LocateEndOfAdditionalHeaders(bytes, size, 0);
 
-  if (headersEndPos < 0)
+  if (headers_end_pos == std::string::npos)
     return false;
 
-  *end = headersEndPos;
+  *end = static_cast<wtf_size_t>(headers_end_pos);
 
   // Eat headers and prepend a status line as is required by
   // HttpResponseHeaders.
   std::string headers("HTTP/1.1 200 OK\r\n");
-  headers.append(bytes, headersEndPos);
+  headers.append(bytes, headers_end_pos);
 
-  scoped_refptr<net::HttpResponseHeaders> responseHeaders =
-      new net::HttpResponseHeaders(
-          net::HttpUtil::AssembleRawHeaders(headers.data(), headers.length()));
+  auto responseHeaders = base::MakeRefCounted<net::HttpResponseHeaders>(
+      net::HttpUtil::AssembleRawHeaders(headers));
 
   // Copy selected header fields.
   const AtomicString* const headerNamePointers[] = {
-      &HTTPNames::Content_Disposition, &HTTPNames::Content_Type};
+      &http_names::kContentDisposition, &http_names::kContentType};
   for (const AtomicString* headerNamePointer : headerNamePointers) {
     StringUTF8Adaptor adaptor(*headerNamePointer);
     size_t iterator = 0;
@@ -681,7 +564,7 @@ std::unique_ptr<ServerTimingHeaderVector> ParseServerTimingHeader(
     HeaderFieldTokenizer tokenizer(headerValue);
     while (!tokenizer.IsConsumed()) {
       StringView name;
-      if (!tokenizer.ConsumeToken(Mode::kNormal, name)) {
+      if (!tokenizer.ConsumeToken(ParsedContentType::Mode::kNormal, name)) {
         break;
       }
 
@@ -689,13 +572,15 @@ std::unique_ptr<ServerTimingHeaderVector> ParseServerTimingHeader(
 
       while (tokenizer.Consume(';')) {
         StringView parameter_name;
-        if (!tokenizer.ConsumeToken(Mode::kNormal, parameter_name)) {
+        if (!tokenizer.ConsumeToken(ParsedContentType::Mode::kNormal,
+                                    parameter_name)) {
           break;
         }
 
         String value = "";
         if (tokenizer.Consume('=')) {
-          tokenizer.ConsumeTokenOrQuotedString(Mode::kNormal, value);
+          tokenizer.ConsumeTokenOrQuotedString(ParsedContentType::Mode::kNormal,
+                                               value);
           tokenizer.ConsumeBeforeAnyCharMatch({',', ';'});
         }
         header.SetParameter(parameter_name, value);

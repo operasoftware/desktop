@@ -29,7 +29,7 @@ class ScrollAnchorTest : public testing::WithParamInterface<bool>,
   void Update() {
     // TODO(skobes): Use SimTest instead of RenderingTest and move into
     // Source/web?
-    GetDocument().View()->UpdateAllLifecyclePhases();
+    UpdateAllLifecyclePhasesForTest();
   }
 
   ScrollableArea* LayoutViewport() {
@@ -45,13 +45,12 @@ class ScrollAnchorTest : public testing::WithParamInterface<bool>,
   }
 
   ScrollAnchor& GetScrollAnchor(ScrollableArea* scroller) {
-    DCHECK(scroller->IsLocalFrameView() ||
-           scroller->IsPaintLayerScrollableArea());
+    DCHECK(scroller->IsPaintLayerScrollableArea());
     return *(scroller->GetScrollAnchor());
   }
 
   void SetHeight(Element* element, int height) {
-    element->setAttribute(HTMLNames::styleAttr,
+    element->setAttribute(html_names::kStyleAttr,
                           AtomicString(String::Format("height: %dpx", height)));
     Update();
   }
@@ -80,7 +79,7 @@ class ScrollAnchorTest : public testing::WithParamInterface<bool>,
   }
 };
 
-INSTANTIATE_TEST_CASE_P(All, ScrollAnchorTest, testing::Bool());
+INSTANTIATE_TEST_SUITE_P(All, ScrollAnchorTest, testing::Bool());
 
 // TODO(ymalik): Currently, this should be the first test in the file to avoid
 // failure when running with other tests. Dig into this more and fix.
@@ -268,7 +267,7 @@ TEST_P(ScrollAnchorTest, FractionalOffsetsAreRoundedBeforeComparing) {
   ScrollableArea* viewport = LayoutViewport();
   ScrollLayoutViewport(ScrollOffset(0, 100));
 
-  GetDocument().getElementById("block1")->setAttribute(HTMLNames::styleAttr,
+  GetDocument().getElementById("block1")->setAttribute(html_names::kStyleAttr,
                                                        "height: 50.6px");
   Update();
 
@@ -286,7 +285,7 @@ TEST_P(ScrollAnchorTest, AvoidStickyAnchorWhichMovesWithScroll) {
   ScrollableArea* viewport = LayoutViewport();
   ScrollLayoutViewport(ScrollOffset(0, 60));
 
-  GetDocument().getElementById("block1")->setAttribute(HTMLNames::styleAttr,
+  GetDocument().getElementById("block1")->setAttribute(html_names::kStyleAttr,
                                                        "height: 100px");
   Update();
 
@@ -427,7 +426,7 @@ TEST_P(ScrollAnchorTest, FlexboxDelayedAdjustmentRespectsSANACLAP) {
   Element* scroller = GetDocument().getElementById("scroller");
   scroller->setScrollTop(100);
 
-  GetDocument().getElementById("spacer")->setAttribute(HTMLNames::styleAttr,
+  GetDocument().getElementById("spacer")->setAttribute(html_names::kStyleAttr,
                                                        "margin-top: 50px");
   Update();
   EXPECT_EQ(100, ScrollerForElement(scroller)->ScrollOffsetInt().Height());
@@ -436,10 +435,6 @@ TEST_P(ScrollAnchorTest, FlexboxDelayedAdjustmentRespectsSANACLAP) {
 // TODO(skobes): Convert this to web-platform-tests when document.rootScroller
 // is launched (http://crbug.com/505516).
 TEST_P(ScrollAnchorTest, NonDefaultRootScroller) {
-  // TODO(crbug.com/889449): The test fails in LayoutNG mode.
-  if (RuntimeEnabledFeatures::LayoutNGEnabled())
-    return;
-
   SetBodyInnerHTML(R"HTML(
     <style>
         ::-webkit-scrollbar {
@@ -470,7 +465,7 @@ TEST_P(ScrollAnchorTest, NonDefaultRootScroller) {
 
   NonThrowableExceptionState non_throw;
   GetDocument().setRootScroller(root_scroller_element, non_throw);
-  GetDocument().View()->UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   ScrollableArea* scroller = ScrollerForElement(root_scroller_element);
 

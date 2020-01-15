@@ -15,8 +15,8 @@
 #include "third_party/blink/renderer/core/workers/worker_or_worklet_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worklet_module_responses_map.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -58,12 +58,14 @@ class CORE_EXPORT WorkletGlobalScope
   KURL CompleteURL(const String&) const final;
   String UserAgent(const KURL&) const final { return user_agent_; }
   SecurityContext& GetSecurityContext() final { return *this; }
+  const SecurityContext& GetSecurityContext() const final { return *this; }
   bool IsSecureContext(String& error_message) const final;
   bool IsContextThread() const final;
-  void AddConsoleMessage(ConsoleMessage*) final;
+  void AddConsoleMessageImpl(ConsoleMessage*, bool discard_duplicates) final;
   void ExceptionThrown(ErrorEvent*) final;
   CoreProbeSink* GetProbeSink() final;
   scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(TaskType) final;
+  FrameOrWorkerScheduler* GetScheduler() final;
 
   // WorkerOrWorkletGlobalScope
   void Dispose() override;
@@ -73,7 +75,7 @@ class CORE_EXPORT WorkletGlobalScope
 
   const base::UnguessableToken& GetAgentClusterID() const final {
     // Currently, worklet agents have no clearly defined owner. See
-    // https://html.spec.whatwg.org/multipage/webappapis.html#integration-with-the-javascript-agent-cluster-formalism
+    // https://html.spec.whatwg.org/C/#integration-with-the-javascript-agent-cluster-formalism
     //
     // However, it is intended that a SharedArrayBuffer can be shared with a
     // worklet, e.g. the AudioWorklet. If this WorkletGlobalScope's creation
@@ -96,8 +98,9 @@ class CORE_EXPORT WorkletGlobalScope
   // parent frame's task runner).
   void FetchAndInvokeScript(
       const KURL& module_url_record,
-      network::mojom::FetchCredentialsMode,
-      FetchClientSettingsObjectSnapshot* outside_settings_object,
+      network::mojom::CredentialsMode,
+      const FetchClientSettingsObjectSnapshot& outside_settings_object,
+      WorkerResourceTimingNotifier& outside_resource_timing_notifier,
       scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner,
       WorkletPendingTasks*);
 
@@ -126,12 +129,15 @@ class CORE_EXPORT WorkletGlobalScope
   // thread.
   WorkletGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
                      WorkerReportingProxy&,
-                     LocalFrame*);
+                     LocalFrame*,
+                     Agent* = nullptr);
   // Constructs an instance as a threaded worklet. Must be called on a worker
   // thread.
   WorkletGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
                      WorkerReportingProxy&,
                      WorkerThread*);
+
+  BrowserInterfaceBrokerProxy& GetBrowserInterfaceBroker() override;
 
  private:
   enum class ThreadType {
@@ -150,7 +156,8 @@ class CORE_EXPORT WorkletGlobalScope
                      v8::Isolate*,
                      ThreadType,
                      LocalFrame*,
-                     WorkerThread*);
+                     WorkerThread*,
+                     Agent*);
 
   EventTarget* ErrorEventTarget() final { return nullptr; }
 
@@ -180,11 +187,12 @@ class CORE_EXPORT WorkletGlobalScope
   WorkerThread* worker_thread_;
 };
 
-DEFINE_TYPE_CASTS(WorkletGlobalScope,
-                  ExecutionContext,
-                  context,
-                  context->IsWorkletGlobalScope(),
-                  context.IsWorkletGlobalScope());
+template <>
+struct DowncastTraits<WorkletGlobalScope> {
+  static bool AllowFrom(const ExecutionContext& context) {
+    return context.IsWorkletGlobalScope();
+  }
+};
 
 }  // namespace blink
 

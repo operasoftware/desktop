@@ -8,8 +8,6 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/callback_promise_adapter.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/modules/service_worker/navigation_preload_callbacks.h"
-#include "third_party/blink/renderer/modules/service_worker/service_worker_container_client.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker_registration.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
 
@@ -34,18 +32,16 @@ ScriptPromise NavigationPreloadManager::setHeaderValue(
                               "') is not a valid HTTP header field value."));
   }
 
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
-  registration_->WebRegistration()->SetNavigationPreloadHeader(
-      value, std::make_unique<SetNavigationPreloadHeaderCallbacks>(resolver));
+  registration_->SetNavigationPreloadHeader(value, resolver);
   return promise;
 }
 
 ScriptPromise NavigationPreloadManager::getState(ScriptState* script_state) {
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
-  registration_->WebRegistration()->GetNavigationPreloadState(
-      std::make_unique<GetNavigationPreloadStateCallbacks>(resolver));
+  registration_->GetNavigationPreloadState(resolver);
   return promise;
 }
 
@@ -55,10 +51,9 @@ NavigationPreloadManager::NavigationPreloadManager(
 
 ScriptPromise NavigationPreloadManager::SetEnabled(bool enable,
                                                    ScriptState* script_state) {
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
-  registration_->WebRegistration()->EnableNavigationPreload(
-      enable, std::make_unique<EnableNavigationPreloadCallbacks>(resolver));
+  registration_->EnableNavigationPreload(enable, resolver);
   return promise;
 }
 

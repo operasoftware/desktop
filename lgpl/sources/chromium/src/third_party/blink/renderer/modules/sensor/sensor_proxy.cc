@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/modules/sensor/sensor_proxy.h"
 
-#include "third_party/blink/public/mojom/page/page_visibility_state.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_screen_info.h"
@@ -13,17 +12,15 @@
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/modules/sensor/sensor_provider_proxy.h"
 #include "third_party/blink/renderer/modules/sensor/sensor_reading_remapper.h"
-#include "third_party/blink/renderer/platform/layout_test_support.h"
+#include "third_party/blink/renderer/platform/web_test_support.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
 
-using namespace device::mojom::blink;
-
 const char SensorProxy::kDefaultErrorDescription[] =
     "Could not connect to a sensor";
 
-SensorProxy::SensorProxy(SensorType sensor_type,
+SensorProxy::SensorProxy(device::mojom::blink::SensorType sensor_type,
                          SensorProviderProxy* provider,
                          Page* page)
     : PageVisibilityObserver(page),
@@ -66,14 +63,14 @@ void SensorProxy::ReportError(DOMExceptionCode code, const String& message) {
 
 namespace {
 
-uint16_t GetScreenOrientationAngleForPage(Page* page) {
-  if (LayoutTestSupport::IsRunningLayoutTest()) {
+uint16_t GetScreenOrientationAngle(LocalFrame& frame) {
+  if (WebTestSupport::IsRunningWebTest()) {
     // Simulate that the device is turned 90 degrees on the right.
     // 'orientation_angle' must be 270 as per
     // https://w3c.github.io/screen-orientation/#dfn-update-the-orientation-information.
     return 270;
   }
-  return page->GetChromeClient().GetScreenInfo().orientation_angle;
+  return frame.GetChromeClient().GetScreenInfo(frame).orientation_angle;
 }
 
 }  // namespace
@@ -84,7 +81,9 @@ const device::SensorReading& SensorProxy::GetReading(bool remapped) const {
     if (remapped_reading_.timestamp() != reading_.timestamp()) {
       remapped_reading_ = reading_;
       SensorReadingRemapper::RemapToScreenCoords(
-          type_, GetScreenOrientationAngleForPage(GetPage()),
+          type_,
+          GetScreenOrientationAngle(
+              *provider_->GetSupplementable()->GetFrame()),
           &remapped_reading_);
     }
     return remapped_reading_;
@@ -111,7 +110,7 @@ void SensorProxy::UpdateSuspendedStatus() {
 }
 
 bool SensorProxy::ShouldSuspendUpdates() const {
-  if (GetPage()->VisibilityState() != mojom::PageVisibilityState::kVisible)
+  if (!GetPage()->IsPageVisible())
     return true;
 
   LocalFrame* focused_frame = GetPage()->GetFocusController().FocusedFrame();
@@ -131,7 +130,7 @@ bool SensorProxy::ShouldSuspendUpdates() const {
   return !focused_frame_origin->CanAccess(this_origin);
 }
 
-SensorProvider* SensorProxy::sensor_provider() const {
+device::mojom::blink::SensorProvider* SensorProxy::sensor_provider() const {
   return provider_->sensor_provider();
 }
 

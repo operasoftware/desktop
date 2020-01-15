@@ -31,7 +31,6 @@
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/timer.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -39,7 +38,6 @@ class FetchParameters;
 class ImageResourceContent;
 class ResourceClient;
 class ResourceFetcher;
-class SecurityOrigin;
 
 // ImageResource implements blink::Resource interface and image-specific logic
 // for loading images.
@@ -65,6 +63,10 @@ class CORE_EXPORT ImageResource final
   static ImageResource* Create(const ResourceRequest&);
   static ImageResource* CreateForTest(const KURL&);
 
+  ImageResource(const ResourceRequest&,
+                const ResourceLoaderOptions&,
+                ImageResourceContent*,
+                bool is_placeholder);
   ~ImageResource() override;
 
   ImageResourceContent* GetContent();
@@ -84,10 +86,10 @@ class CORE_EXPORT ImageResource final
 
   scoped_refptr<const SharedBuffer> ResourceBuffer() const override;
   void NotifyStartLoad() override;
-  void ResponseReceived(const ResourceResponse&,
-                        std::unique_ptr<WebDataConsumerHandle>) override;
+  void ResponseReceived(const ResourceResponse&) override;
   void AppendData(const char*, size_t) override;
-  void Finish(TimeTicks finish_time, base::SingleThreadTaskRunner*) override;
+  void Finish(base::TimeTicks finish_time,
+              base::SingleThreadTaskRunner*) override;
   void FinishAsError(const ResourceError&,
                      base::SingleThreadTaskRunner*) override;
 
@@ -120,15 +122,9 @@ class CORE_EXPORT ImageResource final
   class ImageResourceInfoImpl;
   class ImageResourceFactory;
 
-  ImageResource(const ResourceRequest&,
-                const ResourceLoaderOptions&,
-                ImageResourceContent*,
-                bool is_placeholder);
-
   // Only for ImageResourceInfoImpl.
   void DecodeError(bool all_data_received);
   bool IsAccessAllowed(
-      const SecurityOrigin*,
       ImageResourceInfo::DoesCurrentFrameHaveSingleSecurityOrigin) const;
 
   bool HasClientsOrObservers() const override;
@@ -176,7 +172,7 @@ class CORE_EXPORT ImageResource final
   };
   PlaceholderOption placeholder_option_;
 
-  TimeTicks last_flush_time_;
+  base::TimeTicks last_flush_time_;
 
   bool is_during_finish_as_error_ = false;
 

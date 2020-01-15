@@ -35,6 +35,7 @@
 #include "third_party/blink/renderer/core/svg/svg_integer.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
@@ -47,19 +48,22 @@ class SVGAnimatedInteger : public ScriptWrappable,
   USING_GARBAGE_COLLECTED_MIXIN(SVGAnimatedInteger);
 
  public:
-  static SVGAnimatedInteger* Create(SVGElement* context_element,
-                                    const QualifiedName& attribute_name,
-                                    int initial) {
-    SVGInteger* initial_value = SVGInteger::Create(initial);
-    return new SVGAnimatedInteger(context_element, attribute_name,
-                                  initial_value);
-  }
-  static SVGAnimatedInteger* Create(SVGElement* context_element,
-                                    const QualifiedName& attribute_name,
-                                    SVGInteger* initial_value) {
-    return new SVGAnimatedInteger(context_element, attribute_name,
-                                  initial_value);
-  }
+  SVGAnimatedInteger(SVGElement* context_element,
+                     const QualifiedName& attribute_name,
+                     int initial)
+      : SVGAnimatedInteger(context_element,
+                           attribute_name,
+                           MakeGarbageCollected<SVGInteger>(initial)) {}
+
+  SVGAnimatedInteger(SVGElement* context_element,
+                     const QualifiedName& attribute_name,
+                     SVGInteger* initial_value)
+      : SVGAnimatedProperty<SVGInteger>(context_element,
+                                        attribute_name,
+                                        initial_value,
+                                        CSSPropertyID::kInvalid,
+                                        initial_value->Value()),
+        parent_integer_optional_integer_(nullptr) {}
 
   void SynchronizeAttribute() override;
 
@@ -71,16 +75,6 @@ class SVGAnimatedInteger : public ScriptWrappable,
   void Trace(blink::Visitor*) override;
 
  protected:
-  SVGAnimatedInteger(SVGElement* context_element,
-                     const QualifiedName& attribute_name,
-                     SVGInteger* initial_value)
-      : SVGAnimatedProperty<SVGInteger>(context_element,
-                                        attribute_name,
-                                        initial_value,
-                                        CSSPropertyInvalid,
-                                        initial_value->Value()),
-        parent_integer_optional_integer_(nullptr) {}
-
   Member<SVGAnimatedIntegerOptionalInteger> parent_integer_optional_integer_;
 };
 

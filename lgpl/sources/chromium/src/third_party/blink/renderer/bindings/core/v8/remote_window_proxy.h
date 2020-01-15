@@ -45,15 +45,9 @@ namespace blink {
 // using v8::Context::NewRemoteContext().
 class RemoteWindowProxy final : public WindowProxy {
  public:
-  static RemoteWindowProxy* Create(v8::Isolate* isolate,
-                                   RemoteFrame& frame,
-                                   scoped_refptr<DOMWrapperWorld> world) {
-    return new RemoteWindowProxy(isolate, frame, std::move(world));
-  }
-
- private:
   RemoteWindowProxy(v8::Isolate*, RemoteFrame&, scoped_refptr<DOMWrapperWorld>);
 
+ private:
   void Initialize() override;
   void DisposeContext(Lifecycle next_status, FrameReuseStatus) override;
 

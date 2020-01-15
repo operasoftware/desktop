@@ -17,9 +17,9 @@ class MediaControlAnimatedArrowContainerElementTest : public PageTestBase {
   void SetUp() final {
     // Create page and instance of AnimatedArrow to run tests on.
     PageTestBase::SetUp();
-    arrow_element_ =
-        new MediaControlAnimatedArrowContainerElement::AnimatedArrow(
-            "test", GetDocument());
+    arrow_element_ = MakeGarbageCollected<
+        MediaControlAnimatedArrowContainerElement::AnimatedArrow>(
+        "test", GetDocument());
     GetDocument().body()->AppendChild(arrow_element_);
   }
 
@@ -39,14 +39,14 @@ class MediaControlAnimatedArrowContainerElementTest : public PageTestBase {
   void SimulateShow() { arrow_element_->Show(); }
 
   void SimulateAnimationIteration() {
-    Event* event = Event::Create(EventTypeNames::animationiteration);
+    Event* event = Event::Create(event_type_names::kAnimationiteration);
     GetElementById("arrow-3")->DispatchEvent(*event);
   }
 
  private:
   bool SVGElementHasDisplayValue() {
     return GetElementById("jump")->InlineStyle()->HasProperty(
-        CSSPropertyDisplay);
+        CSSPropertyID::kDisplay);
   }
 
   bool SVGElementIsPresent() { return GetElementById("jump"); }

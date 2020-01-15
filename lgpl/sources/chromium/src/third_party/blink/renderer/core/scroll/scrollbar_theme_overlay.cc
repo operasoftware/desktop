@@ -47,6 +47,7 @@ ScrollbarThemeOverlay::ScrollbarThemeOverlay(int thumb_thickness,
       scrollbar_margin_(scrollbar_margin),
       allow_hit_test_(allow_hit_test),
       color_(color),
+      is_mobile_theme_(false),
       use_solid_color_(true) {}
 
 ScrollbarThemeOverlay::ScrollbarThemeOverlay(int thumb_thickness,
@@ -56,13 +57,14 @@ ScrollbarThemeOverlay::ScrollbarThemeOverlay(int thumb_thickness,
       thumb_thickness_(thumb_thickness),
       scrollbar_margin_(scrollbar_margin),
       allow_hit_test_(allow_hit_test),
+      is_mobile_theme_(false),
       use_solid_color_(false) {}
 
 bool ScrollbarThemeOverlay::ShouldRepaintAllPartsOnInvalidation() const {
   return false;
 }
 
-ScrollbarPart ScrollbarThemeOverlay::InvalidateOnThumbPositionChange(
+ScrollbarPart ScrollbarThemeOverlay::PartsToInvalidateOnThumbPositionChange(
     const Scrollbar&,
     float old_position,
     float new_position) const {
@@ -82,22 +84,22 @@ bool ScrollbarThemeOverlay::UsesOverlayScrollbars() const {
   return true;
 }
 
-TimeDelta ScrollbarThemeOverlay::OverlayScrollbarFadeOutDelay() const {
+base::TimeDelta ScrollbarThemeOverlay::OverlayScrollbarFadeOutDelay() const {
   // TODO(bokan): Unit tests run without a theme engine. This is normally fine
   // because they expect to use ScrollbarThemeMock which doesn't use a theme
   // engine.  If overlays are turned on though, this class is used even if mock
   // scrollbars are on. We should either provide mock out a web theme engine for
   // unit tests or provide a mock version of this class.
   if (!Platform::Current()->ThemeEngine())
-    return TimeDelta();
+    return base::TimeDelta();
   WebThemeEngine::ScrollbarStyle style;
   Platform::Current()->ThemeEngine()->GetOverlayScrollbarStyle(&style);
   return style.fade_out_delay;
 }
 
-TimeDelta ScrollbarThemeOverlay::OverlayScrollbarFadeOutDuration() const {
+base::TimeDelta ScrollbarThemeOverlay::OverlayScrollbarFadeOutDuration() const {
   if (!Platform::Current()->ThemeEngine())
-    return TimeDelta();
+    return base::TimeDelta();
   WebThemeEngine::ScrollbarStyle style;
   Platform::Current()->ThemeEngine()->GetOverlayScrollbarStyle(&style);
   return style.fade_out_duration;
@@ -121,19 +123,16 @@ bool ScrollbarThemeOverlay::HasThumb(const Scrollbar& scrollbar) {
   return true;
 }
 
-IntRect ScrollbarThemeOverlay::BackButtonRect(const Scrollbar&,
-                                              ScrollbarPart,
-                                              bool) {
+IntRect ScrollbarThemeOverlay::BackButtonRect(const Scrollbar&, ScrollbarPart) {
   return IntRect();
 }
 
 IntRect ScrollbarThemeOverlay::ForwardButtonRect(const Scrollbar&,
-                                                 ScrollbarPart,
-                                                 bool) {
+                                                 ScrollbarPart) {
   return IntRect();
 }
 
-IntRect ScrollbarThemeOverlay::TrackRect(const Scrollbar& scrollbar, bool) {
+IntRect ScrollbarThemeOverlay::TrackRect(const Scrollbar& scrollbar) {
   IntRect rect = scrollbar.FrameRect();
   if (scrollbar.Orientation() == kHorizontalScrollbar)
     rect.InflateX(-scrollbar_margin_);
@@ -196,8 +195,8 @@ void ScrollbarThemeOverlay::PaintThumb(GraphicsContext& context,
     canvas->scale(-1, 1);
   }
 
-  Platform::Current()->ThemeEngine()->Paint(canvas, part, state, WebRect(rect),
-                                            &params);
+  Platform::Current()->ThemeEngine()->Paint(
+      canvas, part, state, WebRect(rect), &params, scrollbar.UsedColorScheme());
 
   if (scrollbar.IsLeftSideVerticalScrollbar())
     canvas->restore();
@@ -281,6 +280,10 @@ int ScrollbarThemeOverlay::MinimumThumbLength(const Scrollbar& scrollbar) {
       ->ThemeEngine()
       ->GetSize(WebThemeEngine::kPartScrollbarHorizontalThumb)
       .width;
+}
+
+bool ScrollbarThemeOverlay::AllowsHitTest() const {
+  return allow_hit_test_ != kDisallowHitTest;
 }
 
 }  // namespace blink

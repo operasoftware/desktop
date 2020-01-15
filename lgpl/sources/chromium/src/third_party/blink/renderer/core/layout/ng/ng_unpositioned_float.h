@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NGUnpositionedFloat_h
-#define NGUnpositionedFloat_h
+#ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_UNPOSITIONED_FLOAT_H_
+#define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_UNPOSITIONED_FLOAT_H_
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_box_strut.h"
@@ -20,27 +20,37 @@ struct CORE_EXPORT NGUnpositionedFloat final {
   DISALLOW_NEW();
 
  public:
-  NGUnpositionedFloat(NGBlockNode node, const NGBlockBreakToken* token);
-  ~NGUnpositionedFloat();
+  NGUnpositionedFloat(NGBlockNode node, const NGBlockBreakToken* token)
+      : node(node), token(token) {}
 
   NGUnpositionedFloat(NGUnpositionedFloat&&) noexcept = default;
   NGUnpositionedFloat(const NGUnpositionedFloat&) noexcept = default;
   NGUnpositionedFloat& operator=(NGUnpositionedFloat&&) = default;
   NGUnpositionedFloat& operator=(const NGUnpositionedFloat&) = default;
 
+  bool operator==(const NGUnpositionedFloat& other) const {
+    return node == other.node && token == other.token;
+  }
+
   NGBlockNode node;
   scoped_refptr<const NGBlockBreakToken> token;
 
   // layout_result and margins are used as a cache when measuring the
   // inline_size of a float in an inline context.
-  scoped_refptr<NGLayoutResult> layout_result;
+  scoped_refptr<const NGLayoutResult> layout_result;
   NGBoxStrut margins;
 
-  bool IsLeft() const { return node.Style().Floating() == EFloat::kLeft; }
-  bool IsRight() const { return node.Style().Floating() == EFloat::kRight; }
-  EClear ClearType() const { return node.Style().Clear(); }
+  bool IsLineLeft(TextDirection cb_direction) const {
+    return node.Style().Floating(cb_direction) == EFloat::kLeft;
+  }
+  bool IsLineRight(TextDirection cb_direction) const {
+    return node.Style().Floating(cb_direction) == EFloat::kRight;
+  }
+  EClear ClearType(TextDirection cb_direction) const {
+    return node.Style().Clear(cb_direction);
+  }
 };
 
 }  // namespace blink
 
-#endif  // NGUnpositionedFloat_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_UNPOSITIONED_FLOAT_H_

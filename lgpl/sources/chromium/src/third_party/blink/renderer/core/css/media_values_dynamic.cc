@@ -4,6 +4,9 @@
 
 #include "third_party/blink/renderer/core/css/media_values_dynamic.h"
 
+#include "third_party/blink/public/common/css/forced_colors.h"
+#include "third_party/blink/public/common/css/navigation_controls.h"
+#include "third_party/blink/public/common/css/preferred_color_scheme.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_resolution_units.h"
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
@@ -20,8 +23,8 @@ MediaValues* MediaValuesDynamic::Create(Document& document) {
 MediaValues* MediaValuesDynamic::Create(LocalFrame* frame) {
   if (!frame || !frame->View() || !frame->GetDocument() ||
       !frame->GetDocument()->GetLayoutView())
-    return MediaValuesCached::Create();
-  return new MediaValuesDynamic(frame);
+    return MakeGarbageCollected<MediaValuesCached>();
+  return MakeGarbageCollected<MediaValuesDynamic>(frame);
 }
 
 MediaValuesDynamic::MediaValuesDynamic(LocalFrame* frame)
@@ -44,25 +47,25 @@ MediaValuesDynamic::MediaValuesDynamic(LocalFrame* frame,
 }
 
 MediaValues* MediaValuesDynamic::Copy() const {
-  return new MediaValuesDynamic(frame_, viewport_dimensions_overridden_,
-                                viewport_width_override_,
-                                viewport_height_override_);
+  return MakeGarbageCollected<MediaValuesDynamic>(
+      frame_, viewport_dimensions_overridden_, viewport_width_override_,
+      viewport_height_override_);
 }
 
 bool MediaValuesDynamic::ComputeLength(double value,
                                        CSSPrimitiveValue::UnitType type,
                                        int& result) const {
-  return MediaValues::ComputeLength(
-      value, type, CalculateDefaultFontSize(frame_),
-      CalculateViewportWidth(frame_), CalculateViewportHeight(frame_), result);
+  return MediaValues::ComputeLength(value, type,
+                                    CalculateDefaultFontSize(frame_),
+                                    ViewportWidth(), ViewportHeight(), result);
 }
 
 bool MediaValuesDynamic::ComputeLength(double value,
                                        CSSPrimitiveValue::UnitType type,
                                        double& result) const {
-  return MediaValues::ComputeLength(
-      value, type, CalculateDefaultFontSize(frame_),
-      CalculateViewportWidth(frame_), CalculateViewportHeight(frame_), result);
+  return MediaValues::ComputeLength(value, type,
+                                    CalculateDefaultFontSize(frame_),
+                                    ViewportWidth(), ViewportHeight(), result);
 }
 
 double MediaValuesDynamic::ViewportWidth() const {
@@ -125,7 +128,7 @@ const String MediaValuesDynamic::MediaType() const {
   return CalculateMediaType(frame_);
 }
 
-WebDisplayMode MediaValuesDynamic::DisplayMode() const {
+blink::mojom::DisplayMode MediaValuesDynamic::DisplayMode() const {
   return CalculateDisplayMode(frame_);
 }
 
@@ -139,6 +142,22 @@ DisplayShape MediaValuesDynamic::GetDisplayShape() const {
 
 ColorSpaceGamut MediaValuesDynamic::ColorGamut() const {
   return CalculateColorGamut(frame_);
+}
+
+PreferredColorScheme MediaValuesDynamic::GetPreferredColorScheme() const {
+  return CalculatePreferredColorScheme(frame_);
+}
+
+bool MediaValuesDynamic::PrefersReducedMotion() const {
+  return CalculatePrefersReducedMotion(frame_);
+}
+
+ForcedColors MediaValuesDynamic::GetForcedColors() const {
+  return CalculateForcedColors();
+}
+
+NavigationControls MediaValuesDynamic::GetNavigationControls() const {
+  return CalculateNavigationControls(frame_);
 }
 
 Document* MediaValuesDynamic::GetDocument() const {

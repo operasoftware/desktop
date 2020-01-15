@@ -31,17 +31,14 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_CONTEXT_MENU_DATA_H_
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_CONTEXT_MENU_DATA_H_
 
+#include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "third_party/blink/public/platform/web_menu_source_type.h"
 #include "third_party/blink/public/platform/web_point.h"
 #include "third_party/blink/public/platform/web_rect.h"
-#include "third_party/blink/public/platform/web_referrer_policy.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
-#include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/public/web/web_menu_item_info.h"
-
-#define WEBCONTEXT_MEDIATYPEFILE_DEFINED
 
 namespace blink {
 
@@ -81,13 +78,6 @@ struct WebContextMenuData {
 
   // Whether the image in context is a null.
   bool has_image_contents;
-
-  // Whether the image in context is a Client-side Lo-Fi placeholder image.
-  bool is_placeholder_image;
-
-  // If |media_type| is MediaTypeImage and |has_image_contents| is true, then
-  // this contains the image's WebURLResponse.
-  WebURLResponse image_response;
 
   // The absolute URL of the page in context.
   WebURL page_url;
@@ -133,9 +123,11 @@ struct WebContextMenuData {
   // The raw text of the selection in context.
   WebString selected_text;
 
-  // Title attribute or alt attribute (if title is not available) of the
-  // selection in context.
+  // Title attribute of the selection in context.
   WebString title_text;
+
+  // Alt attribute of the selection in context.
+  WebString alt_text;
 
   // Whether spell checking is enabled.
   bool is_spell_checking_enabled;
@@ -200,7 +192,7 @@ struct WebContextMenuData {
   int edit_flags;
 
   // The referrer policy applicable to this context.
-  WebReferrerPolicy referrer_policy;
+  network::mojom::ReferrerPolicy referrer_policy;
 
   // Custom context menu items provided by the WebCore internals.
   WebVector<WebMenuItemInfo> custom_items;

@@ -35,7 +35,7 @@
 #include <memory>
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -55,24 +55,22 @@ class PLATFORM_EXPORT MediaStreamDescriptorClient
 };
 
 class PLATFORM_EXPORT MediaStreamDescriptor final
-    : public GarbageCollectedFinalized<MediaStreamDescriptor> {
+    : public GarbageCollected<MediaStreamDescriptor> {
  private:
   static int GenerateUniqueId();
 
  public:
   // Only used for AudioDestinationNode.
-  static MediaStreamDescriptor* Create(
-      const MediaStreamSourceVector& audio_sources,
-      const MediaStreamSourceVector& video_sources);
-
-  static MediaStreamDescriptor* Create(
-      const MediaStreamComponentVector& audio_components,
-      const MediaStreamComponentVector& video_components);
-
-  static MediaStreamDescriptor* Create(
-      const String& id,
-      const MediaStreamComponentVector& audio_components,
-      const MediaStreamComponentVector& video_components);
+  MediaStreamDescriptor(const MediaStreamSourceVector& audio_sources,
+                        const MediaStreamSourceVector& video_sources);
+  MediaStreamDescriptor(const String& id,
+                        const MediaStreamSourceVector& audio_sources,
+                        const MediaStreamSourceVector& video_sources);
+  MediaStreamDescriptor(const MediaStreamComponentVector& audio_components,
+                        const MediaStreamComponentVector& video_components);
+  MediaStreamDescriptor(const String& id,
+                        const MediaStreamComponentVector& audio_components,
+                        const MediaStreamComponentVector& video_components);
 
   MediaStreamDescriptorClient* Client() const { return client_; }
   void SetClient(MediaStreamDescriptorClient* client) { client_ = client; }
@@ -89,10 +87,16 @@ class PLATFORM_EXPORT MediaStreamDescriptor final
   MediaStreamComponent* AudioComponent(unsigned index) const {
     return audio_components_[index].Get();
   }
+  const HeapVector<Member<MediaStreamComponent>>& AudioComponents() const {
+    return audio_components_;
+  }
 
   unsigned NumberOfVideoComponents() const { return video_components_.size(); }
   MediaStreamComponent* VideoComponent(unsigned index) const {
     return video_components_[index].Get();
+  }
+  const HeapVector<Member<MediaStreamComponent>>& VideoComponents() const {
+    return video_components_;
   }
 
   void AddComponent(MediaStreamComponent*);
@@ -107,20 +111,9 @@ class PLATFORM_EXPORT MediaStreamDescriptor final
   void AddObserver(WebMediaStreamObserver*);
   void RemoveObserver(WebMediaStreamObserver*);
 
-  // |m_extraData| may hold pointers to GC objects, and it may touch them in
-  // destruction.  So this class is eagerly finalized to finalize |m_extraData|
-  // promptly.
-  EAGERLY_FINALIZE();
   void Trace(blink::Visitor*);
 
  private:
-  MediaStreamDescriptor(const String& id,
-                        const MediaStreamSourceVector& audio_sources,
-                        const MediaStreamSourceVector& video_sources);
-  MediaStreamDescriptor(const String& id,
-                        const MediaStreamComponentVector& audio_components,
-                        const MediaStreamComponentVector& video_components);
-
   Member<MediaStreamDescriptorClient> client_;
   String id_;
   int unique_id_;

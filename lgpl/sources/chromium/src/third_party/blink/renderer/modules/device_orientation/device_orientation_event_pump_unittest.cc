@@ -7,12 +7,14 @@
 #include <memory>
 
 #include "base/run_loop.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/device/public/cpp/test/fake_sensor_and_provider.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/renderer/core/frame/platform_event_controller.h"
 #include "third_party/blink/renderer/modules/device_orientation/device_orientation_data.h"
 #include "third_party/blink/renderer/modules/device_orientation/device_orientation_event_pump.h"
+#include "third_party/blink/renderer/modules/device_orientation/device_sensor_entry.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 
 namespace {
@@ -26,7 +28,7 @@ namespace blink {
 using device::FakeSensorProvider;
 
 class MockDeviceOrientationController final
-    : public GarbageCollectedFinalized<MockDeviceOrientationController>,
+    : public GarbageCollected<MockDeviceOrientationController>,
       public PlatformEventController {
   USING_GARBAGE_COLLECTED_MIXIN(MockDeviceOrientationController);
 
@@ -53,7 +55,13 @@ class MockDeviceOrientationController final
   }
 
   void RegisterWithDispatcher() override {
-    orientation_pump_->AddController(this);
+    // In the typical case, |frame| should be non-null. Passing nullptr here
+    // causes DeviceOrientationEventPump to exit early from StartListening
+    // before DeviceOrientationEventPump::Start is called. As a workaround,
+    // Start is called manually by each test case.
+    // TODO(crbug.com/850619): Ensure a non-null LocalFrame is passed, and use
+    // SetController/RemoveController to start and stop the event pump.
+    orientation_pump_->SetController(this);
   }
 
   bool HasLastData() override {
@@ -61,12 +69,12 @@ class MockDeviceOrientationController final
   }
 
   void UnregisterWithDispatcher() override {
-    orientation_pump_->RemoveController(this);
+    orientation_pump_->RemoveController();
   }
 
   const DeviceOrientationData* data() {
     return orientation_pump_->LatestDeviceOrientationData();
-  };
+  }
 
   DeviceOrientationEventPump* orientation_pump() {
     return orientation_pump_.Get();
@@ -85,22 +93,22 @@ class DeviceOrientationEventPumpTest : public testing::Test {
 
  protected:
   void SetUp() override {
-    device::mojom::SensorProviderPtrInfo sensor_provider_ptr_info;
-    sensor_provider_.Bind(mojo::MakeRequest(&sensor_provider_ptr_info));
-    auto* orientation_pump = new DeviceOrientationEventPump(
+    mojo::PendingRemote<device::mojom::SensorProvider> sensor_provider;
+    sensor_provider_.Bind(sensor_provider.InitWithNewPipeAndPassReceiver());
+    auto* orientation_pump = MakeGarbageCollected<DeviceOrientationEventPump>(
         base::ThreadTaskRunnerHandle::Get(), false /* absolute */);
     orientation_pump->SetSensorProviderForTesting(
-        device::mojom::blink::SensorProviderPtr(
-            device::mojom::blink::SensorProviderPtrInfo(
-                sensor_provider_ptr_info.PassHandle(),
-                device::mojom::SensorProvider::Version_)));
+        mojo::PendingRemote<device::mojom::blink::SensorProvider>(
+            sensor_provider.PassPipe(),
+            device::mojom::SensorProvider::Version_));
 
-    controller_ = new MockDeviceOrientationController(orientation_pump);
+    controller_ =
+        MakeGarbageCollected<MockDeviceOrientationController>(orientation_pump);
 
     ExpectRelativeOrientationSensorStateToBe(
-        DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+        DeviceSensorEntry::State::NOT_INITIALIZED);
     ExpectAbsoluteOrientationSensorStateToBe(
-        DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+        DeviceSensorEntry::State::NOT_INITIALIZED);
     EXPECT_EQ(DeviceOrientationEventPump::PumpState::STOPPED,
               controller_->orientation_pump()->GetPumpStateForTesting());
   }
@@ -108,17 +116,17 @@ class DeviceOrientationEventPumpTest : public testing::Test {
   void FireEvent() { controller_->orientation_pump()->FireEvent(nullptr); }
 
   void ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState expected_sensor_state) {
-    EXPECT_EQ(expected_sensor_state,
-              controller_->orientation_pump()
-                  ->relative_orientation_sensor_.sensor_state);
+      DeviceSensorEntry::State expected_sensor_state) {
+    EXPECT_EQ(
+        expected_sensor_state,
+        controller_->orientation_pump()->relative_orientation_sensor_->state());
   }
 
   void ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState expected_sensor_state) {
-    EXPECT_EQ(expected_sensor_state,
-              controller_->orientation_pump()
-                  ->absolute_orientation_sensor_.sensor_state);
+      DeviceSensorEntry::State expected_sensor_state) {
+    EXPECT_EQ(
+        expected_sensor_state,
+        controller_->orientation_pump()->absolute_orientation_sensor_->state());
   }
 
   MockDeviceOrientationController* controller() { return controller_.Get(); }
@@ -136,32 +144,28 @@ TEST_F(DeviceOrientationEventPumpTest, MultipleStartAndStopWithWait) {
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
   EXPECT_EQ(DeviceOrientationEventPump::PumpState::RUNNING,
             controller()->orientation_pump()->GetPumpStateForTesting());
 
   controller()->orientation_pump()->Stop();
   base::RunLoop().RunUntilIdle();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
   EXPECT_EQ(DeviceOrientationEventPump::PumpState::STOPPED,
             controller()->orientation_pump()->GetPumpStateForTesting());
 
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
   EXPECT_EQ(DeviceOrientationEventPump::PumpState::RUNNING,
             controller()->orientation_pump()->GetPumpStateForTesting());
 
   controller()->orientation_pump()->Stop();
   base::RunLoop().RunUntilIdle();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
   EXPECT_EQ(DeviceOrientationEventPump::PumpState::STOPPED,
             controller()->orientation_pump()->GetPumpStateForTesting());
 }
@@ -174,9 +178,8 @@ TEST_F(DeviceOrientationEventPumpTest,
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
   EXPECT_EQ(DeviceOrientationEventPump::PumpState::RUNNING,
             controller()->orientation_pump()->GetPumpStateForTesting());
 
@@ -184,9 +187,8 @@ TEST_F(DeviceOrientationEventPumpTest,
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
   EXPECT_EQ(DeviceOrientationEventPump::PumpState::STOPPED,
             controller()->orientation_pump()->GetPumpStateForTesting());
 
@@ -194,9 +196,8 @@ TEST_F(DeviceOrientationEventPumpTest,
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
   EXPECT_EQ(DeviceOrientationEventPump::PumpState::RUNNING,
             controller()->orientation_pump()->GetPumpStateForTesting());
 
@@ -204,9 +205,8 @@ TEST_F(DeviceOrientationEventPumpTest,
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
   EXPECT_EQ(DeviceOrientationEventPump::PumpState::STOPPED,
             controller()->orientation_pump()->GetPumpStateForTesting());
 }
@@ -216,7 +216,7 @@ TEST_F(DeviceOrientationEventPumpTest, CallStop) {
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest, CallStopWithSensorFallback) {
@@ -226,9 +226,9 @@ TEST_F(DeviceOrientationEventPumpTest, CallStopWithSensorFallback) {
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
   ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest, CallStartAndStop) {
@@ -236,8 +236,7 @@ TEST_F(DeviceOrientationEventPumpTest, CallStartAndStop) {
   controller()->orientation_pump()->Stop();
   base::RunLoop().RunUntilIdle();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest, CallStartAndStopWithSensorFallback) {
@@ -248,9 +247,8 @@ TEST_F(DeviceOrientationEventPumpTest, CallStartAndStopWithSensorFallback) {
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest, CallStartMultipleTimes) {
@@ -259,8 +257,7 @@ TEST_F(DeviceOrientationEventPumpTest, CallStartMultipleTimes) {
   controller()->orientation_pump()->Stop();
   base::RunLoop().RunUntilIdle();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest,
@@ -273,9 +270,8 @@ TEST_F(DeviceOrientationEventPumpTest,
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest, CallStopMultipleTimes) {
@@ -284,8 +280,7 @@ TEST_F(DeviceOrientationEventPumpTest, CallStopMultipleTimes) {
   controller()->orientation_pump()->Stop();
   base::RunLoop().RunUntilIdle();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest,
@@ -298,9 +293,8 @@ TEST_F(DeviceOrientationEventPumpTest,
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 // Test a sequence of Start(), Stop(), Start() calls only bind sensor once.
@@ -310,13 +304,11 @@ TEST_F(DeviceOrientationEventPumpTest, SensorOnlyBindOnce) {
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   controller()->orientation_pump()->Stop();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 // Test when using fallback from relative orientation to absolute orientation,
@@ -330,16 +322,14 @@ TEST_F(DeviceOrientationEventPumpTest, SensorOnlyBindOnceWithSensorFallback) {
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   controller()->orientation_pump()->Stop();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest, SensorIsActive) {
@@ -347,8 +337,7 @@ TEST_F(DeviceOrientationEventPumpTest, SensorIsActive) {
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   sensor_provider()->UpdateRelativeOrientationSensorData(
       1 /* alpha */, 2 /* beta */, 3 /* gamma */);
@@ -370,8 +359,7 @@ TEST_F(DeviceOrientationEventPumpTest, SensorIsActive) {
 
   controller()->orientation_pump()->Stop();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest, SensorIsActiveWithSensorFallback) {
@@ -382,9 +370,8 @@ TEST_F(DeviceOrientationEventPumpTest, SensorIsActiveWithSensorFallback) {
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   sensor_provider()->UpdateAbsoluteOrientationSensorData(
       4 /* alpha */, 5 /* beta */, 6 /* gamma */);
@@ -411,9 +398,8 @@ TEST_F(DeviceOrientationEventPumpTest, SensorIsActiveWithSensorFallback) {
   controller()->orientation_pump()->Stop();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest, SomeSensorDataFieldsNotAvailable) {
@@ -421,8 +407,7 @@ TEST_F(DeviceOrientationEventPumpTest, SomeSensorDataFieldsNotAvailable) {
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   sensor_provider()->UpdateRelativeOrientationSensorData(
       NAN /* alpha */, 2 /* beta */, 3 /* gamma */);
@@ -441,8 +426,7 @@ TEST_F(DeviceOrientationEventPumpTest, SomeSensorDataFieldsNotAvailable) {
 
   controller()->orientation_pump()->Stop();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest,
@@ -454,9 +438,8 @@ TEST_F(DeviceOrientationEventPumpTest,
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   sensor_provider()->UpdateAbsoluteOrientationSensorData(
       4 /* alpha */, NAN /* beta */, 6 /* gamma */);
@@ -481,9 +464,8 @@ TEST_F(DeviceOrientationEventPumpTest,
   controller()->orientation_pump()->Stop();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest, FireAllNullEvent) {
@@ -496,9 +478,9 @@ TEST_F(DeviceOrientationEventPumpTest, FireAllNullEvent) {
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
   ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
 
   FireEvent();
 
@@ -513,9 +495,9 @@ TEST_F(DeviceOrientationEventPumpTest, FireAllNullEvent) {
   controller()->orientation_pump()->Stop();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
   ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest,
@@ -524,8 +506,7 @@ TEST_F(DeviceOrientationEventPumpTest,
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   FireEvent();
 
@@ -533,8 +514,7 @@ TEST_F(DeviceOrientationEventPumpTest,
 
   controller()->orientation_pump()->Stop();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest,
@@ -546,9 +526,8 @@ TEST_F(DeviceOrientationEventPumpTest,
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   FireEvent();
 
@@ -557,9 +536,8 @@ TEST_F(DeviceOrientationEventPumpTest,
   controller()->orientation_pump()->Stop();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest, UpdateRespectsOrientationThreshold) {
@@ -567,8 +545,7 @@ TEST_F(DeviceOrientationEventPumpTest, UpdateRespectsOrientationThreshold) {
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   sensor_provider()->UpdateRelativeOrientationSensorData(
       1 /* alpha */, 2 /* beta */, 3 /* gamma */);
@@ -629,8 +606,7 @@ TEST_F(DeviceOrientationEventPumpTest, UpdateRespectsOrientationThreshold) {
 
   controller()->orientation_pump()->Stop();
 
-  ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectRelativeOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceOrientationEventPumpTest,
@@ -642,9 +618,8 @@ TEST_F(DeviceOrientationEventPumpTest,
   base::RunLoop().RunUntilIdle();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   sensor_provider()->UpdateAbsoluteOrientationSensorData(
       4 /* alpha */, 5 /* beta */, 6 /* gamma */);
@@ -713,9 +688,8 @@ TEST_F(DeviceOrientationEventPumpTest,
   controller()->orientation_pump()->Stop();
 
   ExpectRelativeOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 class DeviceAbsoluteOrientationEventPumpTest : public testing::Test {
@@ -724,20 +698,20 @@ class DeviceAbsoluteOrientationEventPumpTest : public testing::Test {
 
  protected:
   void SetUp() override {
-    device::mojom::SensorProviderPtrInfo sensor_provider_ptr_info;
-    sensor_provider_.Bind(mojo::MakeRequest(&sensor_provider_ptr_info));
-    auto* absolute_orientation_pump = new DeviceOrientationEventPump(
-        base::ThreadTaskRunnerHandle::Get(), true /* absolute */);
+    mojo::PendingRemote<device::mojom::SensorProvider> sensor_provider;
+    sensor_provider_.Bind(sensor_provider.InitWithNewPipeAndPassReceiver());
+    auto* absolute_orientation_pump =
+        MakeGarbageCollected<DeviceOrientationEventPump>(
+            base::ThreadTaskRunnerHandle::Get(), true /* absolute */);
     absolute_orientation_pump->SetSensorProviderForTesting(
-        device::mojom::blink::SensorProviderPtr(
-            device::mojom::blink::SensorProviderPtrInfo(
-                sensor_provider_ptr_info.PassHandle(),
-                device::mojom::SensorProvider::Version_)));
-    controller_ =
-        new MockDeviceOrientationController(absolute_orientation_pump);
+        mojo::PendingRemote<device::mojom::blink::SensorProvider>(
+            sensor_provider.PassPipe(),
+            device::mojom::SensorProvider::Version_));
+    controller_ = MakeGarbageCollected<MockDeviceOrientationController>(
+        absolute_orientation_pump);
 
     ExpectAbsoluteOrientationSensorStateToBe(
-        DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+        DeviceSensorEntry::State::NOT_INITIALIZED);
     EXPECT_EQ(DeviceOrientationEventPump::PumpState::STOPPED,
               controller_->orientation_pump()->GetPumpStateForTesting());
   }
@@ -745,10 +719,10 @@ class DeviceAbsoluteOrientationEventPumpTest : public testing::Test {
   void FireEvent() { controller_->orientation_pump()->FireEvent(nullptr); }
 
   void ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState expected_sensor_state) {
-    EXPECT_EQ(expected_sensor_state,
-              controller_->orientation_pump()
-                  ->absolute_orientation_sensor_.sensor_state);
+      DeviceSensorEntry::State expected_sensor_state) {
+    EXPECT_EQ(
+        expected_sensor_state,
+        controller_->orientation_pump()->absolute_orientation_sensor_->state());
   }
 
   MockDeviceOrientationController* controller() { return controller_.Get(); }
@@ -766,32 +740,28 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest, MultipleStartAndStopWithWait) {
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
   EXPECT_EQ(DeviceOrientationEventPump::PumpState::RUNNING,
             controller()->orientation_pump()->GetPumpStateForTesting());
 
   controller()->orientation_pump()->Stop();
   base::RunLoop().RunUntilIdle();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
   EXPECT_EQ(DeviceOrientationEventPump::PumpState::STOPPED,
             controller()->orientation_pump()->GetPumpStateForTesting());
 
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
   EXPECT_EQ(DeviceOrientationEventPump::PumpState::RUNNING,
             controller()->orientation_pump()->GetPumpStateForTesting());
 
   controller()->orientation_pump()->Stop();
   base::RunLoop().RunUntilIdle();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
   EXPECT_EQ(DeviceOrientationEventPump::PumpState::STOPPED,
             controller()->orientation_pump()->GetPumpStateForTesting());
 }
@@ -801,7 +771,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest, CallStop) {
   base::RunLoop().RunUntilIdle();
 
   ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
 }
 
 TEST_F(DeviceAbsoluteOrientationEventPumpTest, CallStartAndStop) {
@@ -809,8 +779,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest, CallStartAndStop) {
   controller()->orientation_pump()->Stop();
   base::RunLoop().RunUntilIdle();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceAbsoluteOrientationEventPumpTest, CallStartMultipleTimes) {
@@ -819,8 +788,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest, CallStartMultipleTimes) {
   controller()->orientation_pump()->Stop();
   base::RunLoop().RunUntilIdle();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceAbsoluteOrientationEventPumpTest, CallStopMultipleTimes) {
@@ -829,8 +797,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest, CallStopMultipleTimes) {
   controller()->orientation_pump()->Stop();
   base::RunLoop().RunUntilIdle();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 // Test multiple DeviceSensorEventPump::Start() calls only bind sensor once.
@@ -840,13 +807,11 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest, SensorOnlyBindOnce) {
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   controller()->orientation_pump()->Stop();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceAbsoluteOrientationEventPumpTest, SensorIsActive) {
@@ -854,8 +819,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest, SensorIsActive) {
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   sensor_provider()->UpdateAbsoluteOrientationSensorData(
       4 /* alpha */, 5 /* beta */, 6 /* gamma */);
@@ -875,8 +839,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest, SensorIsActive) {
 
   controller()->orientation_pump()->Stop();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceAbsoluteOrientationEventPumpTest,
@@ -885,8 +848,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest,
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   sensor_provider()->UpdateAbsoluteOrientationSensorData(
       4 /* alpha */, NAN /* beta */, 6 /* gamma */);
@@ -905,8 +867,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest,
 
   controller()->orientation_pump()->Stop();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceAbsoluteOrientationEventPumpTest, FireAllNullEvent) {
@@ -918,7 +879,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest, FireAllNullEvent) {
   base::RunLoop().RunUntilIdle();
 
   ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
 
   FireEvent();
 
@@ -933,7 +894,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest, FireAllNullEvent) {
   controller()->orientation_pump()->Stop();
 
   ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::NOT_INITIALIZED);
+      DeviceSensorEntry::State::NOT_INITIALIZED);
 }
 
 TEST_F(DeviceAbsoluteOrientationEventPumpTest,
@@ -942,8 +903,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest,
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   FireEvent();
 
@@ -951,8 +911,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest,
 
   controller()->orientation_pump()->Stop();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 TEST_F(DeviceAbsoluteOrientationEventPumpTest,
@@ -961,8 +920,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest,
   controller()->orientation_pump()->Start(nullptr);
   base::RunLoop().RunUntilIdle();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::ACTIVE);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::ACTIVE);
 
   sensor_provider()->UpdateAbsoluteOrientationSensorData(
       4 /* alpha */, 5 /* beta */, 6 /* gamma */);
@@ -1025,8 +983,7 @@ TEST_F(DeviceAbsoluteOrientationEventPumpTest,
 
   controller()->orientation_pump()->Stop();
 
-  ExpectAbsoluteOrientationSensorStateToBe(
-      DeviceOrientationEventPump::SensorState::SUSPENDED);
+  ExpectAbsoluteOrientationSensorStateToBe(DeviceSensorEntry::State::SUSPENDED);
 }
 
 }  // namespace blink

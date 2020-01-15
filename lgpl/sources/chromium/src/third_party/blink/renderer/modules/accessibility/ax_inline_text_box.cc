@@ -34,28 +34,31 @@
 #include "third_party/blink/renderer/modules/accessibility/ax_object_cache_impl.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_position.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_range.h"
-#include "third_party/blink/renderer/platform/layout_unit.h"
+#include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 
 namespace blink {
-
-using namespace HTMLNames;
 
 AXInlineTextBox::AXInlineTextBox(
     scoped_refptr<AbstractInlineTextBox> inline_text_box,
     AXObjectCacheImpl& ax_object_cache)
     : AXObject(ax_object_cache), inline_text_box_(std::move(inline_text_box)) {}
 
-AXInlineTextBox* AXInlineTextBox::Create(
-    scoped_refptr<AbstractInlineTextBox> inline_text_box,
-    AXObjectCacheImpl& ax_object_cache) {
-  return new AXInlineTextBox(std::move(inline_text_box), ax_object_cache);
-}
-
 void AXInlineTextBox::Init() {}
 
 void AXInlineTextBox::Detach() {
   AXObject::Detach();
   inline_text_box_ = nullptr;
+}
+
+bool AXInlineTextBox::IsLineBreakingObject() const {
+  if (IsDetached())
+    return AXObject::IsLineBreakingObject();
+
+  // If this object is a forced line break, or the parent is a <br>
+  // element, then this object is line breaking.
+  const AXObject* parent = ParentObject();
+  return inline_text_box_->IsLineBreak() ||
+         (parent && parent->RoleValue() == ax::mojom::Role::kLineBreak);
 }
 
 void AXInlineTextBox::GetRelativeBounds(AXObject** out_container,
@@ -112,19 +115,19 @@ void AXInlineTextBox::TextCharacterOffsets(Vector<int>& offsets) const {
   }
 }
 
-void AXInlineTextBox::GetWordBoundaries(Vector<AXRange>& words) const {
-  if (!inline_text_box_ || inline_text_box_->GetText().ContainsOnlyWhitespace())
+void AXInlineTextBox::GetWordBoundaries(Vector<int>& word_starts,
+                                        Vector<int>& word_ends) const {
+  if (!inline_text_box_ ||
+      inline_text_box_->GetText().ContainsOnlyWhitespaceOrEmpty())
     return;
 
   Vector<AbstractInlineTextBox::WordBoundaries> boundaries;
   inline_text_box_->GetWordBoundaries(boundaries);
-  words.ReserveCapacity(boundaries.size());
+  word_starts.ReserveCapacity(boundaries.size());
+  word_ends.ReserveCapacity(boundaries.size());
   for (const auto& boundary : boundaries) {
-    const AXRange range(
-        AXPosition::CreatePositionInTextObject(*this, boundary.start_index),
-        AXPosition::CreatePositionInTextObject(*this, boundary.end_index));
-    if (range.IsValid())
-      words.push_back(range);
+    word_starts.push_back(boundary.start_index);
+    word_ends.push_back(boundary.end_index);
   }
 }
 
@@ -141,8 +144,9 @@ AXObject* AXInlineTextBox::ComputeParent() const {
   DCHECK(!IsDetached());
   if (!inline_text_box_ || !ax_object_cache_)
     return nullptr;
-
   LineLayoutText line_layout_text = inline_text_box_->GetLineLayoutItem();
+  if (!line_layout_text)
+    return nullptr;
   return ax_object_cache_->GetOrCreate(
       LineLayoutAPIShim::LayoutObjectFrom(line_layout_text));
 }
@@ -175,27 +179,27 @@ Node* AXInlineTextBox::GetNode() const {
 }
 
 AXObject* AXInlineTextBox::NextOnLine() const {
+  if (inline_text_box_->IsLast())
+    return ParentObject()->NextOnLine();
+
   scoped_refptr<AbstractInlineTextBox> next_on_line =
       inline_text_box_->NextOnLine();
   if (next_on_line)
     return ax_object_cache_->GetOrCreate(next_on_line.get());
 
-  if (!inline_text_box_->IsLast())
-    return nullptr;
-
-  return ParentObject()->NextOnLine();
+  return nullptr;
 }
 
 AXObject* AXInlineTextBox::PreviousOnLine() const {
+  if (inline_text_box_->IsFirst())
+    return ParentObject()->PreviousOnLine();
+
   scoped_refptr<AbstractInlineTextBox> previous_on_line =
       inline_text_box_->PreviousOnLine();
   if (previous_on_line)
     return ax_object_cache_->GetOrCreate(previous_on_line.get());
 
-  if (!inline_text_box_->IsFirst())
-    return nullptr;
-
-  return ParentObject()->PreviousOnLine();
+  return nullptr;
 }
 
 }  // namespace blink

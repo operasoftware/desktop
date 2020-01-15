@@ -30,6 +30,7 @@
 #include "base/gtest_prod_util.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document_lifecycle.h"
+#include "third_party/blink/renderer/core/paint/compositing/compositing_inputs_root.h"
 #include "third_party/blink/renderer/core/paint/compositing/compositing_reason_finder.h"
 
 namespace blink {
@@ -65,7 +66,7 @@ enum CompositingStateTransitionType {
 // decides for each PaintLayer whether it should get a CompositedLayerMapping,
 // and asks each CLM to set up its GraphicsLayers.
 //
-// In Slimming Paint v2, PaintLayerCompositor will be eventually replaced by
+// With CompositeAfterPaint, PaintLayerCompositor will be eventually replaced by
 // PaintArtifactCompositor.
 
 class CORE_EXPORT PaintLayerCompositor {
@@ -74,6 +75,15 @@ class CORE_EXPORT PaintLayerCompositor {
  public:
   explicit PaintLayerCompositor(LayoutView&);
   ~PaintLayerCompositor();
+
+  // Called while the LocalFrame behind the LayoutView is being detached.
+  // Pointers in other objects should be cleaned up at this point, before
+  // pointers out of this object become invalid.
+  void CleanUp();
+
+  // Called after layout is performed on the LocalFrame holding the LayoutView,
+  // during the document lifecycle update.
+  void DidLayout();
 
   void UpdateIfNeededRecursive(DocumentLifecycle::LifecycleState target_state);
 
@@ -95,18 +105,13 @@ class CORE_EXPORT PaintLayerCompositor {
 
   bool RootShouldAlwaysComposite() const;
 
-  // Copy the accelerated compositing related flags from Settings
+  // Notifies about changes to PreferCompositingToLCDText or
+  // AcceleratedCompositing.
   void UpdateAcceleratedCompositingSettings();
 
   // Used to indicate that a compositing update will be needed for the next
   // frame that gets drawn.
   void SetNeedsCompositingUpdate(CompositingUpdateType);
-
-  void DidLayout();
-
-  // Whether layer's compositedLayerMapping needs a GraphicsLayer to clip
-  // z-order children of the given Layer.
-  bool ClipsCompositingDescendants(const PaintLayer*) const;
 
   // Whether the given layer needs an extra 'contents' layer.
   bool NeedsContentsCompositingLayer(const PaintLayer*) const;
@@ -124,13 +129,8 @@ class CORE_EXPORT PaintLayerCompositor {
 
   // Returns the GraphicsLayer we should start painting from. This can differ
   // from above in some cases, e.g.  when the RootGraphicsLayer is detached and
-  // swapped out for an overlay video layer.
+  // swapped out for an overlay video or immersive-ar DOM overlay layer.
   GraphicsLayer* PaintRootGraphicsLayer() const;
-
-  // The LayoutView's scroll layer.
-  GraphicsLayer* ScrollLayer() const;
-
-  void SetIsInWindow(bool);
 
   static PaintLayerCompositor* FrameContentsCompositor(LayoutEmbeddedContent&);
   // Return true if the layers changed.
@@ -152,9 +152,20 @@ class CORE_EXPORT PaintLayerCompositor {
       PaintLayer*,
       CompositingStateTransitionType composited_layer_update);
 
-  bool InOverlayFullscreenVideo() const { return in_overlay_fullscreen_video_; }
+  void AttachRootLayerViaChromeClient();
 
-  bool IsRootScrollerAncestor() const;
+  PaintLayer* GetCompositingInputsRoot() {
+    return compositing_inputs_root_.Get();
+  }
+
+  void ClearCompositingInputsRoot() { compositing_inputs_root_.Clear(); }
+
+  void UpdateCompositingInputsRoot(PaintLayer* layer) {
+    compositing_inputs_root_.Update(layer);
+  }
+
+  void ForceRecomputeVisualRectsIncludingNonCompositingDescendants(
+      LayoutObject&);
 
  private:
 #if DCHECK_IS_ON()
@@ -169,14 +180,8 @@ class CORE_EXPORT PaintLayerCompositor {
   void UpdateIfNeeded(DocumentLifecycle::LifecycleState target_state,
                       CompositingReasonsStats&);
 
-  void EnsureRootLayer();
-  void DestroyRootLayer();
-
   void AttachRootLayer();
   void DetachRootLayer();
-
-  void AttachCompositorTimeline();
-  void DetachCompositorTimeline();
 
   Page* GetPage() const;
 
@@ -198,24 +203,25 @@ class CORE_EXPORT PaintLayerCompositor {
   GraphicsLayer* ParentForContentLayers(
       GraphicsLayer* child_frame_parent_candidate = nullptr) const;
 
+  GraphicsLayer* GetXrImmersiveDomOverlayLayer() const;
+
   LayoutView& layout_view_;
+  const bool has_accelerated_compositing_ = true;
 
-  CompositingReasonFinder compositing_reason_finder_;
-
-  CompositingUpdateType pending_update_type_;
-
-  bool has_accelerated_compositing_;
-  bool compositing_;
+  bool compositing_ = false;
 
   // The root layer doesn't composite if it's a non-scrollable frame.
   // So, after a layout we set this dirty bit to know that we need
   // to recompute whether the root layer should composite even if
   // none of its descendants composite.
-  // FIXME: Get rid of all the callers of setCompositingModeEnabled
-  // except the one in updateIfNeeded, then rename this to
-  // m_compositingDirty.
-  bool root_should_always_composite_dirty_;
-  bool in_overlay_fullscreen_video_;
+  // FIXME: Get rid of all the callers of SetCompositingModeEnabled()
+  // except the one in UpdateIfNeeded(), then rename this to
+  // compositing_dirty_.
+  bool root_should_always_composite_dirty_ = true;
+
+  // After initialization, compositing updates must be done, so start dirty.
+  CompositingUpdateType pending_update_type_ =
+      kCompositingUpdateAfterCompositingInputChange;
 
   enum RootLayerAttachment {
     kRootLayerUnattached,
@@ -223,7 +229,9 @@ class CORE_EXPORT PaintLayerCompositor {
     kRootLayerAttachedViaChromeClient,
     kRootLayerAttachedViaEnclosingFrame
   };
-  RootLayerAttachment root_layer_attachment_;
+  RootLayerAttachment root_layer_attachment_ = kRootLayerUnattached;
+
+  CompositingInputsRoot compositing_inputs_root_;
 
   FRIEND_TEST_ALL_PREFIXES(FrameThrottlingTest,
                            IntersectionObservationOverridesThrottling);

@@ -25,6 +25,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOCUMENT_TYPE_H_
 
 #include "third_party/blink/renderer/core/dom/node.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -36,33 +37,37 @@ class DocumentType final : public Node {
                               const String& name,
                               const String& public_id,
                               const String& system_id) {
-    return new DocumentType(document, name, public_id, system_id);
+    return MakeGarbageCollected<DocumentType>(document, name, public_id,
+                                              system_id);
   }
+
+  DocumentType(Document*,
+               const String& name,
+               const String& public_id,
+               const String& system_id);
 
   const String& name() const { return name_; }
   const String& publicId() const { return public_id_; }
   const String& systemId() const { return system_id_; }
 
  private:
-  DocumentType(Document*,
-               const String& name,
-               const String& public_id,
-               const String& system_id);
-
   String nodeName() const override;
   NodeType getNodeType() const override;
   Node* Clone(Document&, CloneChildrenFlag) const override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void RemovedFrom(ContainerNode&) override;
-  void DetachLayoutTree(const AttachContext&) final {}
+  void DetachLayoutTree(bool performing_reattach) final {}
 
   String name_;
   String public_id_;
   String system_id_;
 };
 
-DEFINE_NODE_TYPE_CASTS(DocumentType, IsDocumentTypeNode());
+template <>
+struct DowncastTraits<DocumentType> {
+  static bool AllowFrom(const Node& node) { return node.IsDocumentTypeNode(); }
+};
 
 }  // namespace blink
 

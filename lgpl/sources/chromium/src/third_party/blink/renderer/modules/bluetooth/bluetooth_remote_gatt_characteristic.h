@@ -5,10 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_BLUETOOTH_BLUETOOTH_REMOTE_GATT_CHARACTERISTIC_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_BLUETOOTH_BLUETOOTH_REMOTE_GATT_CHARACTERISTIC_H_
 
-#include "mojo/public/cpp/bindings/associated_binding_set.h"
-#include "third_party/blink/public/platform/modules/bluetooth/web_bluetooth.mojom-blink.h"
+#include "mojo/public/cpp/bindings/associated_receiver_set.h"
+#include "third_party/blink/public/mojom/bluetooth/web_bluetooth.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
-#include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_piece.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_data_view.h"
 #include "third_party/blink/renderer/modules/bluetooth/bluetooth_remote_gatt_service.h"
@@ -45,12 +45,6 @@ class BluetoothRemoteGATTCharacteristic final
 
  public:
   explicit BluetoothRemoteGATTCharacteristic(
-      ExecutionContext*,
-      mojom::blink::WebBluetoothRemoteGATTCharacteristicPtr,
-      BluetoothRemoteGATTService*,
-      BluetoothDevice*);
-
-  static BluetoothRemoteGATTCharacteristic* Create(
       ExecutionContext*,
       mojom::blink::WebBluetoothRemoteGATTCharacteristicPtr,
       BluetoothRemoteGATTService*,
@@ -97,7 +91,8 @@ class BluetoothRemoteGATTCharacteristic final
   ScriptPromise startNotifications(ScriptState*);
   ScriptPromise stopNotifications(ScriptState*);
 
-  DEFINE_ATTRIBUTE_EVENT_LISTENER(characteristicvaluechanged);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(characteristicvaluechanged,
+                                  kCharacteristicvaluechanged)
 
  protected:
   // EventTarget overrides.
@@ -138,8 +133,8 @@ class BluetoothRemoteGATTCharacteristic final
   Member<BluetoothCharacteristicProperties> properties_;
   Member<DOMDataView> value_;
   Member<BluetoothDevice> device_;
-  mojo::AssociatedBindingSet<mojom::blink::WebBluetoothCharacteristicClient>
-      client_bindings_;
+  mojo::AssociatedReceiverSet<mojom::blink::WebBluetoothCharacteristicClient>
+      receivers_;
 };
 
 }  // namespace blink

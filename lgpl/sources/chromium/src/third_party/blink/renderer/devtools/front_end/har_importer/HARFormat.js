@@ -7,8 +7,9 @@ HARImporter.HARBase = class {
    * @param {*} data
    */
   constructor(data) {
-    if (!data || typeof data !== 'object')
+    if (!data || typeof data !== 'object') {
       throw 'First parameter is expected to be an object';
+    }
   }
 
   /**
@@ -17,8 +18,9 @@ HARImporter.HARBase = class {
    */
   static _safeDate(data) {
     const date = new Date(data);
-    if (!Number.isNaN(date.getTime()))
+    if (!Number.isNaN(date.getTime())) {
       return date;
+    }
     throw 'Invalid date format';
   }
 
@@ -28,8 +30,9 @@ HARImporter.HARBase = class {
    */
   static _safeNumber(data) {
     const result = Number(data);
-    if (!Number.isNaN(result))
+    if (!Number.isNaN(result)) {
       return result;
+    }
     throw 'Casting to number results in NaN';
   }
 
@@ -66,12 +69,23 @@ HARImporter.HARBase = class {
   customAsNumber(name) {
     // Har specification says starting with '_' is a custom property, but closure uses '_' as a private property.
     let value = /** @type {!Object} */ (this)['_' + name];
-    if (value === undefined)
+    if (value === undefined) {
       return;
+    }
     value = Number(value);
-    if (Number.isNaN(value))
+    if (Number.isNaN(value)) {
       return;
+    }
     return value;
+  }
+
+  /**
+   * @param {string} name
+   * @return {!Array|undefined}
+   */
+  customAsArray(name) {
+    const value = /** @type {!Object} */ (this)['_' + name];
+    return Array.isArray(value) ? value : undefined;
   }
 };
 
@@ -96,8 +110,9 @@ HARImporter.HARLog = class extends HARImporter.HARBase {
     this.creator = new HARImporter.HARCreator(data['creator']);
     this.browser = data['browser'] ? new HARImporter.HARCreator(data['browser']) : undefined;
     this.pages = Array.isArray(data['pages']) ? data['pages'].map(page => new HARImporter.HARPage(page)) : [];
-    if (!Array.isArray(data['entries']))
+    if (!Array.isArray(data['entries'])) {
       throw 'log.entries is expected to be an array';
+    }
     this.entries = data['entries'].map(entry => new HARImporter.HAREntry(entry));
     this.comment = HARImporter.HARBase._optionalString(data['comment']);
   }
@@ -160,9 +175,41 @@ HARImporter.HAREntry = class extends HARImporter.HARBase {
 
     // Chrome specific.
     this._fromCache = HARImporter.HARBase._optionalString(data['_fromCache']);
-    if (data['_initiator'])
-      this._initiator = new HARImporter.HARInitiator(data['_initiator']);
+    this._initiator = this._importInitiator(data['_initiator']);
     this._priority = HARImporter.HARBase._optionalString(data['_priority']);
+    this._resourceType = HARImporter.HARBase._optionalString(data['_resourceType']);
+    this._webSocketMessages = this._importWebSocketMessages(data['_webSocketMessages']);
+  }
+
+  /**
+   * @param {*} initiator
+   * @return {!HARImporter.HARInitiator|undefined}
+   */
+  _importInitiator(initiator) {
+    if (typeof initiator !== 'object') {
+      return;
+    }
+
+    return new HARImporter.HARInitiator(initiator);
+  }
+
+  /**
+   * @param {*} inputMessages
+   * @return {!Array<!HARImporter.HARInitiator>|undefined}
+   */
+  _importWebSocketMessages(inputMessages) {
+    if (!Array.isArray(inputMessages)) {
+      return;
+    }
+
+    const outputMessages = [];
+    for (const message of inputMessages) {
+      if (typeof message !== 'object') {
+        return;
+      }
+      outputMessages.push(new HARImporter.HARWebSocketMessage(message));
+    }
+    return outputMessages;
   }
 };
 
@@ -328,5 +375,18 @@ HARImporter.HARInitiator = class extends HARImporter.HARBase {
     this.type = HARImporter.HARBase._optionalString(data['type']);
     this.url = HARImporter.HARBase._optionalString(data['url']);
     this.lineNumber = HARImporter.HARBase._optionalNumber(data['lineNumber']);
+  }
+};
+
+HARImporter.HARWebSocketMessage = class extends HARImporter.HARBase {
+  /**
+   * @param {*} data
+   */
+  constructor(data) {
+    super(data);
+    this.time = HARImporter.HARBase._optionalNumber(data['time']);
+    this.opcode = HARImporter.HARBase._optionalNumber(data['opcode']);
+    this.data = HARImporter.HARBase._optionalString(data['data']);
+    this.type = HARImporter.HARBase._optionalString(data['type']);
   }
 };

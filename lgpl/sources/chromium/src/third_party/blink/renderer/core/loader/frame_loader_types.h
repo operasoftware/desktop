@@ -33,8 +33,6 @@ namespace blink {
 
 enum ShouldSendReferrer { kMaybeSendReferrer, kNeverSendReferrer };
 
-enum ShouldSetOpener { kMaybeSetOpener, kNeverSetOpener };
-
 enum ReasonForCallingAllowPlugins {
   kAboutToInstantiatePlugin,
   kNotAboutToInstantiatePlugin
@@ -71,6 +69,17 @@ enum SinglePageAppNavigationType {
   kSPANavTypeSameDocumentBackwardOrForward = 1,
   kSPANavTypeOtherFragmentNavigation = 2,
   kSPANavTypeCount
+};
+
+enum class ClientNavigationReason {
+  kFormSubmissionGet,
+  kFormSubmissionPost,
+  kHttpHeaderRefresh,
+  kFrameNavigation,
+  kMetaTagRefresh,
+  kPageBlock,
+  kReload,
+  kNone
 };
 }  // namespace blink
 

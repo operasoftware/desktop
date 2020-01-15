@@ -42,10 +42,10 @@ float ClampCoordinate(double value) {
 }
 }
 
-using namespace HTMLNames;
+using namespace html_names;
 
-inline HTMLAreaElement::HTMLAreaElement(Document& document)
-    : HTMLAnchorElement(areaTag, document), shape_(kRect) {}
+HTMLAreaElement::HTMLAreaElement(Document& document)
+    : HTMLAnchorElement(kAreaTag, document), shape_(kRect) {}
 
 // An explicit empty destructor should be in html_area_element.cc, because
 // if an implicit destructor is used or an empty destructor is defined in
@@ -54,12 +54,10 @@ inline HTMLAreaElement::HTMLAreaElement(Document& document)
 // definition.
 HTMLAreaElement::~HTMLAreaElement() = default;
 
-DEFINE_NODE_FACTORY(HTMLAreaElement)
-
 void HTMLAreaElement::ParseAttribute(
     const AttributeModificationParams& params) {
   const AtomicString& value = params.new_value;
-  if (params.name == shapeAttr) {
+  if (params.name == kShapeAttr) {
     if (EqualIgnoringASCIICase(value, "default")) {
       shape_ = kDefault;
     } else if (EqualIgnoringASCIICase(value, "circle") ||
@@ -74,10 +72,10 @@ void HTMLAreaElement::ParseAttribute(
       shape_ = kRect;
     }
     InvalidateCachedPath();
-  } else if (params.name == coordsAttr) {
+  } else if (params.name == kCoordsAttr) {
     coords_ = ParseHTMLListOfFloatingPointNumbers(value.GetString());
     InvalidateCachedPath();
-  } else if (params.name == altAttr || params.name == accesskeyAttr) {
+  } else if (params.name == kAltAttr || params.name == kAccesskeyAttr) {
     // Do nothing.
   } else {
     HTMLAnchorElement::ParseAttribute(params);
@@ -88,22 +86,23 @@ void HTMLAreaElement::InvalidateCachedPath() {
   path_ = nullptr;
 }
 
-bool HTMLAreaElement::PointInArea(const LayoutPoint& location,
+bool HTMLAreaElement::PointInArea(const PhysicalOffset& location,
                                   const LayoutObject* container_object) const {
   return GetPath(container_object).Contains(FloatPoint(location));
 }
 
-LayoutRect HTMLAreaElement::ComputeAbsoluteRect(
+PhysicalRect HTMLAreaElement::ComputeAbsoluteRect(
     const LayoutObject* container_object) const {
   if (!container_object)
-    return LayoutRect();
+    return PhysicalRect();
 
   // FIXME: This doesn't work correctly with transforms.
-  FloatPoint abs_pos = container_object->LocalToAbsolute();
+  PhysicalOffset abs_pos = container_object->LocalToAbsolutePoint(
+      PhysicalOffset(), kIgnoreTransforms);
 
   Path path = GetPath(container_object);
-  path.Translate(ToFloatSize(abs_pos));
-  return EnclosingLayoutRect(path.BoundingRect());
+  path.Translate(FloatSize(abs_pos));
+  return PhysicalRect::EnclosingRect(path.BoundingRect());
 }
 
 Path HTMLAreaElement::GetPath(const LayoutObject* container_object) const {
@@ -222,7 +221,7 @@ void HTMLAreaElement::SetFocused(bool should_be_focused,
 
 void HTMLAreaElement::UpdateFocusAppearanceWithOptions(
     SelectionBehaviorOnFocus selection_behavior,
-    const FocusOptions& options) {
+    const FocusOptions* options) {
   GetDocument().UpdateStyleAndLayoutTreeForNode(this);
   if (!IsFocusable())
     return;

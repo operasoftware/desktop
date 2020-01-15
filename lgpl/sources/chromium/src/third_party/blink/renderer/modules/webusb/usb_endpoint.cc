@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/modules/webusb/usb_endpoint.h"
 
-#include "device/usb/public/mojom/device.mojom-blink.h"
+#include "services/device/public/mojom/usb_device.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/modules/webusb/usb_alternate_interface.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -46,7 +46,7 @@ String ConvertTypeToEnum(const UsbTransferType& type) {
 
 USBEndpoint* USBEndpoint::Create(const USBAlternateInterface* alternate,
                                  wtf_size_t endpoint_index) {
-  return new USBEndpoint(alternate, endpoint_index);
+  return MakeGarbageCollected<USBEndpoint>(alternate, endpoint_index);
 }
 
 USBEndpoint* USBEndpoint::Create(const USBAlternateInterface* alternate,

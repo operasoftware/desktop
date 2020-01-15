@@ -14,6 +14,7 @@ import generate_gn as gg
 from generate_gn import SourceSet, SourceListCondition
 import string
 import unittest
+from os import path
 
 
 class ModuleUnittest(unittest.TestCase):
@@ -217,9 +218,11 @@ class SourceSetUnittest(unittest.TestCase):
     stanza = disjoint_sets[0].GenerateGnStanza()
     self.assertEqual(string.find(stanza, bad_condition), -1)
 
-  def assertEqualSets(self, expected, actual):
+  def assertEqualSourceSets(self, expected, actual):
+    assert all(isinstance(a, SourceSet) for a in expected)
+    assert all(isinstance(a, SourceSet) for a in actual)
 
-    def SetToString(source_set):
+    def SourceSetToString(source_set):
       sources = [str(e) for e in source_set.sources]
       conditions = [str(e) for e in source_set.conditions]
       sources_str = ','.join(sources)
@@ -232,11 +235,11 @@ class SourceSetUnittest(unittest.TestCase):
     if len(missing_elements):
       msg += 'Missing expected elements:\n'
       for e in missing_elements:
-        msg += SetToString(e) + '\n'
+        msg += SourceSetToString(e) + '\n'
     if len(extra_elements):
       msg += 'Found extra elements:\n'
       for e in extra_elements:
-        msg += SetToString(e) + '\n'
+        msg += SourceSetToString(e) + '\n'
 
     self.assertTrue(expected == actual, msg=msg)
 
@@ -262,7 +265,7 @@ class SourceSetUnittest(unittest.TestCase):
                                                       'win')])))
 
     source_sets = gg.CreatePairwiseDisjointSets([a, b])
-    self.assertEqualSets(expected, set(source_sets))
+    self.assertEqualSourceSets(expected, set(source_sets))
 
   def testCreatePairwiseDisjointSets_Triplet(self):
     a = SourceSet(
@@ -300,7 +303,7 @@ class SourceSetUnittest(unittest.TestCase):
             set(['arm']), set([SourceListCondition('arm', 'Chromium', 'win')])))
 
     source_sets = gg.CreatePairwiseDisjointSets([a, b, c])
-    self.assertEqualSets(expected, set(source_sets))
+    self.assertEqualSourceSets(expected, set(source_sets))
 
   def testCreatePairwiseDisjointSets_Multiple(self):
     a = SourceSet(
@@ -361,7 +364,7 @@ class SourceSetUnittest(unittest.TestCase):
             set([SourceListCondition('arm-neon', 'ChromeOS', 'linux')])))
 
     source_sets = gg.CreatePairwiseDisjointSets([a, b, c, d, e, f])
-    self.assertEqualSets(expected, set(source_sets))
+    self.assertEqualSourceSets(expected, set(source_sets))
 
   def testReduceConditions(self):
     # Set conditions span all of the supported architectures for linux.
@@ -374,26 +377,27 @@ class SourceSetUnittest(unittest.TestCase):
             SourceListCondition('arm64', 'Chromium', 'linux'),
             SourceListCondition('arm-neon', 'Chromium', 'linux'),
             SourceListCondition('mipsel', 'Chromium', 'linux'),
-            SourceListCondition('mips64el', 'Chromium', 'linux')
+            SourceListCondition('mips64el', 'Chromium', 'linux'),
         ]))
     gg.ReduceConditionalLogic(a)
 
     # Conditions should reduce to a single condition with wild-card for arch.
     expected = set([SourceListCondition('*', 'Chromium', 'linux')])
-    self.assertEqualSets(expected, a.conditions)
+    self.assertEqual(expected, a.conditions)
 
     # Set conditions span all of the supported architectures for windows.
     b = SourceSet(
         set(['foo.c']),
         set([
             SourceListCondition('ia32', 'Chromium', 'win'),
-            SourceListCondition('x64', 'Chromium', 'win')
+            SourceListCondition('x64', 'Chromium', 'win'),
+            SourceListCondition('arm64', 'Chromium', 'win'),
         ]))
     gg.ReduceConditionalLogic(b)
 
     # Conditions should reduce to a single condition with wild-card for
     expected = set([SourceListCondition('*', 'Chromium', 'win')])
-    self.assertEqualSets(expected, b.conditions)
+    self.assertEqual(expected, b.conditions)
 
     # Set conditions span all supported architectures and brandings for windows.
     b = SourceSet(
@@ -401,12 +405,14 @@ class SourceSetUnittest(unittest.TestCase):
         set([
             SourceListCondition('ia32', 'Chromium', 'win'),
             SourceListCondition('x64', 'Chromium', 'win'),
+            SourceListCondition('arm64', 'Chromium', 'win'),
             SourceListCondition('ia32', 'Chrome', 'win'),
-            SourceListCondition('x64', 'Chrome', 'win')
+            SourceListCondition('x64', 'Chrome', 'win'),
+            SourceListCondition('arm64', 'Chrome', 'win'),
         ]))
     gg.ReduceConditionalLogic(b)
     expected = set([SourceListCondition('*', '*', 'win')])
-    self.assertEqualSets(expected, b.conditions)
+    self.assertEqual(expected, b.conditions)
 
     # Set conditions span all supported platforms.
     c = SourceSet(
@@ -415,26 +421,27 @@ class SourceSetUnittest(unittest.TestCase):
             SourceListCondition('x64', 'Chromium', 'win'),
             SourceListCondition('x64', 'Chromium', 'mac'),
             SourceListCondition('x64', 'Chromium', 'linux'),
-            SourceListCondition('x64', 'Chromium', 'android')
+            SourceListCondition('x64', 'Chromium', 'android'),
         ]))
     gg.ReduceConditionalLogic(c)
     expected = set([SourceListCondition('x64', 'Chromium', '*')])
-    self.assertEqualSets(expected, c.conditions)
+    self.assertEqual(expected, c.conditions)
 
     # Spans all architectures for Chromium, but also all targets for ia32 & win.
     d = SourceSet(
         set(['foo.c']),
         set([
+            SourceListCondition('arm64', 'Chromium', 'win'),
             SourceListCondition('x64', 'Chromium', 'win'),
             SourceListCondition('ia32', 'Chromium', 'win'),
-            SourceListCondition('ia32', 'Chrome', 'win')
+            SourceListCondition('ia32', 'Chrome', 'win'),
         ]))
     gg.ReduceConditionalLogic(d)
     expected = set([
         SourceListCondition('*', 'Chromium', 'win'),
-        SourceListCondition('ia32', '*', 'win')
+        SourceListCondition('ia32', '*', 'win'),
     ])
-    self.assertEqualSets(expected, d.conditions)
+    self.assertEqual(expected, d.conditions)
 
   def testReduceConditions_fullSpan(self):
     # Build SourceSet with conditions spanning every combination of attributes.
@@ -446,7 +453,7 @@ class SourceSetUnittest(unittest.TestCase):
 
     gg.ReduceConditionalLogic(ss)
     expected = set([SourceListCondition('*', '*', '*')])
-    self.assertEqualSets(expected, ss.conditions)
+    self.assertEqual(expected, ss.conditions)
 
   def testGenerateStanzaWildCard(self):
     a = SourceSet(
@@ -467,9 +474,12 @@ class SourceSetUnittest(unittest.TestCase):
     # Verify basic rename case - same basename in different directories.
     a = SourceSet(set(['foo.c']), set([SourceListCondition('*', '*', '*')]))
     b = SourceSet(
-        set(['a/foo.c', 'b/foo.c']), set([SourceListCondition('*', '*', '*')]))
-    expected_renames = set([('a/foo.c', 'a/autorename_a_foo.c'),
-                            ('b/foo.c', 'b/autorename_b_foo.c')])
+        set([path.join('a','foo.c'), path.join('b', 'foo.c')]),
+        set([SourceListCondition('*', '*', '*')]))
+    expected_renames = set([(path.join('a', 'foo.c'),
+                             path.join('a', 'autorename_a_foo.c')),
+                            (path.join('b', 'foo.c'),
+                             path.join('b', 'autorename_b_foo.c'))])
     gg.FixObjectBasenameCollisions([a, b], [], do_rename_cb, log_renames=False)
     self.assertEqual(expected_renames, observed_renames)
 
@@ -477,12 +487,13 @@ class SourceSetUnittest(unittest.TestCase):
     observed_renames = set()
     a = SourceSet(set(['foo.c']), set([SourceListCondition('*', '*', '*')]))
     b = SourceSet(set(['foo.asm']), set([SourceListCondition('*', '*', '*')]))
-    c = SourceSet(
-        set(['a/foo.S', 'b/foo.asm']), set([SourceListCondition('*', '*',
-                                                                '*')]))
+    c = SourceSet(set([path.join('a', 'foo.S'), path.join('b', 'foo.asm')]),
+                  set([SourceListCondition('*', '*', '*')]))
     expected_renames = set([('foo.asm', 'autorename_foo.asm'),
-                            ('a/foo.S', 'a/autorename_a_foo.S'),
-                            ('b/foo.asm', 'b/autorename_b_foo.asm')])
+                            (path.join('a', 'foo.S'),
+                             path.join('a', 'autorename_a_foo.S')),
+                            (path.join('b', 'foo.asm'),
+                             path.join('b', 'autorename_b_foo.asm'))])
     gg.FixObjectBasenameCollisions(
         [a, b, c], [], do_rename_cb, log_renames=False)
     self.assertEqual(expected_renames, observed_renames)

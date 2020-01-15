@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/platform/animation/compositor_animation.h"
 
+#include <memory>
+
 #include "base/time/time.h"
 #include "third_party/blink/renderer/platform/animation/compositor_animation_client.h"
 #include "third_party/blink/renderer/platform/animation/compositor_animation_delegate.h"
@@ -12,8 +14,6 @@
 #include "third_party/blink/renderer/platform/animation/compositor_keyframe_model.h"
 #include "third_party/blink/renderer/platform/animation/compositor_target_property.h"
 #include "third_party/blink/renderer/platform/testing/compositor_test.h"
-
-#include <memory>
 
 namespace blink {
 
@@ -60,25 +60,23 @@ TEST_F(CompositorAnimationTest, NullDelegate) {
       CompositorAnimation::Create();
   cc::SingleKeyframeEffectAnimation* cc_animation = animation->CcAnimation();
 
-  std::unique_ptr<CompositorAnimationCurve> curve =
-      CompositorFloatAnimationCurve::Create();
-  std::unique_ptr<CompositorKeyframeModel> keyframe_model =
-      CompositorKeyframeModel::Create(
-          *curve, CompositorTargetProperty::TRANSFORM, 1, 0);
+  auto curve = std::make_unique<CompositorFloatAnimationCurve>();
+  auto keyframe_model = std::make_unique<CompositorKeyframeModel>(
+      *curve, compositor_target_property::TRANSFORM, 0, 1);
   animation->AddKeyframeModel(std::move(keyframe_model));
 
   animation->SetAnimationDelegate(delegate.get());
   EXPECT_FALSE(delegate->finished_);
 
   cc_animation->NotifyKeyframeModelFinishedForTesting(
-      CompositorTargetProperty::TRANSFORM, 1);
+      compositor_target_property::TRANSFORM, 1);
   EXPECT_TRUE(delegate->finished_);
 
   delegate->ResetFlags();
 
   animation->SetAnimationDelegate(nullptr);
   cc_animation->NotifyKeyframeModelFinishedForTesting(
-      CompositorTargetProperty::TRANSFORM, 1);
+      compositor_target_property::TRANSFORM, 1);
   EXPECT_FALSE(delegate->finished_);
 }
 
@@ -91,18 +89,16 @@ TEST_F(CompositorAnimationTest, NotifyFromCCAfterCompositorAnimationDeletion) {
   scoped_refptr<cc::SingleKeyframeEffectAnimation> cc_animation =
       animation->CcAnimation();
 
-  std::unique_ptr<CompositorAnimationCurve> curve =
-      CompositorFloatAnimationCurve::Create();
-  std::unique_ptr<CompositorKeyframeModel> keyframe_model =
-      CompositorKeyframeModel::Create(*curve, CompositorTargetProperty::OPACITY,
-                                      1, 0);
+  auto curve = std::make_unique<CompositorFloatAnimationCurve>();
+  auto keyframe_model = std::make_unique<CompositorKeyframeModel>(
+      *curve, compositor_target_property::OPACITY, 0, 1);
   animation->AddKeyframeModel(std::move(keyframe_model));
 
   animation->SetAnimationDelegate(delegate.get());
   EXPECT_FALSE(delegate->finished_);
 
   cc_animation->NotifyKeyframeModelFinishedForTesting(
-      CompositorTargetProperty::OPACITY, 1);
+      compositor_target_property::OPACITY, 1);
   EXPECT_TRUE(delegate->finished_);
   delegate->finished_ = false;
 
@@ -111,14 +107,13 @@ TEST_F(CompositorAnimationTest, NotifyFromCCAfterCompositorAnimationDeletion) {
 
   // No notifications. Doesn't crash.
   cc_animation->NotifyKeyframeModelFinishedForTesting(
-      CompositorTargetProperty::OPACITY, 1);
+      compositor_target_property::OPACITY, 1);
   EXPECT_FALSE(delegate->finished_);
 }
 
 TEST_F(CompositorAnimationTest,
        CompositorAnimationDeletionDetachesFromCCTimeline) {
-  std::unique_ptr<CompositorAnimationTimeline> timeline =
-      CompositorAnimationTimeline::Create();
+  auto timeline = std::make_unique<CompositorAnimationTimeline>();
   std::unique_ptr<CompositorAnimationTestClient> client(
       new CompositorAnimationTestClient);
 

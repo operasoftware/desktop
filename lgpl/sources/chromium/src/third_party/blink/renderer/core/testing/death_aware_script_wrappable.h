@@ -7,7 +7,6 @@
 
 #include <signal.h>
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
@@ -28,7 +27,7 @@ class InObjectContainer {
   virtual void Trace(Visitor* visitor) { visitor->Trace(dependency_); }
 
  private:
-  TraceWrapperMember<DeathAwareScriptWrappable> dependency_;
+  Member<DeathAwareScriptWrappable> dependency_;
 };
 
 }  // namespace internal
@@ -42,10 +41,10 @@ class DeathAwareScriptWrappable : public ScriptWrappable {
   static bool has_died_;
 
  public:
-  typedef TraceWrapperMember<DeathAwareScriptWrappable> Wrapper;
+  typedef Member<DeathAwareScriptWrappable> Wrapper;
 
   static DeathAwareScriptWrappable* Create() {
-    return new DeathAwareScriptWrappable();
+    return MakeGarbageCollected<DeathAwareScriptWrappable>();
   }
 
   static bool HasDied() { return has_died_; }
@@ -54,6 +53,7 @@ class DeathAwareScriptWrappable : public ScriptWrappable {
     instance_ = instance;
   }
 
+  DeathAwareScriptWrappable() = default;
   ~DeathAwareScriptWrappable() override {
     if (this == instance_) {
       has_died_ = true;
@@ -86,8 +86,6 @@ class DeathAwareScriptWrappable : public ScriptWrappable {
   }
 
  private:
-  DeathAwareScriptWrappable() = default;
-
   Wrapper wrapped_dependency_;
   HeapVector<Wrapper> wrapped_vector_dependency_;
   HeapHashMap<Wrapper, Wrapper> wrapped_hash_map_dependency_;

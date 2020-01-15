@@ -9,11 +9,12 @@
 #include "base/strings/string_util.h"
 #include "media/base/mime_util.h"
 #include "media/filters/stream_parser_factory.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/mime_util.h"
 #include "third_party/blink/public/common/mime_util/mime_util.h"
+#include "third_party/blink/public/mojom/mime/mime_registry.mojom-blink.h"
 #include "third_party/blink/public/platform/file_path_conversion.h"
 #include "third_party/blink/public/platform/interface_provider.h"
-#include "third_party/blink/public/platform/mime_registry.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -26,11 +27,11 @@ struct MimeRegistryPtrHolder {
  public:
   MimeRegistryPtrHolder() {
     Platform::Current()->GetInterfaceProvider()->GetInterface(
-        mojo::MakeRequest(&mime_registry));
+        mime_registry.BindNewPipeAndPassReceiver());
   }
   ~MimeRegistryPtrHolder() = default;
 
-  mojom::blink::MimeRegistryPtr mime_registry;
+  mojo::Remote<mojom::blink::MimeRegistry> mime_registry;
 };
 
 // H.264 High Profile level 4.0
@@ -101,7 +102,7 @@ std::string ToLowerASCIIInternal(CHARTYPE* str, SIZETYPE length) {
 
 // Does the same as ToASCIIOrEmpty, but also makes the chars lower.
 std::string ToLowerASCIIOrEmpty(const String& str) {
-  if (str.IsEmpty() || !str.ContainsOnlyASCII())
+  if (str.IsEmpty() || !str.ContainsOnlyASCIIOrEmpty())
     return std::string();
   if (str.Is8Bit())
     return ToLowerASCIIInternal(str.Characters8(), str.length());
@@ -163,14 +164,6 @@ bool MIMETypeRegistry::IsSupportedImageMIMETypeForEncoding(
           EqualIgnoringASCIICase(mime_type, "image/webp"));
 }
 
-bool MIMETypeRegistry::IsModernImageMIMEType(const String& mime_type) {
-  return (EqualIgnoringASCIICase(mime_type, "image/gif") ||
-          EqualIgnoringASCIICase(mime_type, "image/jpeg") ||
-          EqualIgnoringASCIICase(mime_type, "image/png") ||
-          EqualIgnoringASCIICase(mime_type, "image/svg+xml") ||
-          EqualIgnoringASCIICase(mime_type, "image/webp"));
-}
-
 bool MIMETypeRegistry::IsSupportedJavaScriptMIMEType(const String& mime_type) {
   return blink::IsSupportedJavascriptMimeType(ToLowerASCIIOrEmpty(mime_type));
 }
@@ -222,18 +215,23 @@ MIMETypeRegistry::SupportsType MIMETypeRegistry::SupportsMediaMIMEType(
       media::IsSupportedMediaFormat(ascii_mime_type, codec_vector));
 }
 
-bool MIMETypeRegistry::IsSupportedMediaSourceMIMEType(const String& mime_type,
-                                                      const String& codecs) {
+MIMETypeRegistry::SupportsType MIMETypeRegistry::SupportsMediaSourceMIMEType(
+    const String& mime_type,
+    const String& codecs) {
   const std::string ascii_mime_type = ToLowerASCIIOrEmpty(mime_type);
   if (ascii_mime_type.empty())
-    return false;
+    return kIsNotSupported;
   std::vector<std::string> parsed_codec_ids;
   media::SplitCodecs(ToASCIIOrEmpty(codecs), &parsed_codec_ids);
   if (ShouldDisableMediaSourceMimeForPowerSaving(ascii_mime_type, parsed_codec_ids))
-    return false;
-  return static_cast<MIMETypeRegistry::SupportsType>(
-      media::StreamParserFactory::IsTypeSupported(ascii_mime_type,
-                                                  parsed_codec_ids));
+    return kIsNotSupported;
+
+  for (const std::string& codec_id : parsed_codec_ids)
+    if (!media::ValidateCodecString(ascii_mime_type, codec_id))
+      return kIsNotSupported;
+
+  return static_cast<SupportsType>(media::StreamParserFactory::IsTypeSupported(
+      ascii_mime_type, parsed_codec_ids));
 }
 
 bool MIMETypeRegistry::IsJavaAppletMIMEType(const String& mime_type) {
@@ -261,6 +259,21 @@ bool MIMETypeRegistry::IsSupportedFontMIMEType(const String& mime_type) {
 
 bool MIMETypeRegistry::IsSupportedTextTrackMIMEType(const String& mime_type) {
   return EqualIgnoringASCIICase(mime_type, "text/vtt");
+}
+
+bool MIMETypeRegistry::IsLossyImageMIMEType(const String& mime_type) {
+  return EqualIgnoringASCIICase(mime_type, "image/jpeg") ||
+         EqualIgnoringASCIICase(mime_type, "image/jpg") ||
+         EqualIgnoringASCIICase(mime_type, "image/pjpeg");
+}
+
+bool MIMETypeRegistry::IsLosslessImageMIMEType(const String& mime_type) {
+  return EqualIgnoringASCIICase(mime_type, "image/bmp") ||
+         EqualIgnoringASCIICase(mime_type, "image/gif") ||
+         EqualIgnoringASCIICase(mime_type, "image/png") ||
+         EqualIgnoringASCIICase(mime_type, "image/webp") ||
+         EqualIgnoringASCIICase(mime_type, "image/x-xbitmap") ||
+         EqualIgnoringASCIICase(mime_type, "image/x-png");
 }
 
 }  // namespace blink

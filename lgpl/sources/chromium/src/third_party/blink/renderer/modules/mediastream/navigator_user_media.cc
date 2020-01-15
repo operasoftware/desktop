@@ -14,7 +14,7 @@ namespace blink {
 
 NavigatorUserMedia::NavigatorUserMedia(Navigator& navigator)
     : Supplement<Navigator>(navigator),
-      media_devices_(MediaDevices::Create(
+      media_devices_(MakeGarbageCollected<MediaDevices>(
           navigator.GetFrame() ? navigator.GetFrame()->GetDocument()
                                : nullptr)) {}
 
@@ -24,7 +24,7 @@ NavigatorUserMedia& NavigatorUserMedia::From(Navigator& navigator) {
   NavigatorUserMedia* supplement =
       Supplement<Navigator>::From<NavigatorUserMedia>(navigator);
   if (!supplement) {
-    supplement = new NavigatorUserMedia(navigator);
+    supplement = MakeGarbageCollected<NavigatorUserMedia>(navigator);
     ProvideTo(navigator, supplement);
   }
   return *supplement;

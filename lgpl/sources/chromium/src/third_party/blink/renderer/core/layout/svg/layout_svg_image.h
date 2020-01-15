@@ -45,6 +45,10 @@ class LayoutSVGImage final : public LayoutSVGModelObject {
   }
 
   FloatRect ObjectBoundingBox() const override { return object_bounding_box_; }
+  bool IsObjectBoundingBoxValid() const {
+    return !object_bounding_box_.IsEmpty();
+  }
+
   bool IsOfType(LayoutObjectType type) const override {
     return type == kLayoutObjectSVGImage ||
            LayoutSVGModelObject::IsOfType(type);
@@ -53,6 +57,7 @@ class LayoutSVGImage final : public LayoutSVGModelObject {
   const char* GetName() const override { return "LayoutSVGImage"; }
 
  protected:
+  void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
   void WillBeDestroyed() override;
 
  private:
@@ -66,8 +71,8 @@ class LayoutSVGImage final : public LayoutSVGModelObject {
   bool UpdateBoundingBox();
 
   bool NodeAtPoint(HitTestResult&,
-                   const HitTestLocation& location_in_parent,
-                   const LayoutPoint& accumulated_offset,
+                   const HitTestLocation&,
+                   const PhysicalOffset& accumulated_offset,
                    HitTestAction) override;
 
   AffineTransform LocalSVGTransform() const override {
@@ -79,6 +84,7 @@ class LayoutSVGImage final : public LayoutSVGModelObject {
 
   bool needs_boundaries_update_ : 1;
   bool needs_transform_update_ : 1;
+  bool transform_uses_reference_box_ : 1;
   AffineTransform local_transform_;
   FloatRect object_bounding_box_;
   Persistent<LayoutImageResource> image_resource_;

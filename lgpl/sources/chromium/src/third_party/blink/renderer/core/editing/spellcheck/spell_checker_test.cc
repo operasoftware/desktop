@@ -35,12 +35,12 @@ void SpellCheckerTest::ForceLayout() {
   frame_rect.SetWidth(frame_rect.Width() + 1);
   frame_rect.SetHeight(frame_rect.Height() + 1);
   Page().GetFrameView().SetFrameRect(frame_rect);
-  GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+  GetDocument().UpdateStyleAndLayout();
 }
 
 TEST_F(SpellCheckerTest, AdvanceToNextMisspellingWithEmptyInputNoCrash) {
   SetBodyContent("<input placeholder='placeholder'>abc");
-  UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
   Element* input = GetDocument().QuerySelector("input");
   input->focus();
   // Do not crash in advanceToNextMisspelling.
@@ -57,7 +57,7 @@ TEST_F(SpellCheckerTest, AdvanceToNextMisspellingWithImageInTableNoCrash) {
       "zz zz zz"
       "</div>");
   GetDocument().QuerySelector("div")->focus();
-  UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   // Do not crash in advanceToNextMisspelling.
   GetSpellChecker().AdvanceToNextMisspelling(false);
@@ -73,7 +73,7 @@ TEST_F(SpellCheckerTest, AdvancedToNextMisspellingWrapSearchNoCrash) {
       SelectionInDOMTree::Builder()
           .Collapse(Position::LastPositionInNode(*div))
           .Build());
-  UpdateAllLifecyclePhases();
+  UpdateAllLifecyclePhasesForTest();
 
   GetSpellChecker().AdvanceToNextMisspelling(false);
 }
@@ -123,9 +123,9 @@ TEST_F(SpellCheckerTest, MarkAndReplaceForHandlesMultipleReplacements) {
 
   // The Spelling marker's description should be a newline-separated list of the
   // suggested replacements
-  EXPECT_EQ(
-      "spellcheck\nspillchuck",
-      ToSpellCheckMarker(GetDocument().Markers().Markers()[0])->Description());
+  EXPECT_EQ("spellcheck\nspillchuck",
+            To<SpellCheckMarker>(GetDocument().Markers().Markers()[0].Get())
+                ->Description());
 }
 
 TEST_F(SpellCheckerTest, GetSpellCheckMarkerUnderSelection_FirstCharSelected) {

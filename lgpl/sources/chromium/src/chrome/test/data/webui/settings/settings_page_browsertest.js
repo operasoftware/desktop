@@ -4,13 +4,8 @@
 
 /** @fileoverview Prototype for Settings page tests. */
 
-/** @const {string} Path to root from chrome/test/data/webui/settings/. */
-// eslint-disable-next-line no-var
-var ROOT_PATH = '../../../../../';
-
 // Polymer BrowserTest fixture.
-GEN_INCLUDE(
-    [ROOT_PATH + 'chrome/test/data/webui/polymer_browser_test_base.js']);
+GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 
 /**
  * @constructor
@@ -25,10 +20,11 @@ SettingsPageBrowserTest.prototype = {
   browsePreload: 'chrome://settings/',
 
   /** @override */
-  extraLibraries: PolymerTest.getLibraries(ROOT_PATH).concat([
+  extraLibraries: [
+    ...PolymerTest.prototype.extraLibraries,
     '../fake_chrome_event.js',
     'fake_settings_private.js',
-  ]),
+  ],
 
   /** @type {?SettingsBasicPageElement} */
   basicPage: null,
@@ -71,8 +67,9 @@ SettingsPageBrowserTest.prototype = {
     const page = settingsMain.$$(pageType);
 
     const idleRender = page && page.$$('settings-idle-load');
-    if (!idleRender)
+    if (!idleRender) {
       return Promise.resolve(page);
+    }
 
     return idleRender.get().then(function() {
       Polymer.dom.flush();
@@ -91,8 +88,9 @@ SettingsPageBrowserTest.prototype = {
     assertTrue(!!sections);
     for (let i = 0; i < sections.length; ++i) {
       const s = sections[i];
-      if (s.section == section)
+      if (s.section == section) {
         return s;
+      }
     }
     return undefined;
   },
@@ -106,8 +104,9 @@ SettingsPageBrowserTest.prototype = {
     // Check if there are sub-pages to verify.
     const pages = section.firstElementChild.shadowRoot.querySelector(
         'settings-animated-pages');
-    if (!pages)
+    if (!pages) {
       return;
+    }
 
     const children = pages.getContentChildren();
     const stampedChildren = children.filter(function(element) {

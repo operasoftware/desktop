@@ -19,7 +19,11 @@ class CORE_EXPORT LayoutNGListItem final : public LayoutNGBlockFlow {
   ListItemOrdinal& Ordinal() { return ordinal_; }
 
   int Value() const;
+  String MarkerTextWithSuffix() const;
   String MarkerTextWithoutSuffix() const;
+
+  // Marker text with suffix, e.g. "1. ", for use in accessibility.
+  static String TextAlternative(const LayoutObject& marker);
 
   LayoutObject* Marker() const { return marker_; }
   bool IsMarkerImage() const {
@@ -38,6 +42,9 @@ class CORE_EXPORT LayoutNGListItem final : public LayoutNGBlockFlow {
 
   LayoutObject* SymbolMarkerLayoutText() const;
   static const LayoutObject* FindSymbolMarkerLayoutText(const LayoutObject*);
+
+  // Find the LayoutNGListItem from a marker.
+  static LayoutNGListItem* FromMarker(const LayoutObject& marker);
 
   const char* GetName() const override { return "LayoutNGListItem"; }
 
@@ -59,6 +66,8 @@ class CORE_EXPORT LayoutNGListItem final : public LayoutNGBlockFlow {
   void UpdateMarkerText(LayoutText*);
   void UpdateMarker();
   void DestroyMarker();
+
+  void ListStyleTypeChanged();
 
   ListItemOrdinal ordinal_;
   LayoutObject* marker_ = nullptr;

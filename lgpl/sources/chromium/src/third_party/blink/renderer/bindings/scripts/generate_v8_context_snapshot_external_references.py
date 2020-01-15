@@ -23,17 +23,10 @@ INCLUDES = frozenset([
     'third_party/blink/renderer/bindings/core/v8/v8_html_document.h',
     'third_party/blink/renderer/bindings/core/v8/v8_initializer.h',
     'third_party/blink/renderer/bindings/core/v8/v8_window.h',
-    'third_party/blink/renderer/platform/bindings/dom_wrapper_world.h',
     'third_party/blink/renderer/platform/bindings/v8_object_constructor.h',
-    'third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h',
-    'third_party/blink/renderer/platform/bindings/v8_private_property.h',
     'v8/include/v8.h'])
 
-TEMPLATE_FILE = 'external_reference_table.cpp.tmpl'
-
-WHITE_LIST_INTERFACES = frozenset([
-    'DOMMatrix',  # crbug.com/733481
-])
+TEMPLATE_FILE = 'external_reference_table.cc.tmpl'
 
 SNAPSHOTTED_INTERFACES = frozenset([
     'Window',
@@ -66,8 +59,10 @@ class InterfaceTemplateContextBuilder(object):
         self._opts = opts
         self._info_provider = info_provider
 
-    def create_interface_context(self, interface, interfaces):
+    def create_interface_context(self, interface, component, interfaces):
         '''Creates a Jinja context which is based on an interface.'''
+
+        assert component in ['core', 'modules']
 
         name = '%s%s' % (v8_utilities.cpp_name(interface), 'Partial' if interface.is_partial else '')
 
@@ -85,17 +80,16 @@ class InterfaceTemplateContextBuilder(object):
         has_cross_origin_named_enum = False
         has_cross_origin_named_getter = False
         has_cross_origin_named_setter = False
-        has_origin_safe_method_setter = False
         has_security_check = False
         indexed_property_getter = None
         is_global = False
         named_property_getter = None
+        component_info = self._info_provider.component_info
         if interface.name in SNAPSHOTTED_INTERFACES:
-            attributes = [v8_attributes.attribute_context(interface, attribute, interfaces)
+            attributes = [v8_attributes.attribute_context(interface, attribute, interfaces, component_info)
                           for attribute in interface.attributes]
-            methods = v8_interface.methods_context(interface)['methods']
-            is_global = ('PrimaryGlobal' in interface.extended_attributes or
-                         'Global' in interface.extended_attributes)
+            methods = v8_interface.methods_context(interface, component_info)['methods']
+            is_global = 'Global' in interface.extended_attributes
 
             named_property_getter = v8_interface.property_getter(
                 interface.named_property_getter, ['name'])
@@ -103,9 +97,6 @@ class InterfaceTemplateContextBuilder(object):
                 interface.indexed_property_getter, ['index'])
 
             if not interface.is_partial:
-                has_origin_safe_method_setter = is_global and any(
-                    method['is_check_security_for_receiver'] and not method['is_unforgeable']
-                    for method in methods)
                 has_security_check = ('CheckSecurity' in interface.extended_attributes and
                                       interface.name != 'EventTarget')
                 has_cross_origin_named_getter = (any(method['is_cross_origin'] for method in methods) or
@@ -118,7 +109,7 @@ class InterfaceTemplateContextBuilder(object):
 
         return {
             'attributes': attributes,
-            'has_origin_safe_method_setter': has_origin_safe_method_setter,
+            'component': component,
             'has_constructor_callback': has_constructor_callback,
             'has_cross_origin_named_getter': has_cross_origin_named_getter,
             'has_cross_origin_named_setter': has_cross_origin_named_setter,
@@ -128,17 +119,15 @@ class InterfaceTemplateContextBuilder(object):
             'indexed_property_getter': indexed_property_getter,
             'indexed_property_setter': v8_interface.property_setter(interface.indexed_property_setter, interface),
             'indexed_property_deleter': v8_interface.property_deleter(interface.indexed_property_deleter),
-            'is_array_buffer_or_view': interface.idl_type.is_array_buffer_or_view,
-            'is_callback': interface.is_callback,
+            'internal_namespace': v8_interface.internal_namespace(interface),
             'is_partial': interface.is_partial,
-            'is_snapshotted': interface in SNAPSHOTTED_INTERFACES,
             'methods': methods,
             'name': name,
             'named_constructor': v8_interface.named_constructor_context(interface),
             'named_property_getter': named_property_getter,
             'named_property_setter': v8_interface.property_setter(interface.named_property_setter, interface),
             'named_property_deleter': v8_interface.property_deleter(interface.named_property_deleter),
-            'v8_name': v8_utilities.v8_class_name_or_partial(interface),
+            'v8_class': v8_utilities.v8_class_name_or_partial(interface),
         }
 
 
@@ -168,24 +157,32 @@ class ExternalReferenceTableGenerator(object):
     # in V8 context snapshot, so we can skip them.
     def _process_interface(self, interface, component, interfaces):
         def has_impl(interface):
-            if interface.name in WHITE_LIST_INTERFACES:
-                return True
+            component_info = self._info_provider.component_info
+            runtime_features = component_info['runtime_enabled_features']
             # Non legacy callback interface does not provide V8 callbacks.
             if interface.is_callback:
                 return len(interface.constants) > 0
-            if 'RuntimeEnabled' in interface.extended_attributes:
+            if v8_utilities.runtime_enabled_feature_name(interface, runtime_features):
                 return False
-            return True
+            if 'Exposed' not in interface.extended_attributes:
+                return True
+            return any(exposure.exposed == 'Window' and exposure.runtime_enabled is None
+                       for exposure in interface.extended_attributes['Exposed'])
 
         if not has_impl(interface):
             return
 
         context_builder = InterfaceTemplateContextBuilder(self._opts, self._info_provider)
-        context = context_builder.create_interface_context(interface, interfaces)
+        context = context_builder.create_interface_context(interface, component, interfaces)
         name = '%s%s' % (interface.name, 'Partial' if interface.is_partial else '')
         self._interface_contexts[name] = context
+
+        # Do not include unnecessary header files.
+        if not context['attributes'] and not context['named_property_setter']:
+            return
+
         include_file = 'third_party/blink/renderer/bindings/%s/v8/%s.h' % (
-            component, utilities.to_snake_case(context['v8_name']))
+            component, utilities.to_snake_case(context['v8_class']))
         self._include_files.add(include_file)
 
     # Gathers all interface-dependent information and returns as a Jinja template context.
@@ -220,7 +217,7 @@ def main():
         opts.info_dir, opts.target_component)
     generator = ExternalReferenceTableGenerator(opts, info_provider)
 
-    idl_files = utilities.read_idl_files_list_from_file(opts.idl_files_list, False)
+    idl_files = utilities.read_idl_files_list_from_file(opts.idl_files_list)
     for idl_file in idl_files:
         generator.process_idl_file(idl_file)
     output_code = generator.generate()

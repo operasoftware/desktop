@@ -26,55 +26,37 @@ class InterpolationType;
 //
 // The TransitionInterpolation subclass stores the start and end keyframes as
 // InterpolationValue objects, with an InterpolationType object that applies to
-// both InterpolationValues. It additionally stores AnimatableValue objects
-// corresponding to start and end keyframes as communicated to the compositor
-// thread. Together, this is equivalent to representing the start and end
-// keyframes as TransitionPropertySpecificKeyframe objects with the added
+// both InterpolationValues. It additionally stores CompositorKeyframeValue
+// objects corresponding to start and end keyframes as communicated to the
+// compositor thread. Together, this is equivalent to representing the start and
+// end keyframes as TransitionPropertySpecificKeyframe objects with the added
 // constraint that they share an InterpolationType.
 // TODO(crbug.com/442163): Store information for communication with the
-// compositor without using AnimatableValue objects.
+// compositor without using CompositorKeyframeValue objects.
 //
 // During the effect application phase of animation computation, the current
 // value of the property is applied to the element by calling the Apply
 // function.
 class CORE_EXPORT TransitionInterpolation : public Interpolation {
  public:
-  static TransitionInterpolation* Create(const PropertyHandle& property,
-                                         const InterpolationType& type,
-                                         InterpolationValue&& start,
-                                         InterpolationValue&& end,
-                                         AnimatableValue* compositor_start,
-                                         AnimatableValue* compositor_end) {
-    return new TransitionInterpolation(property, type, std::move(start),
-                                       std::move(end), compositor_start,
-                                       compositor_end);
+  static TransitionInterpolation* Create(
+      const PropertyHandle& property,
+      const InterpolationType& type,
+      InterpolationValue&& start,
+      InterpolationValue&& end,
+      CompositorKeyframeValue* compositor_start,
+      CompositorKeyframeValue* compositor_end) {
+    return MakeGarbageCollected<TransitionInterpolation>(
+        property, type, std::move(start), std::move(end), compositor_start,
+        compositor_end);
   }
 
-  void Apply(StyleResolverState&) const;
-
-  bool IsTransitionInterpolation() const final { return true; }
-
-  const PropertyHandle& GetProperty() const final { return property_; }
-
-  std::unique_ptr<TypedInterpolationValue> GetInterpolatedValue() const;
-
-  AnimatableValue* GetInterpolatedCompositorValue() const;
-
-  void Interpolate(int iteration, double fraction) final;
-
-  void Trace(Visitor* visitor) override {
-    visitor->Trace(compositor_start_);
-    visitor->Trace(compositor_end_);
-    Interpolation::Trace(visitor);
-  }
-
- protected:
   TransitionInterpolation(const PropertyHandle& property,
                           const InterpolationType& type,
                           InterpolationValue&& start,
                           InterpolationValue&& end,
-                          AnimatableValue* compositor_start,
-                          AnimatableValue* compositor_end)
+                          CompositorKeyframeValue* compositor_start,
+                          CompositorKeyframeValue* compositor_end)
       : property_(property),
         type_(type),
         start_(std::move(start)),
@@ -95,17 +77,33 @@ class CORE_EXPORT TransitionInterpolation : public Interpolation {
               property_.GetCSSProperty().IsCompositableProperty());
   }
 
+  void Apply(StyleResolverState&) const;
+
+  bool IsTransitionInterpolation() const final { return true; }
+
+  const PropertyHandle& GetProperty() const final { return property_; }
+
+  std::unique_ptr<TypedInterpolationValue> GetInterpolatedValue() const;
+
+  void Interpolate(int iteration, double fraction) final;
+
+  void Trace(Visitor* visitor) override {
+    visitor->Trace(compositor_start_);
+    visitor->Trace(compositor_end_);
+    Interpolation::Trace(visitor);
+  }
+
  private:
   const InterpolableValue& CurrentInterpolableValue() const;
-  NonInterpolableValue* CurrentNonInterpolableValue() const;
+  const NonInterpolableValue* CurrentNonInterpolableValue() const;
 
   const PropertyHandle property_;
   const InterpolationType& type_;
   const InterpolationValue start_;
   const InterpolationValue end_;
   const PairwiseInterpolationValue merge_;
-  const Member<AnimatableValue> compositor_start_;
-  const Member<AnimatableValue> compositor_end_;
+  const Member<CompositorKeyframeValue> compositor_start_;
+  const Member<CompositorKeyframeValue> compositor_end_;
 
   mutable double cached_fraction_ = 0;
   mutable int cached_iteration_ = 0;

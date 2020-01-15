@@ -24,12 +24,12 @@
 
 #include "third_party/blink/renderer/core/layout/layout_embedded_object.h"
 
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/exported/web_plugin_container_impl.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_plugin_element.h"
-#include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/intrinsic_sizing_info.h"
 #include "third_party/blink/renderer/core/layout/layout_analyzer.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
@@ -38,8 +38,6 @@
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 
 namespace blink {
-
-using namespace HTMLNames;
 
 LayoutEmbeddedObject::LayoutEmbeddedObject(Element* element)
     : LayoutEmbeddedContent(element) {
@@ -52,14 +50,17 @@ static String LocalizedUnavailablePluginReplacementText(
     Node* node,
     LayoutEmbeddedObject::PluginAvailability availability) {
   Locale& locale =
-      node ? ToElement(node)->GetLocale() : Locale::DefaultLocale();
+      node ? To<Element>(node)->GetLocale() : Locale::DefaultLocale();
   switch (availability) {
     case LayoutEmbeddedObject::kPluginAvailable:
       break;
     case LayoutEmbeddedObject::kPluginMissing:
-      return locale.QueryString(WebLocalizedString::kMissingPluginText);
+      return locale.QueryString(IDS_PLUGIN_INITIALIZATION_ERROR);
     case LayoutEmbeddedObject::kPluginBlockedByContentSecurityPolicy:
-      return locale.QueryString(WebLocalizedString::kBlockedPluginText);
+      return String();  // There is no matched resource_id for
+                        // kPluginBlockedByContentSecurityPolicy yet. Return an
+                        // empty String(). See crbug.com/302130 for more
+                        // details.
   }
   NOTREACHED();
   return String();
@@ -84,7 +85,7 @@ bool LayoutEmbeddedObject::ShowsUnavailablePluginIndicator() const {
 
 void LayoutEmbeddedObject::PaintReplaced(
     const PaintInfo& paint_info,
-    const LayoutPoint& paint_offset) const {
+    const PhysicalOffset& paint_offset) const {
   EmbeddedObjectPainter(*this).PaintReplaced(paint_info, paint_offset);
 }
 
@@ -95,14 +96,14 @@ void LayoutEmbeddedObject::UpdateLayout() {
   UpdateLogicalWidth();
   UpdateLogicalHeight();
 
-  overflow_.reset();
-  AddVisualEffectOverflow();
+  ClearLayoutOverflow();
 
   UpdateAfterLayout();
 
   if (!GetEmbeddedContentView() && GetFrameView())
     GetFrameView()->AddPartToUpdate(*this);
 
+  ClearSelfNeedsLayoutOverflowRecalc();
   ClearNeedsLayout();
 }
 
@@ -114,6 +115,7 @@ CompositingReasons LayoutEmbeddedObject::AdditionalCompositingReasons() const {
 
 void LayoutEmbeddedObject::ComputeIntrinsicSizingInfo(
     IntrinsicSizingInfo& intrinsic_sizing_info) const {
+  DCHECK(!ShouldApplySizeContainment());
   FrameView* frame_view = ChildFrameView();
   if (frame_view && frame_view->GetIntrinsicSizingInfo(intrinsic_sizing_info)) {
     // Handle zoom & vertical writing modes here, as the embedded document

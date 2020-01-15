@@ -7,10 +7,11 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/paint/text_painter_base.h"
+#include "third_party/blink/renderer/platform/fonts/ng_text_fragment_paint_info.h"
+#include "third_party/blink/renderer/platform/graphics/dom_node_id.h"
 
 namespace blink {
 
-class NGPhysicalTextFragment;
 struct NGTextFragmentPaintInfo;
 
 // Text painter for LayoutNG, logic shared between legacy layout and LayoutNG
@@ -24,12 +25,14 @@ class CORE_EXPORT NGTextPainter : public TextPainterBase {
  public:
   NGTextPainter(GraphicsContext& context,
                 const Font& font,
-                const NGPhysicalTextFragment& text_fragment,
-                const LayoutPoint& text_origin,
-                const LayoutRect& text_bounds,
+                const NGTextFragmentPaintInfo& fragment_paint_info,
+                const IntRect& visual_rect,
+                const PhysicalOffset& text_origin,
+                const PhysicalRect& text_bounds,
                 bool horizontal)
       : TextPainterBase(context, font, text_origin, text_bounds, horizontal),
-        fragment_(text_fragment) {}
+        fragment_paint_info_(fragment_paint_info),
+        visual_rect_(visual_rect) {}
   ~NGTextPainter() = default;
 
   void ClipDecorationsStripe(float upper,
@@ -38,31 +41,23 @@ class CORE_EXPORT NGTextPainter : public TextPainterBase {
   void Paint(unsigned start_offset,
              unsigned end_offset,
              unsigned length,
-             const TextPaintStyle&);
-
-  static TextPaintStyle TextPaintingStyle(const NGPhysicalTextFragment*,
-                                          const ComputedStyle&,
-                                          const PaintInfo&);
-  static TextPaintStyle SelectionPaintingStyle(
-      const NGPhysicalTextFragment*,
-      bool have_selection,
-      const PaintInfo&,
-      const TextPaintStyle& text_style);
+             const TextPaintStyle&,
+             DOMNodeId);
 
  private:
   template <PaintInternalStep step>
-  void PaintInternalFragment(NGTextFragmentPaintInfo&,
-                             unsigned from,
-                             unsigned to);
+  void PaintInternalFragment(unsigned from, unsigned to, DOMNodeId node_id);
 
   template <PaintInternalStep step>
   void PaintInternal(unsigned start_offset,
                      unsigned end_offset,
-                     unsigned truncation_point);
+                     unsigned truncation_point,
+                     DOMNodeId node_id);
 
   void PaintEmphasisMarkForCombinedText();
 
-  const NGPhysicalTextFragment& fragment_;
+  NGTextFragmentPaintInfo fragment_paint_info_;
+  const IntRect& visual_rect_;
 };
 
 }  // namespace blink

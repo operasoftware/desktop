@@ -30,8 +30,10 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EVENTS_MESSAGE_EVENT_H_
 
 #include <memory>
+
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/unpacked_serialized_script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/world_safe_v8_reference.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
@@ -39,7 +41,7 @@
 #include "third_party/blink/renderer/core/fileapi/blob.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
-#include "third_party/blink/renderer/platform/wtf/compiler.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -49,156 +51,61 @@ class CORE_EXPORT MessageEvent final : public Event {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static MessageEvent* Create() { return new MessageEvent; }
+  static MessageEvent* Create() { return MakeGarbageCollected<MessageEvent>(); }
   static MessageEvent* Create(MessagePortArray* ports,
                               const String& origin = String(),
                               const String& last_event_id = String(),
                               EventTarget* source = nullptr) {
-    return new MessageEvent(origin, last_event_id, source, ports);
+    return MakeGarbageCollected<MessageEvent>(origin, last_event_id, source,
+                                              ports);
   }
   static MessageEvent* Create(MessagePortArray* ports,
                               scoped_refptr<SerializedScriptValue> data,
                               const String& origin = String(),
                               const String& last_event_id = String(),
                               EventTarget* source = nullptr) {
-    return new MessageEvent(std::move(data), origin, last_event_id, source,
-                            ports, nullptr);
+    return MakeGarbageCollected<MessageEvent>(
+        std::move(data), origin, last_event_id, source, ports, nullptr);
   }
   static MessageEvent* Create(MessagePortArray* ports,
                               scoped_refptr<SerializedScriptValue> data,
                               UserActivation* user_activation) {
-    return new MessageEvent(std::move(data), String(), String(), nullptr, ports,
-                            user_activation);
+    return MakeGarbageCollected<MessageEvent>(
+        std::move(data), String(), String(), nullptr, ports, user_activation);
   }
   static MessageEvent* Create(Vector<MessagePortChannel> channels,
                               scoped_refptr<SerializedScriptValue> data,
                               const String& origin = String(),
                               const String& last_event_id = String(),
                               EventTarget* source = nullptr,
-                              UserActivation* user_activation = nullptr) {
-    return new MessageEvent(std::move(data), origin, last_event_id, source,
-                            std::move(channels), user_activation);
+                              UserActivation* user_activation = nullptr,
+                              bool transfer_user_activation = false,
+                              bool allow_autoplay = false) {
+    return MakeGarbageCollected<MessageEvent>(
+        std::move(data), origin, last_event_id, source, std::move(channels),
+        user_activation, transfer_user_activation, allow_autoplay);
   }
   static MessageEvent* CreateError(const String& origin = String(),
                                    EventTarget* source = nullptr) {
-    return new MessageEvent(origin, source);
+    return MakeGarbageCollected<MessageEvent>(origin, source);
   }
   static MessageEvent* Create(const String& data,
                               const String& origin = String()) {
-    return new MessageEvent(data, origin);
+    return MakeGarbageCollected<MessageEvent>(data, origin);
   }
   static MessageEvent* Create(Blob* data, const String& origin = String()) {
-    return new MessageEvent(data, origin);
+    return MakeGarbageCollected<MessageEvent>(data, origin);
   }
   static MessageEvent* Create(DOMArrayBuffer* data,
                               const String& origin = String()) {
-    return new MessageEvent(data, origin);
+    return MakeGarbageCollected<MessageEvent>(data, origin);
   }
   static MessageEvent* Create(const AtomicString& type,
-                              const MessageEventInit& initializer,
+                              const MessageEventInit* initializer,
                               ExceptionState&);
-  ~MessageEvent() override;
-
-  void initMessageEvent(const AtomicString& type,
-                        bool bubbles,
-                        bool cancelable,
-                        ScriptValue data,
-                        const String& origin,
-                        const String& last_event_id,
-                        EventTarget* source,
-                        MessagePortArray*);
-  void initMessageEvent(const AtomicString& type,
-                        bool bubbles,
-                        bool cancelable,
-                        scoped_refptr<SerializedScriptValue> data,
-                        const String& origin,
-                        const String& last_event_id,
-                        EventTarget* source,
-                        MessagePortArray*,
-                        UserActivation* user_activation);
-  void initMessageEvent(const AtomicString& type,
-                        bool bubbles,
-                        bool cancelable,
-                        const String& data,
-                        const String& origin,
-                        const String& last_event_id,
-                        EventTarget* source,
-                        MessagePortArray*);
-
-  const String& origin() const { return origin_; }
-  const String& lastEventId() const { return last_event_id_; }
-  EventTarget* source() const { return source_.Get(); }
-  MessagePortArray ports();
-  bool isPortsDirty() const { return is_ports_dirty_; }
-  UserActivation* userActivation() const { return user_activation_; }
-
-  Vector<MessagePortChannel> ReleaseChannels() { return std::move(channels_); }
-
-  const AtomicString& InterfaceName() const override;
-
-  enum DataType {
-    kDataTypeNull,  // For "messageerror" events.
-    kDataTypeScriptValue,
-    kDataTypeSerializedScriptValue,
-    kDataTypeString,
-    kDataTypeBlob,
-    kDataTypeArrayBuffer
-  };
-  DataType GetDataType() const { return data_type_; }
-  ScriptValue DataAsScriptValue() const {
-    DCHECK_EQ(data_type_, kDataTypeScriptValue);
-    return data_as_script_value_;
-  }
-  // Use with caution. Since the data has already been unpacked, the underlying
-  // SerializedScriptValue will no longer contain transferred contents.
-  SerializedScriptValue* DataAsSerializedScriptValue() const {
-    DCHECK_EQ(data_type_, kDataTypeSerializedScriptValue);
-    return data_as_serialized_script_value_->Value();
-  }
-  UnpackedSerializedScriptValue* DataAsUnpackedSerializedScriptValue() const {
-    DCHECK_EQ(data_type_, kDataTypeSerializedScriptValue);
-    return data_as_serialized_script_value_.Get();
-  }
-  const String& DataAsString() const {
-    DCHECK_EQ(data_type_, kDataTypeString);
-    return data_as_string_.data();
-  }
-  Blob* DataAsBlob() const {
-    DCHECK_EQ(data_type_, kDataTypeBlob);
-    return data_as_blob_.Get();
-  }
-  DOMArrayBuffer* DataAsArrayBuffer() const {
-    DCHECK_EQ(data_type_, kDataTypeArrayBuffer);
-    return data_as_array_buffer_.Get();
-  }
-
-  void EntangleMessagePorts(ExecutionContext*);
-
-  void Trace(blink::Visitor*) override;
-
-  WARN_UNUSED_RESULT v8::Local<v8::Object> AssociateWithWrapper(
-      v8::Isolate*,
-      const WrapperTypeInfo*,
-      v8::Local<v8::Object> wrapper) override;
-
- private:
-  class V8GCAwareString final {
-   public:
-    V8GCAwareString() = default;
-    V8GCAwareString(const String&);
-
-    ~V8GCAwareString();
-
-    V8GCAwareString& operator=(const String&);
-
-    const String& data() const { return string_; }
-
-   private:
-    String string_;
-  };
 
   MessageEvent();
-  MessageEvent(const AtomicString&, const MessageEventInit&);
+  MessageEvent(const AtomicString&, const MessageEventInit*);
   MessageEvent(const String& origin,
                const String& last_event_id,
                EventTarget* source,
@@ -214,21 +121,109 @@ class CORE_EXPORT MessageEvent final : public Event {
                const String& last_event_id,
                EventTarget* source,
                Vector<MessagePortChannel>,
-               UserActivation* user_activation);
-
+               UserActivation* user_activation,
+               bool transfer_user_activation,
+               bool allow_autoplay);
   // Creates a "messageerror" event.
   MessageEvent(const String& origin, EventTarget* source);
-
   MessageEvent(const String& data, const String& origin);
   MessageEvent(Blob* data, const String& origin);
   MessageEvent(DOMArrayBuffer* data, const String& origin);
+  ~MessageEvent() override;
+
+  void initMessageEvent(const AtomicString& type,
+                        bool bubbles,
+                        bool cancelable,
+                        const ScriptValue& data,
+                        const String& origin,
+                        const String& last_event_id,
+                        EventTarget* source,
+                        MessagePortArray& ports);
+  void initMessageEvent(const AtomicString& type,
+                        bool bubbles,
+                        bool cancelable,
+                        scoped_refptr<SerializedScriptValue> data,
+                        const String& origin,
+                        const String& last_event_id,
+                        EventTarget* source,
+                        MessagePortArray*,
+                        UserActivation* user_activation,
+                        bool transfer_user_activation = false,
+                        bool allow_autoplay = false);
+  void initMessageEvent(const AtomicString& type,
+                        bool bubbles,
+                        bool cancelable,
+                        const String& data,
+                        const String& origin,
+                        const String& last_event_id,
+                        EventTarget* source,
+                        MessagePortArray*);
+
+  ScriptValue data(ScriptState*);
+  bool IsDataDirty() const { return is_data_dirty_; }
+  const String& origin() const { return origin_; }
+  const String& lastEventId() const { return last_event_id_; }
+  EventTarget* source() const { return source_.Get(); }
+  MessagePortArray ports();
+  bool isPortsDirty() const { return is_ports_dirty_; }
+  UserActivation* userActivation() const { return user_activation_; }
+  bool transferUserActivation() const { return transfer_user_activation_; }
+  bool allowAutoplay() const { return allow_autoplay_; }
+
+  Vector<MessagePortChannel> ReleaseChannels() { return std::move(channels_); }
+
+  const AtomicString& InterfaceName() const override;
+
+  // Use with caution. Since the data has already been unpacked, the underlying
+  // SerializedScriptValue will no longer contain transferred contents.
+  SerializedScriptValue* DataAsSerializedScriptValue() const {
+    DCHECK_EQ(data_type_, kDataTypeSerializedScriptValue);
+    return data_as_serialized_script_value_->Value();
+  }
+
+  void EntangleMessagePorts(ExecutionContext*);
+
+  void Trace(blink::Visitor*) override;
+
+  WARN_UNUSED_RESULT v8::Local<v8::Object> AssociateWithWrapper(
+      v8::Isolate*,
+      const WrapperTypeInfo*,
+      v8::Local<v8::Object> wrapper) override;
+
+ private:
+  enum DataType {
+    kDataTypeNull,  // For "messageerror" events.
+    kDataTypeScriptValue,
+    kDataTypeSerializedScriptValue,
+    kDataTypeString,
+    kDataTypeBlob,
+    kDataTypeArrayBuffer
+  };
+
+  class V8GCAwareString final {
+    DISALLOW_NEW();
+
+   public:
+    V8GCAwareString() = default;
+    V8GCAwareString(const String&);
+
+    ~V8GCAwareString();
+
+    V8GCAwareString& operator=(const String&);
+
+    const String& data() const { return string_; }
+
+   private:
+    String string_;
+  };
 
   DataType data_type_;
-  ScriptValue data_as_script_value_;
+  WorldSafeV8Reference<v8::Value> data_as_v8_value_;
   Member<UnpackedSerializedScriptValue> data_as_serialized_script_value_;
   V8GCAwareString data_as_string_;
   Member<Blob> data_as_blob_;
   Member<DOMArrayBuffer> data_as_array_buffer_;
+  bool is_data_dirty_ = true;
   String origin_;
   String last_event_id_;
   Member<EventTarget> source_;
@@ -239,6 +234,8 @@ class CORE_EXPORT MessageEvent final : public Event {
   bool is_ports_dirty_ = true;
   Vector<MessagePortChannel> channels_;
   Member<UserActivation> user_activation_;
+  bool transfer_user_activation_ = false;
+  bool allow_autoplay_ = false;
 };
 
 }  // namespace blink

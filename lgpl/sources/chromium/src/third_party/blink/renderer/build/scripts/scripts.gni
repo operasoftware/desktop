@@ -5,6 +5,10 @@
 import("//build/toolchain/toolchain.gni")
 import("//third_party/blink/renderer/config.gni")
 
+if (is_mac) {
+  import("//build/config/mac/mac_sdk.gni")
+}
+
 # All paths in this file should be absolute so targets in any directory can use
 # them without worrying about the current directory.
 _scripts_dir = "//third_party/blink/renderer/build/scripts"
@@ -68,6 +72,9 @@ make_trie_helpers_files =
 if (host_os == "win") {
   gperf_exe = rebase_path("//third_party/gperf/bin/gperf.exe", root_build_dir)
   bison_exe = rebase_path("//third_party/bison/bin/bison.exe", root_build_dir)
+} else if (is_mac) {
+  gperf_exe = mac_bin_path + "gperf"
+  bison_exe = mac_bin_path + "bison"
 } else {
   gperf_exe = "gperf"
   bison_exe = "bison"
@@ -81,6 +88,45 @@ make_core_generated_deps = [
   "//third_party/blink/renderer/core:generated_testing_idls",
   "//third_party/blink/renderer/core:core_event_interfaces",
 ]
+
+# A wrapper for python scripts. This adds the following paths to PYTHONPATH,
+# then run invoker.script.
+#  - //third_party/blink/renderer/build/scripts
+#  - //third_party
+template("blink_python_runner") {
+  action(target_name) {
+    script = "$_scripts_dir/run_with_pythonpath.py"
+    sources = [
+      invoker.script,
+    ]
+    if (defined(invoker.sources)) {
+      sources += invoker.sources
+    }
+    if (defined(invoker.inputs)) {
+      inputs = invoker.inputs
+    }
+    if (defined(invoker.data)) {
+      data = invoker.data
+    }
+    outputs = invoker.outputs
+    args = [
+             "-I",
+             rebase_path(_scripts_dir, root_build_dir),
+             "-I",
+             rebase_path("//third_party", root_build_dir),
+             "-I",
+             rebase_path("//tools", root_build_dir),
+             rebase_path(invoker.script, root_build_dir),
+           ] + invoker.args
+    if (defined(invoker.deps)) {
+      deps = invoker.deps
+    }
+    if (defined(invoker.data_deps)) {
+      data_deps = invoker.data_deps
+    }
+    forward_variables_from(invoker, [ "visibility" ])
+  }
+}
 
 # TODO(crbug.com/732657): Remove this once everything that uses this switches over to
 # the 'code_generator' template instead.
@@ -97,7 +143,7 @@ make_core_generated_deps = [
 #   deps [optional]:
 #     Depenendencies. If unspecified defaults to make_core_generated_deps.
 template("process_json5_files") {
-  action(target_name) {
+  blink_python_runner(target_name) {
     script = invoker.script
 
     inputs = invoker.in_files
@@ -115,12 +161,6 @@ template("process_json5_files") {
              "--output_dir",
              rebase_path(output_dir, root_build_dir),
            ]
-    if (is_mac && !use_system_xcode) {
-      args += [
-        "--developer_dir",
-        hermetic_xcode_path,
-      ]
-    }
     if (defined(invoker.other_args)) {
       args += invoker.other_args
     }
@@ -146,7 +186,7 @@ template("process_json5_files") {
 #   deps [optional]:
 #     Depenendencies. If unspecified defaults to make_core_generated_deps.
 template("code_generator") {
-  action(target_name) {
+  blink_python_runner(target_name) {
     script = invoker.script
     inputs = invoker.json_inputs + invoker.templates + scripts_for_json5_files
     if (defined(invoker.other_inputs)) {
@@ -161,12 +201,6 @@ template("code_generator") {
              "--output_dir",
              rebase_path(output_dir, root_build_dir),
            ]
-    if (is_mac && !use_system_xcode) {
-      args += [
-        "--developer_dir",
-        hermetic_xcode_path,
-      ]
-    }
     if (defined(invoker.other_args)) {
       args += invoker.other_args
     }

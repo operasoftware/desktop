@@ -3,26 +3,25 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/modules/webgl/webgl_context_attribute_helpers.h"
-#include "third_party/blink/renderer/modules/xr/xr_device.h"
 
 #include "third_party/blink/renderer/core/frame/settings.h"
 
 namespace blink {
 
-WebGLContextAttributes ToWebGLContextAttributes(
+WebGLContextAttributes* ToWebGLContextAttributes(
     const CanvasContextCreationAttributesCore& attrs) {
-  WebGLContextAttributes result;
-  result.setAlpha(attrs.alpha);
-  result.setDepth(attrs.depth);
-  result.setStencil(attrs.stencil);
-  result.setAntialias(attrs.antialias);
-  result.setPremultipliedAlpha(attrs.premultiplied_alpha);
-  result.setPreserveDrawingBuffer(attrs.preserve_drawing_buffer);
-  result.setFailIfMajorPerformanceCaveat(
+  WebGLContextAttributes* result = WebGLContextAttributes::Create();
+  result->setAlpha(attrs.alpha);
+  result->setDepth(attrs.depth);
+  result->setStencil(attrs.stencil);
+  result->setAntialias(attrs.antialias);
+  result->setPremultipliedAlpha(attrs.premultiplied_alpha);
+  result->setPreserveDrawingBuffer(attrs.preserve_drawing_buffer);
+  result->setPowerPreference(attrs.power_preference);
+  result->setFailIfMajorPerformanceCaveat(
       attrs.fail_if_major_performance_caveat);
-  result.setCompatibleXRDevice(
-      static_cast<XRDevice*>(attrs.compatible_xr_device.Get()));
-  result.setLowLatency(attrs.low_latency);
+  result->setXrCompatible(attrs.xr_compatible);
+  result->setDesynchronized(attrs.desynchronized);
   return result;
 }
 
@@ -31,6 +30,7 @@ Platform::ContextAttributes ToPlatformContextAttributes(
     Platform::ContextType context_type,
     bool support_own_offscreen_surface) {
   Platform::ContextAttributes result;
+  result.prefer_low_power_gpu = attrs.power_preference == "low-power";
   result.fail_if_major_performance_caveat =
       attrs.fail_if_major_performance_caveat;
   result.context_type = context_type;

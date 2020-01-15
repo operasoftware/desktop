@@ -31,9 +31,12 @@
 #include "third_party/blink/renderer/platform/text/bidi_resolver.h"
 
 #include <fstream>
+
+#include "base/stl_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/text/bidi_test_harness.h"
 #include "third_party/blink/renderer/platform/text/text_run_iterator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -106,11 +109,13 @@ TEST(BidiResolver, ParagraphDirectionSurrogates) {
       // Test broken surrogate: trail appearing before
       // lead. (U+10858 units reversed)
       {{0xDC58, 0xD802}, 2, TextDirection::kLtr, false}};
-  for (size_t i = 0; i < arraysize(kTestData); ++i)
+  for (size_t i = 0; i < base::size(kTestData); ++i)
     TestDirectionality(kTestData[i]);
 }
 
 class BidiTestRunner {
+  STACK_ALLOCATED();
+
  public:
   BidiTestRunner()
       : tests_run_(0),
@@ -124,15 +129,15 @@ class BidiTestRunner {
   }
 
   void RunTest(const std::basic_string<UChar>& input,
-               const std::vector<int>& reorder,
-               const std::vector<int>& levels,
+               const Vector<int>& reorder,
+               const Vector<int>& levels,
                bidi_test::ParagraphDirection,
                const std::string& line,
                size_t line_number);
 
   size_t tests_run_;
   size_t tests_skipped_;
-  std::set<UChar> skipped_code_points_;
+  HashSet<UChar> skipped_code_points_;
   size_t ignored_char_failures_;
   size_t level_failures_;
   size_t order_failures_;
@@ -151,8 +156,7 @@ static bool IsNonRenderedCodePoint(UChar c) {
   // But it seems to expect LRI, etc. to be rendered!?
 }
 
-std::string DiffString(const std::vector<int>& actual,
-                       const std::vector<int>& expected) {
+std::string DiffString(const Vector<int>& actual, const Vector<int>& expected) {
   std::ostringstream diff;
   diff << "actual: ";
   // This is the magical way to print a vector to a stream, clear, right?
@@ -165,14 +169,14 @@ std::string DiffString(const std::vector<int>& actual,
 }
 
 void BidiTestRunner::RunTest(const std::basic_string<UChar>& input,
-                             const std::vector<int>& expected_order,
-                             const std::vector<int>& expected_levels,
+                             const Vector<int>& expected_order,
+                             const Vector<int>& expected_levels,
                              bidi_test::ParagraphDirection paragraph_direction,
                              const std::string& line,
                              size_t line_number) {
-  if (!skipped_code_points_.empty()) {
+  if (!skipped_code_points_.IsEmpty()) {
     for (size_t i = 0; i < input.size(); i++) {
-      if (skipped_code_points_.count(input[i])) {
+      if (skipped_code_points_.Contains(input[i])) {
         tests_skipped_++;
         return;
       }
@@ -208,9 +212,9 @@ void BidiTestRunner::RunTest(const std::basic_string<UChar>& input,
   error_context << " context: "
                 << bidi_test::NameFromParagraphDirection(paragraph_direction);
 
-  std::vector<int> actual_order;
-  std::vector<int> actual_levels;
-  actual_levels.assign(input.size(), -1);
+  Vector<int> actual_order;
+  Vector<int> actual_levels;
+  actual_levels.Fill(-1, input.size());
   BidiCharacterRun* run = runs.FirstRun();
   while (run) {
     // Blink's UBA just makes runs, the actual ordering of the display of

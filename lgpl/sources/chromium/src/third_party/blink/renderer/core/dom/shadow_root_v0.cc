@@ -65,11 +65,11 @@ inline void DistributionPool::PopulateChildren(const ContainerNode& parent) {
   Clear();
   for (Node* child = parent.firstChild(); child; child = child->nextSibling()) {
     // Re-distribution across v0 and v1 shadow trees is not supported
-    if (IsHTMLSlotElement(child))
+    if (IsA<HTMLSlotElement>(child))
       continue;
 
     if (IsActiveV0InsertionPoint(*child)) {
-      V0InsertionPoint* insertion_point = ToV0InsertionPoint(child);
+      auto* insertion_point = To<V0InsertionPoint>(child);
       for (wtf_size_t i = 0; i < insertion_point->DistributedNodesSize(); ++i)
         nodes_.push_back(insertion_point->DistributedNodeAt(i));
     } else {
@@ -88,8 +88,8 @@ void DistributionPool::DistributeTo(V0InsertionPoint* insertion_point,
     if (distributed_[i])
       continue;
 
-    if (IsHTMLContentElement(*insertion_point) &&
-        !ToHTMLContentElement(insertion_point)->CanSelectNode(nodes_, i))
+    auto* html_content_element = DynamicTo<HTMLContentElement>(insertion_point);
+    if (html_content_element && !html_content_element->CanSelectNode(nodes_, i))
       continue;
 
     Node* node = nodes_[i];
@@ -116,17 +116,16 @@ inline DistributionPool::~DistributionPool() {
 
 inline void DistributionPool::DetachNonDistributedNodes() {
   for (wtf_size_t i = 0; i < nodes_.size(); ++i) {
-    if (distributed_[i])
-      continue;
-    if (nodes_[i]->GetLayoutObject())
-      nodes_[i]->LazyReattachIfAttached();
+    if (!distributed_[i])
+      nodes_[i]->RemovedFromFlatTree();
   }
 }
 
 const HeapVector<Member<V0InsertionPoint>>&
 ShadowRootV0::DescendantInsertionPoints() {
-  DEFINE_STATIC_LOCAL(Persistent<HeapVector<Member<V0InsertionPoint>>>,
-                      empty_list, (new HeapVector<Member<V0InsertionPoint>>));
+  DEFINE_STATIC_LOCAL(
+      Persistent<HeapVector<Member<V0InsertionPoint>>>, empty_list,
+      (MakeGarbageCollected<HeapVector<Member<V0InsertionPoint>>>()));
   if (descendant_insertion_points_is_valid_)
     return descendant_insertion_points_;
 
@@ -169,7 +168,7 @@ void ShadowRootV0::Distribute() {
   for (const auto& point : DescendantInsertionPoints()) {
     if (!point->IsActive())
       continue;
-    if (auto* shadow = ToHTMLShadowElementOrNull(*point)) {
+    if (auto* shadow = DynamicTo<HTMLShadowElement>(*point)) {
       DCHECK(!shadow_insertion_point);
       shadow_insertion_point = shadow;
     } else {
@@ -188,15 +187,17 @@ void ShadowRootV0::Distribute() {
             ShadowRootWhereNodeCanBeDistributedForV0(*shadow_insertion_point))
       shadow_root->SetNeedsDistributionRecalc();
   }
-  probe::didPerformElementShadowDistribution(&GetShadowRoot().host());
+  probe::DidPerformElementShadowDistribution(&GetShadowRoot().host());
 }
 
 void ShadowRootV0::DidDistributeNode(const Node* node,
                                      V0InsertionPoint* insertion_point) {
   NodeToDestinationInsertionPoints::AddResult result =
       node_to_insertion_points_.insert(node, nullptr);
-  if (result.is_new_entry)
-    result.stored_value->value = new DestinationInsertionPoints;
+  if (result.is_new_entry) {
+    result.stored_value->value =
+        MakeGarbageCollected<DestinationInsertionPoints>();
+  }
   result.stored_value->value->push_back(insertion_point);
 }
 
@@ -234,7 +235,7 @@ void ShadowRootV0::CollectSelectFeatureSetFrom() {
       if (!shadow_root->IsV1())
         select_features.Add(shadow_root->V0().EnsureSelectFeatureSet());
     }
-    if (auto* content = ToHTMLContentElementOrNull(element))
+    if (auto* content = DynamicTo<HTMLContentElement>(element))
       select_features.CollectFeaturesFromSelectorList(content->SelectorList());
   }
 }

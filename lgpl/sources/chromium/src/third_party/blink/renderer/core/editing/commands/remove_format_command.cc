@@ -39,7 +39,7 @@
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
 RemoveFormatCommand::RemoveFormatCommand(Document& document)
     : CompositeEditCommand(document) {}
@@ -48,10 +48,10 @@ static bool IsElementForRemoveFormatCommand(const Element* element) {
   DEFINE_STATIC_LOCAL(
       HashSet<QualifiedName>, elements,
       ({
-          acronymTag, bTag,   bdoTag,  bigTag,  citeTag,  codeTag,
-          dfnTag,     emTag,  fontTag, iTag,    insTag,   kbdTag,
-          nobrTag,    qTag,   sTag,    sampTag, smallTag, strikeTag,
-          strongTag,  subTag, supTag,  ttTag,   uTag,     varTag,
+          kAcronymTag, kBTag,   kBdoTag,  kBigTag,  kCiteTag,  kCodeTag,
+          kDfnTag,     kEmTag,  kFontTag, kITag,    kInsTag,   kKbdTag,
+          kNobrTag,    kQTag,   kSTag,    kSampTag, kSmallTag, kStrikeTag,
+          kStrongTag,  kSubTag, kSupTag,  kTtTag,   kUTag,     kVarTag,
       }));
   return elements.Contains(element->TagQName());
 }
@@ -69,14 +69,14 @@ void RemoveFormatCommand::DoApply(EditingState* editing_state) {
   // Get the default style for this editable root, it's the style that we'll
   // give the content that we're operating on.
   Element* root = selection.RootEditableElement();
-  EditingStyle* default_style = EditingStyle::Create(root);
+  EditingStyle* default_style = MakeGarbageCollected<EditingStyle>(root);
 
   // We want to remove everything but transparent background.
   // FIXME: We shouldn't access style().
-  default_style->Style()->SetProperty(CSSPropertyBackgroundColor,
-                                      CSSValueTransparent);
+  default_style->Style()->SetProperty(CSSPropertyID::kBackgroundColor,
+                                      CSSValueID::kTransparent);
 
-  ApplyCommandToComposite(ApplyStyleCommand::Create(
+  ApplyCommandToComposite(MakeGarbageCollected<ApplyStyleCommand>(
                               GetDocument(), default_style,
                               IsElementForRemoveFormatCommand, GetInputType()),
                           editing_state);

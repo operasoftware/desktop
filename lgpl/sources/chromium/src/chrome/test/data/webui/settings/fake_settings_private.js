@@ -17,35 +17,41 @@ cr.define('settings', function() {
    * Fake of chrome.settingsPrivate API. Use by setting
    * CrSettingsPrefs.deferInitialization to true, then passing a
    * FakeSettingsPrivate to settings-prefs#initialize().
-   * @constructor
-   * @param {Array<!settings.FakeSettingsPrivate.Pref>=} opt_initialPrefs
    * @implements {SettingsPrivate}
    */
-  function FakeSettingsPrivate(opt_initialPrefs) {
-    this.prefs = {};
+  class FakeSettingsPrivate {
+    /** @param {Array<!settings.FakeSettingsPrivate.Pref>=} opt_initialPrefs */
+    constructor(opt_initialPrefs) {
+      this.disallowSetPref_ = false;
+      this.failNextSetPref_ = false;
 
-    if (!opt_initialPrefs)
-      return;
-    for (const pref of opt_initialPrefs)
-      this.addPref_(pref.type, pref.key, pref.value);
-  }
+      this.prefs = {};
 
-  FakeSettingsPrivate.prototype = {
+      if (!opt_initialPrefs) {
+        return;
+      }
+      for (const pref of opt_initialPrefs) {
+        this.addPref_(pref.type, pref.key, pref.value);
+      }
+
+      // chrome.settingsPrivate override.
+      this.onPrefsChanged = new FakeChromeEvent();
+    }
+
     // chrome.settingsPrivate overrides.
-    onPrefsChanged: new FakeChromeEvent(),
-
-    getAllPrefs: function(callback) {
+    getAllPrefs(callback) {
       // Send a copy of prefs to keep our internal state private.
       const prefs = [];
-      for (const key in this.prefs)
+      for (const key in this.prefs) {
         prefs.push(deepCopy(this.prefs[key]));
+      }
 
       // Run the callback asynchronously to test that the prefs aren't actually
       // used before they become available.
       setTimeout(callback.bind(null, prefs));
-    },
+    }
 
-    setPref: function(key, value, pageId, callback) {
+    setPref(key, value, pageId, callback) {
       const pref = this.prefs[key];
       assertNotEquals(undefined, pref);
       assertEquals(typeof value, typeof pref.value);
@@ -63,37 +69,38 @@ cr.define('settings', function() {
       callback(true);
 
       // Like chrome.settingsPrivate, send a notification when prefs change.
-      if (changed)
+      if (changed) {
         this.sendPrefChanges([{key: key, value: deepCopy(value)}]);
-    },
+      }
+    }
 
-    getPref: function(key, callback) {
+    getPref(key, callback) {
       const pref = this.prefs[key];
       assertNotEquals(undefined, pref);
       callback(deepCopy(pref));
-    },
+    }
 
     // Functions used by tests.
 
     /** Instructs the API to return a failure when setPref is next called. */
-    failNextSetPref: function() {
+    failNextSetPref() {
       this.failNextSetPref_ = true;
-    },
+    }
 
     /** Instructs the API to assert (fail the test) if setPref is called. */
-    disallowSetPref: function() {
+    disallowSetPref() {
       this.disallowSetPref_ = true;
-    },
+    }
 
-    allowSetPref: function() {
+    allowSetPref() {
       this.disallowSetPref_ = false;
-    },
+    }
 
     /**
      * Notifies the listeners of pref changes.
      * @param {!Object<{key: string, value: *}>} changes
      */
-    sendPrefChanges: function(changes) {
+    sendPrefChanges(changes) {
       const prefs = [];
       for (const change of changes) {
         const pref = this.prefs[change.key];
@@ -102,7 +109,7 @@ cr.define('settings', function() {
         prefs.push(deepCopy(pref));
       }
       this.onPrefsChanged.callListeners(prefs);
-    },
+    }
 
     // Private methods for use by the fake API.
 
@@ -110,15 +117,16 @@ cr.define('settings', function() {
      * @param {!chrome.settingsPrivate.PrefType} type
      * @param {string} key
      * @param {*} value
+     * @private
      */
-    addPref_: function(type, key, value) {
+    addPref_(type, key, value) {
       this.prefs[key] = {
         type: type,
         key: key,
         value: value,
       };
-    },
-  };
+    }
+  }
 
   return {FakeSettingsPrivate: FakeSettingsPrivate};
 });

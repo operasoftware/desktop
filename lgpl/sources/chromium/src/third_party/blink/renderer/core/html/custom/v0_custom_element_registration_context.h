@@ -43,12 +43,9 @@ namespace blink {
 class CustomElementRegistry;
 
 class V0CustomElementRegistrationContext final
-    : public GarbageCollectedFinalized<V0CustomElementRegistrationContext> {
+    : public GarbageCollected<V0CustomElementRegistrationContext> {
  public:
-  static V0CustomElementRegistrationContext* Create() {
-    return new V0CustomElementRegistrationContext();
-  }
-
+  V0CustomElementRegistrationContext();
   ~V0CustomElementRegistrationContext() = default;
   void DocumentWasDetached() { registry_.DocumentWasDetached(); }
 
@@ -68,10 +65,7 @@ class V0CustomElementRegistrationContext final
   bool NameIsDefined(const AtomicString& name) const;
   void SetV1(const CustomElementRegistry*);
 
-  void Trace(blink::Visitor*);
-
- protected:
-  V0CustomElementRegistrationContext();
+  void Trace(Visitor*);
 
   // Instance creation
   void DidGiveTypeExtension(Element*, const AtomicString& type);

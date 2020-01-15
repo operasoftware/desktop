@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/platform/testing/viewport_layers_setup.h"
 
 #include <memory>
+#include "base/time/time.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/trees/layer_tree_host.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
@@ -16,30 +17,19 @@
 namespace blink {
 
 ViewportLayersSetup::ViewportLayersSetup() {
-  clip_layer_ = std::make_unique<FakeGraphicsLayer>(client_);
-  scroll_elasticity_layer_ = std::make_unique<FakeGraphicsLayer>(client_);
-  page_scale_layer_ = std::make_unique<FakeGraphicsLayer>(client_);
+  // TODO(wangxianzhu): Don't create unnecessary layers.
+  root_layer_ = std::make_unique<FakeGraphicsLayer>(client_);
   graphics_layer_ = std::make_unique<FakeGraphicsLayer>(client_);
   graphics_layer_->SetDrawsContent(true);
-  clip_layer_->AddChild(scroll_elasticity_layer_.get());
-  scroll_elasticity_layer_->AddChild(page_scale_layer_.get());
-  page_scale_layer_->AddChild(graphics_layer_.get());
-  graphics_layer_->CcLayer()->SetScrollable(clip_layer_->CcLayer()->bounds());
+  graphics_layer_->SetHitTestable(true);
+  root_layer_->AddChild(graphics_layer_.get());
+  graphics_layer_->CcLayer()->SetScrollable(root_layer_->CcLayer()->bounds());
   layer_tree_ = std::make_unique<LayerTreeHostEmbedder>();
-  layer_tree_->layer_tree_host()->SetRootLayer(clip_layer_->CcLayer());
+  layer_tree_->layer_tree_host()->SetRootLayer(root_layer_->CcLayer());
 
-  scroll_elasticity_layer_->SetElementId(cc::LayerIdToElementIdForTesting(
-      scroll_elasticity_layer_->CcLayer()->id()));
-
-  cc::LayerTreeHost::ViewportLayers viewport_layers;
-  viewport_layers.overscroll_elasticity_element_id =
-      scroll_elasticity_layer_->GetElementId();
-  viewport_layers.page_scale = page_scale_layer_->CcLayer();
-  viewport_layers.inner_viewport_container = clip_layer_->CcLayer();
-  viewport_layers.inner_viewport_scroll = graphics_layer_->CcLayer();
-  layer_tree_->layer_tree_host()->RegisterViewportLayers(viewport_layers);
-  layer_tree_->layer_tree_host()->SetViewportSizeAndScale(
-      gfx::Size(1, 1), /*device_scale_factor=*/1.f, viz::LocalSurfaceId());
+  layer_tree_->layer_tree_host()->SetViewportRectAndScale(
+      gfx::Rect(1, 1), /*device_scale_factor=*/1.f,
+      viz::LocalSurfaceIdAllocation());
 
   graphics_layer_->SetLayerState(PropertyTreeState(PropertyTreeState::Root()),
                                  IntPoint());

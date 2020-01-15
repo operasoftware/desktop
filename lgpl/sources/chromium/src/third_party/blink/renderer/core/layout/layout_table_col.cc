@@ -32,8 +32,6 @@
 
 namespace blink {
 
-using namespace HTMLNames;
-
 LayoutTableCol::LayoutTableCol(Element* element)
     : LayoutTableBoxComponent(element), span_(1) {
   // init LayoutObject attributes
@@ -81,9 +79,10 @@ void LayoutTableCol::UpdateFromElement() {
   } else {
     span_ = 1;
   }
-  if (span_ != old_span && Style() && Parent())
+  if (span_ != old_span && Style() && Parent()) {
     SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
-        LayoutInvalidationReason::kAttributeChanged);
+        layout_invalidation_reason::kAttributeChanged);
+  }
 }
 
 void LayoutTableCol::InsertedIntoTree() {
@@ -125,7 +124,7 @@ LayoutTable* LayoutTableCol::Table() const {
   LayoutObject* table = Parent();
   if (table && !table->IsTable())
     table = table->Parent();
-  return table && table->IsTable() ? ToLayoutTable(table) : nullptr;
+  return table && table->IsTable() ? To<LayoutTable>(table) : nullptr;
 }
 
 LayoutTableCol* LayoutTableCol::EnclosingColumnGroup() const {

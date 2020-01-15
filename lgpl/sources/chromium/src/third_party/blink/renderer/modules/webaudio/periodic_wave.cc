@@ -49,19 +49,12 @@ const unsigned kMaxPeriodicWaveSize = 16384;
 
 const float kCentsPerRange = 1200 / kNumberOfOctaveBands;
 
-using namespace VectorMath;
-
 PeriodicWave* PeriodicWave::Create(BaseAudioContext& context,
                                    const Vector<float>& real,
                                    const Vector<float>& imag,
                                    bool disable_normalization,
                                    ExceptionState& exception_state) {
   DCHECK(IsMainThread());
-
-  if (context.IsContextClosed()) {
-    context.ThrowExceptionForClosedState(exception_state);
-    return nullptr;
-  }
 
   if (real.size() != imag.size()) {
     exception_state.ThrowDOMException(
@@ -72,29 +65,30 @@ PeriodicWave* PeriodicWave::Create(BaseAudioContext& context,
     return nullptr;
   }
 
-  PeriodicWave* periodic_wave = new PeriodicWave(context.sampleRate());
+  PeriodicWave* periodic_wave =
+      MakeGarbageCollected<PeriodicWave>(context.sampleRate());
   periodic_wave->CreateBandLimitedTables(real.data(), imag.data(), real.size(),
                                          disable_normalization);
   return periodic_wave;
 }
 
 PeriodicWave* PeriodicWave::Create(BaseAudioContext* context,
-                                   const PeriodicWaveOptions& options,
+                                   const PeriodicWaveOptions* options,
                                    ExceptionState& exception_state) {
-  bool normalize = options.disableNormalization();
+  bool normalize = options->disableNormalization();
 
   Vector<float> real_coef;
   Vector<float> imag_coef;
 
-  if (options.hasReal()) {
-    real_coef = options.real();
-    if (options.hasImag())
-      imag_coef = options.imag();
+  if (options->hasReal()) {
+    real_coef = options->real();
+    if (options->hasImag())
+      imag_coef = options->imag();
     else
       imag_coef.resize(real_coef.size());
-  } else if (options.hasImag()) {
+  } else if (options->hasImag()) {
     // |real| not given, but we have |imag|.
-    imag_coef = options.imag();
+    imag_coef = options->imag();
     real_coef.resize(imag_coef.size());
   } else {
     // Neither |real| nor |imag| given.  Return an object that would
@@ -108,25 +102,25 @@ PeriodicWave* PeriodicWave::Create(BaseAudioContext* context,
 }
 
 PeriodicWave* PeriodicWave::CreateSine(float sample_rate) {
-  PeriodicWave* periodic_wave = new PeriodicWave(sample_rate);
+  PeriodicWave* periodic_wave = MakeGarbageCollected<PeriodicWave>(sample_rate);
   periodic_wave->GenerateBasicWaveform(OscillatorHandler::SINE);
   return periodic_wave;
 }
 
 PeriodicWave* PeriodicWave::CreateSquare(float sample_rate) {
-  PeriodicWave* periodic_wave = new PeriodicWave(sample_rate);
+  PeriodicWave* periodic_wave = MakeGarbageCollected<PeriodicWave>(sample_rate);
   periodic_wave->GenerateBasicWaveform(OscillatorHandler::SQUARE);
   return periodic_wave;
 }
 
 PeriodicWave* PeriodicWave::CreateSawtooth(float sample_rate) {
-  PeriodicWave* periodic_wave = new PeriodicWave(sample_rate);
+  PeriodicWave* periodic_wave = MakeGarbageCollected<PeriodicWave>(sample_rate);
   periodic_wave->GenerateBasicWaveform(OscillatorHandler::SAWTOOTH);
   return periodic_wave;
 }
 
 PeriodicWave* PeriodicWave::CreateTriangle(float sample_rate) {
-  PeriodicWave* periodic_wave = new PeriodicWave(sample_rate);
+  PeriodicWave* periodic_wave = MakeGarbageCollected<PeriodicWave>(sample_rate);
   periodic_wave->GenerateBasicWaveform(OscillatorHandler::TRIANGLE);
   return periodic_wave;
 }
@@ -219,7 +213,7 @@ unsigned PeriodicWave::NumberOfPartialsForRange(unsigned range_index) const {
 
 // Tell V8 about the memory we're using so it can properly schedule garbage
 // collects.
-void PeriodicWave::AdjustV8ExternalMemory(int delta) {
+void PeriodicWave::AdjustV8ExternalMemory(int64_t delta) {
   v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(delta);
   v8_external_memory_ += delta;
 }
@@ -255,9 +249,9 @@ void PeriodicWave::CreateBandLimitedTables(const float* real_data,
     // arrays.  Need to scale the data by fftSize to remove the scaling that the
     // inverse IFFT would do.
     float scale = fft_size;
-    Vsmul(real_data, 1, &scale, real_p, 1, number_of_components);
+    vector_math::Vsmul(real_data, 1, &scale, real_p, 1, number_of_components);
     scale = -scale;
-    Vsmul(imag_data, 1, &scale, imag_p, 1, number_of_components);
+    vector_math::Vsmul(imag_data, 1, &scale, imag_p, 1, number_of_components);
 
     // Find the starting bin where we should start culling.  We need to clear
     // out the highest frequencies to band-limit the waveform.
@@ -292,7 +286,7 @@ void PeriodicWave::CreateBandLimitedTables(const float* real_data,
     if (!disable_normalization) {
       if (!range_index) {
         float max_value;
-        Vmaxmgv(data, 1, &max_value, fft_size);
+        vector_math::Vmaxmgv(data, 1, &max_value, fft_size);
 
         if (max_value)
           normalization_scale = 1.0f / max_value;
@@ -300,7 +294,7 @@ void PeriodicWave::CreateBandLimitedTables(const float* real_data,
     }
 
     // Apply normalization scale.
-    Vsmul(data, 1, &normalization_scale, data, 1, fft_size);
+    vector_math::Vsmul(data, 1, &normalization_scale, data, 1, fft_size);
   }
 }
 

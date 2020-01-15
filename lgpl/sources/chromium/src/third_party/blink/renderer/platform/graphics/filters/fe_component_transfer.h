@@ -60,23 +60,16 @@ struct ComponentTransferFunction {
 
 class PLATFORM_EXPORT FEComponentTransfer final : public FilterEffect {
  public:
-  static FEComponentTransfer* Create(
-      Filter*,
-      const ComponentTransferFunction& red_func,
-      const ComponentTransferFunction& green_func,
-      const ComponentTransferFunction& blue_func,
-      const ComponentTransferFunction& alpha_func);
-
-  WTF::TextStream& ExternalRepresentation(WTF::TextStream&,
-                                          int indention) const override;
-
- private:
   FEComponentTransfer(Filter*,
                       const ComponentTransferFunction& red_func,
                       const ComponentTransferFunction& green_func,
                       const ComponentTransferFunction& blue_func,
                       const ComponentTransferFunction& alpha_func);
 
+  WTF::TextStream& ExternalRepresentation(WTF::TextStream&,
+                                          int indention) const override;
+
+ private:
   sk_sp<PaintFilter> CreateImageFilter() override;
 
   bool AffectsTransparentPixels() const override;

@@ -7,7 +7,7 @@
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_model_object.h"
 #include "third_party/blink/renderer/core/paint/object_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
-#include "third_party/blink/renderer/platform/graphics/paint/hit_test_data.h"
+#include "third_party/blink/renderer/platform/graphics/paint/hit_test_display_item.h"
 
 namespace blink {
 
@@ -24,7 +24,7 @@ bool SVGModelObjectPainter::CullRectSkipsPainting(const PaintInfo& paint_info) {
   if (layout_svg_model_object_.IsSVGHiddenContainer())
     return false;
 
-  return !paint_info.GetCullRect().IntersectsCullRect(
+  return !paint_info.GetCullRect().IntersectsTransformed(
       layout_svg_model_object_.LocalToSVGParentTransform(),
       layout_svg_model_object_.VisualRectInLocalSVGCoordinates());
 }
@@ -38,14 +38,14 @@ void SVGModelObjectPainter::RecordHitTestData(
   if (paint_info.GetGlobalPaintFlags() & kGlobalPaintFlattenCompositingLayers)
     return;
 
-  auto touch_action = layout_svg_model_object.EffectiveWhitelistedTouchAction();
+  auto touch_action = layout_svg_model_object.EffectiveAllowedTouchAction();
   if (touch_action == TouchAction::kTouchActionAuto)
     return;
 
   auto rect =
       LayoutRect(layout_svg_model_object.VisualRectInLocalSVGCoordinates());
-  HitTestData::RecordHitTestRect(paint_info.context, layout_svg_model_object,
-                                 HitTestRect(rect, touch_action));
+  HitTestDisplayItem::Record(paint_info.context, layout_svg_model_object,
+                             HitTestRect(rect, touch_action));
 }
 
 void SVGModelObjectPainter::PaintOutline(const PaintInfo& paint_info) {
@@ -60,7 +60,8 @@ void SVGModelObjectPainter::PaintOutline(const PaintInfo& paint_info) {
   outline_paint_info.phase = PaintPhase::kSelfOutlineOnly;
   auto visual_rect = layout_svg_model_object_.VisualRectInLocalSVGCoordinates();
   ObjectPainter(layout_svg_model_object_)
-      .PaintOutline(outline_paint_info, LayoutPoint(visual_rect.Location()));
+      .PaintOutline(outline_paint_info, PhysicalOffset::FromFloatPointRound(
+                                            visual_rect.Location()));
 }
 
 }  // namespace blink

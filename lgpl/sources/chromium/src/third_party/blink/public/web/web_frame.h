@@ -33,7 +33,6 @@
 
 #include <memory>
 #include "cc/paint/paint_canvas.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_insecure_request_policy.h"
 #include "third_party/blink/public/web/web_frame_load_type.h"
@@ -53,6 +52,7 @@ class WebRemoteFrame;
 class WebSecurityOrigin;
 class WebView;
 enum class WebSandboxFlags;
+struct FramePolicy;
 struct WebFrameOwnerProperties;
 struct WebRect;
 
@@ -105,13 +105,13 @@ class BLINK_EXPORT WebFrame {
   // parent is in another process and it dynamically updates this frame's
   // sandbox flags or container policy. The new policy won't take effect until
   // the next navigation.
-  void SetFrameOwnerPolicy(WebSandboxFlags, const blink::ParsedFeaturePolicy&);
+  void SetFrameOwnerPolicy(const FramePolicy&);
 
   // The frame's insecure request policy.
   WebInsecureRequestPolicy GetInsecureRequestPolicy() const;
 
   // The frame's upgrade insecure navigations set.
-  std::vector<unsigned> GetInsecureRequestToUpgrade() const;
+  WebVector<unsigned> GetInsecureRequestToUpgrade() const;
 
   // Updates this frame's FrameOwner properties, such as scrolling, margin,
   // or allowfullscreen.  This is used when this frame's parent is in
@@ -119,15 +119,6 @@ class BLINK_EXPORT WebFrame {
   // TODO(dcheng): Currently, the update only takes effect on next frame
   // navigation.  This matches the in-process frame behavior.
   void SetFrameOwnerProperties(const WebFrameOwnerProperties&);
-
-  // Geometry -----------------------------------------------------------
-
-  // NOTE: These routines do not force page layout so their results may
-  // not be accurate if the page layout is out-of-date.
-
-  // Returns the visible content rect (with or without scrollbar area, in
-  // absolute coordinate)
-  virtual WebRect VisibleContentRect(bool include_scrollbars = false) const = 0;
 
   // Whether to collapse the frame's owner element in the embedder document,
   // that is, to remove it from the layout as if it did not exist. Only works
@@ -146,7 +137,7 @@ class BLINK_EXPORT WebFrame {
   void SetOpener(WebFrame*);
 
   // Reset the frame that opened this frame to 0.
-  // This is executed between layout tests runs
+  // This is executed between web tests runs
   void ClearOpener();
 
   // Returns the parent frame or 0 if this is a top-most frame.
@@ -190,8 +181,9 @@ class BLINK_EXPORT WebFrame {
   // Utility -------------------------------------------------------------
 
   // Creates a static image of frame.
-  virtual SkBitmap FrameImage(const WebRect& source_rect,
-                              bool include_scrollbars) = 0;
+  virtual bool FrameImage(const WebRect& source_rect,
+                          bool include_scrollbars,
+                          SkCanvas* canvas) = 0;
 
   // Returns the frame inside a given frame or iframe element. Returns 0 if
   // the given node is not a frame, iframe or if the frame is empty.

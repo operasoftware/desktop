@@ -4,36 +4,23 @@
 
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_text_fragment_builder.h"
 
+#include "third_party/blink/renderer/core/layout/layout_text_fragment.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_item_result.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_node.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_line_height_metrics.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_physical_text_fragment.h"
+#include "third_party/blink/renderer/platform/fonts/shaping/shape_result_view.h"
 
 namespace blink {
 
-namespace {
-
-NGLineOrientation ToLineOrientation(WritingMode writing_mode) {
-  switch (writing_mode) {
-    case WritingMode::kHorizontalTb:
-      return NGLineOrientation::kHorizontal;
-    case WritingMode::kVerticalRl:
-    case WritingMode::kVerticalLr:
-    case WritingMode::kSidewaysRl:
-      return NGLineOrientation::kClockWiseVertical;
-    case WritingMode::kSidewaysLr:
-      return NGLineOrientation::kCounterClockWiseVertical;
-  }
-  NOTREACHED();
-  return NGLineOrientation::kHorizontal;
-}
-
-}  // namespace
-
-NGTextFragmentBuilder::NGTextFragmentBuilder(NGInlineNode node,
-                                             WritingMode writing_mode)
-    : NGBaseFragmentBuilder(writing_mode, TextDirection::kLtr),
-      inline_node_(node) {}
+NGTextFragmentBuilder::NGTextFragmentBuilder(
+    const NGPhysicalTextFragment& fragment)
+    : NGFragmentBuilder(fragment),
+      text_(fragment.text_),
+      start_offset_(fragment.StartOffset()),
+      end_offset_(fragment.EndOffset()),
+      shape_result_(fragment.TextShapeResult()),
+      text_type_(fragment.TextType()) {}
 
 void NGTextFragmentBuilder::SetItem(
     NGPhysicalTextFragment::NGTextType text_type,
@@ -47,12 +34,10 @@ void NGTextFragmentBuilder::SetItem(
 
   text_type_ = text_type;
   text_ = items_data.text_content;
-  item_index_ = item_result->item_index;
   start_offset_ = item_result->start_offset;
   end_offset_ = item_result->end_offset;
   SetStyle(item_result->item->Style(), item_result->item->StyleVariant());
   size_ = {item_result->inline_size, line_height};
-  end_effect_ = item_result->text_end_effect;
   shape_result_ = std::move(item_result->shape_result);
   layout_object_ = item_result->item->GetLayoutObject();
 }
@@ -62,33 +47,42 @@ void NGTextFragmentBuilder::SetText(
     const String& text,
     scoped_refptr<const ComputedStyle> style,
     bool is_ellipsis_style,
-    scoped_refptr<const ShapeResult> shape_result) {
+    scoped_refptr<const ShapeResultView> shape_result) {
   DCHECK(layout_object);
   DCHECK(style);
   DCHECK(shape_result);
 
   text_type_ = NGPhysicalTextFragment::kGeneratedText;
   text_ = text;
-  item_index_ = std::numeric_limits<unsigned>::max();
-  start_offset_ = shape_result->StartIndexForResult();
-  end_offset_ = shape_result->EndIndexForResult();
+  start_offset_ = shape_result->StartIndex();
+  end_offset_ = shape_result->EndIndex();
   SetStyle(style, is_ellipsis_style ? NGStyleVariant::kEllipsis
                                     : NGStyleVariant::kStandard);
   size_ = {shape_result->SnappedWidth(),
            NGLineHeightMetrics(*style).LineHeight()};
   shape_result_ = std::move(shape_result);
   layout_object_ = layout_object;
-  end_effect_ = NGTextEndEffect::kNone;
+}
+
+bool NGTextFragmentBuilder::IsGeneratedText() const {
+  if (UNLIKELY(style_variant_ == NGStyleVariant::kEllipsis ||
+               text_type_ == NGPhysicalTextFragment::kGeneratedText))
+    return true;
+
+  DCHECK(layout_object_);
+  if (const auto* layout_text_fragment =
+          ToLayoutTextFragmentOrNull(layout_object_)) {
+    return !layout_text_fragment->AssociatedTextNode();
+  }
+
+  const Node* node = layout_object_->GetNode();
+  return !node || node->IsPseudoElement();
 }
 
 scoped_refptr<const NGPhysicalTextFragment>
 NGTextFragmentBuilder::ToTextFragment() {
   scoped_refptr<const NGPhysicalTextFragment> fragment =
-      base::AdoptRef(new NGPhysicalTextFragment(
-          layout_object_, Style(), style_variant_, text_type_, text_,
-          start_offset_, end_offset_, size_.ConvertToPhysical(GetWritingMode()),
-          ToLineOrientation(GetWritingMode()), end_effect_,
-          std::move(shape_result_)));
+      base::AdoptRef(new NGPhysicalTextFragment(this));
   return fragment;
 }
 

@@ -22,6 +22,7 @@
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
+#include "third_party/blink/renderer/core/layout/api/line_layout_api_shim.h"
 #include "third_party/blink/renderer/core/layout/api/line_layout_block_flow.h"
 #include "third_party/blink/renderer/core/layout/api/line_layout_item.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
@@ -180,21 +181,20 @@ void RootInlineBox::Paint(const PaintInfo& paint_info,
 }
 
 bool RootInlineBox::NodeAtPoint(HitTestResult& result,
-                                const HitTestLocation& location_in_container,
-                                const LayoutPoint& accumulated_offset,
+                                const HitTestLocation& hit_test_location,
+                                const PhysicalOffset& accumulated_offset,
                                 LayoutUnit line_top,
                                 LayoutUnit line_bottom) {
   if (HasEllipsisBox() && VisibleToHitTestRequest(result.GetHitTestRequest())) {
-    if (GetEllipsisBox()->NodeAtPoint(result, location_in_container,
+    if (GetEllipsisBox()->NodeAtPoint(result, hit_test_location,
                                       accumulated_offset, line_top,
                                       line_bottom)) {
       GetLineLayoutItem().UpdateHitTestResult(
-          result,
-          location_in_container.Point() - ToLayoutSize(accumulated_offset));
+          result, hit_test_location.Point() - accumulated_offset);
       return true;
     }
   }
-  return InlineFlowBox::NodeAtPoint(result, location_in_container,
+  return InlineFlowBox::NodeAtPoint(result, hit_test_location,
                                     accumulated_offset, line_top, line_bottom);
 }
 
@@ -416,13 +416,14 @@ static bool IsEditableLeaf(InlineBox* leaf) {
          HasEditableStyle(*leaf->GetLineLayoutItem().GetNode());
 }
 
-InlineBox* RootInlineBox::ClosestLeafChildForPoint(
+const LayoutObject* RootInlineBox::ClosestLeafChildForPoint(
     const LayoutPoint& point_in_contents,
     bool only_editable_leaves) const {
-  return ClosestLeafChildForLogicalLeftPosition(
+  InlineBox* closest_box = ClosestLeafChildForLogicalLeftPosition(
       Block().IsHorizontalWritingMode() ? point_in_contents.X()
                                         : point_in_contents.Y(),
       only_editable_leaves);
+  return LineLayoutAPIShim::LayoutObjectFrom(closest_box->GetLineLayoutItem());
 }
 
 InlineBox* RootInlineBox::ClosestLeafChildForLogicalLeftPosition(
@@ -478,10 +479,10 @@ InlineBox* RootInlineBox::ClosestLeafChildForLogicalLeftPosition(
 
 BidiStatus RootInlineBox::LineBreakBidiStatus() const {
   return BidiStatus(
-      static_cast<WTF::Unicode::CharDirection>(line_break_bidi_status_eor_),
-      static_cast<WTF::Unicode::CharDirection>(
+      static_cast<WTF::unicode::CharDirection>(line_break_bidi_status_eor_),
+      static_cast<WTF::unicode::CharDirection>(
           line_break_bidi_status_last_strong_),
-      static_cast<WTF::Unicode::CharDirection>(line_break_bidi_status_last_),
+      static_cast<WTF::unicode::CharDirection>(line_break_bidi_status_last_),
       line_break_context_);
 }
 
@@ -604,8 +605,8 @@ void RootInlineBox::AscentAndDescentForBox(
                                              .PrimaryFont();
     if (primary_font)
       used_fonts->push_back(primary_font);
-    for (size_t i = 0; i < used_fonts->size(); ++i) {
-      const FontMetrics& font_metrics = used_fonts->at(i)->GetFontMetrics();
+    for (const SimpleFontData* font_data : *used_fonts) {
+      const FontMetrics& font_metrics = font_data->GetFontMetrics();
       LayoutUnit used_font_ascent(font_metrics.Ascent(BaselineType()));
       LayoutUnit used_font_descent(font_metrics.Descent(BaselineType()));
       LayoutUnit half_leading(
@@ -808,9 +809,9 @@ void RootInlineBox::CollectLeafBoxesInLogicalOrder(
 const InlineBox* RootInlineBox::GetLogicalStartNonPseudoBox() const {
   Vector<InlineBox*> leaf_boxes_in_logical_order;
   CollectLeafBoxesInLogicalOrder(leaf_boxes_in_logical_order);
-  for (size_t i = 0; i < leaf_boxes_in_logical_order.size(); ++i) {
-    if (leaf_boxes_in_logical_order[i]->GetLineLayoutItem().NonPseudoNode())
-      return leaf_boxes_in_logical_order[i];
+  for (InlineBox* box : leaf_boxes_in_logical_order) {
+    if (box->GetLineLayoutItem().NonPseudoNode())
+      return box;
   }
   return nullptr;
 }
@@ -818,7 +819,7 @@ const InlineBox* RootInlineBox::GetLogicalStartNonPseudoBox() const {
 const InlineBox* RootInlineBox::GetLogicalEndNonPseudoBox() const {
   Vector<InlineBox*> leaf_boxes_in_logical_order;
   CollectLeafBoxesInLogicalOrder(leaf_boxes_in_logical_order);
-  for (size_t i = leaf_boxes_in_logical_order.size(); i > 0; --i) {
+  for (wtf_size_t i = leaf_boxes_in_logical_order.size(); i > 0; --i) {
     if (leaf_boxes_in_logical_order[i - 1]
             ->GetLineLayoutItem()
             .NonPseudoNode()) {

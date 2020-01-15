@@ -52,13 +52,12 @@ class InputTypeView;
 // An InputType object represents the type-specific part of an HTMLInputElement.
 // Do not expose instances of InputType and classes derived from it to classes
 // other than HTMLInputElement.
-class CORE_EXPORT InputType : public GarbageCollectedFinalized<InputType> {
+class CORE_EXPORT InputType : public GarbageCollected<InputType> {
  public:
   static InputType* Create(HTMLInputElement&, const AtomicString&);
-  static InputType* CreateText(HTMLInputElement&);
   static const AtomicString& NormalizeTypeName(const AtomicString&);
   virtual ~InputType();
-  virtual void Trace(blink::Visitor*);
+  virtual void Trace(Visitor*);
 
   virtual InputTypeView* CreateView() = 0;
   virtual const AtomicString& FormControlType() const = 0;
@@ -91,7 +90,7 @@ class CORE_EXPORT InputType : public GarbageCollectedFinalized<InputType> {
   // is missing.
   virtual String DefaultLabel() const;
 
-  // https://html.spec.whatwg.org/multipage/forms.html#dom-input-value
+  // https://html.spec.whatwg.org/C/#dom-input-value
   enum class ValueMode { kValue, kDefault, kDefaultOn, kFilename };
   virtual ValueMode GetValueMode() const = 0;
 
@@ -133,10 +132,10 @@ class CORE_EXPORT InputType : public GarbageCollectedFinalized<InputType> {
   double Minimum() const;
   double Maximum() const;
   bool StepMismatch(const String&) const;
-  virtual bool GetAllowedValueStep(Decimal*) const;
+  bool GetAllowedValueStep(Decimal*) const;
   virtual StepRange CreateStepRange(AnyStepHandling) const;
-  virtual void StepUp(double, ExceptionState&);
-  virtual void StepUpFromLayoutObject(int);
+  void StepUp(double, ExceptionState&);
+  void StepUpFromLayoutObject(int);
   virtual String BadInputText() const;
   virtual String RangeOverflowText(const Decimal& maximum) const;
   virtual String RangeUnderflowText(const Decimal& minimum) const;
@@ -164,7 +163,9 @@ class CORE_EXPORT InputType : public GarbageCollectedFinalized<InputType> {
   virtual void SanitizeValueInResponseToMinOrMaxAttributeChange();
   virtual bool ShouldRespectAlignAttribute();
   virtual FileList* Files();
-  virtual void SetFiles(FileList*);
+  // Should return true if the file list was were changed.
+  virtual bool SetFiles(FileList*);
+  virtual void SetFilesAndDispatchEvents(FileList*);
   virtual void SetFilesFromPaths(const Vector<String>&);
   // Should return true if the given DragData has more than one dropped files.
   virtual bool ReceiveDroppedFiles(const DragData*);
@@ -193,7 +194,6 @@ class CORE_EXPORT InputType : public GarbageCollectedFinalized<InputType> {
   virtual const QualifiedName& SubResourceAttributeName() const;
   virtual void CopyNonAttributeProperties(const HTMLInputElement&);
   virtual void OnAttachWithLayoutObject();
-  virtual void OnDetachWithLayoutObject();
 
   // Parses the specified string for the type, and return
   // the Decimal value for the parsing result if the parsing

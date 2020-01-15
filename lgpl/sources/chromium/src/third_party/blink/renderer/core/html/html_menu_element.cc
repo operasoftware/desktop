@@ -26,11 +26,9 @@
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-inline HTMLMenuElement::HTMLMenuElement(Document& document)
-    : HTMLElement(menuTag, document) {}
-
-DEFINE_NODE_FACTORY(HTMLMenuElement)
+HTMLMenuElement::HTMLMenuElement(Document& document)
+    : HTMLElement(kMenuTag, document) {}
 
 }  // namespace blink

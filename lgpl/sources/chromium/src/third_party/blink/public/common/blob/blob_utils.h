@@ -9,16 +9,12 @@
 #include <stdint.h>
 #include <limits>
 
-#include "third_party/blink/common/common_export.h"
+#include "third_party/blink/public/common/common_export.h"
 
 namespace blink {
 
 class BlobUtils {
  public:
-  // Whether the new Blob URL glue for NetworkService is enabled (i.e.,
-  // the NetworkService or MojoBlobURLs feature is enabled).
-  static bool BLINK_COMMON_EXPORT MojoBlobURLsEnabled();
-
   // Get the preferred capacity a mojo::DataPipe being used to read a blob.
   static uint32_t BLINK_COMMON_EXPORT
   GetDataPipeCapacity(uint64_t target_blob_size);

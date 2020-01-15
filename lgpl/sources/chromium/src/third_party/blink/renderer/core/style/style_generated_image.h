@@ -26,6 +26,7 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/style/style_image.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -38,20 +39,18 @@ class ImageResourceObserver;
 // paint(...) function.
 class CORE_EXPORT StyleGeneratedImage final : public StyleImage {
  public:
-  static StyleGeneratedImage* Create(const CSSImageGeneratorValue& value) {
-    return new StyleGeneratedImage(value);
-  }
+  explicit StyleGeneratedImage(const CSSImageGeneratorValue&);
 
   WrappedImagePtr Data() const override { return image_generator_value_.Get(); }
 
   CSSValue* CssValue() const override;
-  CSSValue* ComputedCSSValue() const override;
+  CSSValue* ComputedCSSValue(const ComputedStyle&,
+                             bool allow_visited_style) const override;
 
   FloatSize ImageSize(const Document&,
                       float multiplier,
                       const LayoutSize& default_object_size) const override;
-  bool ImageHasRelativeSize() const override { return !fixed_size_; }
-  bool UsesImageContainerSize() const override { return !fixed_size_; }
+  bool HasIntrinsicSize() const override { return fixed_size_; }
   void AddClient(ImageResourceObserver*) override;
   void RemoveClient(ImageResourceObserver*) override;
   // The |target_size| is the desired image size
@@ -61,11 +60,12 @@ class CORE_EXPORT StyleGeneratedImage final : public StyleImage {
                                 const FloatSize& target_size) const override;
   bool KnownToBeOpaque(const Document&, const ComputedStyle&) const override;
 
+  bool IsUsingCustomProperty(const AtomicString& custom_property_name,
+                             const Document&) const;
+
   void Trace(blink::Visitor*) override;
 
  private:
-  StyleGeneratedImage(const CSSImageGeneratorValue&);
-
   bool IsEqual(const StyleImage&) const override;
 
   // TODO(sashab): Replace this with <const CSSImageGeneratorValue> once
@@ -74,7 +74,12 @@ class CORE_EXPORT StyleGeneratedImage final : public StyleImage {
   const bool fixed_size_;
 };
 
-DEFINE_STYLE_IMAGE_TYPE_CASTS(StyleGeneratedImage, IsGeneratedImage());
+template <>
+struct DowncastTraits<StyleGeneratedImage> {
+  static bool AllowFrom(const StyleImage& styleImage) {
+    return styleImage.IsGeneratedImage();
+  }
+};
 
 }  // namespace blink
 #endif

@@ -8,8 +8,8 @@
 #include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/fonts/font_custom_platform_data.h"
 #include "third_party/blink/renderer/platform/fonts/font_selector.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 
 namespace blink {
 namespace test {
@@ -21,10 +21,14 @@ class TestFontSelector : public FontSelector {
   static TestFontSelector* Create(const String& path) {
     scoped_refptr<SharedBuffer> font_buffer = test::ReadFromFile(path);
     String ots_parse_message;
-    return new TestFontSelector(
+    return MakeGarbageCollected<TestFontSelector>(
         FontCustomPlatformData::Create(font_buffer.get(), ots_parse_message));
   }
 
+  TestFontSelector(scoped_refptr<FontCustomPlatformData> custom_platform_data)
+      : custom_platform_data_(std::move(custom_platform_data)) {
+    DCHECK(custom_platform_data_);
+  }
   ~TestFontSelector() override = default;
 
   scoped_refptr<FontData> GetFontData(
@@ -39,7 +43,7 @@ class TestFontSelector : public FontSelector {
         font_description.IsSyntheticBold(),
         font_description.IsSyntheticItalic(),
         font_description.GetFontSelectionRequest(), normal_capabilities,
-        font_description.Orientation());
+        font_description.FontOpticalSizing(), font_description.Orientation());
     return SimpleFontData::Create(platform_data, CustomFontData::Create());
   }
 
@@ -66,11 +70,6 @@ class TestFontSelector : public FontSelector {
   }
 
  private:
-  TestFontSelector(scoped_refptr<FontCustomPlatformData> custom_platform_data)
-      : custom_platform_data_(std::move(custom_platform_data)) {
-    DCHECK(custom_platform_data_);
-  }
-
   scoped_refptr<FontCustomPlatformData> custom_platform_data_;
 };
 

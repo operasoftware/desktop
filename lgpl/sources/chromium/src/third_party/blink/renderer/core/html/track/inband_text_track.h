@@ -41,14 +41,12 @@ namespace blink {
 class InbandTextTrack final : public TextTrack,
                               public WebInbandTextTrackClient {
  public:
-  static InbandTextTrack* Create(WebInbandTextTrack*);
+  explicit InbandTextTrack(WebInbandTextTrack*);
   ~InbandTextTrack() override;
 
   void SetTrackList(TextTrackList*) override;
 
  private:
-  explicit InbandTextTrack(WebInbandTextTrack*);
-
   void AddWebVTTCue(double,
                     double,
                     const WebString&,

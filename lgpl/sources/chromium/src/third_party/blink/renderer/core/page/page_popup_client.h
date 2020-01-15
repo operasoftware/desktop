@@ -33,8 +33,8 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
-#include "third_party/blink/renderer/platform/wtf/text/cstring.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -72,7 +72,7 @@ class CORE_EXPORT PagePopupClient {
   virtual void SetValue(const String&) = 0;
 
   // This is called by the content HTML of a PagePopup.
-  virtual void ClosePopup() = 0;
+  virtual void CancelPopup() = 0;
 
   // This is called whenever a PagePopup was closed.
   virtual void DidClosePopup() = 0;
@@ -82,7 +82,6 @@ class CORE_EXPORT PagePopupClient {
   // Helper functions to be used in PagePopupClient::writeDocument().
   static void AddString(const String&, SharedBuffer*);
   static void AddJavaScriptString(const String&, SharedBuffer*);
-  static void AddHTMLString(const String&, SharedBuffer*);
   static void AddProperty(const char* name, const String& value, SharedBuffer*);
   static void AddProperty(const char* name, int value, SharedBuffer*);
   static void AddProperty(const char* name, unsigned value, SharedBuffer*);
@@ -95,8 +94,8 @@ class CORE_EXPORT PagePopupClient {
 };
 
 inline void PagePopupClient::AddString(const String& str, SharedBuffer* data) {
-  CString str8 = str.Utf8();
-  data->Append(str8.data(), str8.length());
+  StringUTF8Adaptor utf8(str);
+  data->Append(utf8.data(), utf8.size());
 }
 
 }  // namespace blink

@@ -24,6 +24,14 @@ PolymerTest.prototype = {
   browsePreload: 'chrome://chrome-urls/',
 
   /**
+   * The name of the custom element under test. Should be overridden by
+   * subclasses that are using the HTML imports polyfill and need to wait for
+   * a custom element to be defined before starting the test.
+   * @type {?string}
+   */
+  customElementName: null,
+
+  /**
    * The mocha adapter assumes all tests are async.
    * @override
    * @final
@@ -38,16 +46,15 @@ PolymerTest.prototype = {
   runAccessibilityChecks: false,
 
   /**
-   * Files that need not be compiled. Should be overridden to use correct
-   * relative paths with PolymerTest.getLibraries.
+   * Files that need not be compiled.
    * @override
    */
   extraLibraries: [
-    'ui/webui/resources/js/cr.js',
-    'ui/webui/resources/js/promise_resolver.js',
-    'third_party/mocha/mocha.js',
-    'chrome/test/data/webui/mocha_adapter.js',
-    'third_party/polymer/v1_0/components-chromium/iron-test-helpers/' +
+    '//ui/webui/resources/js/cr.js',
+    '//ui/webui/resources/js/promise_resolver.js',
+    '//third_party/mocha/mocha.js',
+    '//chrome/test/data/webui/mocha_adapter.js',
+    '//third_party/polymer/v1_0/components-chromium/iron-test-helpers/' +
         'mock-interactions.js',
   ],
 
@@ -74,10 +81,12 @@ PolymerTest.prototype = {
             'is already registered, perhaps you have loaded a script twice. ' +
             'Incorrect resource URLs can redirect to base WebUI pages; make ' +
             'sure the following URLs are correct and unique:\n';
-        for (var i = 0; i < PolymerTest.importUrls_.length; i++)
+        for (var i = 0; i < PolymerTest.importUrls_.length; i++) {
           msg += '  ' + PolymerTest.importUrls_[i] + '\n';
-        for (var i = 0; i < PolymerTest.scriptUrls_.length; i++)
+        }
+        for (var i = 0; i < PolymerTest.scriptUrls_.length; i++) {
           msg += '  ' + PolymerTest.scriptUrls_[i] + '\n';
+        }
         console.error(msg);
 
         // Mocha will handle the error.
@@ -85,12 +94,19 @@ PolymerTest.prototype = {
       }
     };
 
-    // Import Polymer before running tests.
-    suiteSetup(function() {
-      if (!window.Polymer) {
-        return PolymerTest.importHtml('chrome://resources/html/polymer.html');
-      }
-    });
+    if (typeof HTMLImports !== 'undefined') {
+      suiteSetup(() => {
+        return new Promise(resolve => {
+                 HTMLImports.whenReady(resolve);
+               })
+            .then(() => {
+              const customElementName = this.customElementName;
+              if (customElementName) {
+                return customElements.whenDefined(customElementName);
+              }
+            });
+      });
+    }
   },
 
   /** @override */
@@ -110,6 +126,12 @@ PolymerTest.prototype = {
  */
 PolymerTest.testIronIcons = function(e) {
   e.querySelectorAll('* /deep/ iron-icon').forEach(function(icon) {
+    // Early return if the src is set instead of the icon, since the tests
+    // below will not work correctly in this case.
+    if (icon.src && !icon.icon) {
+      return;
+    }
+
     // If the icon isn't set (or is set to ''), then don't test this. Having no
     // set icon is valid for cases when we don't want to display anything.
     if (!icon.icon) {
@@ -170,32 +192,7 @@ PolymerTest.clearBody = function() {
   var vulcanizeDiv =
       document.querySelector('body > div[hidden][by-polymer-bundler]');
   document.body.innerHTML = '';
-  if (vulcanizeDiv)
+  if (vulcanizeDiv) {
     document.body.appendChild(vulcanizeDiv);
-};
-
-/**
- * Helper function to return the list of extra libraries relative to basePath.
- */
-PolymerTest.getLibraries = function(basePath) {
-  // Ensure basePath ends in '/'.
-  if (basePath.length && basePath[basePath.length - 1] != '/')
-    basePath += '/';
-
-  return PolymerTest.prototype.extraLibraries.map(function(library) {
-    return basePath + library;
-  });
-};
-
-/*
- * Waits for queued up tasks to finish before proceeding. Inspired by:
- * https://github.com/Polymer/web-component-tester/blob/master/browser/environment/helpers.js#L97
- */
-PolymerTest.flushTasks = function() {
-  Polymer.dom.flush();
-  // Promises have microtask timing, so we use setTimeout to explicity force a
-  // new task.
-  return new Promise(function(resolve, reject) {
-    window.setTimeout(resolve, 0);
-  });
+  }
 };

@@ -16,8 +16,7 @@ TEST(DragUpdateTest, AffectedByDragUpdate) {
   // Check that when dragging the div in the document below, you only get a
   // single element style recalc.
 
-  std::unique_ptr<DummyPageHolder> dummy_page_holder =
-      DummyPageHolder::Create(IntSize(800, 600));
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
   Document& document = dummy_page_holder->GetDocument();
   document.documentElement()->SetInnerHTMLFromString(R"HTML(
     <style>div {width:100px;height:100px} div:-webkit-drag {
@@ -30,11 +29,13 @@ TEST(DragUpdateTest, AffectedByDragUpdate) {
     </div>
   )HTML");
 
-  document.View()->UpdateAllLifecyclePhases();
+  document.View()->UpdateAllLifecyclePhases(
+      DocumentLifecycle::LifecycleUpdateReason::kTest);
   unsigned start_count = document.GetStyleEngine().StyleForElementCount();
 
   document.getElementById("div")->SetDragged(true);
-  document.View()->UpdateAllLifecyclePhases();
+  document.View()->UpdateAllLifecyclePhases(
+      DocumentLifecycle::LifecycleUpdateReason::kTest);
 
   unsigned element_count =
       document.GetStyleEngine().StyleForElementCount() - start_count;
@@ -46,8 +47,7 @@ TEST(DragUpdateTest, ChildAffectedByDragUpdate) {
   // Check that when dragging the div in the document below, you get a
   // single element style recalc.
 
-  std::unique_ptr<DummyPageHolder> dummy_page_holder =
-      DummyPageHolder::Create(IntSize(800, 600));
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
   Document& document = dummy_page_holder->GetDocument();
   document.documentElement()->SetInnerHTMLFromString(R"HTML(
     <style>div {width:100px;height:100px} div:-webkit-drag .drag {
@@ -76,8 +76,7 @@ TEST(DragUpdateTest, SiblingAffectedByDragUpdate) {
   // Check that when dragging the div in the document below, you get a
   // single element style recalc.
 
-  std::unique_ptr<DummyPageHolder> dummy_page_holder =
-      DummyPageHolder::Create(IntSize(800, 600));
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
   Document& document = dummy_page_holder->GetDocument();
   document.documentElement()->SetInnerHTMLFromString(R"HTML(
     <style>div {width:100px;height:100px} div:-webkit-drag + .drag {

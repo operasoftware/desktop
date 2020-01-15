@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/slot_assignment.h"
+#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 
 namespace blink {
 
@@ -40,6 +41,9 @@ void SlotAssignmentEngine::Disconnected(ShadowRoot& shadow_root) {
 }
 
 void SlotAssignmentEngine::RecalcSlotAssignments() {
+  if (shadow_roots_needing_recalc_.IsEmpty())
+    return;
+  TRACE_EVENT0("blink", "SlotAssignmentEngine::RecalcSlotAssignments");
   for (auto& shadow_root :
        HeapHashSet<WeakMember<ShadowRoot>>(shadow_roots_needing_recalc_)) {
     DCHECK(shadow_root->isConnected());
@@ -51,7 +55,7 @@ void SlotAssignmentEngine::RecalcSlotAssignments() {
   DCHECK(shadow_roots_needing_recalc_.IsEmpty());
 }
 
-void SlotAssignmentEngine::Trace(blink::Visitor* visitor) {
+void SlotAssignmentEngine::Trace(Visitor* visitor) {
   visitor->Trace(shadow_roots_needing_recalc_);
 }
 

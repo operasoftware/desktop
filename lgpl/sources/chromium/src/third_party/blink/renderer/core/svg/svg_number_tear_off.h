@@ -40,20 +40,14 @@ class SVGNumberTearOff : public SVGPropertyTearOff<SVGNumber> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SVGNumberTearOff* Create(SVGNumber* target,
-                                  SVGAnimatedPropertyBase* binding,
-                                  PropertyIsAnimValType property_is_anim_val) {
-    return new SVGNumberTearOff(target, binding, property_is_anim_val);
-  }
   static SVGNumberTearOff* CreateDetached();
 
-  void setValue(float, ExceptionState&);
-  float value() { return Target()->Value(); }
-
- protected:
   SVGNumberTearOff(SVGNumber*,
                    SVGAnimatedPropertyBase* binding,
                    PropertyIsAnimValType);
+
+  void setValue(float, ExceptionState&);
+  float value() { return Target()->Value(); }
 };
 
 }  // namespace blink

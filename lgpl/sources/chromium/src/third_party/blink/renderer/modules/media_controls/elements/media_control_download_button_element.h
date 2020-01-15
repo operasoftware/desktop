@@ -6,14 +6,13 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIA_CONTROLS_ELEMENTS_MEDIA_CONTROL_DOWNLOAD_BUTTON_ELEMENT_H_
 
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_input_element.h"
-#include "third_party/blink/renderer/modules/modules_export.h"
 
 namespace blink {
 
 class Event;
 class MediaControlsImpl;
 
-class MODULES_EXPORT MediaControlDownloadButtonElement final
+class MediaControlDownloadButtonElement final
     : public MediaControlInputElement {
  public:
   explicit MediaControlDownloadButtonElement(MediaControlsImpl&);
@@ -24,14 +23,14 @@ class MODULES_EXPORT MediaControlDownloadButtonElement final
 
   // MediaControlInputElement overrides.
   // TODO(mlamouri): add WillRespondToMouseClickEvents
-  WebLocalizedString::Name GetOverflowStringName() const final;
+  int GetOverflowStringId() const final;
   bool HasOverflowButton() const final;
+  bool IsControlPanelButton() const final;
 
   void Trace(blink::Visitor*) override;
 
  protected:
   const char* GetNameForHistograms() const final;
-  void UpdateShownState() final;
 
  private:
   // This is used for UMA histogram (Media.Controls.Download). New values should

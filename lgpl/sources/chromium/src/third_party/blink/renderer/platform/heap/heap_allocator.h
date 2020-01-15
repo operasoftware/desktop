@@ -5,12 +5,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_HEAP_ALLOCATOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_HEAP_ALLOCATOR_H_
 
+#include <type_traits>
+
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/heap/heap_buildflags.h"
 #include "third_party/blink/renderer/platform/heap/marking_visitor.h"
+#include "third_party/blink/renderer/platform/heap/thread_state_scopes.h"
 #include "third_party/blink/renderer/platform/heap/trace_traits.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/construct_traits.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
@@ -25,6 +28,22 @@
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
+
+#define DISALLOW_IN_CONTAINER()              \
+ public:                                     \
+  using IsDisallowedInContainerMarker = int; \
+                                             \
+ private:                                    \
+  friend class ::WTF::internal::__thisIsHereToForceASemicolonAfterThisMacro
+
+// IsAllowedInContainer returns true if some type T supports being nested
+// arbitrarily in other containers. This is relevant for collections where some
+// collections assume that they are placed on a non-moving arena.
+template <typename T, typename = int>
+struct IsAllowedInContainer : std::true_type {};
+template <typename T>
+struct IsAllowedInContainer<T, typename T::IsDisallowedInContainerMarker>
+    : std::false_type {};
 
 template <typename T, typename Traits = WTF::VectorTraits<T>>
 class HeapVectorBacking {
@@ -74,8 +93,8 @@ class PLATFORM_EXPORT HeapAllocator {
     uint32_t gc_info_index = GCInfoTrait<HeapVectorBacking<T>>::Index();
     NormalPageArena* arena = static_cast<NormalPageArena*>(
         state->Heap().VectorBackingArena(gc_info_index));
-    return reinterpret_cast<T*>(arena->AllocateObject(
-        ThreadHeap::AllocationSizeFromSize(size), gc_info_index));
+    return reinterpret_cast<T*>(MarkAsConstructed(arena->AllocateObject(
+        ThreadHeap::AllocationSizeFromSize(size), gc_info_index)));
   }
   template <typename T>
   static T* AllocateExpandedVectorBacking(size_t size) {
@@ -85,8 +104,8 @@ class PLATFORM_EXPORT HeapAllocator {
     uint32_t gc_info_index = GCInfoTrait<HeapVectorBacking<T>>::Index();
     NormalPageArena* arena = static_cast<NormalPageArena*>(
         state->Heap().ExpandedVectorBackingArena(gc_info_index));
-    return reinterpret_cast<T*>(arena->AllocateObject(
-        ThreadHeap::AllocationSizeFromSize(size), gc_info_index));
+    return reinterpret_cast<T*>(MarkAsConstructed(arena->AllocateObject(
+        ThreadHeap::AllocationSizeFromSize(size), gc_info_index)));
   }
   static void FreeVectorBacking(void*);
   static bool ExpandVectorBacking(void*, size_t);
@@ -99,9 +118,10 @@ class PLATFORM_EXPORT HeapAllocator {
     ThreadState* state =
         ThreadStateFor<ThreadingTrait<T>::kAffinity>::GetState();
     const char* type_name = WTF_HEAP_PROFILER_TYPE_NAME(HeapVectorBacking<T>);
-    return reinterpret_cast<T*>(state->Heap().AllocateOnArenaIndex(
-        state, size, BlinkGC::kInlineVectorArenaIndex, gc_info_index,
-        type_name));
+    return reinterpret_cast<T*>(
+        MarkAsConstructed(state->Heap().AllocateOnArenaIndex(
+            state, size, BlinkGC::kInlineVectorArenaIndex, gc_info_index,
+            type_name)));
   }
   static void FreeInlineVectorBacking(void*);
   static bool ExpandInlineVectorBacking(void*, size_t);
@@ -117,8 +137,10 @@ class PLATFORM_EXPORT HeapAllocator {
         ThreadStateFor<ThreadingTrait<T>::kAffinity>::GetState();
     const char* type_name =
         WTF_HEAP_PROFILER_TYPE_NAME(HeapHashTableBacking<HashTable>);
-    return reinterpret_cast<T*>(state->Heap().AllocateOnArenaIndex(
-        state, size, BlinkGC::kHashTableArenaIndex, gc_info_index, type_name));
+    return reinterpret_cast<T*>(
+        MarkAsConstructed(state->Heap().AllocateOnArenaIndex(
+            state, size, BlinkGC::kHashTableArenaIndex, gc_info_index,
+            type_name)));
   }
   template <typename T, typename HashTable>
   static T* AllocateZeroedHashTableBacking(size_t size) {
@@ -135,10 +157,28 @@ class PLATFORM_EXPORT HeapAllocator {
     MarkingVisitor::WriteBarrier(address);
   }
 
+  template <typename HashTable>
+  static void BackingWriteBarrierForHashTable(void* address) {
+    if (MarkingVisitor::WriteBarrier(address)) {
+      AddMovingCallback<HashTable>(
+          static_cast<typename HashTable::ValueType*>(address));
+    }
+  }
+
+  template <typename T>
+  static void BackingWriteBarrier(Member<T>* address, size_t size) {
+    MarkingVisitor::WriteBarrier(address);
+  }
+
+  template <typename T>
+  static void BackingWriteBarrier(T* address, size_t size) {
+    MarkingVisitor::WriteBarrier(address);
+  }
+
   template <typename Return, typename Metadata>
   static Return Malloc(size_t size, const char* type_name) {
-    return reinterpret_cast<Return>(ThreadHeap::Allocate<Metadata>(
-        size, IsEagerlyFinalizedType<Metadata>::value));
+    return reinterpret_cast<Return>(
+        MarkAsConstructed(ThreadHeap::Allocate<Metadata>(size)));
   }
 
   // Compilers sometimes eagerly instantiates the unused 'operator delete', so
@@ -155,10 +195,6 @@ class PLATFORM_EXPORT HeapAllocator {
 
   static bool IsAllocationAllowed() {
     return ThreadState::Current()->IsAllocationAllowed();
-  }
-
-  static bool IsObjectResurrectionForbidden() {
-    return ThreadState::Current()->IsObjectResurrectionForbidden();
   }
 
   static bool IsSweepForbidden() {
@@ -185,11 +221,9 @@ class PLATFORM_EXPORT HeapAllocator {
 
   template <typename T, typename VisitorDispatcher>
   static void RegisterBackingStoreCallback(VisitorDispatcher visitor,
-                                           T** backing_store_slot,
-                                           MovingObjectCallback callback,
-                                           void* callback_data) {
-    visitor->RegisterBackingStoreCallback(
-        reinterpret_cast<void**>(backing_store_slot), callback, callback_data);
+                                           T* backing,
+                                           MovingObjectCallback callback) {
+    visitor->RegisterBackingStoreCallback(backing, callback);
   }
 
   static void EnterGCForbiddenScope() {
@@ -202,7 +236,6 @@ class PLATFORM_EXPORT HeapAllocator {
 
   template <typename T, typename Traits>
   static void NotifyNewObject(T* object) {
-#if BUILDFLAG(BLINK_HEAP_INCREMENTAL_MARKING)
     if (!ThreadState::IsAnyIncrementalMarking())
       return;
     // The object may have been in-place constructed as part of a large object.
@@ -213,10 +246,6 @@ class PLATFORM_EXPORT HeapAllocator {
       // are discovered by the marker.
       ThreadState::NoAllocationScope no_allocation_scope(thread_state);
       DCHECK(thread_state->CurrentVisitor());
-      // This check ensures that the visitor will not eagerly recurse into
-      // children but rather push all blink::GarbageCollected objects and only
-      // eagerly trace non-managed objects.
-      DCHECK(!thread_state->Heap().GetStackFrameDepth().IsEnabled());
       // No weak handling for write barriers. Modifying weakly reachable objects
       // strongifies them for the current cycle.
       DCHECK(!Traits::kCanHaveDeletedValue || !Traits::IsDeletedValue(*object));
@@ -225,12 +254,10 @@ class PLATFORM_EXPORT HeapAllocator {
                                                       ->CurrentVisitor(),
                                                   *object);
     }
-#endif  // BUILDFLAG(BLINK_HEAP_INCREMENTAL_MARKING)
   }
 
   template <typename T, typename Traits>
   static void NotifyNewObjects(T* array, size_t len) {
-#if BUILDFLAG(BLINK_HEAP_INCREMENTAL_MARKING)
     if (!ThreadState::IsAnyIncrementalMarking())
       return;
     // The object may have been in-place constructed as part of a large object.
@@ -240,7 +267,6 @@ class PLATFORM_EXPORT HeapAllocator {
       // See |NotifyNewObject| for details.
       ThreadState::NoAllocationScope no_allocation_scope(thread_state);
       DCHECK(thread_state->CurrentVisitor());
-      DCHECK(!thread_state->Heap().GetStackFrameDepth().IsEnabled());
       // No weak handling for write barriers. Modifying weakly reachable objects
       // strongifies them for the current cycle.
       while (len-- > 0) {
@@ -253,7 +279,6 @@ class PLATFORM_EXPORT HeapAllocator {
         array++;
       }
     }
-#endif  // BUILDFLAG(BLINK_HEAP_INCREMENTAL_MARKING)
   }
 
   template <typename T>
@@ -296,6 +321,28 @@ class PLATFORM_EXPORT HeapAllocator {
   }
 
  private:
+  static Address MarkAsConstructed(Address address) {
+    HeapObjectHeader::FromPayload(reinterpret_cast<void*>(address))
+        ->MarkFullyConstructed<HeapObjectHeader::AccessMode::kAtomic>();
+    return address;
+  }
+
+  template <
+      typename HashTable,
+      std::enable_if_t<HashTable::ValueTraits::kHasMovingCallback>* = nullptr>
+  static void AddMovingCallback(typename HashTable::ValueType* memory) {
+    ThreadState* thread_state = ThreadState::Current();
+    auto* visitor = thread_state->CurrentVisitor();
+    DCHECK(visitor);
+    HashTable::ValueTraits::template RegisterMovingCallback<HashTable>(visitor,
+                                                                       memory);
+  }
+
+  template <
+      typename HashTable,
+      std::enable_if_t<!HashTable::ValueTraits::kHasMovingCallback>* = nullptr>
+  static void AddMovingCallback(typename HashTable::ValueType*) {}
+
   static void BackingFree(void*);
   static bool BackingExpand(void*, size_t);
   static bool BackingShrink(void*,
@@ -390,7 +437,9 @@ void HeapVectorBacking<T, Traits>::Finalize(void* pointer) {
       "HeapVectorBacking doesn't support objects that cannot be cleared as "
       "unused with memset or don't have a vtable");
 
-  DCHECK(!WTF::IsTriviallyDestructible<T>::value);
+  static_assert(
+      !std::is_trivially_destructible<T>::value,
+      "Finalization of trivially destructible classes should not happen.");
   HeapObjectHeader* header = HeapObjectHeader::FromPayload(pointer);
   // Use the payload size as recorded by the heap to determine how many
   // elements to finalize.
@@ -417,7 +466,9 @@ void HeapVectorBacking<T, Traits>::Finalize(void* pointer) {
 template <typename Table>
 void HeapHashTableBacking<Table>::Finalize(void* pointer) {
   using Value = typename Table::ValueType;
-  DCHECK(!WTF::IsTriviallyDestructible<Value>::value);
+  static_assert(
+      !std::is_trivially_destructible<Value>::value,
+      "Finalization of trivially destructible classes should not happen.");
   HeapObjectHeader* header = HeapObjectHeader::FromPayload(pointer);
   // Use the payload size as recorded by the heap to determine how many
   // elements to finalize.
@@ -440,11 +491,32 @@ class HeapHashMap : public HashMap<KeyArg,
                                    KeyTraitsArg,
                                    MappedTraitsArg,
                                    HeapAllocator> {
-  IS_GARBAGE_COLLECTED_TYPE();
-  static_assert(WTF::IsTraceable<KeyArg>::value ||
-                    WTF::IsTraceable<MappedArg>::value,
-                "For hash maps without traceable elements, use HashMap<> "
-                "instead of HeapHashMap<>");
+  IS_GARBAGE_COLLECTED_CONTAINER_TYPE();
+  DISALLOW_NEW();
+
+  static void CheckType() {
+    static_assert(std::is_trivially_destructible<HeapHashMap>::value,
+                  "HeapHashMap must be trivially destructible.");
+    static_assert(
+        IsAllowedInContainer<KeyArg>::value,
+        "Not allowed to directly nest type. Use Member<> indirection instead.");
+    static_assert(
+        IsAllowedInContainer<MappedArg>::value,
+        "Not allowed to directly nest type. Use Member<> indirection instead.");
+    static_assert(
+        WTF::IsTraceable<KeyArg>::value || WTF::IsTraceable<MappedArg>::value,
+        "For hash maps without traceable elements, use HashMap<> "
+        "instead of HeapHashMap<>.");
+  }
+
+ public:
+  static void* AllocateObject(size_t size) {
+    return ThreadHeap::Allocate<
+        HeapHashMap<KeyArg, MappedArg, HashArg, KeyTraitsArg, MappedTraitsArg>>(
+        size);
+  }
+
+  HeapHashMap() { CheckType(); }
 };
 
 template <typename ValueArg,
@@ -452,10 +524,27 @@ template <typename ValueArg,
           typename TraitsArg = HashTraits<ValueArg>>
 class HeapHashSet
     : public HashSet<ValueArg, HashArg, TraitsArg, HeapAllocator> {
-  IS_GARBAGE_COLLECTED_TYPE();
-  static_assert(WTF::IsTraceable<ValueArg>::value,
-                "For hash sets without traceable elements, use HashSet<> "
-                "instead of HeapHashSet<>");
+  IS_GARBAGE_COLLECTED_CONTAINER_TYPE();
+  DISALLOW_NEW();
+
+  static void CheckType() {
+    static_assert(std::is_trivially_destructible<HeapHashSet>::value,
+                  "HeapHashSet must be trivially destructible.");
+    static_assert(
+        IsAllowedInContainer<ValueArg>::value,
+        "Not allowed to directly nest type. Use Member<> indirection instead.");
+    static_assert(WTF::IsTraceable<ValueArg>::value,
+                  "For hash sets without traceable elements, use HashSet<> "
+                  "instead of HeapHashSet<>.");
+  }
+
+ public:
+  static void* AllocateObject(size_t size) {
+    return ThreadHeap::Allocate<HeapHashSet<ValueArg, HashArg, TraitsArg>>(
+        size);
+  }
+
+  HeapHashSet() { CheckType(); }
 };
 
 template <typename ValueArg,
@@ -463,10 +552,28 @@ template <typename ValueArg,
           typename TraitsArg = HashTraits<ValueArg>>
 class HeapLinkedHashSet
     : public LinkedHashSet<ValueArg, HashArg, TraitsArg, HeapAllocator> {
-  IS_GARBAGE_COLLECTED_TYPE();
-  static_assert(WTF::IsTraceable<ValueArg>::value,
-                "For sets without traceable elements, use LinkedHashSet<> "
-                "instead of HeapLinkedHashSet<>");
+  IS_GARBAGE_COLLECTED_CONTAINER_TYPE();
+  DISALLOW_NEW();
+  // HeapLinkedHashSet is using custom callbacks for compaction that rely on the
+  // fact that the container itself does not move.
+  DISALLOW_IN_CONTAINER();
+
+  static void CheckType() {
+    static_assert(
+        IsAllowedInContainer<ValueArg>::value,
+        "Not allowed to directly nest type. Use Member<> indirection instead.");
+    static_assert(WTF::IsTraceable<ValueArg>::value,
+                  "For sets without traceable elements, use LinkedHashSet<> "
+                  "instead of HeapLinkedHashSet<>.");
+  }
+
+ public:
+  static void* AllocateObject(size_t size) {
+    return ThreadHeap::Allocate<
+        HeapLinkedHashSet<ValueArg, HashArg, TraitsArg>>(size);
+  }
+
+  HeapLinkedHashSet() { CheckType(); }
 };
 
 template <typename ValueArg,
@@ -479,10 +586,27 @@ class HeapListHashSet
                          inlineCapacity,
                          HashArg,
                          HeapListHashSetAllocator<ValueArg, inlineCapacity>> {
-  IS_GARBAGE_COLLECTED_TYPE();
-  static_assert(WTF::IsTraceable<ValueArg>::value,
-                "For sets without traceable elements, use ListHashSet<> "
-                "instead of HeapListHashSet<>");
+  IS_GARBAGE_COLLECTED_CONTAINER_TYPE();
+  DISALLOW_NEW();
+
+  static void CheckType() {
+    static_assert(std::is_trivially_destructible<HeapListHashSet>::value,
+                  "HeapListHashSet must be trivially destructible.");
+    static_assert(
+        IsAllowedInContainer<ValueArg>::value,
+        "Not allowed to directly nest type. Use Member<> indirection instead.");
+    static_assert(WTF::IsTraceable<ValueArg>::value,
+                  "For sets without traceable elements, use ListHashSet<> "
+                  "instead of HeapListHashSet<>.");
+  }
+
+ public:
+  static void* AllocateObject(size_t size) {
+    return ThreadHeap::Allocate<
+        HeapListHashSet<ValueArg, inlineCapacity, HashArg>>(size);
+  }
+
+  HeapListHashSet() { CheckType(); }
 };
 
 template <typename Value,
@@ -490,100 +614,118 @@ template <typename Value,
           typename Traits = HashTraits<Value>>
 class HeapHashCountedSet
     : public HashCountedSet<Value, HashFunctions, Traits, HeapAllocator> {
-  IS_GARBAGE_COLLECTED_TYPE();
-  static_assert(WTF::IsTraceable<Value>::value,
-                "For counted sets without traceable elements, use "
-                "HashCountedSet<> instead of HeapHashCountedSet<>");
+  IS_GARBAGE_COLLECTED_CONTAINER_TYPE();
+  DISALLOW_NEW();
+
+  static void CheckType() {
+    static_assert(std::is_trivially_destructible<HeapHashCountedSet>::value,
+                  "HeapHashCountedSet must be trivially destructible.");
+    static_assert(
+        IsAllowedInContainer<Value>::value,
+        "Not allowed to directly nest type. Use Member<> indirection instead.");
+    static_assert(WTF::IsTraceable<Value>::value,
+                  "For counted sets without traceable elements, use "
+                  "HashCountedSet<> instead of HeapHashCountedSet<>.");
+  }
+
+ public:
+  static void* AllocateObject(size_t size) {
+    return ThreadHeap::Allocate<
+        HeapHashCountedSet<Value, HashFunctions, Traits>>(size);
+  }
+
+  HeapHashCountedSet() { CheckType(); }
 };
 
 template <typename T, wtf_size_t inlineCapacity = 0>
 class HeapVector : public Vector<T, inlineCapacity, HeapAllocator> {
-  IS_GARBAGE_COLLECTED_TYPE();
-  using Base = Vector<T, inlineCapacity, HeapAllocator>;
+  IS_GARBAGE_COLLECTED_CONTAINER_TYPE();
+  DISALLOW_NEW();
 
- public:
-  HeapVector() {
+  static void CheckType() {
+    static_assert(
+        std::is_trivially_destructible<HeapVector>::value || inlineCapacity,
+        "HeapVector must be trivially destructible.");
+    static_assert(
+        IsAllowedInContainer<T>::value,
+        "Not allowed to directly nest type. Use Member<> indirection instead.");
     static_assert(WTF::IsTraceable<T>::value,
                   "For vectors without traceable elements, use Vector<> "
-                  "instead of HeapVector<>");
+                  "instead of HeapVector<>.");
   }
 
-  void* operator new(size_t size) {
-    static_assert(
-        inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
-        "on-heap HeapVector<Persistent<>> should not have an inline capacity");
-    return Base::operator new(size);
+ public:
+  static void* AllocateObject(size_t size) {
+    // On-heap HeapVectors generally should not have inline capacity, but it is
+    // hard to avoid when using a type alias. Hence we only disallow the
+    // VectorTraits<T>::kNeedsDestruction case for now.
+    static_assert(inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
+                  "on-heap HeapVector<> should not have an inline capacity");
+    return ThreadHeap::Allocate<HeapVector<T, inlineCapacity>>(size);
   }
-  void operator delete(void* p) { return Base::operator delete(p); };
-  void* operator new[](size_t size) {
-    static_assert(
-        inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
-        "on-heap HeapVector<Persistent<>> should not have an inline capacity");
-    return Base::operator new[](size);
-  }
-  void operator delete[](void* p) { return Base::operator delete[](p); };
-  void* operator new(size_t size, NotNullTag null_tag, void* location) {
-    static_assert(
-        inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
-        "on-heap HeapVector<Persistent<>> should not have an inline capacity");
-    return Base::operator new(size, null_tag, location);
-  }
-  void* operator new(size_t size, void* location) {
-    return Base::operator new(size, location);
-  }
+
+  HeapVector() { CheckType(); }
 
   explicit HeapVector(wtf_size_t size)
-      : Vector<T, inlineCapacity, HeapAllocator>(size) {}
+      : Vector<T, inlineCapacity, HeapAllocator>(size) {
+    CheckType();
+  }
 
   HeapVector(wtf_size_t size, const T& val)
-      : Vector<T, inlineCapacity, HeapAllocator>(size, val) {}
+      : Vector<T, inlineCapacity, HeapAllocator>(size, val) {
+    CheckType();
+  }
 
   template <wtf_size_t otherCapacity>
   HeapVector(const HeapVector<T, otherCapacity>& other)
-      : Vector<T, inlineCapacity, HeapAllocator>(other) {}
+      : Vector<T, inlineCapacity, HeapAllocator>(other) {
+    CheckType();
+  }
+
+  HeapVector(std::initializer_list<T> elements)
+      : Vector<T, inlineCapacity, HeapAllocator>(elements) {
+    CheckType();
+  }
 };
 
 template <typename T, wtf_size_t inlineCapacity = 0>
 class HeapDeque : public Deque<T, inlineCapacity, HeapAllocator> {
-  IS_GARBAGE_COLLECTED_TYPE();
-  using Base = Deque<T, inlineCapacity, HeapAllocator>;
+  IS_GARBAGE_COLLECTED_CONTAINER_TYPE();
+  DISALLOW_NEW();
 
- public:
-  HeapDeque() {
+  static void CheckType() {
+    static_assert(
+        std::is_trivially_destructible<HeapDeque>::value || inlineCapacity,
+        "HeapDeque must be trivially destructible.");
+    static_assert(
+        IsAllowedInContainer<T>::value,
+        "Not allowed to directly nest type. Use Member<> indirection instead.");
     static_assert(WTF::IsTraceable<T>::value,
                   "For vectors without traceable elements, use Deque<> instead "
                   "of HeapDeque<>");
   }
 
-  void* operator new(size_t size) {
-    static_assert(
-        inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
-        "on-heap HeapDeque<Persistent<>> should not have an inline capacity");
-    return Base::operator new(size);
+ public:
+  static void* AllocateObject(size_t size) {
+    // On-heap HeapDeques generally should not have inline capacity, but it is
+    // hard to avoid when using a type alias. Hence we only disallow the
+    // VectorTraits<T>::kNeedsDestruction case for now.
+    static_assert(inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
+                  "on-heap HeapDeque<> should not have an inline capacity");
+    return ThreadHeap::Allocate<HeapDeque<T, inlineCapacity>>(size);
   }
-  void operator delete(void* p) { return Base::operator delete(p); };
-  void* operator new[](size_t size) {
-    static_assert(
-        inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
-        "on-heap HeapDequer<Persistent<>> should not have an inline capacity");
-    return Base::operator new[](size);
-  }
-  void operator delete[](void* p) { return Base::operator delete[](p); };
-  void* operator new(size_t size, NotNullTag null_tag, void* location) {
-    static_assert(
-        inlineCapacity == 0 || !VectorTraits<T>::kNeedsDestruction,
-        "on-heap HeapDeque<Persistent<>> should not have an inline capacity");
-    return Base::operator new(size, null_tag, location);
-  }
-  void* operator new(size_t size, void* location) {
-    return Base::operator new(size, location);
-  }
+
+  HeapDeque() { CheckType(); }
 
   explicit HeapDeque(wtf_size_t size)
-      : Deque<T, inlineCapacity, HeapAllocator>(size) {}
+      : Deque<T, inlineCapacity, HeapAllocator>(size) {
+    CheckType();
+  }
 
   HeapDeque(wtf_size_t size, const T& val)
-      : Deque<T, inlineCapacity, HeapAllocator>(size, val) {}
+      : Deque<T, inlineCapacity, HeapAllocator>(size, val) {
+    CheckType();
+  }
 
   HeapDeque& operator=(const HeapDeque& other) {
     HeapDeque<T> copy(other);
@@ -594,23 +736,6 @@ class HeapDeque : public Deque<T, inlineCapacity, HeapAllocator> {
   template <wtf_size_t otherCapacity>
   HeapDeque(const HeapDeque<T, otherCapacity>& other)
       : Deque<T, inlineCapacity, HeapAllocator>(other) {}
-};
-
-template <typename T>
-class HeapDoublyLinkedList : public DoublyLinkedList<T, Member<T>> {
-  IS_GARBAGE_COLLECTED_TYPE();
-  DISALLOW_NEW();
-
- public:
-  HeapDoublyLinkedList() {
-    static_assert(WTF::IsGarbageCollectedType<T>::value,
-                  "This should only be used for garbage collected types.");
-  }
-
-  void Trace(Visitor* visitor) {
-    visitor->Trace(this->head_);
-    visitor->Trace(this->tail_);
-  }
 };
 
 }  // namespace blink
@@ -630,17 +755,6 @@ struct VectorTraits<blink::Member<T>> : VectorTraitsBase<blink::Member<T>> {
 template <typename T>
 struct VectorTraits<blink::SameThreadCheckedMember<T>>
     : VectorTraitsBase<blink::SameThreadCheckedMember<T>> {
-  STATIC_ONLY(VectorTraits);
-  static const bool kNeedsDestruction = false;
-  static const bool kCanInitializeWithMemset = true;
-  static const bool kCanClearUnusedSlotsWithMemset = true;
-  static const bool kCanMoveWithMemcpy = true;
-  static const bool kCanSwapUsingCopyOrMove = false;
-};
-
-template <typename T>
-struct VectorTraits<blink::TraceWrapperMember<T>>
-    : VectorTraitsBase<blink::TraceWrapperMember<T>> {
   STATIC_ONLY(VectorTraits);
   static const bool kNeedsDestruction = false;
   static const bool kCanInitializeWithMemset = true;
@@ -782,39 +896,6 @@ struct HashTraits<blink::SameThreadCheckedMember<T>>
   static blink::SameThreadCheckedMember<T> EmptyValue() {
     return blink::SameThreadCheckedMember<T>(nullptr, nullptr);
   }
-};
-
-template <typename T>
-struct HashTraits<blink::TraceWrapperMember<T>>
-    : SimpleClassHashTraits<blink::TraceWrapperMember<T>> {
-  STATIC_ONLY(HashTraits);
-  // FIXME: Implement proper const'ness for iterator types. Requires support
-  // in the marking Visitor.
-  using PeekInType = T*;
-  using IteratorGetType = blink::TraceWrapperMember<T>*;
-  using IteratorConstGetType = const blink::TraceWrapperMember<T>*;
-  using IteratorReferenceType = blink::TraceWrapperMember<T>&;
-  using IteratorConstReferenceType = const blink::TraceWrapperMember<T>&;
-  static IteratorReferenceType GetToReferenceConversion(IteratorGetType x) {
-    return *x;
-  }
-  static IteratorConstReferenceType GetToReferenceConstConversion(
-      IteratorConstGetType x) {
-    return *x;
-  }
-
-  using PeekOutType = T*;
-
-  template <typename U>
-  static void Store(const U& value, blink::TraceWrapperMember<T>& storage) {
-    storage = value;
-  }
-
-  static PeekOutType Peek(const blink::TraceWrapperMember<T>& value) {
-    return value;
-  }
-
-  static blink::TraceWrapperMember<T> EmptyValue() { return nullptr; }
 };
 
 template <typename T>

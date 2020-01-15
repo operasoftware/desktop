@@ -31,8 +31,6 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_IMAGE_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_IMAGE_H_
 
-#include <vector>
-
 #include "base/time/time.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_vector.h"
@@ -62,7 +60,7 @@ class WebImage {
   // Returns a list of all frames in the image. Only the first frame at each
   // pixel size will be returned.
   BLINK_PLATFORM_EXPORT static WebVector<SkBitmap> FramesFromData(
-      const WebData&, bool allow_svg = false);
+      const WebData&);
 
   // Returns a list of all animation frames in the image.
   BLINK_PLATFORM_EXPORT static WebVector<AnimationFrame> AnimationFromData(

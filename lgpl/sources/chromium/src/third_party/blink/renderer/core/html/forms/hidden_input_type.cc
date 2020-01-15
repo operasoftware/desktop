@@ -31,21 +31,24 @@
 
 #include "third_party/blink/renderer/core/html/forms/hidden_input_type.h"
 
+#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/form_controller.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-InputType* HiddenInputType::Create(HTMLInputElement& element) {
-  return new HiddenInputType(element);
+void HiddenInputType::CountUsage() {
+  UseCounter::Count(GetElement().GetDocument(), WebFeature::kInputTypeHidden);
 }
 
-void HiddenInputType::Trace(blink::Visitor* visitor) {
+void HiddenInputType::Trace(Visitor* visitor) {
   InputTypeView::Trace(visitor);
   InputType::Trace(visitor);
 }
@@ -55,7 +58,7 @@ InputTypeView* HiddenInputType::CreateView() {
 }
 
 const AtomicString& HiddenInputType::FormControlType() const {
-  return InputTypeNames::hidden;
+  return input_type_names::kHidden;
 }
 
 bool HiddenInputType::ShouldSaveAndRestoreFormControlState() const {
@@ -66,7 +69,8 @@ bool HiddenInputType::SupportsValidation() const {
   return false;
 }
 
-LayoutObject* HiddenInputType::CreateLayoutObject(const ComputedStyle&) const {
+LayoutObject* HiddenInputType::CreateLayoutObject(const ComputedStyle&,
+                                                  LegacyLayout) const {
   NOTREACHED();
   return nullptr;
 }
@@ -85,7 +89,7 @@ void HiddenInputType::SetValue(const String& sanitized_value,
                                bool,
                                TextFieldEventBehavior,
                                TextControlSetValueSelection) {
-  GetElement().setAttribute(valueAttr, AtomicString(sanitized_value));
+  GetElement().setAttribute(kValueAttr, AtomicString(sanitized_value));
 }
 
 void HiddenInputType::AppendToFormData(FormData& form_data) const {

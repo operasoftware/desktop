@@ -13,9 +13,6 @@ class CORE_EXPORT HTMLDataElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static HTMLDataElement* Create(Document&);
-
- private:
   HTMLDataElement(Document&);
 };
 

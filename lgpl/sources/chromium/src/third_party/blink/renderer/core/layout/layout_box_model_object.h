@@ -46,12 +46,6 @@ enum PaintLayerType {
   kForcedPaintLayer
 };
 
-enum : uint32_t {
-  kBackgroundPaintInGraphicsLayer = 1 << 0,
-  kBackgroundPaintInScrollingContents = 1 << 1
-};
-using BackgroundPaintLocation = uint32_t;
-
 // Modes for some of the line-related functions.
 enum LinePositionMode {
   kPositionOnContainingLine,
@@ -85,7 +79,7 @@ enum LineDirectionMode { kHorizontalLine, kVerticalLine };
 //
 // In order to fully understand LayoutBoxModelObject and the inherited classes,
 // we need to introduce the concept of coordinate systems.
-// There is 3 main coordinate systems:
+// There are 4 coordinate systems:
 // - physical coordinates: it is the coordinate system used for painting and
 //   correspond to physical direction as seen on the physical display (screen,
 //   printed page). In CSS, 'top', 'right', 'bottom', 'left' are all in physical
@@ -121,7 +115,13 @@ enum LineDirectionMode { kHorizontalLine, kVerticalLine };
 // - physical coordinates with flipped block-flow direction: those are physical
 //   coordinates but we flipped the block direction. Almost all geometries
 //   in box layout use this coordinate space, except those having explicit
-//   "Logical" or "Physical" prefix in their names.
+//   "Logical" or "Physical" prefix in their names, or the name implies logical
+//   (e.g. InlineStart, BlockEnd) or physical (e.g. Top, Left), or the return
+//   type is PhysicalRect.
+//
+// - logical coordinates without flipping inline direction: those are "logical
+//   block coordinates", without considering text direction. Examples are
+//   "LogicalLeft" and "LogicalRight".
 //
 // For more, see Source/core/layout/README.md ### Coordinate Spaces.
 class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
@@ -132,11 +132,13 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
   // This is the only way layers should ever be destroyed.
   void DestroyLayer();
 
-  LayoutSize RelativePositionOffset() const;
+  PhysicalOffset RelativePositionOffset() const;
   LayoutSize RelativePositionLogicalOffset() const {
-    return StyleRef().IsHorizontalWritingMode()
-               ? RelativePositionOffset()
-               : RelativePositionOffset().TransposedSize();
+    // TODO(layout-dev): This seems incorrect in flipped blocks writing mode,
+    // but seems for legacy layout only.
+    auto offset = RelativePositionOffset().ToLayoutSize();
+    return StyleRef().IsHorizontalWritingMode() ? offset
+                                                : offset.TransposedSize();
   }
 
   // Populates StickyPositionConstraints, setting the sticky box rect,
@@ -144,10 +146,10 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
   // available space.
   FloatRect ComputeStickyConstrainingRect() const;
   void UpdateStickyPositionConstraints() const;
-  LayoutSize StickyPositionOffset() const;
+  PhysicalOffset StickyPositionOffset() const;
   bool IsSlowRepaintConstrainedObject() const;
 
-  LayoutSize OffsetForInFlowPosition() const;
+  PhysicalOffset OffsetForInFlowPosition() const;
 
   // IE extensions. Used to calculate offsetWidth/Height. Overridden by inlines
   // (LayoutInline) to return the remaining width on a given line (and the
@@ -179,16 +181,18 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
   // border boxes.
   virtual IntRect BorderBoundingBox() const = 0;
 
-  virtual LayoutRect VisualOverflowRect() const = 0;
+  virtual PhysicalRect PhysicalVisualOverflowRect() const = 0;
 
-  // Checks if this box, or any of it's descendants, or any of it's
-  // continuations, will take up space in the layout of the page.
-  bool HasNonEmptyLayoutSize() const;
   bool UsesCompositedScrolling() const;
 
   // Returns which layers backgrounds should be painted into for overflow
   // scrolling boxes.
-  BackgroundPaintLocation GetBackgroundPaintLocation(uint32_t* reasons) const;
+  // TODO(yigu): PaintLayerScrollableArea::ComputeNeedsCompositedScrolling
+  // calls this method to obtain main thread scrolling reasons due to
+  // background paint location. Once the cases get handled on compositor the
+  // parameter "reasons" could be removed.
+  BackgroundPaintLocation GetBackgroundPaintLocation(
+      uint32_t* main_thread_scrolling_reasons = nullptr) const;
 
   // These return the CSS computed padding values.
   LayoutUnit ComputedCSSPaddingTop() const {
@@ -281,10 +285,6 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
                              -BorderLeft());
   }
 
-  bool HasBorderOrPadding() const {
-    return StyleRef().HasBorder() || StyleRef().HasPadding();
-  }
-
   LayoutUnit BorderAndPaddingStart() const {
     return BorderStart() + PaddingStart();
   }
@@ -308,7 +308,7 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
     return BorderLeft() + BorderRight() + PaddingLeft() + PaddingRight();
   }
   DISABLE_CFI_PERF LayoutUnit BorderAndPaddingLogicalHeight() const {
-    return HasBorderOrPadding()
+    return (StyleRef().HasBorder() || StyleRef().MayHavePadding())
                ? BorderAndPaddingBefore() + BorderAndPaddingAfter()
                : LayoutUnit();
   }
@@ -417,20 +417,22 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
   void ContentChanged(ContentChangeType);
   bool HasAcceleratedCompositing() const;
 
-  void ComputeLayerHitTestRects(LayerHitTestRects&, TouchAction) const override;
-
   // Returns true if the background is painted opaque in the given rect.
   // The query rect is given in local coordinate system.
-  virtual bool BackgroundIsKnownToBeOpaqueInRect(const LayoutRect&) const {
+  virtual bool BackgroundIsKnownToBeOpaqueInRect(const PhysicalRect&) const {
     return false;
   }
 
-  // http://www.w3.org/TR/css3-background/#body-background
-  // <html> root element with no background steals background from its first
-  // <body> child. The used background for such body element should be the
-  // initial value. (i.e. transparent)
-  bool BackgroundStolenForBeingBody(
-      const ComputedStyle* root_element_style = nullptr) const;
+  // This object's background is transferred to its LayoutView if:
+  // 1. it's the document element, or
+  // 2. it's the first <body> if the document element is <html> and doesn't have
+  //    a background. http://www.w3.org/TR/css3-background/#body-background
+  // If it's the case, the used background should be the initial value (i.e.
+  // transparent). The first condition is actually an implementation detail
+  // because we paint the view background in ViewPainter instead of the painter
+  // of the layout object of the document element.
+  bool BackgroundTransfersToView(
+      const ComputedStyle* document_element_style = nullptr) const;
 
   void AbsoluteQuads(Vector<FloatQuad>& quads,
                      MapCoordinatesFlags mode = 0) const override;
@@ -446,6 +448,17 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
   virtual bool HasOverrideContainingBlockContentWidth() const { return false; }
   virtual bool HasOverrideContainingBlockContentHeight() const { return false; }
 
+  // Returns the continuation associated with |this|.
+  // Returns nullptr if no continuation is associated with |this|.
+  //
+  // See the section about CONTINUATIONS AND ANONYMOUS LAYOUTBLOCKFLOWS in
+  // LayoutInline for more details about them.
+  //
+  // Our implementation uses a HashMap to store them to avoid paying the cost
+  // for each LayoutBoxModelObject (|continuationMap| in the cpp file).
+  // public only for NGOutOfFlowLayoutPart, otherwise protected.
+  LayoutBoxModelObject* Continuation() const;
+
  protected:
   // Compute absolute quads for |this|, but not any continuations. May only be
   // called for objects which can be or have continuations, i.e. LayoutInline or
@@ -455,49 +468,37 @@ class CORE_EXPORT LayoutBoxModelObject : public LayoutObject {
 
   void WillBeDestroyed() override;
 
-  LayoutPoint AdjustedPositionRelativeTo(const LayoutPoint&,
-                                         const Element*) const;
-
-  // Returns the continuation associated with |this|.
-  // Returns nullptr if no continuation is associated with |this|.
-  //
-  // See the section about CONTINUATIONS AND ANONYMOUS LAYOUTBLOCKFLOWS in
-  // LayoutInline for more details about them.
-  //
-  // Our implementation uses a HashMap to store them to avoid paying the cost
-  // for each LayoutBoxModelObject (|continuationMap| in the cpp file).
-  LayoutBoxModelObject* Continuation() const;
+  PhysicalOffset AdjustedPositionRelativeTo(const PhysicalOffset&,
+                                            const Element*) const;
 
   // Set the next link in the continuation chain.
   //
   // See continuation above for more details.
   void SetContinuation(LayoutBoxModelObject*);
 
-  virtual LayoutSize AccumulateInFlowPositionOffsets() const {
-    return LayoutSize();
+  virtual PhysicalOffset AccumulateInFlowPositionOffsets() const {
+    return PhysicalOffset();
   }
 
   LayoutRect LocalCaretRectForEmptyElement(LayoutUnit width,
                                            LayoutUnit text_indent_offset) const;
 
-  bool HasAutoHeightOrContainingBlockWithAutoHeight() const;
+  enum RegisterPercentageDescendant {
+    kDontRegisterPercentageDescendant,
+    kRegisterPercentageDescendant,
+  };
+  bool HasAutoHeightOrContainingBlockWithAutoHeight(
+      RegisterPercentageDescendant = kRegisterPercentageDescendant) const;
   LayoutBlock* ContainingBlockForAutoHeightDetection(
-      Length logical_height) const;
+      const Length& logical_height) const;
 
-  void AddOutlineRectsForNormalChildren(Vector<LayoutRect>&,
-                                        const LayoutPoint& additional_offset,
+  void AddOutlineRectsForNormalChildren(Vector<PhysicalRect>&,
+                                        const PhysicalOffset& additional_offset,
                                         NGOutlineType) const;
   void AddOutlineRectsForDescendant(const LayoutObject& descendant,
-                                    Vector<LayoutRect>&,
-                                    const LayoutPoint& additional_offset,
+                                    Vector<PhysicalRect>&,
+                                    const PhysicalOffset& additional_offset,
                                     NGOutlineType) const;
-
-  void AddLayerHitTestRects(LayerHitTestRects&,
-                            const PaintLayer*,
-                            const LayoutPoint&,
-                            TouchAction,
-                            const LayoutRect&,
-                            TouchAction) const override;
 
   void StyleWillChange(StyleDifference,
                        const ComputedStyle& new_style) override;

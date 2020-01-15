@@ -28,7 +28,7 @@ typedef Vector<CueInterval> CueList;
 
 // This class manages the timeline and rendering updates of cues associated
 // with TextTracks. Owned by a HTMLMediaElement.
-class CueTimeline final : public GarbageCollectedFinalized<CueTimeline> {
+class CueTimeline final : public GarbageCollected<CueTimeline> {
  public:
   CueTimeline(HTMLMediaElement&);
 
@@ -47,7 +47,7 @@ class CueTimeline final : public GarbageCollectedFinalized<CueTimeline> {
 
   const CueList& CurrentlyActiveCues() const { return currently_active_cues_; }
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
  private:
   HTMLMediaElement& MediaElement() const { return *media_element_; }

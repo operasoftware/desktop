@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/bindings/modules/v8/v8_sql_statement_callback.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_sql_statement_error_callback.h"
+#include "third_party/blink/renderer/core/probe/async_task_id.h"
 #include "third_party/blink/renderer/modules/webdatabase/sql_result_set.h"
 #include "third_party/blink/renderer/modules/webdatabase/sqlite/sql_value.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -44,8 +45,7 @@ class SQLTransaction;
 
 class SQLStatement final : public GarbageCollected<SQLStatement> {
  public:
-  class OnSuccessCallback
-      : public GarbageCollectedFinalized<OnSuccessCallback> {
+  class OnSuccessCallback : public GarbageCollected<OnSuccessCallback> {
    public:
     virtual ~OnSuccessCallback() = default;
     virtual void Trace(blink::Visitor*) {}
@@ -58,19 +58,21 @@ class SQLStatement final : public GarbageCollected<SQLStatement> {
   class OnSuccessV8Impl : public OnSuccessCallback {
    public:
     static OnSuccessV8Impl* Create(V8SQLStatementCallback* callback) {
-      return callback ? new OnSuccessV8Impl(callback) : nullptr;
+      return callback ? MakeGarbageCollected<OnSuccessV8Impl>(callback)
+                      : nullptr;
     }
+
+    explicit OnSuccessV8Impl(V8SQLStatementCallback* callback)
+        : callback_(callback) {}
+
     void Trace(blink::Visitor*) override;
     bool OnSuccess(SQLTransaction*, SQLResultSet*) override;
 
    private:
-    explicit OnSuccessV8Impl(V8SQLStatementCallback* callback)
-        : callback_(ToV8PersistentCallbackInterface(callback)) {}
-
-    Member<V8PersistentCallbackInterface<V8SQLStatementCallback>> callback_;
+    Member<V8SQLStatementCallback> callback_;
   };
 
-  class OnErrorCallback : public GarbageCollectedFinalized<OnErrorCallback> {
+  class OnErrorCallback : public GarbageCollected<OnErrorCallback> {
    public:
     virtual ~OnErrorCallback() = default;
     virtual void Trace(blink::Visitor*) {}
@@ -83,20 +85,23 @@ class SQLStatement final : public GarbageCollected<SQLStatement> {
   class OnErrorV8Impl : public OnErrorCallback {
    public:
     static OnErrorV8Impl* Create(V8SQLStatementErrorCallback* callback) {
-      return callback ? new OnErrorV8Impl(callback) : nullptr;
+      return callback ? MakeGarbageCollected<OnErrorV8Impl>(callback) : nullptr;
     }
+
+    explicit OnErrorV8Impl(V8SQLStatementErrorCallback* callback)
+        : callback_(callback) {}
+
     void Trace(blink::Visitor*) override;
     bool OnError(SQLTransaction*, SQLError*) override;
 
    private:
-    explicit OnErrorV8Impl(V8SQLStatementErrorCallback* callback)
-        : callback_(ToV8PersistentCallbackInterface(callback)) {}
-
-    Member<V8PersistentCallbackInterface<V8SQLStatementErrorCallback>>
-        callback_;
+    Member<V8SQLStatementErrorCallback> callback_;
   };
 
   static SQLStatement* Create(Database*, OnSuccessCallback*, OnErrorCallback*);
+
+  SQLStatement(Database*, OnSuccessCallback*, OnErrorCallback*);
+
   void Trace(blink::Visitor*);
 
   bool PerformCallback(SQLTransaction*);
@@ -107,8 +112,6 @@ class SQLStatement final : public GarbageCollected<SQLStatement> {
   bool HasErrorCallback();
 
  private:
-  SQLStatement(Database*, OnSuccessCallback*, OnErrorCallback*);
-
   // The SQLStatementBackend owns the SQLStatement. Hence, the backend is
   // guaranteed to be outlive the SQLStatement, and it is safe for us to refer
   // to the backend using a raw pointer here.
@@ -116,6 +119,8 @@ class SQLStatement final : public GarbageCollected<SQLStatement> {
 
   Member<OnSuccessCallback> success_callback_;
   Member<OnErrorCallback> error_callback_;
+
+  probe::AsyncTaskId async_task_id_;
 };
 
 }  // namespace blink

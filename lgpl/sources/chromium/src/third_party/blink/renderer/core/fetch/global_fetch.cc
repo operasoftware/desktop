@@ -8,22 +8,34 @@
 #include "third_party/blink/renderer/core/fetch/request.h"
 #include "third_party/blink/renderer/core/fetch/request_init.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
 
 namespace {
 
+void MeasureFetchProperties(ExecutionContext* execution_context,
+                            FetchRequestData* data) {
+  // 'redirect' measurement
+  if (data->Redirect() == network::mojom::RedirectMode::kError)
+    UseCounter::Count(execution_context, WebFeature::kFetchRedirectError);
+  else if (data->Redirect() == network::mojom::RedirectMode::kManual)
+    UseCounter::Count(execution_context, WebFeature::kFetchRedirectManual);
+
+  // 'cache' measurement: https://crbug.com/959789
+  if (data->CacheMode() == mojom::FetchCacheMode::kBypassCache)
+    UseCounter::Count(execution_context, WebFeature::kFetchCacheReload);
+}
+
 template <typename T>
-class GlobalFetchImpl final
-    : public GarbageCollectedFinalized<GlobalFetchImpl<T>>,
-      public GlobalFetch::ScopedFetcher,
-      public Supplement<T> {
+class GlobalFetchImpl final : public GarbageCollected<GlobalFetchImpl<T>>,
+                              public GlobalFetch::ScopedFetcher,
+                              public Supplement<T> {
   USING_GARBAGE_COLLECTED_MIXIN(GlobalFetchImpl);
 
  public:
@@ -34,15 +46,18 @@ class GlobalFetchImpl final
     GlobalFetchImpl* supplement =
         Supplement<T>::template From<GlobalFetchImpl>(supplementable);
     if (!supplement) {
-      supplement = new GlobalFetchImpl(execution_context);
+      supplement = MakeGarbageCollected<GlobalFetchImpl>(execution_context);
       Supplement<T>::ProvideTo(supplementable, supplement);
     }
     return supplement;
   }
 
+  explicit GlobalFetchImpl(ExecutionContext* execution_context)
+      : fetch_manager_(FetchManager::Create(execution_context)) {}
+
   ScriptPromise Fetch(ScriptState* script_state,
                       const RequestInfo& input,
-                      const RequestInit& init,
+                      const RequestInit* init,
                       ExceptionState& exception_state) override {
     ExecutionContext* execution_context = fetch_manager_->GetExecutionContext();
     if (!script_state->ContextIsValid() || !execution_context) {
@@ -58,9 +73,10 @@ class GlobalFetchImpl final
     if (exception_state.HadException())
       return ScriptPromise();
 
-    probe::willSendXMLHttpOrFetchNetworkRequest(execution_context, r->url());
+    probe::WillSendXMLHttpOrFetchNetworkRequest(execution_context, r->url());
     FetchRequestData* request_data =
         r->PassRequestData(script_state, exception_state);
+    MeasureFetchProperties(execution_context, request_data);
     if (exception_state.HadException())
       return ScriptPromise();
     auto promise = fetch_manager_->Fetch(script_state, request_data,
@@ -78,9 +94,6 @@ class GlobalFetchImpl final
   }
 
  private:
-  explicit GlobalFetchImpl(ExecutionContext* execution_context)
-      : fetch_manager_(FetchManager::Create(execution_context)) {}
-
   Member<FetchManager> fetch_manager_;
 };
 
@@ -109,7 +122,7 @@ void GlobalFetch::ScopedFetcher::Trace(blink::Visitor* visitor) {}
 ScriptPromise GlobalFetch::fetch(ScriptState* script_state,
                                  LocalDOMWindow& window,
                                  const RequestInfo& input,
-                                 const RequestInit& init,
+                                 const RequestInit* init,
                                  ExceptionState& exception_state) {
   UseCounter::Count(window.GetExecutionContext(), WebFeature::kFetch);
   if (!window.GetFrame()) {
@@ -123,7 +136,7 @@ ScriptPromise GlobalFetch::fetch(ScriptState* script_state,
 ScriptPromise GlobalFetch::fetch(ScriptState* script_state,
                                  WorkerGlobalScope& worker,
                                  const RequestInfo& input,
-                                 const RequestInit& init,
+                                 const RequestInit* init,
                                  ExceptionState& exception_state) {
   UseCounter::Count(worker.GetExecutionContext(), WebFeature::kFetch);
   return ScopedFetcher::From(worker)->Fetch(script_state, input, init,

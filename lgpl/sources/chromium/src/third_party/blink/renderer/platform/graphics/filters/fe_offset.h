@@ -29,7 +29,7 @@ namespace blink {
 
 class PLATFORM_EXPORT FEOffset final : public FilterEffect {
  public:
-  static FEOffset* Create(Filter*, float dx, float dy);
+  FEOffset(Filter*, float dx, float dy);
 
   float Dx() const;
   void SetDx(float);
@@ -41,8 +41,6 @@ class PLATFORM_EXPORT FEOffset final : public FilterEffect {
                                           int indention) const override;
 
  private:
-  FEOffset(Filter*, float dx, float dy);
-
   FloatRect MapEffect(const FloatRect&) const override;
 
   sk_sp<PaintFilter> CreateImageFilter() override;

@@ -9,13 +9,13 @@
 #include "third_party/blink/renderer/core/css/cssom/css_style_value.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/scoped_persistent.h"
-#include "third_party/blink/renderer/platform/geometry/int_size.h"
+#include "third_party/blink/renderer/platform/geometry/float_size.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
-class CSSSyntaxDescriptor;
+class CSSSyntaxDefinition;
 class Document;
 class DocumentPaintDefinition;
 class Image;
@@ -27,17 +27,22 @@ class MODULES_EXPORT CSSPaintImageGeneratorImpl final
   static CSSPaintImageGenerator* Create(const String& name,
                                         const Document&,
                                         Observer*);
+
+  CSSPaintImageGeneratorImpl(Observer*, PaintWorklet*, const String&);
+  CSSPaintImageGeneratorImpl(PaintWorklet*, const String&);
   ~CSSPaintImageGeneratorImpl() override;
 
-  // The |container_size| is the container size with subpixel snapping.
+  // The |container_size| is without subpixel snapping.
   scoped_refptr<Image> Paint(const ImageResourceObserver&,
-                             const IntSize& container_size,
-                             const CSSStyleValueVector*) final;
+                             const FloatSize& container_size,
+                             const CSSStyleValueVector*,
+                             float device_scale_factor) final;
   const Vector<CSSPropertyID>& NativeInvalidationProperties() const final;
   const Vector<AtomicString>& CustomInvalidationProperties() const final;
   bool HasAlpha() const final;
-  const Vector<CSSSyntaxDescriptor>& InputArgumentTypes() const final;
+  const Vector<CSSSyntaxDefinition>& InputArgumentTypes() const final;
   bool IsImageGeneratorReady() const final;
+  int WorkletId() const final;
 
   // Should be called from the PaintWorkletGlobalScope when a javascript class
   // is registered with the same name.
@@ -52,10 +57,10 @@ class MODULES_EXPORT CSSPaintImageGeneratorImpl final
   void Trace(blink::Visitor*) override;
 
  private:
-  CSSPaintImageGeneratorImpl(Observer*, PaintWorklet*, const String&);
-  CSSPaintImageGeneratorImpl(PaintWorklet*, const String&);
-
+  // Used for main-thread CSS Paint.
   bool HasDocumentDefinition() const;
+
+  // Used for main-thread CSS Paint.
   // This function first checks whether the document definition with |name_|
   // exists or not. If it does exist, the function fetches the document
   // definition and checks if it is valid. The function returns true when the

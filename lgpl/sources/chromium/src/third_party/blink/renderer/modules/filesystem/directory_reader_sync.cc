@@ -36,57 +36,9 @@
 #include "third_party/blink/renderer/modules/filesystem/file_entry_sync.h"
 #include "third_party/blink/renderer/modules/filesystem/file_system_callbacks.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
-
-class DirectoryReaderSync::EntriesCallbackHelper final
-    : public EntriesCallbacks::OnDidGetEntriesCallback {
- public:
-  static EntriesCallbackHelper* Create(DirectoryReaderSync* reader) {
-    return new EntriesCallbackHelper(reader);
-  }
-
-  void Trace(blink::Visitor* visitor) override {
-    visitor->Trace(reader_);
-    EntriesCallbacks::OnDidGetEntriesCallback::Trace(visitor);
-  }
-
-  void OnSuccess(EntryHeapVector* entries) override {
-    reader_->entries_.ReserveCapacity(reader_->entries_.size() +
-                                      entries->size());
-    for (const auto& entry : *entries) {
-      reader_->entries_.UncheckedAppend(EntrySync::Create(entry.Get()));
-    }
-  }
-
- private:
-  explicit EntriesCallbackHelper(DirectoryReaderSync* reader)
-      : reader_(reader) {}
-
-  Member<DirectoryReaderSync> reader_;
-};
-
-class DirectoryReaderSync::ErrorCallbackHelper final
-    : public ErrorCallbackBase {
- public:
-  static ErrorCallbackHelper* Create(DirectoryReaderSync* reader) {
-    return new ErrorCallbackHelper(reader);
-  }
-
-  void Trace(blink::Visitor* visitor) override {
-    visitor->Trace(reader_);
-    ErrorCallbackBase::Trace(visitor);
-  }
-
-  void Invoke(base::File::Error error) override {
-    reader_->error_code_ = error;
-  }
-
- private:
-  explicit ErrorCallbackHelper(DirectoryReaderSync* reader) : reader_(reader) {}
-
-  Member<DirectoryReaderSync> reader_;
-};
 
 DirectoryReaderSync::DirectoryReaderSync(DOMFileSystemBase* file_system,
                                          const String& full_path)
@@ -94,17 +46,33 @@ DirectoryReaderSync::DirectoryReaderSync(DOMFileSystemBase* file_system,
 
 EntrySyncHeapVector DirectoryReaderSync::readEntries(
     ExceptionState& exception_state) {
+  auto success_callback_wrapper = WTF::BindRepeating(
+      [](DirectoryReaderSync* persistent_reader, EntryHeapVector* entries) {
+        persistent_reader->entries_.ReserveCapacity(
+            persistent_reader->entries_.size() + entries->size());
+        for (const auto& entry : *entries) {
+          persistent_reader->entries_.UncheckedAppend(
+              EntrySync::Create(entry.Get()));
+        }
+      },
+      WrapPersistentIfNeeded(this));
+  auto error_callback_wrapper = WTF::Bind(
+      [](DirectoryReaderSync* persistent_reader, base::File::Error error) {
+        persistent_reader->error_code_ = error;
+      },
+      WrapPersistentIfNeeded(this));
+
   if (!has_called_read_directory_) {
-    Filesystem()->ReadDirectory(
-        this, full_path_, EntriesCallbackHelper::Create(this),
-        ErrorCallbackHelper::Create(this), DOMFileSystemBase::kSynchronous);
+    Filesystem()->ReadDirectory(this, full_path_, success_callback_wrapper,
+                                std::move(error_callback_wrapper),
+                                DOMFileSystemBase::kSynchronous);
     has_called_read_directory_ = true;
   }
 
   DCHECK(!has_more_entries_);
 
   if (error_code_ != base::File::FILE_OK) {
-    FileError::ThrowDOMException(exception_state, error_code_);
+    file_error::ThrowDOMException(exception_state, error_code_);
     return EntrySyncHeapVector();
   }
 

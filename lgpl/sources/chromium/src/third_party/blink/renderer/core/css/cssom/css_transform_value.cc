@@ -28,16 +28,17 @@ CSSTransformValue* CSSTransformValue::Create(
     const HeapVector<Member<CSSTransformComponent>>& transform_components) {
   if (transform_components.IsEmpty())
     return nullptr;
-  return new CSSTransformValue(transform_components);
+  return MakeGarbageCollected<CSSTransformValue>(transform_components);
 }
 
 CSSTransformValue* CSSTransformValue::FromCSSValue(const CSSValue& css_value) {
-  if (!css_value.IsValueList()) {
+  auto* css_value_list = DynamicTo<CSSValueList>(css_value);
+  if (!css_value_list) {
     // TODO(meade): Also need to check the separator here if we care.
     return nullptr;
   }
   HeapVector<Member<CSSTransformComponent>> components;
-  for (const CSSValue* value : ToCSSValueList(css_value)) {
+  for (const CSSValue* value : *css_value_list) {
     CSSTransformComponent* component =
         CSSTransformComponent::FromCSSValue(*value);
     if (!component)

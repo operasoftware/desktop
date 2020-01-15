@@ -7,7 +7,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/bindings/dom_data_store.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -25,22 +25,22 @@ static void AccumulateArrayBuffersForAllWorlds(
   }
 }
 
-bool DOMArrayBuffer::IsNeuterable(v8::Isolate* isolate) {
+bool DOMArrayBuffer::IsDetachable(v8::Isolate* isolate) {
   Vector<v8::Local<v8::ArrayBuffer>, 4> buffer_handles;
   v8::HandleScope handle_scope(isolate);
   AccumulateArrayBuffersForAllWorlds(isolate, this, buffer_handles);
 
-  bool is_neuterable = true;
+  bool is_detachable = true;
   for (const auto& buffer_handle : buffer_handles)
-    is_neuterable &= buffer_handle->IsNeuterable();
+    is_detachable &= buffer_handle->IsDetachable();
 
-  return is_neuterable;
+  return is_detachable;
 }
 
 bool DOMArrayBuffer::Transfer(v8::Isolate* isolate,
                               WTF::ArrayBufferContents& result) {
   DOMArrayBuffer* to_transfer = this;
-  if (!IsNeuterable(isolate)) {
+  if (!IsDetachable(isolate)) {
     to_transfer =
         DOMArrayBuffer::Create(Buffer()->Data(), Buffer()->ByteLength());
   }
@@ -53,7 +53,7 @@ bool DOMArrayBuffer::Transfer(v8::Isolate* isolate,
   AccumulateArrayBuffersForAllWorlds(isolate, to_transfer, buffer_handles);
 
   for (const auto& buffer_handle : buffer_handles)
-    buffer_handle->Neuter();
+    buffer_handle->Detach();
 
   return true;
 }
@@ -97,6 +97,27 @@ DOMArrayBuffer* DOMArrayBuffer::Create(
   for (const auto& span : *shared_buffer) {
     memcpy(data, span.data(), span.size());
     data += span.size();
+  }
+
+  return Create(ArrayBuffer::Create(contents));
+}
+
+DOMArrayBuffer* DOMArrayBuffer::Create(
+    const Vector<base::span<const char>>& data) {
+  size_t size = 0;
+  for (const auto& span : data) {
+    size += span.size();
+  }
+  WTF::ArrayBufferContents contents(size, 1,
+                                    WTF::ArrayBufferContents::kNotShared,
+                                    WTF::ArrayBufferContents::kDontInitialize);
+  uint8_t* ptr = static_cast<uint8_t*>(contents.Data());
+  if (UNLIKELY(!ptr))
+    OOM_CRASH();
+
+  for (const auto& span : data) {
+    memcpy(ptr, span.data(), span.size());
+    ptr += span.size();
   }
 
   return Create(ArrayBuffer::Create(contents));

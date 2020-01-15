@@ -31,37 +31,25 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_DOM_DATA_STORE_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_DOM_DATA_STORE_H_
 
+#include "base/macros.h"
 #include "base/optional.h"
-#include "third_party/blink/renderer/platform/bindings/dom_wrapper_map.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable_marking_visitor.h"
 #include "third_party/blink/renderer/platform/bindings/wrapper_type_info.h"
 #include "third_party/blink/renderer/platform/heap/unified_heap_marking_visitor.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/stack_util.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
-// Holds a DOMWrapperMap specialized to map between ScriptWrappable objects and
-// their wrappers and provides an API to perform common operations with this map
-// and manage wrappers in a single world. Each world (DOMWrapperWorld) holds a
-// single DOMWrapperMap instance to hold wrappers only for that world.
-class DOMDataStore {
-  WTF_MAKE_NONCOPYABLE(DOMDataStore);
-  USING_FAST_MALLOC(DOMDataStore);
-
+// Holds a map specialized to map between ScriptWrappable objects and their
+// wrappers and provides an API to perform common operations with this map and
+// manage wrappers in a single world. Each world (DOMWrapperWorld) holds a
+// single map instance to hold wrappers only for that world.
+class DOMDataStore final : public GarbageCollected<DOMDataStore> {
  public:
-  DOMDataStore(v8::Isolate* isolate, bool is_main_world)
-      : is_main_world_(is_main_world) {
-    // We never use |m_wrapperMap| when it's the main world.
-    if (!is_main_world)
-      wrapper_map_.emplace(isolate);
-  }
-
   static DOMDataStore& Current(v8::Isolate* isolate) {
     return DOMWrapperWorld::Current(isolate).DomDataStore();
   }
@@ -120,10 +108,18 @@ class DOMDataStore {
     return Current(isolate).ContainsWrapper(object);
   }
 
+  DOMDataStore(v8::Isolate* isolate, bool is_main_world);
+
+  // Clears all references.
+  void Dispose();
+
   v8::Local<v8::Object> Get(ScriptWrappable* object, v8::Isolate* isolate) {
     if (is_main_world_)
       return object->MainWorldWrapper(isolate);
-    return wrapper_map_->NewLocal(isolate, object);
+    auto it = wrapper_map_.find(object);
+    if (it != wrapper_map_.end())
+      return it->value->ref.NewLocal(isolate);
+    return v8::Local<v8::Object>();
   }
 
   WARN_UNUSED_RESULT bool Set(v8::Isolate* isolate,
@@ -134,42 +130,54 @@ class DOMDataStore {
     DCHECK(!wrapper.IsEmpty());
     if (is_main_world_)
       return object->SetWrapper(isolate, wrapper_type_info, wrapper);
-    bool updated = wrapper_map_->Set(object, wrapper_type_info, wrapper);
-    if (updated) {
-      ScriptWrappableMarkingVisitor::WriteBarrier(
-          isolate, &wrapper_map_.value(), object);
-      UnifiedHeapMarkingVisitor::WriteBarrier(isolate, &wrapper_map_.value(),
-                                              object);
+
+    auto result = wrapper_map_.insert(
+        object, MakeGarbageCollected<WrappedReference>(isolate, wrapper));
+    if (LIKELY(result.is_new_entry)) {
+      wrapper_type_info->ConfigureWrapper(
+          &result.stored_value->value->ref.Get());
+    } else {
+      DCHECK(!result.stored_value->value->ref.IsEmpty());
+      wrapper = result.stored_value->value->ref.NewLocal(isolate);
     }
-    return updated;
+    return result.is_new_entry;
   }
 
-  void Trace(const ScriptWrappable* script_wrappable, Visitor* visitor) {
-    visitor->Trace(&wrapper_map_.value(), script_wrappable);
-  }
-
-  void MarkWrapper(ScriptWrappable* script_wrappable) {
-    wrapper_map_->MarkWrapper(script_wrappable);
-  }
-
-  // Dissociates a wrapper, if any, from |script_wrappable|.
-  void UnsetWrapperIfAny(ScriptWrappable* script_wrappable) {
+  bool UnsetSpecificWrapperIfSet(
+      ScriptWrappable* object,
+      const v8::TracedReference<v8::Object>& handle) {
     DCHECK(!is_main_world_);
-    wrapper_map_->RemoveIfAny(script_wrappable);
+    const auto& it = wrapper_map_.find(object);
+    if (it != wrapper_map_.end()) {
+      if (it->value->ref.Get() == handle) {
+        it->value->ref.Clear();
+        wrapper_map_.erase(it);
+        return true;
+      }
+    }
+    return false;
   }
 
   bool SetReturnValueFrom(v8::ReturnValue<v8::Value> return_value,
                           ScriptWrappable* object) {
     if (is_main_world_)
       return object->SetReturnValue(return_value);
-    return wrapper_map_->SetReturnValueFrom(return_value, object);
+    auto it = wrapper_map_.find(object);
+    if (it != wrapper_map_.end()) {
+      return_value.Set(it->value->ref.Get());
+      return true;
+    }
+    return false;
   }
 
   bool ContainsWrapper(const ScriptWrappable* object) {
     if (is_main_world_)
       return object->ContainsWrapper();
-    return wrapper_map_->ContainsKey(object);
+    return wrapper_map_.find(const_cast<ScriptWrappable*>(object)) !=
+           wrapper_map_.end();
   }
+
+  virtual void Trace(Visitor*);
 
  private:
   // We can use a wrapper stored in a ScriptWrappable when we're in the main
@@ -191,24 +199,28 @@ class DOMDataStore {
     return wrappable->IsEqualTo(holder);
   }
 
+  // Wrapper around TraceWrapperV8Reference to allow use in ephemeron hash map
+  // below.
+  class PLATFORM_EXPORT WrappedReference final
+      : public GarbageCollected<WrappedReference> {
+   public:
+    WrappedReference() = default;
+    WrappedReference(v8::Isolate* isolate, v8::Local<v8::Object> handle)
+        : ref(isolate, handle) {}
+
+    virtual void Trace(Visitor*);
+
+    TraceWrapperV8Reference<v8::Object> ref;
+  };
+
   bool is_main_world_;
-  base::Optional<DOMWrapperMap<ScriptWrappable>> wrapper_map_;
+  // Ephemeron map: WrappedReference will be kept alive as long as
+  // ScriptWrappable is alive.
+  HeapHashMap<WeakMember<ScriptWrappable>, Member<WrappedReference>>
+      wrapper_map_;
+
+  DISALLOW_COPY_AND_ASSIGN(DOMDataStore);
 };
-
-template <>
-inline void DOMWrapperMap<ScriptWrappable>::PersistentValueMapTraits::Dispose(
-    v8::Isolate*,
-    v8::Global<v8::Object>,
-    ScriptWrappable*) {
-  WrapperTypeInfo::WrapperDestroyed();
-}
-
-template <>
-inline void
-DOMWrapperMap<ScriptWrappable>::PersistentValueMapTraits::DisposeWeak(
-    const v8::WeakCallbackInfo<WeakCallbackDataType>&) {
-  WrapperTypeInfo::WrapperDestroyed();
-}
 
 }  // namespace blink
 

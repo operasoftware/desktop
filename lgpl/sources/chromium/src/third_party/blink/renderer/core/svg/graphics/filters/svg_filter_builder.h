@@ -42,7 +42,7 @@ class SVGFilterElement;
 class SVGFilterGraphNodeMap final
     : public GarbageCollected<SVGFilterGraphNodeMap> {
  public:
-  static SVGFilterGraphNodeMap* Create() { return new SVGFilterGraphNodeMap; }
+  SVGFilterGraphNodeMap();
 
   typedef HeapHashSet<Member<FilterEffect>> FilterEffectSet;
 
@@ -66,8 +66,6 @@ class SVGFilterGraphNodeMap final
   void Trace(blink::Visitor*);
 
  private:
-  SVGFilterGraphNodeMap();
-
   // The value is a list, which contains those filter effects,
   // which depends on the key filter effect.
   HeapHashMap<Member<FilterEffect>, FilterEffectSet> effect_references_;

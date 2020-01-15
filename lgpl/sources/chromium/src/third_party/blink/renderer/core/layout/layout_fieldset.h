@@ -39,6 +39,8 @@ class LayoutFieldset final : public LayoutBlockFlow {
 
   bool CreatesNewFormattingContext() const final { return true; }
 
+  bool BackgroundIsKnownToBeOpaqueInRect(const PhysicalRect&) const override;
+
  private:
   bool IsOfType(LayoutObjectType type) const override {
     return type == kLayoutObjectFieldset || LayoutBlockFlow::IsOfType(type);
@@ -51,9 +53,9 @@ class LayoutFieldset final : public LayoutBlockFlow {
 
   void PaintBoxDecorationBackground(
       const PaintInfo&,
-      const LayoutPoint& paint_offset) const override;
+      const PhysicalOffset& paint_offset) const override;
   void PaintMask(const PaintInfo&,
-                 const LayoutPoint& paint_offset) const override;
+                 const PhysicalOffset& paint_offset) const override;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutFieldset, IsFieldset());

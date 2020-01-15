@@ -37,12 +37,10 @@ namespace blink {
 
 class MonthInputType final : public BaseTemporalInputType {
  public:
-  static InputType* Create(HTMLInputElement&);
-
- private:
   explicit MonthInputType(HTMLInputElement& element)
       : BaseTemporalInputType(element) {}
 
+ private:
   void CountUsage() override;
   const AtomicString& FormControlType() const override;
   double ValueAsDate() const override;

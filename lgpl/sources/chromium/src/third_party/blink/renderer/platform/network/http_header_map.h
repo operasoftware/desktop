@@ -31,7 +31,7 @@
 #include <utility>
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
@@ -60,7 +60,7 @@ class PLATFORM_EXPORT HTTPHeaderMap final {
   typedef MapType::AddResult AddResult;
   typedef MapType::const_iterator const_iterator;
 
-  size_t size() const { return headers_.size(); }
+  wtf_size_t size() const { return headers_.size(); }
   const_iterator begin() const { return headers_.begin(); }
   const_iterator end() const { return headers_.end(); }
   const_iterator Find(const AtomicString& k) const { return headers_.find(k); }

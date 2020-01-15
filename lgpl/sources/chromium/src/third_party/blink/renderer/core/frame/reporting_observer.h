@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_reporting_observer_callback.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/frame/report.h"
 #include "third_party/blink/renderer/core/frame/reporting_observer_options.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -27,7 +28,11 @@ class CORE_EXPORT ReportingObserver final
  public:
   static ReportingObserver* Create(ExecutionContext*,
                                    V8ReportingObserverCallback*,
-                                   ReportingObserverOptions);
+                                   ReportingObserverOptions*);
+
+  explicit ReportingObserver(ExecutionContext*,
+                             V8ReportingObserverCallback*,
+                             ReportingObserverOptions*);
 
   // ActiveScriptWrappable
   bool HasPendingActivity() const final;
@@ -56,13 +61,9 @@ class CORE_EXPORT ReportingObserver final
   void Trace(blink::Visitor*) override;
 
  private:
-  explicit ReportingObserver(ExecutionContext*,
-                             V8ReportingObserverCallback*,
-                             ReportingObserverOptions);
-
   Member<ExecutionContext> execution_context_;
-  TraceWrapperMember<V8ReportingObserverCallback> callback_;
-  ReportingObserverOptions options_;
+  Member<V8ReportingObserverCallback> callback_;
+  Member<ReportingObserverOptions> options_;
   HeapVector<Member<Report>> report_queue_;
   bool registered_;
 };

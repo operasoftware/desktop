@@ -10,7 +10,6 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -32,7 +31,7 @@ class DOMTimerCoordinator {
   // Creates and installs a new timer. Returns the assigned ID.
   int InstallNewTimeout(ExecutionContext*,
                         ScheduledAction*,
-                        TimeDelta timeout,
+                        base::TimeDelta timeout,
                         bool single_shot);
 
   // Removes and disposes the timer with the specified ID, if any. This may
@@ -42,7 +41,7 @@ class DOMTimerCoordinator {
   // Timers created during the execution of other timers, and
   // repeating timers, are throttled. Timer nesting level tracks the
   // number of linked timers or repetitions of a timer. See
-  // https://html.spec.whatwg.org/#timers
+  // https://html.spec.whatwg.org/C/#timers
   int TimerNestingLevel() { return timer_nesting_level_; }
 
   // Sets the timer nesting level. Set when a timer executes so that

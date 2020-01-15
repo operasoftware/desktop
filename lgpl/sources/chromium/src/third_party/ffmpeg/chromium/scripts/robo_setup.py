@@ -8,9 +8,10 @@
 
 import io
 import os
-from subprocess import call
+from robo_lib import UserInstructions
 import subprocess
 from robo_lib import log
+import shutil
 
 def InstallUbuntuPackage(robo_configuration, package):
   """Install |package|.
@@ -21,7 +22,8 @@ def InstallUbuntuPackage(robo_configuration, package):
   """
 
   log("Installing package %s" % package)
-  if call(["sudo", "apt-get", "install", package]):
+  if robo_configuration.Call(["sudo", "apt-get", "install",
+                                            package]):
     raise Exception("Could not install %s" % package)
 
 def InstallPrereqs(robo_configuration):
@@ -36,7 +38,8 @@ def InstallPrereqs(robo_configuration):
     media_directory = os.path.join("media", "test", "data", "internal")
     if not os.path.exists(media_directory):
       log("Checking out media internal test data")
-      if call(["git", "clone",
+      if robo_configuration.Call(
+              ["git", "clone",
               "https://chrome-internal.googlesource.com/chrome/data/media",
               media_directory]):
         raise Exception(
@@ -44,7 +47,7 @@ def InstallPrereqs(robo_configuration):
                 media_directory)
 
     if robo_configuration.host_operating_system() == "linux":
-      InstallUbuntuPackage(robo_configuration, "yasm")
+      InstallUbuntuPackage(robo_configuration, "nasm")
       InstallUbuntuPackage(robo_configuration, "gcc-aarch64-linux-gnu")
     else:
       raise Exception("I don't know how to install deps for host os %s" %
@@ -85,7 +88,8 @@ def EnsureASANDirWorks(robo_configuration):
 
     # Ask gn to generate build files.
     log("Running gn on %s" % directory_name)
-    if call(["gn", "gen", robo_configuration.local_asan_directory()]):
+    if robo_configuration.Call(
+                 ["gn", "gen", robo_configuration.relative_asan_directory()]):
       raise Exception("Unable to gn gen %s" %
               robo_configuration.local_asan_directory())
 
@@ -114,20 +118,20 @@ def EnsureGClientTargets(robo_configuration):
     log("OUTSIDE of the solutions = [] section")
     log("Example line:")
     log("target_os = [ 'android', 'win' ]")
-    raise Exception("Please add target_os to %s" % gclient_filename)
+    raise UserInstructions("Please add target_os to %s" % gclient_filename)
 
   if ('android' not in scope['target_os']) or ('win' not in scope['target_os']):
     log("Missing 'android' and/or 'win' in target_os, which goes at the")
     log("end of .gclient, OUTSIDE of the solutions = [] section")
     log("Example line:")
     log("target_os = [ 'android', 'win' ]")
-    raise Exception("Please add 'android' and 'win' to target_os in %s" %
+    raise UserInstructions("Please add 'android' and 'win' to target_os in %s" %
         gclient_filename)
 
   # Sync regardless of whether we changed the config.
   log("Running gclient sync")
   robo_configuration.chdir_to_chrome_src()
-  if call(["gclient", "sync"]):
+  if robo_configuration.Call(["gclient", "sync"]):
     raise Exception("gclient sync failed")
 
 def FetchAdditionalWindowsBinaries(robo_configuration):
@@ -135,7 +139,8 @@ def FetchAdditionalWindowsBinaries(robo_configuration):
   sometimes remove these.  Re-run this if you're missing llvm-nm or llvm-ar."""
   robo_configuration.chdir_to_chrome_src()
   log("Downloading some additional compiler tools")
-  if call(["tools/clang/scripts/download_objdump.py"]):
+  if robo_configuration.Call(
+                                ["tools/clang/scripts/download_objdump.py"]):
     raise Exception("download_objdump.py failed")
 
 def FetchMacSDK(robo_configuration):
@@ -146,7 +151,7 @@ def FetchMacSDK(robo_configuration):
   if not os.path.exists(sdk_base):
     os.makedirs(sdk_base)
   os.chdir(sdk_base)
-  if call(
+  if robo_configuration.Call(
       "gsutil.py cat gs://chrome-mac-sdk/toolchain-8E2002-3.tgz | tar xzvf -",
       shell=True):
     raise Exception("Cannot download and extract Mac SDK")
@@ -171,9 +176,43 @@ def EnsureSysroots(robo_configuration):
   """Install arm/arm64/mips/mips64 sysroots."""
   robo_configuration.chdir_to_chrome_src()
   for arch in ["arm", "arm64", "mips", "mips64el"]:
-    if call(["build/linux/sysroot_scripts/install-sysroot.py",
+    if robo_configuration.Call(
+            ["build/linux/sysroot_scripts/install-sysroot.py",
              "--arch=" + arch]):
       raise Exception("Failed to install sysroot for " + arch);
+
+def EnsureChromiumNasm(robo_configuration):
+  """Make sure that chromium's nasm is built, so we can use it.  apt-get's is
+  too old."""
+  os.chdir(robo_configuration.chrome_src())
+
+  # nasm in the LLVM bin directory that we already added to $PATH.  Note that we
+  # put it there so that configure can find is as "nasm", rather than us having
+  # to give it the full path.  I think the full path would affect the real
+  # build.  That's not good.
+  llvm_nasm_path = os.path.join(robo_configuration.llvm_path(), "nasm")
+  if os.path.exists(llvm_nasm_path):
+    log("nasm already installed in llvm bin directory")
+    return
+
+  # Make sure nasm is built, and copy it to the llvm bin directory.
+  chromium_nasm_path = os.path.join(
+                  robo_configuration.absolute_asan_directory(),
+                  "nasm")
+  if not os.path.exists(chromium_nasm_path):
+    log("Building Chromium's nasm")
+    if robo_configuration.Call(["ninja", "-j5000", "-C",
+          robo_configuration.relative_asan_directory(), "third_party/nasm"]):
+        raise Exception("Failed to build nasm")
+    # Verify that it exists now, for sanity.
+    if not os.path.exists(chromium_nasm_path):
+        raise Exception("Failed to find nasm even after building it")
+
+  # Copy it
+  log("Copying Chromium's nasm to llvm bin directory")
+  if shutil.copy(chromium_nasm_path, llvm_nasm_path):
+     raise Exception("Could not copy %s into %s" %
+                     (chromium_nasm_path, llvm_nasm_path))
 
 def EnsureToolchains(robo_configuration):
   """Make sure that we have all the toolchains for cross-compilation"""
@@ -182,3 +221,17 @@ def EnsureToolchains(robo_configuration):
   FetchMacSDK(robo_configuration)
   EnsureLLVMSymlinks(robo_configuration)
   EnsureSysroots(robo_configuration)
+
+def EnsureUpstreamRemote(robo_configuration):
+  """Make sure that the upstream remote is defined."""
+  remotes = subprocess.check_output(["git", "remote", "-v"]).split()
+  if "upstream" in remotes:
+    log("Upstream remote found")
+    return
+  log("Adding upstream remote")
+  if robo_configuration.Call(["git",
+                             "remote",
+                             "add",
+                             "upstream",
+                             "git://source.ffmpeg.org/ffmpeg.git"]):
+    raise Exception("Failed to add git remote")

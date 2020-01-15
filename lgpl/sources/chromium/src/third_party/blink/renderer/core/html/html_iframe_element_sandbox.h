@@ -14,12 +14,9 @@ class HTMLIFrameElement;
 
 class HTMLIFrameElementSandbox final : public DOMTokenList {
  public:
-  static HTMLIFrameElementSandbox* Create(HTMLIFrameElement* element) {
-    return new HTMLIFrameElementSandbox(element);
-  }
+  explicit HTMLIFrameElementSandbox(HTMLIFrameElement*);
 
  private:
-  explicit HTMLIFrameElementSandbox(HTMLIFrameElement*);
   bool ValidateTokenValue(const AtomicString&, ExceptionState&) const override;
 };
 

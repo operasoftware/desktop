@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "third_party/blink/renderer/core/fileapi/file_reader_loader_client.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -52,7 +52,7 @@ class IDBRequestLoader : public FileReaderLoaderClient {
   void DidStartLoading() override;
   void DidReceiveDataForClient(const char* data, unsigned data_length) override;
   void DidFinishLoading() override;
-  void DidFail(FileError::ErrorCode) override;
+  void DidFail(FileErrorCode) override;
 
  private:
   // Starts unwrapping the next wrapped IDBValue.

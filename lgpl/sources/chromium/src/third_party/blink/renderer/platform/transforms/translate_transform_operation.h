@@ -25,8 +25,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_TRANSFORMS_TRANSLATE_TRANSFORM_OPERATION_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TRANSFORMS_TRANSLATE_TRANSFORM_OPERATION_H_
 
-#include "third_party/blink/renderer/platform/length.h"
-#include "third_party/blink/renderer/platform/length_functions.h"
+#include "third_party/blink/renderer/platform/geometry/length.h"
+#include "third_party/blink/renderer/platform/geometry/length_functions.h"
 #include "third_party/blink/renderer/platform/transforms/transform_operation.h"
 
 namespace blink {
@@ -98,6 +98,8 @@ class PLATFORM_EXPORT TranslateTransformOperation final
   scoped_refptr<TransformOperation> Zoom(double factor) final {
     return ZoomTranslate(factor);
   }
+
+  bool PreservesAxisAlignment() const final { return true; }
 
   TranslateTransformOperation(const Length& tx,
                               const Length& ty,

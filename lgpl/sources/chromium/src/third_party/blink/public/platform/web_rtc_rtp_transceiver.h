@@ -6,14 +6,13 @@
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_RTC_RTP_TRANSCEIVER_H_
 
 #include <memory>
-#include <vector>
 
 #include "base/optional.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_rtc_rtp_receiver.h"
 #include "third_party/blink/public/platform/web_rtc_rtp_sender.h"
 #include "third_party/blink/public/platform/web_string.h"
-#include "third_party/webrtc/api/rtptransceiverinterface.h"
+#include "third_party/webrtc/api/rtp_transceiver_interface.h"
 
 namespace blink {
 
@@ -58,6 +57,10 @@ class BLINK_PLATFORM_EXPORT WebRTCRtpTransceiver {
       const = 0;
   virtual base::Optional<webrtc::RtpTransceiverDirection> FiredDirection()
       const = 0;
+  virtual webrtc::RTCError SetCodecPreferences(
+      WebVector<webrtc::RtpCodecCapability>) {
+    return {};
+  }
 };
 
 }  // namespace blink

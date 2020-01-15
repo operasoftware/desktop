@@ -37,19 +37,23 @@ class FirstLetterPseudoElement;
 // We cache offsets so that text transformations can be applied in such a way
 // that we can recover the original unaltered string from our corresponding DOM
 // node.
-class CORE_EXPORT LayoutTextFragment final : public LayoutText {
+class CORE_EXPORT LayoutTextFragment : public LayoutText {
  public:
-  LayoutTextFragment(Node*, StringImpl*, int start_offset, int length);
-  LayoutTextFragment(Node*, StringImpl*);
   ~LayoutTextFragment() override;
 
-  static LayoutTextFragment* CreateAnonymous(PseudoElement&, StringImpl*);
+  static LayoutTextFragment* Create(Node*,
+                                    StringImpl*,
+                                    int start_offset,
+                                    int length,
+                                    LegacyLayout);
+  static LayoutTextFragment* CreateAnonymous(PseudoElement&,
+                                             StringImpl*,
+                                             LegacyLayout);
   static LayoutTextFragment* CreateAnonymous(PseudoElement&,
                                              StringImpl*,
                                              unsigned start,
-                                             unsigned length);
-
-  bool IsTextFragment() const override { return true; }
+                                             unsigned length,
+                                             LegacyLayout);
 
   Position PositionForCaretOffset(unsigned) const override;
   base::Optional<unsigned> CaretOffsetForPosition(
@@ -70,9 +74,6 @@ class CORE_EXPORT LayoutTextFragment final : public LayoutText {
 
   scoped_refptr<StringImpl> OriginalText() const override;
 
-  void SetText(scoped_refptr<StringImpl>,
-               bool force = false,
-               bool avoid_layout_and_only_paint = false) override;
   void SetTextFragment(scoped_refptr<StringImpl>,
                        unsigned start,
                        unsigned length);
@@ -99,13 +100,17 @@ class CORE_EXPORT LayoutTextFragment final : public LayoutText {
   LayoutText* GetFirstLetterPart() const override;
 
  protected:
+  friend class LayoutObjectFactory;
+  LayoutTextFragment(Node*, StringImpl*, int start_offset, int length);
   void WillBeDestroyed() override;
 
  private:
   LayoutBlock* BlockForAccompanyingFirstLetter() const;
   UChar PreviousCharacter() const override;
+  void TextDidChange() override;
 
-  void UpdateHitTestResult(HitTestResult&, const LayoutPoint&) const override;
+  void UpdateHitTestResult(HitTestResult&,
+                           const PhysicalOffset&) const override;
 
   unsigned start_;
   unsigned fragment_length_;

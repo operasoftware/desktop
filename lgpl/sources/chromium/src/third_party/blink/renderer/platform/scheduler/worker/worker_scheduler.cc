@@ -12,14 +12,32 @@
 namespace blink {
 namespace scheduler {
 
+WorkerScheduler::PauseHandle::PauseHandle(
+    base::WeakPtr<WorkerScheduler> scheduler)
+    : scheduler_(scheduler) {
+  scheduler_->PauseImpl();
+}
+
+WorkerScheduler::PauseHandle::~PauseHandle() {
+  if (scheduler_)
+    scheduler_->ResumeImpl();
+}
+
 WorkerScheduler::WorkerScheduler(WorkerThreadScheduler* worker_thread_scheduler,
                                  WorkerSchedulerProxy* proxy)
     : throttleable_task_queue_(
           worker_thread_scheduler->CreateTaskQueue("worker_throttleable_tq")),
-      unthrottleable_task_queue_(
-          worker_thread_scheduler->CreateTaskQueue("worker_unthrottleable_tq")),
-      thread_scheduler_(worker_thread_scheduler),
-      weak_factory_(this) {
+      pausable_task_queue_(
+          worker_thread_scheduler->CreateTaskQueue("worker_pausable_tq")),
+      unpausable_task_queue_(
+          worker_thread_scheduler->CreateTaskQueue("worker_unpausable_tq")),
+      thread_scheduler_(worker_thread_scheduler) {
+  task_runners_.emplace(throttleable_task_queue_,
+                        throttleable_task_queue_->CreateQueueEnabledVoter());
+  task_runners_.emplace(pausable_task_queue_,
+                        pausable_task_queue_->CreateQueueEnabledVoter());
+  task_runners_.emplace(unpausable_task_queue_, nullptr);
+
   thread_scheduler_->RegisterWorkerScheduler(this);
 
   SetUpThrottling();
@@ -34,9 +52,39 @@ base::WeakPtr<WorkerScheduler> WorkerScheduler::GetWeakPtr() {
 }
 
 WorkerScheduler::~WorkerScheduler() {
-#if DCHECK_IS_ON()
   DCHECK(is_disposed_);
-#endif
+  DCHECK_EQ(0u, paused_count_);
+}
+
+std::unique_ptr<WorkerScheduler::PauseHandle> WorkerScheduler::Pause() {
+  thread_scheduler_->helper()->CheckOnValidThread();
+  if (is_disposed_)
+    return nullptr;
+  return std::make_unique<PauseHandle>(GetWeakPtr());
+}
+
+void WorkerScheduler::PauseImpl() {
+  thread_scheduler_->helper()->CheckOnValidThread();
+  paused_count_++;
+  if (paused_count_ == 1) {
+    for (const auto& pair : task_runners_) {
+      if (pair.second) {
+        pair.second->SetVoteToEnable(false);
+      }
+    }
+  }
+}
+
+void WorkerScheduler::ResumeImpl() {
+  thread_scheduler_->helper()->CheckOnValidThread();
+  paused_count_--;
+  if (paused_count_ == 0 && !is_disposed_) {
+    for (const auto& pair : task_runners_) {
+      if (pair.second) {
+        pair.second->SetVoteToEnable(true);
+      }
+    }
+  }
 }
 
 void WorkerScheduler::SetUpThrottling() {
@@ -60,11 +108,6 @@ void WorkerScheduler::SetUpThrottling() {
   }
 }
 
-std::unique_ptr<FrameOrWorkerScheduler::ActiveConnectionHandle>
-WorkerScheduler::OnActiveConnectionCreated() {
-  return nullptr;
-}
-
 SchedulingLifecycleState WorkerScheduler::CalculateLifecycleState(
     ObserverType) const {
   return thread_scheduler_->lifecycle_state();
@@ -78,12 +121,13 @@ void WorkerScheduler::Dispose() {
 
   thread_scheduler_->UnregisterWorkerScheduler(this);
 
-  unthrottleable_task_queue_->ShutdownTaskQueue();
-  throttleable_task_queue_->ShutdownTaskQueue();
+  for (const auto& pair : task_runners_) {
+    pair.first->ShutdownTaskQueue();
+  }
 
-#if DCHECK_IS_ON()
+  task_runners_.clear();
+
   is_disposed_ = true;
-#endif
 }
 
 scoped_refptr<base::SingleThreadTaskRunner> WorkerScheduler::GetTaskRunner(
@@ -93,7 +137,6 @@ scoped_refptr<base::SingleThreadTaskRunner> WorkerScheduler::GetTaskRunner(
     case TaskType::kPostedMessage:
     case TaskType::kWorkerAnimation:
       return throttleable_task_queue_->CreateTaskRunner(type);
-    case TaskType::kDeprecatedNone:
     case TaskType::kDOMManipulation:
     case TaskType::kUserInteraction:
     case TaskType::kNetworking:
@@ -115,23 +158,37 @@ scoped_refptr<base::SingleThreadTaskRunner> WorkerScheduler::GetTaskRunner(
     case TaskType::kWebGL:
     case TaskType::kIdleTask:
     case TaskType::kMiscPlatformAPI:
+    case TaskType::kFontLoading:
+    case TaskType::kApplicationLifeCycle:
+    case TaskType::kBackgroundFetch:
+    case TaskType::kPermission:
     case TaskType::kInternalDefault:
     case TaskType::kInternalLoading:
-    case TaskType::kInternalTest:
     case TaskType::kInternalWebCrypto:
-    case TaskType::kInternalIndexedDB:
     case TaskType::kInternalMedia:
     case TaskType::kInternalMediaRealTime:
-    case TaskType::kInternalIPC:
     case TaskType::kInternalUserInteraction:
-    case TaskType::kInternalInspector:
-    case TaskType::kInternalWorker:
     case TaskType::kInternalIntersectionObserver:
+    case TaskType::kInternalFreezableIPC:
+    case TaskType::kInternalContinueScriptLoading:
       // UnthrottledTaskRunner is generally discouraged in future.
       // TODO(nhiroki): Identify which tasks can be throttled / suspendable and
       // move them into other task runners. See also comments in
       // Get(LocalFrame). (https://crbug.com/670534)
-      return unthrottleable_task_queue_->CreateTaskRunner(type);
+      return pausable_task_queue_->CreateTaskRunner(type);
+    case TaskType::kDeprecatedNone:
+    case TaskType::kInternalIPC:
+    case TaskType::kInternalInspector:
+    case TaskType::kInternalTest:
+    case TaskType::kInternalNavigationAssociated:
+      // kWebLocks can be frozen if for entire page, but not for individual
+      // frames. See https://crrev.com/c/1687716
+    case TaskType::kWebLocks:
+      // UnthrottledTaskRunner is generally discouraged in future.
+      // TODO(nhiroki): Identify which tasks can be throttled / suspendable and
+      // move them into other task runners. See also comments in
+      // Get(LocalFrame). (https://crbug.com/670534)
+      return unpausable_task_queue_->CreateTaskRunner(type);
     case TaskType::kMainThreadTaskQueueV8:
     case TaskType::kMainThreadTaskQueueCompositor:
     case TaskType::kMainThreadTaskQueueDefault:
@@ -140,13 +197,16 @@ scoped_refptr<base::SingleThreadTaskRunner> WorkerScheduler::GetTaskRunner(
     case TaskType::kMainThreadTaskQueueIPC:
     case TaskType::kMainThreadTaskQueueControl:
     case TaskType::kMainThreadTaskQueueCleanup:
+    case TaskType::kMainThreadTaskQueueMemoryPurge:
     case TaskType::kCompositorThreadTaskQueueDefault:
     case TaskType::kCompositorThreadTaskQueueInput:
     case TaskType::kWorkerThreadTaskQueueDefault:
     case TaskType::kWorkerThreadTaskQueueV8:
     case TaskType::kWorkerThreadTaskQueueCompositor:
-    case TaskType::kExperimentalWebSchedulingUserInteraction:
-    case TaskType::kExperimentalWebSchedulingBestEffort:
+    case TaskType::kInternalTranslation:
+    case TaskType::kServiceWorkerClientMessage:
+    case TaskType::kInternalContentCapture:
+    case TaskType::kExperimentalWebScheduling:
     case TaskType::kCount:
       NOTREACHED();
       break;
@@ -173,14 +233,23 @@ void WorkerScheduler::OnLifecycleStateChanged(
   NotifyLifecycleObservers();
 }
 
-scoped_refptr<NonMainThreadTaskQueue>
-WorkerScheduler::UnthrottleableTaskQueue() {
-  return unthrottleable_task_queue_.get();
+scoped_refptr<NonMainThreadTaskQueue> WorkerScheduler::UnpausableTaskQueue() {
+  return unpausable_task_queue_.get();
+}
+
+scoped_refptr<NonMainThreadTaskQueue> WorkerScheduler::PausableTaskQueue() {
+  return pausable_task_queue_.get();
 }
 
 scoped_refptr<NonMainThreadTaskQueue> WorkerScheduler::ThrottleableTaskQueue() {
   return throttleable_task_queue_.get();
 }
+
+void WorkerScheduler::OnStartedUsingFeature(SchedulingPolicy::Feature feature,
+                                            const SchedulingPolicy& policy) {}
+
+void WorkerScheduler::OnStoppedUsingFeature(SchedulingPolicy::Feature feature,
+                                            const SchedulingPolicy& policy) {}
 
 }  // namespace scheduler
 }  // namespace blink

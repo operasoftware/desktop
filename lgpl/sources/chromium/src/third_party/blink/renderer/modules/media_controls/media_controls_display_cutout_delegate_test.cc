@@ -6,7 +6,6 @@
 
 #include "third_party/blink/public/mojom/page/display_cutout.mojom-blink.h"
 #include "third_party/blink/renderer/core/events/touch_event.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/frame/viewport_data.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
@@ -16,7 +15,9 @@
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
@@ -26,7 +27,7 @@ namespace {
 class DisplayCutoutMockChromeClient : public EmptyChromeClient {
  public:
   // ChromeClient overrides:
-  void EnterFullscreen(LocalFrame& frame, const FullscreenOptions&) override {
+  void EnterFullscreen(LocalFrame& frame, const FullscreenOptions*) override {
     Fullscreen::DidEnterFullscreen(*frame.GetDocument());
   }
   void ExitFullscreen(LocalFrame& frame) override {
@@ -36,19 +37,22 @@ class DisplayCutoutMockChromeClient : public EmptyChromeClient {
 
 }  // namespace
 
-class MediaControlsDisplayCutoutDelegateTest : public PageTestBase {
+class MediaControlsDisplayCutoutDelegateTest
+    : public PageTestBase,
+      private ScopedDisplayCutoutAPIForTest,
+      private ScopedMediaControlsExpandGestureForTest {
  public:
+  MediaControlsDisplayCutoutDelegateTest()
+      : ScopedDisplayCutoutAPIForTest(true),
+        ScopedMediaControlsExpandGestureForTest(true) {}
   void SetUp() override {
-    chrome_client_ = new DisplayCutoutMockChromeClient();
+    chrome_client_ = MakeGarbageCollected<DisplayCutoutMockChromeClient>();
 
     Page::PageClients clients;
     FillWithEmptyClients(clients);
     clients.chrome_client = chrome_client_.Get();
-    SetupPageWithClients(&clients, EmptyLocalFrameClient::Create());
-
-    RuntimeEnabledFeatures::SetDisplayCutoutAPIEnabled(true);
-    RuntimeEnabledFeatures::SetMediaControlsExpandGestureEnabled(true);
-
+    SetupPageWithClients(&clients,
+                         MakeGarbageCollected<EmptyLocalFrameClient>());
     GetDocument().write("<body><video id=video></body>");
   }
 
@@ -75,35 +79,38 @@ class MediaControlsDisplayCutoutDelegateTest : public PageTestBase {
 
   void SimulateContractingGesture() {
     TouchList* list = CreateTouchListWithTwoPoints(5, 5, -5, -5);
-    SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchstart, list));
+    SimulateEvent(
+        CreateTouchEventWithList(event_type_names::kTouchstart, list));
 
     list = CreateTouchListWithTwoPoints(4, 4, -4, -4);
-    SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchmove, list));
+    SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchmove, list));
 
     list = CreateTouchListWithTwoPoints(0, 0, 0, 0);
-    SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchend, list));
+    SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchend, list));
   }
 
   void SimulateExpandingGesture() {
     TouchList* list = CreateTouchListWithTwoPoints(1, 1, -1, -1);
-    SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchstart, list));
+    SimulateEvent(
+        CreateTouchEventWithList(event_type_names::kTouchstart, list));
 
     list = CreateTouchListWithTwoPoints(4, 4, -4, -4);
-    SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchmove, list));
+    SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchmove, list));
 
     list = CreateTouchListWithTwoPoints(5, 5, -5, -5);
-    SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchend, list));
+    SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchend, list));
   }
 
   void SimulateSingleTouchGesture() {
     TouchList* list = CreateTouchListWithOnePoint(1, 1);
-    SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchstart, list));
+    SimulateEvent(
+        CreateTouchEventWithList(event_type_names::kTouchstart, list));
 
     list = CreateTouchListWithOnePoint(4, 4);
-    SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchmove, list));
+    SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchmove, list));
 
     list = CreateTouchListWithOnePoint(5, 5);
-    SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchend, list));
+    SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchend, list));
   }
 
   bool HasGestureState() { return GetDelegate().previous_.has_value(); }
@@ -173,23 +180,23 @@ TEST_F(MediaControlsDisplayCutoutDelegateTest, CombinedGesture) {
 
   // Simulate the an expanding gesture but do not finish it.
   TouchList* list = CreateTouchListWithTwoPoints(1, 1, -1, -1);
-  SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchstart, list));
+  SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchstart, list));
   list = CreateTouchListWithTwoPoints(4, 4, -4, -4);
-  SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchmove, list));
+  SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchmove, list));
 
   // Check the viewport fit value has been correctly set.
   EXPECT_EQ(mojom::ViewportFit::kCoverForcedByUserAgent, CurrentViewportFit());
 
   // Finish the gesture by contracting.
   list = CreateTouchListWithTwoPoints(0, 0, 0, 0);
-  SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchend, list));
+  SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchend, list));
 
   // Check the viewport fit value has been correctly set.
   EXPECT_EQ(mojom::ViewportFit::kAuto, CurrentViewportFit());
 
   // Make sure we recorded a UseCounter metric.
-  EXPECT_TRUE(UseCounter::IsCounted(
-      GetDocument(), WebFeature::kMediaControlsDisplayCutoutGesture));
+  EXPECT_TRUE(GetDocument().IsUseCounted(
+      WebFeature::kMediaControlsDisplayCutoutGesture));
 }
 
 TEST_F(MediaControlsDisplayCutoutDelegateTest, ContractingGesture) {
@@ -205,8 +212,8 @@ TEST_F(MediaControlsDisplayCutoutDelegateTest, ContractingGesture) {
   EXPECT_EQ(mojom::ViewportFit::kAuto, CurrentViewportFit());
 
   // Make sure we recorded a UseCounter metric.
-  EXPECT_TRUE(UseCounter::IsCounted(
-      GetDocument(), WebFeature::kMediaControlsDisplayCutoutGesture));
+  EXPECT_TRUE(GetDocument().IsUseCounted(
+      WebFeature::kMediaControlsDisplayCutoutGesture));
 }
 
 TEST_F(MediaControlsDisplayCutoutDelegateTest, ContractingGesture_Noop) {
@@ -231,8 +238,8 @@ TEST_F(MediaControlsDisplayCutoutDelegateTest, ExpandingGesture) {
   EXPECT_EQ(mojom::ViewportFit::kAuto, CurrentViewportFit());
 
   // Make sure we recorded a UseCounter metric.
-  EXPECT_TRUE(UseCounter::IsCounted(
-      GetDocument(), WebFeature::kMediaControlsDisplayCutoutGesture));
+  EXPECT_TRUE(GetDocument().IsUseCounted(
+      WebFeature::kMediaControlsDisplayCutoutGesture));
 }
 
 TEST_F(MediaControlsDisplayCutoutDelegateTest, ExpandingGesture_DoubleNoop) {
@@ -253,21 +260,21 @@ TEST_F(MediaControlsDisplayCutoutDelegateTest, IncompleteGestureClearsState) {
 
   // Simulate a gesture and check we have state.
   TouchList* list = CreateTouchListWithTwoPoints(1, 1, -1, -1);
-  SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchstart, list));
+  SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchstart, list));
 
   list = CreateTouchListWithTwoPoints(2, 2, -2, -2);
-  SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchmove, list));
+  SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchmove, list));
   EXPECT_TRUE(DirectionIsExpanding());
 
   // Simulate another start gesture and make sure we do not have a direction.
   list = CreateTouchListWithTwoPoints(3, 3, -3, -3);
-  SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchstart, list));
+  SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchstart, list));
   EXPECT_TRUE(DirectionIsUnknown());
 }
 
 TEST_F(MediaControlsDisplayCutoutDelegateTest, MetricsNoop) {
-  EXPECT_FALSE(UseCounter::IsCounted(
-      GetDocument(), WebFeature::kMediaControlsDisplayCutoutGesture));
+  EXPECT_FALSE(GetDocument().IsUseCounted(
+      WebFeature::kMediaControlsDisplayCutoutGesture));
 }
 
 TEST_F(MediaControlsDisplayCutoutDelegateTest, NoFullscreen_Noop) {
@@ -288,12 +295,12 @@ TEST_F(MediaControlsDisplayCutoutDelegateTest, TouchCancelShouldClearState) {
 
   // Simulate a gesture and check we have state.
   TouchList* list = CreateTouchListWithTwoPoints(1, 1, -1, -1);
-  SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchstart, list));
+  SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchstart, list));
   EXPECT_TRUE(HasGestureState());
 
   // Simulate a touchcancel gesture and check that clears the state.
   list = CreateTouchListWithTwoPoints(1, 1, -1, -1);
-  SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchcancel, list));
+  SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchcancel, list));
   EXPECT_FALSE(HasGestureState());
   EXPECT_EQ(mojom::ViewportFit::kAuto, CurrentViewportFit());
 }
@@ -303,12 +310,12 @@ TEST_F(MediaControlsDisplayCutoutDelegateTest, TouchEndShouldClearState) {
 
   // Simulate a gesture and check we have state.
   TouchList* list = CreateTouchListWithTwoPoints(1, 1, -1, -1);
-  SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchstart, list));
+  SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchstart, list));
   EXPECT_TRUE(HasGestureState());
 
   // Simulate a touchend gesture and check that clears the state.
   list = CreateTouchListWithTwoPoints(1, 1, -1, -1);
-  SimulateEvent(CreateTouchEventWithList(EventTypeNames::touchend, list));
+  SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchend, list));
   EXPECT_FALSE(HasGestureState());
   EXPECT_EQ(mojom::ViewportFit::kAuto, CurrentViewportFit());
 }

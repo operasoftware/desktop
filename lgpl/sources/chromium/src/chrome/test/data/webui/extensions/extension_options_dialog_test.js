@@ -1,66 +1,27 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/** @fileoverview Suite of tests for extension-options-dialog. */
-cr.define('extension_options_dialog_tests', function() {
-  /** @enum {string} */
-  const TestNames = {
-    Layout: 'Layout',
-  };
+/**
+ * @fileoverview Suite of tests for extension options dialog.
+ * These are run as part of interactive_ui_tests.
+ */
+suite('ExtensionOptionsDialogTest', () => {
+  test('show options dialog', async () => {
+    const manager = document.querySelector('extensions-manager');
+    assertTrue(!!manager);
+    const extensionDetailView = manager.$$('extensions-detail-view');
+    assertTrue(!!extensionDetailView);
 
-  const suiteName = 'ExtensionOptionsDialogTests';
-
-  suite(suiteName, function() {
-    /** @type {extensions.OptionsDialog} */
-    let optionsDialog;
-
-    /** @type {chrome.developerPrivate.ExtensionInfo} */
-    let data;
-
-    setup(function() {
-      PolymerTest.clearBody();
-      optionsDialog = new extensions.OptionsDialog();
-      document.body.appendChild(optionsDialog);
-
-      const service = extensions.Service.getInstance();
-      return service.getExtensionsInfo().then(function(info) {
-        assertEquals(1, info.length);
-        data = info[0];
-      });
-    });
-
-    function isDialogVisible() {
-      const dialogElement = optionsDialog.$.dialog.getNative();
-      const rect = dialogElement.getBoundingClientRect();
-      return rect.width * rect.height > 0;
-    }
-
-    test(assert(TestNames.Layout), function() {
-      // Try showing the dialog.
-      assertFalse(isDialogVisible());
-      optionsDialog.show(data);
-      return test_util.eventToPromise('cr-dialog-open', optionsDialog)
-          .then(function() {
-            assertTrue(isDialogVisible());
-
-            const dialogElement = optionsDialog.$.dialog.getNative();
-            const rect = dialogElement.getBoundingClientRect();
-            assertGE(rect.width, extensions.OptionsDialogMinWidth);
-            assertLE(rect.height, extensions.OptionsDialogMaxHeight);
-            // This is the header height with default font size.
-            assertGE(rect.height, 68);
-
-            assertEquals(
-                data.name,
-                assert(optionsDialog.$$('#icon-and-name-wrapper span'))
-                    .textContent.trim());
-          });
-    });
+    const optionsButton = extensionDetailView.$$('#extensions-options');
+    optionsButton.click();
+    await test_util.eventToPromise('cr-dialog-open', manager);
+    const dialog = manager.$$('#options-dialog');
+    let waitForClose = test_util.eventToPromise('close', dialog);
+    dialog.$.dialog.cancel();
+    await waitForClose;
+    const activeElement = getDeepActiveElement();
+    assertEquals('CR-ICON-BUTTON', activeElement.tagName);
+    assertEquals(optionsButton.$.icon, getDeepActiveElement());
   });
-
-  return {
-    suiteName: suiteName,
-    TestNames: TestNames,
-  };
 });

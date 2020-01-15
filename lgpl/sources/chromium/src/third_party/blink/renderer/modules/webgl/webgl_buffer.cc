@@ -31,7 +31,7 @@
 namespace blink {
 
 WebGLBuffer* WebGLBuffer::Create(WebGLRenderingContextBase* ctx) {
-  return new WebGLBuffer(ctx);
+  return MakeGarbageCollected<WebGLBuffer>(ctx);
 }
 
 WebGLBuffer::WebGLBuffer(WebGLRenderingContextBase* ctx)
@@ -41,9 +41,7 @@ WebGLBuffer::WebGLBuffer(WebGLRenderingContextBase* ctx)
   SetObject(buffer);
 }
 
-WebGLBuffer::~WebGLBuffer() {
-  RunDestructor();
-}
+WebGLBuffer::~WebGLBuffer() = default;
 
 void WebGLBuffer::DeleteObjectImpl(gpu::gles2::GLES2Interface* gl) {
   gl->DeleteBuffers(1, &object_);

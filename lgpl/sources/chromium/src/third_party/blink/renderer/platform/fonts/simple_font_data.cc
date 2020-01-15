@@ -35,10 +35,6 @@
 #include <memory>
 #include <utility>
 
-#include "SkPath.h"
-#include "SkTypeface.h"
-#include "SkTypes.h"
-
 #include "base/memory/ptr_util.h"
 #include "base/sys_byteorder.h"
 #include "build/build_config.h"
@@ -50,6 +46,10 @@
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
+#include "third_party/skia/include/core/SkFontMetrics.h"
+#include "third_party/skia/include/core/SkPath.h"
+#include "third_party/skia/include/core/SkTypeface.h"
+#include "third_party/skia/include/core/SkTypes.h"
 
 namespace blink {
 
@@ -77,20 +77,18 @@ void SimpleFontData::PlatformInit(bool subpixel_ascent_descent) {
     return;
   }
 
-  SkPaint::FontMetrics metrics;
+  SkFontMetrics metrics;
 
-  PaintFont font;
-  platform_data_.SetupPaintFont(&font);
-  font.SetTextEncoding(SkPaint::kGlyphID_TextEncoding);
-  paint_ = font.ToSkPaint();
-  paint_.getFontMetrics(&metrics);
+  font_ = SkFont();
+  platform_data_.SetupSkFont(&font_);
+  font_.getMetrics(&metrics);
 
   float ascent;
   float descent;
 
   FontMetrics::AscentDescentWithHacks(
       ascent, descent, visual_overflow_inflation_for_ascent_,
-      visual_overflow_inflation_for_descent_, platform_data_, paint_,
+      visual_overflow_inflation_for_descent_, platform_data_, font_,
       subpixel_ascent_descent);
 
   font_metrics_.SetAscent(ascent);
@@ -162,7 +160,7 @@ void SimpleFontData::PlatformInit(bool subpixel_ascent_descent) {
   }
 #endif
 
-  SkTypeface* face = paint_.getTypeface();
+  SkTypeface* face = font_.getTypeface();
   DCHECK(face);
   if (int units_per_em = face->getUnitsPerEm())
     font_metrics_.SetUnitsPerEm(units_per_em);
@@ -192,11 +190,9 @@ const SimpleFontData* SimpleFontData::FontDataForCharacter(UChar32) const {
 }
 
 Glyph SimpleFontData::GlyphForCharacter(UChar32 codepoint) const {
-  uint16_t glyph;
   SkTypeface* typeface = PlatformData().Typeface();
   CHECK(typeface);
-  typeface->charsToGlyphs(&codepoint, SkTypeface::kUTF32_Encoding, &glyph, 1);
-  return glyph;
+  return typeface->unicharToGlyph(codepoint);
 }
 
 bool SimpleFontData::IsSegmented() const {
@@ -206,7 +202,7 @@ bool SimpleFontData::IsSegmented() const {
 scoped_refptr<SimpleFontData> SimpleFontData::SmallCapsFontData(
     const FontDescription& font_description) const {
   if (!derived_font_data_)
-    derived_font_data_ = DerivedFontData::Create();
+    derived_font_data_ = std::make_unique<DerivedFontData>();
   if (!derived_font_data_->small_caps)
     derived_font_data_->small_caps =
         CreateScaledFontData(font_description, kSmallCapsFontSizeMultiplier);
@@ -217,17 +213,12 @@ scoped_refptr<SimpleFontData> SimpleFontData::SmallCapsFontData(
 scoped_refptr<SimpleFontData> SimpleFontData::EmphasisMarkFontData(
     const FontDescription& font_description) const {
   if (!derived_font_data_)
-    derived_font_data_ = DerivedFontData::Create();
+    derived_font_data_ = std::make_unique<DerivedFontData>();
   if (!derived_font_data_->emphasis_mark)
     derived_font_data_->emphasis_mark =
         CreateScaledFontData(font_description, kEmphasisMarkFontSizeMultiplier);
 
   return derived_font_data_->emphasis_mark;
-}
-
-std::unique_ptr<SimpleFontData::DerivedFontData>
-SimpleFontData::DerivedFontData::Create() {
-  return base::WrapUnique(new DerivedFontData);
 }
 
 scoped_refptr<SimpleFontData> SimpleFontData::CreateScaledFontData(
@@ -350,7 +341,7 @@ FloatRect SimpleFontData::PlatformBoundsForGlyph(Glyph glyph) const {
   static_assert(sizeof(glyph) == 2, "Glyph id should not be truncated.");
 
   SkRect bounds;
-  SkiaTextMetrics(&paint_).GetSkiaBoundsForGlyph(glyph, &bounds);
+  SkFontGetBoundsForGlyph(font_, glyph, &bounds);
   return FloatRect(bounds);
 }
 
@@ -362,7 +353,7 @@ void SimpleFontData::BoundsForGlyphs(const Vector<Glyph, 256>& glyphs,
     return;
 
   DCHECK_EQ(bounds->size(), glyphs.size());
-  SkiaTextMetrics(&paint_).GetSkiaBoundsForGlyphs(glyphs, bounds->data());
+  SkFontGetBoundsForGlyphs(font_, glyphs, bounds->data());
 }
 
 float SimpleFontData::PlatformWidthForGlyph(Glyph glyph) const {
@@ -371,7 +362,7 @@ float SimpleFontData::PlatformWidthForGlyph(Glyph glyph) const {
 
   static_assert(sizeof(glyph) == 2, "Glyph id should not be truncated.");
 
-  return SkiaTextMetrics(&paint_).GetSkiaWidthForGlyph(glyph);
+  return SkFontGetWidthForGlyph(font_, glyph);
 }
 
 }  // namespace blink

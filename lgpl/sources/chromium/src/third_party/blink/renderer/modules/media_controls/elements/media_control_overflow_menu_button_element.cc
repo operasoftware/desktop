@@ -5,18 +5,24 @@
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_overflow_menu_button_element.h"
 
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
-#include "third_party/blink/renderer/modules/media_controls/elements/media_control_download_button_element.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
-#include "third_party/blink/renderer/modules/media_controls/media_download_in_product_help_manager.h"
+#include "third_party/blink/renderer/platform/text/platform_locale.h"
 
 namespace blink {
 
 MediaControlOverflowMenuButtonElement::MediaControlOverflowMenuButtonElement(
     MediaControlsImpl& media_controls)
-    : MediaControlInputElement(media_controls, kMediaOverflowButton) {
-  setType(InputTypeNames::button);
+    : MediaControlInputElement(media_controls) {
+  setType(input_type_names::kButton);
+  setAttribute(
+      html_names::kAriaLabelAttr,
+      WTF::AtomicString(GetLocale().QueryString(IDS_AX_MEDIA_OVERFLOW_BUTTON)));
+  setAttribute(html_names::kTitleAttr,
+               WTF::AtomicString(
+                   GetLocale().QueryString(IDS_AX_MEDIA_OVERFLOW_BUTTON_HELP)));
   SetShadowPseudoId(AtomicString("-internal-media-controls-overflow-button"));
   SetIsWanted(false);
 }
@@ -25,26 +31,19 @@ bool MediaControlOverflowMenuButtonElement::WillRespondToMouseClickEvents() {
   return true;
 }
 
+bool MediaControlOverflowMenuButtonElement::IsControlPanelButton() const {
+  return true;
+}
+
 const char* MediaControlOverflowMenuButtonElement::GetNameForHistograms()
     const {
   return "OverflowButton";
 }
 
-void MediaControlOverflowMenuButtonElement::UpdateShownState() {
-  MediaControlInputElement::UpdateShownState();
-
-  if (MediaControlsImpl::IsModern() &&
-      GetMediaControls().DownloadInProductHelp()) {
-    GetMediaControls().DownloadInProductHelp()->SetDownloadButtonVisibility(
-        IsWanted() && DoesFit() &&
-        GetMediaControls().DownloadButton().ShouldDisplayDownloadButton());
-  }
-}
-
 void MediaControlOverflowMenuButtonElement::DefaultEventHandler(Event& event) {
   // Only respond to a click event if we are not disabled.
-  if (!hasAttribute(HTMLNames::disabledAttr) &&
-      event.type() == EventTypeNames::click) {
+  if (!IsDisabled() && (event.type() == event_type_names::kClick ||
+                        event.type() == event_type_names::kGesturetap)) {
     if (GetMediaControls().OverflowMenuVisible()) {
       Platform::Current()->RecordAction(
           UserMetricsAction("Media.Controls.OverflowClose"));

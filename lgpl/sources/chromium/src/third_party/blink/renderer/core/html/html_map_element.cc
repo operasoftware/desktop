@@ -24,28 +24,27 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/node_lists_node_data.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/html_area_element.h"
 #include "third_party/blink/renderer/core/html/html_collection.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-inline HTMLMapElement::HTMLMapElement(Document& document)
-    : HTMLElement(mapTag, document) {
+HTMLMapElement::HTMLMapElement(Document& document)
+    : HTMLElement(kMapTag, document) {
   UseCounter::Count(document, WebFeature::kMapElement);
 }
-
-DEFINE_NODE_FACTORY(HTMLMapElement)
 
 HTMLMapElement::~HTMLMapElement() = default;
 
 HTMLAreaElement* HTMLMapElement::AreaForPoint(
-    const LayoutPoint& location,
+    const PhysicalOffset& location,
     const LayoutObject* container_object) {
   HTMLAreaElement* default_area = nullptr;
   for (HTMLAreaElement& area :
@@ -66,7 +65,7 @@ HTMLImageElement* HTMLMapElement::ImageElement() {
     // beginning, which has to be stripped off.
     HTMLImageElement& image_element = ToHTMLImageElement(*curr);
     String use_map_name =
-        image_element.getAttribute(usemapAttr).GetString().Substring(1);
+        image_element.getAttribute(kUsemapAttr).GetString().Substring(1);
     if (use_map_name == name_)
       return &image_element;
   }
@@ -79,8 +78,8 @@ void HTMLMapElement::ParseAttribute(const AttributeModificationParams& params) {
   // Either the id or name will be used depending on the order the attributes
   // are parsed.
 
-  if (params.name == idAttr || params.name == nameAttr) {
-    if (params.name == idAttr) {
+  if (params.name == kIdAttr || params.name == kNameAttr) {
+    if (params.name == kIdAttr) {
       // Call base class so that hasID bit gets set.
       HTMLElement::ParseAttribute(params);
       if (GetDocument().IsHTMLDocument())

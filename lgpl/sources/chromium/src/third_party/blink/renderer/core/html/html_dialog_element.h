@@ -27,6 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_DIALOG_ELEMENT_H_
 
 #include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 
 namespace blink {
 
@@ -38,7 +39,7 @@ class HTMLDialogElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(HTMLDialogElement);
+  explicit HTMLDialogElement(Document&);
 
   void close(const String& return_value = String());
   void show();
@@ -63,8 +64,6 @@ class HTMLDialogElement final : public HTMLElement {
   }
 
  private:
-  explicit HTMLDialogElement(Document&);
-
   bool IsPresentationAttribute(const QualifiedName&) const override;
   void DefaultEventHandler(Event&) override;
 

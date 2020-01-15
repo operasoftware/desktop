@@ -38,20 +38,15 @@
 #include "third_party/blink/renderer/core/html/html_table_row_element.h"
 #include "third_party/blink/renderer/core/html/html_table_section_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_view_source_parser.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
-using namespace HTMLNames;
-
-namespace {
-
-const char kXSSDetected[] = "Token contains a reflected XSS vector";
-
-}  // namespace
+using namespace html_names;
 
 HTMLViewSourceDocument::HTMLViewSourceDocument(const DocumentInit& initializer,
                                                const String& mime_type)
-    : HTMLDocument(initializer), type_(mime_type) {
+    : HTMLDocument(initializer, kViewSourceDocumentClass), type_(mime_type) {
   SetIsViewSource(true);
 
   // FIXME: Why do view-source pages need to load in quirks mode?
@@ -60,34 +55,32 @@ HTMLViewSourceDocument::HTMLViewSourceDocument(const DocumentInit& initializer,
 }
 
 DocumentParser* HTMLViewSourceDocument::CreateParser() {
-  return HTMLViewSourceParser::Create(*this, type_);
+  return MakeGarbageCollected<HTMLViewSourceParser>(*this, type_);
 }
 
 void HTMLViewSourceDocument::CreateContainingTable() {
-  HTMLHtmlElement* html = HTMLHtmlElement::Create(*this);
+  auto* html = MakeGarbageCollected<HTMLHtmlElement>(*this);
   ParserAppendChild(html);
-  HTMLHeadElement* head = HTMLHeadElement::Create(*this);
+  auto* head = MakeGarbageCollected<HTMLHeadElement>(*this);
   html->ParserAppendChild(head);
-  HTMLBodyElement* body = HTMLBodyElement::Create(*this);
+  auto* body = MakeGarbageCollected<HTMLBodyElement>(*this);
   html->ParserAppendChild(body);
 
   // Create a line gutter div that can be used to make sure the gutter extends
   // down the height of the whole document.
-  HTMLDivElement* div = HTMLDivElement::Create(*this);
-  div->setAttribute(classAttr, "line-gutter-backdrop");
+  auto* div = MakeGarbageCollected<HTMLDivElement>(*this);
+  div->setAttribute(kClassAttr, "line-gutter-backdrop");
   body->ParserAppendChild(div);
 
-  HTMLTableElement* table = HTMLTableElement::Create(*this);
+  auto* table = MakeGarbageCollected<HTMLTableElement>(*this);
   body->ParserAppendChild(table);
-  tbody_ = HTMLTableSectionElement::Create(tbodyTag, *this);
+  tbody_ = MakeGarbageCollected<HTMLTableSectionElement>(kTbodyTag, *this);
   table->ParserAppendChild(tbody_);
   current_ = tbody_;
   line_number_ = 0;
 }
 
-void HTMLViewSourceDocument::AddSource(const String& source,
-                                       HTMLToken& token,
-                                       SourceAnnotation annotation) {
+void HTMLViewSourceDocument::AddSource(const String& source, HTMLToken& token) {
   if (!current_)
     CreateContainingTable();
 
@@ -103,13 +96,13 @@ void HTMLViewSourceDocument::AddSource(const String& source,
       break;
     case HTMLToken::kStartTag:
     case HTMLToken::kEndTag:
-      ProcessTagToken(source, token, annotation);
+      ProcessTagToken(source, token);
       break;
     case HTMLToken::kComment:
       ProcessCommentToken(source, token);
       break;
     case HTMLToken::kCharacter:
-      ProcessCharacterToken(source, token, annotation);
+      ProcessCharacterToken(source, token);
       break;
   }
 }
@@ -129,9 +122,7 @@ void HTMLViewSourceDocument::ProcessEndOfFileToken(const String& source,
 }
 
 void HTMLViewSourceDocument::ProcessTagToken(const String& source,
-                                             HTMLToken& token,
-                                             SourceAnnotation annotation) {
-  MaybeAddSpanForAnnotation(annotation);
+                                             HTMLToken& token) {
   current_ = AddSpanWithClassName("html-tag");
 
   AtomicString tag_name(token.GetName());
@@ -155,21 +146,21 @@ void HTMLViewSourceDocument::ProcessTagToken(const String& source,
     index = AddRange(source, index, iter->NameRange().end - token.StartIndex(),
                      "html-attribute-name");
 
-    if (tag_name == baseTag && name == hrefAttr)
+    if (tag_name == kBaseTag && name == kHrefAttr)
       AddBase(value);
 
     index =
         AddRange(source, index, iter->ValueRange().start - token.StartIndex(),
                  g_empty_atom);
 
-    if (name == srcsetAttr) {
+    if (name == kSrcsetAttr) {
       index =
           AddSrcset(source, index, iter->ValueRange().end - token.StartIndex());
     } else {
-      bool is_link = name == srcAttr || name == hrefAttr;
+      bool is_link = name == kSrcAttr || name == kHrefAttr;
       index =
           AddRange(source, index, iter->ValueRange().end - token.StartIndex(),
-                   "html-attribute-value", is_link, tag_name == aTag, value);
+                   "html-attribute-value", is_link, tag_name == kATag, value);
     }
 
     ++iter;
@@ -184,11 +175,9 @@ void HTMLViewSourceDocument::ProcessCommentToken(const String& source,
   current_ = td_;
 }
 
-void HTMLViewSourceDocument::ProcessCharacterToken(
-    const String& source,
-    HTMLToken&,
-    SourceAnnotation annotation) {
-  AddText(source, "", annotation);
+void HTMLViewSourceDocument::ProcessCharacterToken(const String& source,
+                                                   HTMLToken&) {
+  AddText(source, "");
 }
 
 Element* HTMLViewSourceDocument::AddSpanWithClassName(
@@ -198,27 +187,27 @@ Element* HTMLViewSourceDocument::AddSpanWithClassName(
     return current_;
   }
 
-  HTMLSpanElement* span = HTMLSpanElement::Create(*this);
-  span->setAttribute(classAttr, class_name);
+  auto* span = MakeGarbageCollected<HTMLSpanElement>(*this);
+  span->setAttribute(kClassAttr, class_name);
   current_->ParserAppendChild(span);
   return span;
 }
 
 void HTMLViewSourceDocument::AddLine(const AtomicString& class_name) {
   // Create a table row.
-  HTMLTableRowElement* trow = HTMLTableRowElement::Create(*this);
+  auto* trow = MakeGarbageCollected<HTMLTableRowElement>(*this);
   tbody_->ParserAppendChild(trow);
 
   // Create a cell that will hold the line number (it is generated in the
   // stylesheet using counters).
-  HTMLTableCellElement* td = HTMLTableCellElement::Create(tdTag, *this);
-  td->setAttribute(classAttr, "line-number");
-  td->SetIntegralAttribute(valueAttr, ++line_number_);
+  auto* td = MakeGarbageCollected<HTMLTableCellElement>(kTdTag, *this);
+  td->setAttribute(kClassAttr, "line-number");
+  td->SetIntegralAttribute(kValueAttr, ++line_number_);
   trow->ParserAppendChild(td);
 
   // Create a second cell for the line contents
-  td = HTMLTableCellElement::Create(tdTag, *this);
-  td->setAttribute(classAttr, "line-content");
+  td = MakeGarbageCollected<HTMLTableCellElement>(kTdTag, *this);
+  td->setAttribute(kClassAttr, "line-content");
   trow->ParserAppendChild(td);
   current_ = td_ = td;
 
@@ -233,15 +222,14 @@ void HTMLViewSourceDocument::AddLine(const AtomicString& class_name) {
 
 void HTMLViewSourceDocument::FinishLine() {
   if (!current_->HasChildren()) {
-    HTMLBRElement* br = HTMLBRElement::Create(*this);
+    auto* br = MakeGarbageCollected<HTMLBRElement>(*this);
     current_->ParserAppendChild(br);
   }
   current_ = tbody_;
 }
 
 void HTMLViewSourceDocument::AddText(const String& text,
-                                     const AtomicString& class_name,
-                                     SourceAnnotation annotation) {
+                                     const AtomicString& class_name) {
   if (text.IsEmpty())
     return;
 
@@ -260,7 +248,6 @@ void HTMLViewSourceDocument::AddText(const String& text,
       continue;
     }
     Element* old_element = current_;
-    MaybeAddSpanForAnnotation(annotation);
     current_->ParserAppendChild(Text::Create(*this, substring));
     current_ = old_element;
     if (i < size - 1)
@@ -288,13 +275,13 @@ int HTMLViewSourceDocument::AddRange(const String& source,
   }
   AddText(text, class_name);
   if (!class_name.IsEmpty() && current_ != tbody_)
-    current_ = ToElement(current_->parentNode());
+    current_ = To<Element>(current_->parentNode());
   return end;
 }
 
 Element* HTMLViewSourceDocument::AddBase(const AtomicString& href) {
-  HTMLBaseElement* base = HTMLBaseElement::Create(*this);
-  base->setAttribute(hrefAttr, href);
+  auto* base = MakeGarbageCollected<HTMLBaseElement>(*this);
+  base->setAttribute(kHrefAttr, href);
   current_->ParserAppendChild(base);
   return base;
 }
@@ -305,19 +292,19 @@ Element* HTMLViewSourceDocument::AddLink(const AtomicString& url,
     AddLine("html-tag");
 
   // Now create a link for the attribute value instead of a span.
-  HTMLAnchorElement* anchor = HTMLAnchorElement::Create(*this);
+  auto* anchor = MakeGarbageCollected<HTMLAnchorElement>(*this);
   const char* class_value;
   if (is_anchor)
     class_value = "html-attribute-value html-external-link";
   else
     class_value = "html-attribute-value html-resource-link";
-  anchor->setAttribute(classAttr, class_value);
-  anchor->setAttribute(targetAttr, "_blank");
-  anchor->setAttribute(hrefAttr, url);
-  anchor->setAttribute(relAttr, "noreferrer noopener");
+  anchor->setAttribute(kClassAttr, class_value);
+  anchor->setAttribute(kTargetAttr, "_blank");
+  anchor->setAttribute(kHrefAttr, url);
+  anchor->setAttribute(kRelAttr, "noreferrer noopener");
   // Disallow JavaScript hrefs. https://crbug.com/808407
   if (anchor->Url().ProtocolIsJavaScript())
-    anchor->setAttribute(hrefAttr, "about:blank");
+    anchor->setAttribute(kHrefAttr, "about:blank");
   current_->ParserAppendChild(anchor);
   return anchor;
 }
@@ -336,7 +323,7 @@ int HTMLViewSourceDocument::AddSrcset(const String& source,
       AtomicString link(tmp[0]);
       current_ = AddLink(link, false);
       AddText(srclist[i], "html-attribute-value");
-      current_ = ToElement(current_->parentNode());
+      current_ = To<Element>(current_->parentNode());
     } else {
       AddText(srclist[i], "html-attribute-value");
     }
@@ -346,15 +333,7 @@ int HTMLViewSourceDocument::AddSrcset(const String& source,
   return end;
 }
 
-void HTMLViewSourceDocument::MaybeAddSpanForAnnotation(
-    SourceAnnotation annotation) {
-  if (annotation == kAnnotateSourceAsXSS) {
-    current_ = AddSpanWithClassName("highlight");
-    current_->setAttribute(titleAttr, kXSSDetected);
-  }
-}
-
-void HTMLViewSourceDocument::Trace(blink::Visitor* visitor) {
+void HTMLViewSourceDocument::Trace(Visitor* visitor) {
   visitor->Trace(current_);
   visitor->Trace(tbody_);
   visitor->Trace(td_);

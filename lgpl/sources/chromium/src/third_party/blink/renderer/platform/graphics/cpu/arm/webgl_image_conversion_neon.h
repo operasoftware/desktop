@@ -27,13 +27,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_CPU_ARM_WEBGL_IMAGE_CONVERSION_NEON_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_CPU_ARM_WEBGL_IMAGE_CONVERSION_NEON_H_
 
-#if WTF_CPU_ARM_NEON
+#include "base/compiler_specific.h"
+
+#if defined(CPU_ARM_NEON)
 
 #include <arm_neon.h>
 
 namespace blink {
 
-namespace SIMD {
+namespace simd {
 
 ALWAYS_INLINE void UnpackOneRowOfRGBA16LittleToRGBA8(const uint16_t*& source,
                                                      uint8_t*& destination,
@@ -288,10 +290,10 @@ ALWAYS_INLINE void PackOneRowOfRGBA8ToUnsignedShort565(
   pixels_per_row = tail_components / 4;
 }
 
-}  // namespace SIMD
+}  // namespace simd
 
 }  // namespace blink
 
-#endif  // WTF_CPU_ARM_NEON
+#endif  // CPU_ARM_NEON
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_CPU_ARM_WEBGL_IMAGE_CONVERSION_NEON_H_

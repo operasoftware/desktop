@@ -4,16 +4,18 @@
 
 #include "third_party/blink/renderer/modules/storage/dom_window_storage.h"
 
+#include "base/feature_list.h"
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/modules/storage/storage_area.h"
 #include "third_party/blink/renderer/modules/storage/storage_controller.h"
 #include "third_party/blink/renderer/modules/storage/storage_namespace.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
@@ -35,7 +37,7 @@ DOMWindowStorage& DOMWindowStorage::From(LocalDOMWindow& window) {
   DOMWindowStorage* supplement =
       Supplement<LocalDOMWindow>::From<DOMWindowStorage>(window);
   if (!supplement) {
-    supplement = new DOMWindowStorage(window);
+    supplement = MakeGarbageCollected<DOMWindowStorage>(window);
     ProvideTo(window, supplement);
   }
   return *supplement;
@@ -62,7 +64,7 @@ StorageArea* DOMWindowStorage::sessionStorage(
   DCHECK(document);
   String access_denied_message = "Access is denied for this document.";
   if (!document->GetSecurityOrigin()->CanAccessSessionStorage()) {
-    if (document->IsSandboxed(kSandboxOrigin))
+    if (document->IsSandboxed(WebSandboxFlags::kOrigin))
       exception_state.ThrowSecurityError(
           "The document is sandboxed and lacks the 'allow-same-origin' flag.");
     else if (document->Url().ProtocolIs("data"))
@@ -89,11 +91,15 @@ StorageArea* DOMWindowStorage::sessionStorage(
   if (!page)
     return nullptr;
 
-  auto storage_area = StorageNamespace::From(page)->GetWebStorageArea(
-      document->GetSecurityOrigin());
+  StorageNamespace* storage_namespace = StorageNamespace::From(page);
+  if (!storage_namespace)
+    return nullptr;
+  auto storage_area =
+      storage_namespace->GetCachedArea(document->GetSecurityOrigin());
   session_storage_ =
       StorageArea::Create(document->GetFrame(), std::move(storage_area),
                           StorageArea::StorageType::kSessionStorage);
+
   if (!session_storage_->CanAccessStorage()) {
     exception_state.ThrowSecurityError(access_denied_message);
     return nullptr;
@@ -110,7 +116,7 @@ StorageArea* DOMWindowStorage::localStorage(
   DCHECK(document);
   String access_denied_message = "Access is denied for this document.";
   if (!document->GetSecurityOrigin()->CanAccessLocalStorage()) {
-    if (document->IsSandboxed(kSandboxOrigin))
+    if (document->IsSandboxed(WebSandboxFlags::kOrigin))
       exception_state.ThrowSecurityError(
           "The document is sandboxed and lacks the 'allow-same-origin' flag.");
     else if (document->Url().ProtocolIs("data"))
@@ -136,11 +142,12 @@ StorageArea* DOMWindowStorage::localStorage(
   Page* page = document->GetPage();
   if (!page || !page->GetSettings().GetLocalStorageEnabled())
     return nullptr;
-  auto storage_area = StorageController::GetInstance()->GetWebLocalStorageArea(
+  auto storage_area = StorageController::GetInstance()->GetLocalStorageArea(
       document->GetSecurityOrigin());
   local_storage_ =
       StorageArea::Create(document->GetFrame(), std::move(storage_area),
                           StorageArea::StorageType::kLocalStorage);
+
   if (!local_storage_->CanAccessStorage()) {
     exception_state.ThrowSecurityError(access_denied_message);
     return nullptr;

@@ -41,14 +41,14 @@ enum EdgeModeType {
 
 class PLATFORM_EXPORT FEConvolveMatrix final : public FilterEffect {
  public:
-  static FEConvolveMatrix* Create(Filter*,
-                                  const IntSize&,
-                                  float,
-                                  float,
-                                  const IntPoint&,
-                                  EdgeModeType,
-                                  bool,
-                                  const Vector<float>&);
+  FEConvolveMatrix(Filter*,
+                   const IntSize&,
+                   float,
+                   float,
+                   const IntPoint&,
+                   EdgeModeType,
+                   bool,
+                   const Vector<float>&);
 
   bool SetDivisor(float);
   bool SetBias(float);
@@ -60,15 +60,6 @@ class PLATFORM_EXPORT FEConvolveMatrix final : public FilterEffect {
                                           int indention) const override;
 
  private:
-  FEConvolveMatrix(Filter*,
-                   const IntSize&,
-                   float,
-                   float,
-                   const IntPoint&,
-                   EdgeModeType,
-                   bool,
-                   const Vector<float>&);
-
   FloatRect MapEffect(const FloatRect&) const final;
 
   sk_sp<PaintFilter> CreateImageFilter() override;

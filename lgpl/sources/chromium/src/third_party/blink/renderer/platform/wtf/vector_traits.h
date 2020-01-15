@@ -25,14 +25,15 @@
 #include <type_traits>
 #include <utility>
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/type_traits.h"
 
 namespace WTF {
 
 template <typename T>
 struct VectorTraitsBase {
-  static const bool kNeedsDestruction = !IsTriviallyDestructible<T>::value;
+  static const bool kNeedsDestruction =
+      !std::is_trivially_destructible<T>::value;
 
   static constexpr bool kCanInitializeWithMemset =
       std::is_trivially_default_constructible<T>::value;

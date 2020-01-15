@@ -89,7 +89,7 @@
 ol:not(.tree-outline) {
     display: none;
     margin: 0;
-    -webkit-padding-start: 12px;
+    padding-inline-start: 12px;
     list-style: none;
 }
 
@@ -163,6 +163,13 @@ ol.expanded {
 :host-context(.styles-panel-hovered:not(.read-only)) .value:hover {
     text-decoration: underline;
     cursor: default;
+}
+
+.styles-name-value-separator {
+    display: inline-block;
+    width: 14px;
+    text-decoration: inherit;
+    white-space: pre;
 }
 
 .styles-clipboard-only {

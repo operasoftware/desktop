@@ -35,13 +35,8 @@ class LayoutObject;
 
 class FEImage final : public FilterEffect {
  public:
-  static FEImage* CreateWithImage(Filter*,
-                                  scoped_refptr<Image>,
-                                  SVGPreserveAspectRatio*);
-  static FEImage* CreateWithIRIReference(Filter*,
-                                         TreeScope&,
-                                         const String&,
-                                         SVGPreserveAspectRatio*);
+  FEImage(Filter*, scoped_refptr<Image>, SVGPreserveAspectRatio*);
+  FEImage(Filter*, TreeScope&, const String&, SVGPreserveAspectRatio*);
 
   // feImage does not perform color interpolation of any kind, so doesn't
   // depend on the value of color-interpolation-filters.
@@ -54,8 +49,6 @@ class FEImage final : public FilterEffect {
 
  private:
   ~FEImage() override = default;
-  FEImage(Filter*, scoped_refptr<Image>, SVGPreserveAspectRatio*);
-  FEImage(Filter*, TreeScope&, const String&, SVGPreserveAspectRatio*);
   LayoutObject* ReferencedLayoutObject() const;
 
   FilterEffectType GetFilterEffectType() const override {

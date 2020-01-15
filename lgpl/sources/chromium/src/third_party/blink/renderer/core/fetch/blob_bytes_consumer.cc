@@ -7,6 +7,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fetch/form_data_bytes_consumer.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
+#include "third_party/blink/renderer/platform/network/wrapped_data_pipe_getter.h"
 
 namespace blink {
 
@@ -28,8 +29,8 @@ BytesConsumer::Result BlobBytesConsumer::BeginRead(const char** buffer,
     scoped_refptr<EncodedFormData> form_data = EncodedFormData::Create();
     form_data->AppendDataPipe(base::MakeRefCounted<WrappedDataPipeGetter>(
         blob_data_handle_->AsDataPipeGetter()));
-    nested_consumer_ =
-        new FormDataBytesConsumer(execution_context_, std::move(form_data));
+    nested_consumer_ = MakeGarbageCollected<FormDataBytesConsumer>(
+        execution_context_, std::move(form_data));
     if (client_)
       nested_consumer_->SetClient(client_);
     blob_data_handle_ = nullptr;

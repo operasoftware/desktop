@@ -12,7 +12,7 @@
 
 #include "base/logging.h"
 #include "base/strings/string16.h"
-#include "third_party/blink/common/common_export.h"
+#include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/indexeddb/web_idb_types.h"
 
 namespace blink {
@@ -21,13 +21,13 @@ class BLINK_COMMON_EXPORT IndexedDBKey {
  public:
   typedef std::vector<IndexedDBKey> KeyArray;
 
-  IndexedDBKey();  // Defaults to blink::WebIDBKeyTypeInvalid.
-  explicit IndexedDBKey(blink::WebIDBKeyType);  // must be Null or Invalid
-  explicit IndexedDBKey(const KeyArray& array);
-  explicit IndexedDBKey(const std::string& binary);
-  explicit IndexedDBKey(const base::string16& string);
+  IndexedDBKey();  // Defaults to mojom::IDBKeyType::Invalid.
+  explicit IndexedDBKey(mojom::IDBKeyType);  // must be Null or Invalid
+  explicit IndexedDBKey(KeyArray array);
+  explicit IndexedDBKey(std::string binary);
+  explicit IndexedDBKey(base::string16 string);
   IndexedDBKey(double number,
-               blink::WebIDBKeyType type);  // must be date or number
+               mojom::IDBKeyType type);  // must be date or number
   IndexedDBKey(const IndexedDBKey& other);
   ~IndexedDBKey();
   IndexedDBKey& operator=(const IndexedDBKey& other);
@@ -37,34 +37,43 @@ class BLINK_COMMON_EXPORT IndexedDBKey {
   bool IsLessThan(const IndexedDBKey& other) const;
   bool Equals(const IndexedDBKey& other) const;
 
-  blink::WebIDBKeyType type() const { return type_; }
+  mojom::IDBKeyType type() const { return type_; }
   const std::vector<IndexedDBKey>& array() const {
-    DCHECK_EQ(type_, blink::kWebIDBKeyTypeArray);
+    DCHECK_EQ(type_, mojom::IDBKeyType::Array);
     return array_;
   }
   const std::string& binary() const {
-    DCHECK_EQ(type_, blink::kWebIDBKeyTypeBinary);
+    DCHECK_EQ(type_, mojom::IDBKeyType::Binary);
     return binary_;
   }
   const base::string16& string() const {
-    DCHECK_EQ(type_, blink::kWebIDBKeyTypeString);
+    DCHECK_EQ(type_, mojom::IDBKeyType::String);
     return string_;
   }
   double date() const {
-    DCHECK_EQ(type_, blink::kWebIDBKeyTypeDate);
+    DCHECK_EQ(type_, mojom::IDBKeyType::Date);
     return number_;
   }
   double number() const {
-    DCHECK_EQ(type_, blink::kWebIDBKeyTypeNumber);
+    DCHECK_EQ(type_, mojom::IDBKeyType::Number);
     return number_;
   }
 
   size_t size_estimate() const { return size_estimate_; }
 
+  // Tests if this array-type key has "holes". Used in cases where a compound
+  // key references an auto-generated primary key.
+  bool HasHoles() const;
+
+  // Returns a copy of this array-type key, but with "holes" replaced by the
+  // given primary key. Used in cases where a compound key references an
+  // auto-generated primary key.
+  IndexedDBKey FillHoles(const IndexedDBKey&) const WARN_UNUSED_RESULT;
+
  private:
   int CompareTo(const IndexedDBKey& other) const;
 
-  blink::WebIDBKeyType type_;
+  mojom::IDBKeyType type_;
   std::vector<IndexedDBKey> array_;
   std::string binary_;
   base::string16 string_;
@@ -74,7 +83,10 @@ class BLINK_COMMON_EXPORT IndexedDBKey {
 };
 
 // An index id, and corresponding set of keys to insert.
-using IndexedDBIndexKeys = std::pair<int64_t, std::vector<IndexedDBKey>>;
+struct IndexedDBIndexKeys {
+  int64_t id;
+  std::vector<IndexedDBKey> keys;
+};
 
 }  // namespace blink
 

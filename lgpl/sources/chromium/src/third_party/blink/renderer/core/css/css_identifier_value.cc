@@ -6,7 +6,7 @@
 
 #include "third_party/blink/renderer/core/css/css_markup.h"
 #include "third_party/blink/renderer/core/css/css_value_pool.h"
-#include "third_party/blink/renderer/platform/length.h"
+#include "third_party/blink/renderer/platform/geometry/length.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -16,7 +16,7 @@ CSSIdentifierValue* CSSIdentifierValue::Create(CSSValueID value_id) {
   CSSIdentifierValue* css_value = CssValuePool().IdentifierCacheValue(value_id);
   if (!css_value) {
     css_value = CssValuePool().SetIdentifierCacheValue(
-        value_id, new CSSIdentifierValue(value_id));
+        value_id, MakeGarbageCollected<CSSIdentifierValue>(value_id));
   }
   return css_value;
 }
@@ -27,37 +27,37 @@ String CSSIdentifierValue::CustomCSSText() const {
 
 CSSIdentifierValue::CSSIdentifierValue(CSSValueID value_id)
     : CSSValue(kIdentifierClass), value_id_(value_id) {
-  // TODO(sashab): Add a DCHECK_NE(valueID, CSSValueInvalid) once no code paths
-  // cause this to happen.
+  // TODO(sashab): Add a DCHECK_NE(valueID, CSSValueID::kInvalid) once no code
+  // paths cause this to happen.
 }
 
 CSSIdentifierValue::CSSIdentifierValue(const Length& length)
     : CSSValue(kIdentifierClass) {
   switch (length.GetType()) {
-    case kAuto:
-      value_id_ = CSSValueAuto;
+    case Length::kAuto:
+      value_id_ = CSSValueID::kAuto;
       break;
-    case kMinContent:
-      value_id_ = CSSValueMinContent;
+    case Length::kMinContent:
+      value_id_ = CSSValueID::kMinContent;
       break;
-    case kMaxContent:
-      value_id_ = CSSValueMaxContent;
+    case Length::kMaxContent:
+      value_id_ = CSSValueID::kMaxContent;
       break;
-    case kFillAvailable:
-      value_id_ = CSSValueWebkitFillAvailable;
+    case Length::kFillAvailable:
+      value_id_ = CSSValueID::kWebkitFillAvailable;
       break;
-    case kFitContent:
-      value_id_ = CSSValueFitContent;
+    case Length::kFitContent:
+      value_id_ = CSSValueID::kFitContent;
       break;
-    case kExtendToZoom:
-      value_id_ = CSSValueInternalExtendToZoom;
+    case Length::kExtendToZoom:
+      value_id_ = CSSValueID::kInternalExtendToZoom;
       break;
-    case kPercent:
-    case kFixed:
-    case kCalculated:
-    case kDeviceWidth:
-    case kDeviceHeight:
-    case kMaxSizeNone:
+    case Length::kPercent:
+    case Length::kFixed:
+    case Length::kCalculated:
+    case Length::kDeviceWidth:
+    case Length::kDeviceHeight:
+    case Length::kMaxSizeNone:
       NOTREACHED();
       break;
   }

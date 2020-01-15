@@ -1,9 +1,0 @@
-Name: hunspell
-URL: http://hunspell.sourceforge.net/
-Version: 1.3.2
-License: MPL 1.1/GPL 2.0/LGPL 2.1
-License File: COPYING
-Required Text: LINK
-
-Description:
-This is a partial copy of Hunspell 1.3.2 with some changes by Opera and Google

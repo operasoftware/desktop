@@ -44,7 +44,7 @@ class SVGNumber : public SVGPropertyHelper<SVGNumber> {
   typedef SVGNumberTearOff TearOffType;
   typedef float PrimitiveType;
 
-  static SVGNumber* Create(float value = 0.0f) { return new SVGNumber(value); }
+  explicit SVGNumber(float = 0.0f);
 
   virtual SVGNumber* Clone() const;
 
@@ -71,8 +71,6 @@ class SVGNumber : public SVGPropertyHelper<SVGNumber> {
   static constexpr int kInitialValueBits = 2;
 
  protected:
-  explicit SVGNumber(float);
-
   template <typename CharType>
   SVGParsingError Parse(const CharType*& ptr, const CharType* end);
 
@@ -87,15 +85,10 @@ DEFINE_SVG_PROPERTY_TYPE_CASTS(SVGNumber);
 //   offset = "<number> | <percentage>"
 class SVGNumberAcceptPercentage final : public SVGNumber {
  public:
-  static SVGNumberAcceptPercentage* Create(float value = 0) {
-    return new SVGNumberAcceptPercentage(value);
-  }
+  explicit SVGNumberAcceptPercentage(float = 0);
 
   SVGNumber* Clone() const override;
   SVGParsingError SetValueAsString(const String&) override;
-
- private:
-  explicit SVGNumberAcceptPercentage(float);
 };
 
 }  // namespace blink

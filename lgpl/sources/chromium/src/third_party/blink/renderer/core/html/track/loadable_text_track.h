@@ -36,9 +36,7 @@ class HTMLTrackElement;
 
 class LoadableTextTrack final : public TextTrack {
  public:
-  static LoadableTextTrack* Create(HTMLTrackElement* track) {
-    return new LoadableTextTrack(track);
-  }
+  explicit LoadableTextTrack(HTMLTrackElement*);
   ~LoadableTextTrack() override;
 
   // TextTrack method.
@@ -51,11 +49,9 @@ class LoadableTextTrack final : public TextTrack {
 
   bool IsDefault() const override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
 
  private:
-  explicit LoadableTextTrack(HTMLTrackElement*);
-
   Member<HTMLTrackElement> track_element_;
 };
 

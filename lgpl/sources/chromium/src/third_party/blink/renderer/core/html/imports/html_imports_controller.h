@@ -34,7 +34,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -51,9 +51,7 @@ class HTMLImportsController final
     : public GarbageCollected<HTMLImportsController>,
       public NameClient {
  public:
-  static HTMLImportsController* Create(Document& master) {
-    return new HTMLImportsController(master);
-  }
+  explicit HTMLImportsController(Document&);
 
   HTMLImportTreeRoot* Root() const { return root_; }
 
@@ -68,7 +66,7 @@ class HTMLImportsController final
   HTMLImportLoader* LoaderAt(wtf_size_t i) const { return loaders_[i]; }
   HTMLImportLoader* LoaderFor(const Document&) const;
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
   void Dispose();
 
@@ -77,14 +75,12 @@ class HTMLImportsController final
   }
 
  private:
-  explicit HTMLImportsController(Document&);
-
   HTMLImportChild* CreateChild(const KURL&,
                                HTMLImportLoader*,
                                HTMLImport* parent,
                                HTMLImportChildClient*);
 
-  TraceWrapperMember<HTMLImportTreeRoot> root_;
+  Member<HTMLImportTreeRoot> root_;
   using LoaderList = HeapVector<Member<HTMLImportLoader>>;
   LoaderList loaders_;
 };

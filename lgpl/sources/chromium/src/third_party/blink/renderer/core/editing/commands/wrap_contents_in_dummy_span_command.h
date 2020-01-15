@@ -34,15 +34,11 @@ class HTMLSpanElement;
 
 class WrapContentsInDummySpanCommand final : public SimpleEditCommand {
  public:
-  static WrapContentsInDummySpanCommand* Create(Element* element) {
-    return new WrapContentsInDummySpanCommand(element);
-  }
-
-  void Trace(blink::Visitor*) override;
-
- private:
   explicit WrapContentsInDummySpanCommand(Element*);
 
+  void Trace(Visitor*) override;
+
+ private:
   void DoApply(EditingState*) override;
   void DoUnapply() override;
   void DoReapply() override;

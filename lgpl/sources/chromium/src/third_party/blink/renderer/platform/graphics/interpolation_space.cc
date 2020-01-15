@@ -36,7 +36,7 @@
 
 namespace blink {
 
-namespace InterpolationSpaceUtilities {
+namespace interpolation_space_utilities {
 
 namespace {
 
@@ -49,9 +49,9 @@ sk_sp<SkColorFilter> GetConversionFilter(
 
   switch (dst_interpolation_space) {
     case kInterpolationSpaceLinear:
-      return SkColorFilter::MakeSRGBToLinearGamma();
+      return SkColorFilters::SRGBToLinearGamma();
     case kInterpolationSpaceSRGB:
-      return SkColorFilter::MakeLinearToSRGBGamma();
+      return SkColorFilters::LinearToSRGBGamma();
   }
 
   NOTREACHED();
@@ -76,6 +76,6 @@ sk_sp<SkColorFilter> CreateInterpolationSpaceFilter(
   return GetConversionFilter(dst_interpolation_space, src_interpolation_space);
 }
 
-}  // namespace InterpolationSpaceUtilities
+}  // namespace interpolation_space_utilities
 
 }  // namespace blink

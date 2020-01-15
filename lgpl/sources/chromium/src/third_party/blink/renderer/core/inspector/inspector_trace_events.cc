@@ -9,8 +9,7 @@
 #include <memory>
 
 #include "cc/layers/picture_layer.h"
-#include "services/network/public/mojom/request_context_frame_type.mojom-shared.h"
-#include "third_party/blink/public/platform/web_layer_tree_view.h"
+#include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/core/animation/animation.h"
@@ -35,9 +34,10 @@
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
 #include "third_party/blink/renderer/core/xmlhttprequest/xml_http_request.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
-#include "third_party/blink/renderer/platform/instance_counters.h"
+#include "third_party/blink/renderer/platform/instrumentation/instance_counters.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/traced_value.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_load_timing.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -51,14 +51,9 @@ namespace blink {
 
 namespace {
 
-void* AsyncId(unsigned long identifier) {
-  // This value should be odd to avoid collisions with regular pointers.
-  return reinterpret_cast<void*>((identifier << 1) | 1);
-}
-
 std::unique_ptr<TracedValue> InspectorParseHtmlBeginData(Document* document,
                                                          unsigned start_line) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetInteger("startLine", start_line);
   value->SetString("frame", IdentifiersFactory::FrameId(document->GetFrame()));
   value->SetString("url", document->Url().GetString());
@@ -67,13 +62,13 @@ std::unique_ptr<TracedValue> InspectorParseHtmlBeginData(Document* document,
 }
 
 std::unique_ptr<TracedValue> InspectorParseHtmlEndData(unsigned end_line) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetInteger("endLine", end_line);
   return value;
 }
 
 std::unique_ptr<TracedValue> GetNavigationTracingData(Document* document) {
-  std::unique_ptr<TracedValue> data = TracedValue::Create();
+  auto data = std::make_unique<TracedValue>();
 
   data->SetString("navigationId",
                   IdentifiersFactory::LoaderId(document->Loader()));
@@ -102,10 +97,10 @@ void SetCallStack(TracedValue* value) {
 }
 
 void InspectorTraceEvents::WillSendRequest(
-    ExecutionContext*,
-    unsigned long identifier,
+    uint64_t identifier,
     DocumentLoader* loader,
-    ResourceRequest& request,
+    const KURL& fetch_context_url,
+    const ResourceRequest& request,
     const ResourceResponse& redirect_response,
     const FetchInitiatorInfo&,
     ResourceType) {
@@ -113,57 +108,72 @@ void InspectorTraceEvents::WillSendRequest(
   TRACE_EVENT_INSTANT1(
       "devtools.timeline", "ResourceSendRequest", TRACE_EVENT_SCOPE_THREAD,
       "data",
-      InspectorSendRequestEvent::Data(loader, identifier, frame, request));
+      inspector_send_request_event::Data(loader, identifier, frame, request));
+}
+
+void InspectorTraceEvents::WillSendNavigationRequest(
+    uint64_t identifier,
+    DocumentLoader* loader,
+    const KURL& url,
+    const AtomicString& http_method,
+    EncodedFormData*) {
+  LocalFrame* frame = loader ? loader->GetFrame() : nullptr;
+  TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceSendRequest",
+                       TRACE_EVENT_SCOPE_THREAD, "data",
+                       inspector_send_navigation_request_event::Data(
+                           loader, identifier, frame, url, http_method));
 }
 
 void InspectorTraceEvents::DidReceiveResourceResponse(
-    unsigned long identifier,
+    uint64_t identifier,
     DocumentLoader* loader,
     const ResourceResponse& response,
-    Resource*) {
+    const Resource*) {
   LocalFrame* frame = loader ? loader->GetFrame() : nullptr;
-  TRACE_EVENT_INSTANT1(
-      "devtools.timeline", "ResourceReceiveResponse", TRACE_EVENT_SCOPE_THREAD,
-      "data",
-      InspectorReceiveResponseEvent::Data(loader, identifier, frame, response));
+  TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceReceiveResponse",
+                       TRACE_EVENT_SCOPE_THREAD, "data",
+                       inspector_receive_response_event::Data(
+                           loader, identifier, frame, response));
 }
 
-void InspectorTraceEvents::DidReceiveData(unsigned long identifier,
+void InspectorTraceEvents::DidReceiveData(uint64_t identifier,
                                           DocumentLoader* loader,
                                           const char* data,
-                                          int encoded_data_length) {
+                                          uint64_t encoded_data_length) {
   LocalFrame* frame = loader ? loader->GetFrame() : nullptr;
   TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceReceivedData",
                        TRACE_EVENT_SCOPE_THREAD, "data",
-                       InspectorReceiveDataEvent::Data(
+                       inspector_receive_data_event::Data(
                            loader, identifier, frame, encoded_data_length));
-  probe::AsyncTask async_task(frame ? frame->GetDocument() : nullptr,
-                              AsyncId(identifier), "data");
 }
 
-void InspectorTraceEvents::DidFinishLoading(unsigned long identifier,
+void InspectorTraceEvents::DidFinishLoading(uint64_t identifier,
                                             DocumentLoader* loader,
-                                            TimeTicks finish_time,
+                                            base::TimeTicks finish_time,
                                             int64_t encoded_data_length,
                                             int64_t decoded_body_length,
                                             bool should_report_corb_blocking) {
-  LocalFrame* frame = loader ? loader->GetFrame() : nullptr;
   TRACE_EVENT_INSTANT1(
       "devtools.timeline", "ResourceFinish", TRACE_EVENT_SCOPE_THREAD, "data",
-      InspectorResourceFinishEvent::Data(loader, identifier, finish_time, false,
-                                         encoded_data_length,
-                                         decoded_body_length));
-  probe::AsyncTask async_task(frame ? frame->GetDocument() : nullptr,
-                              AsyncId(identifier));
+      inspector_resource_finish_event::Data(loader, identifier, finish_time,
+                                            false, encoded_data_length,
+                                            decoded_body_length));
 }
 
-void InspectorTraceEvents::DidFailLoading(unsigned long identifier,
+void InspectorTraceEvents::DidFailLoading(uint64_t identifier,
                                           DocumentLoader* loader,
                                           const ResourceError&) {
   TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceFinish",
                        TRACE_EVENT_SCOPE_THREAD, "data",
-                       InspectorResourceFinishEvent::Data(
-                           loader, identifier, TimeTicks(), true, 0, 0));
+                       inspector_resource_finish_event::Data(
+                           loader, identifier, base::TimeTicks(), true, 0, 0));
+}
+
+void InspectorTraceEvents::MarkResourceAsCached(DocumentLoader* loader,
+                                                uint64_t identifier) {
+  TRACE_EVENT_INSTANT1(
+      "devtools.timeline", "ResourceMarkAsCached", TRACE_EVENT_SCOPE_THREAD,
+      "data", inspector_mark_resource_cached_event::Data(loader, identifier));
 }
 
 void InspectorTraceEvents::Will(const probe::ExecuteScript&) {}
@@ -171,7 +181,7 @@ void InspectorTraceEvents::Will(const probe::ExecuteScript&) {}
 void InspectorTraceEvents::Did(const probe::ExecuteScript&) {
   TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
                        "UpdateCounters", TRACE_EVENT_SCOPE_THREAD, "data",
-                       InspectorUpdateCountersEvent::Data());
+                       inspector_update_counters_event::Data());
 }
 
 void InspectorTraceEvents::Will(const probe::ParseHTML& probe) {
@@ -188,31 +198,25 @@ void InspectorTraceEvents::Did(const probe::ParseHTML& probe) {
       InspectorParseHtmlEndData(probe.parser->LineNumber().ZeroBasedInt() - 1));
   TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
                        "UpdateCounters", TRACE_EVENT_SCOPE_THREAD, "data",
-                       InspectorUpdateCountersEvent::Data());
+                       inspector_update_counters_event::Data());
 }
 
 void InspectorTraceEvents::Will(const probe::CallFunction& probe) {
-  if (probe.depth)
-    return;
-  TRACE_EVENT_BEGIN1(
-      "devtools.timeline", "FunctionCall", "data",
-      InspectorFunctionCallEvent::Data(probe.context, probe.function));
 }
 
 void InspectorTraceEvents::Did(const probe::CallFunction& probe) {
   if (probe.depth)
     return;
-  TRACE_EVENT_END0("devtools.timeline", "FunctionCall");
   TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
                        "UpdateCounters", TRACE_EVENT_SCOPE_THREAD, "data",
-                       InspectorUpdateCountersEvent::Data());
+                       inspector_update_counters_event::Data());
 }
 
 void InspectorTraceEvents::PaintTiming(Document* document,
                                        const char* name,
                                        double timestamp) {
   TRACE_EVENT_MARK_WITH_TIMESTAMP2("loading,rail,devtools.timeline", name,
-                                   TraceEvent::ToTraceTimestamp(timestamp),
+                                   trace_event::ToTraceTimestamp(timestamp),
                                    "frame", ToTraceValue(document->GetFrame()),
                                    "data", GetNavigationTracingData(document));
 }
@@ -254,11 +258,12 @@ const char* PseudoTypeToString(CSSSelector::PseudoType pseudo_type) {
     DEFINE_STRING_MAPPING(PseudoNthLastChild)
     DEFINE_STRING_MAPPING(PseudoNthLastOfType)
     DEFINE_STRING_MAPPING(PseudoPart)
+    DEFINE_STRING_MAPPING(PseudoState)
     DEFINE_STRING_MAPPING(PseudoLink)
     DEFINE_STRING_MAPPING(PseudoVisited)
     DEFINE_STRING_MAPPING(PseudoAny)
-    DEFINE_STRING_MAPPING(PseudoMatches)
-    DEFINE_STRING_MAPPING(PseudoIS)
+    DEFINE_STRING_MAPPING(PseudoIs)
+    DEFINE_STRING_MAPPING(PseudoWhere)
     DEFINE_STRING_MAPPING(PseudoWebkitAnyLink)
     DEFINE_STRING_MAPPING(PseudoAnyLink)
     DEFINE_STRING_MAPPING(PseudoAutofill)
@@ -317,6 +322,7 @@ const char* PseudoTypeToString(CSSSelector::PseudoType pseudo_type) {
     DEFINE_STRING_MAPPING(PseudoFullScreen)
     DEFINE_STRING_MAPPING(PseudoFullScreenAncestor)
     DEFINE_STRING_MAPPING(PseudoFullscreen)
+    DEFINE_STRING_MAPPING(PseudoPictureInPicture)
     DEFINE_STRING_MAPPING(PseudoInRange)
     DEFINE_STRING_MAPPING(PseudoOutOfRange)
     DEFINE_STRING_MAPPING(PseudoWebKitCustomElement)
@@ -332,11 +338,13 @@ const char* PseudoTypeToString(CSSSelector::PseudoType pseudo_type) {
     DEFINE_STRING_MAPPING(PseudoShadow)
     DEFINE_STRING_MAPPING(PseudoSlotted)
     DEFINE_STRING_MAPPING(PseudoSpatialNavigationFocus)
+    DEFINE_STRING_MAPPING(PseudoSpatialNavigationInterest)
     DEFINE_STRING_MAPPING(PseudoIsHtml)
     DEFINE_STRING_MAPPING(PseudoListBox)
     DEFINE_STRING_MAPPING(PseudoHostHasAppearance)
     DEFINE_STRING_MAPPING(PseudoVideoPersistent)
     DEFINE_STRING_MAPPING(PseudoVideoPersistentAncestor)
+    DEFINE_STRING_MAPPING(PseudoXrImmersiveDomOverlay)
 #undef DEFINE_STRING_MAPPING
   }
 
@@ -358,10 +366,6 @@ const char* CompileOptionsString(v8::ScriptCompiler::CompileOptions options) {
       return "code";
     case v8::ScriptCompiler::kEagerCompile:
       return "full code";
-    // TODO(v8:8252): Remove the default branch once deprecated options are
-    // removed from v8::ScriptCompiler::CompileOptions.
-    default:
-      NOTREACHED();
   }
   NOTREACHED();
   return "";
@@ -371,8 +375,8 @@ const char* NotStreamedReasonString(ScriptStreamer::NotStreamingReason reason) {
   switch (reason) {
     case ScriptStreamer::kNotHTTP:
       return "not http/https protocol";
-    case ScriptStreamer::kReload:
-      return "reload event";
+    case ScriptStreamer::kRevalidate:
+      return "revalidation event";
     case ScriptStreamer::kContextNotValid:
       return "script context not valid";
     case ScriptStreamer::kEncodingNotSupported:
@@ -395,6 +399,14 @@ const char* NotStreamedReasonString(ScriptStreamer::NotStreamingReason reason) {
       return "start streaming not called";
     case ScriptStreamer::kErrorOccurred:
       return "an error occurred";
+    case ScriptStreamer::kStreamingDisabled:
+      return "already disabled streaming";
+    case ScriptStreamer::kSecondScriptResourceUse:
+      return "already used streamed data";
+    case ScriptStreamer::kWorkerTopLevelScript:
+      return "worker top-level scripts are not streamable";
+    case ScriptStreamer::kModuleScript:
+      return "module script";
     case ScriptStreamer::kAlreadyLoaded:
     case ScriptStreamer::kCount:
     case ScriptStreamer::kInvalid:
@@ -406,12 +418,12 @@ const char* NotStreamedReasonString(ScriptStreamer::NotStreamingReason reason) {
 
 }  // namespace
 
-namespace InspectorScheduleStyleInvalidationTrackingEvent {
+namespace inspector_schedule_style_invalidation_tracking_event {
 std::unique_ptr<TracedValue> FillCommonPart(
     ContainerNode& node,
     const InvalidationSet& invalidation_set,
     const char* invalidated_selector) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("frame",
                    IdentifiersFactory::FrameId(node.GetDocument().GetFrame()));
   SetNodeInfo(value.get(), &node, "nodeId", "nodeName");
@@ -421,15 +433,16 @@ std::unique_ptr<TracedValue> FillCommonPart(
   SourceLocation::Capture()->ToTracedValue(value.get(), "stackTrace");
   return value;
 }
-}  // namespace InspectorScheduleStyleInvalidationTrackingEvent
+}  // namespace inspector_schedule_style_invalidation_tracking_event
 
-const char InspectorScheduleStyleInvalidationTrackingEvent::kAttribute[] =
+const char inspector_schedule_style_invalidation_tracking_event::kAttribute[] =
     "attribute";
-const char InspectorScheduleStyleInvalidationTrackingEvent::kClass[] = "class";
-const char InspectorScheduleStyleInvalidationTrackingEvent::kId[] = "id";
-const char InspectorScheduleStyleInvalidationTrackingEvent::kPseudo[] =
+const char inspector_schedule_style_invalidation_tracking_event::kClass[] =
+    "class";
+const char inspector_schedule_style_invalidation_tracking_event::kId[] = "id";
+const char inspector_schedule_style_invalidation_tracking_event::kPseudo[] =
     "pseudo";
-const char InspectorScheduleStyleInvalidationTrackingEvent::kRuleSet[] =
+const char inspector_schedule_style_invalidation_tracking_event::kRuleSet[] =
     "ruleset";
 
 const char* ResourcePriorityString(ResourceLoadPriority priority) {
@@ -457,7 +470,7 @@ const char* ResourcePriorityString(ResourceLoadPriority priority) {
 }
 
 std::unique_ptr<TracedValue>
-InspectorScheduleStyleInvalidationTrackingEvent::IdChange(
+inspector_schedule_style_invalidation_tracking_event::IdChange(
     Element& element,
     const InvalidationSet& invalidation_set,
     const AtomicString& id) {
@@ -468,7 +481,7 @@ InspectorScheduleStyleInvalidationTrackingEvent::IdChange(
 }
 
 std::unique_ptr<TracedValue>
-InspectorScheduleStyleInvalidationTrackingEvent::ClassChange(
+inspector_schedule_style_invalidation_tracking_event::ClassChange(
     Element& element,
     const InvalidationSet& invalidation_set,
     const AtomicString& class_name) {
@@ -479,7 +492,7 @@ InspectorScheduleStyleInvalidationTrackingEvent::ClassChange(
 }
 
 std::unique_ptr<TracedValue>
-InspectorScheduleStyleInvalidationTrackingEvent::AttributeChange(
+inspector_schedule_style_invalidation_tracking_event::AttributeChange(
     Element& element,
     const InvalidationSet& invalidation_set,
     const QualifiedName& attribute_name) {
@@ -490,7 +503,7 @@ InspectorScheduleStyleInvalidationTrackingEvent::AttributeChange(
 }
 
 std::unique_ptr<TracedValue>
-InspectorScheduleStyleInvalidationTrackingEvent::PseudoChange(
+inspector_schedule_style_invalidation_tracking_event::PseudoChange(
     Element& element,
     const InvalidationSet& invalidation_set,
     CSSSelector::PseudoType pseudo_type) {
@@ -501,7 +514,7 @@ InspectorScheduleStyleInvalidationTrackingEvent::PseudoChange(
 }
 
 std::unique_ptr<TracedValue>
-InspectorScheduleStyleInvalidationTrackingEvent::RuleSetInvalidation(
+inspector_schedule_style_invalidation_tracking_event::RuleSetInvalidation(
     ContainerNode& root_node,
     const InvalidationSet& invalidation_set) {
   std::unique_ptr<TracedValue> value =
@@ -513,46 +526,44 @@ String DescendantInvalidationSetToIdString(const InvalidationSet& set) {
   return ToHexString(&set);
 }
 
-const char InspectorStyleInvalidatorInvalidateEvent::
+const char inspector_style_invalidator_invalidate_event::
     kElementHasPendingInvalidationList[] =
         "Element has pending invalidation list";
-const char InspectorStyleInvalidatorInvalidateEvent::kInvalidateCustomPseudo[] =
-    "Invalidate custom pseudo element";
-const char InspectorStyleInvalidatorInvalidateEvent::
+const char
+    inspector_style_invalidator_invalidate_event::kInvalidateCustomPseudo[] =
+        "Invalidate custom pseudo element";
+const char inspector_style_invalidator_invalidate_event::
     kInvalidationSetMatchedAttribute[] = "Invalidation set matched attribute";
+const char inspector_style_invalidator_invalidate_event::
+    kInvalidationSetMatchedClass[] = "Invalidation set matched class";
 const char
-    InspectorStyleInvalidatorInvalidateEvent::kInvalidationSetMatchedClass[] =
-        "Invalidation set matched class";
-const char
-    InspectorStyleInvalidatorInvalidateEvent::kInvalidationSetMatchedId[] =
+    inspector_style_invalidator_invalidate_event::kInvalidationSetMatchedId[] =
         "Invalidation set matched id";
-const char
-    InspectorStyleInvalidatorInvalidateEvent::kInvalidationSetMatchedTagName[] =
-        "Invalidation set matched tagName";
-const char
-    InspectorStyleInvalidatorInvalidateEvent::kInvalidationSetMatchedPart[] =
-        "Invalidation set matched part";
+const char inspector_style_invalidator_invalidate_event::
+    kInvalidationSetMatchedTagName[] = "Invalidation set matched tagName";
+const char inspector_style_invalidator_invalidate_event::
+    kInvalidationSetMatchedPart[] = "Invalidation set matched part";
 
-namespace InspectorStyleInvalidatorInvalidateEvent {
+namespace inspector_style_invalidator_invalidate_event {
 std::unique_ptr<TracedValue> FillCommonPart(ContainerNode& node,
                                             const char* reason) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("frame",
                    IdentifiersFactory::FrameId(node.GetDocument().GetFrame()));
   SetNodeInfo(value.get(), &node, "nodeId", "nodeName");
   value->SetString("reason", reason);
   return value;
 }
-}  // namespace InspectorStyleInvalidatorInvalidateEvent
+}  // namespace inspector_style_invalidator_invalidate_event
 
-std::unique_ptr<TracedValue> InspectorStyleInvalidatorInvalidateEvent::Data(
+std::unique_ptr<TracedValue> inspector_style_invalidator_invalidate_event::Data(
     Element& element,
     const char* reason) {
   return FillCommonPart(element, reason);
 }
 
 std::unique_ptr<TracedValue>
-InspectorStyleInvalidatorInvalidateEvent::SelectorPart(
+inspector_style_invalidator_invalidate_event::SelectorPart(
     Element& element,
     const char* reason,
     const InvalidationSet& invalidation_set,
@@ -566,7 +577,7 @@ InspectorStyleInvalidatorInvalidateEvent::SelectorPart(
 }
 
 std::unique_ptr<TracedValue>
-InspectorStyleInvalidatorInvalidateEvent::InvalidationList(
+inspector_style_invalidator_invalidate_event::InvalidationList(
     ContainerNode& node,
     const Vector<scoped_refptr<InvalidationSet>>& invalidation_list) {
   std::unique_ptr<TracedValue> value =
@@ -579,12 +590,12 @@ InspectorStyleInvalidatorInvalidateEvent::InvalidationList(
 }
 
 std::unique_ptr<TracedValue>
-InspectorStyleRecalcInvalidationTrackingEvent::Data(
+inspector_style_recalc_invalidation_tracking_event::Data(
     Node* node,
     const StyleChangeReasonForTracing& reason) {
   DCHECK(node);
 
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("frame",
                    IdentifiersFactory::FrameId(node->GetDocument().GetFrame()));
   SetNodeInfo(value.get(), node, "nodeId", "nodeName");
@@ -594,7 +605,7 @@ InspectorStyleRecalcInvalidationTrackingEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorLayoutEvent::BeginData(
+std::unique_ptr<TracedValue> inspector_layout_event::BeginData(
     LocalFrameView* frame_view) {
   bool is_partial;
   unsigned needs_layout_objects;
@@ -603,7 +614,7 @@ std::unique_ptr<TracedValue> InspectorLayoutEvent::BeginData(
   frame.View()->CountObjectsNeedingLayout(needs_layout_objects, total_objects,
                                           is_partial);
 
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetInteger("dirtyObjects", needs_layout_objects);
   value->SetInteger("totalObjects", total_objects);
   value->SetBoolean("partialLayout", is_partial);
@@ -640,12 +651,12 @@ static void SetGeneratingNodeInfo(TracedValue* value,
   SetNodeInfo(value, node, id_field_name, name_field_name);
 }
 
-std::unique_ptr<TracedValue> InspectorLayoutEvent::EndData(
+std::unique_ptr<TracedValue> inspector_layout_event::EndData(
     LayoutObject* root_for_this_layout) {
   Vector<FloatQuad> quads;
   root_for_this_layout->AbsoluteQuads(quads);
 
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   if (quads.size() >= 1) {
     CreateQuad(value.get(), "root", quads[0]);
     SetGeneratingNodeInfo(value.get(), root_for_this_layout, "rootNode");
@@ -655,7 +666,7 @@ std::unique_ptr<TracedValue> InspectorLayoutEvent::EndData(
   return value;
 }
 
-namespace LayoutInvalidationReason {
+namespace layout_invalidation_reason {
 const char kUnknown[] = "Unknown";
 const char kSizeChanged[] = "Size changed";
 const char kAncestorMoved[] = "Ancestor moved";
@@ -670,6 +681,7 @@ const char kAnonymousBlockChange[] = "Anonymous block change";
 const char kFullscreen[] = "Fullscreen change";
 const char kChildChanged[] = "Child changed";
 const char kListValueChange[] = "List value change";
+const char kListStyleTypeChange[] = "List style type change";
 const char kImageChanged[] = "Image changed";
 const char kLineBoxesChanged[] = "Line boxes changed";
 const char kSliderValueChanged[] = "Slider value changed";
@@ -688,13 +700,14 @@ const char kPaddingChanged[] = "Padding changed";
 const char kTextControlChanged[] = "Text control changed";
 const char kSvgChanged[] = "SVG changed";
 const char kScrollbarChanged[] = "Scrollbar changed";
-}  // namespace LayoutInvalidationReason
+const char kDisplayLock[] = "Display lock";
+}  // namespace layout_invalidation_reason
 
-std::unique_ptr<TracedValue> InspectorLayoutInvalidationTrackingEvent::Data(
+std::unique_ptr<TracedValue> inspector_layout_invalidation_tracking_event::Data(
     const LayoutObject* layout_object,
     LayoutInvalidationReasonForTracing reason) {
   DCHECK(layout_object);
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("frame",
                    IdentifiersFactory::FrameId(layout_object->GetFrame()));
   SetGeneratingNodeInfo(value.get(), layout_object, "nodeId", "nodeName");
@@ -703,56 +716,26 @@ std::unique_ptr<TracedValue> InspectorLayoutInvalidationTrackingEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorPaintInvalidationTrackingEvent::Data(
-    const LayoutObject& layout_object) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
-  value->SetString("frame",
-                   IdentifiersFactory::FrameId(layout_object.GetFrame()));
-  const auto* paint_container =
-      layout_object.IsRooted() ? &layout_object.ContainerForPaintInvalidation()
-                               : nullptr;
-  SetGeneratingNodeInfo(value.get(), paint_container, "paintId");
-  SetGeneratingNodeInfo(value.get(), &layout_object, "nodeId", "nodeName");
-  return value;
-}
-
-std::unique_ptr<TracedValue> InspectorScrollInvalidationTrackingEvent::Data(
-    const LayoutObject& layout_object) {
-  static const char kScrollInvalidationReason[] =
-      "Scroll with viewport-constrained element";
-
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
-  value->SetString("frame",
-                   IdentifiersFactory::FrameId(layout_object.GetFrame()));
-  value->SetString("reason", kScrollInvalidationReason);
-  SetGeneratingNodeInfo(value.get(), &layout_object, "nodeId", "nodeName");
-  SourceLocation::Capture()->ToTracedValue(value.get(), "stackTrace");
-  return value;
-}
-
-std::unique_ptr<TracedValue> InspectorChangeResourcePriorityEvent::Data(
+std::unique_ptr<TracedValue> inspector_change_resource_priority_event::Data(
     DocumentLoader* loader,
-    unsigned long identifier,
+    uint64_t identifier,
     const ResourceLoadPriority& load_priority) {
   String request_id = IdentifiersFactory::RequestId(loader, identifier);
 
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("requestId", request_id);
   value->SetString("priority", ResourcePriorityString(load_priority));
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorSendRequestEvent::Data(
+std::unique_ptr<TracedValue> inspector_send_request_event::Data(
     DocumentLoader* loader,
-    unsigned long identifier,
+    uint64_t identifier,
     LocalFrame* frame,
     const ResourceRequest& request) {
-  String request_id = IdentifiersFactory::RequestId(loader, identifier);
-  if (request.GetFrameType() != network::mojom::RequestContextFrameType::kNone)
-    request_id = IdentifiersFactory::LoaderId(loader);
-
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
-  value->SetString("requestId", request_id);
+  auto value = std::make_unique<TracedValue>();
+  value->SetString("requestId",
+                   IdentifiersFactory::RequestId(loader, identifier));
   value->SetString("frame", IdentifiersFactory::FrameId(frame));
   value->SetString("url", request.Url().GetString());
   value->SetString("requestMethod", request.HttpMethod());
@@ -763,9 +746,29 @@ std::unique_ptr<TracedValue> InspectorSendRequestEvent::Data(
   return value;
 }
 
+std::unique_ptr<TracedValue> inspector_send_navigation_request_event::Data(
+    DocumentLoader* loader,
+    uint64_t identifier,
+    LocalFrame* frame,
+    const KURL& url,
+    const AtomicString& http_method) {
+  auto value = std::make_unique<TracedValue>();
+  value->SetString("requestId", IdentifiersFactory::LoaderId(loader));
+  value->SetString("frame", IdentifiersFactory::FrameId(frame));
+  value->SetString("url", url.GetString());
+  value->SetString("requestMethod", http_method);
+  const char* priority =
+      ResourcePriorityString(ResourceLoadPriority::kVeryHigh);
+  if (priority)
+    value->SetString("priority", priority);
+  SetCallStack(value.get());
+  return value;
+}
+
 namespace {
 void RecordTiming(const ResourceLoadTiming& timing, TracedValue* value) {
-  value->SetDouble("requestTime", TimeTicksInSeconds(timing.RequestTime()));
+  value->SetDouble("requestTime",
+                   timing.RequestTime().since_origin().InSecondsF());
   value->SetDouble("proxyStart",
                    timing.CalculateMillisecondDelta(timing.ProxyStart()));
   value->SetDouble("proxyEnd",
@@ -790,19 +793,19 @@ void RecordTiming(const ResourceLoadTiming& timing, TracedValue* value) {
                    timing.CalculateMillisecondDelta(timing.SendEnd()));
   value->SetDouble("receiveHeadersEnd", timing.CalculateMillisecondDelta(
                                             timing.ReceiveHeadersEnd()));
-  value->SetDouble("pushStart", TimeTicksInSeconds(timing.PushStart()));
-  value->SetDouble("pushEnd", TimeTicksInSeconds(timing.PushEnd()));
+  value->SetDouble("pushStart", timing.PushStart().since_origin().InSecondsF());
+  value->SetDouble("pushEnd", timing.PushEnd().since_origin().InSecondsF());
 }
 }  // namespace
 
-std::unique_ptr<TracedValue> InspectorReceiveResponseEvent::Data(
+std::unique_ptr<TracedValue> inspector_receive_response_event::Data(
     DocumentLoader* loader,
-    unsigned long identifier,
+    uint64_t identifier,
     LocalFrame* frame,
     const ResourceResponse& response) {
   String request_id = IdentifiersFactory::RequestId(loader, identifier);
 
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("requestId", request_id);
   value->SetString("frame", IdentifiersFactory::FrameId(frame));
   value->SetInteger("statusCode", response.HttpStatusCode());
@@ -820,36 +823,45 @@ std::unique_ptr<TracedValue> InspectorReceiveResponseEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorReceiveDataEvent::Data(
+std::unique_ptr<TracedValue> inspector_receive_data_event::Data(
     DocumentLoader* loader,
-    unsigned long identifier,
+    uint64_t identifier,
     LocalFrame* frame,
-    int encoded_data_length) {
+    uint64_t encoded_data_length) {
   String request_id = IdentifiersFactory::RequestId(loader, identifier);
 
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("requestId", request_id);
   value->SetString("frame", IdentifiersFactory::FrameId(frame));
-  value->SetInteger("encodedDataLength", encoded_data_length);
+  value->SetDouble("encodedDataLength", encoded_data_length);
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorResourceFinishEvent::Data(
+std::unique_ptr<TracedValue> inspector_resource_finish_event::Data(
     DocumentLoader* loader,
-    unsigned long identifier,
-    TimeTicks finish_time,
+    uint64_t identifier,
+    base::TimeTicks finish_time,
     bool did_fail,
     int64_t encoded_data_length,
     int64_t decoded_body_length) {
   String request_id = IdentifiersFactory::RequestId(loader, identifier);
 
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("requestId", request_id);
   value->SetBoolean("didFail", did_fail);
   value->SetDouble("encodedDataLength", encoded_data_length);
   value->SetDouble("decodedBodyLength", decoded_body_length);
   if (!finish_time.is_null())
-    value->SetDouble("finishTime", TimeTicksInSeconds(finish_time));
+    value->SetDouble("finishTime", finish_time.since_origin().InSecondsF());
+  return value;
+}
+
+std::unique_ptr<TracedValue> inspector_mark_resource_cached_event::Data(
+    DocumentLoader* loader,
+    uint64_t identifier) {
+  auto value = std::make_unique<TracedValue>();
+  String request_id = IdentifiersFactory::RequestId(loader, identifier);
+  value->SetString("requestId", request_id);
   return value;
 }
 
@@ -861,17 +873,17 @@ static LocalFrame* FrameForExecutionContext(ExecutionContext* context) {
 
 static std::unique_ptr<TracedValue> GenericTimerData(ExecutionContext* context,
                                                      int timer_id) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetInteger("timerId", timer_id);
   if (LocalFrame* frame = FrameForExecutionContext(context))
     value->SetString("frame", IdentifiersFactory::FrameId(frame));
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorTimerInstallEvent::Data(
+std::unique_ptr<TracedValue> inspector_timer_install_event::Data(
     ExecutionContext* context,
     int timer_id,
-    TimeDelta timeout,
+    base::TimeDelta timeout,
     bool single_shot) {
   std::unique_ptr<TracedValue> value = GenericTimerData(context, timer_id);
   value->SetDouble("timeout", timeout.InMillisecondsF());
@@ -880,7 +892,7 @@ std::unique_ptr<TracedValue> InspectorTimerInstallEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorTimerRemoveEvent::Data(
+std::unique_ptr<TracedValue> inspector_timer_remove_event::Data(
     ExecutionContext* context,
     int timer_id) {
   std::unique_ptr<TracedValue> value = GenericTimerData(context, timer_id);
@@ -888,22 +900,22 @@ std::unique_ptr<TracedValue> InspectorTimerRemoveEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorTimerFireEvent::Data(
+std::unique_ptr<TracedValue> inspector_timer_fire_event::Data(
     ExecutionContext* context,
     int timer_id) {
   return GenericTimerData(context, timer_id);
 }
 
-std::unique_ptr<TracedValue> InspectorAnimationFrameEvent::Data(
+std::unique_ptr<TracedValue> inspector_animation_frame_event::Data(
     ExecutionContext* context,
     int callback_id) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetInteger("id", callback_id);
   if (auto* document = DynamicTo<Document>(context)) {
     value->SetString("frame",
                      IdentifiersFactory::FrameId(document->GetFrame()));
-  } else if (context->IsWorkerGlobalScope()) {
-    value->SetString("worker", ToHexString(ToWorkerGlobalScope(context)));
+  } else if (auto* scope = DynamicTo<WorkerGlobalScope>(context)) {
+    value->SetString("worker", ToHexString(scope));
   }
   SetCallStack(value.get());
   return value;
@@ -911,7 +923,7 @@ std::unique_ptr<TracedValue> InspectorAnimationFrameEvent::Data(
 
 std::unique_ptr<TracedValue> GenericIdleCallbackEvent(ExecutionContext* context,
                                                       int id) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetInteger("id", id);
   if (LocalFrame* frame = FrameForExecutionContext(context))
     value->SetString("frame", IdentifiersFactory::FrameId(frame));
@@ -919,7 +931,7 @@ std::unique_ptr<TracedValue> GenericIdleCallbackEvent(ExecutionContext* context,
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorIdleCallbackRequestEvent::Data(
+std::unique_ptr<TracedValue> inspector_idle_callback_request_event::Data(
     ExecutionContext* context,
     int id,
     double timeout) {
@@ -928,13 +940,13 @@ std::unique_ptr<TracedValue> InspectorIdleCallbackRequestEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorIdleCallbackCancelEvent::Data(
+std::unique_ptr<TracedValue> inspector_idle_callback_cancel_event::Data(
     ExecutionContext* context,
     int id) {
   return GenericIdleCallbackEvent(context, id);
 }
 
-std::unique_ptr<TracedValue> InspectorIdleCallbackFireEvent::Data(
+std::unique_ptr<TracedValue> inspector_idle_callback_fire_event::Data(
     ExecutionContext* context,
     int id,
     double allotted_milliseconds,
@@ -945,17 +957,17 @@ std::unique_ptr<TracedValue> InspectorIdleCallbackFireEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorParseAuthorStyleSheetEvent::Data(
+std::unique_ptr<TracedValue> inspector_parse_author_style_sheet_event::Data(
     const CSSStyleSheetResource* cached_style_sheet) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("styleSheetUrl", cached_style_sheet->Url().GetString());
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorXhrReadyStateChangeEvent::Data(
+std::unique_ptr<TracedValue> inspector_xhr_ready_state_change_event::Data(
     ExecutionContext* context,
     XMLHttpRequest* request) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("url", request->Url().GetString());
   value->SetInteger("readyState", request->readyState());
   if (LocalFrame* frame = FrameForExecutionContext(context))
@@ -964,10 +976,10 @@ std::unique_ptr<TracedValue> InspectorXhrReadyStateChangeEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorXhrLoadEvent::Data(
+std::unique_ptr<TracedValue> inspector_xhr_load_event::Data(
     ExecutionContext* context,
     XMLHttpRequest* request) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("url", request->Url().GetString());
   if (LocalFrame* frame = FrameForExecutionContext(context))
     value->SetString("frame", IdentifiersFactory::FrameId(frame));
@@ -981,50 +993,22 @@ static FloatPoint LocalCoordToFloatPoint(LocalFrameView* view,
 }
 
 static void LocalToPageQuad(const LayoutObject& layout_object,
-                            const LayoutRect& rect,
+                            const PhysicalRect& rect,
                             FloatQuad* quad) {
   LocalFrame* frame = layout_object.GetFrame();
   LocalFrameView* view = frame->View();
-  FloatQuad absolute =
-      layout_object.LocalToAbsoluteQuad(FloatQuad(FloatRect(rect)));
+  FloatQuad absolute = layout_object.LocalRectToAbsoluteQuad(rect);
   quad->SetP1(LocalCoordToFloatPoint(view, absolute.P1()));
   quad->SetP2(LocalCoordToFloatPoint(view, absolute.P2()));
   quad->SetP3(LocalCoordToFloatPoint(view, absolute.P3()));
   quad->SetP4(LocalCoordToFloatPoint(view, absolute.P4()));
 }
 
-const char InspectorLayerInvalidationTrackingEvent::
-    kSquashingLayerGeometryWasUpdated[] =
-        "Squashing layer geometry was updated";
-const char InspectorLayerInvalidationTrackingEvent::kAddedToSquashingLayer[] =
-    "The layer may have been added to an already-existing squashing layer";
-const char
-    InspectorLayerInvalidationTrackingEvent::kRemovedFromSquashingLayer[] =
-        "Removed the layer from a squashing layer";
-const char InspectorLayerInvalidationTrackingEvent::kReflectionLayerChanged[] =
-    "Reflection layer change";
-const char InspectorLayerInvalidationTrackingEvent::kNewCompositedLayer[] =
-    "Assigned a new composited layer";
-
-std::unique_ptr<TracedValue> InspectorLayerInvalidationTrackingEvent::Data(
-    const PaintLayer* layer,
-    const char* reason) {
-  const LayoutObject& paint_invalidation_container =
-      layer->GetLayoutObject().ContainerForPaintInvalidation();
-
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
-  value->SetString("frame", IdentifiersFactory::FrameId(
-                                paint_invalidation_container.GetFrame()));
-  SetGeneratingNodeInfo(value.get(), &paint_invalidation_container, "paintId");
-  value->SetString("reason", reason);
-  return value;
-}
-
-std::unique_ptr<TracedValue> InspectorPaintEvent::Data(
+std::unique_ptr<TracedValue> inspector_paint_event::Data(
     LayoutObject* layout_object,
-    const LayoutRect& clip_rect,
+    const PhysicalRect& clip_rect,
     const GraphicsLayer* graphics_layer) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("frame",
                    IdentifiersFactory::FrameId(layout_object->GetFrame()));
   FloatQuad quad;
@@ -1038,7 +1022,7 @@ std::unique_ptr<TracedValue> InspectorPaintEvent::Data(
 }
 
 std::unique_ptr<TracedValue> FrameEventData(LocalFrame* frame) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   bool is_main_frame = frame && frame->IsMainFrame();
   value->SetBoolean("isMainFrame", is_main_frame);
   // TODO(dgozman): this does not work with OOPIF, so everyone who
@@ -1054,39 +1038,41 @@ void FillCommonFrameData(TracedValue* frame_data, LocalFrame* frame) {
   frame_data->SetString("name", frame->Tree().GetName());
 
   FrameOwner* owner = frame->Owner();
-  if (owner && owner->IsLocal()) {
-    frame_data->SetInteger("nodeId", IdentifiersFactory::IntIdForNode(
-                                         ToHTMLFrameOwnerElement(owner)));
+  if (auto* frame_owner_element = DynamicTo<HTMLFrameOwnerElement>(owner)) {
+    frame_data->SetInteger(
+        "nodeId", IdentifiersFactory::IntIdForNode(frame_owner_element));
   }
   Frame* parent = frame->Tree().Parent();
-  if (parent && parent->IsLocalFrame())
+  if (IsA<LocalFrame>(parent))
     frame_data->SetString("parent", IdentifiersFactory::FrameId(parent));
 }
 
-std::unique_ptr<TracedValue> InspectorCommitLoadEvent::Data(LocalFrame* frame) {
+std::unique_ptr<TracedValue> inspector_commit_load_event::Data(
+    LocalFrame* frame) {
   std::unique_ptr<TracedValue> frame_data = FrameEventData(frame);
   FillCommonFrameData(frame_data.get(), frame);
   return frame_data;
 }
 
-std::unique_ptr<TracedValue> InspectorMarkLoadEvent::Data(LocalFrame* frame) {
+std::unique_ptr<TracedValue> inspector_mark_load_event::Data(
+    LocalFrame* frame) {
   std::unique_ptr<TracedValue> frame_data = FrameEventData(frame);
   frame_data->SetString("frame", IdentifiersFactory::FrameId(frame));
   return frame_data;
 }
 
-std::unique_ptr<TracedValue> InspectorScrollLayerEvent::Data(
+std::unique_ptr<TracedValue> inspector_scroll_layer_event::Data(
     LayoutObject* layout_object) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("frame",
                    IdentifiersFactory::FrameId(layout_object->GetFrame()));
   SetGeneratingNodeInfo(value.get(), layout_object, "nodeId");
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorUpdateLayerTreeEvent::Data(
+std::unique_ptr<TracedValue> inspector_update_layer_tree_event::Data(
     LocalFrame* frame) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("frame", IdentifiersFactory::FrameId(frame));
   return value;
 }
@@ -1094,7 +1080,7 @@ std::unique_ptr<TracedValue> InspectorUpdateLayerTreeEvent::Data(
 namespace {
 std::unique_ptr<TracedValue> FillLocation(const String& url,
                                           const TextPosition& text_position) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("url", url);
   value->SetInteger("lineNumber", text_position.line_.OneBasedInt());
   value->SetInteger("columnNumber", text_position.column_.OneBasedInt());
@@ -1102,7 +1088,7 @@ std::unique_ptr<TracedValue> FillLocation(const String& url,
 }
 }  // namespace
 
-std::unique_ptr<TracedValue> InspectorEvaluateScriptEvent::Data(
+std::unique_ptr<TracedValue> inspector_evaluate_script_event::Data(
     LocalFrame* frame,
     const String& url,
     const TextPosition& text_position) {
@@ -1112,25 +1098,21 @@ std::unique_ptr<TracedValue> InspectorEvaluateScriptEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorParseScriptEvent::Data(
-    unsigned long identifier,
+std::unique_ptr<TracedValue> inspector_parse_script_event::Data(
+    uint64_t identifier,
     const String& url) {
   String request_id = IdentifiersFactory::RequestId(nullptr, identifier);
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("requestId", request_id);
   value->SetString("url", url);
   return value;
 }
 
-InspectorCompileScriptEvent::V8CacheResult::ProduceResult::ProduceResult(
-    v8::ScriptCompiler::CompileOptions produce_options,
+inspector_compile_script_event::V8CacheResult::ProduceResult::ProduceResult(
     int cache_size)
-    : produce_options(produce_options), cache_size(cache_size) {
-  DCHECK(produce_options == v8::ScriptCompiler::kNoCompileOptions ||
-         produce_options == v8::ScriptCompiler::kEagerCompile);
-}
+    : cache_size(cache_size) {}
 
-InspectorCompileScriptEvent::V8CacheResult::ConsumeResult::ConsumeResult(
+inspector_compile_script_event::V8CacheResult::ConsumeResult::ConsumeResult(
     v8::ScriptCompiler::CompileOptions consume_options,
     int cache_size,
     bool rejected)
@@ -1140,13 +1122,13 @@ InspectorCompileScriptEvent::V8CacheResult::ConsumeResult::ConsumeResult(
   DCHECK_EQ(consume_options, v8::ScriptCompiler::kConsumeCodeCache);
 }
 
-InspectorCompileScriptEvent::V8CacheResult::V8CacheResult(
+inspector_compile_script_event::V8CacheResult::V8CacheResult(
     base::Optional<ProduceResult> produce_result,
     base::Optional<ConsumeResult> consume_result)
     : produce_result(std::move(produce_result)),
       consume_result(std::move(consume_result)) {}
 
-std::unique_ptr<TracedValue> InspectorCompileScriptEvent::Data(
+std::unique_ptr<TracedValue> inspector_compile_script_event::Data(
     const String& url,
     const TextPosition& text_position,
     const V8CacheResult& cache_result,
@@ -1155,9 +1137,6 @@ std::unique_ptr<TracedValue> InspectorCompileScriptEvent::Data(
   std::unique_ptr<TracedValue> value = FillLocation(url, text_position);
 
   if (cache_result.produce_result) {
-    value->SetString(
-        "cacheProduceOptions",
-        CompileOptionsString(cache_result.produce_result->produce_options));
     value->SetInteger("producedCacheSize",
                       cache_result.produce_result->cache_size);
   }
@@ -1178,10 +1157,10 @@ std::unique_ptr<TracedValue> InspectorCompileScriptEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorFunctionCallEvent::Data(
+std::unique_ptr<TracedValue> inspector_function_call_event::Data(
     ExecutionContext* context,
     const v8::Local<v8::Function>& function) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   if (LocalFrame* frame = FrameForExecutionContext(context))
     value->SetString("frame", IdentifiersFactory::FrameId(frame));
 
@@ -1203,11 +1182,11 @@ std::unique_ptr<TracedValue> InspectorFunctionCallEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorPaintImageEvent::Data(
+std::unique_ptr<TracedValue> inspector_paint_image_event::Data(
     const LayoutImage& layout_image,
     const FloatRect& src_rect,
     const FloatRect& dest_rect) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   SetGeneratingNodeInfo(value.get(), &layout_image, "nodeId");
   if (const ImageResourceContent* resource = layout_image.CachedImage())
     value->SetString("url", resource->Url().GetString());
@@ -1222,22 +1201,22 @@ std::unique_ptr<TracedValue> InspectorPaintImageEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorPaintImageEvent::Data(
+std::unique_ptr<TracedValue> inspector_paint_image_event::Data(
     const LayoutObject& owning_layout_object,
     const StyleImage& style_image) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   SetGeneratingNodeInfo(value.get(), &owning_layout_object, "nodeId");
   if (const ImageResourceContent* resource = style_image.CachedImage())
     value->SetString("url", resource->Url().GetString());
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorPaintImageEvent::Data(
+std::unique_ptr<TracedValue> inspector_paint_image_event::Data(
     Node* node,
     const StyleImage& style_image,
     const FloatRect& src_rect,
     const FloatRect& dest_rect) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   if (node)
     SetNodeInfo(value.get(), node, "nodeId", nullptr);
   if (const ImageResourceContent* resource = style_image.CachedImage())
@@ -1253,10 +1232,10 @@ std::unique_ptr<TracedValue> InspectorPaintImageEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorPaintImageEvent::Data(
+std::unique_ptr<TracedValue> inspector_paint_image_event::Data(
     const LayoutObject* owning_layout_object,
     const ImageResourceContent& image_resource) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   SetGeneratingNodeInfo(value.get(), owning_layout_object, "nodeId");
   value->SetString("url", image_resource.Url().GetString());
   return value;
@@ -1268,8 +1247,8 @@ static size_t UsedHeapSize() {
   return heap_statistics.used_heap_size();
 }
 
-std::unique_ptr<TracedValue> InspectorUpdateCountersEvent::Data() {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+std::unique_ptr<TracedValue> inspector_update_counters_event::Data() {
+  auto value = std::make_unique<TracedValue>();
   if (IsMainThread()) {
     value->SetInteger("documents", InstanceCounters::CounterValue(
                                        InstanceCounters::kDocumentCounter));
@@ -1283,46 +1262,47 @@ std::unique_ptr<TracedValue> InspectorUpdateCountersEvent::Data() {
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorInvalidateLayoutEvent::Data(
+std::unique_ptr<TracedValue> inspector_invalidate_layout_event::Data(
     LocalFrame* frame) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("frame", IdentifiersFactory::FrameId(frame));
   SetCallStack(value.get());
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorRecalculateStylesEvent::Data(
+std::unique_ptr<TracedValue> inspector_recalculate_styles_event::Data(
     LocalFrame* frame) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("frame", IdentifiersFactory::FrameId(frame));
   SetCallStack(value.get());
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorEventDispatchEvent::Data(
+std::unique_ptr<TracedValue> inspector_event_dispatch_event::Data(
     const Event& event) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("type", event.type());
   SetCallStack(value.get());
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorTimeStampEvent::Data(
+std::unique_ptr<TracedValue> inspector_time_stamp_event::Data(
     ExecutionContext* context,
     const String& message) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("message", message);
   if (LocalFrame* frame = FrameForExecutionContext(context))
     value->SetString("frame", IdentifiersFactory::FrameId(frame));
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorTracingSessionIdForWorkerEvent::Data(
+std::unique_ptr<TracedValue>
+inspector_tracing_session_id_for_worker_event::Data(
     const base::UnguessableToken& worker_devtools_token,
     const base::UnguessableToken& parent_devtools_token,
     const KURL& url,
     PlatformThreadId worker_thread_id) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("frame",
                    IdentifiersFactory::IdFromToken(parent_devtools_token));
   value->SetString("url", url.GetString());
@@ -1332,39 +1312,39 @@ std::unique_ptr<TracedValue> InspectorTracingSessionIdForWorkerEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorTracingStartedInFrame::Data(
+std::unique_ptr<TracedValue> inspector_tracing_started_in_frame::Data(
     const String& session_id,
     LocalFrame* frame) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("sessionId", session_id);
   value->SetString("page",
                    IdentifiersFactory::FrameId(&frame->LocalFrameRoot()));
   value->SetBoolean("persistentIds", true);
   value->BeginArray("frames");
   for (Frame* f = frame; f; f = f->Tree().TraverseNext(frame)) {
-    if (!f->IsLocalFrame())
+    auto* local_frame = DynamicTo<LocalFrame>(f);
+    if (!local_frame)
       continue;
     value->BeginDictionary();
-    FillCommonFrameData(value.get(), ToLocalFrame(f));
+    FillCommonFrameData(value.get(), local_frame);
     value->EndDictionary();
   }
   value->EndArray();
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorSetLayerTreeId::Data(LocalFrame* frame) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+std::unique_ptr<TracedValue> inspector_set_layer_tree_id::Data(
+    LocalFrame* frame) {
+  auto value = std::make_unique<TracedValue>();
   value->SetString("frame", IdentifiersFactory::FrameId(frame));
-  WebLayerTreeView* layerTreeView =
-      frame->GetPage()->GetChromeClient().GetWebLayerTreeView(frame);
   value->SetInteger("layerTreeId",
-                    layerTreeView ? layerTreeView->LayerTreeId() : 0);
+                    frame->GetPage()->GetChromeClient().GetLayerTreeId(*frame));
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorAnimationEvent::Data(
+std::unique_ptr<TracedValue> inspector_animation_event::Data(
     const Animation& animation) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("id", String::Number(animation.SequenceNumber()));
   value->SetString("state", animation.playState());
   if (const AnimationEffect* effect = animation.effect()) {
@@ -1377,18 +1357,18 @@ std::unique_ptr<TracedValue> InspectorAnimationEvent::Data(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorAnimationStateEvent::Data(
+std::unique_ptr<TracedValue> inspector_animation_state_event::Data(
     const Animation& animation) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->SetString("state", animation.playState());
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorHitTestEvent::EndData(
+std::unique_ptr<TracedValue> inspector_hit_test_event::EndData(
     const HitTestRequest& request,
     const HitTestLocation& location,
     const HitTestResult& result) {
-  std::unique_ptr<TracedValue> value(TracedValue::Create());
+  auto value(std::make_unique<TracedValue>());
   value->SetInteger("x", location.RoundedPoint().X());
   value->SetInteger("y", location.RoundedPoint().Y());
   if (location.IsRectBasedTest())
@@ -1406,8 +1386,9 @@ std::unique_ptr<TracedValue> InspectorHitTestEvent::EndData(
   return value;
 }
 
-std::unique_ptr<TracedValue> InspectorAsyncTask::Data(const StringView& name) {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+std::unique_ptr<TracedValue> inspector_async_task::Data(
+    const StringView& name) {
+  auto value = std::make_unique<TracedValue>();
   value->SetString("name", name.ToString());
   return value;
 }

@@ -8,14 +8,15 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
 TEST(TreeScopeTest, CommonAncestorOfSameTrees) {
-  Document* document = Document::CreateForTest();
+  auto* document = MakeGarbageCollected<Document>();
   EXPECT_EQ(document, document->CommonAncestorTreeScope(*document));
 
-  Element* html = document->CreateRawElement(HTMLNames::htmlTag);
+  Element* html = document->CreateRawElement(html_names::kHTMLTag);
   document->AppendChild(html);
   ShadowRoot& shadow_root = html->CreateV0ShadowRootForTesting();
   EXPECT_EQ(shadow_root, shadow_root.CommonAncestorTreeScope(shadow_root));
@@ -26,8 +27,8 @@ TEST(TreeScopeTest, CommonAncestorOfInclusiveTrees) {
   //     |      : Common ancestor is document.
   // shadowRoot
 
-  Document* document = Document::CreateForTest();
-  Element* html = document->CreateRawElement(HTMLNames::htmlTag);
+  auto* document = MakeGarbageCollected<Document>();
+  Element* html = document->CreateRawElement(html_names::kHTMLTag);
   document->AppendChild(html);
   ShadowRoot& shadow_root = html->CreateV0ShadowRootForTesting();
 
@@ -40,12 +41,12 @@ TEST(TreeScopeTest, CommonAncestorOfSiblingTrees) {
   //   /    \  : Common ancestor is document.
   //  A      B
 
-  Document* document = Document::CreateForTest();
-  Element* html = document->CreateRawElement(HTMLNames::htmlTag);
+  auto* document = MakeGarbageCollected<Document>();
+  Element* html = document->CreateRawElement(html_names::kHTMLTag);
   document->AppendChild(html);
-  Element* head = document->CreateRawElement(HTMLNames::headTag);
+  Element* head = document->CreateRawElement(html_names::kHeadTag);
   html->AppendChild(head);
-  Element* body = document->CreateRawElement(HTMLNames::bodyTag);
+  Element* body = document->CreateRawElement(html_names::kBodyTag);
   html->AppendChild(body);
 
   ShadowRoot& shadow_root_a = head->CreateV0ShadowRootForTesting();
@@ -62,18 +63,18 @@ TEST(TreeScopeTest, CommonAncestorOfTreesAtDifferentDepths) {
   //  /
   // A
 
-  Document* document = Document::CreateForTest();
-  Element* html = document->CreateRawElement(HTMLNames::htmlTag);
+  auto* document = MakeGarbageCollected<Document>();
+  Element* html = document->CreateRawElement(html_names::kHTMLTag);
   document->AppendChild(html);
-  Element* head = document->CreateRawElement(HTMLNames::headTag);
+  Element* head = document->CreateRawElement(html_names::kHeadTag);
   html->AppendChild(head);
-  Element* body = document->CreateRawElement(HTMLNames::bodyTag);
+  Element* body = document->CreateRawElement(html_names::kBodyTag);
   html->AppendChild(body);
 
   ShadowRoot& shadow_root_y = head->CreateV0ShadowRootForTesting();
   ShadowRoot& shadow_root_b = body->CreateV0ShadowRootForTesting();
 
-  Element* div_in_y = document->CreateRawElement(HTMLNames::divTag);
+  Element* div_in_y = document->CreateRawElement(html_names::kDivTag);
   shadow_root_y.AppendChild(div_in_y);
   ShadowRoot& shadow_root_a = div_in_y->CreateV0ShadowRootForTesting();
 
@@ -82,8 +83,8 @@ TEST(TreeScopeTest, CommonAncestorOfTreesAtDifferentDepths) {
 }
 
 TEST(TreeScopeTest, CommonAncestorOfTreesInDifferentDocuments) {
-  Document* document1 = Document::CreateForTest();
-  Document* document2 = Document::CreateForTest();
+  auto* document1 = MakeGarbageCollected<Document>();
+  auto* document2 = MakeGarbageCollected<Document>();
   EXPECT_EQ(nullptr, document1->CommonAncestorTreeScope(*document2));
   EXPECT_EQ(nullptr, document2->CommonAncestorTreeScope(*document1));
 }

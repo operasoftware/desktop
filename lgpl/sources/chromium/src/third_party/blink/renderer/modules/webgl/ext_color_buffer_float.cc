@@ -10,6 +10,10 @@ EXTColorBufferFloat::EXTColorBufferFloat(WebGLRenderingContextBase* context)
     : WebGLExtension(context) {
   context->ExtensionsUtil()->EnsureExtensionEnabled(
       "GL_EXT_color_buffer_float");
+
+  // https://github.com/KhronosGroup/WebGL/pull/2830
+  // Spec requires EXT_float_blend needs to be turned on implicitly here
+  context->ExtensionsUtil()->EnsureExtensionEnabled("GL_EXT_float_blend");
 }
 
 WebGLExtensionName EXTColorBufferFloat::GetName() const {
@@ -18,7 +22,7 @@ WebGLExtensionName EXTColorBufferFloat::GetName() const {
 
 EXTColorBufferFloat* EXTColorBufferFloat::Create(
     WebGLRenderingContextBase* context) {
-  return new EXTColorBufferFloat(context);
+  return MakeGarbageCollected<EXTColorBufferFloat>(context);
 }
 
 bool EXTColorBufferFloat::Supported(WebGLRenderingContextBase* context) {

@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/modules/webusb/usb_interface.h"
 
-#include "device/usb/public/mojom/device.mojom-blink.h"
+#include "services/device/public/mojom/usb_device.mojom-blink.h"
 #include "third_party/blink/renderer/modules/webusb/usb_alternate_interface.h"
 #include "third_party/blink/renderer/modules/webusb/usb_configuration.h"
 #include "third_party/blink/renderer/modules/webusb/usb_device.h"
@@ -14,8 +14,8 @@ namespace blink {
 
 USBInterface* USBInterface::Create(const USBConfiguration* configuration,
                                    wtf_size_t interface_index) {
-  return new USBInterface(configuration->Device(), configuration->Index(),
-                          interface_index);
+  return MakeGarbageCollected<USBInterface>(
+      configuration->Device(), configuration->Index(), interface_index);
 }
 
 USBInterface* USBInterface::Create(const USBConfiguration* configuration,
@@ -23,9 +23,10 @@ USBInterface* USBInterface::Create(const USBConfiguration* configuration,
                                    ExceptionState& exception_state) {
   const auto& interfaces = configuration->Info().interfaces;
   for (wtf_size_t i = 0; i < interfaces.size(); ++i) {
-    if (interfaces[i]->interface_number == interface_number)
-      return new USBInterface(configuration->Device(), configuration->Index(),
-                              i);
+    if (interfaces[i]->interface_number == interface_number) {
+      return MakeGarbageCollected<USBInterface>(configuration->Device(),
+                                                configuration->Index(), i);
+    }
   }
   exception_state.ThrowRangeError("Invalid interface index.");
   return nullptr;

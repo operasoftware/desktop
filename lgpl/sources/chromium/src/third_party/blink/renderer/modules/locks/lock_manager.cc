@@ -5,21 +5,26 @@
 #include "third_party/blink/renderer/modules/locks/lock_manager.h"
 
 #include <algorithm>
-#include "mojo/public/cpp/bindings/binding.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_lock_granted_callback.h"
 #include "third_party/blink/renderer/core/dom/abort_signal.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/modules/locks/lock.h"
 #include "third_party/blink/renderer/modules/locks/lock_info.h"
 #include "third_party/blink/renderer/modules/locks/lock_manager_snapshot.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/scheduling_policy.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -30,17 +35,18 @@ namespace {
 
 constexpr char kRequestAbortedMessage[] = "The request was aborted.";
 
-LockInfo ToLockInfo(const mojom::blink::LockInfoPtr& record) {
-  LockInfo info;
-  info.setMode(Lock::ModeToString(record->mode));
-  info.setName(record->name);
-  info.setClientId(record->client_id);
+LockInfo* ToLockInfo(const mojom::blink::LockInfoPtr& record) {
+  LockInfo* info = LockInfo::Create();
+  ;
+  info->setMode(Lock::ModeToString(record->mode));
+  info->setName(record->name);
+  info->setClientId(record->client_id);
   return info;
 }
 
-HeapVector<LockInfo> ToLockInfos(
+HeapVector<Member<LockInfo>> ToLockInfos(
     const Vector<mojom::blink::LockInfoPtr>& records) {
-  HeapVector<LockInfo> out;
+  HeapVector<Member<LockInfo>> out;
   out.ReserveInitialCapacity(records.size());
   for (const auto& record : records)
     out.push_back(ToLockInfo(record));
@@ -50,27 +56,36 @@ HeapVector<LockInfo> ToLockInfos(
 }  // namespace
 
 class LockManager::LockRequestImpl final
-    : public GarbageCollectedFinalized<LockRequestImpl>,
+    : public GarbageCollected<LockRequestImpl>,
       public NameClient,
       public mojom::blink::LockRequest {
-  WTF_MAKE_NONCOPYABLE(LockRequestImpl);
-  EAGERLY_FINALIZE();
+  USING_PRE_FINALIZER(LockManager::LockRequestImpl, Dispose);
 
  public:
-  LockRequestImpl(V8LockGrantedCallback* callback,
-                  ScriptPromiseResolver* resolver,
-                  const String& name,
-                  mojom::blink::LockMode mode,
-                  mojom::blink::LockRequestRequest request,
-                  LockManager* manager)
+  LockRequestImpl(
+      V8LockGrantedCallback* callback,
+      ScriptPromiseResolver* resolver,
+      const String& name,
+      mojom::blink::LockMode mode,
+      mojo::PendingAssociatedReceiver<mojom::blink::LockRequest> receiver,
+      LockManager* manager)
       : callback_(callback),
         resolver_(resolver),
         name_(name),
         mode_(mode),
-        binding_(this, std::move(request)),
+        receiver_(
+            this,
+            std::move(receiver),
+            manager->GetExecutionContext()->GetTaskRunner(TaskType::kWebLocks)),
         manager_(manager) {}
 
   ~LockRequestImpl() override = default;
+
+  void Dispose() {
+    // This Impl might still be bound to a LockRequest, so we reset
+    // the receiver before destroying the object.
+    receiver_.reset();
+  }
 
   void Trace(blink::Visitor* visitor) {
     visitor->Trace(resolver_);
@@ -84,7 +99,7 @@ class LockManager::LockRequestImpl final
 
   // Called to immediately close the pipe which signals the back-end,
   // unblocking further requests, without waiting for GC finalize the object.
-  void Cancel() { binding_.Close(); }
+  void Cancel() { receiver_.reset(); }
 
   void Abort(const String& reason) override {
     // Abort signal after acquisition should be ignored.
@@ -92,22 +107,20 @@ class LockManager::LockRequestImpl final
       return;
 
     manager_->RemovePendingRequest(this);
-    binding_.Close();
+    receiver_.reset();
 
     if (!resolver_->GetScriptState()->ContextIsValid())
       return;
 
-    resolver_->Reject(
-        DOMException::Create(DOMExceptionCode::kAbortError, reason));
+    resolver_->Reject(MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kAbortError, reason));
   }
 
   void Failed() override {
-    // Ensure a local reference to the callback's wrapper is retained, as it
-    // can no longer be traced once removed from |manager_|'s list.
-    auto* callback = ToV8PersistentCallbackFunction(callback_.Release());
+    auto* callback = callback_.Release();
 
     manager_->RemovePendingRequest(this);
-    binding_.Close();
+    receiver_.reset();
 
     ScriptState* script_state = resolver_->GetScriptState();
     if (!script_state->ContextIsValid())
@@ -125,16 +138,14 @@ class LockManager::LockRequestImpl final
     }
   }
 
-  void Granted(mojom::blink::LockHandlePtr handle) override {
-    DCHECK(binding_.is_bound());
-    DCHECK(handle.is_bound());
+  void Granted(mojo::PendingAssociatedRemote<mojom::blink::LockHandle>
+                   handle_remote) override {
+    DCHECK(receiver_.is_bound());
 
-    // Ensure a local reference to the callback's wrapper is retained, as it
-    // can no longer be traced once removed from |manager_|'s list.
-    auto* callback = ToV8PersistentCallbackFunction(callback_.Release());
+    auto* callback = callback_.Release();
 
     manager_->RemovePendingRequest(this);
-    binding_.Close();
+    receiver_.reset();
 
     ScriptState* script_state = resolver_->GetScriptState();
     if (!script_state->ContextIsValid()) {
@@ -142,8 +153,8 @@ class LockManager::LockRequestImpl final
       return;
     }
 
-    Lock* lock =
-        Lock::Create(script_state, name_, mode_, std::move(handle), manager_);
+    Lock* lock = Lock::Create(script_state, name_, mode_,
+                              std::move(handle_remote), manager_);
     manager_->held_locks_.insert(lock);
 
     ScriptState::Scope scope(script_state);
@@ -161,7 +172,7 @@ class LockManager::LockRequestImpl final
 
  private:
   // Callback passed by script; invoked when the lock is granted.
-  TraceWrapperMember<V8LockGrantedCallback> callback_;
+  Member<V8LockGrantedCallback> callback_;
 
   // Rejects if the request was aborted, otherwise resolves/rejects with
   // |callback_|'s result.
@@ -173,12 +184,14 @@ class LockManager::LockRequestImpl final
   // Held to stamp the Lock object's |mode| property.
   mojom::blink::LockMode mode_;
 
-  mojo::Binding<mojom::blink::LockRequest> binding_;
+  mojo::AssociatedReceiver<mojom::blink::LockRequest> receiver_;
 
   // The |manager_| keeps |this| alive until a response comes in and this is
   // registered. If the context is destroyed then |manager_| will dispose of
   // |this| which terminates the request on the service side.
   Member<LockManager> manager_;
+
+  DISALLOW_COPY_AND_ASSIGN(LockRequestImpl);
 };
 
 LockManager::LockManager(ExecutionContext* context)
@@ -188,16 +201,25 @@ ScriptPromise LockManager::request(ScriptState* script_state,
                                    const String& name,
                                    V8LockGrantedCallback* callback,
                                    ExceptionState& exception_state) {
-  return request(script_state, name, LockOptions(), callback, exception_state);
+  return request(script_state, name, LockOptions::Create(), callback,
+                 exception_state);
 }
 
 ScriptPromise LockManager::request(ScriptState* script_state,
                                    const String& name,
-                                   const LockOptions& options,
+                                   const LockOptions* options,
                                    V8LockGrantedCallback* callback,
                                    ExceptionState& exception_state) {
+  // Observed context may be gone if frame is detached.
+  if (!GetExecutionContext())
+    return ScriptPromise();
+
   ExecutionContext* context = ExecutionContext::From(script_state);
   DCHECK(context->IsContextThread());
+
+  context->GetScheduler()->RegisterStickyFeature(
+      blink::SchedulingPolicy::Feature::kWebLocks,
+      {blink::SchedulingPolicy::RecordMetricsForBackForwardCache()});
 
   // 5. If origin is an opaque origin, then reject promise with a
   // "SecurityError" DOMException.
@@ -210,16 +232,18 @@ ScriptPromise LockManager::request(ScriptState* script_state,
     UseCounter::Count(context, WebFeature::kFileAccessedLocks);
   }
 
-  if (!service_.get()) {
-    if (auto* provider = context->GetInterfaceProvider())
-      provider->GetInterface(mojo::MakeRequest(&service_));
-    if (!service_.get()) {
+  if (!service_.is_bound()) {
+    context->GetBrowserInterfaceBroker().GetInterface(
+        service_.BindNewPipeAndPassReceiver(
+            context->GetTaskRunner(TaskType::kMiscPlatformAPI)));
+
+    if (!service_.is_bound()) {
       exception_state.ThrowTypeError("Service not available.");
       return ScriptPromise();
     }
   }
 
-  mojom::blink::LockMode mode = Lock::StringToMode(options.mode());
+  mojom::blink::LockMode mode = Lock::StringToMode(options->mode());
 
   // 6. Otherwise, if name starts with U+002D HYPHEN-MINUS (-), then reject
   // promise with a "NotSupportedError" DOMException.
@@ -232,7 +256,7 @@ ScriptPromise LockManager::request(ScriptState* script_state,
   // 7. Otherwise, if both options’ steal dictionary member and option’s
   // ifAvailable dictionary member are true, then reject promise with a
   // "NotSupportedError" DOMException.
-  if (options.steal() && options.ifAvailable()) {
+  if (options->steal() && options->ifAvailable()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,
         "The 'steal' and 'ifAvailable' options cannot be used together.");
@@ -242,7 +266,7 @@ ScriptPromise LockManager::request(ScriptState* script_state,
   // 8. Otherwise, if options’ steal dictionary member is true and option’s mode
   // dictionary member is not "exclusive", then reject promise with a
   // "NotSupportedError" DOMException.
-  if (options.steal() && mode != mojom::blink::LockMode::EXCLUSIVE) {
+  if (options->steal() && mode != mojom::blink::LockMode::EXCLUSIVE) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,
         "The 'steal' option may only be used with 'exclusive' locks.");
@@ -253,13 +277,13 @@ ScriptPromise LockManager::request(ScriptState* script_state,
   // of options’ steal dictionary member or options’ ifAvailable dictionary
   // member is true, then reject promise with a "NotSupportedError"
   // DOMException.
-  if (options.hasSignal() && options.ifAvailable()) {
+  if (options->hasSignal() && options->ifAvailable()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,
         "The 'signal' and 'ifAvailable' options cannot be used together.");
     return ScriptPromise();
   }
-  if (options.hasSignal() && options.steal()) {
+  if (options->hasSignal() && options->steal()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,
         "The 'signal' and 'steal' options cannot be used together.");
@@ -268,42 +292,43 @@ ScriptPromise LockManager::request(ScriptState* script_state,
 
   // 10. Otherwise, if options’ signal dictionary member is present and its
   // aborted flag is set, then reject promise with an "AbortError" DOMException.
-  if (options.hasSignal() && options.signal()->aborted()) {
+  if (options->hasSignal() && options->signal()->aborted()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kAbortError,
                                       kRequestAbortedMessage);
     return ScriptPromise();
   }
 
   mojom::blink::LockManager::WaitMode wait =
-      options.steal()
-          ? mojom::blink::LockManager::WaitMode::PREEMPT
-          : options.ifAvailable() ? mojom::blink::LockManager::WaitMode::NO_WAIT
-                                  : mojom::blink::LockManager::WaitMode::WAIT;
+      options->steal() ? mojom::blink::LockManager::WaitMode::PREEMPT
+                       : options->ifAvailable()
+                             ? mojom::blink::LockManager::WaitMode::NO_WAIT
+                             : mojom::blink::LockManager::WaitMode::WAIT;
 
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  mojom::blink::LockRequestPtr request_ptr;
+  mojo::PendingAssociatedRemote<mojom::blink::LockRequest> request_remote;
   // 11.1. Let request be the result of running the steps to request a lock with
   // promise, the current agent, environment’s id, origin, callback, name,
   // options’ mode dictionary member, options’ ifAvailable dictionary member,
   // and options’ steal dictionary member.
-  LockRequestImpl* request = new LockRequestImpl(
-      callback, resolver, name, mode, mojo::MakeRequest(&request_ptr), this);
+  LockRequestImpl* request = MakeGarbageCollected<LockRequestImpl>(
+      callback, resolver, name, mode,
+      request_remote.InitWithNewEndpointAndPassReceiver(), this);
   AddPendingRequest(request);
 
   // 11.2. If options’ signal dictionary member is present, then add the
   // following abort steps to options’ signal dictionary member:
-  if (options.hasSignal()) {
+  if (options->hasSignal()) {
     // 11.2.1. Enqueue the steps to abort the request request to the lock task
     // queue.
     // 11.2.2. Reject promise with an "AbortError" DOMException.
-    options.signal()->AddAlgorithm(WTF::Bind(&LockRequestImpl::Abort,
-                                             WrapWeakPersistent(request),
-                                             String(kRequestAbortedMessage)));
+    options->signal()->AddAlgorithm(WTF::Bind(&LockRequestImpl::Abort,
+                                              WrapWeakPersistent(request),
+                                              String(kRequestAbortedMessage)));
   }
 
-  service_->RequestLock(name, mode, wait, std::move(request_ptr));
+  service_->RequestLock(name, mode, wait, std::move(request_remote));
 
   // 12. Return promise.
   return promise;
@@ -311,6 +336,10 @@ ScriptPromise LockManager::request(ScriptState* script_state,
 
 ScriptPromise LockManager::query(ScriptState* script_state,
                                  ExceptionState& exception_state) {
+  // Observed context may be gone if frame is detached.
+  if (!GetExecutionContext())
+    return ScriptPromise();
+
   ExecutionContext* context = ExecutionContext::From(script_state);
   DCHECK(context->IsContextThread());
 
@@ -323,25 +352,27 @@ ScriptPromise LockManager::query(ScriptState* script_state,
     UseCounter::Count(context, WebFeature::kFileAccessedLocks);
   }
 
-  if (!service_.get()) {
-    if (auto* provider = context->GetInterfaceProvider())
-      provider->GetInterface(mojo::MakeRequest(&service_));
-    if (!service_.get()) {
+  if (!service_.is_bound()) {
+    context->GetBrowserInterfaceBroker().GetInterface(
+        service_.BindNewPipeAndPassReceiver(
+            context->GetTaskRunner(TaskType::kMiscPlatformAPI)));
+
+    if (!service_.is_bound()) {
       exception_state.ThrowTypeError("Service not available.");
       return ScriptPromise();
     }
   }
 
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
   service_->QueryState(WTF::Bind(
       [](ScriptPromiseResolver* resolver,
          Vector<mojom::blink::LockInfoPtr> pending,
          Vector<mojom::blink::LockInfoPtr> held) {
-        LockManagerSnapshot snapshot;
-        snapshot.setPending(ToLockInfos(pending));
-        snapshot.setHeld(ToLockInfos(held));
+        LockManagerSnapshot* snapshot = LockManagerSnapshot::Create();
+        snapshot->setPending(ToLockInfos(pending));
+        snapshot->setHeld(ToLockInfos(held));
         resolver->Resolve(snapshot);
       },
       WrapPersistent(resolver)));

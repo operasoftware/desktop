@@ -30,7 +30,6 @@
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/modules/webaudio/media_stream_audio_source_options.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/wtf/locker.h"
 
 namespace blink {
 
@@ -61,7 +60,7 @@ MediaStreamAudioSourceHandler::~MediaStreamAudioSourceHandler() {
   Uninitialize();
 }
 
-void MediaStreamAudioSourceHandler::SetFormat(size_t number_of_channels,
+void MediaStreamAudioSourceHandler::SetFormat(uint32_t number_of_channels,
                                               float source_sample_rate) {
   if (number_of_channels != source_number_of_channels_ ||
       source_sample_rate != Context()->sampleRate()) {
@@ -91,7 +90,7 @@ void MediaStreamAudioSourceHandler::SetFormat(size_t number_of_channels,
   }
 }
 
-void MediaStreamAudioSourceHandler::Process(size_t number_of_frames) {
+void MediaStreamAudioSourceHandler::Process(uint32_t number_of_frames) {
   AudioBus* output_bus = Output(0).Bus();
 
   if (!GetAudioSourceProvider()) {
@@ -136,11 +135,6 @@ MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
-  if (context.IsContextClosed()) {
-    context.ThrowExceptionForClosedState(exception_state);
-    return nullptr;
-  }
-
   MediaStreamTrackVector audio_tracks = media_stream.getAudioTracks();
   if (audio_tracks.IsEmpty()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
@@ -148,13 +142,20 @@ MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
     return nullptr;
   }
 
-  // Use the first audio track in the media stream.
+  // Find the first track, which is the track whose id comes first given a
+  // lexicographic ordering of the code units of the track id.
   MediaStreamTrack* audio_track = audio_tracks[0];
+  for (auto track : audio_tracks) {
+    if (CodeUnitCompareLessThan(track->id(), audio_track->id())) {
+      audio_track = track;
+    }
+  }
   std::unique_ptr<AudioSourceProvider> provider =
-      audio_track->CreateWebAudioSource();
+      audio_track->CreateWebAudioSource(context.sampleRate());
 
-  MediaStreamAudioSourceNode* node = new MediaStreamAudioSourceNode(
-      context, media_stream, audio_track, std::move(provider));
+  MediaStreamAudioSourceNode* node =
+      MakeGarbageCollected<MediaStreamAudioSourceNode>(
+          context, media_stream, audio_track, std::move(provider));
 
   if (!node)
     return nullptr;
@@ -170,9 +171,9 @@ MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
 
 MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
     AudioContext* context,
-    const MediaStreamAudioSourceOptions& options,
+    const MediaStreamAudioSourceOptions* options,
     ExceptionState& exception_state) {
-  return Create(*context, *options.mediaStream(), exception_state);
+  return Create(*context, *options->mediaStream(), exception_state);
 }
 
 void MediaStreamAudioSourceNode::Trace(blink::Visitor* visitor) {
@@ -191,10 +192,23 @@ MediaStream* MediaStreamAudioSourceNode::getMediaStream() const {
   return media_stream_;
 }
 
-void MediaStreamAudioSourceNode::SetFormat(size_t number_of_channels,
+void MediaStreamAudioSourceNode::SetFormat(uint32_t number_of_channels,
                                            float source_sample_rate) {
   GetMediaStreamAudioSourceHandler().SetFormat(number_of_channels,
                                                source_sample_rate);
+}
+
+bool MediaStreamAudioSourceNode::HasPendingActivity() const {
+  // As long as the context is running, this node has activity.
+  return (context()->ContextState() == BaseAudioContext::kRunning);
+}
+
+void MediaStreamAudioSourceNode::ReportDidCreate() {
+  GraphTracer().DidCreateAudioNode(this);
+}
+
+void MediaStreamAudioSourceNode::ReportWillBeDestroyed() {
+  GraphTracer().WillDestroyAudioNode(this);
 }
 
 }  // namespace blink

@@ -43,8 +43,8 @@ class MockImageDecoderClient {
   virtual ImageFrame::Status GetStatus(size_t index) = 0;
   virtual size_t FrameCount() = 0;
   virtual int RepetitionCount() const = 0;
-  virtual TimeDelta FrameDuration() const = 0;
-  virtual void ClearCacheExceptFrameRequested(size_t){};
+  virtual base::TimeDelta FrameDuration() const = 0;
+  virtual void ClearCacheExceptFrameRequested(size_t) {}
   virtual void MemoryAllocatorSet() {}
 
   // Clients can control the behavior of MockImageDecoder::decodedSize() by
@@ -54,7 +54,7 @@ class MockImageDecoderClient {
   // MockImageDecoder::decodedSize() below.
   virtual IntSize DecodedSize() const { return IntSize(); }
 
-  void ForceFirstFrameToBeEmpty() { first_frame_forced_to_be_empty_ = true; };
+  void ForceFirstFrameToBeEmpty() { first_frame_forced_to_be_empty_ = true; }
 
   bool FirstFrameForcedToBeEmpty() const {
     return first_frame_forced_to_be_empty_;
@@ -66,10 +66,6 @@ class MockImageDecoderClient {
 
 class MockImageDecoder : public ImageDecoder {
  public:
-  static std::unique_ptr<MockImageDecoder> Create(
-      MockImageDecoderClient* client) {
-    return std::make_unique<MockImageDecoder>(client);
-  }
 
   MockImageDecoder(MockImageDecoderClient* client)
       : ImageDecoder(kAlphaPremultiplied,
@@ -92,7 +88,7 @@ class MockImageDecoder : public ImageDecoder {
     return client_->GetStatus(index) == ImageFrame::kFrameComplete;
   }
 
-  TimeDelta FrameDurationAtIndex(size_t) const override {
+  base::TimeDelta FrameDurationAtIndex(size_t) const override {
     return client_->FrameDuration();
   }
 
@@ -157,8 +153,7 @@ class MockImageDecoderFactory : public ImageDecoderFactory {
   }
 
   std::unique_ptr<ImageDecoder> Create() override {
-    std::unique_ptr<MockImageDecoder> decoder =
-        MockImageDecoder::Create(client_);
+    auto decoder = std::make_unique<MockImageDecoder>(client_);
     decoder->SetSize(decoded_size_.Width(), decoded_size_.Height());
     return std::move(decoder);
   }

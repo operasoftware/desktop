@@ -37,12 +37,10 @@
 
 namespace blink {
 
-using namespace HTMLNames;
+using namespace html_names;
 
-inline HTMLNoScriptElement::HTMLNoScriptElement(Document& document)
-    : HTMLElement(noscriptTag, document) {}
-
-DEFINE_NODE_FACTORY(HTMLNoScriptElement)
+HTMLNoScriptElement::HTMLNoScriptElement(Document& document)
+    : HTMLElement(kNoscriptTag, document) {}
 
 bool HTMLNoScriptElement::LayoutObjectIsNeeded(
     const ComputedStyle& style) const {

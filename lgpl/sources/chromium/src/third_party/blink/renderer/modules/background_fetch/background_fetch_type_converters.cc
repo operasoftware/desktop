@@ -16,34 +16,37 @@ TypeConverter<blink::BackgroundFetchRegistration*,
               blink::mojom::blink::BackgroundFetchRegistrationPtr>::
     Convert(const blink::mojom::blink::BackgroundFetchRegistrationPtr&
                 mojo_registration) {
-  if (!mojo_registration)
+  if (!mojo_registration || !mojo_registration->registration_data)
     return nullptr;
 
-  return new blink::BackgroundFetchRegistration(
-      mojo_registration->developer_id, mojo_registration->unique_id,
-      mojo_registration->upload_total, mojo_registration->uploaded,
-      mojo_registration->download_total, mojo_registration->downloaded,
-      mojo_registration->result, mojo_registration->failure_reason);
+  return blink::MakeGarbageCollected<blink::BackgroundFetchRegistration>(
+      mojo_registration->registration_data->developer_id,
+      mojo_registration->registration_data->upload_total,
+      mojo_registration->registration_data->uploaded,
+      mojo_registration->registration_data->download_total,
+      mojo_registration->registration_data->downloaded,
+      mojo_registration->registration_data->result,
+      mojo_registration->registration_data->failure_reason);
 }
 
-blink::mojom::blink::BackgroundFetchOptionsPtr TypeConverter<
-    blink::mojom::blink::BackgroundFetchOptionsPtr,
-    blink::BackgroundFetchOptions>::Convert(const blink::BackgroundFetchOptions&
-                                                options) {
+blink::mojom::blink::BackgroundFetchOptionsPtr
+TypeConverter<blink::mojom::blink::BackgroundFetchOptionsPtr,
+              const blink::BackgroundFetchOptions*>::
+    Convert(const blink::BackgroundFetchOptions* options) {
   blink::mojom::blink::BackgroundFetchOptionsPtr mojo_options =
       blink::mojom::blink::BackgroundFetchOptions::New();
 
   WTF::Vector<blink::mojom::blink::ManifestImageResourcePtr> mojo_icons;
-  mojo_icons.ReserveInitialCapacity(options.icons().size());
+  mojo_icons.ReserveInitialCapacity(options->icons().size());
 
-  for (const auto& icon : options.icons()) {
+  for (auto& icon : options->icons()) {
     mojo_icons.push_back(
-        blink::mojom::blink::ManifestImageResource::From(icon));
+        blink::mojom::blink::ManifestImageResource::From(icon.Get()));
   }
 
   mojo_options->icons = std::move(mojo_icons);
-  mojo_options->download_total = options.downloadTotal();
-  mojo_options->title = options.hasTitle() ? options.title() : "";
+  mojo_options->download_total = options->downloadTotal();
+  mojo_options->title = options->hasTitle() ? options->title() : "";
 
   return mojo_options;
 }

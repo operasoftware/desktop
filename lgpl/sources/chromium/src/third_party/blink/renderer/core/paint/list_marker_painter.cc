@@ -67,7 +67,7 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info) {
     return;
 
   const auto& local_paint_info = paint_state.GetPaintInfo();
-  auto box_origin = paint_state.PaintOffset();
+  auto box_origin = paint_state.PaintOffset().ToLayoutPoint();
 
   DrawingRecorder recorder(local_paint_info.context, layout_list_marker_,
                            local_paint_info.phase);
@@ -133,7 +133,6 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info) {
   }
 
   TextRunPaintInfo text_run_paint_info(text_run);
-  text_run_paint_info.bounds = FloatRect(EnclosingIntRect(marker));
   const SimpleFontData* font_data =
       layout_list_marker_.StyleRef().GetFont().PrimaryFont();
   FloatPoint text_origin =
@@ -144,8 +143,8 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info) {
   // Text is not arbitrary. We can judge whether it's RTL from the first
   // character, and we only need to handle the direction RightToLeft for now.
   bool text_needs_reversing =
-      WTF::Unicode::Direction(layout_list_marker_.GetText()[0]) ==
-      WTF::Unicode::kRightToLeft;
+      WTF::unicode::Direction(layout_list_marker_.GetText()[0]) ==
+      WTF::unicode::kRightToLeft;
   StringBuilder reversed_text;
   if (text_needs_reversing) {
     unsigned length = layout_list_marker_.GetText().length();
@@ -156,6 +155,13 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info) {
     text_run.SetText(reversed_text.ToString());
   }
 
+  if (style_category == LayoutListMarker::ListStyleCategory::kStaticString) {
+    // Don't add a suffix.
+    context.DrawText(font, text_run_paint_info, text_origin, kInvalidDOMNodeId);
+    context.GetPaintController().SetTextPainted();
+    return;
+  }
+
   const UChar suffix =
       list_marker_text::Suffix(layout_list_marker_.StyleRef().ListStyleType(),
                                layout_list_marker_.ListItem()->Value());
@@ -164,18 +170,19 @@ void ListMarkerPainter::Paint(const PaintInfo& paint_info) {
       ConstructTextRun(font, suffix_str, 2, layout_list_marker_.StyleRef(),
                        layout_list_marker_.StyleRef().Direction());
   TextRunPaintInfo suffix_run_info(suffix_run);
-  suffix_run_info.bounds = FloatRect(EnclosingIntRect(marker));
 
   if (layout_list_marker_.StyleRef().IsLeftToRightDirection()) {
-    context.DrawText(font, text_run_paint_info, text_origin);
+    context.DrawText(font, text_run_paint_info, text_origin, kInvalidDOMNodeId);
     context.DrawText(font, suffix_run_info,
-                     text_origin + FloatSize(IntSize(font.Width(text_run), 0)));
+                     text_origin + FloatSize(IntSize(font.Width(text_run), 0)),
+                     kInvalidDOMNodeId);
   } else {
-    context.DrawText(font, suffix_run_info, text_origin);
+    context.DrawText(font, suffix_run_info, text_origin, kInvalidDOMNodeId);
     // Is the truncation to IntSize below meaningful or a bug?
     context.DrawText(
         font, text_run_paint_info,
-        text_origin + FloatSize(IntSize(font.Width(suffix_run), 0)));
+        text_origin + FloatSize(IntSize(font.Width(suffix_run), 0)),
+        kInvalidDOMNodeId);
   }
   // TODO(npm): Check that there are non-whitespace characters. See
   // crbug.com/788444.

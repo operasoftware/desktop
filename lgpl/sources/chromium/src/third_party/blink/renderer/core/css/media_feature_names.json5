@@ -1,6 +1,6 @@
 {
   metadata: {
-    namespace: "MediaFeature",
+    namespace: "media_feature_names",
     export: "",
   },
 
@@ -10,6 +10,7 @@
     "color",
     "color-index",
     "color-gamut",
+    "forced-colors",
     "grid",
     "monochrome",
     "height",
@@ -47,7 +48,10 @@
     "min-monochrome",
     "min-width",
     "min-resolution",
+    "navigation-controls",
     "pointer",
+    "prefers-color-scheme",
+    "prefers-reduced-motion",
     "resolution",
     "-webkit-transform-3d",
     "scan",

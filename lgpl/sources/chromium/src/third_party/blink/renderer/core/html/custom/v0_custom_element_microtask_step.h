@@ -37,7 +37,7 @@
 namespace blink {
 
 class V0CustomElementMicrotaskStep
-    : public GarbageCollectedFinalized<V0CustomElementMicrotaskStep> {
+    : public GarbageCollected<V0CustomElementMicrotaskStep> {
  public:
   V0CustomElementMicrotaskStep() = default;
   virtual ~V0CustomElementMicrotaskStep() = default;
@@ -46,7 +46,7 @@ class V0CustomElementMicrotaskStep
 
   virtual Result Process() = 0;
 
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) {}
 
 #if !defined(NDEBUG)
   virtual void Show(unsigned indent) = 0;

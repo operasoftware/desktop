@@ -42,10 +42,12 @@ namespace blink {
 
 Gradient::Gradient(Type type,
                    GradientSpreadMethod spread_method,
-                   ColorInterpolation interpolation)
+                   ColorInterpolation interpolation,
+                   DegenerateHandling degenerate_handling)
     : type_(type),
       spread_method_(spread_method),
       color_interpolation_(interpolation),
+      degenerate_handling_(degenerate_handling),
       stops_sorted_(true) {}
 
 Gradient::~Gradient() = default;
@@ -96,14 +98,14 @@ static inline SkColor MakeSkColor(const Color& c) {
 void Gradient::FillSkiaStops(ColorBuffer& colors, OffsetBuffer& pos) const {
   if (stops_.IsEmpty()) {
     // A gradient with no stops must be transparent black.
-    pos.push_back(WebCoreFloatToSkScalar(0));
+    pos.push_back(WebCoreDoubleToSkScalar(0));
     colors.push_back(SK_ColorTRANSPARENT);
   } else if (stops_.front().stop > 0) {
     // Copy the first stop to 0.0. The first stop position may have a slight
     // rounding error, but we don't care in this float comparison, since
     // 0.0 comes through cleanly and people aren't likely to want a gradient
     // with a stop at (0 + epsilon).
-    pos.push_back(WebCoreFloatToSkScalar(0));
+    pos.push_back(WebCoreDoubleToSkScalar(0));
     if (color_filter_) {
       colors.push_back(
           color_filter_->filterColor(MakeSkColor(stops_.front().color)));
@@ -113,7 +115,7 @@ void Gradient::FillSkiaStops(ColorBuffer& colors, OffsetBuffer& pos) const {
   }
 
   for (const auto& stop : stops_) {
-    pos.push_back(WebCoreFloatToSkScalar(stop.stop));
+    pos.push_back(WebCoreDoubleToSkScalar(stop.stop));
     if (color_filter_)
       colors.push_back(color_filter_->filterColor(MakeSkColor(stop.color)));
     else
@@ -124,7 +126,7 @@ void Gradient::FillSkiaStops(ColorBuffer& colors, OffsetBuffer& pos) const {
   // comparison.
   DCHECK(!pos.IsEmpty());
   if (pos.back() < 1) {
-    pos.push_back(WebCoreFloatToSkScalar(1));
+    pos.push_back(WebCoreDoubleToSkScalar(1));
     colors.push_back(colors.back());
   }
 }
@@ -143,16 +145,16 @@ sk_sp<PaintShader> Gradient::CreateShaderInternal(
   DCHECK_GE(colors.size(), 2ul);
   DCHECK_EQ(pos.size(), colors.size());
 
-  SkShader::TileMode tile = SkShader::kClamp_TileMode;
+  SkTileMode tile = SkTileMode::kClamp;
   switch (spread_method_) {
     case kSpreadMethodReflect:
-      tile = SkShader::kMirror_TileMode;
+      tile = SkTileMode::kMirror;
       break;
     case kSpreadMethodRepeat:
-      tile = SkShader::kRepeat_TileMode;
+      tile = SkTileMode::kRepeat;
       break;
     case kSpreadMethodPad:
-      tile = SkShader::kClamp_TileMode;
+      tile = SkTileMode::kClamp;
       break;
   }
 
@@ -187,18 +189,27 @@ class LinearGradient final : public Gradient {
   LinearGradient(const FloatPoint& p0,
                  const FloatPoint& p1,
                  GradientSpreadMethod spread_method,
-                 ColorInterpolation interpolation)
-      : Gradient(Type::kLinear, spread_method, interpolation),
+                 ColorInterpolation interpolation,
+                 DegenerateHandling degenerate_handling)
+      : Gradient(Type::kLinear,
+                 spread_method,
+                 interpolation,
+                 degenerate_handling),
         p0_(p0),
         p1_(p1) {}
 
  protected:
   sk_sp<PaintShader> CreateShader(const ColorBuffer& colors,
                                   const OffsetBuffer& pos,
-                                  SkShader::TileMode tile_mode,
+                                  SkTileMode tile_mode,
                                   uint32_t flags,
                                   const SkMatrix& local_matrix,
                                   SkColor fallback_color) const override {
+    if (GetDegenerateHandling() == DegenerateHandling::kDisallow &&
+        p0_ == p1_) {
+      return PaintShader::MakeEmpty();
+    }
+
     SkPoint pts[2] = {FloatPointToSkPoint(p0_), FloatPointToSkPoint(p1_)};
     return PaintShader::MakeLinearGradient(
         pts, colors.data(), pos.data(), static_cast<int>(colors.size()),
@@ -218,8 +229,12 @@ class RadialGradient final : public Gradient {
                  float r1,
                  float aspect_ratio,
                  GradientSpreadMethod spread_method,
-                 ColorInterpolation interpolation)
-      : Gradient(Type::kRadial, spread_method, interpolation),
+                 ColorInterpolation interpolation,
+                 DegenerateHandling degenerate_handling)
+      : Gradient(Type::kRadial,
+                 spread_method,
+                 interpolation,
+                 degenerate_handling),
         p0_(p0),
         p1_(p1),
         r0_(r0),
@@ -229,7 +244,7 @@ class RadialGradient final : public Gradient {
  protected:
   sk_sp<PaintShader> CreateShader(const ColorBuffer& colors,
                                   const OffsetBuffer& pos,
-                                  SkShader::TileMode tile_mode,
+                                  SkTileMode tile_mode,
                                   uint32_t flags,
                                   const SkMatrix& local_matrix,
                                   SkColor fallback_color) const override {
@@ -248,6 +263,12 @@ class RadialGradient final : public Gradient {
     // negative radius, ask for zero instead.
     const SkScalar radius0 = std::max(WebCoreFloatToSkScalar(r0_), 0.0f);
     const SkScalar radius1 = std::max(WebCoreFloatToSkScalar(r1_), 0.0f);
+
+    if (GetDegenerateHandling() == DegenerateHandling::kDisallow &&
+        p0_ == p1_ && radius0 == radius1) {
+      return PaintShader::MakeEmpty();
+    }
+
     return PaintShader::MakeTwoPointConicalGradient(
         FloatPointToSkPoint(p0_), radius0, FloatPointToSkPoint(p1_), radius1,
         colors.data(), pos.data(), static_cast<int>(colors.size()), tile_mode,
@@ -269,8 +290,12 @@ class ConicGradient final : public Gradient {
                 float start_angle,
                 float end_angle,
                 GradientSpreadMethod spread_method,
-                ColorInterpolation interpolation)
-      : Gradient(Type::kConic, spread_method, interpolation),
+                ColorInterpolation interpolation,
+                DegenerateHandling degenerate_handling)
+      : Gradient(Type::kConic,
+                 spread_method,
+                 interpolation,
+                 degenerate_handling),
         position_(position),
         rotation_(rotation),
         start_angle_(start_angle),
@@ -279,10 +304,15 @@ class ConicGradient final : public Gradient {
  protected:
   sk_sp<PaintShader> CreateShader(const ColorBuffer& colors,
                                   const OffsetBuffer& pos,
-                                  SkShader::TileMode tile_mode,
+                                  SkTileMode tile_mode,
                                   uint32_t flags,
                                   const SkMatrix& local_matrix,
                                   SkColor fallback_color) const override {
+    if (GetDegenerateHandling() == DegenerateHandling::kDisallow &&
+        start_angle_ == end_angle_) {
+      return PaintShader::MakeEmpty();
+    }
+
     // Skia's sweep gradient angles are relative to the x-axis, not the y-axis.
     const float skia_rotation = rotation_ - 90;
     const SkMatrix* matrix = &local_matrix;
@@ -307,15 +337,16 @@ class ConicGradient final : public Gradient {
   const float end_angle_;      // angle (deg) corresponding to color position 1
 };
 
-}  // anonymous ns
+}  // namespace
 
 scoped_refptr<Gradient> Gradient::CreateLinear(
     const FloatPoint& p0,
     const FloatPoint& p1,
     GradientSpreadMethod spread_method,
-    ColorInterpolation interpolation) {
-  return base::AdoptRef(
-      new LinearGradient(p0, p1, spread_method, interpolation));
+    ColorInterpolation interpolation,
+    DegenerateHandling degenerate_handling) {
+  return base::AdoptRef(new LinearGradient(p0, p1, spread_method, interpolation,
+                                           degenerate_handling));
 }
 
 scoped_refptr<Gradient> Gradient::CreateRadial(
@@ -325,9 +356,11 @@ scoped_refptr<Gradient> Gradient::CreateRadial(
     float r1,
     float aspect_ratio,
     GradientSpreadMethod spread_method,
-    ColorInterpolation interpolation) {
+    ColorInterpolation interpolation,
+    DegenerateHandling degenerate_handling) {
   return base::AdoptRef(new RadialGradient(p0, r0, p1, r1, aspect_ratio,
-                                           spread_method, interpolation));
+                                           spread_method, interpolation,
+                                           degenerate_handling));
 }
 
 scoped_refptr<Gradient> Gradient::CreateConic(
@@ -336,10 +369,11 @@ scoped_refptr<Gradient> Gradient::CreateConic(
     float start_angle,
     float end_angle,
     GradientSpreadMethod spread_method,
-    ColorInterpolation interpolation) {
+    ColorInterpolation interpolation,
+    DegenerateHandling degenerate_handling) {
   return base::AdoptRef(new ConicGradient(position, rotation, start_angle,
                                           end_angle, spread_method,
-                                          interpolation));
+                                          interpolation, degenerate_handling));
 }
 
 }  // namespace blink

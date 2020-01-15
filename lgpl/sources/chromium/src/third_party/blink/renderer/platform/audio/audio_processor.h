@@ -32,7 +32,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_AUDIO_AUDIO_PROCESSOR_H_
 
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -63,12 +63,12 @@ class PLATFORM_EXPORT AudioProcessor {
   // in source and destination.
   virtual void Process(const AudioBus* source,
                        AudioBus* destination,
-                       size_t frames_to_process) = 0;
+                       uint32_t frames_to_process) = 0;
 
   // Forces all AudioParams in the processor to run the timeline,
   // bypassing any other processing the processor would do in
   // process().
-  virtual void ProcessOnlyAudioParams(size_t frames_to_process){};
+  virtual void ProcessOnlyAudioParams(uint32_t frames_to_process) {}
 
   // Resets filter state
   virtual void Reset() = 0;

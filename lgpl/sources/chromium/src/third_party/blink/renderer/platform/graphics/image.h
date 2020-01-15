@@ -30,6 +30,7 @@
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
+#include "third_party/blink/renderer/platform/geometry/float_size.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/graphics/image_animation_policy.h"
@@ -39,11 +40,11 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
+#include "ui/base/resource/scale_factor.h"
 
 class SkMatrix;
 
@@ -55,9 +56,9 @@ class ImageDecodeCache;
 
 namespace blink {
 
+class DarkModeImageClassifier;
 class FloatPoint;
 class FloatRect;
-class FloatSize;
 class GraphicsContext;
 class Image;
 class KURL;
@@ -75,7 +76,16 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
 
   static cc::ImageDecodeCache& SharedCCDecodeCache(SkColorType);
 
-  static scoped_refptr<Image> LoadPlatformResource(const char* name);
+  static scoped_refptr<Image> LoadPlatformResource(
+      int resource_id,
+      ui::ScaleFactor scale_factor = ui::SCALE_FACTOR_100P);
+
+  static PaintImage ResizeAndOrientImage(
+      const PaintImage&,
+      ImageOrientation,
+      FloatSize image_scale = FloatSize(1, 1),
+      float opacity = 1.0,
+      InterpolationQuality = kInterpolationNone);
 
   virtual bool IsSVGImage() const { return false; }
   virtual bool IsBitmapImage() const { return false; }
@@ -96,8 +106,7 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
   static Image* NullImage();
   bool IsNull() const { return Size().IsEmpty(); }
 
-  virtual bool UsesContainerSize() const { return false; }
-  virtual bool HasRelativeSize() const { return false; }
+  virtual bool HasIntrinsicSize() const { return true; }
 
   virtual IntSize Size() const = 0;
   IntRect Rect() const { return IntRect(IntPoint(), Size()); }
@@ -162,8 +171,6 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
     image_observer_disabled_ = disabled;
   }
 
-  enum TileRule { kStretchTile, kRoundTile, kSpaceTile, kRepeatTile };
-
   virtual scoped_refptr<Image> ImageForDefaultFrame();
 
   enum ImageDecodingMode {
@@ -220,33 +227,6 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
     return nullptr;
   }
 
-  // Given the |size| that the whole image should draw at, and the
-  // input phase requested by the content, and the space between repeated tiles,
-  // return a rectangle with |size| and a location that respects
-  // the phase but is no more than one size + space in magnitude. In practice,
-  // this means that if there is no repeating the returned rect would contain
-  // the destination_offset location. The destination_offset passed here must
-  // exactly match the location of the subset in a following call to
-  // ComputeSubsetForBackground.
-  static FloatRect ComputePhaseForBackground(
-      const FloatPoint& destination_offset,
-      const FloatSize& size,
-      const FloatPoint& phase,
-      const FloatSize& spacing);
-
-  // Compute the image subset, in intrinsic image coordinates, that gets mapped
-  // onto the |subset|, when the whole image would be drawn with phase
-  // and size given by |phase_and_size|. Assumes
-  // |phase_and_size| contains |subset|. The location
-  // of the requested subset should be the painting snapped location, or
-  // whatever was used as a destination_offset in ComputePhaseForBackground.
-  // It is used to undo the offset added in ComputePhaseForBackground. The size
-  // of requested subset should be the unsnapped size so that the computed
-  // scale and location in the source image can be correctly determined.
-  static FloatRect ComputeSubsetForBackground(const FloatRect& phase_and_size,
-                                              const FloatRect& subset,
-                                              const FloatSize& intrinsic_size);
-
   virtual sk_sp<PaintRecord> PaintRecordForContainer(
       const KURL& url,
       const IntSize& container_size,
@@ -256,48 +236,39 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
     return nullptr;
   }
 
-  HighContrastClassification GetHighContrastClassification() {
-    return high_contrast_classification_;
+  // This function is implemented by the derived classes which might
+  // have certain conditions or default classification decisions which
+  // need to be checked before the classification algorithms are applied
+  // on the image.
+  virtual DarkModeClassification CheckTypeSpecificConditionsForDarkMode(
+      const FloatRect& dest_rect,
+      DarkModeImageClassifier* classifier) {
+    return DarkModeClassification::kDoNotApplyFilter;
   }
 
-  // High contrast classification result is cached to be consistent and have
-  // higher performance for future paints.
-  void SetHighContrastClassification(
-      const HighContrastClassification high_contrast_classification) {
-    high_contrast_classification_ = high_contrast_classification;
-  }
+  // This function returns true if it can create the bitmap of the
+  // image using |src_rect| for the location and dimensions of the image.
+  // For Bitmap and SVG (and any other type) images the implementation
+  // of this function differs when it comes to the implementation of
+  // PaintImageForCurrentFrame(). Once the PaintImage is available,
+  // the method used to extract the bitmap is the same for any image.
+  bool GetBitmap(const FloatRect& src_rect, SkBitmap* bitmap);
 
   PaintImage::Id paint_image_id() const { return stable_image_id_; }
 
   // Returns an SkBitmap that is a copy of the image's current frame.
   SkBitmap AsSkBitmapForCurrentFrame(RespectImageOrientationEnum);
 
+  DarkModeClassification GetDarkModeClassification(const FloatRect& src_rect);
+
+  // Dark mode classification result is cached to be consistent and have
+  // higher performance for future paints.
+  void AddDarkModeClassification(
+      const FloatRect& src_rect,
+      const DarkModeClassification dark_mode_classification);
+
  protected:
   Image(ImageObserver* = nullptr, bool is_multipart = false);
-
-  // The unsnapped_subset_size should be the target painting area implied by the
-  //   content, without any snapping applied. It is necessary to correctly
-  //   compute the subset of the source image to paint into the destination.
-  // The snapped_paint_rect should be the target destination for painting into.
-  // The phase is never snapped.
-  // The tile_size is the total image size. The mapping from this size
-  //   to the unsnapped_dest_rect size defines the scaling of the image for
-  //   sprite computation.
-  void DrawTiledBackground(GraphicsContext&,
-                           const FloatSize& unsnapped_subset_size,
-                           const FloatRect& snapped_paint_rect,
-                           const FloatPoint& phase,
-                           const FloatSize& tile_size,
-                           SkBlendMode,
-                           const FloatSize& repeat_spacing);
-
-  void DrawTiledBorder(GraphicsContext&,
-                       const FloatRect& dst_rect,
-                       const FloatRect& src_rect,
-                       const FloatSize& tile_scale_factor,
-                       TileRule h_rule,
-                       TileRule v_rule,
-                       SkBlendMode);
 
   virtual void DrawPattern(GraphicsContext&,
                            const FloatRect&,
@@ -314,6 +285,9 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
   // Whether or not size is available yet.
   virtual bool IsSizeAvailable() { return true; }
 
+  typedef FloatSize ClassificationKey;
+  HashMap<ClassificationKey, DarkModeClassification> dark_mode_classifications_;
+
  private:
   bool image_observer_disabled_;
   scoped_refptr<SharedBuffer> encoded_image_data_;
@@ -327,8 +301,6 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
   WeakPersistent<ImageObserver> image_observer_;
   PaintImage::Id stable_image_id_;
   const bool is_multipart_;
-  HighContrastClassification high_contrast_classification_;
-
   DISALLOW_COPY_AND_ASSIGN(Image);
 };
 

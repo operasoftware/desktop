@@ -36,17 +36,13 @@ class AXObjectCacheImpl;
 
 class AXMenuListOption final : public AXMockObject {
  public:
-  static AXMenuListOption* Create(HTMLOptionElement* element,
-                                  AXObjectCacheImpl& ax_object_cache) {
-    return new AXMenuListOption(element, ax_object_cache);
-  }
+  AXMenuListOption(HTMLOptionElement*, AXObjectCacheImpl&);
   ~AXMenuListOption() override;
 
   int PosInSet() const override;
   int SetSize() const override;
 
  private:
-  AXMenuListOption(HTMLOptionElement*, AXObjectCacheImpl&);
   void Trace(blink::Visitor*) override;
 
   bool IsMenuListOption() const override { return true; }

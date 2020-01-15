@@ -54,8 +54,10 @@ class ChildListMutationAccumulator final
  public:
   static ChildListMutationAccumulator* GetOrCreate(Node&);
 
-  void ChildAdded(Node*);
-  void WillRemoveChild(Node*);
+  ChildListMutationAccumulator(Node*, MutationObserverInterestGroup*);
+
+  void ChildAdded(Node&);
+  void WillRemoveChild(Node&);
 
   bool HasObservers() const { return observers_; }
 
@@ -64,15 +66,13 @@ class ChildListMutationAccumulator final
   void EnterMutationScope() { mutation_scopes_++; }
   void LeaveMutationScope();
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
  private:
-  ChildListMutationAccumulator(Node*, MutationObserverInterestGroup*);
-
   void EnqueueMutationRecord();
   bool IsEmpty();
-  bool IsAddedNodeInOrder(Node*);
-  bool IsRemovedNodeInOrder(Node*);
+  bool IsAddedNodeInOrder(Node&);
+  bool IsRemovedNodeInOrder(Node&);
 
   Member<Node> target_;
 
@@ -110,12 +110,12 @@ class ChildListMutationScope final {
 
   void ChildAdded(Node& child) {
     if (accumulator_ && accumulator_->HasObservers())
-      accumulator_->ChildAdded(&child);
+      accumulator_->ChildAdded(child);
   }
 
   void WillRemoveChild(Node& child) {
     if (accumulator_ && accumulator_->HasObservers())
-      accumulator_->WillRemoveChild(&child);
+      accumulator_->WillRemoveChild(child);
   }
 
  private:

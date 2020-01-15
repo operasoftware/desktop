@@ -31,19 +31,23 @@
 
 #include "third_party/blink/renderer/core/html/forms/checkbox_input_type.h"
 
+#include "third_party/blink/public/strings/grit/blink_strings.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
+#include "third_party/blink/renderer/core/page/spatial_navigation.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 
 namespace blink {
 
-InputType* CheckboxInputType::Create(HTMLInputElement& element) {
-  return new CheckboxInputType(element);
+void CheckboxInputType::CountUsage() {
+  CountUsageIfVisible(WebFeature::kInputTypeCheckbox);
 }
 
 const AtomicString& CheckboxInputType::FormControlType() const {
-  return InputTypeNames::checkbox;
+  return input_type_names::kCheckbox;
 }
 
 bool CheckboxInputType::ValueMissing(const String&) const {
@@ -51,14 +55,17 @@ bool CheckboxInputType::ValueMissing(const String&) const {
 }
 
 String CheckboxInputType::ValueMissingText() const {
-  return GetLocale().QueryString(
-      WebLocalizedString::kValidationValueMissingForCheckbox);
+  return GetLocale().QueryString(IDS_FORM_VALIDATION_VALUE_MISSING_CHECKBOX);
 }
 
 void CheckboxInputType::HandleKeyupEvent(KeyboardEvent& event) {
-  if (event.key() != " ")
-    return;
-  DispatchSimulatedClickIfActive(event);
+  // Use Space key simulated click by default.
+  // Use Enter key simulated click when Spatial Navigation enabled.
+  if (event.key() == " " ||
+      (IsSpatialNavigationEnabled(GetElement().GetDocument().GetFrame()) &&
+       event.key() == "Enter")) {
+    DispatchSimulatedClickIfActive(event);
+  }
 }
 
 ClickHandlingState* CheckboxInputType::WillDispatchClick() {
@@ -66,7 +73,7 @@ ClickHandlingState* CheckboxInputType::WillDispatchClick() {
   // checking we do here.  The ClickHandlingState object contains what we need
   // to undo what we did here in didDispatchClick.
 
-  ClickHandlingState* state = new ClickHandlingState;
+  ClickHandlingState* state = MakeGarbageCollected<ClickHandlingState>();
 
   state->checked = GetElement().checked();
   state->indeterminate = GetElement().indeterminate();
@@ -74,7 +81,8 @@ ClickHandlingState* CheckboxInputType::WillDispatchClick() {
   if (state->indeterminate)
     GetElement().setIndeterminate(false);
 
-  GetElement().setChecked(!state->checked, kDispatchChangeEvent);
+  GetElement().setChecked(!state->checked,
+                          TextFieldEventBehavior::kDispatchChangeEvent);
   is_in_click_handler_ = true;
   return state;
 }

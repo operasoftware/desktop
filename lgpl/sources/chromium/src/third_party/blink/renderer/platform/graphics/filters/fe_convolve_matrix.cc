@@ -25,10 +25,11 @@
 #include "third_party/blink/renderer/platform/graphics/filters/fe_convolve_matrix.h"
 
 #include <memory>
-#include "SkMatrixConvolutionImageFilter.h"
+
 #include "base/numerics/checked_math.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
+#include "third_party/skia/include/effects/SkMatrixConvolutionImageFilter.h"
 
 namespace blink {
 
@@ -48,18 +49,6 @@ FEConvolveMatrix::FEConvolveMatrix(Filter* filter,
       edge_mode_(edge_mode),
       preserve_alpha_(preserve_alpha),
       kernel_matrix_(kernel_matrix) {}
-
-FEConvolveMatrix* FEConvolveMatrix::Create(Filter* filter,
-                                           const IntSize& kernel_size,
-                                           float divisor,
-                                           float bias,
-                                           const IntPoint& target_offset,
-                                           EdgeModeType edge_mode,
-                                           bool preserve_alpha,
-                                           const Vector<float>& kernel_matrix) {
-  return new FEConvolveMatrix(filter, kernel_size, divisor, bias, target_offset,
-                              edge_mode, preserve_alpha, kernel_matrix);
-}
 
 FloatRect FEConvolveMatrix::MapEffect(const FloatRect& rect) const {
   if (!ParametersValid())
@@ -140,8 +129,8 @@ sk_sp<PaintFilter> FEConvolveMatrix::CreateImageFilter() {
   if (!ParametersValid())
     return CreateTransparentBlack();
 
-  sk_sp<PaintFilter> input(
-      PaintFilterBuilder::Build(InputEffect(0), OperatingInterpolationSpace()));
+  sk_sp<PaintFilter> input(paint_filter_builder::Build(
+      InputEffect(0), OperatingInterpolationSpace()));
   SkISize kernel_size(
       SkISize::Make(kernel_size_.Width(), kernel_size_.Height()));
   // parametersValid() above checks that the kernel area fits in int.

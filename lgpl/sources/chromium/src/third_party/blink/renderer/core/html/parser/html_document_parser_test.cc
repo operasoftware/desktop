@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/core/loader/prerenderer_client.h"
 #include "third_party/blink/renderer/core/loader/text_resource_decoder_builder.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
@@ -52,8 +53,8 @@ class HTMLDocumentParserTest : public PageTestBase {
   }
 
   HTMLDocumentParser* CreateParser(HTMLDocument& document) {
-    HTMLDocumentParser* parser =
-        HTMLDocumentParser::Create(document, kForceSynchronousParsing);
+    auto* parser = MakeGarbageCollected<HTMLDocumentParser>(
+        document, kForceSynchronousParsing);
     std::unique_ptr<TextResourceDecoder> decoder(
         BuildTextResourceDecoderFor(&document, "text/html", g_null_atom));
     parser->SetDecoder(std::move(decoder));
@@ -74,7 +75,7 @@ TEST_F(HTMLDocumentParserTest, AppendPrefetch) {
   HTMLDocument& document = ToHTMLDocument(GetDocument());
   ProvidePrerendererClientTo(
       *document.GetPage(),
-      new MockPrerendererClient(*document.GetPage(), true));
+      MakeGarbageCollected<MockPrerendererClient>(*document.GetPage(), true));
   EXPECT_TRUE(document.IsPrefetchOnly());
   HTMLDocumentParser* parser = CreateParser(document);
 

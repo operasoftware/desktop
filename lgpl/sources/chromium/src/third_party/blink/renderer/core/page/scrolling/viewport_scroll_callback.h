@@ -6,8 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_SCROLLING_VIEWPORT_SCROLL_CALLBACK_H_
 
 #include "third_party/blink/renderer/core/page/scrolling/scroll_state_callback.h"
+#include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/scroll/scroll_types.h"
 
 namespace blink {
 
@@ -31,16 +31,11 @@ class RootFrameViewport;
 // ScrollableArea to use.
 class ViewportScrollCallback : public ScrollStateCallback {
  public:
-  // The BrowserControls and OverscrollController are given to the
-  // ViewportScrollCallback but are not owned or kept alive by it.
-  static ViewportScrollCallback* Create(
-      BrowserControls* browser_controls,
-      OverscrollController* overscroll_controller,
-      RootFrameViewport& root_frame_viewport) {
-    return new ViewportScrollCallback(browser_controls, overscroll_controller,
-                                      root_frame_viewport);
-  }
-
+  // ViewportScrollCallback does not assume ownership of BrowserControls or of
+  // OverscrollController.
+  ViewportScrollCallback(BrowserControls*,
+                         OverscrollController*,
+                         RootFrameViewport&);
   ~ViewportScrollCallback() override;
 
   void Invoke(ScrollState*) override;
@@ -49,12 +44,6 @@ class ViewportScrollCallback : public ScrollStateCallback {
   void Trace(blink::Visitor*) override;
 
  private:
-  // ViewportScrollCallback does not assume ownership of BrowserControls or of
-  // OverscrollController.
-  ViewportScrollCallback(BrowserControls*,
-                         OverscrollController*,
-                         RootFrameViewport&);
-
   bool ShouldScrollBrowserControls(const ScrollOffset&,
                                    ScrollGranularity) const;
   bool ScrollBrowserControls(ScrollState&);

@@ -110,7 +110,7 @@ void InternalSettings::Backup::RestoreTo(Settings* settings) {
 InternalSettings* InternalSettings::From(Page& page) {
   InternalSettings* supplement = Supplement<Page>::From<InternalSettings>(page);
   if (!supplement) {
-    supplement = new InternalSettings(page);
+    supplement = MakeGarbageCollected<InternalSettings>(page);
     ProvideTo(page, supplement);
   }
   return supplement;
@@ -400,15 +400,15 @@ void InternalSettings::setDisplayModeOverride(const String& display_mode,
   InternalSettingsGuardForSettings();
   String token = display_mode.StripWhiteSpace();
 
-  WebDisplayMode mode = kWebDisplayModeBrowser;
+  auto mode = blink::mojom::DisplayMode::kBrowser;
   if (token == "browser") {
-    mode = kWebDisplayModeBrowser;
+    mode = blink::mojom::DisplayMode::kBrowser;
   } else if (token == "minimal-ui") {
-    mode = kWebDisplayModeMinimalUi;
+    mode = blink::mojom::DisplayMode::kMinimalUi;
   } else if (token == "standalone") {
-    mode = kWebDisplayModeStandalone;
+    mode = blink::mojom::DisplayMode::kStandalone;
   } else if (token == "fullscreen") {
-    mode = kWebDisplayModeFullscreen;
+    mode = blink::mojom::DisplayMode::kFullscreen;
   } else {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kSyntaxError,
@@ -538,8 +538,6 @@ void InternalSettings::setAutoplayPolicy(const String& policy_str,
     policy = AutoplayPolicy::Type::kNoUserGestureRequired;
   } else if (policy_str == "user-gesture-required") {
     policy = AutoplayPolicy::Type::kUserGestureRequired;
-  } else if (policy_str == "user-gesture-required-for-cross-origin") {
-    policy = AutoplayPolicy::Type::kUserGestureRequiredForCrossOrigin;
   } else if (policy_str == "document-user-activation-required") {
     policy = AutoplayPolicy::Type::kDocumentUserActivationRequired;
   } else {
@@ -549,6 +547,21 @@ void InternalSettings::setAutoplayPolicy(const String& policy_str,
   }
 
   GetSettings()->SetAutoplayPolicy(policy);
+}
+
+void InternalSettings::setUniversalAccessFromFileURLs(
+    bool enabled,
+    ExceptionState& exception_state) {
+  InternalSettingsGuardForSettings();
+  GetSettings()->SetAllowUniversalAccessFromFileURLs(enabled);
+}
+
+void InternalSettings::PrepareForLeakDetection() {
+  // Prepares for leak detection by removing all InternalSetting objects from
+  // Pages.
+  for (Page* page : Page::OrdinaryPages()) {
+    page->RemoveSupplement<InternalSettings>();
+  }
 }
 
 }  // namespace blink

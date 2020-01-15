@@ -4,25 +4,28 @@
 
 #include "third_party/blink/renderer/core/events/animation_playback_event.h"
 
-#include "third_party/blink/renderer/core/event_names.h"
+#include "third_party/blink/renderer/core/event_interface_names.h"
 
 namespace blink {
 
 AnimationPlaybackEvent::AnimationPlaybackEvent(const AtomicString& type,
                                                double current_time,
                                                double timeline_time)
-    : Event(type, Bubbles::kNo, Cancelable::kNo),
-      current_time_(current_time),
-      timeline_time_(timeline_time) {}
+    : Event(type, Bubbles::kNo, Cancelable::kNo) {
+  if (!std::isnan(current_time))
+    current_time_ = current_time;
+  if (!std::isnan(timeline_time))
+    timeline_time_ = timeline_time;
+}
 
 AnimationPlaybackEvent::AnimationPlaybackEvent(
     const AtomicString& type,
-    const AnimationPlaybackEventInit& initializer)
+    const AnimationPlaybackEventInit* initializer)
     : Event(type, initializer) {
-  if (initializer.hasCurrentTime())
-    current_time_ = initializer.currentTime();
-  if (initializer.hasTimelineTime())
-    timeline_time_ = initializer.timelineTime();
+  if (initializer->hasCurrentTime())
+    current_time_ = initializer->currentTime();
+  if (initializer->hasTimelineTime())
+    timeline_time_ = initializer->timelineTime();
 }
 
 AnimationPlaybackEvent::~AnimationPlaybackEvent() = default;
@@ -38,7 +41,7 @@ double AnimationPlaybackEvent::timelineTime(bool& is_null) const {
 }
 
 const AtomicString& AnimationPlaybackEvent::InterfaceName() const {
-  return EventNames::AnimationPlaybackEvent;
+  return event_interface_names::kAnimationPlaybackEvent;
 }
 
 void AnimationPlaybackEvent::Trace(blink::Visitor* visitor) {

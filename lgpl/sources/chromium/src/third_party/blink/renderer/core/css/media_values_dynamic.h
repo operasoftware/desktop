@@ -15,6 +15,13 @@ class CORE_EXPORT MediaValuesDynamic : public MediaValues {
  public:
   static MediaValues* Create(Document&);
   static MediaValues* Create(LocalFrame*);
+
+  MediaValuesDynamic(LocalFrame*);
+  MediaValuesDynamic(LocalFrame*,
+                     bool overridden_viewport_dimensions,
+                     double viewport_width,
+                     double viewport_height);
+
   MediaValues* Copy() const override;
   bool ComputeLength(double value,
                      CSSPrimitiveValue::UnitType,
@@ -38,9 +45,13 @@ class CORE_EXPORT MediaValuesDynamic : public MediaValues {
   bool InImmersiveMode() const override;
   bool StrictMode() const override;
   const String MediaType() const override;
-  WebDisplayMode DisplayMode() const override;
+  blink::mojom::DisplayMode DisplayMode() const override;
   DisplayShape GetDisplayShape() const override;
   ColorSpaceGamut ColorGamut() const override;
+  PreferredColorScheme GetPreferredColorScheme() const override;
+  bool PrefersReducedMotion() const override;
+  ForcedColors GetForcedColors() const override;
+  NavigationControls GetNavigationControls() const override;
   Document* GetDocument() const override;
   bool HasValues() const override;
   void OverrideViewportDimensions(double width, double height) override;
@@ -48,12 +59,6 @@ class CORE_EXPORT MediaValuesDynamic : public MediaValues {
   void Trace(blink::Visitor*) override;
 
  protected:
-  MediaValuesDynamic(LocalFrame*);
-  MediaValuesDynamic(LocalFrame*,
-                     bool overridden_viewport_dimensions,
-                     double viewport_width,
-                     double viewport_height);
-
   Member<LocalFrame> frame_;
   bool viewport_dimensions_overridden_;
   double viewport_width_override_;

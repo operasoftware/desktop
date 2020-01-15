@@ -29,7 +29,6 @@
 #include "third_party/blink/renderer/modules/webdatabase/sqlite/sql_log.h"
 #include "third_party/blink/renderer/modules/webdatabase/sqlite/sql_value.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
-#include "third_party/blink/renderer/platform/wtf/text/cstring.h"
 #include "third_party/sqlite/sqlite3.h"
 
 // SQLite 3.6.16 makes sqlite3_prepare_v2 automatically retry preparing the
@@ -88,7 +87,7 @@ int SQLiteStatement::Prepare() {
   DCHECK(!is_prepared_);
 #endif
 
-  CString query = query_.StripWhiteSpace().Utf8();
+  std::string query = query_.StripWhiteSpace().Utf8();
 
   // Need to pass non-stack |const char*| and |sqlite3_stmt*| to avoid race
   // with Oilpan stack scanning.
@@ -98,24 +97,26 @@ int SQLiteStatement::Prepare() {
   *statement = nullptr;
   int error;
   {
-    SQL_DVLOG(1) << "SQL - prepare - " << query.data();
+    SQL_DVLOG(1) << "SQL - prepare - " << query;
 
     // Pass the length of the string including the null character to
-    // sqlite3_prepare_v2; this lets SQLite avoid an extra string copy.
-    size_t length_including_null_character = query.length() + 1;
+    // sqlite3_prepare_v3(); this lets SQLite avoid an extra string copy.
+    wtf_size_t length_including_null_character =
+        static_cast<wtf_size_t>(query.length()) + 1;
 
-    error = sqlite3_prepare_v2(database_.Sqlite3Handle(), query.data(),
-                               length_including_null_character, statement.get(),
-                               tail.get());
+    error = sqlite3_prepare_v3(database_.Sqlite3Handle(), query.c_str(),
+                               length_including_null_character,
+                               /* prepFlags= */ 0, statement.get(), tail.get());
   }
   statement_ = *statement;
 
-  if (error != SQLITE_OK)
-    SQL_DVLOG(1) << "sqlite3_prepare16 failed (" << error << ")\n"
-                 << query.data() << "\n"
+  if (error != SQLITE_OK) {
+    SQL_DVLOG(1) << "sqlite3_prepare_v3 failed (" << error << ")\n"
+                 << query << "\n"
                  << sqlite3_errmsg(database_.Sqlite3Handle());
-  else if (*tail && **tail)
+  } else if (*tail && **tail) {
     error = SQLITE_ERROR;
+  }
 
 #if DCHECK_IS_ON()
   is_prepared_ = error == SQLITE_OK;
@@ -254,24 +255,21 @@ SQLValue SQLiteStatement::GetColumnValue(int col) {
 
   // SQLite is typed per value. optional column types are
   // "(mostly) ignored"
-  sqlite3_value* value = sqlite3_column_value(statement_, col);
-  switch (sqlite3_value_type(value)) {
+  switch (sqlite3_column_type(statement_, col)) {
     case SQLITE_INTEGER:  // SQLValue and JS don't represent integers, so use
                           // FLOAT -case
     case SQLITE_FLOAT:
-      return SQLValue(sqlite3_value_double(value));
+      return SQLValue(sqlite3_column_double(statement_, col));
     case SQLITE_BLOB:  // SQLValue and JS don't represent blobs, so use TEXT
                        // -case
     case SQLITE_TEXT: {
-      const UChar* string =
-          reinterpret_cast<const UChar*>(sqlite3_value_text16(value));
-      unsigned length = sqlite3_value_bytes16(value) / sizeof(UChar);
+      const UChar* string = reinterpret_cast<const UChar*>(
+          sqlite3_column_text16(statement_, col));
+      unsigned length = sqlite3_column_bytes16(statement_, col) / sizeof(UChar);
       return SQLValue(StringImpl::Create8BitIfPossible(string, length));
     }
     case SQLITE_NULL:
       return SQLValue();
-    default:
-      break;
   }
   NOTREACHED();
   return SQLValue();

@@ -24,19 +24,15 @@
 
 #include "third_party/blink/renderer/platform/graphics/filters/fe_blend.h"
 
-#include "SkXfermodeImageFilter.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
+#include "third_party/skia/include/effects/SkXfermodeImageFilter.h"
 
 namespace blink {
 
 FEBlend::FEBlend(Filter* filter, BlendMode mode)
     : FilterEffect(filter), mode_(mode) {}
-
-FEBlend* FEBlend::Create(Filter* filter, BlendMode mode) {
-  return new FEBlend(filter, mode);
-}
 
 bool FEBlend::SetBlendMode(BlendMode mode) {
   if (mode_ == mode)
@@ -46,10 +42,10 @@ bool FEBlend::SetBlendMode(BlendMode mode) {
 }
 
 sk_sp<PaintFilter> FEBlend::CreateImageFilter() {
-  sk_sp<PaintFilter> foreground(
-      PaintFilterBuilder::Build(InputEffect(0), OperatingInterpolationSpace()));
-  sk_sp<PaintFilter> background(
-      PaintFilterBuilder::Build(InputEffect(1), OperatingInterpolationSpace()));
+  sk_sp<PaintFilter> foreground(paint_filter_builder::Build(
+      InputEffect(0), OperatingInterpolationSpace()));
+  sk_sp<PaintFilter> background(paint_filter_builder::Build(
+      InputEffect(1), OperatingInterpolationSpace()));
   SkBlendMode mode =
       WebCoreCompositeToSkiaComposite(kCompositeSourceOver, mode_);
   PaintFilter::CropRect crop_rect = GetCropRect();

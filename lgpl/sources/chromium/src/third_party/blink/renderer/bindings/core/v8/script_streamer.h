@@ -5,32 +5,31 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SCRIPT_STREAMER_H_
 #define THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SCRIPT_STREAMER_H_
 
-#include <atomic>
 #include <memory>
 
+#include "base/macros.h"
 #include "base/single_thread_task_runner.h"
+#include "mojo/public/cpp/system/data_pipe.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
-class ClassicPendingScript;
 class ScriptResource;
 class SourceStream;
+class ResponseBodyLoaderClient;
 
 // ScriptStreamer streams incomplete script data to V8 so that it can be parsed
-// while it's loaded. ClassicPendingScript holds a reference to ScriptStreamer.
+// while it's loaded. ScriptResource holds a reference to ScriptStreamer.
 // At the moment, ScriptStreamer is only used for parser blocking scripts; this
 // means that the Document stays stable and no other scripts are executing
 // while we're streaming. It is possible, though, that Document and the
 // ClassicPendingScript are destroyed while the streaming is in progress, and
 // ScriptStreamer handles it gracefully.
 class CORE_EXPORT ScriptStreamer final
-    : public GarbageCollectedFinalized<ScriptStreamer> {
-  WTF_MAKE_NONCOPYABLE(ScriptStreamer);
+    : public GarbageCollected<ScriptStreamer> {
   USING_PRE_FINALIZER(ScriptStreamer, Prefinalize);
 
  public:
@@ -40,32 +39,39 @@ class CORE_EXPORT ScriptStreamer final
   enum NotStreamingReason {
     kAlreadyLoaded,  // DEPRECATED
     kNotHTTP,
-    kReload,
+    kRevalidate,
     kContextNotValid,  // DEPRECATED
     kEncodingNotSupported,
-    kThreadBusy,
+    kThreadBusy,  // DEPRECATED
     kV8CannotStream,
     kScriptTooSmall,
     kNoResourceBuffer,
     kHasCodeCache,
-    kStreamerNotReadyOnGetSource,
+    kStreamerNotReadyOnGetSource,  // DEPRECATED
     kInlineScript,
     kDidntTryToStartStreaming,
     kErrorOccurred,
+    kStreamingDisabled,
+    kSecondScriptResourceUse,
+    kWorkerTopLevelScript,
+    kModuleScript,
 
     // Pseudo values that should never be seen in reported metrics
     kCount,
     kInvalid = -1,
   };
 
+  ScriptStreamer(ScriptResource*,
+                 v8::ScriptCompiler::CompileOptions,
+                 scoped_refptr<base::SingleThreadTaskRunner>);
   ~ScriptStreamer();
   void Trace(blink::Visitor*);
 
-  // Launches a task (on a background thread) which will stream the given
-  // ClassicPendingScript into V8 as it loads.
-  static void StartStreaming(ClassicPendingScript*,
-                             scoped_refptr<base::SingleThreadTaskRunner>,
-                             NotStreamingReason* not_streaming_reason);
+  // Create a script streamer which will stream the given ScriptResource into V8
+  // as it loads.
+  static ScriptStreamer* Create(ScriptResource*,
+                                scoped_refptr<base::SingleThreadTaskRunner>,
+                                NotStreamingReason* not_streaming_reason);
 
   // Returns false if we cannot stream the given encoding.
   static bool ConvertEncoding(const char* encoding_name,
@@ -98,8 +104,14 @@ class CORE_EXPORT ScriptStreamer final
     return suppressed_reason_;
   }
 
-  // Called by ClassicPendingScript when data arrives from the network.
-  void NotifyAppendData(ScriptResource*);
+  // Called by ScriptResource when data arrives from the network.
+  bool TryStartStreaming(mojo::ScopedDataPipeConsumerHandle* data_pipe,
+                         ResponseBodyLoaderClient* response_body_loader_client);
+
+  // Called by ScriptResource when loading has completed.
+  //
+  // Should not be called synchronously, as it can trigger script resource
+  // client callbacks.
   void NotifyFinished();
 
   // Called by ScriptStreamingTask when it has streamed all data to V8 and V8
@@ -107,7 +119,7 @@ class CORE_EXPORT ScriptStreamer final
   void StreamingCompleteOnBackgroundThread();
 
   const String& ScriptURLString() const { return script_url_string_; }
-  unsigned long ScriptResourceIdentifier() const {
+  uint64_t ScriptResourceIdentifier() const {
     return script_resource_identifier_;
   }
 
@@ -122,17 +134,17 @@ class CORE_EXPORT ScriptStreamer final
   // Maximum size of the BOM marker.
   static constexpr size_t kMaximumLengthOfBOM = 4;
 
-  ScriptStreamer(ClassicPendingScript*,
-                 v8::ScriptCompiler::CompileOptions,
-                 scoped_refptr<base::SingleThreadTaskRunner>);
-
   void Prefinalize();
 
+  // Should not be called synchronously, as it can trigger script resource
+  // client callbacks.
   void StreamingComplete();
+  // Should not be called synchronously, as it can trigger script resource
+  // client callbacks.
   void NotifyFinishedToClient();
   bool HasEnoughDataForStreaming(size_t resource_buffer_size);
 
-  Member<ClassicPendingScript> pending_script_;
+  Member<ScriptResource> script_resource_;
   // Whether ScriptStreamer is detached from the Resource. In those cases, the
   // script data is not needed any more, and the client won't get notified
   // when the loading and streaming are done.
@@ -144,11 +156,6 @@ class CORE_EXPORT ScriptStreamer final
   bool parsing_finished_;  // Whether the V8 side processing is done.
   // Whether we have received enough data to start the streaming.
   bool have_enough_data_for_streaming_;
-
-  // Flag used to allow atomic cancelling and reposting of the streaming task
-  // when the load completes without the task yet starting.
-  // TODO(874080): Remove once we can mutate task traits.
-  std::atomic_flag blocking_task_started_or_cancelled_ = ATOMIC_FLAG_INIT;
 
   // Whether the script source code should be retrieved from the Resource
   // instead of the ScriptStreamer.
@@ -162,7 +169,7 @@ class CORE_EXPORT ScriptStreamer final
   const String script_url_string_;
 
   // Keep the script resource dentifier for event tracing.
-  const unsigned long script_resource_identifier_;
+  const uint64_t script_resource_identifier_;
 
   // Encoding of the streamed script. Saved for sanity checking purposes.
   v8::ScriptCompiler::StreamedSource::Encoding encoding_;
@@ -174,6 +181,8 @@ class CORE_EXPORT ScriptStreamer final
   // doesn't break assumptions.
   // TODO(hiroshige): Check the state in more general way.
   bool prefinalizer_called_ = false;
+
+  DISALLOW_COPY_AND_ASSIGN(ScriptStreamer);
 };
 
 }  // namespace blink

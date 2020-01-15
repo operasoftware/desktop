@@ -7,7 +7,7 @@
 
 #include <type_traits>
 #include "third_party/blink/renderer/bindings/core/v8/idl_types_base.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -56,11 +56,6 @@ struct NativeValueTraitsBase<
 //     return toInt32(isolate, value, exceptionState, NormalConversion);
 //   }
 // }
-//
-// Note that there exist some specializations (particularly in V8Binding.h) for
-// which T actually represents the final C++ type that a JavaScript value
-// should be converted to. Introducing new specializations of this kind is
-// discouraged.
 template <typename T, typename SFINAEHelper = void>
 struct NativeValueTraits;
 

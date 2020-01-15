@@ -5,6 +5,7 @@
 mojom = "//third_party/blink/public/mojom/feature_policy/feature_policy.mojom"
 public_headers = [
   "//third_party/blink/public/common/feature_policy/feature_policy.h",
+  "//third_party/blink/public/common/feature_policy/policy_value.h",
   "//third_party/blink/public/common/frame/sandbox_flags.h",
 ]
 traits_headers = [
@@ -14,6 +15,6 @@ sources = [
   "//third_party/blink/common/feature_policy/feature_policy_mojom_traits.cc",
 ]
 type_mappings = [
-  "blink.mojom.ParsedFeaturePolicyDeclaration=blink::ParsedFeaturePolicyDeclaration",
-  "blink.mojom.WebSandboxFlags=blink::WebSandboxFlags",
+  "blink.mojom.ParsedFeaturePolicyDeclaration=::blink::ParsedFeaturePolicyDeclaration",
+  "blink.mojom.WebSandboxFlags=::blink::WebSandboxFlags",
 ]

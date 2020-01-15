@@ -40,11 +40,9 @@ namespace blink {
 
 class Document;
 
-class VisitedLinkState : public GarbageCollectedFinalized<VisitedLinkState> {
+class VisitedLinkState final : public GarbageCollected<VisitedLinkState> {
  public:
-  static VisitedLinkState* Create(const Document& document) {
-    return new VisitedLinkState(document);
-  }
+  explicit VisitedLinkState(const Document&);
 
   void InvalidateStyleForAllLinks(bool invalidate_visited_link_hashes);
   void InvalidateStyleForLink(LinkHash);
@@ -55,10 +53,9 @@ class VisitedLinkState : public GarbageCollectedFinalized<VisitedLinkState> {
     return EInsideLink::kNotInsideLink;
   }
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*);
 
  private:
-  explicit VisitedLinkState(const Document&);
   const Document& GetDocument() const { return *document_; }
 
   EInsideLink DetermineLinkStateSlowCase(const Element&);

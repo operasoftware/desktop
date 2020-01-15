@@ -14,8 +14,7 @@ class CORE_EXPORT VideoTrackList final : public TrackListBase<VideoTrack> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static VideoTrackList* Create(HTMLMediaElement&);
-
+  explicit VideoTrackList(HTMLMediaElement&);
   ~VideoTrackList() override;
 
   int selectedIndex() const;
@@ -25,12 +24,9 @@ class CORE_EXPORT VideoTrackList final : public TrackListBase<VideoTrack> {
 
   void TrackSelected(WebMediaPlayer::TrackId selected_track_id);
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) override {
     TrackListBase<VideoTrack>::Trace(visitor);
   }
-
- private:
-  explicit VideoTrackList(HTMLMediaElement&);
 };
 
 }  // namespace blink

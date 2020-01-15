@@ -25,13 +25,14 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_IFRAME_ELEMENT_H_
 
 #include "third_party/blink/public/common/feature_policy/feature_policy.h"
+#include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/html_frame_element_base.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element_sandbox.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
-class Policy;
+class DOMFeaturePolicy;
 
 class CORE_EXPORT HTMLIFrameElement final
     : public HTMLFrameElementBase,
@@ -40,22 +41,30 @@ class CORE_EXPORT HTMLIFrameElement final
   USING_GARBAGE_COLLECTED_MIXIN(HTMLIFrameElement);
 
  public:
-  DECLARE_NODE_FACTORY(HTMLIFrameElement);
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) override;
+
+  explicit HTMLIFrameElement(Document&);
   ~HTMLIFrameElement() override;
+
   DOMTokenList* sandbox() const;
   // Support JS introspection of frame policy (e.g. feature policy)
-  Policy* policy();
+  DOMFeaturePolicy* featurePolicy();
 
   // Returns attributes that should be checked against Trusted Types
-  const HashSet<AtomicString>& GetCheckedAttributeNames() const override;
+  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override;
 
   ParsedFeaturePolicy ConstructContainerPolicy(
       Vector<String>* /* messages */) const override;
 
- private:
-  explicit HTMLIFrameElement(Document&);
+  FrameOwnerElementType OwnerType() const final {
+    return FrameOwnerElementType::kIframe;
+  }
 
+  WebSandboxFlags sandbox_flags_converted_to_feature_policies() const {
+    return sandbox_flags_converted_to_feature_policies_;
+  }
+
+ private:
   void SetCollapsed(bool) override;
 
   void ParseAttribute(const AttributeModificationParams&) override;
@@ -69,11 +78,11 @@ class CORE_EXPORT HTMLIFrameElement final
   void RemovedFrom(ContainerNode&) override;
 
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override;
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 
   bool IsInteractiveContent() const override;
 
-  ReferrerPolicy ReferrerPolicyAttribute() override;
+  network::mojom::ReferrerPolicy ReferrerPolicyAttribute() override;
 
   // FrameOwner overrides:
   bool AllowFullscreen() const override { return allow_fullscreen_; }
@@ -87,9 +96,14 @@ class CORE_EXPORT HTMLIFrameElement final
   bool allow_payment_request_;
   bool collapsed_by_client_;
   Member<HTMLIFrameElementSandbox> sandbox_;
-  Member<Policy> policy_;
+  Member<DOMFeaturePolicy> policy_;
+  // This represents a subset of sandbox flags set through 'sandbox' attribute
+  // that will be converted to feature policies as part of the container
+  // policies.
+  WebSandboxFlags sandbox_flags_converted_to_feature_policies_ =
+      WebSandboxFlags::kNone;
 
-  ReferrerPolicy referrer_policy_;
+  network::mojom::ReferrerPolicy referrer_policy_;
 };
 
 }  // namespace blink

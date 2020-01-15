@@ -45,7 +45,7 @@ NavigatorStorageQuota& NavigatorStorageQuota::From(Navigator& navigator) {
   NavigatorStorageQuota* supplement =
       Supplement<Navigator>::From<NavigatorStorageQuota>(navigator);
   if (!supplement) {
-    supplement = new NavigatorStorageQuota(navigator);
+    supplement = MakeGarbageCollected<NavigatorStorageQuota>(navigator);
     ProvideTo(navigator, supplement);
   }
   return *supplement;
@@ -67,22 +67,24 @@ StorageManager* NavigatorStorageQuota::storage(Navigator& navigator) {
 }
 
 DeprecatedStorageQuota* NavigatorStorageQuota::webkitTemporaryStorage() const {
-  if (!temporary_storage_)
-    temporary_storage_ =
-        DeprecatedStorageQuota::Create(DeprecatedStorageQuota::kTemporary);
+  if (!temporary_storage_) {
+    temporary_storage_ = MakeGarbageCollected<DeprecatedStorageQuota>(
+        DeprecatedStorageQuota::kTemporary);
+  }
   return temporary_storage_.Get();
 }
 
 DeprecatedStorageQuota* NavigatorStorageQuota::webkitPersistentStorage() const {
-  if (!persistent_storage_)
-    persistent_storage_ =
-        DeprecatedStorageQuota::Create(DeprecatedStorageQuota::kPersistent);
+  if (!persistent_storage_) {
+    persistent_storage_ = MakeGarbageCollected<DeprecatedStorageQuota>(
+        DeprecatedStorageQuota::kPersistent);
+  }
   return persistent_storage_.Get();
 }
 
 StorageManager* NavigatorStorageQuota::storage() const {
   if (!storage_manager_)
-    storage_manager_ = new StorageManager();
+    storage_manager_ = MakeGarbageCollected<StorageManager>();
   return storage_manager_.Get();
 }
 

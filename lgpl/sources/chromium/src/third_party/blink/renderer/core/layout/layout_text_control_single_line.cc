@@ -34,12 +34,11 @@
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/layout_analyzer.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
+#include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/text_control_single_line_painter.h"
 #include "third_party/blink/renderer/platform/fonts/simple_font_data.h"
 
 namespace blink {
-
-using namespace HTMLNames;
 
 LayoutTextControlSingleLine::LayoutTextControlSingleLine(
     HTMLInputElement* element)
@@ -49,18 +48,18 @@ LayoutTextControlSingleLine::~LayoutTextControlSingleLine() = default;
 
 inline Element* LayoutTextControlSingleLine::ContainerElement() const {
   return InputElement()->UserAgentShadowRoot()->getElementById(
-      ShadowElementNames::TextFieldContainer());
+      shadow_element_names::TextFieldContainer());
 }
 
 inline Element* LayoutTextControlSingleLine::EditingViewPortElement() const {
   return InputElement()->UserAgentShadowRoot()->getElementById(
-      ShadowElementNames::EditingViewPort());
+      shadow_element_names::EditingViewPort());
 }
 
 inline HTMLElement* LayoutTextControlSingleLine::InnerSpinButtonElement()
     const {
-  return ToHTMLElement(InputElement()->UserAgentShadowRoot()->getElementById(
-      ShadowElementNames::SpinButton()));
+  return To<HTMLElement>(InputElement()->UserAgentShadowRoot()->getElementById(
+      shadow_element_names::SpinButton()));
 }
 
 void LayoutTextControlSingleLine::Paint(const PaintInfo& paint_info) const {
@@ -130,19 +129,25 @@ void LayoutTextControlSingleLine::UpdateLayout() {
     // The placeholder gets layout last, after the parent text control and its
     // other children, so in order to get the correct overflow from the
     // placeholder we need to recompute it now.
-    if (needed_layout)
-      ComputeOverflow(ClientLogicalBottom());
+    if (needed_layout) {
+      SetNeedsOverflowRecalc();
+      ComputeLayoutOverflow(ClientLogicalBottom());
+    }
   }
 }
 
 bool LayoutTextControlSingleLine::NodeAtPoint(
     HitTestResult& result,
-    const HitTestLocation& location_in_container,
-    const LayoutPoint& accumulated_offset,
+    const HitTestLocation& hit_test_location,
+    const PhysicalOffset& accumulated_offset,
     HitTestAction hit_test_action) {
-  if (!LayoutTextControl::NodeAtPoint(result, location_in_container,
+  if (!LayoutTextControl::NodeAtPoint(result, hit_test_location,
                                       accumulated_offset, hit_test_action))
     return false;
+
+  const LayoutObject* stop_node = result.GetHitTestRequest().GetStopNode();
+  if (stop_node && stop_node->NodeForHitTest() == result.InnerNode())
+    return true;
 
   // Say that we hit the inner text element if
   //  - we hit a node inside the inner text element,
@@ -152,15 +157,18 @@ bool LayoutTextControlSingleLine::NodeAtPoint(
   if (result.InnerNode()->IsDescendantOf(InnerEditorElement()) ||
       result.InnerNode() == GetNode() ||
       (container && container == result.InnerNode())) {
-    LayoutPoint point_in_parent = location_in_container.Point();
+    PhysicalOffset inner_editor_accumulated_offset = accumulated_offset;
     if (container && EditingViewPortElement()) {
-      if (EditingViewPortElement()->GetLayoutBox())
-        point_in_parent -=
-            ToLayoutSize(EditingViewPortElement()->GetLayoutBox()->Location());
-      if (container->GetLayoutBox())
-        point_in_parent -= ToLayoutSize(container->GetLayoutBox()->Location());
+      if (EditingViewPortElement()->GetLayoutBox()) {
+        inner_editor_accumulated_offset +=
+            EditingViewPortElement()->GetLayoutBox()->PhysicalLocation();
+      }
+      if (container->GetLayoutBox()) {
+        inner_editor_accumulated_offset +=
+            container->GetLayoutBox()->PhysicalLocation();
+      }
     }
-    HitInnerEditorElement(result, point_in_parent, accumulated_offset);
+    HitInnerEditorElement(result, hit_test_location, accumulated_offset);
   }
   return true;
 }
@@ -178,7 +186,7 @@ void LayoutTextControlSingleLine::CapsLockStateMayHaveChanged() {
 
   if (LocalFrame* frame = GetDocument().GetFrame())
     should_draw_caps_lock_indicator =
-        InputElement()->type() == InputTypeNames::password &&
+        InputElement()->type() == input_type_names::kPassword &&
         frame->Selection().FrameIsFocusedAndActive() &&
         GetDocument().FocusedElement() == GetNode() &&
         KeyboardEventManager::CurrentCapsLockState();
@@ -193,10 +201,10 @@ bool LayoutTextControlSingleLine::HasControlClip() const {
   return true;
 }
 
-LayoutRect LayoutTextControlSingleLine::ControlClipRect(
-    const LayoutPoint& additional_offset) const {
-  LayoutRect clip_rect = PhysicalPaddingBoxRect();
-  clip_rect.MoveBy(additional_offset);
+PhysicalRect LayoutTextControlSingleLine::ControlClipRect(
+    const PhysicalOffset& additional_offset) const {
+  PhysicalRect clip_rect = PhysicalPaddingBoxRect();
+  clip_rect.offset += additional_offset;
   return clip_rect;
 }
 
@@ -243,10 +251,10 @@ LayoutUnit LayoutTextControlSingleLine::PreferredContentLogicalWidth(
     if (LayoutBox* spin_layout_object =
             spin_button ? spin_button->GetLayoutBox() : nullptr) {
       result += spin_layout_object->BorderAndPaddingLogicalWidth();
-      // Since the width of spinLayoutObject is not calculated yet,
-      // spinLayoutObject->logicalWidth() returns 0.
-      // So ensureComputedStyle()->logicalWidth() is used instead.
-      result += spin_button->EnsureComputedStyle()->LogicalWidth().Value();
+      // Since the width of spin_layout_object is not calculated yet,
+      // spin_layout_object->LogicalWidth() returns 0. Use the computed logical
+      // width instead.
+      result += spin_layout_object->StyleRef().LogicalWidth().Value();
     }
   }
 
@@ -259,7 +267,7 @@ LayoutUnit LayoutTextControlSingleLine::ComputeControlLogicalHeight(
   return line_height + non_content_height;
 }
 
-void LayoutTextControlSingleLine::Autoscroll(const IntPoint& position) {
+void LayoutTextControlSingleLine::Autoscroll(const PhysicalOffset& position) {
   LayoutBox* layout_object = InnerEditorElement()->GetLayoutBox();
   if (!layout_object)
     return;
@@ -291,30 +299,27 @@ LayoutUnit LayoutTextControlSingleLine::ScrollHeight() const {
   return LayoutBlockFlow::ScrollHeight();
 }
 
-LayoutUnit LayoutTextControlSingleLine::ScrollLeft() const {
-  if (InnerEditorElement())
-    return LayoutUnit(InnerEditorElement()->scrollLeft());
-  return LayoutBlockFlow::ScrollLeft();
-}
-
-LayoutUnit LayoutTextControlSingleLine::ScrollTop() const {
-  if (InnerEditorElement())
-    return LayoutUnit(InnerEditorElement()->scrollTop());
-  return LayoutBlockFlow::ScrollTop();
-}
-
-void LayoutTextControlSingleLine::SetScrollLeft(LayoutUnit new_left) {
-  if (InnerEditorElement())
-    InnerEditorElement()->setScrollLeft(new_left);
-}
-
-void LayoutTextControlSingleLine::SetScrollTop(LayoutUnit new_top) {
-  if (InnerEditorElement())
-    InnerEditorElement()->setScrollTop(new_top);
-}
-
 HTMLInputElement* LayoutTextControlSingleLine::InputElement() const {
   return ToHTMLInputElement(GetNode());
+}
+
+void LayoutTextControlSingleLine::ComputeVisualOverflow(
+    bool recompute_floats) {
+  LayoutRect previous_visual_overflow_rect = VisualOverflowRect();
+  ClearVisualOverflow();
+  AddVisualOverflowFromChildren();
+
+  AddVisualEffectOverflow();
+  AddVisualOverflowFromTheme();
+
+  if (recompute_floats || CreatesNewFormattingContext() ||
+      HasSelfPaintingLayer())
+    AddVisualOverflowFromFloats();
+
+  if (VisualOverflowRect() != previous_visual_overflow_rect) {
+    SetShouldCheckForPaintInvalidation();
+    GetFrameView()->SetIntersectionObservationState(LocalFrameView::kDesired);
+  }
 }
 
 }  // namespace blink

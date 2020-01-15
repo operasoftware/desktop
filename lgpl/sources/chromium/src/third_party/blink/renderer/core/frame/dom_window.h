@@ -8,9 +8,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/serialization/transferables.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
-#include "third_party/blink/renderer/core/frame/dom_window_base64.h"
 #include "third_party/blink/renderer/core/frame/frame.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -28,11 +26,19 @@ class SerializedScriptValue;
 class WindowPostMessageOptions;
 class WindowProxyManager;
 
-class CORE_EXPORT DOMWindow : public EventTargetWithInlineData,
-                              public DOMWindowBase64 {
+// DOMWindow is an abstract class of Window interface implementations.
+// We have two derived implementation classes;  LocalDOMWindow and
+// RemoteDOMWindow.
+//
+// TODO(tkent): Rename DOMWindow to Window. The class was named as 'DOMWindow'
+// because WebKit already had KJS::Window.  We have no reasons to avoid
+// blink::Window now.
+class CORE_EXPORT DOMWindow : public EventTargetWithInlineData {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
+  enum class CrossDocumentAccessFeaturePolicy { kAllowed, kDisallowed };
+
   ~DOMWindow() override;
 
   Frame* GetFrame() const {
@@ -51,7 +57,7 @@ class CORE_EXPORT DOMWindow : public EventTargetWithInlineData,
     return frame_;
   }
 
-  // GarbageCollectedFinalized overrides:
+  // GarbageCollected overrides:
   void Trace(blink::Visitor*) override;
 
   virtual bool IsLocalDOMWindow() const = 0;
@@ -84,29 +90,31 @@ class CORE_EXPORT DOMWindow : public EventTargetWithInlineData,
   DOMWindow* parent() const;
   DOMWindow* top() const;
 
-  void focus(LocalDOMWindow* incumbent_window);
+  void focus(v8::Isolate*);
   virtual void blur() = 0;
-  void close(LocalDOMWindow* incumbent_window);
+  void close(v8::Isolate*);
+  void Close(LocalDOMWindow* incumbent_window);
 
-  void postMessage(LocalDOMWindow* incumbent_window,
+  void postMessage(v8::Isolate*,
                    const ScriptValue& message,
                    const String& target_origin,
-                   Vector<ScriptValue>& transfer,
+                   HeapVector<ScriptValue>& transfer,
                    ExceptionState&);
 
-  void postMessage(LocalDOMWindow* incumbent_window,
+  void postMessage(v8::Isolate*,
                    const ScriptValue& message,
-                   const WindowPostMessageOptions& options,
+                   const WindowPostMessageOptions* options,
                    ExceptionState&);
 
   // Indexed properties
   DOMWindow* AnonymousIndexedGetter(uint32_t index) const;
 
   String SanitizedCrossDomainAccessErrorMessage(
-      const LocalDOMWindow* calling_window) const;
+      const LocalDOMWindow* accessing_window,
+      CrossDocumentAccessFeaturePolicy cross_document_access) const;
   String CrossDomainAccessErrorMessage(
-      const LocalDOMWindow* calling_window) const;
-  bool IsInsecureScriptAccess(LocalDOMWindow& calling_window, const KURL&);
+      const LocalDOMWindow* accessing_window,
+      CrossDocumentAccessFeaturePolicy cross_document_access) const;
 
   // FIXME: When this DOMWindow is no longer the active DOMWindow (i.e.,
   // when its document is no longer the document that is displayed in its
@@ -114,8 +122,6 @@ class CORE_EXPORT DOMWindow : public EventTargetWithInlineData,
   // by the document that is currently active in |frame_|.
   // See https://bugs.webkit.org/show_bug.cgi?id=62054
   bool IsCurrentlyDisplayedInFrame() const;
-
-  bool isSecureContext() const;
 
   InputDeviceCapabilitiesConstants* GetInputDeviceCapabilities();
 
@@ -137,7 +143,7 @@ class CORE_EXPORT DOMWindow : public EventTargetWithInlineData,
  private:
   void DoPostMessage(scoped_refptr<SerializedScriptValue> message,
                      const MessagePortArray&,
-                     const WindowPostMessageOptions& options,
+                     const WindowPostMessageOptions* options,
                      LocalDOMWindow* source,
                      ExceptionState&);
 
@@ -147,7 +153,7 @@ class CORE_EXPORT DOMWindow : public EventTargetWithInlineData,
   // of this object.
   const Member<WindowProxyManager> window_proxy_manager_;
   Member<InputDeviceCapabilitiesConstants> input_capabilities_;
-  mutable TraceWrapperMember<Location> location_;
+  mutable Member<Location> location_;
 
   // Set to true when close() has been called. Needed for
   // |window.closed| determinism; having it return 'true'

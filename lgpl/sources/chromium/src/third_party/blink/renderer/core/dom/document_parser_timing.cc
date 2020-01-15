@@ -17,7 +17,7 @@ DocumentParserTiming& DocumentParserTiming::From(Document& document) {
   DocumentParserTiming* timing =
       Supplement<Document>::From<DocumentParserTiming>(document);
   if (!timing) {
-    timing = new DocumentParserTiming(document);
+    timing = MakeGarbageCollected<DocumentParserTiming>(document);
     ProvideTo(document, timing);
   }
   return *timing;
@@ -27,14 +27,14 @@ void DocumentParserTiming::MarkParserStart() {
   if (parser_detached_ || !parser_start_.is_null())
     return;
   DCHECK(parser_stop_.is_null());
-  parser_start_ = CurrentTimeTicks();
+  parser_start_ = base::TimeTicks::Now();
   NotifyDocumentParserTimingChanged();
 }
 
 void DocumentParserTiming::MarkParserStop() {
   if (parser_detached_ || parser_start_.is_null() || !parser_stop_.is_null())
     return;
-  parser_stop_ = CurrentTimeTicks();
+  parser_stop_ = base::TimeTicks::Now();
   NotifyDocumentParserTimingChanged();
 }
 
@@ -44,7 +44,7 @@ void DocumentParserTiming::MarkParserDetached() {
 }
 
 void DocumentParserTiming::RecordParserBlockedOnScriptLoadDuration(
-    TimeDelta duration,
+    base::TimeDelta duration,
     bool script_inserted_via_document_write) {
   if (parser_detached_ || parser_start_.is_null() || !parser_stop_.is_null())
     return;
@@ -55,7 +55,7 @@ void DocumentParserTiming::RecordParserBlockedOnScriptLoadDuration(
 }
 
 void DocumentParserTiming::RecordParserBlockedOnScriptExecutionDuration(
-    TimeDelta duration,
+    base::TimeDelta duration,
     bool script_inserted_via_document_write) {
   if (parser_detached_ || parser_start_.is_null() || !parser_stop_.is_null())
     return;
@@ -66,7 +66,7 @@ void DocumentParserTiming::RecordParserBlockedOnScriptExecutionDuration(
   NotifyDocumentParserTimingChanged();
 }
 
-void DocumentParserTiming::Trace(blink::Visitor* visitor) {
+void DocumentParserTiming::Trace(Visitor* visitor) {
   Supplement<Document>::Trace(visitor);
 }
 

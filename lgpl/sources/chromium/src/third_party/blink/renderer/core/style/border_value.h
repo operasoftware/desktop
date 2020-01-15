@@ -28,7 +28,7 @@
 #include "third_party/blink/renderer/core/css/style_color.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -58,10 +58,6 @@ class BorderValue {
     SetColor(color);
     SetStyle(style);
     SetWidth(width);
-  }
-
-  bool NonZero() const {
-    return Width() && (style_ != static_cast<unsigned>(EBorderStyle::kNone));
   }
 
   bool IsTransparent() const {

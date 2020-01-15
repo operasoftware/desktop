@@ -7,10 +7,10 @@
  * @suppress {accessControls}
  */
 
-CoverageTestRunner.startCoverage = function() {
+CoverageTestRunner.startCoverage = async function() {
   UI.viewManager.showView('coverage');
   const coverageView = self.runtime.sharedInstance(Coverage.CoverageView);
-  coverageView._startRecording();
+  await coverageView._startRecording();
 };
 
 /**
@@ -18,15 +18,44 @@ CoverageTestRunner.startCoverage = function() {
  */
 CoverageTestRunner.stopCoverage = function() {
   const coverageView = self.runtime.sharedInstance(Coverage.CoverageView);
-  return coverageView._stopRecording();
+  return coverageView.stopRecording();
 };
+
+/**
+ * @return {!Promise}
+ */
+CoverageTestRunner.suspendCoverageModel = async function() {
+  const coverageView = self.runtime.sharedInstance(Coverage.CoverageView);
+  await coverageView._model.preSuspendModel();
+  await coverageView._model.suspendModel();
+};
+
+/**
+ * @return {!Promise}
+ */
+CoverageTestRunner.resumeCoverageModel = async function() {
+  const coverageView = self.runtime.sharedInstance(Coverage.CoverageView);
+  await coverageView._model.resumeModel();
+  await coverageView._model.postResumeModel();
+};
+
 
 /**
  * @return {!Promise}
  */
 CoverageTestRunner.pollCoverage = function() {
   const coverageView = self.runtime.sharedInstance(Coverage.CoverageView);
-  return coverageView._poll();
+  return coverageView._model._takeAllCoverage();
+};
+
+/**
+ * @return {!Promise<string>}
+ */
+CoverageTestRunner.exportReport = async function() {
+  const coverageView = self.runtime.sharedInstance(Coverage.CoverageView);
+  let data;
+  await coverageView._model.exportReport({write: d => data = d, close: _ => 0});
+  return data;
 };
 
 /**
@@ -53,8 +82,9 @@ CoverageTestRunner.findCoverageNodeForURL = function(url) {
   const rootNode = coverageListView._dataGrid.rootNode();
 
   for (const child of rootNode.children) {
-    if (child._coverageInfo.url().endsWith(url))
+    if (child._coverageInfo.url().endsWith(url)) {
       return child;
+    }
   }
 
   return null;
@@ -69,8 +99,9 @@ CoverageTestRunner.dumpDecorationsInSourceFrame = function(sourceFrame) {
     let markerType = ' ';
     const lineInfo = codeMirror.lineInfo(line);
 
-    if (!lineInfo)
+    if (!lineInfo) {
       continue;
+    }
 
     const gutterElement = lineInfo.gutterMarkers && lineInfo.gutterMarkers['CodeMirror-gutter-coverage'];
 
@@ -92,8 +123,9 @@ CoverageTestRunner.dumpCoverageListView = function() {
     const data = child._coverageInfo;
     const url = TestRunner.formatters.formatAsURL(data.url());
 
-    if (url.startsWith('test://'))
+    if (url.startsWith('test://')) {
       continue;
+    }
 
     const type = Coverage.CoverageListView._typeToString(data.type());
     TestRunner.addResult(`${url} ${type} used: ${data.usedSize()} unused: ${data.unusedSize()} total: ${data.size()}`);

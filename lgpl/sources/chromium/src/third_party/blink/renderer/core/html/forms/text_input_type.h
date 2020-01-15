@@ -37,10 +37,9 @@ namespace blink {
 
 class TextInputType final : public BaseTextInputType {
  public:
-  static InputType* Create(HTMLInputElement&);
+  TextInputType(HTMLInputElement& element) : BaseTextInputType(element) {}
 
  private:
-  TextInputType(HTMLInputElement& element) : BaseTextInputType(element) {}
   void CountUsage() override;
   const AtomicString& FormControlType() const override;
   bool SupportsInputModeAttribute() const override;

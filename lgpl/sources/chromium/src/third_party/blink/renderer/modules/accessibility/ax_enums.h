@@ -17,9 +17,9 @@ enum AccessibilityOrientation {
 
 // The input restriction on an object.
 enum AXRestriction {
-  kNone = 0,  // An object that is not disabled.
-  kReadOnly,
-  kDisabled,
+  kRestrictionNone = 0,  // An object that is not disabled.
+  kRestrictionReadOnly,
+  kRestrictionDisabled,
 };
 
 enum AccessibilityExpanded {
@@ -28,22 +28,32 @@ enum AccessibilityExpanded {
   kExpandedExpanded,
 };
 
+enum AccessibilityGrabbedState {
+  kGrabbedStateUndefined = 0,
+  kGrabbedStateFalse,
+  kGrabbedStateTrue,
+};
+
 enum AccessibilitySelectedState {
   kSelectedStateUndefined = 0,
   kSelectedStateFalse,
   kSelectedStateTrue,
 };
 
-enum TextStyle {
-  kTextStyleNone = 0,
-  kTextStyleBold = 1 << 0,
-  kTextStyleItalic = 1 << 1,
-  kTextStyleUnderline = 1 << 2,
-  kTextStyleLineThrough = 1 << 3
-};
-
 enum class AXBoolAttribute {
   kAriaBusy,
+};
+
+enum class AXIntAttribute {
+  kAriaColumnCount,
+  kAriaRowCount,
+};
+
+enum class AXUIntAttribute {
+  kAriaColumnIndex,
+  kAriaColumnSpan,
+  kAriaRowIndex,
+  kAriaRowSpan,
 };
 
 enum class AXStringAttribute {

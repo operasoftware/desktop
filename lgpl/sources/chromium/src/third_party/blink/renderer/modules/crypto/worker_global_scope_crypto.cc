@@ -45,7 +45,7 @@ WorkerGlobalScopeCrypto& WorkerGlobalScopeCrypto::From(
   WorkerGlobalScopeCrypto* supplement =
       Supplement<WorkerGlobalScope>::From<WorkerGlobalScopeCrypto>(context);
   if (!supplement) {
-    supplement = new WorkerGlobalScopeCrypto;
+    supplement = MakeGarbageCollected<WorkerGlobalScopeCrypto>();
     ProvideTo(context, supplement);
   }
   return *supplement;
@@ -58,7 +58,7 @@ Crypto* WorkerGlobalScopeCrypto::crypto(
 
 Crypto* WorkerGlobalScopeCrypto::crypto() const {
   if (!crypto_)
-    crypto_ = Crypto::Create();
+    crypto_ = MakeGarbageCollected<Crypto>();
   return crypto_.Get();
 }
 

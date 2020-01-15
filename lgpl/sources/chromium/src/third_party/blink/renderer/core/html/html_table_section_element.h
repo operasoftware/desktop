@@ -36,7 +36,8 @@ class HTMLTableSectionElement final : public HTMLTablePartElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_ELEMENT_FACTORY_WITH_TAGNAME(HTMLTableSectionElement);
+
+  HTMLTableSectionElement(const QualifiedName& tag_name, Document&);
 
   HTMLElement* insertRow(int index, ExceptionState&);
   void deleteRow(int index, ExceptionState&);
@@ -46,15 +47,13 @@ class HTMLTableSectionElement final : public HTMLTablePartElement {
   bool HasNonInBodyInsertionMode() const override { return true; }
 
  private:
-  HTMLTableSectionElement(const QualifiedName& tag_name, Document&);
-
   const CSSPropertyValueSet* AdditionalPresentationAttributeStyle() override;
 };
 
 inline bool IsHTMLTableSectionElement(const HTMLElement& element) {
-  return element.HasTagName(HTMLNames::tbodyTag) ||
-         element.HasTagName(HTMLNames::tfootTag) ||
-         element.HasTagName(HTMLNames::theadTag);
+  return element.HasTagName(html_names::kTbodyTag) ||
+         element.HasTagName(html_names::kTfootTag) ||
+         element.HasTagName(html_names::kTheadTag);
 }
 
 DEFINE_HTMLELEMENT_TYPE_CASTS_WITH_FUNCTION(HTMLTableSectionElement);

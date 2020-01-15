@@ -44,7 +44,9 @@
 #include "third_party/blink/renderer/core/dom/v0_insertion_point.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/picture_in_picture_controller.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
+#include "third_party/blink/renderer/core/html/custom/element_internals.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_control_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_option_element.h"
@@ -58,6 +60,8 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/page/spatial_navigation.h"
+#include "third_party/blink/renderer/core/page/spatial_navigation_controller.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
@@ -65,8 +69,6 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
-
-using namespace HTMLNames;
 
 static bool IsFrameFocused(const Element& element) {
   return element.GetDocument().GetFrame() && element.GetDocument()
@@ -76,14 +78,14 @@ static bool IsFrameFocused(const Element& element) {
 }
 
 static bool MatchesSpatialNavigationFocusPseudoClass(const Element& element) {
-  return IsHTMLOptionElement(element) &&
-         ToHTMLOptionElement(element).SpatialNavigationFocused() &&
+  auto* option_element = DynamicTo<HTMLOptionElement>(element);
+  return option_element && option_element->SpatialNavigationFocused() &&
          IsFrameFocused(element);
 }
 
 static bool MatchesListBoxPseudoClass(const Element& element) {
-  return IsHTMLSelectElement(element) &&
-         !ToHTMLSelectElement(element).UsesMenuList();
+  auto* html_select_element = DynamicTo<HTMLSelectElement>(element);
+  return html_select_element && !html_select_element->UsesMenuList();
 }
 
 static bool MatchesTagName(const Element& element,
@@ -283,8 +285,8 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForSubSelector(
 }
 
 static inline bool IsV0ShadowRoot(const Node* node) {
-  return node && node->IsShadowRoot() &&
-         ToShadowRoot(node)->GetType() == ShadowRootType::V0;
+  auto* shadow_root = DynamicTo<ShadowRoot>(node);
+  return shadow_root && shadow_root->GetType() == ShadowRootType::V0;
 }
 
 SelectorChecker::MatchStatus SelectorChecker::MatchForPseudoShadow(
@@ -299,8 +301,8 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForPseudoShadow(
 }
 
 static inline Element* ParentOrV0ShadowHostElement(const Element& element) {
-  if (element.parentNode() && element.parentNode()->IsShadowRoot()) {
-    if (ToShadowRoot(element.parentNode())->GetType() != ShadowRootType::V0)
+  if (auto* shadow_root = DynamicTo<ShadowRoot>(element.parentNode())) {
+    if (shadow_root->GetType() != ShadowRootType::V0)
       return nullptr;
   }
   return element.ParentOrShadowHostElement();
@@ -505,16 +507,14 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
       // We ascend through ancestor shadow host elements until we reach the host
       // in the TreeScope associated with the style rule. We then match against
       // that host.
-      if (RuntimeEnabledFeatures::CSSPartPseudoElementEnabled()) {
-        while (next_context.element) {
-          next_context.element = next_context.element->OwnerShadowHost();
-          if (!next_context.element)
-            return kSelectorFailsCompletely;
+      while (next_context.element) {
+        next_context.element = next_context.element->OwnerShadowHost();
+        if (!next_context.element)
+          return kSelectorFailsCompletely;
 
-          if (next_context.element->GetTreeScope() ==
-              context.scope->GetTreeScope())
-            return MatchSelector(next_context, result);
-        }
+        if (next_context.element->GetTreeScope() ==
+            context.scope->GetTreeScope())
+          return MatchSelector(next_context, result);
       }
       return kSelectorFailsCompletely;
       break;
@@ -762,23 +762,32 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
     case CSSSelector::kPseudoNot:
       return CheckPseudoNot(context, result);
     case CSSSelector::kPseudoEmpty: {
-      bool result = true;
+      bool is_empty = true;
+      bool has_whitespace = false;
       for (Node* n = element.firstChild(); n; n = n->nextSibling()) {
         if (n->IsElementNode()) {
-          result = false;
+          is_empty = false;
           break;
         }
-        if (n->IsTextNode()) {
-          Text* text_node = ToText(n);
+        if (auto* text_node = DynamicTo<Text>(n)) {
           if (!text_node->data().IsEmpty()) {
-            result = false;
-            break;
+            if (text_node->ContainsOnlyWhitespaceOrEmpty()) {
+              has_whitespace = true;
+            } else {
+              is_empty = false;
+              break;
+            }
           }
         }
       }
+      if (is_empty && has_whitespace) {
+        UseCounter::Count(context.element->GetDocument(),
+                          WebFeature::kCSSSelectorEmptyWhitespaceOnlyFail);
+        is_empty = false;
+      }
       if (mode_ == kResolvingStyle)
         element.SetStyleAffectedByEmpty();
-      return result;
+      return is_empty;
     }
     case CSSSelector::kPseudoFirstChild:
       if (mode_ == kResolvingStyle) {
@@ -891,17 +900,20 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
           return true;
       }
     } break;
-    case CSSSelector::kPseudoAutofill:
-      return element.IsFormControlElement() &&
-             ToHTMLFormControlElement(element).IsAutofilled();
-    case CSSSelector::kPseudoAutofillPreviewed:
-      return element.IsFormControlElement() &&
-             ToHTMLFormControlElement(element).GetAutofillState() ==
-                 WebAutofillState::kPreviewed;
-    case CSSSelector::kPseudoAutofillSelected:
-      return element.IsFormControlElement() &&
-             ToHTMLFormControlElement(element).GetAutofillState() ==
-                 WebAutofillState::kAutofilled;
+    case CSSSelector::kPseudoAutofill: {
+      auto* html_form_element = DynamicTo<HTMLFormControlElement>(&element);
+      return html_form_element && html_form_element->IsAutofilled();
+    }
+    case CSSSelector::kPseudoAutofillPreviewed: {
+      auto* html_form_element = DynamicTo<HTMLFormControlElement>(&element);
+      return html_form_element && html_form_element->GetAutofillState() ==
+                                      WebAutofillState::kPreviewed;
+    }
+    case CSSSelector::kPseudoAutofillSelected: {
+      auto* html_form_element = DynamicTo<HTMLFormControlElement>(&element);
+      return html_form_element && html_form_element->GetAutofillState() ==
+                                      WebAutofillState::kAutofilled;
+    }
     case CSSSelector::kPseudoAnyLink:
     case CSSSelector::kPseudoWebkitAnyLink:
     case CSSSelector::kPseudoLink:
@@ -932,7 +944,7 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
         else
           element.SetChildrenOrSiblingsAffectedByFocusWithin();
       }
-      probe::forcePseudoState(&element, CSSSelector::kPseudoFocusWithin,
+      probe::ForcePseudoState(&element, CSSSelector::kPseudoFocusWithin,
                               &force_pseudo_state);
       if (force_pseudo_state)
         return true;
@@ -946,7 +958,7 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       }
       if (!ShouldMatchHoverOrActive(context))
         return false;
-      probe::forcePseudoState(&element, CSSSelector::kPseudoHover,
+      probe::ForcePseudoState(&element, CSSSelector::kPseudoHover,
                               &force_pseudo_state);
       if (force_pseudo_state)
         return true;
@@ -960,7 +972,7 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       }
       if (!ShouldMatchHoverOrActive(context))
         return false;
-      probe::forcePseudoState(&element, CSSSelector::kPseudoActive,
+      probe::ForcePseudoState(&element, CSSSelector::kPseudoActive,
                               &force_pseudo_state);
       if (force_pseudo_state)
         return true;
@@ -982,12 +994,8 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
     case CSSSelector::kPseudoRequired:
       return element.IsRequiredFormControl();
     case CSSSelector::kPseudoValid:
-      if (mode_ == kResolvingStyle)
-        element.GetDocument().SetContainsValidityStyleRules();
       return element.MatchesValidityPseudoClasses() && element.IsValidElement();
     case CSSSelector::kPseudoInvalid:
-      if (mode_ == kResolvingStyle)
-        element.GetDocument().SetContainsValidityStyleRules();
       return element.MatchesValidityPseudoClasses() &&
              !element.IsValidElement();
     case CSSSelector::kPseudoChecked: {
@@ -1000,9 +1008,10 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
         if (input_element->ShouldAppearChecked() &&
             !input_element->ShouldAppearIndeterminate())
           return true;
-      } else if (IsHTMLOptionElement(element) &&
-                 ToHTMLOptionElement(element).Selected()) {
-        return true;
+      } else if (auto* option_element = DynamicTo<HTMLOptionElement>(element)) {
+        if (option_element->Selected()) {
+          return true;
+        }
       }
       break;
     }
@@ -1011,11 +1020,9 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
     case CSSSelector::kPseudoRoot:
       return element == element.GetDocument().documentElement();
     case CSSSelector::kPseudoLang: {
-      AtomicString value;
-      if (element.IsVTTElement())
-        value = ToVTTElement(element).Language();
-      else
-        value = element.ComputeInheritedLanguage();
+      auto* vtt_element = DynamicTo<VTTElement>(element);
+      AtomicString value = vtt_element ? vtt_element->Language()
+                                       : element.ComputeInheritedLanguage();
       const AtomicString& argument = selector.Argument();
       if (value.IsEmpty() ||
           !value.StartsWith(argument, kTextCaseASCIIInsensitive))
@@ -1031,6 +1038,8 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       return Fullscreen::IsFullscreenElement(element);
     case CSSSelector::kPseudoFullScreenAncestor:
       return element.ContainsFullScreenElement();
+    case CSSSelector::kPseudoPictureInPicture:
+      return PictureInPictureController::IsElementInPictureInPicture(&element);
     case CSSSelector::kPseudoVideoPersistent:
       DCHECK(is_ua_rule_);
       return IsHTMLVideoElement(element) &&
@@ -1038,36 +1047,50 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
     case CSSSelector::kPseudoVideoPersistentAncestor:
       DCHECK(is_ua_rule_);
       return element.ContainsPersistentVideo();
+    case CSSSelector::kPseudoXrImmersiveDomOverlay:
+      DCHECK(is_ua_rule_);
+      // In immersive AR overlay mode, apply a pseudostyle to the root element.
+      return element.GetDocument().IsImmersiveArOverlay() &&
+             element == element.GetDocument().documentElement();
     case CSSSelector::kPseudoInRange:
-      if (mode_ == kResolvingStyle)
-        element.GetDocument().SetContainsValidityStyleRules();
       return element.IsInRange();
     case CSSSelector::kPseudoOutOfRange:
-      if (mode_ == kResolvingStyle)
-        element.GetDocument().SetContainsValidityStyleRules();
       return element.IsOutOfRange();
-    case CSSSelector::kPseudoFutureCue:
-      return element.IsVTTElement() && !ToVTTElement(element).IsPastNode();
-    case CSSSelector::kPseudoPastCue:
-      return element.IsVTTElement() && ToVTTElement(element).IsPastNode();
+    case CSSSelector::kPseudoFutureCue: {
+      auto* vtt_element = DynamicTo<VTTElement>(element);
+      return vtt_element && !vtt_element->IsPastNode();
+    }
+    case CSSSelector::kPseudoPastCue: {
+      auto* vtt_element = DynamicTo<VTTElement>(element);
+      return vtt_element && vtt_element->IsPastNode();
+    }
     case CSSSelector::kPseudoScope:
       if (!context.scope)
         return false;
       if (context.scope == &element.GetDocument())
         return element == element.GetDocument().documentElement();
-      if (context.scope->IsShadowRoot())
-        return element == ToShadowRoot(context.scope)->host();
+      if (auto* shadow_root = DynamicTo<ShadowRoot>(context.scope.Get()))
+        return element == shadow_root->host();
       return context.scope == &element;
     case CSSSelector::kPseudoUnresolved:
       return !element.IsDefined() && element.IsUnresolvedV0CustomElement();
     case CSSSelector::kPseudoDefined:
       return element.IsDefined() || element.IsUpgradedV0CustomElement();
-    case CSSSelector::kPseudoHost:
     case CSSSelector::kPseudoHostContext:
+      UseCounter::Count(
+          context.element->GetDocument(),
+          mode_ == kQueryingRules
+              ? WebFeature::kCSSSelectorHostContextInSnapshotProfile
+              : WebFeature::kCSSSelectorHostContextInLiveProfile);
+      FALLTHROUGH;
+    case CSSSelector::kPseudoHost:
       return CheckPseudoHost(context, result);
     case CSSSelector::kPseudoSpatialNavigationFocus:
       DCHECK(is_ua_rule_);
       return MatchesSpatialNavigationFocusPseudoClass(element);
+    case CSSSelector::kPseudoSpatialNavigationInterest:
+      DCHECK(is_ua_rule_);
+      return MatchesSpatialNavigationInterestPseudoClass(element);
     case CSSSelector::kPseudoIsHtml:
       DCHECK(is_ua_rule_);
       return element.GetDocument().IsHTMLDocument();
@@ -1080,13 +1103,17 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
         if (!root->IsUserAgent())
           return false;
         const ComputedStyle* style = root->host().GetComputedStyle();
-        return style && style->HasAppearance();
+        return style && style->HasEffectiveAppearance();
       }
       return false;
     case CSSSelector::kPseudoWindowInactive:
       if (!context.has_selection_pseudo)
         return false;
       return !element.GetDocument().GetPage()->GetFocusController().IsActive();
+    case CSSSelector::kPseudoState: {
+      return element.DidAttachInternals() &&
+             element.EnsureElementInternals().HasState(selector.Argument());
+    }
     case CSSSelector::kPseudoHorizontal:
     case CSSSelector::kPseudoVertical:
     case CSSSelector::kPseudoDecrement:
@@ -1099,8 +1126,8 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
     case CSSSelector::kPseudoCornerPresent:
       return false;
     case CSSSelector::kPseudoUnknown:
-    case CSSSelector::kPseudoMatches:
-    case CSSSelector::kPseudoIS:
+    case CSSSelector::kPseudoIs:
+    case CSSSelector::kPseudoWhere:
     default:
       NOTREACHED();
       break;
@@ -1129,8 +1156,6 @@ bool SelectorChecker::CheckPseudoElement(const SelectorCheckingContext& context,
       return false;
     }
     case CSSSelector::kPseudoPart:
-      if (!RuntimeEnabledFeatures::CSSPartPseudoElementEnabled())
-        return false;
       DCHECK(part_names_);
       return part_names_->Contains(selector.Argument());
     case CSSSelector::kPseudoPlaceholder:
@@ -1363,7 +1388,7 @@ bool SelectorChecker::CheckScrollbarPseudoClass(
 
 bool SelectorChecker::MatchesFocusPseudoClass(const Element& element) {
   bool force_pseudo_state = false;
-  probe::forcePseudoState(const_cast<Element*>(&element),
+  probe::ForcePseudoState(const_cast<Element*>(&element),
                           CSSSelector::kPseudoFocus, &force_pseudo_state);
   if (force_pseudo_state)
     return true;
@@ -1372,7 +1397,7 @@ bool SelectorChecker::MatchesFocusPseudoClass(const Element& element) {
 
 bool SelectorChecker::MatchesFocusVisiblePseudoClass(const Element& element) {
   bool force_pseudo_state = false;
-  probe::forcePseudoState(const_cast<Element*>(&element),
+  probe::ForcePseudoState(const_cast<Element*>(&element),
                           CSSSelector::kPseudoFocusVisible,
                           &force_pseudo_state);
   if (force_pseudo_state)
@@ -1388,6 +1413,23 @@ bool SelectorChecker::MatchesFocusVisiblePseudoClass(const Element& element) {
 
   return element.IsFocused() && (!last_focus_from_mouse || had_keyboard_event ||
                                  always_show_focus_ring);
+}
+
+// static
+bool SelectorChecker::MatchesSpatialNavigationInterestPseudoClass(
+    const Element& element) {
+  if (!IsSpatialNavigationEnabled(element.GetDocument().GetFrame()))
+    return false;
+
+  if (!RuntimeEnabledFeatures::FocuslessSpatialNavigationEnabled())
+    return false;
+
+  DCHECK(element.GetDocument().GetPage());
+  Element* interested_element = element.GetDocument()
+                                    .GetPage()
+                                    ->GetSpatialNavigationController()
+                                    .GetInterestedElement();
+  return interested_element && *interested_element == element;
 }
 
 }  // namespace blink

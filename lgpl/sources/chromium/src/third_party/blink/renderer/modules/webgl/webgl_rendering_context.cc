@@ -40,6 +40,7 @@
 #include "third_party/blink/renderer/modules/webgl/ext_blend_min_max.h"
 #include "third_party/blink/renderer/modules/webgl/ext_color_buffer_half_float.h"
 #include "third_party/blink/renderer/modules/webgl/ext_disjoint_timer_query.h"
+#include "third_party/blink/renderer/modules/webgl/ext_float_blend.h"
 #include "third_party/blink/renderer/modules/webgl/ext_frag_depth.h"
 #include "third_party/blink/renderer/modules/webgl/ext_shader_texture_lod.h"
 #include "third_party/blink/renderer/modules/webgl/ext_srgb.h"
@@ -65,6 +66,9 @@
 #include "third_party/blink/renderer/modules/webgl/webgl_depth_texture.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_draw_buffers.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_lose_context.h"
+#include "third_party/blink/renderer/modules/webgl/webgl_multi_draw.h"
+#include "third_party/blink/renderer/modules/webgl/webgl_multi_draw_instanced.h"
+#include "third_party/blink/renderer/modules/webgl/webgl_video_texture.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/drawing_buffer.h"
 
 namespace blink {
@@ -83,7 +87,7 @@ static bool ShouldCreateContext(
   if (extensions_util->SupportsExtension("GL_EXT_debug_marker")) {
     String context_label(
         String::Format("WebGLRenderingContext-%p", context_provider));
-    gl->PushGroupMarkerEXT(0, context_label.Ascii().data());
+    gl->PushGroupMarkerEXT(0, context_label.Ascii().c_str());
   }
   return true;
 }
@@ -98,11 +102,12 @@ CanvasRenderingContext* WebGLRenderingContext::Factory::Create(
   if (!ShouldCreateContext(context_provider.get()))
     return nullptr;
 
-  WebGLRenderingContext* rendering_context = new WebGLRenderingContext(
-      host, std::move(context_provider), using_gpu_compositing, attrs);
+  WebGLRenderingContext* rendering_context =
+      MakeGarbageCollected<WebGLRenderingContext>(
+          host, std::move(context_provider), using_gpu_compositing, attrs);
   if (!rendering_context->GetDrawingBuffer()) {
     host->HostDispatchEvent(
-        WebGLContextEvent::Create(EventTypeNames::webglcontextcreationerror,
+        WebGLContextEvent::Create(event_type_names::kWebglcontextcreationerror,
                                   "Could not create a WebGL context."));
     return nullptr;
   }
@@ -115,7 +120,7 @@ CanvasRenderingContext* WebGLRenderingContext::Factory::Create(
 void WebGLRenderingContext::Factory::OnError(HTMLCanvasElement* canvas,
                                              const String& error) {
   canvas->DispatchEvent(*WebGLContextEvent::Create(
-      EventTypeNames::webglcontextcreationerror, error));
+      event_type_names::kWebglcontextcreationerror, error));
 }
 
 WebGLRenderingContext::WebGLRenderingContext(
@@ -154,13 +159,13 @@ void WebGLRenderingContext::RegisterContextExtensions() {
   RegisterExtension<EXTBlendMinMax>(ext_blend_min_max_);
   RegisterExtension<EXTColorBufferHalfFloat>(ext_color_buffer_half_float_);
   RegisterExtension<EXTDisjointTimerQuery>(ext_disjoint_timer_query_);
+  RegisterExtension<EXTFloatBlend>(ext_float_blend_);
   RegisterExtension<EXTFragDepth>(ext_frag_depth_);
   RegisterExtension<EXTShaderTextureLOD>(ext_shader_texture_lod_);
   RegisterExtension<EXTTextureFilterAnisotropic>(
       ext_texture_filter_anisotropic_, kApprovedExtension, kBothPrefixes);
   RegisterExtension<EXTsRGB>(exts_rgb_);
-  RegisterExtension<KHRParallelShaderCompile>(khr_parallel_shader_compile_,
-                                              kDraftExtension);
+  RegisterExtension<KHRParallelShaderCompile>(khr_parallel_shader_compile_);
   RegisterExtension<OESElementIndexUint>(oes_element_index_uint_);
   RegisterExtension<OESStandardDerivatives>(oes_standard_derivatives_);
   RegisterExtension<OESTextureFloat>(oes_texture_float_);
@@ -170,8 +175,7 @@ void WebGLRenderingContext::RegisterContextExtensions() {
   RegisterExtension<OESVertexArrayObject>(oes_vertex_array_object_);
   RegisterExtension<WebGLColorBufferFloat>(webgl_color_buffer_float_);
   RegisterExtension<WebGLCompressedTextureASTC>(webgl_compressed_texture_astc_);
-  RegisterExtension<WebGLCompressedTextureETC>(webgl_compressed_texture_etc_,
-                                               kDraftExtension);
+  RegisterExtension<WebGLCompressedTextureETC>(webgl_compressed_texture_etc_);
   RegisterExtension<WebGLCompressedTextureETC1>(webgl_compressed_texture_etc1_);
   RegisterExtension<WebGLCompressedTexturePVRTC>(
       webgl_compressed_texture_pvrtc_, kApprovedExtension, kBothPrefixes);
@@ -186,6 +190,10 @@ void WebGLRenderingContext::RegisterContextExtensions() {
   RegisterExtension<WebGLDrawBuffers>(webgl_draw_buffers_);
   RegisterExtension<WebGLLoseContext>(webgl_lose_context_, kApprovedExtension,
                                       kBothPrefixes);
+  RegisterExtension<WebGLMultiDraw>(webgl_multi_draw_, kDraftExtension);
+  RegisterExtension<WebGLMultiDrawInstanced>(webgl_multi_draw_instanced_,
+                                             kDraftExtension);
+  RegisterExtension<WebGLVideoTexture>(webgl_video_texture_, kDraftExtension);
 }
 
 void WebGLRenderingContext::Trace(blink::Visitor* visitor) {
@@ -193,6 +201,7 @@ void WebGLRenderingContext::Trace(blink::Visitor* visitor) {
   visitor->Trace(ext_blend_min_max_);
   visitor->Trace(ext_color_buffer_half_float_);
   visitor->Trace(ext_disjoint_timer_query_);
+  visitor->Trace(ext_float_blend_);
   visitor->Trace(ext_frag_depth_);
   visitor->Trace(ext_shader_texture_lod_);
   visitor->Trace(ext_texture_filter_anisotropic_);
@@ -217,6 +226,9 @@ void WebGLRenderingContext::Trace(blink::Visitor* visitor) {
   visitor->Trace(webgl_depth_texture_);
   visitor->Trace(webgl_draw_buffers_);
   visitor->Trace(webgl_lose_context_);
+  visitor->Trace(webgl_multi_draw_);
+  visitor->Trace(webgl_multi_draw_instanced_);
+  visitor->Trace(webgl_video_texture_);
   WebGLRenderingContextBase::Trace(visitor);
 }
 

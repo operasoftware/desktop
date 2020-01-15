@@ -29,11 +29,9 @@ class SVGDescElement final : public SVGElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DECLARE_NODE_FACTORY(SVGDescElement);
-
- private:
   explicit SVGDescElement(Document&);
 
+ private:
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override {
     return false;
   }

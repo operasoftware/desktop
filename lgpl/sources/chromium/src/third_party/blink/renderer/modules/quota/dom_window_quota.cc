@@ -47,7 +47,7 @@ DOMWindowQuota& DOMWindowQuota::From(LocalDOMWindow& window) {
   DOMWindowQuota* supplement =
       Supplement<LocalDOMWindow>::From<DOMWindowQuota>(window);
   if (!supplement) {
-    supplement = new DOMWindowQuota(window);
+    supplement = MakeGarbageCollected<DOMWindowQuota>(window);
     ProvideTo(window, supplement);
   }
   return *supplement;
@@ -61,7 +61,7 @@ DeprecatedStorageInfo* DOMWindowQuota::webkitStorageInfo(
 
 DeprecatedStorageInfo* DOMWindowQuota::webkitStorageInfo() const {
   if (!storage_info_)
-    storage_info_ = DeprecatedStorageInfo::Create();
+    storage_info_ = MakeGarbageCollected<DeprecatedStorageInfo>();
   return storage_info_.Get();
 }
 
