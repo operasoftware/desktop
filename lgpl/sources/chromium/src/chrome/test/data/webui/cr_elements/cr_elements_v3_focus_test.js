@@ -7,6 +7,8 @@
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_interactive_ui_test.js']);
 
+GEN('#include "content/public/test/browser_test.h"');
+
 // eslint-disable-next-line no-var
 var CrElementsV3FocusTest = class extends PolymerInteractiveUITest {
   /** @override */
@@ -95,6 +97,19 @@ TEST_F('CrElementsInputV3Test', 'MAYBE_All', function() {
 });
 
 // eslint-disable-next-line no-var
+var CrElementsProfileAvatarSelectorV3Test =
+    class extends CrElementsV3FocusTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://test?module=cr_elements/cr_profile_avatar_selector_tests.m.js';
+  }
+};
+
+TEST_F('CrElementsProfileAvatarSelectorV3Test', 'All', function() {
+  mocha.run();
+});
+
+// eslint-disable-next-line no-var
 var CrElementsTabsV3Test = class extends CrElementsV3FocusTest {
   /** @override */
   get browsePreload() {
@@ -115,5 +130,17 @@ var CrElementsToggleV3Test = class extends CrElementsV3FocusTest {
 };
 
 TEST_F('CrElementsToggleV3Test', 'All', function() {
+  mocha.run();
+});
+
+// eslint-disable-next-line no-var
+var IronListFocusV3Test = class extends CrElementsV3FocusTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://test?module=cr_elements/iron_list_focus_test.m.js';
+  }
+};
+
+TEST_F('IronListFocusV3Test', 'All', function() {
   mocha.run();
 });

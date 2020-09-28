@@ -35,6 +35,7 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/inspector/inspector_base_agent.h"
 #include "third_party/blink/renderer/core/inspector/protocol/LayerTree.h"
+#include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -58,7 +59,7 @@ class CORE_EXPORT InspectorLayerTreeAgent final
 
   InspectorLayerTreeAgent(InspectedFrames*, Client*);
   ~InspectorLayerTreeAgent() override;
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   void Restore() override;
 
@@ -71,7 +72,9 @@ class CORE_EXPORT InspectorLayerTreeAgent final
   protocol::Response disable() override;
   protocol::Response compositingReasons(
       const String& layer_id,
-      std::unique_ptr<protocol::Array<String>>* compositing_reasons) override;
+      std::unique_ptr<protocol::Array<String>>* compositing_reasons,
+      std::unique_ptr<protocol::Array<String>>* compositing_reason_ids)
+      override;
   protocol::Response makeSnapshot(const String& layer_id,
                                   String* snapshot_id) override;
   protocol::Response loadSnapshot(
@@ -110,7 +113,7 @@ class CORE_EXPORT InspectorLayerTreeAgent final
       const cc::Layer*,
       std::unique_ptr<protocol::Array<protocol::LayerTree::Layer>>&,
       bool has_wheel_event_handlers,
-      int scrolling_root_layer_id);
+      CompositorElementId outer_viewport_scroll_element_id);
 
   Member<InspectedFrames> inspected_frames_;
   Client* client_;

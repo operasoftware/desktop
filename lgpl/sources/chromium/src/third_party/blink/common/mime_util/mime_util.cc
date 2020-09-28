@@ -5,12 +5,14 @@
 #include "third_party/blink/public/common/mime_util/mime_util.h"
 
 #include <stddef.h>
+#include <unordered_set>
 
 #include "base/lazy_instance.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "media/media_buildflags.h"
 #include "net/base/mime_util.h"
+#include "third_party/blink/public/common/features.h"
 
 #if !defined(OS_IOS)
 // iOS doesn't use and must not depend on //media
@@ -79,8 +81,12 @@ static const char* const kUnsupportedTextTypes[] = {
     "text/csv",
     "text/tab-separated-values",
     "text/tsv",
-    "text/ofx",                         // http://crbug.com/162238
-    "text/vnd.sun.j2me.app-descriptor"  // http://crbug.com/176450
+    "text/ofx",                          // https://crbug.com/162238
+    "text/vnd.sun.j2me.app-descriptor",  // https://crbug.com/176450
+    "text/x-ms-iqy",                     // https://crbug.com/1054863
+    "text/x-ms-odc",                     // https://crbug.com/1054863
+    "text/x-ms-rqy",                     // https://crbug.com/1054863
+    "text/x-ms-contact"                  // https://crbug.com/1054863
 };
 
 // Note:
@@ -110,6 +116,7 @@ class MimeUtil {
   bool IsSupportedNonImageMimeType(const std::string& mime_type) const;
   bool IsUnsupportedTextMimeType(const std::string& mime_type) const;
   bool IsSupportedJavascriptMimeType(const std::string& mime_type) const;
+  bool IsJSONMimeType(const std::string&) const;
 
   bool IsSupportedMimeType(const std::string& mime_type) const;
 
@@ -129,15 +136,21 @@ class MimeUtil {
 };
 
 MimeUtil::MimeUtil() {
-  for (size_t i = 0; i < base::size(kSupportedNonImageTypes); ++i)
-    non_image_types_.insert(kSupportedNonImageTypes[i]);
-  for (size_t i = 0; i < base::size(kSupportedImageTypes); ++i)
-    image_types_.insert(kSupportedImageTypes[i]);
-  for (size_t i = 0; i < base::size(kUnsupportedTextTypes); ++i)
-    unsupported_text_types_.insert(kUnsupportedTextTypes[i]);
-  for (size_t i = 0; i < base::size(kSupportedJavascriptTypes); ++i) {
-    javascript_types_.insert(kSupportedJavascriptTypes[i]);
-    non_image_types_.insert(kSupportedJavascriptTypes[i]);
+  for (const char* type : kSupportedNonImageTypes)
+    non_image_types_.insert(type);
+  for (const char* type : kSupportedImageTypes)
+    image_types_.insert(type);
+#if BUILDFLAG(ENABLE_AV1_DECODER)
+  // TODO(wtc): Add "image/avif" to the kSupportedImageTypes array when the AVIF
+  // feature is shipped.
+  if (base::FeatureList::IsEnabled(features::kAVIF))
+    image_types_.insert("image/avif");
+#endif
+  for (const char* type : kUnsupportedTextTypes)
+    unsupported_text_types_.insert(type);
+  for (const char* type : kSupportedJavascriptTypes) {
+    javascript_types_.insert(type);
+    non_image_types_.insert(type);
   }
 }
 
@@ -169,6 +182,14 @@ bool MimeUtil::IsSupportedJavascriptMimeType(
   return javascript_types_.find(mime_type) != javascript_types_.end();
 }
 
+// TODO(sasebree): Allow non-application `*/*+json` MIME types.
+// https://mimesniff.spec.whatwg.org/#json-mime-type
+bool MimeUtil::IsJSONMimeType(const std::string& mime_type) const {
+  return net::MatchesMimeType("application/json", mime_type) ||
+         net::MatchesMimeType("text/json", mime_type) ||
+         net::MatchesMimeType("application/*+json", mime_type);
+}
+
 bool MimeUtil::IsSupportedMimeType(const std::string& mime_type) const {
   return (base::StartsWith(mime_type, "image/",
                            base::CompareCase::INSENSITIVE_ASCII) &&
@@ -196,6 +217,10 @@ bool IsUnsupportedTextMimeType(const std::string& mime_type) {
 
 bool IsSupportedJavascriptMimeType(const std::string& mime_type) {
   return g_mime_util.Get().IsSupportedJavascriptMimeType(mime_type);
+}
+
+bool IsJSONMimeType(const std::string& mime_type) {
+  return g_mime_util.Get().IsJSONMimeType(mime_type);
 }
 
 bool IsSupportedMimeType(const std::string& mime_type) {

@@ -38,12 +38,6 @@ class NodeIterator final : public ScriptWrappable, public NodeIteratorBase {
   USING_GARBAGE_COLLECTED_MIXIN(NodeIterator);
 
  public:
-  static NodeIterator* Create(Node* root_node,
-                              unsigned what_to_show,
-                              V8NodeFilter* filter) {
-    return MakeGarbageCollected<NodeIterator>(root_node, what_to_show, filter);
-  }
-
   NodeIterator(Node*, unsigned what_to_show, V8NodeFilter*);
 
   Node* nextNode(ExceptionState&);
@@ -58,7 +52,7 @@ class NodeIterator final : public ScriptWrappable, public NodeIteratorBase {
   // This function is called before any node is removed from the document tree.
   void NodeWillBeRemoved(Node&);
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   class NodePointer {
@@ -75,7 +69,7 @@ class NodeIterator final : public ScriptWrappable, public NodeIteratorBase {
     Member<Node> node;
     bool is_pointer_before_node;
 
-    void Trace(Visitor* visitor) { visitor->Trace(node); }
+    void Trace(Visitor* visitor) const { visitor->Trace(node); }
   };
 
   void UpdateForNodeRemoval(Node& node_to_be_removed, NodePointer&) const;

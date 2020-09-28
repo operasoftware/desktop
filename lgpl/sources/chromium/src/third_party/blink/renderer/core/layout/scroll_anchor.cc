@@ -84,7 +84,10 @@ static LayoutRect RelativeBounds(const LayoutObject* layout_object,
   PhysicalRect local_bounds;
   if (layout_object->IsBox()) {
     local_bounds = ToLayoutBox(layout_object)->PhysicalBorderBoxRect();
-    if (!layout_object->HasOverflowClip()) {
+    // If we clip overflow then we can use the `PhysicalBorderBoxRect()`
+    // as our bounds. If not, we expand the bounds by the layout overflow and
+    // lowest floating object.
+    if (!layout_object->ShouldClipOverflow()) {
       // BorderBoxRect doesn't include overflow content and floats.
       LayoutUnit max_y =
           std::max(local_bounds.Bottom(),
@@ -156,7 +159,7 @@ static const AtomicString UniqueClassnameAmongSiblings(Element* element) {
     if (sibling_element->HasClass() && sibling_element != element) {
       const SpaceSplitString& class_names = sibling_element->ClassNames();
       for (wtf_size_t i = 0; i < class_names.size(); ++i) {
-        classname_filter->Add(class_names[i]);
+        classname_filter->Add(class_names[i].Impl()->ExistingHash());
       }
     }
   }
@@ -166,7 +169,7 @@ static const AtomicString UniqueClassnameAmongSiblings(Element* element) {
     // MayContain allows for false positives, but a false positive is relatively
     // harmless; it just means we have to choose a different classname, or in
     // the worst case a different selector.
-    if (!classname_filter->MayContain(class_names[i])) {
+    if (!classname_filter->MayContain(class_names[i].Impl()->ExistingHash())) {
       return class_names[i];
     }
   }
@@ -292,6 +295,15 @@ ScrollAnchor::ExamineResult ScrollAnchor::Examine(
   LayoutRect visible_rect =
       ScrollerLayoutBox(scroller_)->OverflowClipRect(LayoutPoint());
 
+  const ComputedStyle* style = ScrollerLayoutBox(scroller_)->Style();
+  LayoutRectOutsets scroll_padding(
+      MinimumValueForLength(style->ScrollPaddingTop(), visible_rect.Height()),
+      MinimumValueForLength(style->ScrollPaddingRight(), visible_rect.Width()),
+      MinimumValueForLength(style->ScrollPaddingBottom(),
+                            visible_rect.Height()),
+      MinimumValueForLength(style->ScrollPaddingLeft(), visible_rect.Width()));
+  visible_rect.Contract(scroll_padding);
+
   bool occupies_space =
       candidate_rect.Width() > 0 && candidate_rect.Height() > 0;
   if (occupies_space && visible_rect.Intersects(candidate_rect)) {
@@ -306,12 +318,75 @@ ScrollAnchor::ExamineResult ScrollAnchor::Examine(
 void ScrollAnchor::FindAnchor() {
   TRACE_EVENT0("blink", "ScrollAnchor::findAnchor");
   SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Layout.ScrollAnchor.TimeToFindAnchor");
-  FindAnchorRecursive(ScrollerLayoutBox(scroller_));
+
+  bool found_priority_anchor = FindAnchorInPriorityCandidates();
+  if (!found_priority_anchor)
+    FindAnchorRecursive(ScrollerLayoutBox(scroller_));
+
   if (anchor_object_) {
     anchor_object_->SetIsScrollAnchorObject();
     saved_relative_offset_ =
         ComputeRelativeOffset(anchor_object_, scroller_, corner_);
   }
+}
+
+bool ScrollAnchor::FindAnchorInPriorityCandidates() {
+  auto* scroller_box = ScrollerLayoutBox(scroller_);
+  if (!scroller_box)
+    return false;
+
+  auto& document = scroller_box->GetDocument();
+
+  // Focused area.
+  LayoutObject* candidate =
+      PriorityCandidateFromNode(document.FocusedElement());
+  auto result = ExaminePriorityCandidate(candidate);
+  if (result.viable) {
+    anchor_object_ = candidate;
+    corner_ = result.corner;
+    return true;
+  }
+
+  // Active find-in-page match.
+  candidate =
+      PriorityCandidateFromNode(document.GetFindInPageActiveMatchNode());
+  result = ExaminePriorityCandidate(candidate);
+  if (result.viable) {
+    anchor_object_ = candidate;
+    corner_ = result.corner;
+    return true;
+  }
+  return false;
+}
+
+LayoutObject* ScrollAnchor::PriorityCandidateFromNode(const Node* node) const {
+  while (node) {
+    if (auto* layout_object = node->GetLayoutObject()) {
+      if (!layout_object->IsAnonymous() &&
+          (!layout_object->IsInline() ||
+           layout_object->IsAtomicInlineLevel())) {
+        return layout_object;
+      }
+    }
+    node = FlatTreeTraversal::Parent(*node);
+  }
+  return nullptr;
+}
+
+ScrollAnchor::ExamineResult ScrollAnchor::ExaminePriorityCandidate(
+    const LayoutObject* candidate) const {
+  auto* ancestor = candidate;
+  auto* scroller_box = ScrollerLayoutBox(scroller_);
+  while (ancestor && ancestor != scroller_box) {
+    if (ancestor->StyleRef().OverflowAnchor() == EOverflowAnchor::kNone)
+      return ExamineResult(kSkip);
+
+    if (!CandidateMayMoveWithScroller(ancestor, scroller_))
+      return ExamineResult(kSkip);
+
+    ancestor = ancestor->Parent();
+  }
+  return ancestor ? Examine(candidate) : ExamineResult(kSkip);
 }
 
 bool ScrollAnchor::FindAnchorRecursive(LayoutObject* candidate) {
@@ -454,7 +529,8 @@ void ScrollAnchor::Adjust() {
   }
 
   scroller_->SetScrollOffset(
-      scroller_->GetScrollOffset() + FloatSize(adjustment), kAnchoringScroll);
+      scroller_->GetScrollOffset() + FloatSize(adjustment),
+      mojom::blink::ScrollType::kAnchoring);
 
   // Update UMA metric.
   DEFINE_STATIC_LOCAL(EnumerationHistogram, adjusted_offset_histogram,
@@ -529,13 +605,15 @@ bool ScrollAnchor::RestoreAnchor(const SerializedAnchor& serialized_anchor) {
     ScrollOffset delta =
         ScrollOffset(RoundedIntSize(serialized_anchor.relative_offset));
     desired_offset -= delta;
-    scroller_->SetScrollOffset(desired_offset, kAnchoringScroll);
+    scroller_->SetScrollOffset(desired_offset,
+                               mojom::blink::ScrollType::kAnchoring);
     FindAnchor();
 
     // If the above FindAnchor call failed, reset the scroll position and try
     // again with the next found element.
     if (!anchor_object_) {
-      scroller_->SetScrollOffset(current_offset, kAnchoringScroll);
+      scroller_->SetScrollOffset(current_offset,
+                                 mojom::blink::ScrollType::kAnchoring);
       continue;
     }
 

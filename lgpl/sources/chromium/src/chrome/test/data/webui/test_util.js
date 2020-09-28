@@ -4,6 +4,8 @@
 
 // clang-format off
 // #import {afterNextRender, beforeNextRender, flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+// #import {assertEquals} from './chai_assert.js';
+// #import {NativeEventTarget as EventTarget} from 'chrome://resources/js/cr/event_target.m.js';
 // clang-format on
 
 cr.define('test_util', function() {
@@ -18,14 +20,14 @@ cr.define('test_util', function() {
   /* #export */ function whenAttributeIs(
       target, attributeName, attributeValue) {
     function isDone() {
-      return target.getAttribute(attributeName) == attributeValue;
+      return target.getAttribute(attributeName) === attributeValue;
     }
 
     return isDone() ? Promise.resolve() : new Promise(function(resolve) {
       new MutationObserver(function(mutations, observer) {
         for (const mutation of mutations) {
           assertEquals('attributes', mutation.type);
-          if (mutation.attributeName == attributeName && isDone()) {
+          if (mutation.attributeName === attributeName && isDone()) {
             observer.disconnect();
             resolve();
             return;
@@ -42,7 +44,7 @@ cr.define('test_util', function() {
   /**
    * Converts an event occurrence to a promise.
    * @param {string} eventType
-   * @param {!HTMLElement} target
+   * @param {!Element|!EventTarget|!Window} target
    * @return {!Promise} A promise firing once the event occurs.
    */
   /* #export */ function eventToPromise(eventType, target) {
@@ -58,8 +60,8 @@ cr.define('test_util', function() {
    * Data-binds two Polymer properties using the property-changed events and
    * set/notifyPath API. Useful for testing components which would normally be
    * used together.
-   * @param {!HTMLElement} el1
-   * @param {!HTMLElement} el2
+   * @param {!Element} el1
+   * @param {!Element} el2
    * @param {string} property
    */
   /* #export */ function fakeDataBind(el1, el2, property) {
@@ -111,20 +113,27 @@ cr.define('test_util', function() {
   }
 
   /**
-   * Returns whether or not the element specified is visible. This is different
-   * from isElementVisible in that this function attempts to search for the
-   * element within a parent element, which means you can use it to check if
-   * the element exists at all.
+   * Returns whether or not the element specified is visible.
+   * @param {!HTMLElement} element
+   * @return {boolean}
+   */
+  /* #export */ function isVisible(element) {
+    const rect = element ? element.getBoundingClientRect() : null;
+    return (!!rect && rect.width * rect.height > 0);
+  }
+
+  /**
+   * Searches the DOM of the parentEl element for a child matching the provided
+   * selector then checks the visibility of the child.
    * @param {!HTMLElement} parentEl
    * @param {string} selector
    * @param {boolean=} checkLightDom
    * @return {boolean}
    */
-  /* #export */ function isVisible(parentEl, selector, checkLightDom) {
+  /* #export */ function isChildVisible(parentEl, selector, checkLightDom) {
     const element = (checkLightDom ? parentEl.querySelector : parentEl.$$)
                         .call(parentEl, selector);
-    const rect = element ? element.getBoundingClientRect() : null;
-    return !!rect && rect.width * rect.height > 0;
+    return isVisible(element);
   }
 
   // #cr_define_end
@@ -133,6 +142,7 @@ cr.define('test_util', function() {
     fakeDataBind: fakeDataBind,
     flushTasks: flushTasks,
     isVisible: isVisible,
+    isChildVisible: isChildVisible,
     waitAfterNextRender: waitAfterNextRender,
     waitBeforeNextRender: waitBeforeNextRender,
     whenAttributeIs: whenAttributeIs,

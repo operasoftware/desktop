@@ -28,7 +28,6 @@
 #include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
-#include "third_party/blink/renderer/core/html/media/media_element_parser_helpers.h"
 #include "third_party/blink/renderer/core/paint/video_painter.h"
 
 namespace blink {
@@ -44,7 +43,7 @@ LayoutSize LayoutVideo::DefaultSize() {
 }
 
 void LayoutVideo::IntrinsicSizeChanged() {
-  if (VideoElement()->ShouldDisplayPosterImage())
+  if (VideoElement()->IsShowPosterFlagSet())
     LayoutMedia::IntrinsicSizeChanged();
   UpdateIntrinsicSize(/* is_in_layout */ false);
 }
@@ -62,7 +61,7 @@ void LayoutVideo::UpdateIntrinsicSize(bool is_in_layout) {
     return;
 
   SetIntrinsicSize(size);
-  SetPreferredLogicalWidthsDirty();
+  SetIntrinsicLogicalWidthsDirty();
   if (!is_in_layout) {
     SetNeedsLayoutAndFullPaintInvalidation(
         layout_invalidation_reason::kSizeChanged);
@@ -73,9 +72,10 @@ LayoutSize LayoutVideo::CalculateIntrinsicSize() {
   HTMLVideoElement* video = VideoElement();
   DCHECK(video);
 
-  if (RuntimeEnabledFeatures::ExperimentalProductivityFeaturesEnabled() &&
-      !video->GetOverriddenIntrinsicSize().IsEmpty())
-    return LayoutSize(video->GetOverriddenIntrinsicSize());
+  if (RuntimeEnabledFeatures::ExperimentalProductivityFeaturesEnabled()) {
+    if (video->IsDefaultIntrinsicSize())
+      return DefaultSize();
+  }
 
   // Spec text from 4.8.6
   //
@@ -91,12 +91,12 @@ LayoutSize LayoutVideo::CalculateIntrinsicSize() {
   WebMediaPlayer* web_media_player = MediaElement()->GetWebMediaPlayer();
   if (web_media_player &&
       video->getReadyState() >= HTMLVideoElement::kHaveMetadata) {
-    IntSize size = web_media_player->NaturalSize();
+    IntSize size(web_media_player->NaturalSize());
     if (!size.IsEmpty())
       return LayoutSize(size);
   }
 
-  if (video->ShouldDisplayPosterImage() && !cached_image_size_.IsEmpty() &&
+  if (video->IsShowPosterFlagSet() && !cached_image_size_.IsEmpty() &&
       !ImageResource()->ErrorOccurred())
     return cached_image_size_;
 
@@ -120,8 +120,13 @@ void LayoutVideo::ImageChanged(WrappedImagePtr new_image,
   UpdateIntrinsicSize(/* is_in_layout */ false);
 }
 
-bool LayoutVideo::ShouldDisplayVideo() const {
-  return !VideoElement()->ShouldDisplayPosterImage();
+LayoutVideo::DisplayMode LayoutVideo::GetDisplayMode() const {
+  if (!VideoElement()->IsShowPosterFlagSet() ||
+      VideoElement()->PosterImageURL().IsEmpty()) {
+    return kVideo;
+  } else {
+    return kPoster;
+  }
 }
 
 void LayoutVideo::PaintReplaced(const PaintInfo& paint_info,
@@ -135,14 +140,13 @@ void LayoutVideo::UpdateLayout() {
 }
 
 HTMLVideoElement* LayoutVideo::VideoElement() const {
-  return ToHTMLVideoElement(GetNode());
+  return To<HTMLVideoElement>(GetNode());
 }
 
 void LayoutVideo::UpdateFromElement() {
   LayoutMedia::UpdateFromElement();
   UpdatePlayer(/* is_in_layout */ false);
 
-  // If the DisplayMode of the video changed, then we need to paint.
   SetShouldDoFullPaintInvalidation();
 }
 
@@ -174,7 +178,7 @@ LayoutUnit LayoutVideo::MinimumReplacedHeight() const {
 }
 
 PhysicalRect LayoutVideo::ReplacedContentRect() const {
-  if (ShouldDisplayVideo()) {
+  if (GetDisplayMode() == kVideo) {
     // Video codecs may need to restart from an I-frame when the output is
     // resized. Round size in advance to avoid 1px snap difference.
     return PreSnappedRectForPersistentSizing(ComputeObjectFit());
@@ -189,23 +193,14 @@ bool LayoutVideo::SupportsAcceleratedRendering() const {
 }
 
 CompositingReasons LayoutVideo::AdditionalCompositingReasons() const {
-  HTMLMediaElement* element = ToHTMLMediaElement(GetNode());
+  auto* element = To<HTMLMediaElement>(GetNode());
   if (element->IsFullscreen() && element->UsesOverlayFullscreenVideo())
     return CompositingReason::kVideo;
 
-  if (ShouldDisplayVideo() && SupportsAcceleratedRendering())
+  if (GetDisplayMode() == kVideo && SupportsAcceleratedRendering())
     return CompositingReason::kVideo;
 
   return CompositingReason::kNone;
-}
-
-void LayoutVideo::UpdateAfterLayout() {
-  LayoutBox::UpdateAfterLayout();
-  // Report violation of unsized-media policy.
-  if (auto* video_element = ToHTMLVideoElementOrNull(GetNode())) {
-    media_element_parser_helpers::ReportUnsizedMediaViolation(
-        this, video_element->IsDefaultIntrinsicSize());
-  }
 }
 
 }  // namespace blink

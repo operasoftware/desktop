@@ -23,6 +23,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GEOMETRY_LENGTH_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GEOMETRY_LENGTH_H_
 
+#include <cstring>
+
+#include "base/notreached.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -54,13 +57,14 @@ class PLATFORM_EXPORT Length {
     kFixed,
     kMinContent,
     kMaxContent,
+    kMinIntrinsic,
     kFillAvailable,
     kFitContent,
     kCalculated,
     kExtendToZoom,
     kDeviceWidth,
     kDeviceHeight,
-    kMaxSizeNone
+    kNone
   };
 
   Length() : int_value_(0), quirk_(false), type_(kAuto), is_float_(false) {}
@@ -114,7 +118,7 @@ class PLATFORM_EXPORT Length {
 
   bool operator==(const Length& o) const {
     return (type_ == o.type_) && (quirk_ == o.quirk_) &&
-           (IsMaxSizeNone() || (GetFloatValue() == o.GetFloatValue()) ||
+           (IsNone() || (GetFloatValue() == o.GetFloatValue()) ||
             IsCalculatedEqual(o));
   }
   bool operator!=(const Length& o) const { return !(*this == o); }
@@ -142,10 +146,11 @@ class PLATFORM_EXPORT Length {
   static Length FillAvailable() { return Length(kFillAvailable); }
   static Length MinContent() { return Length(kMinContent); }
   static Length MaxContent() { return Length(kMaxContent); }
+  static Length MinIntrinsic() { return Length(kMinIntrinsic); }
   static Length ExtendToZoom() { return Length(kExtendToZoom); }
   static Length DeviceWidth() { return Length(kDeviceWidth); }
   static Length DeviceHeight() { return Length(kDeviceHeight); }
-  static Length MaxSizeNone() { return Length(kMaxSizeNone); }
+  static Length None() { return Length(kNone); }
   static Length FitContent() { return Length(kFitContent); }
   template <typename NUMBER_TYPE>
   static Length Percent(NUMBER_TYPE number) {
@@ -191,21 +196,21 @@ class PLATFORM_EXPORT Length {
 
   void SetQuirk(bool quirk) { quirk_ = quirk; }
 
-  bool IsMaxSizeNone() const { return GetType() == kMaxSizeNone; }
+  bool IsNone() const { return GetType() == kNone; }
 
   // FIXME calc: https://bugs.webkit.org/show_bug.cgi?id=80357. A calculated
   // Length always contains a percentage, and without a maxValue passed to these
   // functions it's impossible to determine the sign or zero-ness. We assume all
   // calc values are positive and non-zero for now.
   bool IsZero() const {
-    DCHECK(!IsMaxSizeNone());
+    DCHECK(!IsNone());
     if (IsCalculated())
       return false;
 
     return is_float_ ? !float_value_ : !int_value_;
   }
   bool IsPositive() const {
-    if (IsMaxSizeNone())
+    if (IsNone())
       return false;
     if (IsCalculated())
       return true;
@@ -213,7 +218,7 @@ class PLATFORM_EXPORT Length {
     return GetFloatValue() > 0;
   }
   bool IsNegative() const {
-    if (IsMaxSizeNone() || IsCalculated())
+    if (IsNone() || IsCalculated())
       return false;
 
     return GetFloatValue() < 0;
@@ -228,7 +233,8 @@ class PLATFORM_EXPORT Length {
   bool IsIntrinsicOrAuto() const { return GetType() == kAuto || IsIntrinsic(); }
   bool IsIntrinsic() const {
     return GetType() == kMinContent || GetType() == kMaxContent ||
-           GetType() == kFillAvailable || GetType() == kFitContent;
+           GetType() == kMinIntrinsic || GetType() == kFillAvailable ||
+           GetType() == kFitContent;
   }
   bool IsSpecified() const {
     return GetType() == kFixed || GetType() == kPercent ||
@@ -239,6 +245,7 @@ class PLATFORM_EXPORT Length {
   bool IsCalculatedEqual(const Length&) const;
   bool IsMinContent() const { return GetType() == kMinContent; }
   bool IsMaxContent() const { return GetType() == kMaxContent; }
+  bool IsMinIntrinsic() const { return GetType() == kMinIntrinsic; }
   bool IsFillAvailable() const { return GetType() == kFillAvailable; }
   bool IsFitContent() const { return GetType() == kFitContent; }
   bool IsPercent() const { return GetType() == kPercent; }
@@ -272,7 +279,7 @@ class PLATFORM_EXPORT Length {
   }
 
   float GetFloatValue() const {
-    DCHECK(!IsMaxSizeNone());
+    DCHECK(!IsNone());
     return is_float_ ? float_value_ : int_value_;
   }
   float NonNanCalculatedValue(LayoutUnit max_value) const;
@@ -283,7 +290,7 @@ class PLATFORM_EXPORT Length {
 
  private:
   int GetIntValue() const {
-    DCHECK(!IsMaxSizeNone());
+    DCHECK(!IsNone());
     return is_float_ ? static_cast<int>(float_value_) : int_value_;
   }
 

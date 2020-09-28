@@ -33,6 +33,7 @@
 
 #include "base/optional.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "third_party/blink/public/common/css/forced_colors.h"
 #include "third_party/blink/public/platform/web_color_scheme.h"
 #include "third_party/blink/public/platform/web_rect.h"
@@ -117,6 +118,7 @@ class WebThemeEngine {
     bool has_border;
     bool has_focus;
     SkColor background_color;
+    float zoom;
   };
 
   // Extra parameters for PartTextField
@@ -124,6 +126,8 @@ class WebThemeEngine {
     bool is_text_area;
     bool is_listbox;
     SkColor background_color;
+    bool has_border;
+    bool auto_complete_active;
   };
 
   // Extra parameters for PartMenuList
@@ -144,6 +148,8 @@ class WebThemeEngine {
     bool in_drag;
     int thumb_x;
     int thumb_y;
+    float zoom;
+    bool right_to_left;
   };
 
   // Extra parameters for PartInnerSpinButton
@@ -171,6 +177,24 @@ class WebThemeEngine {
     bool right_to_left;
   };
 
+#if defined(OS_MACOSX)
+  enum ScrollbarOrientation {
+    // Vertical scrollbar on the right side of content.
+    kVerticalOnRight,
+    // Vertical scrollbar on the left side of content.
+    kVerticalOnLeft,
+    // Horizontal scrollbar (on the bottom of content).
+    kHorizontal,
+  };
+
+  struct ScrollbarExtraParams {
+    bool is_hovering;
+    bool is_overlay;
+    WebColorScheme scrollbar_theme;
+    ScrollbarOrientation orientation;
+  };
+#endif
+
   union ExtraParams {
     ScrollbarTrackExtraParams scrollbar_track;
     ButtonExtraParams button;
@@ -181,6 +205,9 @@ class WebThemeEngine {
     ProgressBarExtraParams progress_bar;
     ScrollbarThumbExtraParams scrollbar_thumb;
     ScrollbarButtonExtraParams scrollbar_button;
+#if defined(OS_MACOSX)
+    ScrollbarExtraParams scrollbar_extra;
+#endif
   };
 
   virtual ~WebThemeEngine() {}
@@ -227,7 +254,7 @@ class WebThemeEngine {
     return base::nullopt;
   }
 
-  virtual ForcedColors ForcedColors() const { return ForcedColors::kNone; }
+  virtual ForcedColors GetForcedColors() const { return ForcedColors::kNone; }
   virtual void SetForcedColors(const blink::ForcedColors forced_colors) {}
 };
 

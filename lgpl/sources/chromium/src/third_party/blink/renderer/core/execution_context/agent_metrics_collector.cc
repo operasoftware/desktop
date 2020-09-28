@@ -6,11 +6,21 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "base/time/default_tick_clock.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
-#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/window_agent.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/web_test_support.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
+
+using WTF::HashSet;
+using WTF::String;
+using WTF::Vector;
 
 namespace blink {
 
@@ -44,31 +54,35 @@ AgentMetricsCollector::~AgentMetricsCollector() {
   ReportMetrics();
 }
 
-void AgentMetricsCollector::DidAttachDocument(const Document& doc) {
+void AgentMetricsCollector::DidAttachWindow(const LocalDOMWindow& window) {
   ReportMetrics();
 
-  AgentToDocumentsMap::AddResult result =
-      agent_to_documents_map_.insert(doc.GetAgent(), nullptr);
+  AgentToWindowsMap::AddResult result =
+      agent_to_windows_map_.insert(window.GetAgent(), nullptr);
   if (result.is_new_entry)
-    result.stored_value->value = MakeGarbageCollected<DocumentSet>();
+    result.stored_value->value = MakeGarbageCollected<WindowSet>();
 
-  result.stored_value->value->insert(&doc);
+  result.stored_value->value->insert(&window);
+
+  ReportToBrowser();
 }
 
-void AgentMetricsCollector::DidDetachDocument(const Document& doc) {
+void AgentMetricsCollector::DidDetachWindow(const LocalDOMWindow& window) {
   ReportMetrics();
 
-  auto agent_itr = agent_to_documents_map_.find(doc.GetAgent());
-  DCHECK(agent_itr != agent_to_documents_map_.end());
+  auto agent_itr = agent_to_windows_map_.find(window.GetAgent());
+  DCHECK(agent_itr != agent_to_windows_map_.end());
 
-  DocumentSet& documents = *agent_itr->value.Get();
-  auto document_itr = documents.find(&doc);
-  DCHECK(document_itr != documents.end());
+  WindowSet& windows = *agent_itr->value.Get();
+  auto window_itr = windows.find(&window);
+  DCHECK(window_itr != windows.end());
 
-  documents.erase(document_itr);
+  windows.erase(window_itr);
 
-  if (documents.IsEmpty())
-    agent_to_documents_map_.erase(agent_itr);
+  if (windows.IsEmpty())
+    agent_to_windows_map_.erase(agent_itr);
+
+  ReportToBrowser();
 }
 
 void AgentMetricsCollector::ReportMetrics() {
@@ -104,16 +118,62 @@ void AgentMetricsCollector::ReportMetrics() {
 void AgentMetricsCollector::AddTimeToTotalAgents(int time_delta_to_add) {
   DEFINE_STATIC_LOCAL(LinearHistogram, agents_per_renderer_histogram,
                       (kAgentsPerRendererByTimeHistogram, 1, 100, 101));
-  agents_per_renderer_histogram.CountMany(agent_to_documents_map_.size(),
+  agents_per_renderer_histogram.CountMany(agent_to_windows_map_.size(),
                                           time_delta_to_add);
+}
+
+void AgentMetricsCollector::ReportToBrowser() {
+  Vector<String> agents;
+  for (const auto& kv : agent_to_windows_map_) {
+    const Member<WindowSet>& window_set = kv.value;
+
+    String tuple_origin;
+    DCHECK(!window_set->IsEmpty());
+    const auto& window = *window_set->begin();
+    auto* security_origin = window->GetSecurityOrigin();
+    if (security_origin && !security_origin->IsOpaque() &&
+        !security_origin->IsLocal()) {
+      // We shouldn't ever host multiple tuple-origins in an Agent. However,
+      // this does happen in tests because we have
+      // GetAllowUniversalAccessFromFileURLs enabled but that's ok in tests.
+      tuple_origin = security_origin->Protocol() + "://" +
+                     security_origin->RegistrableDomain();
+    } else {
+      // We use an empty string to specify that there isn't any one
+      // tuple-origin this agent represents. This will typically be for
+      // file:// or opaque origins. We shouldn't ever host multiple sites
+      // inside an agent.
+      tuple_origin = "";
+    }
+
+    agents.push_back(tuple_origin);
+  }
+
+  mojom::blink::AgentMetricsDataPtr data =
+      mojom::blink::AgentMetricsData::New();
+  data->agents = agents;
+
+  GetAgentMetricsCollectorHost()->ReportRendererMetrics(std::move(data));
 }
 
 void AgentMetricsCollector::ReportingTimerFired(TimerBase*) {
   ReportMetrics();
+  ReportToBrowser();
 }
 
-void AgentMetricsCollector::Trace(blink::Visitor* visitor) {
-  visitor->Trace(agent_to_documents_map_);
+blink::mojom::blink::AgentMetricsCollectorHost*
+AgentMetricsCollector::GetAgentMetricsCollectorHost() {
+  if (!agent_metrics_collector_host_.is_bound()) {
+    blink::Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
+        agent_metrics_collector_host_.BindNewPipeAndPassReceiver(
+            ThreadScheduler::Current()->IPCTaskRunner()));
+  }
+  return agent_metrics_collector_host_.get();
+}
+
+void AgentMetricsCollector::Trace(Visitor* visitor) const {
+  visitor->Trace(agent_to_windows_map_);
+  visitor->Trace(agent_metrics_collector_host_);
 }
 
 }  // namespace blink

@@ -42,7 +42,7 @@
 #include <io.h>
 #endif
 
-#if HAVE_SETCONSOLETEXTATTRIBUTE
+#if HAVE_SETCONSOLETEXTATTRIBUTE && HAVE_GETSTDHANDLE
 #include <windows.h>
 #define COLOR_RED    FOREGROUND_RED
 #define COLOR_GREEN  FOREGROUND_GREEN
@@ -130,6 +130,9 @@ static const struct {
     #if CONFIG_LLVIDENCDSP
         { "llviddspenc", checkasm_check_llviddspenc },
     #endif
+    #if CONFIG_OPUS_DECODER
+        { "opusdsp", checkasm_check_opusdsp },
+    #endif
     #if CONFIG_PIXBLOCKDSP
         { "pixblockdsp", checkasm_check_pixblockdsp },
     #endif
@@ -161,6 +164,9 @@ static const struct {
     #endif
     #if CONFIG_COLORSPACE_FILTER
         { "vf_colorspace", checkasm_check_colorspace },
+    #endif
+    #if CONFIG_EQ_FILTER
+        { "vf_eq", checkasm_check_vf_eq },
     #endif
     #if CONFIG_GBLUR_FILTER
         { "vf_gblur", checkasm_check_vf_gblur },
@@ -368,7 +374,7 @@ static void color_printf(int color, const char *fmt, ...)
     static int use_color = -1;
     va_list arg;
 
-#if HAVE_SETCONSOLETEXTATTRIBUTE
+#if HAVE_SETCONSOLETEXTATTRIBUTE && HAVE_GETSTDHANDLE
     static HANDLE con;
     static WORD org_attributes;
 
@@ -397,7 +403,7 @@ static void color_printf(int color, const char *fmt, ...)
     va_end(arg);
 
     if (use_color) {
-#if HAVE_SETCONSOLETEXTATTRIBUTE
+#if HAVE_SETCONSOLETEXTATTRIBUTE && HAVE_GETSTDHANDLE
         SetConsoleTextAttribute(con, org_attributes);
 #else
         fprintf(stderr, "\x1b[0m");

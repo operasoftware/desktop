@@ -4,6 +4,7 @@
 
 #include "third_party/blink/public/platform/modules/webrtc/webrtc_logging.h"
 
+#include "base/logging.h"
 #include "base/time/time.h"
 #include "third_party/webrtc_overrides/rtc_base/logging.h"
 
@@ -25,6 +26,7 @@ void InitWebRtcLogging() {
 }
 
 void WebRtcLogMessage(const std::string& message) {
+  DVLOG(1) << message;
   if (g_webrtc_logging_delegate)
     g_webrtc_logging_delegate->LogMessage(message);
 }

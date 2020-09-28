@@ -44,39 +44,38 @@ class CORE_EXPORT ClassicPendingScript final : public PendingScript,
   // For an inline script.
   static ClassicPendingScript* CreateInline(ScriptElementBase*,
                                             const TextPosition&,
+                                            const KURL& base_url,
+                                            const String& source_text,
                                             ScriptSourceLocationType,
                                             const ScriptFetchOptions&);
 
   ClassicPendingScript(ScriptElementBase*,
                        const TextPosition&,
+                       const KURL& base_url_for_inline_script,
+                       const String& source_text_for_inline_script,
                        ScriptSourceLocationType,
                        const ScriptFetchOptions&,
                        bool is_external);
   ~ClassicPendingScript() override;
 
-  // ScriptStreamer callbacks.
-  void SetStreamer(ScriptStreamer*);
-  void StreamingFinished();
-
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   mojom::ScriptType GetScriptType() const override {
     return mojom::ScriptType::kClassic;
   }
 
-  void WatchForLoad(PendingScriptClient*) override;
-
   ClassicScript* GetSource(const KURL& document_url) const override;
   bool IsReady() const override;
   bool IsExternal() const override { return is_external_; }
   bool WasCanceled() const override;
-  void StartStreamingIfPossible() override;
   KURL UrlForTracing() const override;
   void DisposeInternal() override;
 
   void SetNotStreamingReasonForTest(ScriptStreamer::NotStreamingReason reason) {
     not_streamed_reason_ = reason;
   }
+
+  bool IsEligibleForDelay() const override;
 
  private:
   // See AdvanceReadyState implementation for valid state transitions.
@@ -114,10 +113,12 @@ class CORE_EXPORT ClassicPendingScript final : public PendingScript,
   // https://html.spec.whatwg.org/C/#prepare-a-script
   // which will eventually be used as #concept-script-base-url.
   // https://html.spec.whatwg.org/C/#concept-script-base-url
+  // This is a null URL for external scripts and is not used.
   const KURL base_url_for_inline_script_;
 
   // "element's child text content" snapshot taken at
   // #prepare-a-script (Step 4).
+  // This is a null string for external scripts and is not used.
   const String source_text_for_inline_script_;
 
   const ScriptSourceLocationType source_location_type_;

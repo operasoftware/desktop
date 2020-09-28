@@ -155,7 +155,10 @@ class StyleSheetHandler final : public CSSParserObserver {
   StyleSheetHandler(const String& parsed_text,
                     Document* document,
                     CSSRuleSourceDataList* result)
-      : parsed_text_(parsed_text), document_(document), result_(result) {
+      : parsed_text_(parsed_text),
+        document_(document),
+        result_(result),
+        current_rule_data_(nullptr) {
     DCHECK(result_);
   }
 
@@ -177,10 +180,10 @@ class StyleSheetHandler final : public CSSParserObserver {
   inline void SetRuleHeaderEnd(const CharacterType*, unsigned);
 
   const String& parsed_text_;
-  Member<Document> document_;
-  Member<CSSRuleSourceDataList> result_;
+  Document* document_;
+  CSSRuleSourceDataList* result_;
   CSSRuleSourceDataList current_rule_data_stack_;
-  Member<CSSRuleSourceData> current_rule_data_;
+  CSSRuleSourceData* current_rule_data_;
 };
 
 void StyleSheetHandler::StartRuleHeader(StyleRule::RuleType type,
@@ -531,7 +534,7 @@ void CollectFlatRules(RuleList rule_list, CSSRuleVector* result) {
 
     // The result->append()'ed types should be exactly the same as in
     // flattenSourceData().
-    switch (rule->type()) {
+    switch (rule->GetType()) {
       case CSSRule::kStyleRule:
       case CSSRule::kImportRule:
       case CSSRule::kCharsetRule:
@@ -658,6 +661,8 @@ void Diff(const Vector<String>& list_a,
   delete[] backtrack;
 }
 
+// Warning: it does not always produce valid CSS.
+// Use the rule's cssText method if you need to expose CSS externally.
 String CanonicalCSSText(CSSRule* rule) {
   auto* style_rule = DynamicTo<CSSStyleRule>(rule);
   if (!style_rule)
@@ -728,8 +733,6 @@ InspectorStyle::InspectorStyle(CSSStyleDeclaration* style,
       parent_style_sheet_(parent_style_sheet) {
   DCHECK(style_);
 }
-
-InspectorStyle::~InspectorStyle() = default;
 
 std::unique_ptr<protocol::CSS::CSSStyle> InspectorStyle::BuildObjectForStyle() {
   std::unique_ptr<protocol::CSS::CSSStyle> result = StyleWithProperties();
@@ -897,7 +900,7 @@ String InspectorStyle::ShorthandValue(const String& shorthand_property) {
   return builder.ToString();
 }
 
-void InspectorStyle::Trace(blink::Visitor* visitor) {
+void InspectorStyle::Trace(Visitor* visitor) const {
   visitor->Trace(style_);
   visitor->Trace(parent_style_sheet_);
   visitor->Trace(source_data_);
@@ -928,6 +931,10 @@ const LineEndings* InspectorStyleSheetBase::GetLineEndings() {
   return line_endings_.get();
 }
 
+void InspectorStyleSheetBase::ResetLineEndings() {
+  line_endings_ = std::make_unique<LineEndings>();
+}
+
 bool InspectorStyleSheetBase::LineNumberAndColumnToOffset(
     unsigned line_number,
     unsigned column_number,
@@ -947,18 +954,6 @@ bool InspectorStyleSheetBase::LineNumberAndColumnToOffset(
   return true;
 }
 
-InspectorStyleSheet* InspectorStyleSheet::Create(
-    InspectorNetworkAgent* network_agent,
-    CSSStyleSheet* page_style_sheet,
-    const String& origin,
-    const String& document_url,
-    InspectorStyleSheetBase::Listener* listener,
-    InspectorResourceContainer* resource_container) {
-  return MakeGarbageCollected<InspectorStyleSheet>(
-      network_agent, page_style_sheet, origin, document_url, listener,
-      resource_container);
-}
-
 InspectorStyleSheet::InspectorStyleSheet(
     InspectorNetworkAgent* network_agent,
     CSSStyleSheet* page_style_sheet,
@@ -972,19 +967,12 @@ InspectorStyleSheet::InspectorStyleSheet(
       page_style_sheet_(page_style_sheet),
       origin_(origin),
       document_url_(document_url) {
-  String text;
-  bool success = InspectorStyleSheetText(&text);
-  if (!success)
-    success = InlineStyleSheetText(&text);
-  if (!success)
-    success = ResourceStyleSheetText(&text);
-  if (success)
-    InnerSetText(text, false);
+  UpdateText();
 }
 
 InspectorStyleSheet::~InspectorStyleSheet() = default;
 
-void InspectorStyleSheet::Trace(blink::Visitor* visitor) {
+void InspectorStyleSheet::Trace(Visitor* visitor) const {
   visitor->Trace(resource_container_);
   visitor->Trace(network_agent_);
   visitor->Trace(page_style_sheet_);
@@ -1007,9 +995,8 @@ String InspectorStyleSheet::FinalURL() {
 
 bool InspectorStyleSheet::SetText(const String& text,
                                   ExceptionState& exception_state) {
+  page_style_sheet_->SetText(text, CSSImportRules::kAllow);
   InnerSetText(text, true);
-  page_style_sheet_->SetText(text, true /* allow_import_rules */,
-                             exception_state);
   OnStyleSheetTextChanged();
   return true;
 }
@@ -1036,7 +1023,7 @@ CSSStyleRule* InspectorStyleSheet::SetRuleSelector(
 
   CSSRule* rule = RuleForSourceData(source_data);
   if (!rule || !rule->parentStyleSheet() ||
-      rule->type() != CSSRule::kStyleRule) {
+      rule->GetType() != CSSRule::kStyleRule) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotFoundError,
         "Source range didn't match existing style source range");
@@ -1044,7 +1031,8 @@ CSSStyleRule* InspectorStyleSheet::SetRuleSelector(
   }
 
   CSSStyleRule* style_rule = InspectorCSSAgent::AsCSSStyleRule(rule);
-  style_rule->setSelectorText(page_style_sheet_->OwnerDocument(), text);
+  style_rule->setSelectorText(
+      page_style_sheet_->OwnerDocument()->GetExecutionContext(), text);
 
   ReplaceText(source_data->rule_header_range, text, new_range, old_text);
   OnStyleSheetTextChanged();
@@ -1074,7 +1062,7 @@ CSSKeyframeRule* InspectorStyleSheet::SetKeyframeKey(
 
   CSSRule* rule = RuleForSourceData(source_data);
   if (!rule || !rule->parentStyleSheet() ||
-      rule->type() != CSSRule::kKeyframeRule) {
+      rule->GetType() != CSSRule::kKeyframeRule) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotFoundError,
         "Source range didn't match existing style source range");
@@ -1123,7 +1111,10 @@ CSSRule* InspectorStyleSheet::SetStyleText(const SourceRange& range,
     style = style_rule->style();
   else
     style = To<CSSKeyframeRule>(rule)->style();
-  style->setCSSText(page_style_sheet_->OwnerDocument(), text, exception_state);
+
+  ExecutionContext* execution_context =
+      page_style_sheet_->OwnerDocument()->GetExecutionContext();
+  style->setCSSText(execution_context, text, exception_state);
 
   ReplaceText(source_data->rule_body_range, text, new_range, old_text);
   OnStyleSheetTextChanged();
@@ -1153,7 +1144,7 @@ CSSMediaRule* InspectorStyleSheet::SetMediaRuleText(
 
   CSSRule* rule = RuleForSourceData(source_data);
   if (!rule || !rule->parentStyleSheet() ||
-      rule->type() != CSSRule::kMediaRule) {
+      rule->GetType() != CSSRule::kMediaRule) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotFoundError,
         "Source range didn't match existing style source range");
@@ -1161,7 +1152,8 @@ CSSMediaRule* InspectorStyleSheet::SetMediaRuleText(
   }
 
   CSSMediaRule* media_rule = InspectorCSSAgent::AsCSSMediaRule(rule);
-  media_rule->media()->setMediaText(text);
+  media_rule->media()->setMediaText(
+      page_style_sheet_->OwnerDocument()->GetExecutionContext(), text);
 
   ReplaceText(source_data->rule_header_range, text, new_range, old_text);
   OnStyleSheetTextChanged();
@@ -1217,8 +1209,9 @@ CSSStyleRule* InspectorStyleSheet::InsertCSSOMRuleInMediaRule(
       break;
   }
 
-  media_rule->insertRule(page_style_sheet_->OwnerDocument(), rule_text, index,
-                         exception_state);
+  media_rule->insertRule(
+      page_style_sheet_->OwnerDocument()->GetExecutionContext(), rule_text,
+      index, exception_state);
   CSSRule* rule = media_rule->Item(index);
   CSSStyleRule* style_rule = InspectorCSSAgent::AsCSSStyleRule(rule);
   if (!style_rule) {
@@ -1265,7 +1258,7 @@ CSSStyleRule* InspectorStyleSheet::InsertCSSOMRuleBySourceRange(
                                        exception_state);
 
   CSSRule* rule = RuleForSourceData(containing_rule_source_data);
-  if (!rule || rule->type() != CSSRule::kMediaRule) {
+  if (!rule || rule->GetType() != CSSRule::kMediaRule) {
     exception_state.ThrowDOMException(DOMExceptionCode::kNotFoundError,
                                       "Cannot insert rule in non-media rule.");
     return nullptr;
@@ -1348,7 +1341,7 @@ bool InspectorStyleSheet::DeleteRule(const SourceRange& range,
   }
   CSSRule* parent_rule = rule->parentRule();
   if (parent_rule) {
-    if (parent_rule->type() != CSSRule::kMediaRule) {
+    if (parent_rule->GetType() != CSSRule::kMediaRule) {
       exception_state.ThrowDOMException(
           DOMExceptionCode::kNotFoundError,
           "Cannot remove rule from non-media rule.");
@@ -1406,8 +1399,7 @@ void InspectorStyleSheet::ReplaceText(const SourceRange& range,
   InnerSetText(sheet_text, true);
 }
 
-void InspectorStyleSheet::InnerSetText(const String& text,
-                                       bool mark_as_locally_modified) {
+void InspectorStyleSheet::ParseText(const String& text) {
   CSSRuleSourceDataList* rule_tree =
       MakeGarbageCollected<CSSRuleSourceDataList>();
   auto* style_sheet = MakeGarbageCollected<StyleSheetContents>(
@@ -1423,8 +1415,12 @@ void InspectorStyleSheet::InnerSetText(const String& text,
     source_data_sheet =
         MakeGarbageCollected<CSSStyleSheet>(style_sheet, import_rule);
   } else {
-    source_data_sheet = MakeGarbageCollected<CSSStyleSheet>(
-        style_sheet, *page_style_sheet_->ownerNode());
+    if (page_style_sheet_->ownerNode()) {
+      source_data_sheet = MakeGarbageCollected<CSSStyleSheet>(
+          style_sheet, *page_style_sheet_->ownerNode());
+    } else {
+      source_data_sheet = MakeGarbageCollected<CSSStyleSheet>(style_sheet);
+    }
   }
 
   parsed_flat_rules_.clear();
@@ -1432,6 +1428,50 @@ void InspectorStyleSheet::InnerSetText(const String& text,
 
   source_data_ = MakeGarbageCollected<CSSRuleSourceDataList>();
   FlattenSourceData(*rule_tree, source_data_.Get());
+}
+
+// The stylesheet text might be out of sync with `page_style_sheet_` rules.
+// This method checks if a rule is present in the source text using
+// `SourceDataForRule` and produces a new text with all rules merged into the
+// original text. For example, if the source text is
+//
+//   /* comment */ .rule1 {} .rule3 {}
+//
+// and the page_style_sheet_ contains
+//
+//   .rule0 {} .rule1 {} .rule2 {} .rule3 {} .rule4 {}
+//
+// The result should be
+//
+//   .rule0 {} /* comment */ .rule1 {} .rule2 {} .rule3 {} .rule4 {}
+//
+// Note that page_style_sheet_ does not maintain comments and original
+// formatting.
+String InspectorStyleSheet::MergeCSSOMRulesWithText(const String& text) {
+  String merged_text = text;
+  unsigned original_insert_pos = 0;
+  unsigned inserted_count = 0;
+  for (unsigned i = 0; i < page_style_sheet_->length(); i++) {
+    CSSRuleSourceData* source_data =
+        SourceDataForRule(page_style_sheet_->item(i));
+    if (source_data) {
+      original_insert_pos = source_data->rule_body_range.end + 1;
+      continue;
+    }
+    String rule_text = page_style_sheet_->item(i)->cssText();
+    merged_text.replace(original_insert_pos + inserted_count, 0, rule_text);
+    inserted_count += rule_text.length();
+  }
+  rule_to_source_data_.clear();
+  source_data_to_rule_.clear();
+  cssom_flat_rules_.clear();
+  return merged_text;
+}
+
+void InspectorStyleSheet::InnerSetText(const String& text,
+                                       bool mark_as_locally_modified) {
+  ParseText(text);
+
   text_ = text;
 
   if (mark_as_locally_modified) {
@@ -1497,6 +1537,7 @@ InspectorStyleSheet::BuildObjectForStyleSheetInfo() {
           .setTitle(style_sheet->title())
           .setFrameId(frame ? IdentifiersFactory::FrameId(frame) : "")
           .setIsInline(style_sheet->IsInline() && !StartsAtZero())
+          .setIsMutable(style_sheet->Contents()->IsMutable())
           .setStartLine(start.line_.ZeroBasedInt())
           .setStartColumn(start.column_.ZeroBasedInt())
           .setLength(text_length)
@@ -1745,6 +1786,11 @@ String InspectorStyleSheet::SourceMapURL() {
   return page_style_sheet_->Contents()->SourceMapURL();
 }
 
+const Document* InspectorStyleSheet::GetDocument() {
+  return CSSStyleSheet::SingleOwnerDocument(
+      InspectorStyleSheet::PageStyleSheet());
+}
+
 CSSRuleSourceData* InspectorStyleSheet::FindRuleByHeaderRange(
     const SourceRange& source_range) {
   if (!source_data_)
@@ -1876,7 +1922,8 @@ bool InspectorStyleSheet::ResourceStyleSheetText(String* result) {
     return false;
 
   KURL url(page_style_sheet_->href());
-  if (resource_container_->LoadStyleSheetContent(url, result))
+  if (page_style_sheet_->href() &&
+      resource_container_->LoadStyleSheetContent(url, result))
     return true;
 
   bool base64_encoded;
@@ -1891,20 +1938,84 @@ Element* InspectorStyleSheet::OwnerStyleElement() {
   if (!owner_element)
     return nullptr;
 
-  if (!IsHTMLStyleElement(owner_element) && !IsSVGStyleElement(owner_element))
+  if (!IsA<HTMLStyleElement>(owner_element) &&
+      !IsA<SVGStyleElement>(owner_element))
     return nullptr;
   return owner_element;
 }
 
-bool InspectorStyleSheet::InlineStyleSheetText(String* result) {
-  Element* owner_element = OwnerStyleElement();
-  if (!owner_element)
+String InspectorStyleSheet::CollectStyleSheetRules() {
+  StringBuilder builder;
+  for (unsigned i = 0; i < page_style_sheet_->length(); i++) {
+    builder.Append(page_style_sheet_->item(i)->cssText());
+    builder.Append('\n');
+  }
+  return builder.ToString();
+}
+
+bool InspectorStyleSheet::CSSOMStyleSheetText(String* result) {
+  if (origin_ != protocol::CSS::StyleSheetOriginEnum::Regular) {
     return false;
-  if (resource_container_->LoadStyleElementContent(
-          DOMNodeIds::IdForNode(owner_element), result))
-    return true;
-  *result = owner_element->textContent();
+  }
+  *result = CollectStyleSheetRules();
   return true;
+}
+
+void InspectorStyleSheet::Reset() {
+  ResetLineEndings();
+  if (source_data_)
+    source_data_->clear();
+  cssom_flat_rules_.clear();
+  parsed_flat_rules_.clear();
+  rule_to_source_data_.clear();
+  source_data_to_rule_.clear();
+}
+
+void InspectorStyleSheet::SyncTextIfNeeded() {
+  if (!marked_for_sync_)
+    return;
+  Reset();
+  UpdateText();
+  marked_for_sync_ = false;
+}
+
+void InspectorStyleSheet::UpdateText() {
+  String text;
+  bool success = InspectorStyleSheetText(&text);
+  if (!success)
+    success = InlineStyleSheetText(&text);
+  if (!success)
+    success = ResourceStyleSheetText(&text);
+  if (!success)
+    success = CSSOMStyleSheetText(&text);
+  if (success)
+    InnerSetText(text, false);
+}
+
+bool InspectorStyleSheet::IsMutable() const {
+  return page_style_sheet_->Contents()->IsMutable();
+}
+
+bool InspectorStyleSheet::InlineStyleSheetText(String* out) {
+  Element* owner_element = OwnerStyleElement();
+  bool result = false;
+  if (!owner_element)
+    return result;
+
+  result = resource_container_->LoadStyleElementContent(
+      DOMNodeIds::IdForNode(owner_element), out);
+
+  if (!result) {
+    *out = owner_element->textContent();
+    result = true;
+  }
+
+  if (result && IsMutable()) {
+    ParseText(*out);
+    *out = MergeCSSOMRulesWithText(*out);
+  }
+
+  return result;
 }
 
 bool InspectorStyleSheet::InspectorStyleSheetText(String* result) {
@@ -1917,13 +2028,6 @@ bool InspectorStyleSheet::InspectorStyleSheetText(String* result) {
     return true;
   *result = "";
   return true;
-}
-
-InspectorStyleSheetForInlineStyle* InspectorStyleSheetForInlineStyle::Create(
-    Element* element,
-    Listener* listener) {
-  return MakeGarbageCollected<InspectorStyleSheetForInlineStyle>(element,
-                                                                 listener);
 }
 
 InspectorStyleSheetForInlineStyle::InspectorStyleSheetForInlineStyle(
@@ -1949,7 +2053,7 @@ bool InspectorStyleSheetForInlineStyle::SetText(
 
   {
     InspectorCSSAgent::InlineStyleOverrideScope override_scope(
-        element_->ownerDocument());
+        &element_->ownerDocument()->GetSecurityContext());
     element_->setAttribute("style", AtomicString(text), exception_state);
   }
   if (!exception_state.HadException())
@@ -2000,10 +2104,14 @@ const String& InspectorStyleSheetForInlineStyle::ElementStyleText() {
   return element_->getAttribute("style").GetString();
 }
 
-void InspectorStyleSheetForInlineStyle::Trace(blink::Visitor* visitor) {
+void InspectorStyleSheetForInlineStyle::Trace(Visitor* visitor) const {
   visitor->Trace(element_);
   visitor->Trace(inspector_style_);
   InspectorStyleSheetBase::Trace(visitor);
+}
+
+const Document* InspectorStyleSheetForInlineStyle::GetDocument() {
+  return &InspectorStyleSheetForInlineStyle::element_->GetDocument();
 }
 
 }  // namespace blink

@@ -5,11 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGPU_DAWN_CONVERSIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGPU_DAWN_CONVERSIONS_H_
 
-#include <dawn/dawn.h>
+#include <dawn/webgpu.h>
 
 #include <memory>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "third_party/blink/renderer/modules/webgpu/dawn_object.h"
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
@@ -22,8 +22,9 @@ namespace blink {
 class DoubleSequenceOrGPUColorDict;
 class GPUColorDict;
 class GPUProgrammableStageDescriptor;
-class UnsignedLongSequenceOrGPUExtent3DDict;
-class UnsignedLongSequenceOrGPUOrigin3DDict;
+class GPUTextureCopyView;
+class UnsignedLongEnforceRangeSequenceOrGPUExtent3DDict;
+class UnsignedLongEnforceRangeSequenceOrGPUOrigin3DDict;
 
 // Convert WebGPU bitfield values to Dawn enums. These have the same value.
 template <typename DawnEnum>
@@ -38,14 +39,17 @@ DawnEnum AsDawnEnum(const WTF::String& webgpu_enum);
 // These conversions are used multiple times and are declared here. Conversions
 // used only once, for example for object construction, are defined
 // individually.
-DawnColor AsDawnColor(const Vector<double>&);
-DawnColor AsDawnType(const GPUColorDict*);
-DawnColor AsDawnType(const DoubleSequenceOrGPUColorDict*);
-DawnExtent3D AsDawnType(const UnsignedLongSequenceOrGPUExtent3DDict*);
-DawnOrigin3D AsDawnType(const UnsignedLongSequenceOrGPUOrigin3DDict*);
-
+WGPUColor AsDawnColor(const Vector<double>&);
+WGPUColor AsDawnType(const GPUColorDict*);
+WGPUColor AsDawnType(const DoubleSequenceOrGPUColorDict*);
+WGPUExtent3D AsDawnType(
+    const UnsignedLongEnforceRangeSequenceOrGPUExtent3DDict*);
+WGPUOrigin3D AsDawnType(
+    const UnsignedLongEnforceRangeSequenceOrGPUOrigin3DDict*);
+WGPUTextureCopyView AsDawnType(const GPUTextureCopyView* webgpu_view,
+                               GPUDevice* device);
 using OwnedProgrammableStageDescriptor =
-    std::tuple<DawnProgrammableStageDescriptor, std::unique_ptr<char[]>>;
+    std::tuple<WGPUProgrammableStageDescriptor, std::unique_ptr<char[]>>;
 OwnedProgrammableStageDescriptor AsDawnType(
     const GPUProgrammableStageDescriptor*);
 

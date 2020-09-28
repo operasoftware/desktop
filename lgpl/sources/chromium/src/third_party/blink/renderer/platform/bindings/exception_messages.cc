@@ -103,6 +103,12 @@ String ExceptionMessages::ConstructorNotCallableAsFunction(const char* type) {
                            "constructor cannot be called as a function.");
 }
 
+String ExceptionMessages::ConstructorCalledAsFunction() {
+  return (
+      "Please use the 'new' operator, this DOM object constructor cannot "
+      "be called as a function.");
+}
+
 String ExceptionMessages::IncorrectPropertyType(const String& property,
                                                 const String& detail) {
   return "The '" + property + "' property " + detail;
@@ -120,6 +126,12 @@ String ExceptionMessages::ArgumentNullOrIncorrectType(
   return "The " + OrdinalNumber(argument_index) +
          " argument provided is either null, or an invalid " + expected_type +
          " object.";
+}
+
+String ExceptionMessages::ArgumentNotOfType(int argument_index,
+                                            const char* expected_type) {
+  return String::Format("parameter %d is not of type '%s'.", argument_index + 1,
+                        expected_type);
 }
 
 String ExceptionMessages::NotASequenceTypeProperty(

@@ -35,11 +35,6 @@ enum class DarkModePagePolicy {
   kFilterByBackground,
 };
 
-enum class DarkModeClassifierType {
-  kIcon,
-  kGeneric,
-};
-
 // New variables added to this struct should also be added to
 // BuildDarkModeSettings() in
 //   //src/third_party/blink/renderer/core/accessibility/apply_dark_mode.h
@@ -48,8 +43,7 @@ struct DarkModeSettings {
   bool grayscale = false;
   float image_grayscale_percent = 0.0;  // Valid range from 0.0 to 1.0
   float contrast = 0.0;                 // Valid range from -1.0 to 1.0
-  DarkModeImagePolicy image_policy = DarkModeImagePolicy::kFilterAll;
-  DarkModeClassifierType classifier_type = DarkModeClassifierType::kGeneric;
+  DarkModeImagePolicy image_policy = DarkModeImagePolicy::kFilterNone;
 
   // Text colors with brightness below this threshold will be inverted, and
   // above it will be left as in the original, non-dark-mode page.  Set to 256

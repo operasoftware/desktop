@@ -40,7 +40,6 @@
 namespace blink {
 
 class Page;
-class Prerender;
 class WebPrerendererClient;
 
 class CORE_EXPORT PrerendererClient
@@ -54,7 +53,6 @@ class CORE_EXPORT PrerendererClient
   PrerendererClient(Page&, WebPrerendererClient*);
 
   virtual bool CanPrerender();
-  virtual void WillAddPrerender(Prerender*);
   virtual bool IsPrefetchOnly();
 
   static PrerendererClient* From(Page*);

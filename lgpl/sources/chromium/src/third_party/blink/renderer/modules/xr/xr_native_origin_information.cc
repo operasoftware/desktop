@@ -4,84 +4,72 @@
 
 #include "third_party/blink/renderer/modules/xr/xr_native_origin_information.h"
 
-#include "third_party/blink/renderer/modules/xr/type_converters.h"
+#include "device/vr/public/mojom/vr_service.mojom-blink.h"
 #include "third_party/blink/renderer/modules/xr/xr_anchor.h"
 #include "third_party/blink/renderer/modules/xr/xr_input_source.h"
+#include "third_party/blink/renderer/modules/xr/xr_light_probe.h"
 #include "third_party/blink/renderer/modules/xr/xr_plane.h"
 #include "third_party/blink/renderer/modules/xr/xr_reference_space.h"
 
 namespace blink {
 
-base::Optional<XRNativeOriginInformation> XRNativeOriginInformation::Create(
-    const XRAnchor* anchor) {
+namespace XRNativeOriginInformation {
+
+device::mojom::blink::XRNativeOriginInformation Create(const XRAnchor* anchor) {
   DCHECK(anchor);
-  return XRNativeOriginInformation(Type::Anchor, anchor->id());
+
+  device::mojom::blink::XRNativeOriginInformation result;
+  result.set_anchor_id(anchor->id());
+
+  return result;
 }
 
-base::Optional<XRNativeOriginInformation> XRNativeOriginInformation::Create(
+device::mojom::blink::XRNativeOriginInformation Create(
     const XRInputSource* input_source) {
   DCHECK(input_source);
-  return XRNativeOriginInformation(Type::InputSource,
-                                   input_source->source_id());
+
+  device::mojom::blink::XRNativeOriginInformation result;
+  result.set_input_source_id(input_source->source_id());
+
+  return result;
 }
 
-base::Optional<XRNativeOriginInformation> XRNativeOriginInformation::Create(
-    const XRPlane* plane) {
+device::mojom::blink::XRNativeOriginInformation Create(const XRPlane* plane) {
   DCHECK(plane);
-  return XRNativeOriginInformation(Type::Plane, plane->id());
+
+  device::mojom::blink::XRNativeOriginInformation result;
+  result.set_plane_id(plane->id());
+
+  return result;
 }
 
-base::Optional<XRNativeOriginInformation> XRNativeOriginInformation::Create(
+device::mojom::blink::XRNativeOriginInformation Create(
+    const XRLightProbe* light_probe) {
+  DCHECK(light_probe);
+
+  // TODO: We'll want these to correspond to an actual, independent space
+  // eventually, but at the moment it's sufficient for the ARCore implementation
+  // to have it be equivalent to the local reference space.
+  return Create(device::mojom::XRReferenceSpaceType::kLocal);
+}
+
+device::mojom::blink::XRNativeOriginInformation Create(
     const XRReferenceSpace* reference_space) {
   DCHECK(reference_space);
-  switch (reference_space->GetType()) {
-    case XRReferenceSpace::Type::kTypeBoundedFloor:
-      return XRNativeOriginInformation(
-          Type::ReferenceSpace,
-          device::mojom::XRReferenceSpaceCategory::BOUNDED_FLOOR);
-    case XRReferenceSpace::Type::kTypeUnbounded:
-      return XRNativeOriginInformation(
-          Type::ReferenceSpace,
-          device::mojom::XRReferenceSpaceCategory::UNBOUNDED);
-    case XRReferenceSpace::Type::kTypeLocalFloor:
-      return XRNativeOriginInformation(
-          Type::ReferenceSpace,
-          device::mojom::XRReferenceSpaceCategory::LOCAL_FLOOR);
-    case XRReferenceSpace::Type::kTypeLocal:
-      return XRNativeOriginInformation(
-          Type::ReferenceSpace, device::mojom::XRReferenceSpaceCategory::LOCAL);
-    case XRReferenceSpace::Type::kTypeViewer:
-      return XRNativeOriginInformation(
-          Type::ReferenceSpace,
-          device::mojom::XRReferenceSpaceCategory::VIEWER);
-  }
+
+  auto reference_space_type = reference_space->GetType();
+
+  return Create(reference_space_type);
 }
 
-XRNativeOriginInformation::XRNativeOriginInformation(Type type, uint32_t id)
-    : type_(type), id_(id) {}
+device::mojom::blink::XRNativeOriginInformation Create(
+    device::mojom::XRReferenceSpaceType reference_space_type) {
+  device::mojom::blink::XRNativeOriginInformation result;
+  result.set_reference_space_type(reference_space_type);
 
-XRNativeOriginInformation::XRNativeOriginInformation(
-    Type type,
-    device::mojom::XRReferenceSpaceCategory reference_space_category)
-    : type_(type), reference_space_category_(reference_space_category) {}
-
-device::mojom::blink::XRNativeOriginInformationPtr
-XRNativeOriginInformation::ToMojo() const {
-  switch (type_) {
-    case XRNativeOriginInformation::Type::Anchor:
-      return device::mojom::blink::XRNativeOriginInformation::NewAnchorId(id_);
-
-    case XRNativeOriginInformation::Type::InputSource:
-      return device::mojom::blink::XRNativeOriginInformation::NewInputSourceId(
-          id_);
-
-    case XRNativeOriginInformation::Type::Plane:
-      return device::mojom::blink::XRNativeOriginInformation::NewPlaneId(id_);
-
-    case XRNativeOriginInformation::Type::ReferenceSpace:
-      return device::mojom::blink::XRNativeOriginInformation::
-          NewReferenceSpaceCategory(reference_space_category_);
-  }
+  return result;
 }
+
+}  // namespace XRNativeOriginInformation
 
 }  // namespace blink

@@ -62,6 +62,19 @@ TypesettingFeatures FontDescription::default_typesetting_features_ = 0;
 
 bool FontDescription::use_subpixel_text_positioning_ = false;
 
+// static
+FontDescription FontDescription::CreateHashTableEmptyValue() {
+  FontDescription result;
+  memset(&result, 0, sizeof(FontDescription));
+  DCHECK(result.IsHashTableEmptyValue());
+  return result;
+}
+
+FontDescription::FontDescription(WTF::HashTableDeletedValueType) {
+  memset(this, 0, sizeof(FontDescription));
+  fields_.hash_category_ = kHashDeletedValue;
+}
+
 FontDescription::FontDescription()
     : specified_size_(0),
       computed_size_(0),
@@ -94,6 +107,7 @@ FontDescription::FontDescription()
   fields_.variant_numeric_ = FontVariantNumeric().fields_as_unsigned_;
   fields_.subpixel_ascent_descent_ = false;
   fields_.font_optical_sizing_ = OpticalSizing::kAutoOpticalSizing;
+  fields_.hash_category_ = kHashRegularValue;
 }
 
 FontDescription::FontDescription(const FontDescription&) = default;
@@ -300,6 +314,18 @@ void FontDescription::UpdateTypesettingFeatures() {
     fields_.typesetting_features_ |= blink::kCaps;
 }
 
+namespace {
+
+// This converts -0.0 to 0.0, so that they have the same hash value. This
+// ensures that equal FontDescription have the same hash value.
+float NormalizeSign(float number) {
+  if (UNLIKELY(number == 0.0))
+    return 0.0;
+  return number;
+}
+
+}  // namespace
+
 unsigned FontDescription::StyleHashWithoutFamilyList() const {
   unsigned hash = 0;
   StringHasher string_hasher;
@@ -324,16 +350,27 @@ unsigned FontDescription::StyleHashWithoutFamilyList() const {
   }
   WTF::AddIntToHash(hash, string_hasher.GetHash());
 
-  WTF::AddFloatToHash(hash, specified_size_);
-  WTF::AddFloatToHash(hash, computed_size_);
-  WTF::AddFloatToHash(hash, adjusted_size_);
-  WTF::AddFloatToHash(hash, size_adjust_);
-  WTF::AddFloatToHash(hash, letter_spacing_);
-  WTF::AddFloatToHash(hash, word_spacing_);
+  WTF::AddFloatToHash(hash, NormalizeSign(specified_size_));
+  WTF::AddFloatToHash(hash, NormalizeSign(computed_size_));
+  WTF::AddFloatToHash(hash, NormalizeSign(adjusted_size_));
+  WTF::AddFloatToHash(hash, NormalizeSign(size_adjust_));
+  WTF::AddFloatToHash(hash, NormalizeSign(letter_spacing_));
+  WTF::AddFloatToHash(hash, NormalizeSign(word_spacing_));
   WTF::AddIntToHash(hash, fields_as_unsigned_.parts[0]);
   WTF::AddIntToHash(hash, fields_as_unsigned_.parts[1]);
   WTF::AddIntToHash(hash, font_selection_request_.GetHash());
 
+  return hash;
+}
+
+unsigned FontDescription::GetHash() const {
+  unsigned hash = StyleHashWithoutFamilyList();
+  for (const FontFamily* family = &family_list_; family;
+       family = family->Next()) {
+    if (!family->Family().length())
+      continue;
+    WTF::AddIntToHash(hash, WTF::AtomicStringHash::GetHash(family->Family()));
+  }
   return hash;
 }
 
@@ -436,8 +473,6 @@ String FontDescription::ToString(GenericFamilyType familyType) {
       return "Cursive";
     case GenericFamilyType::kFantasyFamily:
       return "Fantasy";
-    case GenericFamilyType::kPictographFamily:
-      return "Pictograph";
   }
   return "Unknown";
 }

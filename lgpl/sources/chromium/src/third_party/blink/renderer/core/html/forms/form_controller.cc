@@ -40,20 +40,15 @@
 
 namespace blink {
 
-using namespace html_names;
-
 namespace {
-
-// TODO(crbug.com/1008708): Remove this flag when we're sure the new behavior
-// is better than the previous one.
-constexpr bool kRestoreOnLoad = true;
 
 inline HTMLFormElement* OwnerFormForState(const ListedElement& control) {
   // Assume controls with form attribute have no owners because we restore
   // state during parsing and form owners of such controls might be
   // indeterminate.
-  return control.ToHTMLElement().FastHasAttribute(kFormAttr) ? nullptr
-                                                             : control.Form();
+  return control.ToHTMLElement().FastHasAttribute(html_names::kFormAttr)
+             ? nullptr
+             : control.Form();
 }
 
 const AtomicString& ControlType(const ListedElement& control) {
@@ -63,8 +58,9 @@ const AtomicString& ControlType(const ListedElement& control) {
 }
 
 bool IsDirtyControl(const ListedElement& control) {
-  if (control.IsFormControlElementWithState())
-    return ToHTMLFormControlElementWithState(control).UserHasEditedTheField();
+  if (auto* form_control_element =
+          DynamicTo<HTMLFormControlElementWithState>(control))
+    return form_control_element->UserHasEditedTheField();
   if (control.IsElementInternals()) {
     // We have no ways to know the dirtiness of a form-associated custom
     // element.  Assume it is dirty if it has focus.
@@ -338,7 +334,7 @@ class FormKeyGenerator final : public GarbageCollected<FormKeyGenerator> {
  public:
   FormKeyGenerator() = default;
 
-  void Trace(Visitor* visitor) { visitor->Trace(form_to_key_map_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(form_to_key_map_); }
   const AtomicString& FormKey(const ListedElement&);
   void WillDeleteForm(HTMLFormElement*);
 
@@ -382,7 +378,7 @@ static inline void RecordFormStructure(const HTMLFormElement& form,
 }
 
 String FormSignature(const HTMLFormElement& form) {
-  KURL action_url = form.GetURLAttribute(kActionAttr);
+  KURL action_url = form.GetURLAttribute(html_names::kActionAttr);
   // Remove the query part because it might contain volatile parameters such
   // as a session key.
   if (!action_url.IsEmpty())
@@ -431,7 +427,7 @@ void FormKeyGenerator::WillDeleteForm(HTMLFormElement* form) {
 
 DocumentState::DocumentState(Document& document) : document_(document) {}
 
-void DocumentState::Trace(Visitor* visitor) {
+void DocumentState::Trace(Visitor* visitor) const {
   visitor->Trace(document_);
   visitor->Trace(control_list_);
 }
@@ -503,7 +499,7 @@ FormController::FormController(Document& document)
 
 FormController::~FormController() = default;
 
-void FormController::Trace(Visitor* visitor) {
+void FormController::Trace(Visitor* visitor) const {
   visitor->Trace(document_);
   visitor->Trace(document_state_);
   visitor->Trace(form_key_generator_);
@@ -568,7 +564,7 @@ void FormController::WillDeleteForm(HTMLFormElement* form) {
 }
 
 void FormController::RestoreControlStateFor(ListedElement& control) {
-  if (kRestoreOnLoad && !document_->HasFinishedParsing())
+  if (!document_->HasFinishedParsing())
     return;
   if (OwnerFormForState(control))
     return;
@@ -576,7 +572,7 @@ void FormController::RestoreControlStateFor(ListedElement& control) {
 }
 
 void FormController::RestoreControlStateIn(HTMLFormElement& form) {
-  if (kRestoreOnLoad && !document_->HasFinishedParsing())
+  if (!document_->HasFinishedParsing())
     return;
   EventQueueScope scope;
   const ListedElement::List& elements = form.ListedElements();
@@ -620,12 +616,16 @@ void FormController::RestoreControlStateOnUpgrade(ListedElement& control) {
 }
 
 void FormController::ScheduleRestore() {
-  if (!kRestoreOnLoad)
-    return;
   document_->GetTaskRunner(TaskType::kInternalLoading)
       ->PostTask(FROM_HERE,
                  WTF::Bind(&FormController::RestoreAllControlsInDocumentOrder,
                            WrapPersistent(this)));
+}
+
+void FormController::RestoreImmediately() {
+  if (did_restore_all_ || !HasControlStates())
+    return;
+  RestoreAllControlsInDocumentOrder();
 }
 
 void FormController::RestoreAllControlsInDocumentOrder() {
@@ -640,6 +640,7 @@ void FormController::RestoreAllControlsInDocumentOrder() {
     else if (finished_forms.insert(owner).is_new_entry)
       RestoreControlStateIn(*owner);
   }
+  did_restore_all_ = true;
 }
 
 Vector<String> FormController::GetReferencedFilePaths(

@@ -21,7 +21,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_FRAME_OWNER_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_FRAME_OWNER_ELEMENT_H_
 
-#include "third_party/blink/public/common/frame/frame_owner_element_type.h"
+#include "services/network/public/mojom/trust_tokens.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/frame/frame_owner_element_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/feature_policy/feature_policy_parser.h"
@@ -46,6 +48,7 @@ class WebPluginContainerImpl;
 class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
                                           public FrameOwner {
   USING_GARBAGE_COLLECTED_MIXIN(HTMLFrameOwnerElement);
+
  public:
   ~HTMLFrameOwnerElement() override;
 
@@ -63,7 +66,7 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   // is, to remove it from the layout as if it did not exist.
   virtual void SetCollapsed(bool) {}
 
-  virtual FrameOwnerElementType OwnerType() const = 0;
+  virtual mojom::blink::FrameOwnerElementType OwnerType() const = 0;
 
   Document* getSVGDocument(ExceptionState&) const;
 
@@ -105,9 +108,11 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   void IntrinsicSizingInfoChanged() override {}
   void SetNeedsOcclusionTracking(bool) override {}
   AtomicString BrowsingContextContainerName() const override {
-    return getAttribute(html_names::kNameAttr);
+    return FastGetAttribute(html_names::kNameAttr);
   }
-  ScrollbarMode ScrollingMode() const override { return ScrollbarMode::kAuto; }
+  mojom::blink::ScrollbarMode ScrollbarMode() const override {
+    return mojom::blink::ScrollbarMode::kAuto;
+  }
   int MarginWidth() const override { return -1; }
   int MarginHeight() const override { return -1; }
   bool AllowFullscreen() const override { return false; }
@@ -123,15 +128,21 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
 
   void ParseAttribute(const AttributeModificationParams&) override;
 
-  void Trace(Visitor*) override;
+  void SetEmbeddingToken(const base::UnguessableToken& token);
+  const base::Optional<base::UnguessableToken>& GetEmbeddingToken() const;
+
+  bool IsAdRelated() const override;
+
+  void Trace(Visitor*) const override;
 
  protected:
   HTMLFrameOwnerElement(const QualifiedName& tag_name, Document&);
 
-  void SetSandboxFlags(WebSandboxFlags);
-  void SetAllowedToDownloadWithoutUserActivation(bool allowed) {
-    frame_policy_.allowed_to_download_without_user_activation = allowed;
+  void SetSandboxFlags(network::mojom::blink::WebSandboxFlags);
+  void SetAllowedToDownload(bool allowed) {
+    frame_policy_.allowed_to_download = allowed;
   }
+  void SetDisallowDocumentAccesss(bool disallowed);
 
   bool LoadOrRedirectSubframe(const KURL&,
                               const AtomicString& frame_name,
@@ -153,12 +164,26 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   // Return a feature policy container policy for this frame, based on the
   // frame attributes and the effective origin specified in the frame
   // attributes.
-  virtual ParsedFeaturePolicy ConstructContainerPolicy(
-      Vector<String>* /*  messages */) const = 0;
+  virtual ParsedFeaturePolicy ConstructContainerPolicy() const = 0;
 
   // Update the container policy and notify the frame loader client of any
   // changes.
-  void UpdateContainerPolicy(Vector<String>* messages = nullptr);
+  void UpdateContainerPolicy();
+
+  // Return a document policy required policy for this frame, based on the
+  // frame attributes.
+  virtual DocumentPolicy::FeatureState ConstructRequiredPolicy() const {
+    return DocumentPolicy::FeatureState{};
+  }
+
+  // Update the required policy and notify the frame loader client of any
+  // changes.
+  void UpdateRequiredPolicy();
+
+  // Return a set of Trust Tokens parameters for requests for this frame,
+  // based on the frame attributes.
+  virtual network::mojom::blink::TrustTokenParamsPtr ConstructTrustTokenParams()
+      const;
 
  private:
   // Intentionally private to prevent redundant checks when the type is
@@ -174,11 +199,10 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
     return network::mojom::ReferrerPolicy::kDefault;
   }
 
-  bool IsLoadingFrameDefaultEagerEnforced() const;
-
   Member<Frame> content_frame_;
   Member<EmbeddedContentView> embedded_content_view_;
   FramePolicy frame_policy_;
+  base::Optional<base::UnguessableToken> embedding_token_;
 
   Member<LazyLoadFrameObserver> lazy_load_frame_observer_;
   bool should_lazy_load_children_;
@@ -220,7 +244,7 @@ class SubframeLoadingDisabler {
 
   CORE_EXPORT static SubtreeRootSet& DisabledSubtreeRoots();
 
-  Member<Node> root_;
+  Node* root_;
 };
 
 template <>

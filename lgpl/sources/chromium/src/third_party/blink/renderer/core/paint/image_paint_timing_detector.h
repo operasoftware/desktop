@@ -63,6 +63,8 @@ typedef std::pair<const LayoutObject*, const ImageResourceContent*> RecordId;
 // Node, LayoutObject, etc.
 class CORE_EXPORT ImageRecordsManager {
   friend class ImagePaintTimingDetectorTest;
+  DISALLOW_NEW();
+
   using NodesQueueComparator = bool (*)(const base::WeakPtr<ImageRecord>&,
                                         const base::WeakPtr<ImageRecord>&);
   using ImageRecordSet =
@@ -83,6 +85,18 @@ class CORE_EXPORT ImageRecordsManager {
   inline void RemoveVisibleRecord(const RecordId& record_id) {
     base::WeakPtr<ImageRecord> record =
         visible_images_.find(record_id)->value->AsWeakPtr();
+    if (!record->paint_time.is_null()) {
+      DCHECK_GT(record->first_size, 0u);
+      if (record->first_size > largest_removed_image_size_) {
+        largest_removed_image_size_ = record->first_size;
+        largest_removed_image_paint_time_ = record->paint_time;
+      } else if (record->first_size == largest_removed_image_size_) {
+        // Ensure we use the lower timestamp in the case of a tie.
+        DCHECK(!largest_removed_image_paint_time_.is_null());
+        largest_removed_image_paint_time_ =
+            std::min(largest_removed_image_paint_time_, record->paint_time);
+      }
+    }
     size_ordered_set_.erase(record);
     visible_images_.erase(record_id);
     // Leave out |images_queued_for_paint_time_| intentionally because the null
@@ -122,7 +136,7 @@ class CORE_EXPORT ImageRecordsManager {
 
   // Compare the last frame index in queue with the last frame index that has
   // registered for assigning paint time.
-  inline bool HasUnregisteredRecordsInQueued(
+  inline bool HasUnregisteredRecordsInQueue(
       unsigned last_registered_frame_index) {
     while (!images_queued_for_paint_time_.IsEmpty() &&
            !images_queued_for_paint_time_.back()) {
@@ -130,7 +144,6 @@ class CORE_EXPORT ImageRecordsManager {
     }
     if (images_queued_for_paint_time_.IsEmpty())
       return false;
-    DCHECK(last_registered_frame_index <= LastQueuedFrameIndex());
     return last_registered_frame_index < LastQueuedFrameIndex();
   }
   void AssignPaintTimeToRegisteredQueuedRecords(
@@ -140,6 +153,15 @@ class CORE_EXPORT ImageRecordsManager {
     DCHECK(images_queued_for_paint_time_.back());
     return images_queued_for_paint_time_.back()->frame_index;
   }
+
+  uint64_t LargestRemovedImageSize() const {
+    return largest_removed_image_size_;
+  }
+  base::TimeTicks LargestRemovedImagePaintTime() const {
+    return largest_removed_image_paint_time_;
+  }
+
+  void Trace(Visitor* visitor) const;
 
  private:
   // Find the image record of an visible image.
@@ -172,9 +194,13 @@ class CORE_EXPORT ImageRecordsManager {
   // Map containing timestamps of when LayoutObject::ImageNotifyFinished is
   // first called.
   HashMap<RecordId, base::TimeTicks> image_finished_times_;
-  // ImageRecordsManager is always owned by ImagePaintTimingDetector, which
-  // contains the LocalFrameView as a Member.
-  UntracedMember<LocalFrameView> frame_view_;
+
+  Member<LocalFrameView> frame_view_;
+
+  // We store the size and paint time of the largest removed image in order to
+  // compute experimental LCP correctly.
+  uint64_t largest_removed_image_size_ = 0u;
+  base::TimeTicks largest_removed_image_paint_time_;
 
   DISALLOW_COPY_AND_ASSIGN(ImageRecordsManager);
 };
@@ -213,7 +239,8 @@ class CORE_EXPORT ImagePaintTimingDetector final
                    const IntSize& intrinsic_size,
                    const ImageResourceContent&,
                    const PropertyTreeState& current_paint_chunk_properties,
-                   const StyleFetchedImage*);
+                   const StyleFetchedImage*,
+                   const IntRect* image_border);
   void NotifyImageFinished(const LayoutObject&, const ImageResourceContent*);
   void OnPaintFinished();
   void LayoutObjectWillBeDestroyed(const LayoutObject&);
@@ -236,7 +263,7 @@ class CORE_EXPORT ImagePaintTimingDetector final
   // Return the candidate.
   ImageRecord* UpdateCandidate();
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   friend class LargestContentfulPaintCalculatorTest;

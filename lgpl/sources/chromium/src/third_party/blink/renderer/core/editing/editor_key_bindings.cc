@@ -26,7 +26,7 @@
 
 #include "third_party/blink/renderer/core/editing/editor.h"
 
-#include "third_party/blink/public/platform/web_input_event.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/renderer/core/editing/commands/editor_command.h"
 #include "third_party/blink/renderer/core/editing/editing_behavior.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
@@ -34,7 +34,6 @@
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
-#include "third_party/blink/renderer/platform/keyboard_codes.h"
 
 namespace blink {
 
@@ -42,22 +41,11 @@ bool Editor::HandleEditingKeyboardEvent(KeyboardEvent* evt) {
   const WebKeyboardEvent* key_event = evt->KeyEvent();
   if (!key_event)
     return false;
-  // do not treat this as text input if it's a system key event
-  bool is_system_key = key_event->is_system_key;
-#if defined(OS_WIN)
-  // Do not treat Alt[+Shift]+Backspace as a system key to make it an Undo/Redo
-  // command
-  if ((key_event->GetModifiers() & WebInputEvent::kAltKey) &&
-      key_event->windows_key_code == blink::VKEY_BACK)
-    is_system_key = false;
-#endif  // OS_WIN
-  if (is_system_key)
-    return false;
 
   String command_name = Behavior().InterpretKeyEvent(*evt);
   const EditorCommand command = this->CreateCommand(command_name);
 
-  if (key_event->GetType() == WebInputEvent::kRawKeyDown) {
+  if (key_event->GetType() == WebInputEvent::Type::kRawKeyDown) {
     // WebKit doesn't have enough information about mode to decide how
     // commands that just insert text if executed via Editor should be treated,
     // so we leave it upon WebCore to either handle them immediately

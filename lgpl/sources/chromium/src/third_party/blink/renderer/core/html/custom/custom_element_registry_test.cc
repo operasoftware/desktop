@@ -8,13 +8,13 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/web/web_custom_element.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
-#include "third_party/blink/renderer/core/css/css_style_sheet_init.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_css_style_sheet_init.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_element_definition_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_shadow_root_init.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/element_definition_options.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
-#include "third_party/blink/renderer/core/dom/shadow_root_init.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/html/custom/ce_reactions_scope.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element.h"
@@ -78,7 +78,7 @@ TEST_F(CustomElementRegistryTest,
   Element* element = CreateElement("a-a").InDocument(&GetDocument());
   Registry().AddCandidate(*element);
 
-  auto* other_document = MakeGarbageCollected<HTMLDocument>();
+  auto* other_document = HTMLDocument::CreateForTest();
   other_document->AppendChild(element);
   EXPECT_EQ(other_document, element->ownerDocument())
       << "sanity: another document should have adopted an element on append";
@@ -173,7 +173,7 @@ class LogUpgradeDefinition : public TestCustomElementDefinition {
             },
             {}) {}
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     TestCustomElementDefinition::Trace(visitor);
     visitor->Trace(element_);
     visitor->Trace(adopted_);
@@ -205,7 +205,7 @@ class LogUpgradeDefinition : public TestCustomElementDefinition {
     Member<Document> old_owner_;
     Member<Document> new_owner_;
 
-    void Trace(Visitor* visitor) {
+    void Trace(Visitor* visitor) const {
       visitor->Trace(old_owner_);
       visitor->Trace(new_owner_);
     }
@@ -398,7 +398,7 @@ TEST_F(CustomElementRegistryTest, adoptedCallback) {
       static_cast<LogUpgradeDefinition*>(Registry().DefinitionForName("a-a"));
 
   definition->Clear();
-  auto* other_document = MakeGarbageCollected<HTMLDocument>();
+  auto* other_document = HTMLDocument::CreateForTest();
   {
     CEReactionsScope reactions;
     other_document->adoptNode(element, ASSERT_NO_EXCEPTION);

@@ -3,6 +3,18 @@
 // found in the LICENSE file.
 
 (function() {
+
+/** @implements {settings.TimeZoneBrowserProxy} */
+class TestTimeZoneBrowserProxy extends TestBrowserProxy {
+  constructor() {
+    super(['showParentAccessForTimeZone']);
+  }
+  /** @override */
+  showParentAccessForTimeZone() {
+    this.methodCalled('showParentAccessForTimeZone');
+  }
+}
+
 function getFakePrefs() {
   return {
     cros: {
@@ -111,13 +123,13 @@ function updatePrefsWithPolicy(prefs, managed, valueFromPolicy) {
 function initializeDateTime(prefs, hasPolicy, opt_autoDetectPolicyValue) {
   // Find the desired initial time zone by ID.
   const timeZone = assert(fakeTimeZones.find(function(timeZonePair) {
-    return timeZonePair[0] == prefs.cros.system.timezone.value;
+    return timeZonePair[0] === prefs.cros.system.timezone.value;
   }));
 
   const data = {
     timeZoneID: timeZone[0],
     timeZoneName: timeZone[1],
-    controlledSettingPolicy: 'This setting is enforced by your administrator',
+    controlledSettingPolicy: 'This setting is managed by your administrator',
     setTimeZoneAutomaticallyDisabled: 'Automatic time zone detection disabled.',
     setTimeZoneAutomaticallyIpOnlyDefault:
         'Automatic time zone detection IP-only.',
@@ -125,6 +137,7 @@ function initializeDateTime(prefs, hasPolicy, opt_autoDetectPolicyValue) {
         'Automatic time zone detection with WiFi AP',
     setTimeZoneAutomaticallyWithAllLocationInfo:
         'Automatic time zone detection with all location info',
+    isChild: false,
   };
 
   window.loadTimeData = new LoadTimeData;
@@ -192,7 +205,13 @@ suite('settings-date-time-page', function() {
   let dateTimePageReadyCalled;
   let getTimeZonesCalled;
 
+  /** @type {?TestTimeZoneBrowserProxy} */
+  let testBrowserProxy = null;
+
+
   setup(function() {
+    testBrowserProxy = new TestTimeZoneBrowserProxy();
+    settings.TimeZoneBrowserProxyImpl.instance_ = testBrowserProxy;
     PolymerTest.clearBody();
     CrSettingsPrefs.resetForTesting();
 
@@ -209,13 +228,6 @@ suite('settings-date-time-page', function() {
       getTimeZonesCalled = true;
       cr.webUIResponse(callback, true, fakeTimeZones);
     });
-  });
-
-  suiteTeardown(function() {
-    // TODO(michaelpg): Removes the element before exiting, because the
-    // <paper-tooltip> in <cr-policy-indicator> somehow causes warnings
-    // and/or script errors in axs_testing.js.
-    PolymerTest.clearBody();
   });
 
   function checkDateTimePageReadyCalled() {
@@ -383,6 +395,88 @@ suite('settings-date-time-page', function() {
       verifyAutoDetectSetting(false, false);
       done();
     });
+  });
+
+  test('auto-detect on supervised account', async () => {
+    const prefs = getFakePrefs();
+    dateTime = initializeDateTime(prefs, false);
+    // Set auto detect on.
+    dateTime.set(
+        'prefs.generated.resolve_timezone_by_geolocation_on_off.value', true);
+    dateTime.set(
+        'prefs.generated.resolve_timezone_by_geolocation_method_short.value',
+        settings.TimeZoneAutoDetectMethod.IP_ONLY);
+
+    // Set fake child account.
+    loadTimeData.overrideValues({
+      isChild: true,
+    });
+
+    await settings.Router.getInstance().navigateTo(
+        settings.routes.DATETIME_TIMEZONE_SUBPAGE);
+
+    const resolveMethodDropdown = dateTime.$$('#timeZoneResolveMethodDropdown');
+    const timezoneSelector = getTimeZoneSelector('#userTimeZoneSelector');
+    const timeZoneAutoDetectOn = dateTime.$$('#timeZoneAutoDetectOn');
+    const timeZoneAutoDetectOff = dateTime.$$('#timeZoneAutoDetectOff');
+
+    // Verify elements are disabled for child account.
+    assertTrue(resolveMethodDropdown.disabled);
+    assertTrue(timezoneSelector.disabled);
+    assertTrue(timeZoneAutoDetectOn.disabled);
+    assertTrue(timeZoneAutoDetectOff.disabled);
+
+    await testBrowserProxy.whenCalled('showParentAccessForTimeZone');
+    cr.webUIListenerCallback('access-code-validation-complete');
+
+    // Verify elements are enabled.
+    assertFalse(resolveMethodDropdown.disabled);
+    assertFalse(timeZoneAutoDetectOn.disabled);
+    assertFalse(timeZoneAutoDetectOff.disabled);
+
+    // |timezoneSelector| is hidden when auto detect on.
+    assertFalse(timezoneSelector.disabled);
+    assertTrue(timezoneSelector.hidden);
+  });
+
+  test('auto-detect off supervised account', async () => {
+    const prefs = getFakePrefs();
+    dateTime = initializeDateTime(prefs, false);
+    // Set auto detect off.
+    dateTime.set(
+        'prefs.generated.resolve_timezone_by_geolocation_on_off.value', false);
+    dateTime.set(
+        'prefs.generated.resolve_timezone_by_geolocation_method_short.value',
+        settings.TimeZoneAutoDetectMethod.DISABLED);
+    // Set fake child account.
+    loadTimeData.overrideValues({
+      isChild: true,
+    });
+
+    await settings.Router.getInstance().navigateTo(
+        settings.routes.DATETIME_TIMEZONE_SUBPAGE);
+
+    const resolveMethodDropdown = dateTime.$$('#timeZoneResolveMethodDropdown');
+    const timezoneSelector = getTimeZoneSelector('#userTimeZoneSelector');
+    const timeZoneAutoDetectOn = dateTime.$$('#timeZoneAutoDetectOn');
+    const timeZoneAutoDetectOff = dateTime.$$('#timeZoneAutoDetectOff');
+
+    // Verify elements are disabled for child account.
+    assertTrue(resolveMethodDropdown.disabled);
+    assertTrue(timezoneSelector.disabled);
+    assertTrue(timeZoneAutoDetectOn.disabled);
+    assertTrue(timeZoneAutoDetectOff.disabled);
+
+    await testBrowserProxy.whenCalled('showParentAccessForTimeZone');
+    cr.webUIListenerCallback('access-code-validation-complete');
+
+    // |resolveMethodDropdown| is disabled when auto detect off.
+    assertTrue(resolveMethodDropdown.disabled);
+
+    // Verify elements are enabled.
+    assertFalse(timeZoneAutoDetectOn.disabled);
+    assertFalse(timeZoneAutoDetectOff.disabled);
+    assertFalse(timezoneSelector.disabled);
   });
 
   test('set date and time button', function() {

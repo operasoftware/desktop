@@ -5,7 +5,6 @@
 #include "third_party/blink/renderer/core/layout/ng/ng_page_layout_algorithm.h"
 
 #include <algorithm>
-#include "third_party/blink/renderer/core/layout/ng/inline/ng_baseline.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_block_layout_algorithm.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_box_fragment.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space_builder.h"
@@ -18,28 +17,21 @@ namespace blink {
 
 NGPageLayoutAlgorithm::NGPageLayoutAlgorithm(
     const NGLayoutAlgorithmParams& params)
-    : NGLayoutAlgorithm(params),
-      border_padding_(params.fragment_geometry.border +
-                      params.fragment_geometry.padding),
-      border_scrollbar_padding_(border_padding_ +
-                                params.fragment_geometry.scrollbar) {
+    : NGLayoutAlgorithm(params) {
   container_builder_.SetIsNewFormattingContext(
       params.space.IsNewFormattingContext());
   container_builder_.SetInitialFragmentGeometry(params.fragment_geometry);
 }
 
 scoped_refptr<const NGLayoutResult> NGPageLayoutAlgorithm::Layout() {
-  LogicalSize border_box_size = container_builder_.InitialBorderBoxSize();
-  LogicalSize content_box_size =
-      ShrinkAvailableSize(border_box_size, border_scrollbar_padding_);
-  LogicalSize page_size = content_box_size;
+  LogicalSize page_size = ChildAvailableSize();
 
   NGConstraintSpace child_space = CreateConstraintSpaceForPages(page_size);
 
   WritingMode writing_mode = ConstraintSpace().GetWritingMode();
   scoped_refptr<const NGBlockBreakToken> break_token = BreakToken();
   LayoutUnit intrinsic_block_size;
-  LogicalOffset page_offset(border_scrollbar_padding_.StartOffset());
+  LogicalOffset page_offset = BorderScrollbarPadding().StartOffset();
   // TODO(mstensho): Handle auto block size.
   LogicalOffset page_progression(LayoutUnit(), page_size.block_size);
 
@@ -65,10 +57,11 @@ scoped_refptr<const NGLayoutResult> NGPageLayoutAlgorithm::Layout() {
 
   container_builder_.SetIntrinsicBlockSize(intrinsic_block_size);
 
-  // Recompute the block-axis size now that we know our content size.
-  border_box_size.block_size = ComputeBlockSizeForFragment(
-      ConstraintSpace(), Style(), border_padding_, intrinsic_block_size);
-  container_builder_.SetBlockSize(border_box_size.block_size);
+  // Compute the block-axis size now that we know our content size.
+  LayoutUnit block_size = ComputeBlockSizeForFragment(
+      ConstraintSpace(), Style(), BorderPadding(), intrinsic_block_size,
+      container_builder_.InitialBorderBoxSize().inline_size);
+  container_builder_.SetFragmentsTotalBlockSize(block_size);
 
   NGOutOfFlowLayoutPart(
       Node(), ConstraintSpace(),
@@ -81,13 +74,13 @@ scoped_refptr<const NGLayoutResult> NGPageLayoutAlgorithm::Layout() {
   return container_builder_.ToBoxFragment();
 }
 
-base::Optional<MinMaxSize> NGPageLayoutAlgorithm::ComputeMinMaxSize(
-    const MinMaxSizeInput& input) const {
+MinMaxSizesResult NGPageLayoutAlgorithm::ComputeMinMaxSizes(
+    const MinMaxSizesInput& input) const {
   NGFragmentGeometry fragment_geometry =
       CalculateInitialMinMaxFragmentGeometry(ConstraintSpace(), Node());
   NGBlockLayoutAlgorithm algorithm(
       {Node(), fragment_geometry, ConstraintSpace()});
-  return algorithm.ComputeMinMaxSize(input);
+  return algorithm.ComputeMinMaxSizes(input);
 }
 
 NGConstraintSpace NGPageLayoutAlgorithm::CreateConstraintSpaceForPages(
@@ -96,9 +89,6 @@ NGConstraintSpace NGPageLayoutAlgorithm::CreateConstraintSpaceForPages(
       ConstraintSpace(), Style().GetWritingMode(), /* is_new_fc */ true);
   space_builder.SetAvailableSize(page_size);
   space_builder.SetPercentageResolutionSize(page_size);
-
-  if (NGBaseline::ShouldPropagateBaselines(Node()))
-    space_builder.AddBaselineRequests(ConstraintSpace().BaselineRequests());
 
   // TODO(mstensho): Handle auto block size.
   space_builder.SetFragmentationType(kFragmentPage);

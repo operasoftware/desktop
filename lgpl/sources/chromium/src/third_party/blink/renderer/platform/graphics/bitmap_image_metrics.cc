@@ -6,6 +6,7 @@
 
 #include "base/metrics/histogram_base.h"
 #include "base/numerics/safe_conversions.h"
+#include "media/media_buildflags.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/color_space_gamut.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
@@ -28,7 +29,11 @@ void BitmapImageMetrics::CountDecodedImageType(const String& type) {
                                   ? kImageICO
                                   : type == "bmp"
                                         ? kImageBMP
-                                        : DecodedImageType::kImageUnknown;
+#if BUILDFLAG(ENABLE_AV1_DECODER)
+                                        : type == "avif"
+                                              ? kImageAVIF
+#endif
+                                              : DecodedImageType::kImageUnknown;
 
   DEFINE_THREAD_SAFE_STATIC_LOCAL(
       EnumerationHistogram, decoded_image_type_histogram,
@@ -44,6 +49,13 @@ void BitmapImageMetrics::CountImageOrientation(
   orientation_histogram.Count(orientation);
 }
 
+void BitmapImageMetrics::CountImageDensityCorrection(bool density_correction_present) {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(
+      BooleanHistogram, density_correction_histogram,
+      ("Blink.DecodedImage.DensitySizeCorrectionDetected"));
+  density_correction_histogram.Count(density_correction_present);
+}
+
 void BitmapImageMetrics::CountImageJpegDensity(int image_min_side,
                                                uint64_t density_centi_bpp,
                                                size_t image_size_bytes) {
@@ -51,32 +63,8 @@ void BitmapImageMetrics::CountImageJpegDensity(int image_min_side,
   // of 0.01 bpp. We don't report for any sample for small images (0 to 99px on
   // the smallest dimension).
   //
-  // The histograms JpegDensity.1000px, JpegDensity.400px and JpegDensity.100px
-  // report the number of images decoded for a given bpp value.
-  //
   // The histogram JpegDensity.KiBWeighted reports the number of KiB decoded for
   // a given bpp value.
-  if (image_min_side >= 1000) {
-    DEFINE_THREAD_SAFE_STATIC_LOCAL(
-        CustomCountHistogram, density_histogram,
-        ("Blink.DecodedImage.JpegDensity.1000px", 1, 1000, 100));
-    density_histogram.Count(
-        base::saturated_cast<base::Histogram::Sample>(density_centi_bpp));
-  } else if (image_min_side >= 400) {
-    DEFINE_THREAD_SAFE_STATIC_LOCAL(
-        CustomCountHistogram, density_histogram,
-        ("Blink.DecodedImage.JpegDensity.400px", 1, 1000, 100));
-    density_histogram.Count(
-        base::saturated_cast<base::Histogram::Sample>(density_centi_bpp));
-  } else if (image_min_side >= 100) {
-    DEFINE_THREAD_SAFE_STATIC_LOCAL(
-        CustomCountHistogram, density_histogram,
-        ("Blink.DecodedImage.JpegDensity.100px", 1, 1000, 100));
-    density_histogram.Count(
-        base::saturated_cast<base::Histogram::Sample>(density_centi_bpp));
-  } else {
-    // We don't report for images with 0 to 99px on the smallest dimension.
-  }
 
   if (image_min_side >= 100) {
     DEFINE_THREAD_SAFE_STATIC_LOCAL(

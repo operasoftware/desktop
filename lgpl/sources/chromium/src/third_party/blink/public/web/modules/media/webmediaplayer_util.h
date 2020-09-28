@@ -37,7 +37,7 @@ ConvertToWebTimeRanges(const media::Ranges<base::TimeDelta>& ranges);
 BLINK_MODULES_EXPORT WebMediaPlayer::NetworkState PipelineErrorToNetworkState(
     media::PipelineStatus error);
 
-// Report various metrics to UMA and RAPPOR.
+// Report various metrics to UMA.
 BLINK_MODULES_EXPORT void ReportMetrics(WebMediaPlayer::LoadType load_type,
                                         const WebURL& url,
                                         const WebLocalFrame& frame,
@@ -46,8 +46,7 @@ BLINK_MODULES_EXPORT void ReportMetrics(WebMediaPlayer::LoadType load_type,
 // Report metrics about pipeline errors.
 BLINK_MODULES_EXPORT void ReportPipelineError(
     WebMediaPlayer::LoadType load_type,
-    media::PipelineStatus error,
-    media::MediaLog* media_log);
+    media::PipelineStatus error);
 
 // Wraps a WebSetSinkIdCompleteCallback into a
 // media::OutputDeviceStatusCB and binds it to the current thread

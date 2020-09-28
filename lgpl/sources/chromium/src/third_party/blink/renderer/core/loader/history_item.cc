@@ -224,7 +224,7 @@ ResourceRequest HistoryItem::GenerateResourceRequest(
   return request;
 }
 
-void HistoryItem::Trace(blink::Visitor* visitor) {
+void HistoryItem::Trace(Visitor* visitor) const {
   visitor->Trace(document_forms_state_);
   visitor->Trace(content_editables_state_);
 }

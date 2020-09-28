@@ -16,6 +16,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_chunk_subset.h"
 #include "third_party/blink/renderer/platform/graphics/paint/property_tree_state.h"
 #include "third_party/blink/renderer/platform/graphics/paint/raster_invalidation_tracking.h"
+#include "third_party/blink/renderer/platform/graphics/paint/scrollbar_display_item.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
@@ -157,10 +158,9 @@ class ConversionContext {
                                                          *current_transform_);
   }
 
-  void AppendRestore(size_t n) {
+  void AppendRestore() {
     cc_list_.StartPaint();
-    while (n--)
-      cc_list_.push<cc::RestoreOp>();
+    cc_list_.push<cc::RestoreOp>();
     cc_list_.EndPaintOfPairedEnd();
   }
 
@@ -194,7 +194,6 @@ class ConversionContext {
     // Remembers the type of paired begin that caused a state to be saved.
     // This is for checking integrity of the algorithm.
     enum PairedType { kClip, kEffect } type;
-    int saved_count;
 
     // These fields are neve nullptr.
     const TransformPaintPropertyNode* transform;
@@ -206,7 +205,7 @@ class ConversionContext {
     bool has_pre_cap_effect_hierarchy_issue = false;
 #endif
   };
-  void PushState(StateEntry::PairedType, int saved_count);
+  void PushState(StateEntry::PairedType);
   void PopState();
   Vector<StateEntry> state_stack_;
 
@@ -261,7 +260,7 @@ ConversionContext::~ConversionContext() {
   }
   EndTransform();
   if (translated_for_layer_offset_)
-    AppendRestore(1);
+    AppendRestore();
 }
 
 void ConversionContext::TranslateForLayerOffsetOnce() {
@@ -276,6 +275,7 @@ void ConversionContext::TranslateForLayerOffsetOnce() {
 }
 
 void ConversionContext::SwitchToChunkState(const PaintChunk& chunk) {
+  TranslateForLayerOffsetOnce();
   chunk_to_layer_mapper_.SwitchToChunk(chunk);
 
   const auto& chunk_state = chunk.properties;
@@ -302,18 +302,21 @@ static bool CombineClip(const ClipPaintPropertyNode& clip,
     return false;
 
   // Don't combine two rounded clip rects.
-  bool clip_is_rounded = clip.ClipRect().IsRounded();
+  bool clip_is_rounded = clip.PixelSnappedClipRect().IsRounded();
   bool combined_is_rounded = combined_clip_rect.IsRounded();
   if (clip_is_rounded && combined_is_rounded)
     return false;
 
   // If one is rounded and the other contains the rounded bounds, use the
   // rounded as the combined.
-  if (combined_is_rounded)
-    return clip.ClipRect().Rect().Contains(combined_clip_rect.Rect());
+  if (combined_is_rounded) {
+    return clip.PixelSnappedClipRect().Rect().Contains(
+        combined_clip_rect.Rect());
+  }
   if (clip_is_rounded) {
-    if (combined_clip_rect.Rect().Contains(clip.ClipRect().Rect())) {
-      combined_clip_rect = clip.ClipRect();
+    if (combined_clip_rect.Rect().Contains(
+            clip.PixelSnappedClipRect().Rect())) {
+      combined_clip_rect = clip.PixelSnappedClipRect();
       return true;
     }
     return false;
@@ -321,8 +324,8 @@ static bool CombineClip(const ClipPaintPropertyNode& clip,
 
   // The combined is the intersection if both are rectangular.
   DCHECK(!combined_is_rounded && !clip_is_rounded);
-  combined_clip_rect = FloatRoundedRect(
-      Intersection(combined_clip_rect.Rect(), clip.ClipRect().Rect()));
+  combined_clip_rect = FloatRoundedRect(Intersection(
+      combined_clip_rect.Rect(), clip.PixelSnappedClipRect().Rect()));
   return true;
 }
 
@@ -378,9 +381,10 @@ void ConversionContext::SwitchToClip(
 
   // Step 3: Now apply the list of clips in top-down order.
   DCHECK(pending_clips.size());
-  auto pending_combined_clip_rect = pending_clips.back()->ClipRect();
+  auto pending_combined_clip_rect =
+      pending_clips.back()->PixelSnappedClipRect();
   const auto* lowest_combined_clip_node = pending_clips.back();
-  for (size_t i = pending_clips.size() - 1; i--;) {
+  for (auto i = pending_clips.size() - 1; i--;) {
     const auto* sub_clip = pending_clips[i];
     if (CombineClip(*sub_clip, pending_combined_clip_rect)) {
       // Continue to combine.
@@ -389,7 +393,7 @@ void ConversionContext::SwitchToClip(
       // |sub_clip| can't be combined to previous clips. Output the current
       // combined clip, and start new combination.
       StartClip(pending_combined_clip_rect, *lowest_combined_clip_node);
-      pending_combined_clip_rect = sub_clip->ClipRect();
+      pending_combined_clip_rect = sub_clip->PixelSnappedClipRect();
       lowest_combined_clip_node = sub_clip;
     }
   }
@@ -423,7 +427,7 @@ void ConversionContext::StartClip(
   }
   cc_list_.EndPaintOfPairedBegin();
 
-  PushState(StateEntry::kClip, 1);
+  PushState(StateEntry::kClip);
   current_clip_ = &lowest_combined_clip_node;
   current_transform_ = &local_transform;
 }
@@ -491,7 +495,7 @@ void ConversionContext::SwitchToEffect(
   }
 
   // Step 3: Now apply the list of effects in top-down order.
-  for (size_t i = pending_effects.size(); i--;) {
+  for (auto i = pending_effects.size(); i--;) {
     const EffectPaintPropertyNode* sub_effect = pending_effects[i];
 #if DCHECK_IS_ON()
     if (!has_pre_cap_effect_hierarchy_issue)
@@ -517,7 +521,6 @@ void ConversionContext::StartEffect(const EffectPaintPropertyNode& effect) {
   else
     EndClips();
 
-  int saved_count = 0;
   size_t save_layer_id = kNotFound;
 
   // Adjust transform first. Though a non-filter effect itself doesn't depend on
@@ -536,9 +539,8 @@ void ConversionContext::StartEffect(const EffectPaintPropertyNode& effect) {
   bool has_other_effects = effect.BlendMode() != SkBlendMode::kSrcOver ||
                            effect.GetColorFilter() != kColorFilterNone;
   DCHECK(!has_filter || !(has_opacity || has_other_effects));
-
-  // TODO(crbug.com/904592): Add support for non-composited backdrop-filter
-  // here.
+  // We always composite backdrop filters.
+  DCHECK(effect.BackdropFilter().IsEmpty());
 
   // Apply effects.
   cc_list_.StartPaint();
@@ -557,15 +559,8 @@ void ConversionContext::StartEffect(const EffectPaintPropertyNode& effect) {
     } else {
       save_layer_id = cc_list_.push<cc::SaveLayerAlphaOp>(nullptr, alpha);
     }
-    saved_count++;
   } else {
     // Handle filter effect.
-    FloatPoint filter_origin = effect.FiltersOrigin();
-    if (filter_origin != FloatPoint()) {
-      cc_list_.push<cc::SaveOp>();
-      cc_list_.push<cc::TranslateOp>(filter_origin.X(), filter_origin.Y());
-      saved_count++;
-    }
     // The size parameter is only used to computed the origin of zoom
     // operation, which we never generate.
     gfx::SizeF empty;
@@ -573,24 +568,31 @@ void ConversionContext::StartEffect(const EffectPaintPropertyNode& effect) {
     filter_flags.setImageFilter(cc::RenderSurfaceFilters::BuildImageFilter(
         effect.Filter().AsCcFilterOperations(), empty));
     save_layer_id = cc_list_.push<cc::SaveLayerOp>(nullptr, &filter_flags);
-    saved_count++;
-    if (filter_origin != FloatPoint())
-      cc_list_.push<cc::TranslateOp>(-filter_origin.X(), -filter_origin.Y());
   }
   cc_list_.EndPaintOfPairedBegin();
 
-  DCHECK_GT(saved_count, 0);
-  DCHECK_LE(saved_count, 2);
   DCHECK_NE(save_layer_id, kNotFound);
 
   // Adjust state and push previous state onto effect stack.
   // TODO(trchen): Change input clip to expansion hint once implemented.
   const ClipPaintPropertyNode* input_clip = current_clip_;
-  PushState(StateEntry::kEffect, saved_count);
+  PushState(StateEntry::kEffect);
   effect_bounds_stack_.emplace_back(
       EffectBoundsInfo{save_layer_id, current_transform_});
   current_clip_ = input_clip;
   current_effect_ = &effect;
+
+  if (effect.Filter().HasReferenceFilter()) {
+    auto reference_box = effect.Filter().ReferenceBox();
+    effect_bounds_stack_.back().bounds = reference_box;
+    if (current_effect_->Filter().HasReferenceFilter()) {
+      // Emit an empty paint operation to add the filter's source bounds (mapped
+      // to layer space) to the visual rect of the filter's SaveLayerOp.
+      cc_list_.StartPaint();
+      cc_list_.EndPaintOfUnpaired(chunk_to_layer_mapper_.MapVisualRect(
+          EnclosingIntRect(reference_box)));
+    }
+  }
 }
 
 void ConversionContext::UpdateEffectBounds(
@@ -618,20 +620,15 @@ void ConversionContext::EndEffect() {
   DCHECK(effect_bounds_stack_.size());
   const auto& bounds_info = effect_bounds_stack_.back();
   FloatRect bounds = bounds_info.bounds;
-  if (!bounds.IsEmpty()) {
-    if (current_effect_->Filter().IsEmpty()) {
+  if (current_effect_->Filter().IsEmpty()) {
+    if (!bounds.IsEmpty())
       cc_list_.UpdateSaveLayerBounds(bounds_info.save_layer_id, bounds);
-    } else {
-      // The bounds for the SaveLayer[Alpha]Op should be the source bounds
-      // before the filter is applied, in the space of the TranslateOp which was
-      // emitted before the SaveLayer[Alpha]Op.
-      auto save_layer_bounds = bounds;
-      save_layer_bounds.MoveBy(-current_effect_->FiltersOrigin());
-      cc_list_.UpdateSaveLayerBounds(bounds_info.save_layer_id,
-                                     save_layer_bounds);
-      // We need to propagate the filtered bounds to the parent.
-      bounds = current_effect_->MapRect(bounds);
-    }
+  } else {
+    // We need an empty bounds for empty filter to avoid performance issue of
+    // PDF renderer. See crbug.com/740824.
+    cc_list_.UpdateSaveLayerBounds(bounds_info.save_layer_id, bounds);
+    // We need to propagate the filtered bounds to the parent.
+    bounds = current_effect_->MapRect(bounds);
   }
 
   effect_bounds_stack_.pop_back();
@@ -653,11 +650,9 @@ void ConversionContext::EndClip() {
   PopState();
 }
 
-void ConversionContext::PushState(StateEntry::PairedType type,
-                                  int saved_count) {
-  state_stack_.emplace_back(StateEntry{type, saved_count, current_transform_,
-                                       current_clip_, current_effect_,
-                                       previous_transform_});
+void ConversionContext::PushState(StateEntry::PairedType type) {
+  state_stack_.emplace_back(StateEntry{type, current_transform_, current_clip_,
+                                       current_effect_, previous_transform_});
   previous_transform_ = nullptr;
 }
 
@@ -665,7 +660,7 @@ void ConversionContext::PopState() {
   DCHECK_EQ(nullptr, previous_transform_);
 
   const auto& previous_state = state_stack_.back();
-  AppendRestore(previous_state.saved_count);
+  AppendRestore();
   current_transform_ = previous_state.transform;
   previous_transform_ = previous_state.previous_transform;
   current_clip_ = previous_state.clip;
@@ -719,22 +714,24 @@ void ConversionContext::Convert(const PaintChunkSubset& paint_chunks,
     bool switched_to_chunk_state = false;
 
     for (const auto& item : display_items.ItemsInPaintChunk(chunk)) {
-      if (!item.IsDrawing())
+      sk_sp<const PaintRecord> record;
+      if (item.IsScrollbar())
+        record = static_cast<const ScrollbarDisplayItem&>(item).Paint();
+      else if (item.IsDrawing())
+        record = static_cast<const DrawingDisplayItem&>(item).GetPaintRecord();
+      else
         continue;
 
-      auto record =
-          static_cast<const DrawingDisplayItem&>(item).GetPaintRecord();
-      // If we have an empty paint record, then we would prefer not to draw it.
-      // However, if we also have a non-root effect, it means that the filter
-      // applied might draw something even if the record is empty. We need to
-      // "draw" this record in order to ensure that the effect has correct
-      // visual rects.
+      // If we have an empty paint record, then we would prefer ignoring it.
+      // However, if we also have a non-root effect, the empty paint record
+      // might be for a mask with empty content which should make the masked
+      // content fully invisible. We need to "draw" this record to ensure that
+      // the effect has correct visual rect.
       if ((!record || record->size() == 0) &&
           &chunk_state.Effect() == &EffectPaintPropertyNode::Root()) {
         continue;
       }
 
-      TranslateForLayerOffsetOnce();
       if (!switched_to_chunk_state) {
         SwitchToChunkState(chunk);
         switched_to_chunk_state = true;
@@ -746,7 +743,18 @@ void ConversionContext::Convert(const PaintChunkSubset& paint_chunks,
       cc_list_.EndPaintOfUnpaired(
           chunk_to_layer_mapper_.MapVisualRect(item.VisualRect()));
     }
-    UpdateEffectBounds(FloatRect(chunk.bounds), chunk_state.Transform());
+
+    // If we have an empty paint chunk, then we would prefer ignoring it.
+    // However, a reference filter can generate visible effect from invisible
+    // source, and we need to emit paint operations for it.
+    if (!switched_to_chunk_state && &chunk_state.Effect() != current_effect_)
+      SwitchToChunkState(chunk);
+
+    // Most effects apply to drawable contents only. Reference filters are
+    // exceptions, for which we have already added the reference box to the
+    // bounds of the effect in StartEffect().
+    UpdateEffectBounds(FloatRect(chunk.drawable_bounds),
+                       chunk_state.Transform());
   }
 }
 

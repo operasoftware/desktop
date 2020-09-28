@@ -17,8 +17,13 @@ class OriginTrialPolicy {
   virtual ~OriginTrialPolicy() = default;
 
   virtual bool IsOriginTrialsSupported() const { return false; }
-  virtual base::StringPiece GetPublicKey() const { return base::StringPiece(); }
+  virtual std::vector<base::StringPiece> GetPublicKeys() const {
+    return std::vector<base::StringPiece>();
+  }
   virtual bool IsFeatureDisabled(base::StringPiece feature) const {
+    return false;
+  }
+  virtual bool IsFeatureDisabledForUser(base::StringPiece feature) const {
     return false;
   }
   virtual bool IsTokenDisabled(base::StringPiece token_signature) const {

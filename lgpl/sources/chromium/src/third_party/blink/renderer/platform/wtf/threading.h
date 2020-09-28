@@ -33,7 +33,7 @@
 #include <stdint.h>
 #include <memory>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/macros.h"
 #include "base/threading/platform_thread.h"
 #include "build/build_config.h"
@@ -48,6 +48,7 @@ WTF_EXPORT base::PlatformThreadId CurrentThread();
 #if DCHECK_IS_ON()
 WTF_EXPORT bool IsBeforeThreadCreated();
 WTF_EXPORT void WillCreateThread();
+WTF_EXPORT void SetIsBeforeThreadCreatedForTest();
 #endif
 
 class AtomicStringTable;

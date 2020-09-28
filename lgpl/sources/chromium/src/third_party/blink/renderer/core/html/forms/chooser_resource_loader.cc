@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/html/forms/chooser_resource_loader.h"
 
+#include "base/notreached.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/resources/grit/blink_resources.h"
 #include "third_party/blink/renderer/platform/data_resource_helper.h"
@@ -94,6 +95,15 @@ Vector<char> ChooserResourceLoader::GetTimePickerStyleSheet() {
 Vector<char> ChooserResourceLoader::GetTimePickerJS() {
 #if !defined(OS_ANDROID)
   return UncompressResourceAsBinary(IDR_TIME_PICKER_JS);
+#else
+  NOTREACHED();
+  return Vector<char>();
+#endif
+}
+
+Vector<char> ChooserResourceLoader::GetDateTimeLocalPickerJS() {
+#if !defined(OS_ANDROID)
+  return UncompressResourceAsBinary(IDR_DATETIMELOCAL_PICKER_JS);
 #else
   NOTREACHED();
   return Vector<char>();

@@ -24,8 +24,6 @@ blink_core_sources("events") {
     "composition_event.h",
     "current_input_event.cc",
     "current_input_event.h",
-    "detached_view_control_event.cc",
-    "detached_view_control_event.h",
     "drag_event.cc",
     "drag_event.h",
     "error_event.cc",

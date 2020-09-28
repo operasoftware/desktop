@@ -33,6 +33,7 @@
 #include <memory>
 #include <utility>
 #include "base/auto_reset.h"
+#include "third_party/blink/public/common/css/forced_colors.h"
 #include "third_party/blink/public/common/css/preferred_color_scheme.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -47,9 +48,11 @@
 #include "third_party/blink/renderer/core/css/style_engine_context.h"
 #include "third_party/blink/renderer/core/css/style_invalidation_root.h"
 #include "third_party/blink/renderer/core/css/style_recalc_root.h"
+#include "third_party/blink/renderer/core/css/vision_deficiency.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/tree_ordered_list.h"
 #include "third_party/blink/renderer/core/html/track/text_track.h"
+#include "third_party/blink/renderer/core/style/filter_operations.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/fonts/font_selector_client.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -79,7 +82,7 @@ using StyleSheetKey = AtomicString;
 
 // The StyleEngine class manages style-related state for the document. There is
 // a 1-1 relationship of Document to StyleEngine. The document calls the
-// StyleEngine when the the document is updated in a way that impacts styles.
+// StyleEngine when the document is updated in a way that impacts styles.
 class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
                                       public FontSelectorClient,
                                       public NameClient {
@@ -144,7 +147,7 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
                                WebDocument::kAuthorOrigin);
   CSSStyleSheet& EnsureInspectorStyleSheet();
   RuleSet* WatchedSelectorsRuleSet() {
-    DCHECK(IsMaster());
+    DCHECK(!IsHTMLImport());
     DCHECK(global_rule_set_);
     return global_rule_set_->WatchedSelectorsRuleSet();
   }
@@ -153,12 +156,11 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   }
 
   RuleSet* RuleSetForSheet(CSSStyleSheet&);
-  void MediaQueryAffectingValueChanged();
+  void MediaQueryAffectingValueChanged(MediaValueChange change);
   void UpdateActiveStyleSheetsInImport(
-      StyleEngine& master_engine,
+      StyleEngine& root_engine,
       DocumentStyleSheetCollector& parent_collector);
   void UpdateActiveStyle();
-  void MarkAllTreeScopesDirty() { all_tree_scopes_dirty_ = true; }
 
   String PreferredStylesheetSetName() const {
     return preferred_stylesheet_set_name_;
@@ -229,7 +231,7 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   bool MediaQueryAffectedByViewportChange();
   bool MediaQueryAffectedByDeviceChange();
   bool HasViewportDependentMediaQueries() {
-    DCHECK(IsMaster());
+    DCHECK(!IsHTMLImport());
     DCHECK(global_rule_set_);
     UpdateActiveStyle();
     return !global_rule_set_->GetRuleFeatureSet()
@@ -242,7 +244,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   void UpdateLayoutTreeRebuildRoot(ContainerNode* ancestor, Node* dirty_node);
 
   CSSFontSelector* GetFontSelector() { return font_selector_; }
-  void SetFontSelector(CSSFontSelector*);
 
   void RemoveFontFaceRules(const HeapVector<Member<const StyleRuleFontFace>>&);
   // updateGenericFontFamilySettings is used from WebSettingsImpl.
@@ -267,7 +268,9 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   }
 
   void EnsureUAStyleForFullscreen();
+  void EnsureUAStyleForXrOverlay();
   void EnsureUAStyleForElement(const Element&);
+  void EnsureUAStyleForPseudoElement(PseudoId);
 
   void PlatformColorsChanged();
 
@@ -303,6 +306,9 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
 
   void NodeWillBeRemoved(Node&);
   void ChildrenRemoved(ContainerNode& parent);
+  void RemovedFromFlatTree(Node& node) {
+    style_recalc_root_.RemovedFromFlatTree(node);
+  }
   void PseudoElementRemoved(Element& originating_element) {
     layout_tree_rebuild_root_.ChildrenRemoved(originating_element);
   }
@@ -319,9 +325,13 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   void ApplyUserRuleSetChanges(const ActiveStyleSheetVector& old_style_sheets,
                                const ActiveStyleSheetVector& new_style_sheets);
 
+  void VisionDeficiencyChanged();
+  void ApplyVisionDeficiencyStyle(
+      scoped_refptr<ComputedStyle> layout_view_style);
+
   void CollectMatchingUserRules(ElementRuleCollector&) const;
 
-  void CustomPropertyRegistered();
+  void PropertyRegistryChanged();
 
   void EnvironmentVariableChanged();
 
@@ -339,6 +349,9 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   void MarkAllElementsForStyleRecalc(const StyleChangeReasonForTracing& reason);
   void MarkViewportStyleDirty();
   bool IsViewportStyleDirty() const { return viewport_style_dirty_; }
+
+  void MarkFontsNeedUpdate();
+  void InvalidateStyleAndLayoutForFontUpdates();
 
   StyleRuleKeyframes* KeyframeStylesForAnimation(
       const AtomicString& animation_name);
@@ -359,6 +372,7 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   void UpdateViewportStyle();
   void UpdateStyleAndLayoutTree();
   void RecalcStyle();
+  void ClearEnsuredDescendantStyles(Element& element);
   void RebuildLayoutTree();
   bool InRebuildLayoutTree() const { return in_layout_tree_rebuild_; }
 
@@ -367,20 +381,24 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   PreferredColorScheme GetPreferredColorScheme() const {
     return preferred_color_scheme_;
   }
-  void UpdateColorSchemeBackground();
+  ForcedColors GetForcedColors() const { return forced_colors_; }
+  void UpdateColorSchemeBackground(bool color_scheme_changed = false);
+  Color ForcedBackgroundColor() const { return forced_background_color_; }
+  Color ColorAdjustBackgroundColor() const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
   const char* NameInHeapSnapshot() const override { return "StyleEngine"; }
 
  private:
   // FontSelectorClient implementation.
-  void FontsNeedUpdate(FontSelector*) override;
+  void FontsNeedUpdate(FontSelector*, FontInvalidationReason) override;
+
+  void LoadVisionDeficiencyFilter();
 
  private:
   bool NeedsActiveStyleSheetUpdate() const {
-    return all_tree_scopes_dirty_ || tree_scopes_removed_ ||
-           document_scope_dirty_ || dirty_tree_scopes_.size() ||
-           user_style_dirty_;
+    return tree_scopes_removed_ || document_scope_dirty_ ||
+           dirty_tree_scopes_.size() || user_style_dirty_;
   }
 
   TreeScopeStyleSheetCollection& EnsureStyleSheetCollectionFor(TreeScope&);
@@ -392,16 +410,22 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   void MarkTreeScopeDirty(TreeScope&);
   void MarkUserStyleDirty();
 
-  bool IsMaster() const { return is_master_; }
-  Document* Master();
+  bool IsHTMLImport() const { return is_html_import_; }
+  Document* HTMLImportRootDocument();
   Document& GetDocument() const { return *document_; }
 
   typedef HeapHashSet<Member<TreeScope>> UnorderedTreeScopeSet;
 
-  void MediaQueryAffectingValueChanged(UnorderedTreeScopeSet&);
-  void MediaQueryAffectingValueChanged(HeapHashSet<Member<TextTrack>>&);
+  bool MediaQueryAffectingValueChanged(const ActiveStyleSheetVector&,
+                                       MediaValueChange);
+  void MediaQueryAffectingValueChanged(TreeScope&, MediaValueChange);
+  void MediaQueryAffectingValueChanged(UnorderedTreeScopeSet&,
+                                       MediaValueChange);
+  void MediaQueryAffectingValueChanged(HeapHashSet<Member<TextTrack>>&,
+                                       MediaValueChange);
+
   const RuleFeatureSet& GetRuleFeatureSet() const {
-    DCHECK(IsMaster());
+    DCHECK(!IsHTMLImport());
     DCHECK(global_rule_set_);
     return global_rule_set_->GetRuleFeatureSet();
   }
@@ -455,23 +479,31 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   const MediaQueryEvaluator& EnsureMediaQueryEvaluator();
   void UpdateStyleSheetList(TreeScope&);
 
-  void ClearFontCacheAndAddUserFonts();
+  // Returns true if any @font-face rules are added or removed.
+  bool ClearFontFaceCacheAndAddUserFonts();
+
   void ClearKeyframeRules() { keyframes_rule_map_.clear(); }
   void ClearPropertyRules();
 
-  void AddUserFontFaceRules(const RuleSet&);
+  void AddPropertyRulesFromSheets(const ActiveStyleSheetVector&);
+
+  // Returns true if any @font-face rules are added.
+  bool AddUserFontFaceRules(const RuleSet&);
   void AddUserKeyframeRules(const RuleSet&);
   void AddUserKeyframeStyle(StyleRuleKeyframes*);
   void AddPropertyRules(const RuleSet&);
 
   void UpdateColorScheme();
   bool SupportsDarkColorScheme();
+  void UpdateForcedBackgroundColor();
 
   void ViewportDefiningElementDidChange();
   void PropagateWritingModeAndDirectionToHTMLRoot();
 
   Member<Document> document_;
-  bool is_master_;
+
+  // True if this StyleEngine is for an HTML Import document.
+  bool is_html_import_ = false;
 
   // Tracks the number of currently loading top-level stylesheets. Sheets loaded
   // using the @import directive are not included in this count. We use this
@@ -509,7 +541,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   StyleSheetCollectionMap style_sheet_collection_map_;
 
   bool document_scope_dirty_ = true;
-  bool all_tree_scopes_dirty_ = false;
   bool tree_scopes_removed_ = false;
   bool user_style_dirty_ = false;
   UnorderedTreeScopeSet dirty_tree_scopes_;
@@ -522,6 +553,10 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   bool in_layout_tree_rebuild_ = false;
   bool in_dom_removal_ = false;
   bool viewport_style_dirty_ = false;
+  bool fonts_need_update_ = false;
+
+  VisionDeficiency vision_deficiency_ = VisionDeficiency::kNoVisionDeficiency;
+  Member<ReferenceFilterOperation> vision_deficiency_filter_;
 
   Member<StyleResolver> resolver_;
   Member<ViewportStyleResolver> viewport_resolver_;
@@ -573,9 +608,13 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
 
   // The preferred color scheme is set in settings, but may be overridden by the
   // ForceDarkMode setting where the preferred_color_scheme_ will be set to
-  // kNoPreference to avoid dark styling to be applied before auto darkening.
-  PreferredColorScheme preferred_color_scheme_ =
-      PreferredColorScheme::kNoPreference;
+  // kLight to avoid dark styling to be applied before auto darkening.
+  PreferredColorScheme preferred_color_scheme_ = PreferredColorScheme::kLight;
+  bool use_dark_background_ = false;
+
+  // Forced colors is set in WebThemeEngine.
+  ForcedColors forced_colors_ = ForcedColors::kNone;
+  Color forced_background_color_;
 
   friend class NodeTest;
   friend class StyleEngineTest;

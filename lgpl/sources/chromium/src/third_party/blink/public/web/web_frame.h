@@ -33,12 +33,11 @@
 
 #include <memory>
 #include "cc/paint/paint_canvas.h"
+#include "third_party/blink/public/mojom/frame/tree_scope_type.mojom-shared.h"
+#include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-shared.h"
 #include "third_party/blink/public/platform/web_common.h"
-#include "third_party/blink/public/platform/web_insecure_request_policy.h"
 #include "third_party/blink/public/web/web_frame_load_type.h"
-#include "third_party/blink/public/web/web_icon_url.h"
 #include "third_party/blink/public/web/web_node.h"
-#include "third_party/blink/public/web/web_tree_scope_type.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -46,15 +45,10 @@ namespace blink {
 class Frame;
 class OpenedFrameTracker;
 class Visitor;
-class WebImage;
 class WebLocalFrame;
 class WebRemoteFrame;
 class WebSecurityOrigin;
 class WebView;
-enum class WebSandboxFlags;
-struct FramePolicy;
-struct WebFrameOwnerProperties;
-struct WebRect;
 
 // Frames may be rendered in process ('local') or out of process ('remote').
 // A remote frame is always cross-site; a local frame may be either same-site or
@@ -79,6 +73,8 @@ class BLINK_EXPORT WebFrame {
   // Returns the number of live WebFrame objects, used for leak checking.
   static int InstanceCount();
 
+  static WebFrame* FromFrameToken(const base::UnguessableToken&);
+
   virtual bool IsWebLocalFrame() const = 0;
   virtual WebLocalFrame* ToWebLocalFrame() = 0;
   virtual bool IsWebRemoteFrame() const = 0;
@@ -100,30 +96,11 @@ class BLINK_EXPORT WebFrame {
   // The security origin of this frame.
   WebSecurityOrigin GetSecurityOrigin() const;
 
-  // Updates the snapshotted policy attributes (sandbox flags and feature policy
-  // container policy) in the frame's FrameOwner. This is used when this frame's
-  // parent is in another process and it dynamically updates this frame's
-  // sandbox flags or container policy. The new policy won't take effect until
-  // the next navigation.
-  void SetFrameOwnerPolicy(const FramePolicy&);
-
   // The frame's insecure request policy.
-  WebInsecureRequestPolicy GetInsecureRequestPolicy() const;
+  mojom::InsecureRequestPolicy GetInsecureRequestPolicy() const;
 
   // The frame's upgrade insecure navigations set.
   WebVector<unsigned> GetInsecureRequestToUpgrade() const;
-
-  // Updates this frame's FrameOwner properties, such as scrolling, margin,
-  // or allowfullscreen.  This is used when this frame's parent is in
-  // another process and it dynamically updates these properties.
-  // TODO(dcheng): Currently, the update only takes effect on next frame
-  // navigation.  This matches the in-process frame behavior.
-  void SetFrameOwnerProperties(const WebFrameOwnerProperties&);
-
-  // Whether to collapse the frame's owner element in the embedder document,
-  // that is, to remove it from the layout as if it did not exist. Only works
-  // for <iframe> owner elements.
-  void Collapse(bool);
 
   // Hierarchy ----------------------------------------------------------
 
@@ -168,42 +145,39 @@ class BLINK_EXPORT WebFrame {
   static bool ScriptCanAccess(WebFrame*);
 
   // Navigation ----------------------------------------------------------
-  // TODO(clamy): Remove the reload, reloadWithOverrideURL, and loadRequest
-  // functions once RenderFrame only calls WebLoadFrame::load.
-
-  // Stops any pending loads on the frame and its children.
-  virtual void StopLoading() = 0;
 
   // Will return true if between didStartLoading and didStopLoading
   // notifications.
   virtual bool IsLoading() const;
 
   // Utility -------------------------------------------------------------
-
-  // Creates a static image of frame.
-  virtual bool FrameImage(const WebRect& source_rect,
-                          bool include_scrollbars,
-                          SkCanvas* canvas) = 0;
+  virtual float GetDeviceScaleFactor() const = 0;
 
   // Returns the frame inside a given frame or iframe element. Returns 0 if
   // the given node is not a frame, iframe or if the frame is empty.
   static WebFrame* FromFrameOwnerElement(const WebNode&);
+
+  // This identifier represents the stable identifier between a
+  // LocalFrame  <--> RenderFrameHostImpl or a
+  // RemoteFrame <--> RenderFrameProxyHost in the browser process.
+  const base::UnguessableToken& GetFrameToken() const { return frame_token_; }
 
 #if INSIDE_BLINK
   // TODO(mustaq): Should be named FromCoreFrame instead.
   static WebFrame* FromFrame(Frame*);
   static Frame* ToCoreFrame(const WebFrame&);
 
-  bool InShadowTree() const { return scope_ == WebTreeScopeType::kShadow; }
+  bool InShadowTree() const { return scope_ == mojom::TreeScopeType::kShadow; }
 
-  static void TraceFrames(Visitor*, WebFrame*);
+  static void TraceFrames(Visitor*, const WebFrame*);
 
   // Detaches a frame from its parent frame if it has one.
   void DetachFromParent();
 #endif
 
  protected:
-  explicit WebFrame(WebTreeScopeType);
+  explicit WebFrame(mojom::TreeScopeType,
+                    const base::UnguessableToken& frame_token);
   virtual ~WebFrame();
 
   // Sets the parent WITHOUT fulling adding it to the frame tree.
@@ -224,13 +198,19 @@ class BLINK_EXPORT WebFrame {
   friend class OpenedFrameTracker;
   friend class WebFrameTest;
 
-  static void TraceFrame(Visitor*, WebFrame*);
+  static void TraceFrame(Visitor*, const WebFrame*);
 #endif
 
   // Removes the given child from this frame.
   void RemoveChild(WebFrame*);
 
-  const WebTreeScopeType scope_;
+  const mojom::TreeScopeType scope_;
+
+  // See blink::Frame::frame_token_ for comments.
+  // TODO(dtapuska): Remove the need for this variable. This is stored here
+  // because a WebRemote's core frame is created inside the bowels of the Swap
+  // call.
+  const base::UnguessableToken frame_token_;
 
   WebFrame* parent_;
   WebFrame* previous_sibling_;

@@ -10,7 +10,7 @@
 #include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/paint/paint_timing_test_helper.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
-#include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
+#include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
@@ -50,7 +50,7 @@ class LargestContentfulPaintCalculatorTest : public RenderingTest {
   }
 
   void SetImage(const char* id, int width, int height) {
-    ToHTMLImageElement(GetDocument().getElementById(id))
+    To<HTMLImageElement>(GetDocument().getElementById(id))
         ->SetImageForTest(CreateImageForTest(width, height));
   }
 
@@ -60,10 +60,10 @@ class LargestContentfulPaintCalculatorTest : public RenderingTest {
         SkImageInfo::MakeN32Premul(width, height, src_rgb_color_space);
     sk_sp<SkSurface> surface(SkSurface::MakeRaster(raster_image_info));
     sk_sp<SkImage> image = surface->makeImageSnapshot();
-    ImageResourceContent* original_image_resource =
+    ImageResourceContent* original_image_content =
         ImageResourceContent::CreateLoaded(
-            StaticBitmapImage::Create(image).get());
-    return original_image_resource;
+            UnacceleratedStaticBitmapImage::Create(image).get());
+    return original_image_content;
   }
 
   LargestContentType LastReportedType() {

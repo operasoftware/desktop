@@ -35,7 +35,7 @@
 
 namespace blink {
 
-class LayoutRubyText final : public LayoutBlockFlow {
+class LayoutRubyText : public LayoutBlockFlow {
  public:
   LayoutRubyText(Element*);
   ~LayoutRubyText() override;
@@ -47,6 +47,9 @@ class LayoutRubyText final : public LayoutBlockFlow {
   }
 
   bool IsChildAllowed(LayoutObject*, const ComputedStyle&) const override;
+
+  void StyleDidChange(StyleDifference diff,
+                      const ComputedStyle* old_style) override;
 
   bool CreatesNewFormattingContext() const final {
     // Ruby text objects are pushed around after layout, to become flush with

@@ -40,6 +40,7 @@
 
 namespace blink {
 
+class ExecutionContext;
 class PendingScript;
 
 class CORE_EXPORT PendingScriptClient : public GarbageCollectedMixin {
@@ -52,7 +53,7 @@ class CORE_EXPORT PendingScriptClient : public GarbageCollectedMixin {
   // streaming finishes.
   virtual void PendingScriptFinished(PendingScript*) = 0;
 
-  void Trace(Visitor* visitor) override {}
+  void Trace(Visitor* visitor) const override {}
 };
 
 // A container for an script after "prepare a script" until it is executed.
@@ -83,7 +84,7 @@ class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
 
   virtual mojom::ScriptType GetScriptType() const = 0;
 
-  virtual void Trace(Visitor*);
+  virtual void Trace(Visitor*) const;
   const char* NameInHeapSnapshot() const override { return "PendingScript"; }
 
   // Returns nullptr when "script's script is null", i.e. an error occurred.
@@ -93,9 +94,6 @@ class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
   virtual bool IsReady() const = 0;
   virtual bool IsExternal() const = 0;
   virtual bool WasCanceled() const = 0;
-
-  // Support for script streaming.
-  virtual void StartStreamingIfPossible() = 0;
 
   // Used only for tracing, and can return a null URL.
   // TODO(hiroshige): It's preferable to return the base URL consistently
@@ -119,9 +117,6 @@ class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
     DCHECK_EQ(scheduling_type_, ScriptSchedulingType::kNotSet);
     scheduling_type_ = scheduling_type;
   }
-  Document* OriginalContextDocument() const {
-    return original_context_document_;
-  }
 
   bool WasCreatedDuringDocumentWrite() {
     return created_during_document_write_;
@@ -133,6 +128,8 @@ class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
   //
   // This is virtual only for testing.
   virtual void ExecuteScriptBlock(const KURL&);
+
+  virtual bool IsEligibleForDelay() const { return false; }
 
  protected:
   PendingScript(ScriptElementBase*, const TextPosition& starting_position);
@@ -171,7 +168,7 @@ class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
   // These are only used to check whether the script element is moved between
   // documents and thus don't retain a strong references.
   WeakMember<Document> original_element_document_;
-  WeakMember<Document> original_context_document_;
+  WeakMember<ExecutionContext> original_execution_context_;
 
   const bool created_during_document_write_;
 

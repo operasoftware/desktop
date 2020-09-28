@@ -25,7 +25,6 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 """Represents a set of builder bots running web tests.
 
 This class is used to hold a list of builder bots running web tests and their
@@ -38,29 +37,31 @@ from blinkpy.common.path_finder import PathFinder
 
 
 class BuilderList(object):
-
     def __init__(self, builders_dict):
         """Creates and validates a builders list.
 
         The given dictionary maps builder names to dicts with the keys:
             "port_name": A fully qualified port name.
-            "specifiers": A two-item list: [version specifier, build type specifier].
-                Valid values for the version specifier can be found in
-                TestExpectationsParser._configuration_tokens_list, and valid
-                values for the build type specifier include "Release" and "Debug".
-            "is_try_builder": Whether the builder is a try bot.
+            "specifiers": A list of specifiers used to describe a builder.
+                The specifiers list will at the very least have a valid
+                port version specifier like "Mac10.15" and and a valid build
+                type specifier like "Release".
+            "is_try_builder": Whether the builder is a trybot.
             "master": The master name of the builder. It is deprecated, but still required
                 by test-results.appspot.com API."
             "has_webdriver_tests": Whether webdriver_tests_suite runs on this builder.
 
         Possible refactoring note: Potentially, it might make sense to use
-        blinkpy.common.buildbot.Builder and add port_name and specifiers
-        properties to that class.
+        blinkpy.common.net.results_fetcher.Builder and add port_name and
+        specifiers properties to that class.
         """
         self._builders = builders_dict
         for builder in builders_dict:
+            specifiers = {
+                s.lower() for s in builders_dict[builder].get('specifiers', {})}
             assert 'port_name' in builders_dict[builder]
-            assert len(builders_dict[builder]['specifiers']) == 2
+            assert ('android' in specifiers or
+                    len(builders_dict[builder]['specifiers']) == 2)
 
     @staticmethod
     def load_default_builder_list(filesystem):
@@ -74,10 +75,29 @@ class BuilderList(object):
         return sorted(self._builders)
 
     def all_try_builder_names(self):
-        return sorted(b for b in self._builders if self._builders[b].get('is_try_builder'))
+        return self.filter_builders(is_try=True)
 
     def all_continuous_builder_names(self):
-        return sorted(b for b in self._builders if not self._builders[b].get('is_try_builder'))
+        return self.filter_builders(is_try=False)
+
+    def filter_builders(self, exclude_specifiers=None, include_specifiers=None,
+                        is_try=False):
+        _lower_specifiers = lambda specifiers: {s.lower() for s in specifiers}
+        exclude_specifiers = _lower_specifiers(exclude_specifiers or {})
+        include_specifiers = _lower_specifiers(include_specifiers or {})
+        builders = []
+        for b in self._builders:
+            builder_specifiers = _lower_specifiers(
+                self._builders[b].get('specifiers', {}))
+            if self._builders[b].get('is_try_builder', False) != is_try:
+                continue
+            if builder_specifiers & exclude_specifiers:
+                continue
+            if  (include_specifiers and
+                     not include_specifiers & builder_specifiers):
+                continue
+            builders.append(b)
+        return sorted(builders)
 
     def all_port_names(self):
         return sorted({b['port_name'] for b in self._builders.values()})
@@ -96,6 +116,9 @@ class BuilderList(object):
 
     def specifiers_for_builder(self, builder_name):
         return self._builders[builder_name]['specifiers']
+
+    def is_try_server_builder(self, builder_name):
+        return self._builders[builder_name].get('is_try_builder', False)
 
     def platform_specifier_for_builder(self, builder_name):
         return self.specifiers_for_builder(builder_name)[0]
@@ -130,7 +153,7 @@ class BuilderList(object):
                 return builder_info['specifiers'][0]
         return None
 
-    def builder_name_for_specifiers(self, version, build_type):
+    def builder_name_for_specifiers(self, version, build_type, is_try_builder):
         """Returns the builder name for a give version and build type.
 
         Args:
@@ -141,7 +164,10 @@ class BuilderList(object):
             The builder name if found, or an empty string if no match was found.
         """
         for builder_name, info in sorted(self._builders.items()):
-            specifiers = info['specifiers']
-            if specifiers[0].lower() == version.lower() and specifiers[1].lower() == build_type.lower():
+            specifiers = set(spec.lower() for spec in info['specifiers'])
+            is_try_builder_info = info.get('is_try_builder', False)
+            if (version.lower() in specifiers
+                    and build_type.lower() in specifiers 
+                    and is_try_builder_info == is_try_builder):
                 return builder_name
         return ''

@@ -46,6 +46,8 @@ class ElementInnerTextCollector final {
 
   String RunOn(const Element& element);
 
+  void set_include_shadow_dom(bool value) { include_shadow_dom_ = value; }
+
  private:
   // Result characters of innerText collection steps.
   class Result final {
@@ -72,7 +74,6 @@ class ElementInnerTextCollector final {
   static bool IsBeingRendered(const Node& node);
   // Returns true if used value of "display" is block-level.
   static bool IsDisplayBlockLevel(const Node&);
-  static LayoutObject* PreviousLeafOf(const LayoutObject& layout_object);
   static bool ShouldEmitNewlineForTableRow(
       const LayoutNGTableRowInterface& table_row);
 
@@ -81,7 +82,6 @@ class ElementInnerTextCollector final {
   void ProcessChildrenWithRequiredLineBreaks(const Node& node,
                                              int required_line_break_count);
   void ProcessLayoutText(const LayoutText& layout_text, const Text& text_node);
-  void ProcessLayoutTextEmpty(const LayoutText& layout_text);
   void ProcessNode(const Node& node);
   void ProcessOptionElement(const HTMLOptionElement& element);
   void ProcessSelectElement(const HTMLSelectElement& element);
@@ -89,6 +89,7 @@ class ElementInnerTextCollector final {
 
   // Result character buffer.
   Result result_;
+  bool include_shadow_dom_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ElementInnerTextCollector);
 };
@@ -178,19 +179,6 @@ bool ElementInnerTextCollector::IsDisplayBlockLevel(const Node& node) {
   // Note: CAPTION is associated to |LayoutNGTableCaption| in LayoutNG or
   // |LayoutBlockFlow| in legacy layout.
   return true;
-}
-
-// static
-LayoutObject* ElementInnerTextCollector::PreviousLeafOf(
-    const LayoutObject& layout_object) {
-  LayoutObject* parent = layout_object.Parent();
-  for (LayoutObject* runner = layout_object.PreviousInPreOrder(); runner;
-       runner = runner->PreviousInPreOrder()) {
-    if (runner != parent)
-      return runner;
-    parent = runner->Parent();
-  }
-  return nullptr;
 }
 
 // static
@@ -367,6 +355,13 @@ void ElementInnerTextCollector::ProcessNode(const Node& node) {
     return;
   }
 
+  if (include_shadow_dom_) {
+    // If node is an open shadow DOM, then process nodes inside.
+    auto* shadow_root = node.GetShadowRoot();
+    if (shadow_root && shadow_root->IsOpenOrV0())
+      ProcessChildren(*shadow_root);
+  }
+
   // 10. If node's used value of 'display' is block-level or 'table-caption',
   // then append 1 (a required line break count) at the beginning and end of
   // items.
@@ -477,8 +472,19 @@ void ElementInnerTextCollector::Result::FlushRequiredLineBreak() {
 String Element::innerText() {
   // We need to update layout, since |ElementInnerTextCollector()| uses line
   // boxes in the layout tree.
-  GetDocument().UpdateStyleAndLayoutForNode(this);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
   return ElementInnerTextCollector().RunOn(*this);
+}
+
+String Element::innerTextWithShadowDom() {
+  // We need to update layout, since |ElementInnerTextCollector()| uses line
+  // boxes in the layout tree.
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
+  ElementInnerTextCollector collector;
+  collector.set_include_shadow_dom(true);
+  return collector.RunOn(*this);
 }
 
 }  // namespace blink

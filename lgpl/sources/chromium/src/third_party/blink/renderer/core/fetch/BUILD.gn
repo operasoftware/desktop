@@ -14,6 +14,8 @@ blink_core_sources("fetch") {
     "body_stream_buffer.h",
     "bytes_consumer_tee.cc",
     "bytes_consumer_tee.h",
+    "bytes_uploader.cc",
+    "bytes_uploader.h",
     "fetch_data_loader.cc",
     "fetch_data_loader.h",
     "fetch_header_list.cc",
@@ -40,6 +42,10 @@ blink_core_sources("fetch") {
     "request.h",
     "response.cc",
     "response.h",
+    "trust_token_issuance_authorization.cc",
+    "trust_token_issuance_authorization.h",
+    "trust_token_to_mojom.cc",
+    "trust_token_to_mojom.h",
   ]
 
   if (is_win && is_component_build) {
@@ -50,7 +56,5 @@ blink_core_sources("fetch") {
     jumbo_excluded_sources = [ "body.cc" ]
   }
 
-  public_deps = [
-    "//third_party/blink/renderer/platform",
-  ]
+  public_deps = [ "//third_party/blink/renderer/platform" ]
 }

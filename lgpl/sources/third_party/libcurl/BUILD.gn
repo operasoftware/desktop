@@ -294,6 +294,8 @@ source_set("libcurl") {
         "_WIN32_WINNT=0x0502",
       ]
     }
+
+    libs = [ "crypt32.lib" ]
   }
 }
 

@@ -53,6 +53,9 @@ FrameOverlay::FrameOverlay(LocalFrame* local_frame,
 }
 
 void FrameOverlay::UpdatePrePaint() {
+  // Invalidate DisplayItemClient.
+  Invalidate();
+
   if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
     delegate_->Invalidate();
     return;
@@ -75,7 +78,9 @@ void FrameOverlay::UpdatePrePaint() {
   }
 
   DCHECK(parent_layer);
-  if (layer_->Parent() != parent_layer)
+  if (layer_->Parent() != parent_layer ||
+      // Keep the layer the last child of parent to make it topmost.
+      parent_layer->Children().back() != layer_.get())
     parent_layer->AddChild(layer_.get());
   layer_->SetLayerState(DefaultPropertyTreeState(), IntPoint());
   layer_->SetSize(gfx::Size(Size()));

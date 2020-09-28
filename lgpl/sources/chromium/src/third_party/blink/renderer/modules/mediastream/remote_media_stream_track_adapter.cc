@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "third_party/blink/public/web/modules/mediastream/remote_media_stream_track_adapter.h"
+#include "third_party/blink/renderer/modules/mediastream/remote_media_stream_track_adapter.h"
 
 #include "base/single_thread_task_runner.h"
 #include "media/base/limits.h"
-#include "third_party/blink/public/platform/modules/mediastream/media_stream_audio_source.h"
-#include "third_party/blink/public/platform/modules/webrtc/track_observer.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_track.h"
-#include "third_party/blink/public/web/modules/peerconnection/media_stream_remote_video_source.h"
+#include "third_party/blink/renderer/modules/peerconnection/media_stream_remote_video_source.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/webrtc/peer_connection_remote_audio_source.h"
+#include "third_party/blink/renderer/platform/webrtc/track_observer.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -24,14 +24,10 @@ RemoteVideoTrackAdapter::RemoteVideoTrackAdapter(
   std::unique_ptr<TrackObserver> observer(
       new TrackObserver(main_thread, observed_track().get()));
   // Here, we use CrossThreadUnretained() to avoid a circular reference.
-  //
-  // TODO(crbug.com/963574): Remove the use of ConvertToBaseOnceCallback here
-  // once the file that includes remote_media_stream_track_adapter.h (namely
-  // webrtc_media_stream_track_adapter.h) is Onion souped.
-  web_initialize_ = ConvertToBaseOnceCallback(
+  web_initialize_ =
       CrossThreadBindOnce(&RemoteVideoTrackAdapter::InitializeWebVideoTrack,
                           CrossThreadUnretained(this), std::move(observer),
-                          observed_track()->enabled()));
+                          observed_track()->enabled());
 }
 
 RemoteVideoTrackAdapter::~RemoteVideoTrackAdapter() {
@@ -39,9 +35,9 @@ RemoteVideoTrackAdapter::~RemoteVideoTrackAdapter() {
   if (initialized()) {
     // TODO(crbug.com/704136): When moving RemoteVideoTrackAdapter out of the
     // public API, make this managed by Oilpan. Note that, the destructor will
-    // not allowed to touch other on-heap objects like web_track().
+    // not allowed to touch other on-heap objects like track().
     static_cast<MediaStreamRemoteVideoSource*>(
-        web_track()->Source().GetPlatformSource())
+        track()->Source()->GetPlatformSource())
         ->OnSourceTerminated();
   }
 }
@@ -53,15 +49,17 @@ void RemoteVideoTrackAdapter::InitializeWebVideoTrack(
   auto video_source_ptr =
       std::make_unique<MediaStreamRemoteVideoSource>(std::move(observer));
   MediaStreamRemoteVideoSource* video_source = video_source_ptr.get();
-  InitializeWebTrack(WebMediaStreamSource::kTypeVideo);
-  web_track()->Source().SetPlatformSource(std::move(video_source_ptr));
+  InitializeTrack(MediaStreamSource::kTypeVideo);
+  video_source_ptr->SetOwner(track()->Source());
+  track()->Source()->SetPlatformSource(std::move(video_source_ptr));
 
   WebMediaStreamSource::Capabilities capabilities;
   capabilities.device_id = id();
-  web_track()->Source().SetCapabilities(capabilities);
+  track()->Source()->SetCapabilities(capabilities);
 
-  web_track()->SetPlatformTrack(std::make_unique<MediaStreamVideoTrack>(
-      video_source, MediaStreamVideoSource::ConstraintsCallback(), enabled));
+  track()->SetPlatformTrack(std::make_unique<MediaStreamVideoTrack>(
+      video_source, MediaStreamVideoSource::ConstraintsOnceCallback(),
+      enabled));
 }
 
 RemoteAudioTrackAdapter::RemoteAudioTrackAdapter(
@@ -75,13 +73,9 @@ RemoteAudioTrackAdapter::RemoteAudioTrackAdapter(
   // TODO(tommi): Use TrackObserver instead.
   observed_track()->RegisterObserver(this);
   // Here, we use CrossThreadUnretained() to avoid a circular reference.
-  //
-  // TODO(crbug.com/963574): Remove the use of ConvertToBaseOnceCallback here
-  // once the file that includes remote_media_stream_track_adapter.h (namely
-  // webrtc_media_stream_track_adapter.h) is Onion souped.
-  web_initialize_ = ConvertToBaseOnceCallback(
+  web_initialize_ =
       CrossThreadBindOnce(&RemoteAudioTrackAdapter::InitializeWebAudioTrack,
-                          CrossThreadUnretained(this), main_thread));
+                          CrossThreadUnretained(this), main_thread);
 }
 
 RemoteAudioTrackAdapter::~RemoteAudioTrackAdapter() {
@@ -100,13 +94,13 @@ void RemoteAudioTrackAdapter::Unregister() {
 
 void RemoteAudioTrackAdapter::InitializeWebAudioTrack(
     const scoped_refptr<base::SingleThreadTaskRunner>& main_thread) {
-  InitializeWebTrack(WebMediaStreamSource::kTypeAudio);
+  InitializeTrack(MediaStreamSource::kTypeAudio);
 
   auto source = std::make_unique<PeerConnectionRemoteAudioSource>(
       observed_track().get(), main_thread);
   auto* source_ptr = source.get();
-  web_track()->Source().SetPlatformSource(
-      std::move(source));  // Takes ownership.
+  source_ptr->SetOwner(track()->Source());
+  track()->Source()->SetPlatformSource(std::move(source));  // Takes ownership.
 
   WebMediaStreamSource::Capabilities capabilities;
   capabilities.device_id = id();
@@ -118,9 +112,9 @@ void RemoteAudioTrackAdapter::InitializeWebAudioTrack(
       media::SampleFormatToBitsPerChannel(media::kSampleFormatS16),  // min
       media::SampleFormatToBitsPerChannel(media::kSampleFormatS16)   // max
   };
-  web_track()->Source().SetCapabilities(capabilities);
+  track()->Source()->SetCapabilities(capabilities);
 
-  source_ptr->ConnectToTrack(*(web_track()));
+  source_ptr->ConnectToTrack(track());
 }
 
 void RemoteAudioTrackAdapter::OnChanged() {
@@ -141,12 +135,10 @@ void RemoteAudioTrackAdapter::OnChangedOnMainThread(
 
   switch (state) {
     case webrtc::MediaStreamTrackInterface::kLive:
-      web_track()->Source().SetReadyState(
-          WebMediaStreamSource::kReadyStateLive);
+      track()->Source()->SetReadyState(MediaStreamSource::kReadyStateLive);
       break;
     case webrtc::MediaStreamTrackInterface::kEnded:
-      web_track()->Source().SetReadyState(
-          WebMediaStreamSource::kReadyStateEnded);
+      track()->Source()->SetReadyState(MediaStreamSource::kReadyStateEnded);
       break;
     default:
       NOTREACHED();

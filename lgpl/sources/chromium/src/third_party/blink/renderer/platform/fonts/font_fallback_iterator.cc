@@ -12,14 +12,6 @@
 
 namespace blink {
 
-scoped_refptr<FontFallbackIterator> FontFallbackIterator::Create(
-    const FontDescription& description,
-    scoped_refptr<FontFallbackList> fallback_list,
-    FontFallbackPriority font_fallback_priority) {
-  return base::AdoptRef(new FontFallbackIterator(
-      description, std::move(fallback_list), font_fallback_priority));
-}
-
 FontFallbackIterator::FontFallbackIterator(
     const FontDescription& description,
     scoped_refptr<FontFallbackList> fallback_list,
@@ -41,7 +33,7 @@ bool FontFallbackIterator::AlreadyLoadingRangeForHintChar(UChar32 hint_char) {
 }
 
 bool FontFallbackIterator::RangeSetContributesForHint(
-    const Vector<UChar32> hint_list,
+    const Vector<UChar32>& hint_list,
     const FontDataForRangeSet* segmented_face) {
   for (auto* it = hint_list.begin(); it != hint_list.end(); ++it) {
     if (segmented_face->Contains(*it)) {
@@ -64,6 +56,9 @@ void FontFallbackIterator::WillUseRange(const AtomicString& family,
 scoped_refptr<FontDataForRangeSet> FontFallbackIterator::UniqueOrNext(
     scoped_refptr<FontDataForRangeSet> candidate,
     const Vector<UChar32>& hint_list) {
+  if (!candidate->HasFontData())
+    return Next(hint_list);
+
   SkTypeface* candidate_typeface =
       candidate->FontData()->PlatformData().Typeface();
   if (!candidate_typeface)
@@ -78,6 +73,11 @@ scoped_refptr<FontDataForRangeSet> FontFallbackIterator::UniqueOrNext(
   // depends on the subsetting.
   if (candidate->IsEntireRange())
     unique_font_data_for_range_sets_returned_.insert(candidate_id);
+
+  // Save first candidate to be returned if all other fonts fail, and we need
+  // it to render the .notdef glyph.
+  if (!first_candidate_)
+    first_candidate_ = candidate;
   return candidate;
 }
 
@@ -129,14 +129,19 @@ scoped_refptr<FontDataForRangeSet> FontFallbackIterator::Next(
     // resort font that has glyphs for everything, for example the Unicode
     // LastResort font, not just Times or Arial.
     FontCache* font_cache = FontCache::GetFontCache();
-    fallback_stage_ = kOutOfLuck;
+    fallback_stage_ = kFirstCandidateForNotdefGlyph;
     scoped_refptr<SimpleFontData> last_resort =
         font_cache->GetLastResortFallbackFont(font_description_).get();
-    if (!last_resort)
+    return UniqueOrNext(
+        base::AdoptRef(new FontDataForRangeSetFromCache(last_resort)),
+        hint_list);
+  }
+
+  if (fallback_stage_ == kFirstCandidateForNotdefGlyph) {
+    fallback_stage_ = kOutOfLuck;
+    if (!first_candidate_)
       FontCache::CrashWithFontInfo(&font_description_);
-    // Don't skip the LastResort font in uniqueOrNext() since HarfBuzzShaper
-    // needs to use this one to place missing glyph boxes.
-    return base::AdoptRef(new FontDataForRangeSetFromCache(last_resort));
+    return first_candidate_;
   }
 
   DCHECK(fallback_stage_ == kFontGroupFonts ||
@@ -161,7 +166,7 @@ scoped_refptr<FontDataForRangeSet> FontFallbackIterator::Next(
     current_font_data_index_++;
     if (!font_data->IsLoading()) {
       scoped_refptr<SimpleFontData> non_segmented =
-          const_cast<SimpleFontData*>(ToSimpleFontData(font_data));
+          const_cast<SimpleFontData*>(To<SimpleFontData>(font_data));
       // The fontData object that we have here is tracked in m_fontList of
       // FontFallbackList and gets released in the font cache when the
       // FontFallbackList is destroyed.
@@ -173,7 +178,7 @@ scoped_refptr<FontDataForRangeSet> FontFallbackIterator::Next(
 
   // Iterate over ranges of a segmented font below.
 
-  const SegmentedFontData* segmented = ToSegmentedFontData(font_data);
+  const auto* segmented = To<SegmentedFontData>(font_data);
   if (fallback_stage_ != kSegmentedFace) {
     segmented_face_index_ = 0;
     fallback_stage_ = kSegmentedFace;

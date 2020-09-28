@@ -151,29 +151,11 @@ void ReportMetrics(WebMediaPlayer::LoadType load_type,
     UMA_HISTOGRAM_ENUMERATION("Ads.Media.LoadType", load_type,
                               WebMediaPlayer::kLoadTypeMax + 1);
   }
-
-  // Report the origin from where the media player is created.
-  media_log->RecordRapporWithSecurityOrigin("Media.OriginUrl." +
-                                            LoadTypeToString(load_type));
-
-  // For MSE, also report usage by secure/insecure origin.
-  if (load_type == WebMediaPlayer::kLoadTypeMediaSource) {
-    if (frame.GetSecurityOrigin().IsPotentiallyTrustworthy()) {
-      media_log->RecordRapporWithSecurityOrigin("Media.OriginUrl.MSE.Secure");
-    } else {
-      media_log->RecordRapporWithSecurityOrigin("Media.OriginUrl.MSE.Insecure");
-    }
-  }
 }
 
 void ReportPipelineError(WebMediaPlayer::LoadType load_type,
-                         media::PipelineStatus error,
-                         media::MediaLog* media_log) {
+                         media::PipelineStatus error) {
   DCHECK_NE(media::PIPELINE_OK, error);
-
-  // Report the origin from where the media player is created.
-  media_log->RecordRapporWithSecurityOrigin(
-      "Media.OriginUrl." + LoadTypeToString(load_type) + ".PipelineError");
 
   UMA_HISTOGRAM_ENUMERATION(
       "Opera.DSK.Media." + LoadTypeToString(load_type) + ".Pipeline.Error",

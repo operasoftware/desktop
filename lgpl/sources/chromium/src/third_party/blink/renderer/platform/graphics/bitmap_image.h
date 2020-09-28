@@ -36,9 +36,9 @@
 #include "third_party/blink/renderer/platform/graphics/deferred_image_decoder.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/graphics/image_animation_policy.h"
-#include "third_party/blink/renderer/platform/graphics/image_orientation.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_animation.h"
 #include "third_party/blink/renderer/platform/timer.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 #include "third_party/skia/include/core/SkRefCnt.h"
@@ -65,7 +65,8 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   bool CurrentFrameHasSingleSecurityOrigin() const override;
 
   IntSize Size() const override;
-  IntSize SizeRespectingOrientation() const;
+  IntSize SizeRespectingOrientation() const override;
+  bool HasDefaultOrientation() const override;
   bool GetHotSpot(IntPoint&) const override;
   String FilenameExtension() const override;
 
@@ -91,7 +92,7 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   bool CurrentFrameIsLazyDecoded() override;
   size_t FrameCount() override;
   PaintImage PaintImageForCurrentFrame() override;
-  ImageOrientation CurrentFrameOrientation() const;
+  ImageOrientation CurrentFrameOrientation() const override;
 
   PaintImage PaintImageForTesting();
   void AdvanceAnimationForTesting() override {
@@ -100,10 +101,6 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   void SetDecoderForTesting(std::unique_ptr<DeferredImageDecoder> decoder) {
     decoder_ = std::move(decoder);
   }
-
-  DarkModeClassification CheckTypeSpecificConditionsForDarkMode(
-      const FloatRect& dest_rect,
-      DarkModeImageClassifier* classifier) override;
 
  protected:
   bool IsSizeAvailable() override;
@@ -184,7 +181,10 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   PaintImage::AnimationSequenceId reset_animation_sequence_id_ = 0;
 };
 
-DEFINE_IMAGE_TYPE_CASTS(BitmapImage);
+template <>
+struct DowncastTraits<BitmapImage> {
+  static bool AllowFrom(const Image& image) { return image.IsBitmapImage(); }
+};
 
 }  // namespace blink
 

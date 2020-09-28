@@ -1134,7 +1134,7 @@ av_cold void ff_mpeg1_encode_init(MpegEncContext *s)
 #define VE AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_FLAG_VIDEO_PARAM
 #define COMMON_OPTS                                                           \
     { "gop_timecode",        "MPEG GOP Timecode in hh:mm:ss[:;.]ff format. Overrides timecode_frame_start.",   \
-      OFFSET(tc_opt_str), AV_OPT_TYPE_STRING, {.str=NULL}, CHAR_MIN, CHAR_MAX, VE },\
+      OFFSET(tc_opt_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, VE },\
     { "intra_vlc",           "Use MPEG-2 intra VLC table.",                   \
       OFFSET(intra_vlc_format),    AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE }, \
     { "drop_frame_timecode", "Timecode is in drop frame format.",             \
@@ -1193,6 +1193,7 @@ AVCodec ff_mpeg1video_encoder = {
     .pix_fmts             = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,
                                                            AV_PIX_FMT_NONE },
     .capabilities         = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS,
+    .caps_internal        = FF_CODEC_CAP_INIT_CLEANUP,
     .priv_class           = &mpeg1_class,
 };
 
@@ -1210,5 +1211,6 @@ AVCodec ff_mpeg2video_encoder = {
                                                            AV_PIX_FMT_YUV422P,
                                                            AV_PIX_FMT_NONE },
     .capabilities         = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS,
+    .caps_internal        = FF_CODEC_CAP_INIT_CLEANUP,
     .priv_class           = &mpeg2_class,
 };

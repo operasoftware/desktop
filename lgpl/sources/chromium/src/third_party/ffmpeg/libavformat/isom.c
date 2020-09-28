@@ -158,6 +158,7 @@ const AVCodecTag ff_codec_movvideo_tags[] = {
     { AV_CODEC_ID_SGIRLE,  MKTAG('r', 'l', 'e', '1') }, /* SGI RLE 8-bit */
     { AV_CODEC_ID_MSRLE,   MKTAG('W', 'R', 'L', 'E') },
     { AV_CODEC_ID_QDRAW,   MKTAG('q', 'd', 'r', 'w') }, /* QuickDraw */
+    { AV_CODEC_ID_CDTOONS, MKTAG('Q', 'k', 'B', 'k') }, /* CDToons */
 
     { AV_CODEC_ID_RAWVIDEO, MKTAG('W', 'R', 'A', 'W') },
 
@@ -369,7 +370,9 @@ const AVCodecTag ff_codec_movaudio_tags[] = {
     { AV_CODEC_ID_EVRC,            MKTAG('s', 'e', 'v', 'c') }, /* 3GPP2 */
     { AV_CODEC_ID_SMV,             MKTAG('s', 's', 'm', 'v') }, /* 3GPP2 */
     { AV_CODEC_ID_FLAC,            MKTAG('f', 'L', 'a', 'C') }, /* nonstandard */
+    { AV_CODEC_ID_TRUEHD,          MKTAG('m', 'l', 'p', 'a') }, /* mp4ra.org */
     { AV_CODEC_ID_OPUS,            MKTAG('O', 'p', 'u', 's') }, /* mp4ra.org */
+    { AV_CODEC_ID_MPEGH_3D_AUDIO,  MKTAG('m', 'h', 'm', '1') }, /* MPEG-H 3D Audio bitstream */
     { AV_CODEC_ID_NONE, 0 },
 };
 
@@ -546,11 +549,12 @@ FF_ENABLE_DEPRECATION_WARNINGS
             return ret;
         if (st->codecpar->codec_id == AV_CODEC_ID_AAC) {
             MPEG4AudioConfig cfg = {0};
-            ret = avpriv_mpeg4audio_get_config(&cfg, st->codecpar->extradata,
-                                               st->codecpar->extradata_size * 8, 1);
+            ret = avpriv_mpeg4audio_get_config2(&cfg, st->codecpar->extradata,
+                                                st->codecpar->extradata_size, 1, fc);
             if (ret < 0)
                 return ret;
-            st->codecpar->channels = cfg.channels;
+            if (cfg.channels > 0)
+              st->codecpar->channels = cfg.channels;
             if (cfg.object_type == 29 && cfg.sampling_index < 3) // old mp3on4
                 st->codecpar->sample_rate = avpriv_mpa_freq_tab[cfg.sampling_index];
             else if (cfg.ext_sample_rate)

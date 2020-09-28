@@ -5,16 +5,15 @@
 #include "third_party/blink/renderer/platform/network/mime/mime_type_registry.h"
 
 #include "base/files/file_path.h"
-#include "base/power_save_mode/power_save_mode_monitor.h"
 #include "base/strings/string_util.h"
 #include "media/base/mime_util.h"
 #include "media/filters/stream_parser_factory.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/mime_util.h"
 #include "third_party/blink/public/common/mime_util/mime_util.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/mime/mime_registry.mojom-blink.h"
 #include "third_party/blink/public/platform/file_path_conversion.h"
-#include "third_party/blink/public/platform/interface_provider.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -26,66 +25,13 @@ namespace {
 struct MimeRegistryPtrHolder {
  public:
   MimeRegistryPtrHolder() {
-    Platform::Current()->GetInterfaceProvider()->GetInterface(
+    Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
         mime_registry.BindNewPipeAndPassReceiver());
   }
   ~MimeRegistryPtrHolder() = default;
 
   mojo::Remote<mojom::blink::MimeRegistry> mime_registry;
 };
-
-// H.264 High Profile level 4.0
-// Explanation of the three bytes in the codec ID string:
-// 0x64: High Profile, see media::internal::ParseAVCCodecId.
-// 0x00: Constraints (none), see media::internal::ParseAVCCodecId.
-// 0x28: Level 4.0, see media::internal::IsValidH264Level.
-const char kH264CodecId[] = "avc1.640028";
-const char kH264ContainerMimeType[] = "video/mp4";
-
-std::vector<std::string> GetH264Codecs() {
-  std::vector<std::string> codecs;
-  codecs.push_back(kH264CodecId);
-  return codecs;
-}
-
-bool ShouldDisableMimeForPowerSaving(
-    const std::string& mime_type,
-    const std::vector<std::string>& codec_vector) {
-  base::PowerSaveModeMonitor* monitor = base::PowerSaveModeMonitor::Get();
-
-  if (!monitor || !monitor->IsOnPowerSaveMode() ||
-      !monitor->GetStatus().is_vpx_decoding_suppression_enabled)
-    return false;
-
-  if (!base::StartsWith(mime_type, "video/",
-                        base::CompareCase::INSENSITIVE_ASCII))
-    return false;
-
-  for (const std::string& s : codec_vector) {
-    if (base::StartsWith(s, "vp8", base::CompareCase::INSENSITIVE_ASCII))
-      return true;
-    if (base::StartsWith(s, "vp9", base::CompareCase::INSENSITIVE_ASCII))
-      return true;
-  }
-
-  return false;
-}
-
-bool ShouldDisableMediaMimeForPowerSaving(
-    const std::string& mime_type,
-    const std::vector<std::string>& codec_vector) {
-  return ShouldDisableMimeForPowerSaving(mime_type, codec_vector) &&
-         media::IsSupportedMediaFormat(kH264ContainerMimeType,
-                                       GetH264Codecs()) == media::IsSupported;
-}
-
-bool ShouldDisableMediaSourceMimeForPowerSaving(
-    const std::string& mime_type,
-    const std::vector<std::string>& codec_vector) {
-  return ShouldDisableMimeForPowerSaving(mime_type, codec_vector) &&
-         media::StreamParserFactory::IsTypeSupported(kH264ContainerMimeType,
-                                                     GetH264Codecs());
-}
 
 std::string ToASCIIOrEmpty(const WebString& string) {
   return string.ContainsOnlyASCII() ? string.Ascii() : std::string();
@@ -168,6 +114,10 @@ bool MIMETypeRegistry::IsSupportedJavaScriptMIMEType(const String& mime_type) {
   return blink::IsSupportedJavascriptMimeType(ToLowerASCIIOrEmpty(mime_type));
 }
 
+bool MIMETypeRegistry::IsJSONMimeType(const String& mime_type) {
+  return blink::IsJSONMimeType(ToLowerASCIIOrEmpty(mime_type));
+}
+
 bool MIMETypeRegistry::IsLegacySupportedJavaScriptLanguage(
     const String& language) {
   // Mozilla 1.8 accepts javascript1.0 - javascript1.7, but WinIE 7 accepts only
@@ -209,8 +159,6 @@ MIMETypeRegistry::SupportsType MIMETypeRegistry::SupportsMediaMIMEType(
   const std::string ascii_mime_type = ToLowerASCIIOrEmpty(mime_type);
   std::vector<std::string> codec_vector;
   media::SplitCodecs(ToASCIIOrEmpty(codecs), &codec_vector);
-  if (ShouldDisableMediaMimeForPowerSaving(ascii_mime_type, codec_vector))
-    return kIsNotSupported;
   return static_cast<SupportsType>(
       media::IsSupportedMediaFormat(ascii_mime_type, codec_vector));
 }
@@ -223,13 +171,6 @@ MIMETypeRegistry::SupportsType MIMETypeRegistry::SupportsMediaSourceMIMEType(
     return kIsNotSupported;
   std::vector<std::string> parsed_codec_ids;
   media::SplitCodecs(ToASCIIOrEmpty(codecs), &parsed_codec_ids);
-  if (ShouldDisableMediaSourceMimeForPowerSaving(ascii_mime_type, parsed_codec_ids))
-    return kIsNotSupported;
-
-  for (const std::string& codec_id : parsed_codec_ids)
-    if (!media::ValidateCodecString(ascii_mime_type, codec_id))
-      return kIsNotSupported;
-
   return static_cast<SupportsType>(media::StreamParserFactory::IsTypeSupported(
       ascii_mime_type, parsed_codec_ids));
 }
@@ -252,7 +193,7 @@ bool MIMETypeRegistry::IsSupportedFontMIMEType(const String& mime_type) {
   static const unsigned kFontLen = 5;
   if (!mime_type.StartsWithIgnoringASCIICase("font/"))
     return false;
-  String sub_type = mime_type.Substring(kFontLen).DeprecatedLower();
+  String sub_type = mime_type.Substring(kFontLen).LowerASCII();
   return sub_type == "woff" || sub_type == "woff2" || sub_type == "otf" ||
          sub_type == "ttf" || sub_type == "sfnt";
 }
@@ -274,6 +215,71 @@ bool MIMETypeRegistry::IsLosslessImageMIMEType(const String& mime_type) {
          EqualIgnoringASCIICase(mime_type, "image/webp") ||
          EqualIgnoringASCIICase(mime_type, "image/x-xbitmap") ||
          EqualIgnoringASCIICase(mime_type, "image/x-png");
+}
+
+bool MIMETypeRegistry::IsXMLMIMEType(const String& mime_type) {
+  if (EqualIgnoringASCIICase(mime_type, "text/xml") ||
+      EqualIgnoringASCIICase(mime_type, "application/xml") ||
+      EqualIgnoringASCIICase(mime_type, "text/xsl"))
+    return true;
+
+  // Per RFCs 3023 and 2045, an XML MIME type is of the form:
+  // ^[0-9a-zA-Z_\\-+~!$\\^{}|.%'`#&*]+/[0-9a-zA-Z_\\-+~!$\\^{}|.%'`#&*]+\+xml$
+
+  int length = mime_type.length();
+  if (length < 7)
+    return false;
+
+  if (mime_type[0] == '/' || mime_type[length - 5] == '/' ||
+      !mime_type.EndsWithIgnoringASCIICase("+xml"))
+    return false;
+
+  bool has_slash = false;
+  for (int i = 0; i < length - 4; ++i) {
+    UChar ch = mime_type[i];
+    if (ch >= '0' && ch <= '9')
+      continue;
+    if (ch >= 'a' && ch <= 'z')
+      continue;
+    if (ch >= 'A' && ch <= 'Z')
+      continue;
+    switch (ch) {
+      case '_':
+      case '-':
+      case '+':
+      case '~':
+      case '!':
+      case '$':
+      case '^':
+      case '{':
+      case '}':
+      case '|':
+      case '.':
+      case '%':
+      case '\'':
+      case '`':
+      case '#':
+      case '&':
+      case '*':
+        continue;
+      case '/':
+        if (has_slash)
+          return false;
+        has_slash = true;
+        continue;
+      default:
+        return false;
+    }
+  }
+
+  return true;
+}
+
+bool MIMETypeRegistry::IsPlainTextMIMEType(const String& mime_type) {
+  return mime_type.StartsWithIgnoringASCIICase("text/") &&
+         !(EqualIgnoringASCIICase(mime_type, "text/html") ||
+           EqualIgnoringASCIICase(mime_type, "text/xml") ||
+           EqualIgnoringASCIICase(mime_type, "text/xsl"));
 }
 
 }  // namespace blink

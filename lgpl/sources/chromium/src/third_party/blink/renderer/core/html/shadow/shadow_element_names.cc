@@ -89,11 +89,6 @@ const AtomicString& PasswordRevealButton() {
   return name;
 }
 
-const AtomicString& SearchDecoration() {
-  DEFINE_STATIC_LOCAL(AtomicString, name, ("decoration"));
-  return name;
-}
-
 const AtomicString& SliderThumb() {
   DEFINE_STATIC_LOCAL(AtomicString, name, ("thumb"));
   return name;
@@ -106,6 +101,16 @@ const AtomicString& SliderTrack() {
 
 const AtomicString& TextFieldContainer() {
   DEFINE_STATIC_LOCAL(AtomicString, name, ("text-field-container"));
+  return name;
+}
+
+const AtomicString& WebKitDetailsMarker() {
+  DEFINE_STATIC_LOCAL(AtomicString, name, ("-webkit-details-marker"));
+  return name;
+}
+
+const AtomicString& FileUploadButton() {
+  DEFINE_STATIC_LOCAL(AtomicString, name, ("file-upload-button"));
   return name;
 }
 

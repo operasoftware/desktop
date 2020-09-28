@@ -31,63 +31,153 @@
 #include "third_party/blink/renderer/core/css/resolver/matched_properties_cache.h"
 
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
+#include "third_party/blink/renderer/core/css/properties/css_property_ref.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_hasher.h"
 
 namespace blink {
 
-void CachedMatchedProperties::Set(const ComputedStyle& style,
-                                  const ComputedStyle& parent_style,
-                                  const MatchedPropertiesVector& properties) {
-  matched_properties.AppendVector(properties);
+static unsigned ComputeMatchedPropertiesHash(const MatchResult& result) {
+  const MatchedPropertiesVector& vector = result.GetMatchedProperties();
+  return StringHasher::HashMemory(vector.data(),
+                                  sizeof(MatchedProperties) * vector.size());
+}
+
+void CachedMatchedProperties::Set(
+    const ComputedStyle& style,
+    const ComputedStyle& parent_style,
+    const MatchedPropertiesVector& properties,
+    const HashSet<CSSPropertyName>& dependencies) {
+  for (const auto& new_matched_properties : properties) {
+    matched_properties.push_back(new_matched_properties.properties);
+    matched_properties_types.push_back(new_matched_properties.types_);
+  }
 
   // Note that we don't cache the original ComputedStyle instance. It may be
   // further modified.  The ComputedStyle in the cache is really just a holder
   // for the substructures and never used as-is.
   this->computed_style = ComputedStyle::Clone(style);
   this->parent_computed_style = ComputedStyle::Clone(parent_style);
+
+  DCHECK(
+      RuntimeEnabledFeatures::CSSMatchedPropertiesCacheDependenciesEnabled() ||
+      dependencies.IsEmpty());
+  if (dependencies.size()) {
+    DCHECK(dependencies.size() <= StyleResolverState::kMaxDependencies);
+    // Plus one for g_null_atom.
+    this->dependencies =
+        std::make_unique<AtomicString[]>(dependencies.size() + 1);
+
+    size_t index = 0;
+    for (const CSSPropertyName& name : dependencies) {
+      DCHECK_LT(index, dependencies.size());
+      this->dependencies[index++] = name.ToAtomicString();
+    }
+    DCHECK_EQ(index, dependencies.size());
+    this->dependencies[index] = g_null_atom;
+  }
 }
 
 void CachedMatchedProperties::Clear() {
   matched_properties.clear();
+  matched_properties_types.clear();
   computed_style = nullptr;
   parent_computed_style = nullptr;
+  dependencies.reset();
+}
+
+bool CachedMatchedProperties::DependenciesEqual(
+    const StyleResolverState& state) {
+  if (!state.ParentStyle())
+    return false;
+  if ((parent_computed_style->IsEnsuredInDisplayNone() ||
+       computed_style->IsEnsuredOutsideFlatTree()) &&
+      !state.ParentStyle()->IsEnsuredInDisplayNone() &&
+      !state.Style()->IsEnsuredOutsideFlatTree()) {
+    // If we cached a ComputedStyle in a display:none subtree, or outside the
+    // flat tree,  we would not have triggered fetches for external resources
+    // and have StylePendingImages in the ComputedStyle. Instead of having to
+    // inspect the cached ComputedStyle for such resources, don't use a cached
+    // ComputedStyle when it was cached in display:none but is now rendered.
+    return false;
+  }
+
+  for (const AtomicString* name = dependencies.get(); name && !name->IsNull();
+       name++) {
+    CSSPropertyRef ref(*name, state.GetDocument());
+    DCHECK(ref.IsValid());
+    if (!ref.GetProperty().ComputedValuesEqual(*parent_computed_style,
+                                               *state.ParentStyle())) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 MatchedPropertiesCache::MatchedPropertiesCache() = default;
 
-const CachedMatchedProperties* MatchedPropertiesCache::Find(
-    unsigned hash,
-    const StyleResolverState& style_resolver_state,
-    const MatchedPropertiesVector& properties) {
-  DCHECK(hash);
+MatchedPropertiesCache::Key::Key(const MatchResult& result)
+    : Key(result,
+          result.IsCacheable() ? ComputeMatchedPropertiesHash(result)
+                               : HashTraits<unsigned>::EmptyValue()) {}
 
-  Cache::iterator it = cache_.find(hash);
+MatchedPropertiesCache::Key::Key(const MatchResult& result, unsigned hash)
+    : result_(result), hash_(hash) {}
+
+const CachedMatchedProperties* MatchedPropertiesCache::Find(
+    const Key& key,
+    const StyleResolverState& style_resolver_state) {
+  DCHECK(key.IsValid());
+  Cache::iterator it = cache_.find(key.hash_);
   if (it == cache_.end())
     return nullptr;
   CachedMatchedProperties* cache_item = it->value.Get();
   if (!cache_item)
     return nullptr;
-
-  wtf_size_t size = properties.size();
-  if (size != cache_item->matched_properties.size())
+  if (*cache_item != key.result_.GetMatchedProperties())
     return nullptr;
   if (cache_item->computed_style->InsideLink() !=
       style_resolver_state.Style()->InsideLink())
     return nullptr;
-  for (wtf_size_t i = 0; i < size; ++i) {
-    if (properties[i] != cache_item->matched_properties[i])
-      return nullptr;
-  }
+  if (!cache_item->DependenciesEqual(style_resolver_state))
+    return nullptr;
   return cache_item;
 }
 
-void MatchedPropertiesCache::Add(const ComputedStyle& style,
+bool CachedMatchedProperties::operator==(
+    const MatchedPropertiesVector& properties) {
+  if (properties.size() != matched_properties.size())
+    return false;
+  for (wtf_size_t i = 0; i < properties.size(); ++i) {
+    if (properties[i].properties != matched_properties[i])
+      return false;
+    if (properties[i].types_.link_match_type !=
+        matched_properties_types[i].link_match_type)
+      return false;
+    if (properties[i].types_.tree_order !=
+        matched_properties_types[i].tree_order)
+      return false;
+    if (properties[i].types_.valid_property_filter !=
+        matched_properties_types[i].valid_property_filter)
+      return false;
+  }
+  return true;
+}
+
+bool CachedMatchedProperties::operator!=(
+    const MatchedPropertiesVector& properties) {
+  return !(*this == properties);
+}
+
+void MatchedPropertiesCache::Add(const Key& key,
+                                 const ComputedStyle& style,
                                  const ComputedStyle& parent_style,
-                                 unsigned hash,
-                                 const MatchedPropertiesVector& properties) {
-  DCHECK(hash);
-  Cache::AddResult add_result = cache_.insert(hash, nullptr);
+                                 const HashSet<CSSPropertyName>& dependencies) {
+  DCHECK(key.IsValid());
+  Cache::AddResult add_result = cache_.insert(key.hash_, nullptr);
   if (add_result.is_new_entry || !add_result.stored_value->value) {
     add_result.stored_value->value =
         MakeGarbageCollected<CachedMatchedProperties>();
@@ -97,7 +187,8 @@ void MatchedPropertiesCache::Add(const ComputedStyle& style,
   if (!add_result.is_new_entry)
     cache_item->Clear();
 
-  cache_item->Set(style, parent_style, properties);
+  cache_item->Set(style, parent_style, key.result_.GetMatchedProperties(),
+                  dependencies);
 }
 
 void MatchedPropertiesCache::Clear() {
@@ -131,13 +222,21 @@ bool MatchedPropertiesCache::IsStyleCacheable(const ComputedStyle& style) {
     return false;
   if (style.TextAutosizingMultiplier() != 1)
     return false;
-  if (style.GetWritingMode() !=
-          ComputedStyleInitialValues::InitialWritingMode() ||
-      style.Direction() != ComputedStyleInitialValues::InitialDirection())
-    return false;
-  // styles with non inherited properties that reference variables are not
-  // cacheable.
-  if (style.HasVariableReferenceFromNonInheritedProperty())
+  if (!RuntimeEnabledFeatures::CSSMatchedPropertiesCacheDependenciesEnabled()) {
+    if (style.GetWritingMode() !=
+            ComputedStyleInitialValues::InitialWritingMode() ||
+        style.Direction() != ComputedStyleInitialValues::InitialDirection()) {
+      return false;
+    }
+
+    // styles with non inherited properties that reference variables are not
+    // cacheable.
+    if (style.HasVariableReferenceFromNonInheritedProperty())
+      return false;
+  }
+  // -internal-light-dark() values in UA sheets have different computed values
+  // based on the used value of color-scheme.
+  if (style.HasNonInheritedLightDarkValue())
     return false;
   return true;
 }
@@ -148,16 +247,47 @@ bool MatchedPropertiesCache::IsCacheable(const StyleResolverState& state) {
 
   if (!IsStyleCacheable(style))
     return false;
-  // The cache assumes static knowledge about which properties are inherited.
-  // Without a flat tree parent, StyleBuilder::ApplyProperty will not
-  // SetHasExplicitlyInheritedProperties on the parent style.
-  if (!state.ParentNode() || parent_style.HasExplicitlyInheritedProperties())
-    return false;
-  return true;
+
+  if (!RuntimeEnabledFeatures::CSSMatchedPropertiesCacheDependenciesEnabled()) {
+    // The cache assumes static knowledge about which properties are inherited.
+    // Without a flat tree parent, StyleBuilder::ApplyProperty will not
+    // SetChildHasExplicitInheritance on the parent style.
+    if (!state.ParentNode() || parent_style.ChildHasExplicitInheritance())
+      return false;
+    return true;
+  }
+
+  return state.HasValidDependencies() && !state.HasIncomparableDependency();
 }
 
-void MatchedPropertiesCache::Trace(blink::Visitor* visitor) {
+void MatchedPropertiesCache::Trace(Visitor* visitor) const {
   visitor->Trace(cache_);
+  visitor->RegisterWeakCallbackMethod<
+      MatchedPropertiesCache,
+      &MatchedPropertiesCache::RemoveCachedMatchedPropertiesWithDeadEntries>(
+      this);
+}
+
+void MatchedPropertiesCache::RemoveCachedMatchedPropertiesWithDeadEntries(
+    const LivenessBroker& info) {
+  Vector<unsigned> to_remove;
+  for (const auto& entry_pair : cache_) {
+    // A nullptr value indicates that the entry is currently being created; see
+    // |MatchedPropertiesCache::Add|. Keep such entries.
+    if (!entry_pair.value)
+      continue;
+    for (const auto& matched_properties :
+         entry_pair.value->matched_properties) {
+      if (!info.IsHeapObjectAlive(matched_properties)) {
+        to_remove.push_back(entry_pair.key);
+        break;
+      }
+    }
+  }
+  // Allocation is forbidden during executing weak callbacks, so the data
+  // structure will not be rehashed here. The next insertion/deletion from
+  // regular code will take care of shrinking accordingly.
+  cache_.RemoveAll(to_remove);
 }
 
 }  // namespace blink

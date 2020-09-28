@@ -10,7 +10,7 @@ suite('InternetDetailPage', function() {
   let mojoApi_ = null;
 
   /** @type {Object} */
-  let prefs_ = {
+  const prefs_ = {
     'vpn_config_allowed': {
       key: 'vpn_config_allowed',
       type: chrome.settingsPrivate.PrefType.BOOLEAN,
@@ -39,21 +39,6 @@ suite('InternetDetailPage', function() {
       internetDetailPageTitle: 'internetDetailPageTitle',
       internetKnownNetworksPageTitle: 'internetKnownNetworksPageTitle',
     });
-
-    CrOncStrings = {
-      OncTypeCellular: 'OncTypeCellular',
-      OncTypeEthernet: 'OncTypeEthernet',
-      OncTypeMobile: 'OncTypeMobile',
-      OncTypeTether: 'OncTypeTether',
-      OncTypeVPN: 'OncTypeVPN',
-      OncTypeWiFi: 'OncTypeWiFi',
-      networkListItemConnected: 'networkListItemConnected',
-      networkListItemConnecting: 'networkListItemConnecting',
-      networkListItemConnectingTo: 'networkListItemConnectingTo',
-      networkListItemNotConnected: 'networkListItemNotConnected',
-      networkListItemNoNetwork: 'networkListItemNoNetwork',
-      vpnNameTemplate: 'vpnNameTemplate',
-    };
 
     mojoApi_ = new FakeNetworkConfig();
     network_config.MojoInterfaceProviderImpl.getInstance().remote_ = mojoApi_;
@@ -112,7 +97,7 @@ suite('InternetDetailPage', function() {
       internetDetailPage.close();
       internetDetailPage.remove();
       internetDetailPage = null;
-      settings.resetRouteForTesting();
+      settings.Router.getInstance().resetRouteForTesting();
     });
   });
 
@@ -204,7 +189,7 @@ suite('InternetDetailPage', function() {
 
       internetDetailPage.init('wifi_device_guid', 'WiFi', 'wifi_device');
       return flushAsync().then(() => {
-        let allowShared = getAllowSharedProxy();
+        const allowShared = getAllowSharedProxy();
         assertFalse(allowShared.hasAttribute('hidden'));
         assertFalse(allowShared.disabled);
       });
@@ -228,7 +213,7 @@ suite('InternetDetailPage', function() {
 
       internetDetailPage.init('wifi_device_guid', 'WiFi', 'wifi_device');
       return flushAsync().then(() => {
-        let allowShared = getAllowSharedProxy();
+        const allowShared = getAllowSharedProxy();
         assertFalse(allowShared.hasAttribute('hidden'));
         assertFalse(allowShared.disabled);
       });
@@ -331,6 +316,39 @@ suite('InternetDetailPage', function() {
             assertTrue(!!toggle);
             assertTrue(toggle.checked);
             internetDetailPage.init('wifi2_guid', 'WiFi', 'wifi2');
+            return flushAsync();
+          })
+          .then(() => {
+            const toggle = internetDetailPage.$$('#autoConnectToggle');
+            assertTrue(!!toggle);
+            assertFalse(toggle.checked);
+          });
+    });
+
+    test.only('Auto Connect updates don\'t trigger a re-save', function() {
+      const mojom = chromeos.networkConfig.mojom;
+      mojoApi_.setNetworkTypeEnabledState(mojom.NetworkType.kWiFi, true);
+      let wifi1 = getManagedProperties(
+          mojom.NetworkType.kWiFi, 'wifi1', mojom.OncSource.kDevice);
+      wifi1.typeProperties.wifi.autoConnect = OncMojo.createManagedBool(true);
+      mojoApi_.setManagedPropertiesForTest(wifi1);
+
+      mojoApi_.whenCalled('setProperties').then(() => assert(false));
+      internetDetailPage.init('wifi1_guid', 'WiFi', 'wifi1');
+      internetDetailPage.onNetworkStateChanged({guid: 'wifi1_guid'});
+      return flushAsync()
+          .then(() => {
+            const toggle = internetDetailPage.$$('#autoConnectToggle');
+            assertTrue(!!toggle);
+            assertTrue(toggle.checked);
+
+            // Rebuild the object to force polymer to recognize a change.
+            wifi1 = getManagedProperties(
+                mojom.NetworkType.kWiFi, 'wifi1', mojom.OncSource.kDevice);
+            wifi1.typeProperties.wifi.autoConnect =
+                OncMojo.createManagedBool(false);
+            mojoApi_.setManagedPropertiesForTest(wifi1);
+            internetDetailPage.onNetworkStateChanged({guid: 'wifi1_guid'});
             return flushAsync();
           })
           .then(() => {

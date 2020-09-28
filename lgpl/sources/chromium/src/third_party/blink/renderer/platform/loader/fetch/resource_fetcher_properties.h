@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_status.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
 namespace blink {
 
@@ -39,7 +40,7 @@ class PLATFORM_EXPORT ResourceFetcherProperties
 
   ResourceFetcherProperties() = default;
   virtual ~ResourceFetcherProperties() = default;
-  virtual void Trace(Visitor*) {}
+  virtual void Trace(Visitor*) const {}
 
   // Returns the client settings object bound to this global context.
   virtual const FetchClientSettingsObject& GetFetchClientSettingsObject()
@@ -82,6 +83,12 @@ class PLATFORM_EXPORT ResourceFetcherProperties
   // Returns the scheduling status of the associated frame. Returns |kNone|
   // if there is no such a frame.
   virtual scheduler::FrameStatus GetFrameStatus() const = 0;
+
+  // The physical URL of Web Bundle from which this global context is loaded.
+  // Used as an additional identifier for MemoryCache.
+  virtual const KURL& WebBundlePhysicalUrl() const = 0;
+
+  virtual int GetOutstandingThrottledLimit() const = 0;
 };
 
 // A delegating ResourceFetcherProperties subclass which can be retained
@@ -96,7 +103,7 @@ class PLATFORM_EXPORT DetachableResourceFetcherProperties final
 
   void Detach();
 
-  void Trace(Visitor* visitor) override;
+  void Trace(Visitor* visitor) const override;
 
   // ResourceFetcherProperties implementation
   // Add a test in resource_fetcher_test.cc when you change behaviors.
@@ -140,6 +147,15 @@ class PLATFORM_EXPORT DetachableResourceFetcherProperties final
     return properties_ ? properties_->GetFrameStatus()
                        : scheduler::FrameStatus::kNone;
   }
+  const KURL& WebBundlePhysicalUrl() const override {
+    return properties_ ? properties_->WebBundlePhysicalUrl()
+                       : web_bundle_physical_url_;
+  }
+
+  int GetOutstandingThrottledLimit() const override {
+    return properties_ ? properties_->GetOutstandingThrottledLimit()
+                       : outstanding_throttled_limit_;
+  }
 
  private:
   // |properties_| is null if and only if detached.
@@ -151,6 +167,8 @@ class PLATFORM_EXPORT DetachableResourceFetcherProperties final
   bool paused_ = false;
   bool load_complete_ = false;
   bool is_subframe_deprioritization_enabled_ = false;
+  KURL web_bundle_physical_url_;
+  int outstanding_throttled_limit_ = 0;
 };
 
 }  // namespace blink

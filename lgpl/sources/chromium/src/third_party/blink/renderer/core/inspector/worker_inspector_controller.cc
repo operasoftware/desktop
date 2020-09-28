@@ -33,7 +33,9 @@
 #include "base/single_thread_task_runner.h"
 #include "third_party/blink/renderer/core/core_probe_sink.h"
 #include "third_party/blink/renderer/core/inspector/devtools_session.h"
+#include "third_party/blink/renderer/core/inspector/inspector_audits_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_emulation_agent.h"
+#include "third_party/blink/renderer/core/inspector/inspector_issue_reporter.h"
 #include "third_party/blink/renderer/core/inspector/inspector_log_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_network_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
@@ -73,6 +75,9 @@ WorkerInspectorController::WorkerInspectorController(
       thread_(thread),
       inspected_frames_(nullptr),
       probe_sink_(MakeGarbageCollected<CoreProbeSink>()) {
+  probe_sink_->AddInspectorIssueReporter(
+      MakeGarbageCollected<InspectorIssueReporter>(
+          thread->GetInspectorIssueStorage()));
   probe_sink_->AddInspectorTraceEvents(
       MakeGarbageCollected<InspectorTraceEvents>());
   worker_devtools_token_ = devtools_params->devtools_worker_token;
@@ -87,9 +92,10 @@ WorkerInspectorController::WorkerInspectorController(
     agent_ = MakeGarbageCollected<DevToolsAgent>(
         this, inspected_frames_.Get(), probe_sink_.Get(),
         std::move(inspector_task_runner), std::move(io_task_runner));
-    agent_->BindReceiver(std::move(devtools_params->agent_host_remote),
-                         std::move(devtools_params->agent_receiver),
-                         thread->GetTaskRunner(TaskType::kInternalInspector));
+    agent_->BindReceiverForWorker(
+        std::move(devtools_params->agent_host_remote),
+        std::move(devtools_params->agent_receiver),
+        thread->GetTaskRunner(TaskType::kInternalInspector));
   }
   trace_event::AddEnabledStateObserver(this);
   EmitTraceEvent();
@@ -109,9 +115,12 @@ void WorkerInspectorController::AttachSession(DevToolsSession* session,
   session->Append(MakeGarbageCollected<InspectorLogAgent>(
       thread_->GetConsoleMessageStorage(), nullptr, session->V8Session()));
   if (auto* scope = DynamicTo<WorkerGlobalScope>(thread_->GlobalScope())) {
-    session->Append(MakeGarbageCollected<InspectorNetworkAgent>(
-        inspected_frames_.Get(), scope, session->V8Session()));
+    auto* network_agent = MakeGarbageCollected<InspectorNetworkAgent>(
+        inspected_frames_.Get(), scope, session->V8Session());
+    session->Append(network_agent);
     session->Append(MakeGarbageCollected<InspectorEmulationAgent>(nullptr));
+    session->Append(MakeGarbageCollected<InspectorAuditsAgent>(
+        network_agent, thread_->GetInspectorIssueStorage()));
   }
   ++session_count_;
 }
@@ -122,7 +131,7 @@ void WorkerInspectorController::DetachSession(DevToolsSession*) {
     thread_->GetWorkerBackingThread().BackingThread().RemoveTaskObserver(this);
 }
 
-void WorkerInspectorController::InspectElement(const WebPoint&) {
+void WorkerInspectorController::InspectElement(const gfx::Point&) {
   NOTREACHED();
 }
 
@@ -153,7 +162,8 @@ void WorkerInspectorController::WaitForDebuggerIfNeeded() {
 }
 
 void WorkerInspectorController::WillProcessTask(
-    const base::PendingTask& pending_task) {}
+    const base::PendingTask& pending_task,
+    bool was_blocked_or_low_priority) {}
 
 void WorkerInspectorController::DidProcessTask(
     const base::PendingTask& pending_task) {
@@ -177,7 +187,7 @@ void WorkerInspectorController::EmitTraceEvent() {
                            worker_thread_id_));
 }
 
-void WorkerInspectorController::Trace(blink::Visitor* visitor) {
+void WorkerInspectorController::Trace(Visitor* visitor) const {
   visitor->Trace(agent_);
   visitor->Trace(inspected_frames_);
   visitor->Trace(probe_sink_);

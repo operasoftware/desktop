@@ -19,7 +19,7 @@ const char kGATTServerNotConnectedBase[] =
 }  // namespace
 
 // static
-DOMException* BluetoothError::CreateNotConnectedException(
+String BluetoothError::CreateNotConnectedExceptionMessage(
     BluetoothOperation operation) {
   const char* operation_string = nullptr;
   switch (operation) {
@@ -36,10 +36,15 @@ DOMException* BluetoothError::CreateNotConnectedException(
       operation_string = "perform GATT operations";
       break;
   }
+  return String::Format(kGATTServerNotConnectedBase, operation_string);
+}
 
+// static
+DOMException* BluetoothError::CreateNotConnectedException(
+    BluetoothOperation operation) {
   return MakeGarbageCollected<DOMException>(
       DOMExceptionCode::kNetworkError,
-      String::Format(kGATTServerNotConnectedBase, operation_string));
+      CreateNotConnectedExceptionMessage(operation));
 }
 
 // static
@@ -80,6 +85,10 @@ DOMException* BluetoothError::CreateDOMException(
 #define MAP_ERROR(enumeration, name, message)         \
   case mojom::blink::WebBluetoothResult::enumeration: \
     return MakeGarbageCollected<DOMException>(name, message);
+
+      // AbortErrors:
+      MAP_ERROR(WATCH_ADVERTISEMENTS_ABORTED, DOMExceptionCode::kAbortError,
+                "The Bluetooth operation was cancelled.");
 
       // InvalidModificationErrors:
       MAP_ERROR(GATT_INVALID_ATTRIBUTE_LENGTH,

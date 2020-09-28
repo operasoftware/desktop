@@ -34,10 +34,9 @@ typedef (HTMLScriptElement or SVGScriptElement) HTMLOrSVGScriptElement;
 // https://html.spec.whatwg.org/C/#documents
 
 [
-    Exposed=Window,
-    Constructor(),
-    ConstructorCallWith=Document
+    Exposed=Window
 ] interface Document : Node {
+    [CallWith=Document] constructor();
     [SameObject] readonly attribute DOMImplementation implementation;
     [ImplementedAs=urlForBinding] readonly attribute USVString URL;
     // FIXME: documentURI should not be nullable.
@@ -77,9 +76,6 @@ typedef (HTMLScriptElement or SVGScriptElement) HTMLOrSVGScriptElement;
     [NewObject] NodeIterator createNodeIterator(Node root, optional unsigned long whatToShow = 0xFFFFFFFF, optional NodeFilter? filter = null);
     [NewObject] TreeWalker createTreeWalker(Node root, optional unsigned long whatToShow = 0xFFFFFFFF, optional NodeFilter? filter = null);
 
-    // NonDocumentRootScroller (https://github.com/bokand/NonDocumentRootScroller)
-    [RaisesException=Setter, RuntimeEnabled=SetRootScroller, Measure] attribute Element? rootScroller;
-
     // FIXME: xmlEncoding/xmlVersion/xmlStandalone have been removed from the spec.
     [MeasureAs=DocumentXMLEncoding] readonly attribute DOMString? xmlEncoding;
     [RaisesException=Setter, MeasureAs=DocumentXMLVersion] attribute DOMString? xmlVersion;
@@ -116,7 +112,7 @@ typedef (HTMLScriptElement or SVGScriptElement) HTMLOrSVGScriptElement;
 
     // dynamic markup insertion
     [CallWith=Isolate, CEReactions, CustomElementCallbacks, RaisesException, MeasureAs=DocumentOpenTwoArgs] Document open(optional DOMString type = "text/html", optional DOMString replace = "");
-    [CallWith=Isolate, RaisesException, MeasureAs=DocumentOpenThreeArgs] Window open(URLString url, DOMString name, DOMString features);
+    [CallWith=Isolate, RaisesException, MeasureAs=DocumentOpenThreeArgs] Window open(USVString url, DOMString name, DOMString features);
     [CEReactions, RaisesException] void close();
     [CallWith=Isolate, CEReactions, CustomElementCallbacks, RaisesException] void write(DOMString... text);
     [CallWith=Isolate, CEReactions, CustomElementCallbacks, RaisesException] void writeln(DOMString... text);
@@ -170,7 +166,7 @@ typedef (HTMLScriptElement or SVGScriptElement) HTMLOrSVGScriptElement;
     // Custom Elements
     // https://w3c.github.io/webcomponents/spec/custom/#extensions-to-document-interface-to-register
     // FIXME: The registerElement return type should be Function.
-    [RuntimeEnabled=CustomElementsV0, CallWith=ScriptState, CustomElementCallbacks, RaisesException, DeprecateAs=DocumentRegisterElement] any registerElement(DOMString type, optional ElementRegistrationOptions options);
+    [RuntimeEnabled=CustomElementsV0, CallWith=ScriptState, CustomElementCallbacks, RaisesException, DeprecateAs=DocumentRegisterElement] any registerElement(DOMString type, optional ElementRegistrationOptions options = {});
     // https://w3c.github.io/webcomponents/spec/custom/#extensions-to-document-interface-to-instantiate
     [CustomElementCallbacks, PerWorldBindings, RaisesException, ImplementedAs=CreateElementForBinding] Element createElement(DOMString localName, (DOMString or ElementCreationOptions) options);
     [CustomElementCallbacks, RaisesException] Element createElementNS(DOMString? namespaceURI, DOMString qualifiedName, (DOMString or ElementCreationOptions) options);
@@ -183,23 +179,26 @@ typedef (HTMLScriptElement or SVGScriptElement) HTMLOrSVGScriptElement;
 
     // CORS and RFC1918
     // https://wicg.github.io/cors-rfc1918/#feature-detect
-    [RuntimeEnabled=AddressSpace, ImplementedAs=addressSpaceForBindings] readonly attribute AddressSpace addressSpace;
+    [CallWith=ScriptState, RuntimeEnabled=AddressSpace, ImplementedAs=addressSpaceForBindings] readonly attribute AddressSpace addressSpace;
 
     // Non-standard APIs
-    [MeasureAs=DocumentCaretRangeFromPoint] Range caretRangeFromPoint([DefaultValue=Undefined] optional long x, [DefaultValue=Undefined] optional long y);
+    [MeasureAs=DocumentCaretRangeFromPoint] Range caretRangeFromPoint(optional long x = 0, optional long y = 0);
 
     // Storage Access API
-    [CallWith=ScriptState, NewObject, RuntimeEnabled=StorageAccessAPI] Promise<boolean> hasStorageAccess();
-    [CallWith=ScriptState, NewObject, RuntimeEnabled=StorageAccessAPI] Promise<void> requestStorageAccess();
+    [CallWith=ScriptState, NewObject, RuntimeEnabled=StorageAccessAPI, MeasureAs=StorageAccessAPI_HasStorageAccess_Method] Promise<boolean> hasStorageAccess();
+    [CallWith=ScriptState, NewObject, RuntimeEnabled=StorageAccessAPI, MeasureAs=StorageAccessAPI_requestStorageAccess_Method] Promise<void> requestStorageAccess();
 
     // https://w3c.github.io/webappsec-feature-policy/#the-policy-object
-    [RuntimeEnabled=FeaturePolicyJavaScriptInterface] readonly attribute FeaturePolicy featurePolicy;
+    readonly attribute FeaturePolicy featurePolicy;
 
     // Deprecated prefixed page visibility API.
     // TODO(davidben): This is a property so attaching a deprecation warning results in false positives when outputting
     // document in the console. It's possible https://crbug.com/43394 will resolve this.
     [MeasureAs=PrefixedPageVisibility, ImplementedAs=visibilityState] readonly attribute DOMString webkitVisibilityState;
     [MeasureAs=PrefixedPageVisibility, ImplementedAs=hidden] readonly attribute boolean webkitHidden;
+
+    // Trust Token API (https://github.com/wicg/trust-token-api)
+    [CallWith=ScriptState, Measure, RaisesException, NewObject, SecureContext, RuntimeEnabled=TrustTokens] Promise<boolean> hasTrustToken(USVString issuer);
 
     // Event handler attributes
     attribute EventHandler onbeforecopy;

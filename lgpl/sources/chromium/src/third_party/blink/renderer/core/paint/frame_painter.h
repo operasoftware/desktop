@@ -6,7 +6,6 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_FRAME_PAINTER_H_
 
 #include "base/macros.h"
-#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/paint/paint_phase.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
@@ -16,7 +15,7 @@ class CullRect;
 class GraphicsContext;
 class LocalFrameView;
 
-class CORE_EXPORT FramePainter {
+class FramePainter {
   STACK_ALLOCATED();
 
  public:
@@ -29,7 +28,7 @@ class CORE_EXPORT FramePainter {
  private:
   const LocalFrameView& GetFrameView();
 
-  Member<const LocalFrameView> frame_view_;
+  const LocalFrameView* frame_view_;
   static bool in_paint_contents_;
 
   DISALLOW_COPY_AND_ASSIGN(FramePainter);

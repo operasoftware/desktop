@@ -133,14 +133,13 @@ static int ogg_write_page(AVFormatContext *s, OGGPage *page, int extra_flags)
     avio_write(pb, page->data, page->size);
 
     ogg_update_checksum(s, pb, crc_offset);
-    avio_flush(pb);
 
     size = avio_close_dyn_buf(pb, &buf);
     if (size < 0)
         return size;
 
     avio_write(s->pb, buf, size);
-    avio_flush(s->pb);
+    avio_write_marker(s->pb, AV_NOPTS_VALUE, AVIO_DATA_MARKER_FLUSH_POINT);
     av_free(buf);
     oggstream->page_count--;
     return 0;
@@ -547,7 +546,6 @@ static int ogg_init(AVFormatContext *s)
                                              &st->metadata);
             if (err) {
                 av_log(s, AV_LOG_ERROR, "Error writing FLAC headers\n");
-                av_freep(&st->priv_data);
                 return err;
             }
         } else if (st->codecpar->codec_id == AV_CODEC_ID_SPEEX) {
@@ -556,7 +554,6 @@ static int ogg_init(AVFormatContext *s)
                                               &st->metadata);
             if (err) {
                 av_log(s, AV_LOG_ERROR, "Error writing Speex headers\n");
-                av_freep(&st->priv_data);
                 return err;
             }
         } else if (st->codecpar->codec_id == AV_CODEC_ID_OPUS) {
@@ -565,7 +562,6 @@ static int ogg_init(AVFormatContext *s)
                                              &st->metadata, s->chapters, s->nb_chapters);
             if (err) {
                 av_log(s, AV_LOG_ERROR, "Error writing Opus headers\n");
-                av_freep(&st->priv_data);
                 return err;
             }
         } else if (st->codecpar->codec_id == AV_CODEC_ID_VP8) {
@@ -573,7 +569,6 @@ static int ogg_init(AVFormatContext *s)
                                             s->flags & AVFMT_FLAG_BITEXACT);
             if (err) {
                 av_log(s, AV_LOG_ERROR, "Error writing VP8 headers\n");
-                av_freep(&st->priv_data);
                 return err;
             }
         } else {
@@ -586,7 +581,7 @@ static int ogg_init(AVFormatContext *s)
                                       st->codecpar->codec_id == AV_CODEC_ID_VORBIS ? 30 : 42,
                                       (const uint8_t**)oggstream->header, oggstream->header_len) < 0) {
                 av_log(s, AV_LOG_ERROR, "Extradata corrupted\n");
-                av_freep(&st->priv_data);
+                oggstream->header[1] = NULL;
                 return AVERROR_INVALIDDATA;
             }
 
@@ -740,6 +735,8 @@ static int ogg_write_trailer(AVFormatContext *s)
 
 static void ogg_free(AVFormatContext *s)
 {
+    OGGContext *ogg = s->priv_data;
+    OGGPageList *p = ogg->page_list;
     int i;
 
     for (i = 0; i < s->nb_streams; i++) {
@@ -754,8 +751,14 @@ static void ogg_free(AVFormatContext *s)
             av_freep(&oggstream->header[0]);
         }
         av_freep(&oggstream->header[1]);
-        av_freep(&st->priv_data);
     }
+
+    while (p) {
+        OGGPageList *next = p->next;
+        av_free(p);
+        p = next;
+    }
+    ogg->page_list = NULL;
 }
 
 #if CONFIG_OGG_MUXER

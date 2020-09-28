@@ -9,6 +9,8 @@ cr.define('settings_about_page', function() {
      * @param {{
      *   progress: number|undefined,
      *   message: string|undefined
+     *   rollback: bool|undefined
+     *   powerwash: bool|undefined
      * }} opt_options
      */
     function fireStatusChanged(status, opt_options) {
@@ -17,13 +19,15 @@ cr.define('settings_about_page', function() {
         progress: options.progress === undefined ? 1 : options.progress,
         message: options.message,
         status: status,
+        rollback: options.rollback,
+        powerwash: options.powerwash,
       });
     }
 
     suite('AboutPageTest', function() {
       let page = null;
 
-      /** @type {?settings.TestAboutPageBrowserProxy} */
+      /** @type {?settings.TestAboutPageBrowserProxyChromeOS} */
       let aboutBrowserProxy = null;
 
       /** @type {?settings.TestLifetimeBrowserProxy} */
@@ -35,7 +39,7 @@ cr.define('settings_about_page', function() {
         lifetimeBrowserProxy = new settings.TestLifetimeBrowserProxy();
         settings.LifetimeBrowserProxyImpl.instance_ = lifetimeBrowserProxy;
 
-        aboutBrowserProxy = new TestAboutPageBrowserProxy();
+        aboutBrowserProxy = new TestAboutPageBrowserProxyChromeOS();
         settings.AboutPageBrowserProxyImpl.instance_ = aboutBrowserProxy;
         return initNewPage();
       });
@@ -51,7 +55,7 @@ cr.define('settings_about_page', function() {
         lifetimeBrowserProxy.reset();
         PolymerTest.clearBody();
         page = document.createElement('os-settings-about-page');
-        settings.navigateTo(settings.routes.ABOUT);
+        settings.Router.getInstance().navigateTo(settings.routes.ABOUT);
         document.body.appendChild(page);
         return Promise.all([
           aboutBrowserProxy.whenCalled('getChannelInfo'),
@@ -155,16 +159,14 @@ cr.define('settings_about_page', function() {
        * channel are the same.
        */
       test('ButtonsUpdate_SameChannel', function() {
-        const {checkForUpdates, relaunch, relaunchAndPowerwash} = page.$;
+        const {checkForUpdates, relaunch} = page.$;
 
         assertTrue(!!relaunch);
-        assertTrue(!!relaunchAndPowerwash);
         assertTrue(!!checkForUpdates);
 
         function assertAllHidden() {
           assertTrue(checkForUpdates.hidden);
           assertTrue(relaunch.hidden);
-          assertTrue(relaunchAndPowerwash.hidden);
           // Ensure that when all buttons are hidden, the container is also
           // hidden.
           assertTrue(page.$.buttonContainer.hidden);
@@ -175,7 +177,6 @@ cr.define('settings_about_page', function() {
         fireStatusChanged(UpdateStatus.UPDATED);
         assertFalse(checkForUpdates.hidden);
         assertTrue(relaunch.hidden);
-        assertTrue(relaunchAndPowerwash.hidden);
 
         // Check that the "Check for updates" button gets hidden for certain
         // UpdateStatus values, even if the CHECKING state was never
@@ -186,7 +187,6 @@ cr.define('settings_about_page', function() {
         fireStatusChanged(UpdateStatus.NEARLY_UPDATED);
         assertTrue(checkForUpdates.hidden);
         assertFalse(relaunch.hidden);
-        assertTrue(relaunchAndPowerwash.hidden);
 
         fireStatusChanged(UpdateStatus.CHECKING);
         assertAllHidden();
@@ -197,7 +197,6 @@ cr.define('settings_about_page', function() {
         fireStatusChanged(UpdateStatus.NEARLY_UPDATED);
         assertTrue(checkForUpdates.hidden);
         assertFalse(relaunch.hidden);
-        assertTrue(relaunchAndPowerwash.hidden);
 
         fireStatusChanged(UpdateStatus.UPDATED);
         assertAllHidden();
@@ -205,7 +204,6 @@ cr.define('settings_about_page', function() {
         fireStatusChanged(UpdateStatus.FAILED);
         assertFalse(checkForUpdates.hidden);
         assertTrue(relaunch.hidden);
-        assertTrue(relaunchAndPowerwash.hidden);
 
         fireStatusChanged(UpdateStatus.DISABLED);
         assertAllHidden();
@@ -217,24 +215,24 @@ cr.define('settings_about_page', function() {
       /**
        * Test that buttons update according to incoming
        * 'update-status-changed' events for the case where the target channel
-       * is more stable than current channel.
+       * is more stable than current channel and update will powerwash.
        */
       test('ButtonsUpdate_BetaToStable', async () => {
         aboutBrowserProxy.setChannels(
             BrowserChannel.BETA, BrowserChannel.STABLE);
-        aboutBrowserProxy.setUpdateStatus(UpdateStatus.NEARLY_UPDATED);
-
         await initNewPage();
+
+        fireStatusChanged(UpdateStatus.NEARLY_UPDATED, {powerwash: true});
+
         assertTrue(!!page.$.relaunch);
-        assertTrue(!!page.$.relaunchAndPowerwash);
+        assertFalse(page.$.relaunch.hidden);
 
-        assertTrue(page.$.relaunch.hidden);
-        assertFalse(page.$.relaunchAndPowerwash.hidden);
+        assertEquals(
+            page.$.relaunch.innerText,
+            loadTimeData.getString('aboutRelaunchAndPowerwash'));
 
-        page.$.relaunchAndPowerwash.click();
-        const requestTpmFirmwareUpdate =
-            await lifetimeBrowserProxy.whenCalled('factoryReset');
-        assertFalse(requestTpmFirmwareUpdate);
+        page.$.relaunch.click();
+        await lifetimeBrowserProxy.whenCalled('relaunch');
       });
 
       /**
@@ -245,39 +243,38 @@ cr.define('settings_about_page', function() {
       test('ButtonsUpdate_StableToBeta', async () => {
         aboutBrowserProxy.setChannels(
             BrowserChannel.STABLE, BrowserChannel.BETA);
-        aboutBrowserProxy.setUpdateStatus(UpdateStatus.NEARLY_UPDATED);
-
         await initNewPage();
-        assertTrue(!!page.$.relaunch);
-        assertTrue(!!page.$.relaunchAndPowerwash);
 
+        fireStatusChanged(UpdateStatus.NEARLY_UPDATED, {powerwash: false});
+
+        assertTrue(!!page.$.relaunch);
         assertFalse(page.$.relaunch.hidden);
-        assertTrue(page.$.relaunchAndPowerwash.hidden);
+
+        assertEquals(
+            page.$.relaunch.innerText, loadTimeData.getString('aboutRelaunch'));
 
         page.$.relaunch.click();
         await lifetimeBrowserProxy.whenCalled('relaunch');
       });
 
       /**
-       * Test that buttons update as a result of receiving a
-       * 'target-channel-changed' event (normally fired from
-       * <settings-channel-switcher-dialog>).
+       * The relaunch and powerwash button is shown if the powerwash flag is set
+       * in the update status.
        */
-      test('ButtonsUpdate_TargetChannelChangedEvent', async () => {
-        aboutBrowserProxy.setChannels(BrowserChannel.BETA, BrowserChannel.BETA);
-        aboutBrowserProxy.setUpdateStatus(UpdateStatus.NEARLY_UPDATED);
-
+      test('ButtonsUpdate_Powerwash', async () => {
         await initNewPage();
-        assertFalse(page.$.relaunch.hidden);
-        assertTrue(page.$.relaunchAndPowerwash.hidden);
 
-        page.fire('target-channel-changed', BrowserChannel.DEV);
-        assertFalse(page.$.relaunch.hidden);
-        assertTrue(page.$.relaunchAndPowerwash.hidden);
+        fireStatusChanged(UpdateStatus.NEARLY_UPDATED, {powerwash: true});
 
-        page.fire('target-channel-changed', BrowserChannel.STABLE);
-        assertTrue(page.$.relaunch.hidden);
-        assertFalse(page.$.relaunchAndPowerwash.hidden);
+        assertTrue(!!page.$.relaunch);
+        assertFalse(page.$.relaunch.hidden);
+
+        assertEquals(
+            page.$.relaunch.innerText,
+            loadTimeData.getString('aboutRelaunchAndPowerwash'));
+
+        page.$.relaunch.click();
+        await lifetimeBrowserProxy.whenCalled('relaunch');
       });
 
       /**
@@ -286,7 +283,7 @@ cr.define('settings_about_page', function() {
        * page.$$("#") is used to access items inside dom-if.
        */
       test('ReleaseNotes', async () => {
-        let releaseNotes = null;
+        const releaseNotes = null;
 
         /**
          * Checks the visibility of the "release notes" section when online.
@@ -492,7 +489,7 @@ cr.define('settings_about_page', function() {
   function registerOfficialBuildTests() {
     suite('AboutPageTest_OfficialBuild', function() {
       test('ReportAnIssue', function() {
-        const browserProxy = new TestAboutPageBrowserProxy();
+        const browserProxy = new TestAboutPageBrowserProxyChromeOS();
         settings.AboutPageBrowserProxyImpl.instance_ = browserProxy;
         PolymerTest.clearBody();
         const page = document.createElement('os-settings-about-page');
@@ -505,11 +502,220 @@ cr.define('settings_about_page', function() {
     });
   }
 
+  function registerDetailedBuildInfoTests() {
+    suite('DetailedBuildInfoTest', function() {
+      let page = null;
+      let browserProxy = null;
+
+      setup(function() {
+        browserProxy = new TestAboutPageBrowserProxyChromeOS();
+        settings.AboutPageBrowserProxyImpl.instance_ = browserProxy;
+        PolymerTest.clearBody();
+      });
+
+      teardown(function() {
+        page.remove();
+        page = null;
+      });
+
+      test('Initialization', async () => {
+        page = document.createElement('settings-detailed-build-info');
+        document.body.appendChild(page);
+
+        await Promise.all([
+          browserProxy.whenCalled('pageReady'),
+          browserProxy.whenCalled('canChangeChannel'),
+          browserProxy.whenCalled('getChannelInfo'),
+          browserProxy.whenCalled('getVersionInfo'),
+        ]);
+      });
+
+      /**
+       * Checks whether the "change channel" button state (enabled/disabled)
+       * correctly reflects whether the user is allowed to change channel (as
+       * dictated by the browser via loadTimeData boolean).
+       * @param {boolean} canChangeChannel Whether to simulate the case where
+       *     changing channels is allowed.
+       * @return {!Promise}
+       */
+      async function checkChangeChannelButton(canChangeChannel) {
+        browserProxy.setCanChangeChannel(canChangeChannel);
+        page = document.createElement('settings-detailed-build-info');
+        document.body.appendChild(page);
+        await browserProxy.whenCalled('canChangeChannel');
+        const changeChannelButton = page.$$('cr-button');
+        assertTrue(!!changeChannelButton);
+        assertEquals(canChangeChannel, !changeChannelButton.disabled);
+      }
+
+      test('ChangeChannel_Enabled', function() {
+        return checkChangeChannelButton(true);
+      });
+
+      test('ChangeChannel_Disabled', function() {
+        return checkChangeChannelButton(false);
+      });
+
+      /**
+       * Checks whether the "change channel" button state (enabled/disabled)
+       * is correct before getChannelInfo() returns
+       * (see https://crbug.com/848750). Here, getChannelInfo() is blocked
+       * manually until after the button check.
+       */
+      async function checkChangeChannelButtonWithDelayedChannelState(
+          canChangeChannel) {
+        const resolver = new PromiseResolver();
+        browserProxy.getChannelInfo = async function() {
+          await resolver.promise;
+          this.methodCalled('getChannelInfo');
+          return Promise.resolve(this.channelInfo_);
+        };
+        const result = await checkChangeChannelButton(canChangeChannel);
+        resolver.resolve();
+        return result;
+      }
+
+      test('ChangeChannel_EnabledWithDelayedChannelState', function() {
+        return checkChangeChannelButtonWithDelayedChannelState(true);
+      });
+
+      test('ChangeChannel_DisabledWithDelayedChannelState', function() {
+        return checkChangeChannelButtonWithDelayedChannelState(false);
+      });
+
+      async function checkCopyBuildDetailsButton() {
+        page = document.createElement('settings-detailed-build-info');
+        document.body.appendChild(page);
+        const copyBuildDetailsButton = page.$$('cr-icon-button');
+        await browserProxy.whenCalled('getVersionInfo');
+        await browserProxy.whenCalled('getChannelInfo');
+        await browserProxy.whenCalled('canChangeChannel');
+
+        const expectedClipBoardText =
+            `${loadTimeData.getString('application_label')}: ` +
+            `${loadTimeData.getString('aboutBrowserVersion')}\n` +
+            `Platform: ${browserProxy.versionInfo_.osVersion}\n` +
+            `Channel: ${browserProxy.channelInfo_.targetChannel}\n` +
+            `Firmware Version: ${browserProxy.versionInfo_.osFirmware}\n` +
+            `ARC Enabled: ${loadTimeData.getBoolean('aboutIsArcEnabled')}\n` +
+            `ARC: ${browserProxy.versionInfo_.arcVersion}\n` +
+            `Enterprise Enrolled: ` +
+            `${loadTimeData.getBoolean('aboutEnterpriseManaged')}\n` +
+            `Developer Mode: ` +
+            `${loadTimeData.getBoolean('aboutIsDeveloperMode')}`;
+
+        assertTrue(!!copyBuildDetailsButton);
+        await navigator.clipboard.readText().then(text => assertFalse(!!text));
+        copyBuildDetailsButton.click();
+        await navigator.clipboard.readText().then(
+            text => assertEquals(text, expectedClipBoardText));
+      }
+
+      test('CheckCopyBuildDetails', function() {
+        checkCopyBuildDetailsButton();
+      });
+    });
+  }
+
+  function registerChannelSwitcherDialogTests() {
+    suite('ChannelSwitcherDialogTest', function() {
+      let dialog = null;
+      let radioButtons = null;
+      let browserProxy = null;
+      const currentChannel = BrowserChannel.BETA;
+
+      setup(function() {
+        browserProxy = new TestAboutPageBrowserProxyChromeOS();
+        browserProxy.setChannels(currentChannel, currentChannel);
+        settings.AboutPageBrowserProxyImpl.instance_ = browserProxy;
+        PolymerTest.clearBody();
+        dialog = document.createElement('settings-channel-switcher-dialog');
+        document.body.appendChild(dialog);
+
+        radioButtons = dialog.shadowRoot.querySelectorAll('cr-radio-button');
+        assertEquals(3, radioButtons.length);
+        return browserProxy.whenCalled('getChannelInfo');
+      });
+
+      teardown(function() {
+        dialog.remove();
+      });
+
+      test('Initialization', function() {
+        const radioGroup = dialog.$$('cr-radio-group');
+        assertTrue(!!radioGroup);
+        assertTrue(!!dialog.$.warningSelector);
+        assertTrue(!!dialog.$.changeChannel);
+        assertTrue(!!dialog.$.changeChannelAndPowerwash);
+
+        // Check that upon initialization the radio button corresponding to
+        // the current release channel is pre-selected.
+        assertEquals(currentChannel, radioGroup.selected);
+        assertEquals(dialog.$.warningSelector.selected, -1);
+
+        // Check that action buttons are hidden when current and target
+        // channel are the same.
+        assertTrue(dialog.$.changeChannel.hidden);
+        assertTrue(dialog.$.changeChannelAndPowerwash.hidden);
+      });
+
+      // Test case where user switches to a less stable channel.
+      test('ChangeChannel_LessStable', async () => {
+        assertEquals(BrowserChannel.DEV, radioButtons.item(2).name);
+        radioButtons.item(2).click();
+        Polymer.dom.flush();
+
+        await browserProxy.whenCalled('getChannelInfo');
+        assertEquals(dialog.$.warningSelector.selected, 2);
+        // Check that only the "Change channel" button becomes visible.
+        assertTrue(dialog.$.changeChannelAndPowerwash.hidden);
+        assertFalse(dialog.$.changeChannel.hidden);
+
+        const whenTargetChannelChangedFired =
+            test_util.eventToPromise('target-channel-changed', dialog);
+
+        dialog.$.changeChannel.click();
+        const [channel, isPowerwashAllowed] =
+            await browserProxy.whenCalled('setChannel');
+        assertEquals(BrowserChannel.DEV, channel);
+        assertFalse(isPowerwashAllowed);
+        const {detail} = await whenTargetChannelChangedFired;
+        assertEquals(BrowserChannel.DEV, detail);
+      });
+
+      // Test case where user switches to a more stable channel.
+      test('ChangeChannel_MoreStable', async () => {
+        assertEquals(BrowserChannel.STABLE, radioButtons.item(0).name);
+        radioButtons.item(0).click();
+        Polymer.dom.flush();
+
+        await browserProxy.whenCalled('getChannelInfo');
+        assertEquals(dialog.$.warningSelector.selected, 1);
+        // Check that only the "Change channel and Powerwash" button becomes
+        // visible.
+        assertFalse(dialog.$.changeChannelAndPowerwash.hidden);
+        assertTrue(dialog.$.changeChannel.hidden);
+
+        const whenTargetChannelChangedFired =
+            test_util.eventToPromise('target-channel-changed', dialog);
+
+        dialog.$.changeChannelAndPowerwash.click();
+        const [channel, isPowerwashAllowed] =
+            await browserProxy.whenCalled('setChannel');
+        assertEquals(BrowserChannel.STABLE, channel);
+        assertTrue(isPowerwashAllowed);
+        const {detail} = await whenTargetChannelChangedFired;
+        assertEquals(BrowserChannel.STABLE, detail);
+      });
+    });
+  }
+
   return {
-    // TODO(crbug.com/950007): Move the channel switch dialog tests to here
-    // from the browser about page tests when those CrOS-specific parts are
-    // removed from the browser about page.
-    registerTests: registerAboutPageTests,
+    registerTests: function() {
+      registerDetailedBuildInfoTests();
+      registerChannelSwitcherDialogTests();
+      registerAboutPageTests();
+    },
     registerOfficialBuildTests: registerOfficialBuildTests,
   };
 });

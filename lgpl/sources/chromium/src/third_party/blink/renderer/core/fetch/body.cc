@@ -15,6 +15,7 @@
 #include "third_party/blink/renderer/core/fetch/body_stream_buffer.h"
 #include "third_party/blink/renderer/core/fetch/fetch_data_loader.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
@@ -24,6 +25,7 @@
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
 #include "third_party/blink/renderer/platform/heap/disallow_new_wrapper.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/loader/fetch/text_resource_decoder_options.h"
 #include "third_party/blink/renderer/platform/network/parsed_content_type.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -62,7 +64,7 @@ class BodyConsumerBase : public GarbageCollected<BodyConsumerBase>,
                                      WrapPersistent(this), object));
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(resolver_);
     FetchDataLoader::Client::Trace(visitor);
   }
@@ -85,7 +87,8 @@ class BodyBlobConsumer final : public BodyConsumerBase {
 
   void DidFetchDataLoadedBlobHandle(
       scoped_refptr<BlobDataHandle> blob_data_handle) override {
-    ResolveLater(WrapPersistent(Blob::Create(std::move(blob_data_handle))));
+    ResolveLater(WrapPersistent(
+        MakeGarbageCollected<Blob>(std::move(blob_data_handle))));
   }
   DISALLOW_COPY_AND_ASSIGN(BodyBlobConsumer);
 };
@@ -159,7 +162,7 @@ class BodyJsonConsumer final : public BodyConsumerBase {
 
 ScriptPromise Body::arrayBuffer(ScriptState* script_state,
                                 ExceptionState& exception_state) {
-  RejectInvalidConsumption(script_state, exception_state);
+  RejectInvalidConsumption(exception_state);
   if (exception_state.HadException())
     return ScriptPromise();
 
@@ -185,14 +188,14 @@ ScriptPromise Body::arrayBuffer(ScriptState* script_state,
       return ScriptPromise();
     }
   } else {
-    resolver->Resolve(DOMArrayBuffer::Create(0u, 1));
+    resolver->Resolve(DOMArrayBuffer::Create(size_t{0}, size_t{0}));
   }
   return promise;
 }
 
 ScriptPromise Body::blob(ScriptState* script_state,
                          ExceptionState& exception_state) {
-  RejectInvalidConsumption(script_state, exception_state);
+  RejectInvalidConsumption(exception_state);
   if (exception_state.HadException())
     return ScriptPromise();
 
@@ -214,15 +217,15 @@ ScriptPromise Body::blob(ScriptState* script_state,
   } else {
     auto blob_data = std::make_unique<BlobData>();
     blob_data->SetContentType(MimeType());
-    resolver->Resolve(
-        Blob::Create(BlobDataHandle::Create(std::move(blob_data), 0)));
+    resolver->Resolve(MakeGarbageCollected<Blob>(
+        BlobDataHandle::Create(std::move(blob_data), 0)));
   }
   return promise;
 }
 
 ScriptPromise Body::formData(ScriptState* script_state,
                              ExceptionState& exception_state) {
-  RejectInvalidConsumption(script_state, exception_state);
+  RejectInvalidConsumption(exception_state);
   if (exception_state.HadException())
     return ScriptPromise();
 
@@ -252,8 +255,13 @@ ScriptPromise Body::formData(ScriptState* script_state,
     }
   } else if (parsedType == "application/x-www-form-urlencoded") {
     if (BodyBuffer()) {
+      // According to https://fetch.spec.whatwg.org/#concept-body-package-data
+      // application/x-www-form-urlencoded FormData bytes are parsed using
+      // https://url.spec.whatwg.org/#concept-urlencoded-parser
+      // which does not decode BOM.
       BodyBuffer()->StartLoading(
-          FetchDataLoader::CreateLoaderAsString(),
+          FetchDataLoader::CreateLoaderAsString(
+              TextResourceDecoderOptions::CreateUTF8DecodeWithoutBOM()),
           MakeGarbageCollected<BodyFormDataConsumer>(resolver),
           exception_state);
       if (exception_state.HadException()) {
@@ -287,7 +295,7 @@ ScriptPromise Body::formData(ScriptState* script_state,
 
 ScriptPromise Body::json(ScriptState* script_state,
                          ExceptionState& exception_state) {
-  RejectInvalidConsumption(script_state, exception_state);
+  RejectInvalidConsumption(exception_state);
   if (exception_state.HadException())
     return ScriptPromise();
 
@@ -298,9 +306,10 @@ ScriptPromise Body::json(ScriptState* script_state,
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
   if (BodyBuffer()) {
-    BodyBuffer()->StartLoading(FetchDataLoader::CreateLoaderAsString(),
-                               MakeGarbageCollected<BodyJsonConsumer>(resolver),
-                               exception_state);
+    BodyBuffer()->StartLoading(
+        FetchDataLoader::CreateLoaderAsString(
+            TextResourceDecoderOptions::CreateUTF8Decode()),
+        MakeGarbageCollected<BodyJsonConsumer>(resolver), exception_state);
     if (exception_state.HadException()) {
       // Need to resolve the ScriptPromiseResolver to avoid a DCHECK().
       resolver->Resolve();
@@ -315,7 +324,7 @@ ScriptPromise Body::json(ScriptState* script_state,
 
 ScriptPromise Body::text(ScriptState* script_state,
                          ExceptionState& exception_state) {
-  RejectInvalidConsumption(script_state, exception_state);
+  RejectInvalidConsumption(exception_state);
   if (exception_state.HadException())
     return ScriptPromise();
 
@@ -326,9 +335,10 @@ ScriptPromise Body::text(ScriptState* script_state,
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
   if (BodyBuffer()) {
-    BodyBuffer()->StartLoading(FetchDataLoader::CreateLoaderAsString(),
-                               MakeGarbageCollected<BodyTextConsumer>(resolver),
-                               exception_state);
+    BodyBuffer()->StartLoading(
+        FetchDataLoader::CreateLoaderAsString(
+            TextResourceDecoderOptions::CreateUTF8Decode()),
+        MakeGarbageCollected<BodyTextConsumer>(resolver), exception_state);
     if (exception_state.HadException()) {
       // Need to resolve the ScriptPromiseResolver to avoid a DCHECK().
       resolver->Resolve();
@@ -341,30 +351,28 @@ ScriptPromise Body::text(ScriptState* script_state,
 }
 
 ReadableStream* Body::body() {
+  if (auto* execution_context = GetExecutionContext()) {
+    if (execution_context->IsServiceWorkerGlobalScope()) {
+      execution_context->CountUse(WebFeature::kFetchBodyStreamInServiceWorker);
+    } else {
+      execution_context->CountUse(
+          WebFeature::kFetchBodyStreamOutsideServiceWorker);
+    }
+  }
+
   if (!BodyBuffer())
     return nullptr;
   return BodyBuffer()->Stream();
 }
 
-Body::BodyUsed Body::IsBodyUsed(ExceptionState& exception_state) {
+bool Body::IsBodyUsed() const {
   auto* body_buffer = BodyBuffer();
-  if (!body_buffer)
-    return BodyUsed::kUnused;
-  base::Optional<bool> stream_disturbed =
-      body_buffer->IsStreamDisturbed(exception_state);
-  if (exception_state.HadException())
-    return BodyUsed::kBroken;
-  return stream_disturbed.value() ? BodyUsed::kUsed : BodyUsed::kUnused;
+  return body_buffer && body_buffer->IsStreamDisturbed();
 }
 
-Body::BodyLocked Body::IsBodyLocked(ExceptionState& exception_state) {
+bool Body::IsBodyLocked() const {
   auto* body_buffer = BodyBuffer();
-  if (!body_buffer)
-    return BodyLocked::kUnlocked;
-  base::Optional<bool> is_locked = body_buffer->IsStreamLocked(exception_state);
-  if (exception_state.HadException())
-    return BodyLocked::kBroken;
-  return is_locked.value() ? BodyLocked::kLocked : BodyLocked::kUnlocked;
+  return body_buffer && body_buffer->IsStreamLocked();
 }
 
 bool Body::HasPendingActivity() const {
@@ -376,31 +384,16 @@ bool Body::HasPendingActivity() const {
   return body_buffer->HasPendingActivity();
 }
 
-bool Body::IsBodyUsedForDCheck(ExceptionState& exception_state) {
-  return BodyBuffer() &&
-         BodyBuffer()->IsStreamDisturbedForDCheck(exception_state);
-}
+Body::Body(ExecutionContext* context) : ExecutionContextClient(context) {}
 
-Body::Body(ExecutionContext* context) : ContextClient(context) {}
-
-void Body::RejectInvalidConsumption(ScriptState* script_state,
-                                    ExceptionState& exception_state) {
-  const auto used = IsBodyUsed(exception_state);
-  if (exception_state.HadException()) {
-    DCHECK_EQ(used, BodyUsed::kBroken);
-    return;
-  }
-  DCHECK_NE(used, BodyUsed::kBroken);
-
-  if (IsBodyLocked(exception_state) == BodyLocked::kLocked) {
-    DCHECK(!exception_state.HadException());
+void Body::RejectInvalidConsumption(ExceptionState& exception_state) const {
+  if (IsBodyLocked()) {
     exception_state.ThrowTypeError("body stream is locked");
   }
-  if (exception_state.HadException())
-    return;
 
-  if (used == BodyUsed::kUsed)
+  if (IsBodyUsed()) {
     exception_state.ThrowTypeError("body stream already read");
+  }
 }
 
 }  // namespace blink

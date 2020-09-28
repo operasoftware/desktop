@@ -23,6 +23,7 @@ class NGBlockNode;
 class NGBoxFragmentBuilder;
 class NGConstraintSpace;
 class NGLayoutResult;
+class NGPhysicalContainerFragment;
 struct NGLogicalOutOfFlowPositionedNode;
 
 // Helper class for positioning of out-of-flow blocks.
@@ -96,7 +97,8 @@ class CORE_EXPORT NGOutOfFlowLayoutPart {
   bool SweepLegacyCandidates(HashSet<const LayoutObject*>* placed_objects);
 
   const ContainingBlockInfo& GetContainingBlockInfo(
-      const NGLogicalOutOfFlowPositionedNode&) const;
+      const NGLogicalOutOfFlowPositionedNode&,
+      const NGPhysicalContainerFragment* = nullptr);
 
   void ComputeInlineContainingBlocks(
       const Vector<NGLogicalOutOfFlowPositionedNode>&);
@@ -109,11 +111,18 @@ class CORE_EXPORT NGOutOfFlowLayoutPart {
       const NGLogicalOutOfFlowPositionedNode&,
       const LayoutBox* only_layout);
 
+  void LayoutFragmentainerDescendants(
+      Vector<NGLogicalOutOfFlowPositionedNode>* descendants);
+
+  scoped_refptr<const NGLayoutResult> LayoutFragmentainerDescendant(
+      const NGLogicalOutOfFlowPositionedNode&);
+
   scoped_refptr<const NGLayoutResult> Layout(NGBlockNode,
                                              const NGConstraintSpace&,
                                              const NGLogicalStaticPosition&,
                                              LogicalSize container_content_size,
                                              const ContainingBlockInfo&,
+                                             const TextDirection,
                                              const LayoutBox* only_layout);
 
   bool IsContainingBlockForCandidate(const NGLogicalOutOfFlowPositionedNode&);
@@ -122,7 +131,7 @@ class CORE_EXPORT NGOutOfFlowLayoutPart {
       NGBlockNode node,
       const LogicalSize& container_content_size_in_child_writing_mode,
       const base::Optional<LayoutUnit>& block_estimate,
-      const NGLogicalOutOfFlowPosition& node_position);
+      const NGLogicalOutOfFlowDimensions& node_dimensions);
 
   const NGConstraintSpace& container_space_;
   NGBoxFragmentBuilder* container_builder_;
@@ -131,6 +140,7 @@ class CORE_EXPORT NGOutOfFlowLayoutPart {
   const WritingMode writing_mode_;
   bool is_absolute_container_;
   bool is_fixed_container_;
+  bool allow_first_tier_oof_cache_;
 };
 
 }  // namespace blink

@@ -37,7 +37,6 @@
 namespace blink {
 
 class AXObjectCacheImpl;
-class AXSVGRoot;
 class Element;
 class HTMLAreaElement;
 class IntPoint;
@@ -51,17 +50,23 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
 
   // Public, overridden from AXObject.
   LayoutObject* GetLayoutObject() const final { return layout_object_; }
-  LayoutBoxModelObject* GetLayoutBoxModelObject() const;
   ScrollableArea* GetScrollableAreaIfScrollable() const final;
-  ax::mojom::Role DetermineAccessibilityRole() override;
-  ax::mojom::Role NativeRoleIgnoringAria() const override;
+  ax::mojom::blink::Role DetermineAccessibilityRole() override;
 
   // If this is an anonymous node, returns the node of its containing layout
   // block, otherwise returns the node of this layout object.
   Node* GetNodeOrContainingBlockNode() const;
 
+  // DOM and layout tree access.
+  Node* GetNode() const override;
+  Document* GetDocument() const override;
+  LocalFrameView* DocumentFrameView() const override;
+  Element* AnchorElement() const override;
+
  protected:
   LayoutObject* layout_object_;
+
+  LayoutBoxModelObject* GetLayoutBoxModelObject() const override;
 
   LayoutObject* LayoutObjectForRelativeBounds() const override {
     return layout_object_;
@@ -73,17 +78,15 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
 
   void Init() override;
   void Detach() override;
-  bool IsDetached() const override { return !layout_object_; }
-  bool IsAXLayoutObject() const override { return true; }
+  bool IsDetached() const override;
+  bool IsAXLayoutObject() const final;
 
   // Check object role or purpose.
   bool IsAutofillAvailable() const override;
-  bool IsDefault() const override;
   bool IsEditable() const override;
   bool IsRichlyEditable() const override;
   bool IsLineBreakingObject() const override;
   bool IsLinked() const override;
-  bool IsLoaded() const override;
   bool IsOffScreen() const override;
   bool IsVisited() const override;
 
@@ -100,52 +103,28 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   bool ComputeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
 
   // Properties of static elements.
-  const AtomicString& AccessKey() const override;
-  RGBA32 ComputeBackgroundColor() const final;
-  RGBA32 GetColor() const final;
-  String FontFamily() const final;
-  // Font size is in pixels.
-  float FontSize() const final;
-  float FontWeight() const final;
-  String ImageDataUrl(const IntSize& max_size) const final;
-  ax::mojom::ListStyle GetListStyle() const final;
+  ax::mojom::blink::ListStyle GetListStyle() const final;
   String GetText() const override;
-  ax::mojom::TextDirection GetTextDirection() const final;
-  ax::mojom::TextPosition GetTextPosition() const final;
-  int TextLength() const override;
+  ax::mojom::blink::TextDirection GetTextDirection() const final;
+  ax::mojom::blink::TextPosition GetTextPosition() const final;
   void GetTextStyleAndTextDecorationStyle(
       int32_t* text_style,
-      ax::mojom::TextDecorationStyle* text_overline_style,
-      ax::mojom::TextDecorationStyle* text_strikethrough_style,
-      ax::mojom::TextDecorationStyle* text_underline_style) const final;
+      ax::mojom::blink::TextDecorationStyle* text_overline_style,
+      ax::mojom::blink::TextDecorationStyle* text_strikethrough_style,
+      ax::mojom::blink::TextDecorationStyle* text_underline_style) const final;
 
   // Inline text boxes.
-  void LoadInlineTextBoxes() override;
   AXObject* NextOnLine() const override;
   AXObject* PreviousOnLine() const override;
 
   // Properties of interactive elements.
   String StringValue() const override;
 
-  // ARIA attributes.
-  void AriaDescribedbyElements(AXObjectVector&) const override;
-  void AriaOwnsElements(AXObjectVector&) const override;
-
-  ax::mojom::HasPopup HasPopup() const override;
-  bool SupportsARIADragging() const override;
-  void Dropeffects(Vector<ax::mojom::Dropeffect>& dropeffects) const override;
-  bool SupportsARIAFlowTo() const override;
-  bool SupportsARIAOwns() const override;
-
-  // ARIA live-region features.
-  const AtomicString& LiveRegionStatus() const override;
-  const AtomicString& LiveRegionRelevant() const override;
-
   // AX name calc.
   String TextAlternative(bool recursive,
                          bool in_aria_labelled_by_traversal,
                          AXObjectSet& visited,
-                         ax::mojom::NameFrom&,
+                         ax::mojom::blink::NameFrom&,
                          AXRelatedObjectVector*,
                          NameSources*) const override;
 
@@ -165,23 +144,7 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   // accessibility module.
   AXObject* RawFirstChild() const override;
   AXObject* RawNextSibling() const override;
-  void AddChildren() override;
-  void AddListMarker() override;
-  void AddInlineTextBoxChildren(bool force) override;
-  void AddImageMapChildren() override;
-  void AddHiddenChildren() override;
-  void AddPopupChildren() override;
   bool CanHaveChildren() const override;
-
-  // Properties of the object's owning document or page.
-  double EstimatedLoadingProgress() const override;
-
-  // DOM and layout tree access.
-  Node* GetNode() const override;
-  Document* GetDocument() const override;
-  LocalFrameView* DocumentFrameView() const override;
-  Element* AnchorElement() const override;
-  AtomicString Language() const override;
 
   // Notifications that this object may have changed.
   void HandleActiveDescendantChanged() override;
@@ -203,46 +166,51 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   unsigned RowIndex() const override;  // Also for a table row.
   unsigned ColumnSpan() const override;
   unsigned RowSpan() const override;
-  ax::mojom::SortDirection GetSortDirection() const override;
+  ax::mojom::blink::SortDirection GetSortDirection() const override;
 
   // For a table row or column.
   AXObject* HeaderObject() const override;
 
-  // The aria-errormessage object or native object from a validationMessage
-  // alert.
-  AXObject* ErrorMessage() const override;
+  //
+  // Layout object specific methods.
+  //
+  // These methods may eventually migrate over to AXNodeObject.
+  //
+
+  // If we can't determine a useful role from the DOM node, attempt to determine
+  // a role from the layout object.
+  ax::mojom::blink::Role RoleFromLayoutObject(
+      ax::mojom::blink::Role dom_role) const override;
 
  private:
   bool IsTabItemSelected() const;
   AXObject* AccessibilityImageMapHitTest(HTMLAreaElement*,
                                          const IntPoint&) const;
-  bool IsSVGImage() const;
   void DetachRemoteSVGRoot();
-  AXSVGRoot* RemoteSVGRootElement() const;
   AXObject* RemoteSVGElementHitTest(const IntPoint&) const;
   void OffsetBoundingBoxForRemoteSVGElement(LayoutRect&) const;
-  void AddRemoteSVGChildren();
-  void AddTableChildren();
-  void AddValidationMessageChild();
-  ax::mojom::Role DetermineTableCellRole() const;
-  ax::mojom::Role DetermineTableRowRole() const;
-  bool FindAllTableCellsWithRole(ax::mojom::Role, AXObjectVector&) const;
+  bool FindAllTableCellsWithRole(ax::mojom::blink::Role, AXObjectVector&) const;
 
   LayoutRect ComputeElementRect() const;
   bool CanIgnoreTextAsEmpty() const;
   bool CanIgnoreSpaceNextTo(LayoutObject*, bool is_after) const;
   bool HasAriaCellRole(Element*) const;
   bool IsPlaceholder() const;
-  ax::mojom::Dropeffect ParseDropeffect(String& dropeffect) const;
+  bool SelectionShouldFollowFocus() const;
 
-  static ax::mojom::TextDecorationStyle
+  static ax::mojom::blink::TextDecorationStyle
   TextDecorationStyleToAXTextDecorationStyle(
       const ETextDecorationStyle text_decoration_style);
 
   DISALLOW_COPY_AND_ASSIGN(AXLayoutObject);
 };
 
-DEFINE_AX_OBJECT_TYPE_CASTS(AXLayoutObject, IsAXLayoutObject());
+template <>
+struct DowncastTraits<AXLayoutObject> {
+  static bool AllowFrom(const AXObject& object) {
+    return object.IsAXLayoutObject();
+  }
+};
 
 }  // namespace blink
 

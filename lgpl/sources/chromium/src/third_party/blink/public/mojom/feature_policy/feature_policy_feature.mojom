@@ -29,8 +29,6 @@ enum FeaturePolicyFeature {
   kMidiFeature = 7,
   // Controls access to PaymentRequest interface.
   kPayment = 8,
-  // Controls access to document.cookie attribute.
-  kDocumentCookie = 10,
   // Controls access to document.domain attribute.
   kDocumentDomain = 11,
   // Controls whether synchronous script elements will run.
@@ -39,10 +37,6 @@ enum FeaturePolicyFeature {
   kSyncXHR = 13,
   // Controls access to the WebUSB API.
   kUsb = 14,
-  // Controls access to AOM event listeners.
-  kAccessibilityEvents = 15,
-  // Controls use of WebVR API.
-  kWebVr = 16,
   // The following features control access to the corresponding sensor classes.
   // Fusion sensor APIs (e.g. LinearAcceleration, OrientationSensor-based
   // classes)require all of the features that are inputs into that API to be
@@ -51,12 +45,6 @@ enum FeaturePolicyFeature {
   kAmbientLightSensor = 18,
   kGyroscope = 19,
   kMagnetometer = 20,
-  // Controls the layout size of intrinsically sized images and videos. When
-  // disabled, default size (300 x 150) is used to prevent relayout.
-  kUnsizedMedia = 21,
-  // When disallowed, restricts source image size to be no more 2x larger than
-  // the image's containing block.
-  kOversizedImages = 25,
   // Controls access to Picture-in-Picture.
   kPictureInPicture = 26,
   // Controls the ability to block and interfere with vertical scrolling.
@@ -65,16 +53,8 @@ enum FeaturePolicyFeature {
   // which interfere with document's input stream (document.write(),
   // document.close(), etc.).
   kDocumentWrite = 28,
-  // TODO(ekaramad): kLazyLoad is deprecated; remove.
-  // Used to enforce lazyloading for a frame and any nested <iframe> or image.
-  kLazyLoad = 29,
-  // Restricts the usage of layout-causing animations in a document.
-  kLayoutAnimations = 30,
-  // Controls access to WakeLock
-  kWakeLock = 31,
-  // Controls access to font-display attribute in @font-face CSS rule
-  kFontDisplay = 32,
-
+  // Controls access to Screen Wake Lock
+  kScreenWakeLock = 31,
   // These are the defined sandbox features implemented as policy-controlled
   // features.
   kTopNavigation = 33,
@@ -96,16 +76,8 @@ enum FeaturePolicyFeature {
   // Controls access to Idle Detection
   kIdleDetection = 44,
 
-  // When disallowed, these policies require images to have a reasonable byte-to-pixel ratio.
-  kUnoptimizedLossyImages = 45,
-  kUnoptimizedLosslessImages = 46,
-  kUnoptimizedLosslessImagesStrict = 47,
-
-  // Loading policies.
-  kLoadingFrameDefaultEager = 48,
-
-  // Implements sandbox flag: allow-downloads-without-user-activation.
-  kDownloadsWithoutUserActivation = 49,
+  // Implements sandbox flag: allow-downloads.
+  kDownloads = 49,
 
   // Allow execution while not in the viewport.
   kExecutionWhileOutOfViewport = 50,
@@ -129,11 +101,35 @@ enum FeaturePolicyFeature {
   kClientHintViewportWidth = 63,
   kClientHintWidth = 64,
 
-  // Whether all cross document access to this window object is treated as cross origin.
-  kDocumentAccess = 65,
-
   // Controls use of WebXR API.
   kWebXr = 66,
+
+  // Web Authentication (https://w3c.github.io/webauthn/#sctn-iframe-guidance)
+  kPublicKeyCredentialsGet = 67,
+
+  //Additional Client Hint
+  kClientHintUAMobile = 69,
+
+  // Storage Access API
+  kStorageAccessAPI = 70,
+
+  // Client Hint for the full browser version.
+  kClientHintUAFullVersion = 71,
+
+  // Trust Token API redemption and request signing operations
+  kTrustTokenRedemption = 72,
+
+  // Controls use of Conversion Measurement API
+  kConversionMeasurement = 73,
+
+  // Client Hint for UA platform version.
+  kClientHintUAPlatformVersion = 74,
+
+  // Controls use of Clipboard API Read.
+  kClipboardRead = 76,
+
+  // Controls use of Clipboard API Write.
+  kClipboardWrite = 77,
 
   // Don't change assigned numbers of any item, and don't reuse removed slots.
   // Add new features at the end of the enum.

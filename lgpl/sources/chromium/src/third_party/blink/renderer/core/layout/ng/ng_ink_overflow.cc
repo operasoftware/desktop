@@ -5,16 +5,18 @@
 #include "third_party/blink/renderer/core/layout/ng/ng_ink_overflow.h"
 
 #include "third_party/blink/renderer/core/layout/geometry/logical_rect.h"
+#include "third_party/blink/renderer/core/layout/geometry/writing_mode_converter.h"
 #include "third_party/blink/renderer/core/layout/line/line_orientation_utils.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 
 namespace blink {
 
 // static
-std::unique_ptr<NGInkOverflow> NGInkOverflow::TextInkOverflow(
+void NGInkOverflow::ComputeTextInkOverflow(
     const NGTextFragmentPaintInfo& text_info,
     const ComputedStyle& style,
-    const PhysicalSize& size) {
+    const PhysicalSize& size,
+    std::unique_ptr<NGInkOverflow>* ink_overflow_out) {
   // Glyph bounds is in logical coordinate, origin at the alphabetic baseline.
   const Font& font = style.GetFont();
   const FloatRect text_ink_bounds = font.TextInkBounds(text_info);
@@ -57,16 +59,23 @@ std::unique_ptr<NGInkOverflow> NGInkOverflow::TextInkOverflow(
   }
 
   PhysicalRect local_ink_overflow =
-      LogicalRect(ink_overflow).ConvertToPhysical(writing_mode, size);
+      WritingModeConverter({writing_mode, TextDirection::kLtr}, size)
+          .ToPhysical(LogicalRect(ink_overflow));
 
   // Uniting the frame rect ensures that non-ink spaces such side bearings, or
   // even space characters, are included in the visual rect for decorations.
   PhysicalRect local_rect(PhysicalOffset(), size);
-  if (local_rect.Contains(local_ink_overflow))
-    return nullptr;
+  if (local_rect.Contains(local_ink_overflow)) {
+    *ink_overflow_out = nullptr;
+    return;
+  }
   local_ink_overflow.Unite(local_rect);
   local_ink_overflow.ExpandEdgesToPixelBoundaries();
-  return std::make_unique<NGInkOverflow>(local_ink_overflow);
+  if (!*ink_overflow_out) {
+    *ink_overflow_out = std::make_unique<NGInkOverflow>(local_ink_overflow);
+    return;
+  }
+  (*ink_overflow_out)->self_ink_overflow = local_ink_overflow;
 }
 
 }  // namespace blink

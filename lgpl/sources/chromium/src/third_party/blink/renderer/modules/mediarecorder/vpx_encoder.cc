@@ -44,10 +44,10 @@ void VpxEncoder::ShutdownEncoder(std::unique_ptr<Thread> encoding_thread,
 
 VpxEncoder::VpxEncoder(
     bool use_vp9,
-    const VideoTrackRecorder::OnEncodedVideoCB& on_encoded_video_callback,
+    const VideoTrackRecorder::OnEncodedVideoCB& on_encoded_video_cb,
     int32_t bits_per_second,
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner)
-    : VideoTrackRecorder::Encoder(on_encoded_video_callback,
+    : VideoTrackRecorder::Encoder(on_encoded_video_cb,
                                   bits_per_second,
                                   std::move(main_task_runner)),
       use_vp9_(use_vp9) {
@@ -139,7 +139,7 @@ void VpxEncoder::EncodeOnEncodingTaskRunner(scoped_refptr<VideoFrame> frame,
       *origin_task_runner_.get(), FROM_HERE,
       CrossThreadBindOnce(
           OnFrameEncodeCompleted,
-          WTF::Passed(CrossThreadBindRepeating(on_encoded_video_callback_)),
+          WTF::Passed(CrossThreadBindRepeating(on_encoded_video_cb_)),
           video_params, std::move(data), std::move(alpha_data),
           capture_timestamp, keyframe));
 }
@@ -296,26 +296,25 @@ base::TimeDelta VpxEncoder::EstimateFrameDuration(const VideoFrame& frame) {
   DCHECK(encoding_task_runner_->BelongsToCurrentThread());
 
   using base::TimeDelta;
-  base::TimeDelta predicted_frame_duration;
-  if (!frame.metadata()->GetTimeDelta(VideoFrameMetadata::FRAME_DURATION,
-                                      &predicted_frame_duration) ||
-      predicted_frame_duration <= base::TimeDelta()) {
-    // The source of the video frame did not provide the frame duration.  Use
-    // the actual amount of time between the current and previous frame as a
-    // prediction for the next frame's duration.
-    // TODO(mcasas): This duration estimation could lead to artifacts if the
-    // cadence of the received stream is compromised (e.g. camera freeze, pause,
-    // remote packet loss).  Investigate using GetFrameRate() in this case.
-    predicted_frame_duration = frame.timestamp() - last_frame_timestamp_;
-  }
+
+  // If the source of the video frame did not provide the frame duration, use
+  // the actual amount of time between the current and previous frame as a
+  // prediction for the next frame's duration.
+  // TODO(mcasas): This duration estimation could lead to artifacts if the
+  // cadence of the received stream is compromised (e.g. camera freeze, pause,
+  // remote packet loss).  Investigate using GetFrameRate() in this case.
+  base::TimeDelta predicted_frame_duration =
+      frame.timestamp() - last_frame_timestamp_;
+  base::TimeDelta frame_duration =
+      frame.metadata()->frame_duration.value_or(predicted_frame_duration);
   last_frame_timestamp_ = frame.timestamp();
-  // Make sure |predicted_frame_duration| is in a safe range of values.
+  // Make sure |frame_duration| is in a safe range of values.
   const base::TimeDelta kMaxFrameDuration =
       base::TimeDelta::FromSecondsD(1.0 / 8);
   const base::TimeDelta kMinFrameDuration =
       base::TimeDelta::FromMilliseconds(1);
   return std::min(kMaxFrameDuration,
-                  std::max(predicted_frame_duration, kMinFrameDuration));
+                  std::max(frame_duration, kMinFrameDuration));
 }
 
 }  // namespace blink

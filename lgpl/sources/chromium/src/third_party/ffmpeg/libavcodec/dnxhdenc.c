@@ -26,7 +26,6 @@
 #include "libavutil/attributes.h"
 #include "libavutil/internal.h"
 #include "libavutil/opt.h"
-#include "libavutil/timer.h"
 
 #include "avcodec.h"
 #include "blockdsp.h"
@@ -220,7 +219,7 @@ static av_cold int dnxhd_init_vlc(DNXHDEncContext *ctx)
     ctx->vlc_bits  = ctx->orig_vlc_bits + max_level * 2;
     for (level = -max_level; level < max_level; level++) {
         for (run = 0; run < 2; run++) {
-            int index = (level << 1) | run;
+            int index = level * (1 << 1) | run;
             int sign, offset = 0, alevel = level;
 
             MASK_ABS(sign, alevel);
@@ -542,6 +541,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
     if (avctx->active_thread_type == FF_THREAD_SLICE) {
         for (i = 1; i < avctx->thread_count; i++) {
             ctx->thread[i] = av_malloc(sizeof(DNXHDEncContext));
+            if (!ctx->thread[i])
+                goto fail;
             memcpy(ctx->thread[i], ctx, sizeof(DNXHDEncContext));
         }
     }
@@ -616,7 +617,7 @@ void dnxhd_encode_block(DNXHDEncContext *ctx, int16_t *block,
         slevel = block[j];
         if (slevel) {
             int run_level = i - last_non_zero - 1;
-            int rlevel = (slevel << 1) | !!run_level;
+            int rlevel = slevel * (1 << 1) | !!run_level;
             put_bits(&ctx->m.pb, ctx->vlc_bits[rlevel], ctx->vlc_codes[rlevel]);
             if (run_level)
                 put_bits(&ctx->m.pb, ctx->run_bits[run_level],
@@ -696,7 +697,7 @@ int dnxhd_calc_ac_bits(DNXHDEncContext *ctx, int16_t *block, int last_index)
         level = block[j];
         if (level) {
             int run_level = i - last_non_zero - 1;
-            bits += ctx->vlc_bits[(level << 1) |
+            bits += ctx->vlc_bits[level * (1 << 1) |
                     !!run_level] + ctx->run_bits[run_level];
             last_non_zero = i;
         }
@@ -931,9 +932,8 @@ static int dnxhd_encode_thread(AVCodecContext *avctx, void *arg,
             int last_index = ctx->m.dct_quantize(&ctx->m, block,
                                                  ctx->is_444 ? (((i >> 1) % 3) < 1 ? 0 : 4): 4 & (2*i),
                                                  qscale, &overflow);
-            // START_TIMER;
+
             dnxhd_encode_block(ctx, block, last_index, n);
-            // STOP_TIMER("encode_block");
         }
     }
     if (put_bits_count(&ctx->m.pb) & 31)

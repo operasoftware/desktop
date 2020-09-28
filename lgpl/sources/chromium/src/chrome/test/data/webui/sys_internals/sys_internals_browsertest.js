@@ -5,7 +5,9 @@
 /**
  * @fileoverview Test suite for the SysInternals WebUI. (CrOS only)
  */
+
 GEN('#include "chrome/common/chrome_features.h"');
+GEN('#include "content/public/test/browser_test.h"');
 
 /* Set up this global variable to disable sending the update request. */
 DONT_SEND_UPDATE_REQUEST = true;
@@ -16,8 +18,6 @@ SysInternalsBrowserTest.prototype = {
   __proto__: testing.Test.prototype,
 
   browsePreload: 'chrome://sys-internals',
-
-  runAccessibilityChecks: false,
 
   isAsync: true,
 

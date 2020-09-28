@@ -37,9 +37,9 @@ from blinkpy.common import message_pool
 from blinkpy.tool import grammar
 from blinkpy.web_tests.controllers import single_test_runner
 from blinkpy.web_tests.models.test_run_results import TestRunResults
-from blinkpy.web_tests.models import test_expectations
 from blinkpy.web_tests.models import test_failures
 from blinkpy.web_tests.models import test_results
+from blinkpy.web_tests.models.typ_types import ResultType
 
 _log = logging.getLogger(__name__)
 
@@ -53,18 +53,20 @@ class TestRunInterruptedException(Exception):
         self.msg = reason
 
     def __reduce__(self):
-        return self.__class__, (self.reason,)
+        return self.__class__, (self.reason, )
 
 
 class WebTestRunner(object):
-
-    def __init__(self, options, port, printer, results_directory, test_is_slow_fn):
+    def __init__(self, options, port, printer, results_directory,
+                 test_is_slow_fn, result_sink):
         self._options = options
         self._port = port
         self._printer = printer
         self._results_directory = results_directory
         self._test_is_slow = test_is_slow_fn
-        self._sharder = Sharder(self._port.split_test, self._options.max_locked_shards)
+        self._test_result_sink = result_sink
+        self._sharder = Sharder(self._port.split_test,
+                                self._options.max_locked_shards)
         self._filesystem = self._port.host.filesystem
 
         self._expectations = None
@@ -73,7 +75,8 @@ class WebTestRunner(object):
 
         self._current_run_results = None
 
-    def run_tests(self, expectations, test_inputs, tests_to_skip, num_workers, retry_attempt):
+    def run_tests(self, expectations, test_inputs, tests_to_skip, num_workers,
+                  retry_attempt):
         batch_size = self._options.derived_batch_size
 
         # If we're retrying a test, then it's because we think it might be flaky
@@ -86,24 +89,25 @@ class WebTestRunner(object):
         self._expectations = expectations
         self._test_inputs = test_inputs
 
-        test_run_results = TestRunResults(self._expectations, len(test_inputs) + len(tests_to_skip))
+        test_run_results = TestRunResults(
+            self._expectations,
+            len(test_inputs) + len(tests_to_skip))
         self._current_run_results = test_run_results
         self._printer.num_tests = len(test_inputs)
         self._printer.num_completed = 0
 
-        if retry_attempt < 1:
-            self._printer.print_expected(test_run_results, self._expectations.get_tests_with_result_type)
-
         for test_name in set(tests_to_skip):
             result = test_results.TestResult(test_name)
-            result.type = test_expectations.SKIP
-            test_run_results.add(result, expected=True, test_is_slow=self._test_is_slow(test_name))
+            result.type = ResultType.Skip
+            test_run_results.add(
+                result,
+                expected=True,
+                test_is_slow=self._test_is_slow(test_name))
 
         self._printer.write_update('Sharding tests ...')
         locked_shards, unlocked_shards = self._sharder.shard_tests(
-            test_inputs,
-            int(self._options.child_processes),
-            self._options.fully_parallel,
+            test_inputs, int(self._options.child_processes),
+            self._options.fully_parallel, self._options.virtual_parallel,
             batch_size == 1)
 
         self._reorder_tests_by_args(locked_shards)
@@ -116,23 +120,37 @@ class WebTestRunner(object):
         num_workers = min(num_workers, len(all_shards))
 
         if retry_attempt < 1:
-            self._printer.print_workers_and_shards(self._port, num_workers, len(all_shards), len(locked_shards))
+            self._printer.print_workers_and_shards(self._port, num_workers,
+                                                   len(all_shards),
+                                                   len(locked_shards))
 
         if self._options.dry_run:
             return test_run_results
 
-        self._printer.write_update('Starting %s ...' % grammar.pluralize('worker', num_workers))
+        self._printer.write_update(
+            'Starting %s ...' % grammar.pluralize('worker', num_workers))
 
         start_time = time.time()
         try:
-            with message_pool.get(self, self._worker_factory, num_workers, self._port.host) as pool:
-                pool.run(('test_list', shard.name, shard.test_inputs, batch_size) for shard in all_shards)
+            with message_pool.get(self, self._worker_factory, num_workers,
+                                  self._port.host) as pool:
+                pool.run(('test_list', shard.name, shard.test_inputs,
+                          batch_size) for shard in all_shards)
 
             if self._shards_to_redo:
                 num_workers -= len(self._shards_to_redo)
                 if num_workers > 0:
-                    with message_pool.get(self, self._worker_factory, num_workers, self._port.host) as pool:
-                        pool.run(('test_list', shard.name, shard.test_inputs, batch_size) for shard in self._shards_to_redo)
+                    with message_pool.get(self, self._worker_factory,
+                                          num_workers,
+                                          self._port.host) as pool:
+                        pool.run(('test_list', shard.name, shard.test_inputs,
+                                  batch_size)
+                                 for shard in self._shards_to_redo)
+                else:
+                    self._mark_interrupted_tests_as_skipped(
+                        self._current_run_results)
+                    raise TestRunInterruptedException(
+                        'All workers have device failures. Exiting.')
         except TestRunInterruptedException as error:
             _log.warning(error.reason)
             test_run_results.interrupted = True
@@ -141,7 +159,8 @@ class WebTestRunner(object):
             self._printer.writeln('Interrupted, exiting ...')
             test_run_results.keyboard_interrupted = True
         except Exception as error:
-            _log.debug('%s("%s") raised, exiting', error.__class__.__name__, error)
+            _log.debug('%s("%s") raised, exiting', error.__class__.__name__,
+                       error)
             raise
         finally:
             test_run_results.run_time = time.time() - start_time
@@ -159,56 +178,73 @@ class WebTestRunner(object):
             shard.test_inputs = list(itertools.chain(*tests_by_args.values()))
 
     def _worker_factory(self, worker_connection):
-        return Worker(worker_connection, self._results_directory, self._options)
+        return Worker(worker_connection, self._results_directory,
+                      self._options)
 
     def _mark_interrupted_tests_as_skipped(self, test_run_results):
         for test_input in self._test_inputs:
             if test_input.test_name not in test_run_results.results_by_name:
-                result = test_results.TestResult(test_input.test_name, failures=[test_failures.FailureEarlyExit()])
+                result = test_results.TestResult(
+                    test_input.test_name,
+                    failures=[test_failures.FailureEarlyExit()])
                 # FIXME: We probably need to loop here if there are multiple iterations.
                 # FIXME: Also, these results are really neither expected nor unexpected. We probably
                 # need a third type of result.
-                test_run_results.add(result, expected=False, test_is_slow=self._test_is_slow(test_input.test_name))
+                test_run_results.add(
+                    result,
+                    expected=False,
+                    test_is_slow=self._test_is_slow(test_input.test_name))
 
     def _interrupt_if_at_failure_limits(self, test_run_results):
-
-        def interrupt_if_at_failure_limit(limit, failure_count, test_run_results, message):
+        def interrupt_if_at_failure_limit(limit, failure_count,
+                                          test_run_results, message):
             if limit and failure_count >= limit:
-                message += ' %d tests run.' % (test_run_results.expected + test_run_results.unexpected)
+                message += ' %d tests run.' % (
+                    test_run_results.expected + test_run_results.unexpected)
                 self._mark_interrupted_tests_as_skipped(test_run_results)
                 raise TestRunInterruptedException(message)
 
         interrupt_if_at_failure_limit(
             self._options.exit_after_n_failures,
-            test_run_results.unexpected_failures,
-            test_run_results,
-            'Exiting early after %d failures.' % test_run_results.unexpected_failures)
+            test_run_results.unexpected_failures, test_run_results,
+            'Exiting early after %d failures.' %
+            test_run_results.unexpected_failures)
         interrupt_if_at_failure_limit(
             self._options.exit_after_n_crashes_or_timeouts,
-            test_run_results.unexpected_crashes + test_run_results.unexpected_timeouts,
-            test_run_results,
-            'Exiting early after %d crashes and %d timeouts.' % (
-                test_run_results.unexpected_crashes, test_run_results.unexpected_timeouts))
+            test_run_results.unexpected_crashes +
+            test_run_results.unexpected_timeouts, test_run_results,
+            'Exiting early after %d crashes and %d timeouts.' %
+            (test_run_results.unexpected_crashes,
+             test_run_results.unexpected_timeouts))
 
     def _update_summary_with_result(self, test_run_results, result):
-        expected = self._expectations.matches_an_expected_result(
-            result.test_name, result.type, self._options.enable_sanitizer)
-        expectation_string = self._expectations.get_expectations_string(result.test_name)
-        actual_string = self._expectations.expectation_to_string(result.type)
-
-        if result.device_failed:
-            self._printer.print_finished_test(self._port, result, False, expectation_string, 'Aborted')
+        if not self._expectations:
             return
 
-        test_run_results.add(result, expected, self._test_is_slow(result.test_name))
-        self._printer.print_finished_test(self._port, result, expected, expectation_string, actual_string)
+        expected = self._expectations.matches_an_expected_result(
+            result.test_name, result.type)
+        expectation_string = ' '.join(
+            self._expectations.get_expectations(result.test_name).results)
+        if self._test_result_sink:
+            self._test_result_sink.sink(expected, result)
+
+        if result.device_failed:
+            self._printer.print_finished_test(self._port, result, False,
+                                              expectation_string, 'Aborted')
+            return
+
+        test_run_results.add(result, expected,
+                             self._test_is_slow(result.test_name))
+        self._printer.print_finished_test(self._port, result, expected,
+                                          expectation_string, result.type)
         self._interrupt_if_at_failure_limits(test_run_results)
 
     def handle(self, name, source, *args):
         method = getattr(self, '_handle_' + name)
         if method:
             return method(source, *args)
-        raise AssertionError('unknown message %s received from %s, args=%s' % (name, source, repr(args)))
+        raise AssertionError('unknown message %s received from %s, args=%s' %
+                             (name, source, repr(args)))
 
     # The _handle_* methods below are called indirectly by handle(),
     # and may not use all of their arguments - pylint: disable=unused-argument
@@ -228,7 +264,6 @@ class WebTestRunner(object):
 
 
 class Worker(object):
-
     def __init__(self, caller, results_directory, options):
         self._caller = caller
         self._worker_number = caller.worker_number
@@ -244,8 +279,7 @@ class Worker(object):
         self._port = None
         self._batch_count = None
         self._filesystem = None
-        self._primary_driver = None
-        self._secondary_driver = None
+        self._driver = None
         self._num_tests = 0
 
     def __del__(self):
@@ -258,38 +292,34 @@ class Worker(object):
         """
         self._host = self._caller.host
         self._filesystem = self._host.filesystem
-        self._port = self._host.port_factory.get(self._options.platform, self._options)
-        self._primary_driver = self._port.create_driver(self._worker_number)
-
-        if self._port.max_drivers_per_process() > 1:
-            self._secondary_driver = self._port.create_driver(self._worker_number)
-
+        self._port = self._host.port_factory.get(self._options.platform,
+                                                 self._options)
+        self._driver = self._port.create_driver(self._worker_number)
         self._batch_count = 0
 
     def handle(self, name, source, test_list_name, test_inputs, batch_size):
         assert name == 'test_list'
         for i, test_input in enumerate(test_inputs):
-            device_failed = self._run_test(test_input, test_list_name, batch_size)
+            device_failed = self._run_test(test_input, test_list_name,
+                                           batch_size)
             if device_failed:
-                self._caller.post('device_failed', test_list_name, test_inputs[i:])
+                self._caller.post('device_failed', test_list_name,
+                                  test_inputs[i:])
                 self._caller.stop_running()
                 return
-
-        # Kill the secondary driver at the end of each test shard.
-        self._kill_driver(self._secondary_driver, 'secondary')
 
         self._caller.post('finished_test_list', test_list_name)
 
     def _update_test_input(self, test_input):
         if test_input.reference_files is None:
             # Lazy initialization.
-            test_input.reference_files = self._port.reference_files(test_input.test_name)
+            test_input.reference_files = self._port.reference_files(
+                test_input.test_name)
 
     def _run_test(self, test_input, shard_name, batch_size):
-        # If the batch size has been exceeded, kill the drivers.
+        # If the batch size has been exceeded, kill the driver.
         if batch_size > 0 and self._batch_count >= batch_size:
-            self._kill_driver(self._primary_driver, 'primary')
-            self._kill_driver(self._secondary_driver, 'secondary')
+            self._kill_driver()
             self._batch_count = 0
 
         self._batch_count += 1
@@ -301,7 +331,7 @@ class Worker(object):
         self._caller.post('started_test', test_input)
         result = single_test_runner.run_single_test(
             self._port, self._options, self._results_directory, self._name,
-            self._primary_driver, self._secondary_driver, test_input)
+            self._driver, test_input)
 
         result.shard_name = shard_name
         result.worker_name = self._name
@@ -314,49 +344,57 @@ class Worker(object):
 
     def stop(self):
         _log.debug('%s cleaning up', self._name)
-        self._kill_driver(self._primary_driver, 'primary')
-        self._kill_driver(self._secondary_driver, 'secondary')
+        self._kill_driver()
 
-    def _kill_driver(self, driver, label):
+    def _kill_driver(self):
         # Be careful about how and when we kill the driver; if driver.stop()
         # raises an exception, this routine may get re-entered via __del__.
-        if driver:
+        if self._driver:
             # When tracing we need to go through the standard shutdown path to
             # ensure that the trace is recorded properly.
-            if any(i in ['--trace-startup', '--trace-shutdown']
-                   for i in self._options.additional_driver_flag):
+            tracing_enabled = self._port.get_option(
+                'enable_tracing') is not None or any(
+                    flag.startswith(tracing_command) for tracing_command in
+                    ['--trace-startup', '--trace-shutdown']
+                    for flag in self._options.additional_driver_flag)
+
+            if tracing_enabled:
                 _log.debug('%s waiting %d seconds for %s driver to shutdown',
-                           self._name, self._port.driver_stop_timeout(), label)
-                driver.stop(timeout_secs=self._port.driver_stop_timeout())
+                           self._name, self._port.driver_stop_timeout(),
+                           self._name)
+                self._driver.stop(
+                    timeout_secs=self._port.driver_stop_timeout())
                 return
 
             # Otherwise, kill the driver immediately to speed up shutdown.
-            _log.debug('%s killing %s driver', self._name, label)
-            driver.stop()
+            _log.debug('%s killing driver', self._name)
+            self._driver.stop()
 
     def _clean_up_after_test(self, test_input, result):
-        test_name = test_input.test_name
+        test_description = test_input.test_name
+        test_args = self._port.args_for_test(test_input.test_name)
+        if test_args:
+            test_description += ' with args ' + ' '.join(test_args)
 
         if result.failures:
             # Check and kill the driver if we need to.
             if any([f.driver_needs_restart() for f in result.failures]):
                 # FIXME: Need more information in failure reporting so
                 # we know which driver needs to be restarted. For now
-                # we kill both drivers.
-                self._kill_driver(self._primary_driver, 'primary')
-                self._kill_driver(self._secondary_driver, 'secondary')
+                # we kill the driver.
+                self._kill_driver()
 
                 # Reset the batch count since the shell just bounced.
                 self._batch_count = 0
 
             # Print the error message(s).
-            _log.debug('%s %s failed:', self._name, test_name)
+            _log.debug('%s %s failed:', self._name, test_description)
             for f in result.failures:
                 _log.debug('%s  %s', self._name, f.message())
-        elif result.type == test_expectations.SKIP:
-            _log.debug('%s %s skipped', self._name, test_name)
+        elif result.type == ResultType.Skip:
+            _log.debug('%s %s skipped', self._name, test_description)
         else:
-            _log.debug('%s %s passed', self._name, test_name)
+            _log.debug('%s %s passed', self._name, test_description)
 
 
 class TestShard(object):
@@ -376,12 +414,12 @@ class TestShard(object):
 
 
 class Sharder(object):
-
     def __init__(self, test_split_fn, max_locked_shards):
         self._split = test_split_fn
         self._max_locked_shards = max_locked_shards
 
-    def shard_tests(self, test_inputs, num_workers, fully_parallel, run_singly):
+    def shard_tests(self, test_inputs, num_workers, fully_parallel,
+                    parallel_includes_virtual, run_singly):
         """Groups tests into batches.
         This helps ensure that tests that depend on each other (aka bad tests!)
         continue to run together as most cross-tests dependencies tend to
@@ -397,7 +435,8 @@ class Sharder(object):
         if num_workers == 1:
             return self._shard_in_two(test_inputs)
         elif fully_parallel:
-            return self._shard_every_file(test_inputs, run_singly)
+            return self._shard_every_file(test_inputs, run_singly,
+                                          parallel_includes_virtual)
         return self._shard_by_directory(test_inputs)
 
     def _shard_in_two(self, test_inputs):
@@ -422,7 +461,7 @@ class Sharder(object):
 
         return locked_shards, unlocked_shards
 
-    def _shard_every_file(self, test_inputs, run_singly):
+    def _shard_every_file(self, test_inputs, run_singly, virtual_is_unlocked):
         """Returns two lists of shards, each shard containing a single test file.
 
         This mode gets maximal parallelism at the cost of much higher flakiness.
@@ -437,7 +476,8 @@ class Sharder(object):
             # which would be really redundant.
             if test_input.requires_lock:
                 locked_shards.append(TestShard('.', [test_input]))
-            elif test_input.test_name.startswith('virtual') and not run_singly:
+            elif (test_input.test_name.startswith('virtual') and not run_singly
+                  and not virtual_is_unlocked):
                 # This violates the spirit of sharding every file, but in practice, since the
                 # virtual test suites require a different commandline flag and thus a restart
                 # of content_shell, it's too slow to shard them fully.
@@ -445,11 +485,13 @@ class Sharder(object):
             else:
                 unlocked_shards.append(TestShard('.', [test_input]))
 
-        locked_virtual_shards, unlocked_virtual_shards = self._shard_by_directory(virtual_inputs)
+        locked_virtual_shards, unlocked_virtual_shards = self._shard_by_directory(
+            virtual_inputs)
 
         # The locked shards still need to be limited to self._max_locked_shards in order to not
         # overload the http server for the http tests.
-        return (self._resize_shards(locked_virtual_shards + locked_shards, self._max_locked_shards, 'locked_shard'),
+        return (self._resize_shards(locked_virtual_shards + locked_shards,
+                                    self._max_locked_shards, 'locked_shard'),
                 unlocked_virtual_shards + unlocked_shards)
 
     def _shard_by_directory(self, test_inputs):
@@ -493,7 +535,8 @@ class Sharder(object):
         # can handle multiple shards, we should probably do something like
         # limit this to no more than a quarter of all workers, e.g.:
         # return max(math.ceil(num_workers / 4.0), 1)
-        return (self._resize_shards(locked_shards, self._max_locked_shards, 'locked_shard'),
+        return (self._resize_shards(locked_shards, self._max_locked_shards,
+                                    'locked_shard'),
                 unlocked_slow_shards + unlocked_shards)
 
     def _resize_shards(self, old_shards, max_new_shards, shard_name_prefix):
@@ -524,7 +567,8 @@ class Sharder(object):
         new_shards = []
         remaining_shards = old_shards
         while remaining_shards:
-            some_shards, remaining_shards = split_at(remaining_shards, num_old_per_new)
+            some_shards, remaining_shards = split_at(remaining_shards,
+                                                     num_old_per_new)
             new_shards.append(
                 TestShard('%s_%d' % (shard_name_prefix, len(new_shards) + 1),
                           extract_and_flatten(some_shards)))

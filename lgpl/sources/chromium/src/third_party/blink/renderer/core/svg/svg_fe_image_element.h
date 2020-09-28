@@ -48,13 +48,11 @@ class SVGFEImageElement final : public SVGFilterPrimitiveStandardAttributes,
     return preserve_aspect_ratio_.Get();
   }
 
-  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override {
-    return SVGURIReference::GetCheckedAttributeTypes();
-  }
+  const SVGElement* TargetElement() const;
 
   void Dispose();
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   void SvgAttributeChanged(const QualifiedName&) override;

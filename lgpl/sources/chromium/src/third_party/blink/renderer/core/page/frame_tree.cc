@@ -217,7 +217,8 @@ FrameTree::FindResult FrameTree::FindOrCreateFrameForNavigation(
 
   if (frame && !new_window) {
     if (frame->GetPage() != current_frame->GetPage())
-      frame->GetPage()->GetChromeClient().Focus(current_frame);
+      frame->FocusPage(current_frame);
+
     // Focusing can fire onblur, so check for detach.
     if (!frame->GetPage())
       frame = nullptr;
@@ -349,7 +350,7 @@ Frame* FrameTree::TraverseNext(const Frame* stay_within) const {
   return nullptr;
 }
 
-void FrameTree::Trace(blink::Visitor* visitor) {
+void FrameTree::Trace(Visitor* visitor) const {
   visitor->Trace(this_frame_);
 }
 
@@ -384,7 +385,7 @@ static void printFrames(const blink::Frame* frame,
   printf("  document=%p\n", local_frame ? local_frame->GetDocument() : nullptr);
   printIndent(indent);
   printf("  uri=%s\n\n",
-         local_frame
+         local_frame && local_frame->GetDocument()
              ? local_frame->GetDocument()->Url().GetString().Utf8().c_str()
              : nullptr);
 

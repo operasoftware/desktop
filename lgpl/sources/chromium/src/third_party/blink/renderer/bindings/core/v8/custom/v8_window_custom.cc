@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/binding_security.h"
+#include "third_party/blink/renderer/bindings/core/v8/js_based_event_listener.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
@@ -57,7 +58,6 @@
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
@@ -98,42 +98,6 @@ void V8Window::LocationAttributeGetterCustom(
   }
 
   V8SetReturnValue(info, wrapper);
-}
-
-void V8Window::EventAttributeGetterCustom(
-    const v8::FunctionCallbackInfo<v8::Value>& info) {
-  LocalDOMWindow* impl = To<LocalDOMWindow>(V8Window::ToImpl(info.Holder()));
-  v8::Isolate* isolate = info.GetIsolate();
-  ExceptionState exception_state(isolate, ExceptionState::kGetterContext,
-                                 "Window", "event");
-  if (!BindingSecurity::ShouldAllowAccessTo(CurrentDOMWindow(isolate), impl,
-                                            exception_state)) {
-    return;
-  }
-
-  v8::Local<v8::Value> js_event;
-  if (!V8PrivateProperty::GetGlobalEvent(isolate)
-           .GetOrUndefined(info.Holder())
-           .ToLocal(&js_event)) {
-    return;
-  }
-
-  // Track usage of window.event when the event's target is inside V0 shadow
-  // tree.
-  // TODO(yukishiino): Make window.event [Replaceable] and simplify the
-  // following IsWrapper/ToImplWithTypeCheck hack.
-  if (V8DOMWrapper::IsWrapper(isolate, js_event)) {
-    if (Event* event = V8Event::ToImplWithTypeCheck(isolate, js_event)) {
-      if (event->target()) {
-        Node* target_node = event->target()->ToNode();
-        if (target_node && target_node->IsInV0ShadowTree()) {
-          UseCounter::Count(CurrentExecutionContext(isolate),
-                            WebFeature::kWindowEventInV0ShadowTree);
-        }
-      }
-    }
-  }
-  V8SetReturnValue(info, js_event);
 }
 
 void V8Window::FrameElementAttributeGetterCustom(
@@ -269,11 +233,11 @@ void V8Window::NamedPropertyGetterCustom(
   }
 
   // Search named items in the document.
-  Document* doc = To<LocalFrame>(frame)->GetDocument();
-  if (!doc || !doc->IsHTMLDocument())
+  auto* doc = DynamicTo<HTMLDocument>(To<LocalFrame>(frame)->GetDocument());
+  if (!doc)
     return;
 
-  bool has_named_item = ToHTMLDocument(doc)->HasNamedItem(name);
+  bool has_named_item = doc->HasNamedItem(name);
   bool has_id_item = doc->HasElementWithId(name);
 
   if (!has_named_item && !has_id_item)

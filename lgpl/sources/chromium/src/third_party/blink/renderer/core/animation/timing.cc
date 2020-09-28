@@ -4,8 +4,8 @@
 
 #include "third_party/blink/renderer/core/animation/timing.h"
 
-#include "third_party/blink/renderer/core/animation/computed_effect_timing.h"
-#include "third_party/blink/renderer/core/animation/effect_timing.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_computed_effect_timing.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_effect_timing.h"
 #include "third_party/blink/renderer/core/animation/timing_calculations.h"
 
 namespace blink {
@@ -114,11 +114,10 @@ ComputedEffectTiming* Timing::getComputedTiming(
   computed_timing->setEndTime(EndTimeInternal() * 1000);
   computed_timing->setActiveDuration(ActiveDuration() * 1000);
 
-  if (IsNull(calculated_timing.local_time)) {
+  if (calculated_timing.local_time)
+    computed_timing->setLocalTime(calculated_timing.local_time.value() * 1000);
+  else
     computed_timing->setLocalTimeToNull();
-  } else {
-    computed_timing->setLocalTime(calculated_timing.local_time * 1000);
-  }
 
   if (calculated_timing.is_in_effect) {
     DCHECK(calculated_timing.current_iteration);
@@ -153,14 +152,16 @@ ComputedEffectTiming* Timing::getComputedTiming(
 }
 
 Timing::CalculatedTiming Timing::CalculateTimings(
-    double local_time,
+    base::Optional<double> local_time,
+    base::Optional<Phase> timeline_phase,
     AnimationDirection animation_direction,
     bool is_keyframe_effect,
     base::Optional<double> playback_rate) const {
   const double active_duration = ActiveDuration();
 
-  const Timing::Phase current_phase =
-      CalculatePhase(active_duration, local_time, animation_direction, *this);
+  Timing::Phase current_phase = CalculatePhase(
+      active_duration, local_time, timeline_phase, animation_direction, *this);
+
   const base::Optional<AnimationTimeDelta> active_time =
       CalculateActiveTime(active_duration, ResolvedFillMode(is_keyframe_effect),
                           local_time, current_phase, *this);
@@ -187,7 +188,7 @@ Timing::CalculatedTiming Timing::CalculateTimings(
                                           current_direction_is_forwards,
                                           timing_function);
 
-  double time_to_next_iteration = std::numeric_limits<double>::infinity();
+  AnimationTimeDelta time_to_next_iteration = AnimationTimeDelta::Max();
   // Conditionally compute the time to next iteration, which is only
   // applicable if the iteration duration is non-zero.
   if (iteration_duration) {
@@ -204,9 +205,12 @@ Timing::CalculatedTiming Timing::CalculateTimings(
       // active_time cannot be null if iteration_time is not null.
       DCHECK(active_time);
       time_to_next_iteration =
-          iteration_duration - iteration_time->InSecondsF();
-      if (active_duration - active_time->InSecondsF() < time_to_next_iteration)
-        time_to_next_iteration = std::numeric_limits<double>::infinity();
+          AnimationTimeDelta::FromSecondsD(iteration_duration) -
+          iteration_time.value();
+      if (AnimationTimeDelta::FromSecondsD(active_duration) -
+              active_time.value() <
+          time_to_next_iteration)
+        time_to_next_iteration = AnimationTimeDelta::Max();
     }
   }
 

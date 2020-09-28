@@ -1,7 +1,6 @@
 # Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 """Fetches a copy of the latest state of a W3C test repository and commits.
 
 If this script is given the argument --auto-update, it will also:
@@ -17,7 +16,6 @@ import json
 import logging
 import re
 
-from blinkpy.common.net.buildbot import current_build_link
 from blinkpy.common.net.git_cl import GitCL
 from blinkpy.common.net.network_transaction import NetworkTimeout
 from blinkpy.common.path_finder import PathFinder
@@ -32,22 +30,21 @@ from blinkpy.w3c.test_copier import TestCopier
 from blinkpy.w3c.wpt_expectations_updater import WPTExpectationsUpdater
 from blinkpy.w3c.wpt_github import WPTGitHub
 from blinkpy.w3c.wpt_manifest import WPTManifest, BASE_MANIFEST_NAME
-from blinkpy.web_tests.models.test_expectations import TestExpectations, TestExpectationParser
 from blinkpy.web_tests.port.base import Port
+from blinkpy.web_tests.models.test_expectations import TestExpectations
 
 # Settings for how often to check try job results and how long to wait.
 POLL_DELAY_SECONDS = 2 * 60
 TIMEOUT_SECONDS = 210 * 60
 
 # Sheriff calendar URL, used for getting the ecosystem infra sheriff to TBR.
-ROTATIONS_URL = 'https://rota-ng.appspot.com/legacy/all_rotations.js'
-TBR_FALLBACK = 'robertma'
+ROTATIONS_URL = 'https://chrome-ops-rotation-proxy.appspot.com/current/grotation:chrome-ecosystem-infra'
+TBR_FALLBACK = 'robertma@google.com'
 
 _log = logging.getLogger(__file__)
 
 
 class TestImporter(object):
-
     def __init__(self, host, wpt_github=None):
         self.host = host
         self.wpt_github = wpt_github
@@ -73,6 +70,9 @@ class TestImporter(object):
         self.new_test_expectations = {}
         self.verbose = False
 
+        args = ['--clean-up-affected-tests-only']
+        self._expectations_updater = WPTExpectationsUpdater(self.host, args)
+
     def main(self, argv=None):
         # TODO(robertma): Test this method! Split it to make it easier to test
         # if necessary.
@@ -82,12 +82,14 @@ class TestImporter(object):
         self.verbose = options.verbose
         log_level = logging.DEBUG if self.verbose else logging.INFO
         configure_logging(logging_level=log_level, include_time=True)
-        if options.verbose:
-            # Print out the full output when executive.run_command fails.
-            self.host.executive.error_output_limit = None
+
+        # Having the full output when executive.run_command fails is useful when
+        # investigating a failed import, as all we have are logs.
+        self.executive.error_output_limit = None
 
         if options.auto_update and options.auto_upload:
-            _log.error('--auto-upload and --auto-update cannot be used together.')
+            _log.error(
+                '--auto-upload and --auto-update cannot be used together.')
             return 1
 
         if not self.checkout_is_okay():
@@ -104,8 +106,10 @@ class TestImporter(object):
                          '/+/master/docs/testing/web_platform_tests.md'
                          '#GitHub-credentials for instructions on how to set '
                          'your credentials up.')
-        self.wpt_github = self.wpt_github or WPTGitHub(self.host, gh_user, gh_token)
-        self.git_cl = GitCL(self.host, auth_refresh_token_json=options.auth_refresh_token_json)
+        self.wpt_github = self.wpt_github or WPTGitHub(self.host, gh_user,
+                                                       gh_token)
+        self.git_cl = GitCL(
+            self.host, auth_refresh_token_json=options.auth_refresh_token_json)
 
         _log.debug('Noting the current Chromium revision.')
         chromium_revision = self.chromium_git.latest_git_commit()
@@ -124,10 +128,12 @@ class TestImporter(object):
         self.last_wpt_revision = self._get_last_imported_wpt_revision()
         import_commit = 'wpt@%s' % self.wpt_revision
 
-        _log.info('Importing %s to Chromium %s', import_commit, chromium_revision)
+        _log.info('Importing %s to Chromium %s', import_commit,
+                  chromium_revision)
 
         if options.ignore_exportable_commits:
-            commit_message = self._commit_message(chromium_revision, import_commit)
+            commit_message = self._commit_message(chromium_revision,
+                                                  import_commit)
         else:
             commits = self.apply_exportable_commits_locally(local_wpt)
             if commits is None:
@@ -135,7 +141,9 @@ class TestImporter(object):
                 _log.error('Aborting import to prevent clobbering commits.')
                 return 1
             commit_message = self._commit_message(
-                chromium_revision, import_commit, locally_applied_commits=commits)
+                chromium_revision,
+                import_commit,
+                locally_applied_commits=commits)
 
         self._clear_out_dest_path()
 
@@ -151,8 +159,9 @@ class TestImporter(object):
         # TODO(crbug.com/800570 robertma): Re-enable it once we fix the bug.
         # self._delete_orphaned_baselines()
 
-        _log.info('Updating TestExpectations for any removed or renamed tests.')
-        self.update_all_test_expectations_files(self._list_deleted_tests(), self._list_renamed_tests())
+        # Remove expectations for tests that were deleted and rename tests
+        # in expectations for renamed tests.
+        self._expectations_updater.cleanup_test_expectations_files()
 
         if not self.chromium_git.has_working_directory_changes():
             _log.info('Done: no changes to import.')
@@ -180,7 +189,8 @@ class TestImporter(object):
         if not self.run_commit_queue_for_cl():
             return 1
 
-        if not self.send_notifications(local_wpt, options.auto_file_bugs, options.monorail_auth_json):
+        if not self.send_notifications(local_wpt, options.auto_file_bugs,
+                                       options.monorail_auth_json):
             return 1
 
         return 0
@@ -275,40 +285,47 @@ class TestImporter(object):
 
     def blink_try_bots(self):
         """Returns the collection of builders used for updating expectations."""
-        return self.host.builders.all_try_builder_names()
+        return self.host.builders.filter_builders(
+            is_try=True, exclude_specifiers={'android'})
 
     def parse_args(self, argv):
         parser = argparse.ArgumentParser()
         parser.description = __doc__
         parser.add_argument(
-            '-v', '--verbose', action='store_true',
+            '-v',
+            '--verbose',
+            action='store_true',
             help='log extra details that may be helpful when debugging')
         parser.add_argument(
-            '--ignore-exportable-commits', action='store_true',
+            '--ignore-exportable-commits',
+            action='store_true',
             help='do not check for exportable commits that would be clobbered')
         parser.add_argument('-r', '--revision', help='target wpt revision')
         parser.add_argument(
-            '--auto-upload', action='store_true',
+            '--auto-upload',
+            action='store_true',
             help='upload a CL, update expectations, but do NOT trigger CQ')
         parser.add_argument(
-            '--auto-update', action='store_true',
+            '--auto-update',
+            action='store_true',
             help='upload a CL, update expectations, and trigger CQ')
         parser.add_argument(
-            '--auto-file-bugs', action='store_true',
+            '--auto-file-bugs',
+            action='store_true',
             help='file new failures automatically to crbug.com')
         parser.add_argument(
             '--auth-refresh-token-json',
             help='authentication refresh token JSON file used for try jobs, '
-                 'generally not necessary on developer machines')
+            'generally not necessary on developer machines')
         parser.add_argument(
             '--credentials-json',
             help='A JSON file with GitHub credentials, '
-                 'generally not necessary on developer machines')
+            'generally not necessary on developer machines')
         parser.add_argument(
             '--monorail-auth-json',
             help='A JSON file containing the private key of a service account '
-                 'to access Monorail (crbug.com), only needed when '
-                 '--auto-file-bugs is used')
+            'to access Monorail (crbug.com), only needed when '
+            '--auto-file-bugs is used')
 
         return parser.parse_args(argv)
 
@@ -317,7 +334,8 @@ class TestImporter(object):
             _log.warning('Checkout is dirty; aborting.')
             return False
         # TODO(robertma): Add a method in Git to query a range of commits.
-        local_commits = self.chromium_git.run(['log', '--oneline', 'origin/master..HEAD'])
+        local_commits = self.chromium_git.run(
+            ['log', '--oneline', 'origin/master..HEAD'])
         if local_commits:
             _log.warning('Checkout has local commits before import.')
         return True
@@ -355,7 +373,8 @@ class TestImporter(object):
                 _log.error('Commit cannot be applied cleanly:')
                 _log.error(error)
                 return None
-            self.wpt_git.commit_locally_with_message('Applying patch %s' % commit.sha)
+            self.wpt_git.commit_locally_with_message(
+                'Applying patch %s' % commit.sha)
         return commits
 
     def exportable_but_not_exported_commits(self, local_wpt):
@@ -368,7 +387,11 @@ class TestImporter(object):
         # irrelevant and ignored here, because it tests patches *individually*
         # while the importer tries to reapply these patches *cumulatively*.
         commits, _ = exportable_commits_over_last_n_commits(
-            self.host, local_wpt, self.wpt_github, require_clean=False, verify_merged_pr=True)
+            self.host,
+            local_wpt,
+            self.wpt_github,
+            require_clean=False,
+            verify_merged_pr=True)
         return commits
 
     def _generate_manifest(self):
@@ -395,7 +418,8 @@ class TestImporter(object):
         _log.info('Cleaning out tests from %s.', self.dest_path)
         should_remove = lambda fs, dirname, basename: (
             is_file_exportable(fs.relpath(fs.join(dirname, basename), self.finder.chromium_base())))
-        files_to_delete = self.fs.files_under(self.dest_path, file_filter=should_remove)
+        files_to_delete = self.fs.files_under(
+            self.dest_path, file_filter=should_remove)
         for subpath in files_to_delete:
             self.remove(self.finder.path_from_web_tests('external', subpath))
 
@@ -410,13 +434,16 @@ class TestImporter(object):
             self.finder.chromium_base())
         return changed_files == [wpt_base_manifest]
 
-    def _commit_message(self, chromium_commit_sha, import_commit_sha,
+    def _commit_message(self,
+                        chromium_commit_sha,
+                        import_commit_sha,
                         locally_applied_commits=None):
         message = 'Import {}\n\nUsing wpt-import in Chromium {}.\n'.format(
             import_commit_sha, chromium_commit_sha)
         if locally_applied_commits:
             message += 'With Chromium commits locally applied on WPT:\n'
-            message += '\n'.join(str(commit) for commit in locally_applied_commits)
+            message += '\n'.join(
+                str(commit) for commit in locally_applied_commits)
         message += '\nNo-Export: true'
         return message
 
@@ -425,13 +452,15 @@ class TestImporter(object):
 
         is_baseline_filter = lambda fs, dirname, basename: is_testharness_baseline(basename)
 
-        baselines = self.fs.files_under(self.dest_path, file_filter=is_baseline_filter)
+        baselines = self.fs.files_under(
+            self.dest_path, file_filter=is_baseline_filter)
 
         # Note about possible refactoring:
         #  - the manifest path could be factored out to a common location, and
         #  - the logic for reading the manifest could be factored out from here
         # and the Port class.
-        manifest_path = self.finder.path_from_web_tests('external', 'wpt', 'MANIFEST.json')
+        manifest_path = self.finder.path_from_web_tests(
+            'external', 'wpt', 'MANIFEST.json')
         manifest = WPTManifest(self.fs.read_text_file(manifest_path))
         wpt_urls = manifest.all_urls()
 
@@ -451,7 +480,8 @@ class TestImporter(object):
         # TODO(qyearsley): Ensure that this works with platform baselines and
         # virtual baselines, and add unit tests.
         base = '/' + rel_path.replace('-expected.txt', '')
-        return any((base + ext) in wpt_urls for ext in Port.supported_file_extensions)
+        return any(
+            (base + ext) in wpt_urls for ext in Port.supported_file_extensions)
 
     def copyfile(self, source, destination):
         _log.debug('cp %s %s', source, destination)
@@ -462,7 +492,7 @@ class TestImporter(object):
         self.fs.remove(dest)
 
     def _upload_patchset(self, message):
-        self.git_cl.run(['upload', '-f', '-t', message, '--gerrit'])
+        self.git_cl.run(['upload', '-f', '-t', message])
 
     def _upload_cl(self):
         _log.info('Uploading change list.')
@@ -477,12 +507,14 @@ class TestImporter(object):
         self.git_cl.run([
             'upload',
             '-f',
-            '--gerrit',
-            '--message-file', temp_path,
-            '--tbrs', sheriff_email,
+            '--message-file',
+            temp_path,
+            '--tbrs',
+            sheriff_email,
             # Note: we used to CC all the directory owners, but have stopped
             # in search of a better notification mechanism. (crbug.com/765334)
-            '--cc', 'robertma@chromium.org',
+            '--cc',
+            'robertma@chromium.org',
         ])
 
         self.fs.remove(temp_path)
@@ -502,10 +534,6 @@ class TestImporter(object):
         """
         # TODO(robertma): Add a method in Git for getting the commit body.
         description = self.chromium_git.run(['log', '-1', '--format=%B'])
-        build_link = current_build_link(self.host)
-        if build_link:
-            description += 'Build: %s\n\n' % build_link
-
         description += (
             'Note to sheriffs: This CL imports external tests and adds\n'
             'expectations for those tests; if this CL is large and causes\n'
@@ -515,7 +543,8 @@ class TestImporter(object):
             '/chromium/src/+/master/docs/testing/web_platform_tests.md\n\n')
 
         if directory_owners:
-            description += self._format_directory_owners(directory_owners) + '\n\n'
+            description += self._format_directory_owners(
+                directory_owners) + '\n\n'
 
         # Prevent FindIt from auto-reverting import CLs.
         description += 'NOAUTOREVERT=true\n'
@@ -535,42 +564,34 @@ class TestImporter(object):
         return '\n'.join(message_lines)
 
     def tbr_reviewer(self):
-        """Returns the user name or email address to use as the reviewer.
+        """Returns the email address to use as the reviewer.
 
         This tries to fetch the current ecosystem infra sheriff, but falls back
         in case of error.
-
-        Either a user name (which is assumed to have a chromium.org email
-        address) or a full email address (for other cases) is returned.
         """
-        username = ''
+        email = ''
         try:
-            username = self._fetch_ecosystem_infra_sheriff_username()
+            email = self._fetch_ecosystem_infra_sheriff_email()
         except (IOError, KeyError, ValueError) as error:
             _log.error('Exception while fetching current sheriff: %s', error)
-        if username in ['kyleju']:
-            _log.warning('Cannot TBR by %s: not a committer', username)
-            username = ''
-        return username or TBR_FALLBACK
+        if email in ['kyleju@google.com']:
+            _log.warning('Cannot TBR by %s: not a committer', email)
+            email = ''
+        return email or TBR_FALLBACK
 
-    def _fetch_ecosystem_infra_sheriff_username(self):
+    def _fetch_ecosystem_infra_sheriff_email(self):
         try:
             content = self.host.web.get_binary(ROTATIONS_URL)
         except NetworkTimeout:
             _log.error('Cannot fetch %s', ROTATIONS_URL)
             return ''
         data = json.loads(content)
-        today = datetime.date.fromtimestamp(self.host.time()).isoformat()
-        index = data['rotations'].index('ecosystem_infra')
-        calendar = data['calendar']
-        for entry in calendar:
-            if entry['date'] == today:
-                if not entry['participants'][index]:
-                    _log.info('No sheriff today.')
-                    return ''
-                return entry['participants'][index][0]
-        _log.error('No entry found for date %s in rotations table.', today)
-        return ''
+        if not data.get('emails'):
+            _log.error(
+                'No email found for current sheriff. Retrieved content: %s',
+                content)
+            return ''
+        return data['emails'][0]
 
     def fetch_new_expectations_and_baselines(self):
         """Modifies expectation lines and baselines based on try job results.
@@ -582,86 +603,14 @@ class TestImporter(object):
         This is the same as invoking the `wpt-update-expectations` script.
         """
         _log.info('Adding test expectations lines to TestExpectations.')
-        expectation_updater = WPTExpectationsUpdater(self.host)
-        self.rebaselined_tests, self.new_test_expectations = expectation_updater.update_expectations()
-
-    def update_all_test_expectations_files(self, deleted_tests, renamed_tests):
-        """Updates all test expectations files for tests that have been deleted or renamed.
-
-        This is only for deleted or renamed tests in the initial import,
-        not for tests that have failures in try jobs.
-        """
-        port = self.host.port_factory.get()
-        for path, file_contents in port.all_expectations_dict().iteritems():
-            parser = TestExpectationParser(port, all_tests=None, is_lint_mode=False)
-            expectation_lines = parser.parse(path, file_contents)
-            self._update_single_test_expectations_file(port, path, expectation_lines, deleted_tests, renamed_tests)
-
-    def _update_single_test_expectations_file(self, port, path, expectation_lines, deleted_tests, renamed_tests):
-        """Updates a single test expectations file."""
-        # FIXME: This won't work for removed or renamed directories with test
-        # expectations that are directories rather than individual tests.
-        new_lines = []
-        changed_lines = []
-        for expectation_line in expectation_lines:
-            expectation_test_name = expectation_line.name
-            if expectation_test_name and self.finder.is_webdriver_test_path(expectation_test_name):
-                expectation_test_name, subtest_suffix = port.split_webdriver_test_name(expectation_test_name)
-            if expectation_test_name in deleted_tests:
-                continue
-            if expectation_test_name in renamed_tests:
-                if self.finder.is_webdriver_test_path(expectation_line.name):
-                    renamed_test = renamed_tests[expectation_test_name]
-                    expectation_line.name = port.add_webdriver_subtest_suffix(renamed_test, subtest_suffix)
-                else:
-                    expectation_line.name = renamed_tests[expectation_test_name]
-                # Upon parsing the file, a "path does not exist" warning is expected
-                # to be there for tests that have been renamed, and if there are warnings,
-                # then the original string is used. If the warnings are reset, then the
-                # expectation line is re-serialized when output.
-                expectation_line.warnings = []
-                changed_lines.append(expectation_line)
-            new_lines.append(expectation_line)
-        new_file_contents = TestExpectations.list_to_string(new_lines, reconstitute_only_these=changed_lines)
-        self.host.filesystem.write_text_file(path, new_file_contents)
-
-    def _list_deleted_tests(self):
-        """List of web tests that have been deleted."""
-        # TODO(robertma): Improve Git.changed_files so that we can use it here.
-        out = self.chromium_git.run(['diff', 'origin/master', '-M100%', '--diff-filter=D', '--name-only'])
-        deleted_tests = []
-        for path in out.splitlines():
-            test = self._relative_to_web_test_dir(path)
-            if test:
-                deleted_tests.append(test)
-        return deleted_tests
-
-    def _list_renamed_tests(self):
-        """Lists tests that have been renamed.
-
-        Returns a dict mapping source name to destination name.
-        """
-        out = self.chromium_git.run(['diff', 'origin/master', '-M100%', '--diff-filter=R', '--name-status'])
-        renamed_tests = {}
-        for line in out.splitlines():
-            _, source_path, dest_path = line.split()
-            source_test = self._relative_to_web_test_dir(source_path)
-            dest_test = self._relative_to_web_test_dir(dest_path)
-            if source_test and dest_test:
-                renamed_tests[source_test] = dest_test
-        return renamed_tests
-
-    def _relative_to_web_test_dir(self, path_relative_to_repo_root):
-        """Returns a path that's relative to the web tests directory."""
-        abs_path = self.finder.path_from_chromium_base(path_relative_to_repo_root)
-        if not abs_path.startswith(self.finder.web_tests_dir()):
-            return None
-        return self.fs.relpath(abs_path, self.finder.web_tests_dir())
+        self.rebaselined_tests, self.new_test_expectations = (
+            self._expectations_updater.update_expectations())
 
     def _get_last_imported_wpt_revision(self):
         """Finds the last imported WPT revision."""
         # TODO(robertma): Only match commit subjects.
-        output = self.chromium_git.most_recent_log_matching('^Import wpt@', self.finder.chromium_base())
+        output = self.chromium_git.most_recent_log_matching(
+            '^Import wpt@', self.finder.chromium_base())
         # No line-start anchor (^) below because of the formatting of output.
         result = re.search(r'Import wpt@(\w+)', output)
         if result:
@@ -670,13 +619,19 @@ class TestImporter(object):
             _log.error('Cannot find last WPT import.')
             return None
 
-    def send_notifications(self, local_wpt, auto_file_bugs, monorail_auth_json):
+    def send_notifications(self, local_wpt, auto_file_bugs,
+                           monorail_auth_json):
         issue = self.git_cl.run(['status', '--field=id']).strip()
         patchset = self.git_cl.run(['status', '--field=patch']).strip()
         # Construct the notifier here so that any errors won't affect the import.
         notifier = ImportNotifier(self.host, self.chromium_git, local_wpt)
-        notifier.main(self.last_wpt_revision, self.wpt_revision,
-                      self.rebaselined_tests, self.new_test_expectations,
-                      issue, patchset,
-                      dry_run=not auto_file_bugs, service_account_key_json=monorail_auth_json)
+        notifier.main(
+            self.last_wpt_revision,
+            self.wpt_revision,
+            self.rebaselined_tests,
+            self.new_test_expectations,
+            issue,
+            patchset,
+            dry_run=not auto_file_bugs,
+            service_account_key_json=monorail_auth_json)
         return True

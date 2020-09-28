@@ -152,20 +152,43 @@ try openssl rsautl \
   -pkcs \
   -out signature_nohash_pkcs
 
+# Generate an EC P-256 private key
+try openssl ecparam \
+  -genkey \
+  -name prime256v1 \
+  -out out/ec_private_key.der \
+  -outform der
+
+# Extract the SPKI from the private key
+try openssl ec \
+  -pubout \
+  -in out/ec_private_key.der \
+  -inform der \
+  -out ec_spki.der \
+  -outform der
+
+# Generate certificate for ec_private_key
+try openssl req \
+  -new \
+  -x509 \
+  -key out/ec_private_key.der \
+  -keyform der \
+  -out ec_cert.der \
+  -outform der
 
 # Create root, l1_interm, l{1,2}_leaf
 
 CN=root \
   try root_cert root
 
-CA_ID=root CN=l1_leaf \
-  try issue_cert l1_leaf leaf_cert_san_dns as_der
+CA_ID=root CN=l1_leaf SAN="DNS:${CN}"\
+  try issue_cert l1_leaf leaf_cert_san as_der
 
 CA_ID=root CN=l1_interm \
   try issue_cert l1_interm ca_cert as_der
 
-CA_ID=l1_interm CN=l2_leaf \
-  try issue_cert l2_leaf leaf_cert_san_dns as_der
+CA_ID=l1_interm CN=l2_leaf SAN="DNS:${CN}"\
+  try issue_cert l2_leaf leaf_cert_san as_der
 
 
 try rm -rf out

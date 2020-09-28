@@ -33,6 +33,8 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/optional.h"
 #include "base/time/time.h"
+#include "services/network/public/mojom/cross_origin_embedder_policy.mojom-shared.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/renderer/platform/network/http_header_map.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
@@ -223,6 +225,8 @@ class PLATFORM_EXPORT ResourceResponse final {
   const AtomicString& HttpHeaderField(const AtomicString& name) const;
   void SetHttpHeaderField(const AtomicString& name, const AtomicString& value);
   void AddHttpHeaderField(const AtomicString& name, const AtomicString& value);
+  void AddHttpHeaderFieldWithMultipleValues(const AtomicString& name,
+                                            const Vector<AtomicString>& values);
   void ClearHttpHeaderField(const AtomicString& name);
   const HTTPHeaderMap& HttpHeaderFields() const;
 
@@ -280,6 +284,9 @@ class PLATFORM_EXPORT ResourceResponse final {
   bool IsLegacyTLSVersion() const { return is_legacy_tls_version_; }
   void SetIsLegacyTLSVersion(bool value) { is_legacy_tls_version_ = value; }
 
+  bool TimingAllowPassed() const { return timing_allow_passed_; }
+  void SetTimingAllowPassed(bool value) { timing_allow_passed_ = value; }
+
   SecurityStyle GetSecurityStyle() const { return security_style_; }
   void SetSecurityStyle(SecurityStyle security_style) {
     security_style_ = security_style;
@@ -318,6 +325,15 @@ class PLATFORM_EXPORT ResourceResponse final {
   }
   void SetWasFetchedViaServiceWorker(bool value) {
     was_fetched_via_service_worker_ = value;
+  }
+
+  network::mojom::FetchResponseSource GetServiceWorkerResponseSource() const {
+    return service_worker_response_source_;
+  }
+
+  void SetServiceWorkerResponseSource(
+      network::mojom::FetchResponseSource value) {
+    service_worker_response_source_ = value;
   }
 
   // See network::ResourceResponseInfo::was_fallback_required_by_service_worker.
@@ -463,6 +479,9 @@ class PLATFORM_EXPORT ResourceResponse final {
     was_in_prefetch_cache_ = was_in_prefetch_cache;
   }
 
+  network::mojom::CrossOriginEmbedderPolicyValue GetCrossOriginEmbedderPolicy()
+      const;
+
  private:
   void UpdateHeaderParsedState(const AtomicString& name);
 
@@ -502,6 +521,10 @@ class PLATFORM_EXPORT ResourceResponse final {
   // will be removed in the future.
   bool is_legacy_tls_version_ = false;
 
+  // True if the Timing-Allow-Origin check passes.
+  // https://fetch.spec.whatwg.org/#concept-response-timing-allow-passed
+  bool timing_allow_passed_ = false;
+
   // The time at which the resource's certificate expires. Null if there was no
   // certificate.
   base::Time cert_validity_start_;
@@ -511,6 +534,11 @@ class PLATFORM_EXPORT ResourceResponse final {
 
   // Was the resource fetched over a ServiceWorker.
   bool was_fetched_via_service_worker_ = false;
+
+  // The source of the resource, if it was fetched via ServiceWorker. This is
+  // kUnspecified if |was_fetched_via_service_worker| is false.
+  network::mojom::FetchResponseSource service_worker_response_source_ =
+      network::mojom::FetchResponseSource::kUnspecified;
 
   // Was the fallback request with skip service worker flag required.
   bool was_fallback_required_by_service_worker_ = false;
@@ -543,7 +571,8 @@ class PLATFORM_EXPORT ResourceResponse final {
   bool was_alpn_negotiated_ = false;
 
   // https://fetch.spec.whatwg.org/#concept-response-type
-  network::mojom::FetchResponseType response_type_;
+  network::mojom::FetchResponseType response_type_ =
+      network::mojom::FetchResponseType::kDefault;
 
   // HTTP version used in the response, if known.
   HTTPVersion http_version_ = kHTTPVersionUnknown;

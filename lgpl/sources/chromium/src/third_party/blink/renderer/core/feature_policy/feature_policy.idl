@@ -4,11 +4,10 @@
 
 // https://wicg.github.io/feature-policy/#the-policy-object
 [
-  NoInterfaceObject,
-  RuntimeEnabled=FeaturePolicyJavaScriptInterface,
+  Exposed=Window,
   ImplementedAs=DOMFeaturePolicy
 ] interface FeaturePolicy {
-  [MeasureAs=FeaturePolicyJSAPI, CallWith=ScriptState] boolean allowsFeature(DOMString feature, optional DOMString url);
+  [MeasureAs=FeaturePolicyJSAPI, CallWith=ScriptState] boolean allowsFeature(DOMString feature, optional DOMString origin);
   [MeasureAs=FeaturePolicyJSAPI, CallWith=ScriptState] sequence<DOMString> features();
   [MeasureAs=FeaturePolicyJSAPI, CallWith=ScriptState] sequence<DOMString> allowedFeatures();
   [MeasureAs=FeaturePolicyJSAPI, CallWith=ScriptState] sequence<DOMString> getAllowlistForFeature(DOMString feature);

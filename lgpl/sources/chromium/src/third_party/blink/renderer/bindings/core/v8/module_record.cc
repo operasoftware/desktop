@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/bindings/core/v8/module_record.h"
-
+#include "base/feature_list.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/bindings/core/v8/boxed_v8_module.h"
 #include "third_party/blink/renderer/bindings/core/v8/referrer_script_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
@@ -17,6 +18,48 @@
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
 namespace blink {
+
+// static
+ModuleEvaluationResult ModuleEvaluationResult::Empty() {
+  return ModuleEvaluationResult(true, {});
+}
+
+// static
+ModuleEvaluationResult ModuleEvaluationResult::FromResult(
+    v8::Local<v8::Value> promise) {
+  DCHECK(base::FeatureList::IsEnabled(features::kTopLevelAwait) ||
+         promise.IsEmpty());
+  DCHECK(!base::FeatureList::IsEnabled(features::kTopLevelAwait) ||
+         promise->IsPromise());
+  return ModuleEvaluationResult(true, promise);
+}
+
+// static
+ModuleEvaluationResult ModuleEvaluationResult::FromException(
+    v8::Local<v8::Value> exception) {
+  DCHECK(!exception.IsEmpty());
+  return ModuleEvaluationResult(false, exception);
+}
+
+ModuleEvaluationResult& ModuleEvaluationResult::Escape(
+    ScriptState::EscapableScope* scope) {
+  value_ = scope->Escape(value_);
+  return *this;
+}
+
+v8::Local<v8::Value> ModuleEvaluationResult::GetException() const {
+  DCHECK(IsException());
+  DCHECK(!value_.IsEmpty());
+  return value_;
+}
+
+ScriptPromise ModuleEvaluationResult::GetPromise(
+    ScriptState* script_state) const {
+  DCHECK(base::FeatureList::IsEnabled(features::kTopLevelAwait));
+  DCHECK(IsSuccess());
+  DCHECK(!value_.IsEmpty());
+  return ScriptPromise(script_state, value_);
+}
 
 ModuleRecordProduceCacheData::ModuleRecordProduceCacheData(
     v8::Isolate* isolate,
@@ -37,7 +80,7 @@ ModuleRecordProduceCacheData::ModuleRecordProduceCacheData(
   }
 }
 
-void ModuleRecordProduceCacheData::Trace(blink::Visitor* visitor) {
+void ModuleRecordProduceCacheData::Trace(Visitor* visitor) const {
   visitor->Trace(cache_handler_);
   visitor->Trace(unbound_script_.UnsafeCast<v8::Value>());
 }
@@ -71,10 +114,11 @@ v8::Local<v8::Module> ModuleRecord::Compile(
       V8CodeCache::GetCompileOptions(v8_cache_options, cache_handler,
                                      source.length(), source_location_type);
 
-  if (!V8ScriptRunner::CompileModule(isolate, source, cache_handler, source_url,
-                                     text_position, compile_options,
-                                     no_cache_reason,
-                                     ReferrerScriptInfo(base_url, options))
+  if (!V8ScriptRunner::CompileModule(
+           isolate, source, cache_handler, source_url, text_position,
+           compile_options, no_cache_reason,
+           ReferrerScriptInfo(base_url, options,
+                              ReferrerScriptInfo::BaseUrlSource::kOther))
            .ToLocal(&module)) {
     DCHECK(try_catch.HasCaught());
     exception_state.RethrowV8Exception(try_catch.Exception());
@@ -113,9 +157,9 @@ ScriptValue ModuleRecord::Instantiate(ScriptState* script_state,
   return ScriptValue();
 }
 
-ScriptValue ModuleRecord::Evaluate(ScriptState* script_state,
-                                   v8::Local<v8::Module> record,
-                                   const KURL& source_url) {
+ModuleEvaluationResult ModuleRecord::Evaluate(ScriptState* script_state,
+                                              v8::Local<v8::Module> record,
+                                              const KURL& source_url) {
   v8::Isolate* isolate = script_state->GetIsolate();
 
   // Isolate exceptions that occur when executing the code. These exceptions
@@ -126,17 +170,17 @@ ScriptValue ModuleRecord::Evaluate(ScriptState* script_state,
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   probe::ExecuteScript probe(execution_context, source_url);
 
-  // TODO(kouhei): We currently don't have a code-path which use return value of
-  // EvaluateModule. Stop ignoring result once we have such path.
   v8::Local<v8::Value> result;
   if (!V8ScriptRunner::EvaluateModule(isolate, execution_context, record,
                                       script_state->GetContext())
            .ToLocal(&result)) {
-    DCHECK(try_catch.HasCaught());
-    return ScriptValue(isolate, try_catch.Exception());
+    return ModuleEvaluationResult::FromException(try_catch.Exception());
   }
-
-  return ScriptValue();
+  if (base::FeatureList::IsEnabled(features::kTopLevelAwait)) {
+    return ModuleEvaluationResult::FromResult(result);
+  } else {
+    return ModuleEvaluationResult::Empty();
+  }
 }
 
 void ModuleRecord::ReportException(ScriptState* script_state,

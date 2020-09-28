@@ -33,6 +33,7 @@
 
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/text.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
@@ -41,12 +42,10 @@
 
 namespace blink {
 
-using namespace html_names;
-
 BaseButtonInputType::BaseButtonInputType(HTMLInputElement& element)
     : InputType(element), KeyboardClickableInputTypeView(element) {}
 
-void BaseButtonInputType::Trace(Visitor* visitor) {
+void BaseButtonInputType::Trace(Visitor* visitor) const {
   KeyboardClickableInputTypeView::Trace(visitor);
   InputType::Trace(visitor);
 }
@@ -76,8 +75,14 @@ bool BaseButtonInputType::ShouldSaveAndRestoreFormControlState() const {
 
 void BaseButtonInputType::AppendToFormData(FormData&) const {}
 
+bool BaseButtonInputType::TypeShouldForceLegacyLayout() const {
+  return true;
+}
+
 LayoutObject* BaseButtonInputType::CreateLayoutObject(const ComputedStyle&,
                                                       LegacyLayout) const {
+  UseCounter::Count(GetElement().GetDocument(),
+                    WebFeature::kLegacyLayoutByButton);
   return new LayoutButton(&GetElement());
 }
 
@@ -89,7 +94,8 @@ void BaseButtonInputType::SetValue(const String& sanitized_value,
                                    bool,
                                    TextFieldEventBehavior,
                                    TextControlSetValueSelection) {
-  GetElement().setAttribute(kValueAttr, AtomicString(sanitized_value));
+  GetElement().setAttribute(html_names::kValueAttr,
+                            AtomicString(sanitized_value));
 }
 
 bool BaseButtonInputType::MatchesDefaultPseudoClass() {

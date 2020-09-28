@@ -30,8 +30,8 @@ class MODULES_EXPORT WorkletAnimationEffect : public ScriptWrappable {
   EffectTiming* getTiming() const;
   ComputedEffectTiming* getComputedTiming() const;
 
-  void setLocalTime(double time_ms, bool is_null);
-  double localTime(bool& is_null) const;
+  base::Optional<double> localTime() const;
+  void setLocalTime(base::Optional<double> time_ms);
   base::Optional<base::TimeDelta> local_time() const;
 
  private:
@@ -43,7 +43,7 @@ class MODULES_EXPORT WorkletAnimationEffect : public ScriptWrappable {
   // object, as is defined in worklet_animation_effect.idl.
   const Timing specified_timing_;
   mutable Timing::CalculatedTiming calculated_;
-  mutable double last_update_time_;
+  mutable base::Optional<double> last_update_time_;
 };
 
 }  // namespace blink

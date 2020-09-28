@@ -5,7 +5,6 @@ include_rules = [
     "+base/strings/string_number_conversions.h",
     "+base/strings/stringprintf.h",
     "+base/containers/flat_map.h",
-    "+base/callback_helpers.h",
 
     # TODO(crbug.com/923394): Remove these dependencies once per-frame
     # task runners are used in all cases.
@@ -37,14 +36,16 @@ include_rules = [
     "+media/mojo/mojom",
     "+media/webrtc/audio_delay_stats_reporter.h",
     "+media/webrtc/audio_processor_controls.h",
+    "+media/webrtc/helpers.h",
     "+media/webrtc/webrtc_switches.h",
-    "+mojo/public/cpp/bindings/binding.h",
     "-third_party/blink/renderer/modules",
     "+third_party/blink/renderer/modules/event_modules.h",
     "+third_party/blink/renderer/modules/event_target_modules.h",
     "+third_party/blink/renderer/modules/imagecapture",
     "+third_party/blink/renderer/modules/mediastream",
     "+third_party/blink/renderer/modules/modules_export.h",
+    "+third_party/blink/renderer/modules/peerconnection",
+    "+third_party/blink/renderer/modules/webrtc",
     "+ui/gfx/geometry/size.h",
 ]
 

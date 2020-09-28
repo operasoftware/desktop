@@ -29,7 +29,7 @@ std::unique_ptr<WebNavigationParams> WebNavigationParams::CreateFromInfo(
   auto result = std::make_unique<WebNavigationParams>();
   result->url = info.url_request.Url();
   result->http_method = info.url_request.HttpMethod();
-  result->referrer = info.url_request.HttpHeaderField(http_names::kReferer);
+  result->referrer = info.url_request.ReferrerString();
   result->referrer_policy = info.url_request.GetReferrerPolicy();
   result->http_body = info.url_request.HttpBody();
   result->http_content_type =
@@ -42,6 +42,7 @@ std::unique_ptr<WebNavigationParams> WebNavigationParams::CreateFromInfo(
   result->initiator_origin_trial_features =
       info.initiator_origin_trial_features;
   result->ip_address_space = info.initiator_address_space;
+  result->frame_policy = info.frame_policy;
   return result;
 }
 
@@ -128,11 +129,12 @@ WebNavigationParams::PrefetchedSignedExchange::PrefetchedSignedExchange(
     const WebString& header_integrity,
     const WebURL& inner_url,
     const WebURLResponse& inner_response,
-    mojo::ScopedMessagePipeHandle loader_factory_handle)
+    CrossVariantMojoRemote<network::mojom::URLLoaderFactoryInterfaceBase>
+        loader_factory)
     : outer_url(outer_url),
       header_integrity(header_integrity),
       inner_url(inner_url),
       inner_response(inner_response),
-      loader_factory_handle(std::move(loader_factory_handle)) {}
+      loader_factory(std::move(loader_factory)) {}
 
 }  // namespace blink

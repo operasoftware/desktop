@@ -40,10 +40,6 @@ class NamedNodeMap final : public ScriptWrappable {
   friend class Element;
 
  public:
-  static NamedNodeMap* Create(Element* element) {
-    return MakeGarbageCollected<NamedNodeMap>(element);
-  }
-
   explicit NamedNodeMap(Element* element) : element_(element) {
     // Only supports NamedNodeMaps with Element associated.
     DCHECK(element_);
@@ -69,7 +65,7 @@ class NamedNodeMap final : public ScriptWrappable {
   void NamedPropertyEnumerator(Vector<String>& names, ExceptionState&) const;
   bool NamedPropertyQuery(const AtomicString&, ExceptionState&) const;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   Member<Element> element_;

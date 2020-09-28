@@ -31,6 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_MEDIA_PLAYER_CLIENT_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_MEDIA_PLAYER_CLIENT_H_
 
+#include "base/time/time.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_media_player.h"
 #include "ui/gfx/color_space.h"
@@ -92,22 +93,12 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
   virtual void RemoveTextTrack(WebInbandTextTrack*) = 0;
   virtual void MediaSourceOpened(WebMediaSource*) = 0;
   virtual void RequestSeek(double) = 0;
-  virtual void DetachedViewStateChanged(bool) = 0;
-  virtual void DetachedViewMuteStateChanged(bool) = 0;
-  virtual void DetachedViewPlaybackStateToggled() = 0;
-  virtual void DetachedViewVolumeChanged(double) = 0;
-  virtual void DetachedViewActionTriggered(const WebString& action) = 0;
   virtual void RemotePlaybackCompatibilityChanged(const WebURL&,
                                                   bool is_compatible) = 0;
 
   // Set the player as the persistent video. Persistent video should hide its
   // controls and go fullscreen.
   virtual void OnBecamePersistentVideo(bool) = 0;
-
-  // After the monitoring is activated, the client will inform WebMediaPlayer
-  // when the element becomes/stops being the dominant visible content by
-  // calling WebMediaPlayer::BecameDominantVisibleContent(bool).
-  virtual void ActivateViewportIntersectionMonitoring(bool) = 0;
 
   // Returns whether the media element has always been muted. This is used to
   // avoid take audio focus for elements that the user is not aware is playing.
@@ -173,6 +164,15 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
   // Request the player to mute/unmute.
   virtual void RequestMuted(bool muted) = 0;
 
+  // Request the player to set a specific volume.
+  virtual void RequestSetVolume(double volume) = 0;
+
+  // Request the player to enter picture-in-picture.
+  virtual void RequestEnterPictureInPicture() = 0;
+
+  // Request the player to exit picture-in-picture.
+  virtual void RequestExitPictureInPicture() = 0;
+
   // Notify the client that one of the state used by Picture-in-Picture has
   // changed. The client will then have to poll the states from the associated
   // WebMediaPlayer.
@@ -181,6 +181,11 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
   //  - Surface ID;
   //  - Natural Size.
   virtual void OnPictureInPictureStateChange() = 0;
+
+  // Called when a video frame has been presented to the compositor, after a
+  // request was initiated via WebMediaPlayer::RequestVideoFrameCallback().
+  // See https://wicg.github.io/video-rvfc/.
+  virtual void OnRequestVideoFrameCallback() {}
 
   struct Features {
     WebString id;

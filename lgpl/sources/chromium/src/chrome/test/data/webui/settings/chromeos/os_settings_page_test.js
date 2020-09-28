@@ -40,12 +40,12 @@ suite('OSSettingsPage', function() {
 
     const children = pages.getContentChildren();
     const stampedChildren = children.filter(function(element) {
-      return element.tagName != 'TEMPLATE';
+      return element.tagName !== 'TEMPLATE';
     });
 
     // The section's main child should be stamped and visible.
     const main = stampedChildren.filter(function(element) {
-      return element.getAttribute('route-path') == 'default';
+      return element.getAttribute('route-path') === 'default';
     });
     assertEquals(
         main.length, 1,
@@ -54,7 +54,7 @@ suite('OSSettingsPage', function() {
 
     // Any other stamped subpages should not be visible.
     const subpages = stampedChildren.filter(function(element) {
-      return element.getAttribute('route-path') != 'default';
+      return element.getAttribute('route-path') !== 'default';
     });
     for (const subpage of subpages) {
       assertEquals(
@@ -66,11 +66,11 @@ suite('OSSettingsPage', function() {
 
   test('Basic sections', function() {
     const sectionNames = [
-      'internet', 'bluetooth', 'multidevice', 'people', 'device',
-      'personalization', 'search', 'apps'
+      'internet', 'bluetooth', 'multidevice', 'osPeople', 'device',
+      'personalization', 'osSearch', 'apps'
     ];
 
-    for (let name of sectionNames) {
+    for (const name of sectionNames) {
       const section = settingsPage.shadowRoot.querySelector(
           `settings-section[section=${name}]`);
       assertTrue(!!section, 'Did not find ' + name);
@@ -84,10 +84,12 @@ suite('OSSettingsPage', function() {
     Polymer.dom.flush();
     await test_util.flushTasks();
 
-    const sectionNames =
-        ['privacy', 'languages', 'files', 'reset', 'dateTime', 'a11y'];
+    const sectionNames = [
+      'osPrivacy', 'osLanguages', 'files', 'osReset', 'dateTime',
+      'osAccessibility'
+    ];
 
-    for (let name of sectionNames) {
+    for (const name of sectionNames) {
       const section = settingsPage.shadowRoot.querySelector(
           `settings-section[section=${name}]`);
       assertTrue(!!section, 'Did not find ' + name);
@@ -104,18 +106,18 @@ suite('OSSettingsPage', function() {
     Polymer.dom.flush();
     await test_util.flushTasks();
 
-    const hiddenSections = ['multidevice', 'people', 'personalization'];
-    for (let name of hiddenSections) {
+    const hiddenSections = ['multidevice', 'osPeople', 'personalization'];
+    for (const name of hiddenSections) {
       const section = settingsPage.shadowRoot.querySelector(
           `settings-section[section=${name}]`);
       assertFalse(!!section, 'Found unexpected section ' + name);
     }
 
     const visibleSections = [
-      'internet', 'bluetooth', 'device', 'search', 'apps', 'privacy',
-      'languages', 'files', 'reset', 'dateTime', 'a11y'
+      'internet', 'bluetooth', 'device', 'osSearch', 'apps', 'osPrivacy',
+      'osLanguages', 'files', 'osReset', 'dateTime', 'osAccessibility'
     ];
-    for (let name of visibleSections) {
+    for (const name of visibleSections) {
       const section = settingsPage.shadowRoot.querySelector(
           `settings-section[section=${name}]`);
       assertTrue(!!section, 'Expected section ' + name);

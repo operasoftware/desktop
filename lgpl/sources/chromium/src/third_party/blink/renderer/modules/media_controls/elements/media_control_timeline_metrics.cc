@@ -8,8 +8,10 @@
 #include <cmath>
 #include <limits>
 
+#include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/stl_util.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/keyboard_codes.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 

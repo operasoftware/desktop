@@ -59,12 +59,8 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
     // the transform is identity or a 2d translation, the translation_2d version
     // should be used instead.
     TransformAndOrigin(const TransformationMatrix& matrix,
-                       const FloatPoint3D& origin = FloatPoint3D(),
-                       bool disable_optimization = false) {
-      if (!disable_optimization && matrix.IsIdentityOr2DTranslation())
-        translation_2d_ = matrix.To2DTranslation();
-      else
-        matrix_and_origin_.reset(new MatrixAndOrigin{matrix, origin});
+                       const FloatPoint3D& origin = FloatPoint3D()) {
+      matrix_and_origin_.reset(new MatrixAndOrigin{matrix, origin});
     }
 
     bool IsIdentityOr2DTranslation() const { return !matrix_and_origin_; }
@@ -131,7 +127,8 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
       bool affected_by_outer_viewport_bounds_delta : 1;
       bool in_subtree_of_page_scale : 1;
       bool animation_is_axis_aligned : 1;
-    } flags = {false, false, true, false};
+      bool delegates_to_parent_for_backface : 1;
+    } flags = {false, false, true, false, false};
     BackfaceVisibility backface_visibility = BackfaceVisibility::kInherited;
     unsigned rendering_context_id = 0;
     CompositingReasons direct_compositing_reasons = CompositingReason::kNone;
@@ -149,6 +146,8 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
               other.flags.in_subtree_of_page_scale ||
           flags.animation_is_axis_aligned !=
               other.flags.animation_is_axis_aligned ||
+          flags.delegates_to_parent_for_backface !=
+              other.flags.delegates_to_parent_for_backface ||
           backface_visibility != other.backface_visibility ||
           rendering_context_id != other.rendering_context_id ||
           compositor_element_id != other.compositor_element_id ||
@@ -355,7 +354,8 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
   }
 
   bool HasDirectCompositingReasonsOtherThan3dTransform() const {
-    return DirectCompositingReasons() & ~CompositingReason::k3DTransform;
+    return DirectCompositingReasons() & ~CompositingReason::k3DTransform &
+           ~CompositingReason::kTrivial3DTransform;
   }
 
   // TODO(crbug.com/900241): Use HaveActiveTransformAnimation() instead of this
@@ -368,6 +368,11 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
     return state_.direct_compositing_reasons &
            CompositingReason::kActiveTransformAnimation;
   }
+
+  CompositingReasons DirectCompositingReasonsForDebugging() const {
+    return DirectCompositingReasons();
+  }
+
   bool TransformAnimationIsAxisAligned() const {
     return state_.flags.animation_is_axis_aligned;
   }
@@ -376,8 +381,17 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
     return state_.direct_compositing_reasons & CompositingReason::kRootScroller;
   }
 
+  bool RequiresCompositingForWillChangeTransform() const {
+    return state_.direct_compositing_reasons &
+           CompositingReason::kWillChangeTransform;
+  }
+
   const CompositorElementId& GetCompositorElementId() const {
     return state_.compositor_element_id;
+  }
+
+  bool DelegatesToParentForBackface() const {
+    return state_.flags.delegates_to_parent_for_backface;
   }
 
   // Content whose transform nodes have a common rendering context ID are 3D
@@ -416,6 +430,7 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
       // The scroll compositor element id should be stored on the scroll node.
       DCHECK(!state_.compositor_element_id);
     }
+    DCHECK(!HasActiveTransformAnimation() || !IsIdentityOr2DTranslation());
 #endif
   }
 

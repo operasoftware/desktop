@@ -9,13 +9,19 @@
 #include "third_party/blink/renderer/platform/geometry/float_point.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
 class ComputedStyle;
 class SimpleFontData;
 
-enum class ResolvedUnderlinePosition { kRoman, kUnder, kOver };
+enum class ResolvedUnderlinePosition {
+  kNearAlphabeticBaselineAuto,
+  kNearAlphabeticBaselineFromFont,
+  kUnder,
+  kOver
+};
 
 // Holds text decoration painting values to be computed once and subsequently
 // use multiple times to handle decoration paint order correctly. See also
@@ -30,10 +36,9 @@ struct DecorationInfo final {
   float baseline;
   const ComputedStyle* style;
   const SimpleFontData* font_data;
-  float thickness;
-  float double_offset;
   FontBaseline baseline_type;
   ResolvedUnderlinePosition underline_position;
+  Vector<float> applied_decorations_thickness;
 };
 
 }  // namespace blink

@@ -4,11 +4,19 @@
 
 #include "third_party/blink/renderer/core/execution_context/agent.h"
 
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/mutation_observer.h"
-#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/platform/scheduler/public/event_loop.h"
 
 namespace blink {
+
+namespace {
+bool is_cross_origin_isolated = false;
+
+#if DCHECK_IS_ON()
+bool is_cross_origin_isolated_set = false;
+#endif
+}  // namespace
 
 Agent::Agent(v8::Isolate* isolate,
              const base::UnguessableToken& cluster_id,
@@ -19,14 +27,28 @@ Agent::Agent(v8::Isolate* isolate,
 
 Agent::~Agent() = default;
 
-void Agent::Trace(Visitor* visitor) {}
+void Agent::Trace(Visitor* visitor) const {}
 
-void Agent::AttachExecutionContext(ExecutionContext* execution_context) {
-  event_loop_->AttachScheduler(execution_context->GetScheduler());
+void Agent::AttachContext(ExecutionContext* context) {
+  event_loop_->AttachScheduler(context->GetScheduler());
 }
 
-void Agent::DetachExecutionContext(ExecutionContext* execution_context) {
-  event_loop_->DetachScheduler(execution_context->GetScheduler());
+void Agent::DetachContext(ExecutionContext* context) {
+  event_loop_->DetachScheduler(context->GetScheduler());
+}
+
+// static
+bool Agent::IsCrossOriginIsolated() {
+  return is_cross_origin_isolated;
+}
+
+// static
+void Agent::SetIsCrossOriginIsolated(bool value) {
+#if DCHECK_IS_ON()
+  DCHECK(!is_cross_origin_isolated_set);
+  is_cross_origin_isolated_set = true;
+#endif
+  is_cross_origin_isolated = value;
 }
 
 }  // namespace blink

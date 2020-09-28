@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/core/html/forms/date_time_chooser_impl.h"
 
+#include "build/build_config.h"
 #include "third_party/blink/public/mojom/choosers/date_time_chooser.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/strings/grit/blink_strings.h"
@@ -46,6 +47,7 @@
 #include "third_party/blink/renderer/platform/language.h"
 #include "third_party/blink/renderer/platform/text/date_components.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
+#include "ui/base/ui_base_features.h"
 
 namespace blink {
 
@@ -67,7 +69,7 @@ DateTimeChooserImpl::DateTimeChooserImpl(
 
 DateTimeChooserImpl::~DateTimeChooserImpl() = default;
 
-void DateTimeChooserImpl::Trace(Visitor* visitor) {
+void DateTimeChooserImpl::Trace(Visitor* visitor) const {
   visitor->Trace(frame_);
   visitor->Trace(client_);
   DateTimeChooser::Trace(visitor);
@@ -121,16 +123,20 @@ void DateTimeChooserImpl::WriteDocument(SharedBuffer* data) {
         GetLocale().QueryString(IDS_FORM_OTHER_DATE_LABEL);
   }
 
-  AddString("<!DOCTYPE html><head><meta charset='UTF-8'><style>\n", data);
+  AddString(
+      "<!DOCTYPE html><head><meta charset='UTF-8'><meta name='color-scheme' "
+      "content='light dark'><style>\n",
+      data);
 
   data->Append(ChooserResourceLoader::GetPickerCommonStyleSheet());
-  if (!RuntimeEnabledFeatures::FormControlsRefreshEnabled())
+  if (!features::IsFormControlsRefreshEnabled())
     data->Append(ChooserResourceLoader::GetPickerButtonStyleSheet());
   data->Append(ChooserResourceLoader::GetSuggestionPickerStyleSheet());
   data->Append(ChooserResourceLoader::GetCalendarPickerStyleSheet());
-  if (RuntimeEnabledFeatures::FormControlsRefreshEnabled()) {
+  if (features::IsFormControlsRefreshEnabled()) {
     data->Append(ChooserResourceLoader::GetCalendarPickerRefreshStyleSheet());
-    if (parameters_->type == input_type_names::kTime) {
+    if (parameters_->type == input_type_names::kTime ||
+        parameters_->type == input_type_names::kDatetimeLocal) {
       data->Append(ChooserResourceLoader::GetTimePickerStyleSheet());
     }
   }
@@ -139,9 +145,7 @@ void DateTimeChooserImpl::WriteDocument(SharedBuffer* data) {
       "window.dialogArguments = {\n",
       data);
   AddProperty("anchorRectInScreen", parameters_->anchor_rect_in_screen, data);
-  float scale_factor =
-      frame_->View()->GetChromeClient()->WindowToViewportScalar(frame_, 1.0f);
-  AddProperty("zoomFactor", ZoomFactor() / scale_factor, data);
+  AddProperty("zoomFactor", ScaledZoomFactor(), data);
   AddProperty("min",
               ValueToDateTimeString(parameters_->minimum, parameters_->type),
               data);
@@ -157,18 +161,20 @@ void DateTimeChooserImpl::WriteDocument(SharedBuffer* data) {
       data);
   AddProperty("locale", parameters_->locale.GetString(), data);
   AddProperty("todayLabel", today_label_string, data);
-  AddProperty("clearLabel", GetLocale().QueryString(IDS_FORM_CALENDAR_CLEAR),
-              data);
-  AddProperty("weekLabel", GetLocale().QueryString(IDS_FORM_WEEK_NUMBER_LABEL),
-              data);
-  AddProperty("axShowMonthSelector",
-              GetLocale().QueryString(IDS_AX_CALENDAR_SHOW_MONTH_SELECTOR),
-              data);
-  AddProperty("axShowNextMonth",
-              GetLocale().QueryString(IDS_AX_CALENDAR_SHOW_NEXT_MONTH), data);
-  AddProperty("axShowPreviousMonth",
-              GetLocale().QueryString(IDS_AX_CALENDAR_SHOW_PREVIOUS_MONTH),
-              data);
+  AddLocalizedProperty("clearLabel", IDS_FORM_CALENDAR_CLEAR, data);
+  AddLocalizedProperty("weekLabel", IDS_FORM_WEEK_NUMBER_LABEL, data);
+  AddLocalizedProperty("axShowMonthSelector",
+                       IDS_AX_CALENDAR_SHOW_MONTH_SELECTOR, data);
+  AddLocalizedProperty("axShowNextMonth", IDS_AX_CALENDAR_SHOW_NEXT_MONTH,
+                       data);
+  AddLocalizedProperty("axShowPreviousMonth",
+                       IDS_AX_CALENDAR_SHOW_PREVIOUS_MONTH, data);
+  AddLocalizedProperty("axHourLabel", IDS_AX_HOUR_FIELD_TEXT, data);
+  AddLocalizedProperty("axMinuteLabel", IDS_AX_MINUTE_FIELD_TEXT, data);
+  AddLocalizedProperty("axSecondLabel", IDS_AX_SECOND_FIELD_TEXT, data);
+  AddLocalizedProperty("axMillisecondLabel", IDS_AX_MILLISECOND_FIELD_TEXT,
+                       data);
+  AddLocalizedProperty("axAmPmLabel", IDS_AX_AM_PM_FIELD_TEXT, data);
   AddProperty("weekStartDay", locale_->FirstDayOfWeek(), data);
   AddProperty("shortMonthLabels", locale_->ShortMonthLabels(), data);
   AddProperty("dayLabels", locale_->WeekDayShortLabels(), data);
@@ -176,7 +182,11 @@ void DateTimeChooserImpl::WriteDocument(SharedBuffer* data) {
   AddProperty("isLocaleRTL", locale_->IsRTL(), data);
   AddProperty("isRTL", parameters_->is_anchor_element_rtl, data);
   AddProperty("isFormControlsRefreshEnabled",
-              RuntimeEnabledFeatures::FormControlsRefreshEnabled(), data);
+              features::IsFormControlsRefreshEnabled(), data);
+#if defined(OS_MACOSX)
+  AddProperty("isBorderTransparent", features::IsFormControlsRefreshEnabled(),
+              data);
+#endif
   AddProperty("mode", parameters_->type.GetString(), data);
   AddProperty("isAMPMFirst", parameters_->is_ampm_first, data);
   AddProperty("hasAMPM", parameters_->has_ampm, data);
@@ -206,9 +216,9 @@ void DateTimeChooserImpl::WriteDocument(SharedBuffer* data) {
         data);
     AddProperty("otherDateLabel", other_date_label_string, data);
 
-    DCHECK(OwnerElement().GetComputedStyle());
+    const ComputedStyle* style = OwnerElement().GetComputedStyle();
     WebColorScheme color_scheme =
-        OwnerElement().GetComputedStyle()->UsedColorScheme();
+        style ? style->UsedColorScheme() : WebColorScheme::kLight;
 
     AddProperty("suggestionHighlightColor",
                 LayoutTheme::GetTheme()
@@ -225,10 +235,13 @@ void DateTimeChooserImpl::WriteDocument(SharedBuffer* data) {
 
   data->Append(ChooserResourceLoader::GetPickerCommonJS());
   data->Append(ChooserResourceLoader::GetSuggestionPickerJS());
-  if (RuntimeEnabledFeatures::FormControlsRefreshEnabled()) {
+  if (features::IsFormControlsRefreshEnabled()) {
     data->Append(ChooserResourceLoader::GetMonthPickerJS());
     if (parameters_->type == input_type_names::kTime) {
       data->Append(ChooserResourceLoader::GetTimePickerJS());
+    } else if (parameters_->type == input_type_names::kDatetimeLocal) {
+      data->Append(ChooserResourceLoader::GetTimePickerJS());
+      data->Append(ChooserResourceLoader::GetDateTimeLocalPickerJS());
     }
   }
   data->Append(ChooserResourceLoader::GetCalendarPickerJS());
@@ -237,6 +250,10 @@ void DateTimeChooserImpl::WriteDocument(SharedBuffer* data) {
 
 Element& DateTimeChooserImpl::OwnerElement() {
   return client_->OwnerElement();
+}
+
+ChromeClient& DateTimeChooserImpl::GetChromeClient() {
+  return *frame_->View()->GetChromeClient();
 }
 
 Locale& DateTimeChooserImpl::GetLocale() {

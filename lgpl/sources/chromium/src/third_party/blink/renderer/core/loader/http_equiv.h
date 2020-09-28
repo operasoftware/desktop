@@ -34,6 +34,8 @@ class HttpEquiv {
  private:
   static void ProcessHttpEquivDefaultStyle(Document&,
                                            const AtomicString& content);
+  static void ProcessHttpEquivOriginTrial(Document&,
+                                          const AtomicString& content);
   static void ProcessHttpEquivRefresh(Document&,
                                       const AtomicString& content,
                                       Element*);
@@ -45,8 +47,6 @@ class HttpEquiv {
       const AtomicString& equiv,
       const AtomicString& content);
   static void ProcessHttpEquivAcceptCH(Document&, const AtomicString& content);
-  static void ProcessHttpEquivAcceptCHLifetime(Document&,
-                                               const AtomicString& content);
 };
 
 }  // namespace blink

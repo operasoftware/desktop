@@ -449,11 +449,8 @@ void LayoutMultiColumnSet::UpdateLayout() {
   }
 }
 
-void LayoutMultiColumnSet::ComputeIntrinsicLogicalWidths(
-    LayoutUnit& min_logical_width,
-    LayoutUnit& max_logical_width) const {
-  min_logical_width = flow_thread_->MinPreferredLogicalWidth();
-  max_logical_width = flow_thread_->MaxPreferredLogicalWidth();
+MinMaxSizes LayoutMultiColumnSet::ComputeIntrinsicLogicalWidths() const {
+  return MinMaxSizes();
 }
 
 void LayoutMultiColumnSet::ComputeLogicalHeight(
@@ -491,13 +488,13 @@ PositionWithAffinity LayoutMultiColumnSet::PositionForPoint(
 LayoutUnit LayoutMultiColumnSet::ColumnGap() const {
   LayoutBlockFlow* parent_block = MultiColumnBlockFlow();
 
-  if (parent_block->StyleRef().ColumnGap().IsNormal()) {
-    // "1em" is recommended as the normal gap setting. Matches <p> margins.
-    return LayoutUnit(
-        parent_block->StyleRef().GetFontDescription().ComputedPixelSize());
-  }
-  return ValueForLength(parent_block->StyleRef().ColumnGap().GetLength(),
-                        AvailableLogicalWidth());
+  if (const base::Optional<Length>& column_gap =
+          parent_block->StyleRef().ColumnGap())
+    return ValueForLength(*column_gap, AvailableLogicalWidth());
+
+  // "1em" is recommended as the normal gap setting. Matches <p> margins.
+  return LayoutUnit(
+      parent_block->StyleRef().GetFontDescription().ComputedPixelSize());
 }
 
 unsigned LayoutMultiColumnSet::ActualColumnCount() const {
@@ -534,6 +531,7 @@ void LayoutMultiColumnSet::ComputeVisualOverflow(
     AddVisualOverflowFromFloats();
 
   if (VisualOverflowRect() != previous_visual_overflow_rect) {
+    InvalidateIntersectionObserverCachedRects();
     SetShouldCheckForPaintInvalidation();
     GetFrameView()->SetIntersectionObservationState(LocalFrameView::kDesired);
   }

@@ -16,7 +16,9 @@
 #include "third_party/blink/renderer/core/loader/threadable_loader.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/loader/fetch/bytes_consumer.h"
+#include "third_party/blink/renderer/platform/loader/fetch/data_pipe_bytes_consumer.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
@@ -65,23 +67,34 @@ bool IsExcludedHeaderForServiceWorkerFetchEvent(const String& header_name) {
   return false;
 }
 
-}  // namespace
-
-FetchRequestData* FetchRequestData::Create() {
-  return MakeGarbageCollected<FetchRequestData>();
+void SignalSize(
+    std::unique_ptr<mojo::Remote<network::mojom::blink::ChunkedDataPipeGetter>>,
+    Persistent<DataPipeBytesConsumer::CompletionNotifier> notifier,
+    int32_t status,
+    uint64_t size) {
+  if (status != 0) {
+    // error case
+    notifier->SignalError(BytesConsumer::Error());
+    return;
+  }
+  notifier->SignalSize(size);
 }
+
+}  // namespace
 
 FetchRequestData* FetchRequestData::Create(
     ScriptState* script_state,
-    const mojom::blink::FetchAPIRequest& fetch_api_request,
+    mojom::blink::FetchAPIRequestPtr fetch_api_request,
     ForServiceWorkerFetchEvent for_service_worker_fetch_event) {
-  FetchRequestData* request = FetchRequestData::Create();
-  request->url_ = fetch_api_request.url;
-  request->method_ = AtomicString(fetch_api_request.method);
-  for (const auto& pair : fetch_api_request.headers) {
+  DCHECK(fetch_api_request);
+  FetchRequestData* request = MakeGarbageCollected<FetchRequestData>(
+      script_state ? ExecutionContext::From(script_state) : nullptr);
+  request->url_ = fetch_api_request->url;
+  request->method_ = AtomicString(fetch_api_request->method);
+  for (const auto& pair : fetch_api_request->headers) {
     // TODO(leonhsl): Check sources of |fetch_api_request.headers| to make clear
     // whether we really need this filter.
-    if (DeprecatedEqualIgnoringCase(pair.key, "referer"))
+    if (EqualIgnoringASCIICase(pair.key, "referer"))
       continue;
     if (for_service_worker_fetch_event == ForServiceWorkerFetchEvent::kTrue &&
         IsExcludedHeaderForServiceWorkerFetchEvent(pair.key)) {
@@ -90,51 +103,96 @@ FetchRequestData* FetchRequestData::Create(
     request->header_list_->Append(pair.key, pair.value);
   }
 
-  if (fetch_api_request.blob) {
-    DCHECK(!fetch_api_request.body);
-    request->SetBuffer(MakeGarbageCollected<BodyStreamBuffer>(
+  if (fetch_api_request->blob) {
+    DCHECK(fetch_api_request->body.IsEmpty());
+    request->SetBuffer(BodyStreamBuffer::Create(
         script_state,
         MakeGarbageCollected<BlobBytesConsumer>(
-            ExecutionContext::From(script_state), fetch_api_request.blob),
+            ExecutionContext::From(script_state), fetch_api_request->blob),
         nullptr /* AbortSignal */));
-  } else if (fetch_api_request.body) {
-    request->SetBuffer(MakeGarbageCollected<BodyStreamBuffer>(
-        script_state,
-        MakeGarbageCollected<FormDataBytesConsumer>(
-            ExecutionContext::From(script_state), fetch_api_request.body),
-        nullptr /* AbortSignal */));
+  } else if (fetch_api_request->body.FormBody()) {
+    request->SetBuffer(
+        BodyStreamBuffer::Create(script_state,
+                                 MakeGarbageCollected<FormDataBytesConsumer>(
+                                     ExecutionContext::From(script_state),
+                                     fetch_api_request->body.FormBody()),
+                                 nullptr /* AbortSignal */));
+  } else if (fetch_api_request->body.StreamBody()) {
+    mojo::ScopedDataPipeConsumerHandle readable;
+    mojo::ScopedDataPipeProducerHandle writable;
+    MojoCreateDataPipeOptions options{sizeof(MojoCreateDataPipeOptions),
+                                      MOJO_CREATE_DATA_PIPE_FLAG_NONE, 1, 0};
+    const MojoResult result =
+        mojo::CreateDataPipe(&options, &writable, &readable);
+    if (result == MOJO_RESULT_OK) {
+      DataPipeBytesConsumer::CompletionNotifier* completion_notifier = nullptr;
+      // Explicitly creating a ReadableStream here in order to remember
+      // that the request is created from a ReadableStream.
+      auto* stream = BodyStreamBuffer::Create(
+                         script_state,
+                         MakeGarbageCollected<DataPipeBytesConsumer>(
+                             ExecutionContext::From(script_state)
+                                 ->GetTaskRunner(TaskType::kNetworking),
+                             std::move(readable), &completion_notifier),
+                         /*AbortSignal=*/nullptr)
+                         ->Stream();
+      request->SetBuffer(
+          MakeGarbageCollected<BodyStreamBuffer>(script_state, stream,
+                                                 /*AbortSignal=*/nullptr));
+
+      auto body_remote = std::make_unique<
+          mojo::Remote<network::mojom::blink::ChunkedDataPipeGetter>>(
+          fetch_api_request->body.TakeStreamBody());
+      auto* body_remote_raw = body_remote.get();
+      (*body_remote_raw)
+          ->GetSize(WTF::Bind(SignalSize, std::move(body_remote),
+                              WrapPersistent(completion_notifier)));
+      (*body_remote_raw)->StartReading(std::move(writable));
+    } else {
+      request->SetBuffer(BodyStreamBuffer::Create(
+          script_state, BytesConsumer::CreateErrored(BytesConsumer::Error()),
+          nullptr /* AbortSignal */));
+    }
   }
 
-  request->SetContext(fetch_api_request.request_context_type);
+  // Context is always set to FETCH later, so we don't copy it
+  // from fetch_api_request here.
+  // TODO(crbug.com/1045925): Remove this comment too when
+  // we deprecate SetContext.
+
+  request->SetDestination(fetch_api_request->destination);
   request->SetReferrerString(AtomicString(Referrer::NoReferrer()));
-  if (fetch_api_request.referrer) {
-    if (!fetch_api_request.referrer->url.IsEmpty())
-      request->SetReferrerString(AtomicString(fetch_api_request.referrer->url));
-    request->SetReferrerPolicy(fetch_api_request.referrer->policy);
+  if (fetch_api_request->referrer) {
+    if (!fetch_api_request->referrer->url.IsEmpty()) {
+      request->SetReferrerString(
+          AtomicString(fetch_api_request->referrer->url));
+    }
+    request->SetReferrerPolicy(fetch_api_request->referrer->policy);
   }
-  request->SetMode(fetch_api_request.mode);
-  request->SetCredentials(fetch_api_request.credentials_mode);
-  request->SetCacheMode(fetch_api_request.cache_mode);
-  request->SetRedirect(fetch_api_request.redirect_mode);
+  request->SetMode(fetch_api_request->mode);
+  request->SetCredentials(fetch_api_request->credentials_mode);
+  request->SetCacheMode(fetch_api_request->cache_mode);
+  request->SetRedirect(fetch_api_request->redirect_mode);
   request->SetMimeType(request->header_list_->ExtractMIMEType());
-  request->SetIntegrity(fetch_api_request.integrity);
-  request->SetKeepalive(fetch_api_request.keepalive);
-  request->SetIsHistoryNavigation(fetch_api_request.is_history_navigation);
-  request->SetPriority(
-      ConvertRequestPriorityToResourceLoadPriority(fetch_api_request.priority));
-  if (fetch_api_request.fetch_window_id)
-    request->SetWindowId(fetch_api_request.fetch_window_id.value());
+  request->SetIntegrity(fetch_api_request->integrity);
+  request->SetKeepalive(fetch_api_request->keepalive);
+  request->SetIsHistoryNavigation(fetch_api_request->is_history_navigation);
+  request->SetPriority(ConvertRequestPriorityToResourceLoadPriority(
+      fetch_api_request->priority));
+  if (fetch_api_request->fetch_window_id)
+    request->SetWindowId(fetch_api_request->fetch_window_id.value());
   return request;
 }
 
 FetchRequestData* FetchRequestData::CloneExceptBody() {
-  FetchRequestData* request = FetchRequestData::Create();
+  auto* request = MakeGarbageCollected<FetchRequestData>(execution_context_);
   request->url_ = url_;
   request->method_ = method_;
   request->header_list_ = header_list_->Clone();
   request->origin_ = origin_;
   request->isolated_world_origin_ = isolated_world_origin_;
   request->context_ = context_;
+  request->destination_ = destination_;
   request->referrer_string_ = referrer_string_;
   request->referrer_policy_ = referrer_policy_;
   request->mode_ = mode_;
@@ -149,6 +207,9 @@ FetchRequestData* FetchRequestData::CloneExceptBody() {
   request->keepalive_ = keepalive_;
   request->is_history_navigation_ = is_history_navigation_;
   request->window_id_ = window_id_;
+  request->trust_token_params_ = trust_token_params_;
+  request->allow_http1_for_streaming_upload_ =
+      allow_http1_for_streaming_upload_;
   return request;
 }
 
@@ -164,9 +225,11 @@ FetchRequestData* FetchRequestData::Clone(ScriptState* script_state,
     buffer_ = new1;
     request->buffer_ = new2;
   }
-  if (url_loader_factory_) {
+  if (url_loader_factory_.is_bound()) {
     url_loader_factory_->Clone(
-        request->url_loader_factory_.BindNewPipeAndPassReceiver());
+        request->url_loader_factory_.BindNewPipeAndPassReceiver(
+            ExecutionContext::From(script_state)
+                ->GetTaskRunner(TaskType::kNetworking)));
   }
   return request;
 }
@@ -176,7 +239,7 @@ FetchRequestData* FetchRequestData::Pass(ScriptState* script_state,
   FetchRequestData* request = FetchRequestData::CloneExceptBody();
   if (buffer_) {
     request->buffer_ = buffer_;
-    buffer_ = MakeGarbageCollected<BodyStreamBuffer>(
+    buffer_ = BodyStreamBuffer::Create(
         script_state, BytesConsumer::CreateClosed(), nullptr /* AbortSignal */);
     buffer_->CloseAndLockAndDisturb(exception_state);
     if (exception_state.HadException())
@@ -188,10 +251,11 @@ FetchRequestData* FetchRequestData::Pass(ScriptState* script_state,
 
 FetchRequestData::~FetchRequestData() {}
 
-FetchRequestData::FetchRequestData()
+FetchRequestData::FetchRequestData(ExecutionContext* execution_context)
     : method_(http_names::kGET),
       header_list_(MakeGarbageCollected<FetchHeaderList>()),
       context_(mojom::RequestContextType::UNSPECIFIED),
+      destination_(network::mojom::RequestDestination::kEmpty),
       referrer_string_(Referrer::ClientReferrerString()),
       referrer_policy_(network::mojom::ReferrerPolicy::kDefault),
       mode_(network::mojom::RequestMode::kNoCors),
@@ -201,11 +265,15 @@ FetchRequestData::FetchRequestData()
       importance_(mojom::FetchImportanceMode::kImportanceAuto),
       response_tainting_(kBasicTainting),
       priority_(ResourceLoadPriority::kUnresolved),
-      keepalive_(false) {}
+      keepalive_(false),
+      url_loader_factory_(execution_context),
+      execution_context_(execution_context) {}
 
-void FetchRequestData::Trace(blink::Visitor* visitor) {
+void FetchRequestData::Trace(Visitor* visitor) const {
   visitor->Trace(buffer_);
   visitor->Trace(header_list_);
+  visitor->Trace(url_loader_factory_);
+  visitor->Trace(execution_context_);
 }
 
 }  // namespace blink

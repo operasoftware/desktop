@@ -6,12 +6,12 @@
  * Create a mock function that records function calls and validates against
  * expectations.
  */
-class MockMethod {
+/* #export */ class MockMethod {
   constructor() {
     var fn = function() {
       var args = Array.prototype.slice.call(arguments);
       var callbacks = args.filter(function(arg) {
-        return (typeof arg == 'function');
+        return (typeof arg === 'function');
       });
 
       if (callbacks.length > 1) {
@@ -21,7 +21,7 @@ class MockMethod {
       }
 
       fn.recordCall(args);
-      if (callbacks.length == 1) {
+      if (callbacks.length === 1) {
         callbacks[0].apply(undefined, fn.callbackData);
         return;
       }
@@ -109,7 +109,7 @@ class MockMethod {
    * @return True if arg is not function type.
    */
   notFunction_(arg) {
-    return typeof arg != 'function';
+    return typeof arg !== 'function';
   }
 }
 
@@ -117,7 +117,7 @@ class MockMethod {
  * Controller for mocking methods. Tracks calls to mocked methods and verifies
  * that call signatures match expectations.
  */
-class MockController {
+/* #export */ class MockController {
   constructor() {
     /**
      * Original functions implementations, which are restored when |reset| is

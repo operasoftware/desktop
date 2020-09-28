@@ -28,7 +28,6 @@ class RebaselineTest(AbstractRebaseliningCommand):
     def execute(self, options, args, tool):
         self._tool = tool
         self._rebaseline_test_and_update_expectations(options)
-        self._print_expectation_line_changes()
 
     def _rebaseline_test_and_update_expectations(self, options):
         self._baseline_suffix_list = options.suffixes.split(',')
@@ -36,19 +35,16 @@ class RebaselineTest(AbstractRebaseliningCommand):
         if options.results_directory:
             results_url = 'file://' + options.results_directory
         else:
-            results_url = self._tool.buildbot.results_url(
-                options.builder, build_number=options.build_number,
+            results_url = self._tool.results_fetcher.results_url(
+                options.builder,
+                build_number=options.build_number,
                 step_name=options.step_name)
 
-        succeeded = True
-        port_name = options.port_name or self._tool.builders.port_name_for_builder_name(options.builder)
+        port_name = options.port_name or self._tool.builders.port_name_for_builder_name(
+            options.builder)
         test_name = options.test
         for suffix in self._baseline_suffix_list:
-            if not self._rebaseline_test(port_name, test_name, suffix, results_url):
-                succeeded = False
-
-        if succeeded:
-            self.expectation_line_changes.remove_line(test=test_name, port_name=port_name)
+            self._rebaseline_test(port_name, test_name, suffix, results_url)
 
     def _rebaseline_test(self, port_name, test_name, suffix, results_url):
         """Downloads a baseline file and saves it to the filesystem.
@@ -60,38 +56,37 @@ class RebaselineTest(AbstractRebaseliningCommand):
             suffix: The baseline file extension (e.g. png); together with the
                 test name and results_url this determines what file to download.
             results_url: Base URL to download the actual result from.
-
-        Returns:
-            True if the rebaseline is successful.
         """
         port = self._tool.port_factory.get(port_name)
 
         baseline_directory = port.baseline_version_dir()
 
-        source_baseline = '%s/%s' % (results_url, self._file_name_for_actual_result(test_name, suffix))
-        target_baseline = self._tool.filesystem.join(baseline_directory, self._file_name_for_expected_result(test_name, suffix))
+        source_baseline = '%s/%s' % (
+            results_url, self._file_name_for_actual_result(test_name, suffix))
+        target_baseline = self._tool.filesystem.join(
+            baseline_directory,
+            self._file_name_for_expected_result(test_name, suffix))
 
-        succeeded = True
         if suffix == 'png' and port.reference_files(test_name):
-            _log.warning('Cannot rebaseline image result for reftest: %s', test_name)
-            succeeded = False
+            _log.warning('Cannot rebaseline image result for reftest: %s',
+                         test_name)
             data = ''
             # Still continue in case we can remove extra -expected.png.
         else:
-            _log.debug('Retrieving source %s for target %s.', source_baseline, target_baseline)
-            data = self._tool.web.get_binary(source_baseline, return_none_on_404=True)
+            _log.debug('Retrieving source %s for target %s.', source_baseline,
+                       target_baseline)
+            data = self._tool.web.get_binary(
+                source_baseline, return_none_on_404=True)
 
         if not data:
             # We don't just remove the file because the test may create empty
             # result on this platform but non-empty on other platforms.
             # Create an empty file, and let optimization deal with it.
-            _log.debug('Writing empty result %s which may be removed during optimization.', target_baseline)
+            _log.debug(
+                'Writing empty result %s which may be removed during optimization.',
+                target_baseline)
             data = ''
 
         filesystem = self._tool.filesystem
         filesystem.maybe_make_directory(filesystem.dirname(target_baseline))
         filesystem.write_binary_file(target_baseline, data)
-        return succeeded
-
-    def _print_expectation_line_changes(self):
-        print json.dumps(self.expectation_line_changes.to_dict())

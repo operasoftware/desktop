@@ -37,6 +37,7 @@
 #include "third_party/blink/renderer/core/html/forms/form_controller.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/network/form_data_encoder.h"
 #include "third_party/blink/renderer/platform/wtf/text/line_ending.h"
@@ -70,7 +71,7 @@ class FormDataIterationSource final
     return true;
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(form_data_);
     PairIterable<String, FormDataEntryValue>::IterationSource::Trace(visitor);
   }
@@ -100,7 +101,6 @@ FormData* FormData::Create(HTMLFormElement* form,
                            ExceptionState& exception_state) {
   FormData* form_data = form->ConstructEntryList(nullptr, UTF8Encoding());
   if (!form_data) {
-    DCHECK(RuntimeEnabledFeatures::FormDataEventEnabled());
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "The form is constructing entry list.");
     return nullptr;
@@ -111,7 +111,7 @@ FormData* FormData::Create(HTMLFormElement* form,
   return MakeGarbageCollected<FormData>(*form_data);
 }
 
-void FormData::Trace(Visitor* visitor) {
+void FormData::Trace(Visitor* visitor) const {
   visitor->Trace(entries_);
   ScriptWrappable::Trace(visitor);
 }
@@ -302,7 +302,7 @@ scoped_refptr<EncodedFormData> FormData::EncodeMultiPartFormData() {
         auto* file = To<File>(entry->GetBlob());
         // Do not add the file if the path is empty.
         if (!file->GetPath().IsEmpty())
-          form_data->AppendFile(file->GetPath());
+          form_data->AppendFile(file->GetPath(), file->LastModifiedTime());
       } else {
         form_data->AppendBlob(entry->GetBlob()->Uuid(),
                               entry->GetBlob()->GetBlobDataHandle());
@@ -340,7 +340,7 @@ FormData::Entry::Entry(const String& name, Blob* blob, const String& filename)
       << "'name' should be a USVString.";
 }
 
-void FormData::Entry::Trace(Visitor* visitor) {
+void FormData::Entry::Trace(Visitor* visitor) const {
   visitor->Trace(blob_);
 }
 
@@ -360,8 +360,8 @@ File* FormData::Entry::GetFile() const {
   String filename = filename_;
   if (filename.IsNull())
     filename = "blob";
-  return File::Create(filename, base::Time::Now().ToDoubleT() * 1000.0,
-                      GetBlob()->GetBlobDataHandle());
+  return MakeGarbageCollected<File>(filename, base::Time::Now(),
+                                    GetBlob()->GetBlobDataHandle());
 }
 
 void FormData::AppendToControlState(FormControlState& state) const {

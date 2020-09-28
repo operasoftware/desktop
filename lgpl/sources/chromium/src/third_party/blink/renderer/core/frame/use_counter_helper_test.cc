@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/html/html_html_element.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/page/page.h"
@@ -61,8 +62,7 @@ class UseCounterHelperTest : public testing::Test {
   HistogramTester histogram_tester_;
 
   void UpdateAllLifecyclePhases(Document& document) {
-    document.View()->UpdateAllLifecyclePhases(
-        DocumentLifecycle::LifecycleUpdateReason::kTest);
+    document.View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
   }
 };
 
@@ -120,7 +120,7 @@ TEST_F(UseCounterHelperTest, CSSSelectorPseudoWhere) {
   Document& document = dummy_page_holder->GetDocument();
   WebFeature feature = WebFeature::kCSSSelectorPseudoWhere;
   EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
+  document.documentElement()->setInnerHTML(
       "<style>.a+:where(.b, .c+.d) { color: red; }</style>");
   EXPECT_TRUE(document.IsUseCounted(feature));
   EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSSelectorPseudoIs));
@@ -143,7 +143,7 @@ TEST_F(UseCounterHelperTest, CSSSelectorPseudoAnyLink) {
   Document& document = dummy_page_holder->GetDocument();
   WebFeature feature = WebFeature::kCSSSelectorPseudoAnyLink;
   EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
+  document.documentElement()->setInnerHTML(
       "<style>:any-link { color: red; }</style>");
   EXPECT_TRUE(document.IsUseCounted(feature));
 }
@@ -154,7 +154,7 @@ TEST_F(UseCounterHelperTest, CSSSelectorPseudoWebkitAnyLink) {
   Document& document = dummy_page_holder->GetDocument();
   WebFeature feature = WebFeature::kCSSSelectorPseudoWebkitAnyLink;
   EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
+  document.documentElement()->setInnerHTML(
       "<style>:-webkit-any-link { color: red; }</style>");
   EXPECT_TRUE(document.IsUseCounted(feature));
 }
@@ -173,81 +173,10 @@ TEST_F(UseCounterHelperTest, CSSSelectorPseudoIs) {
   Document& document = dummy_page_holder->GetDocument();
   WebFeature feature = WebFeature::kCSSSelectorPseudoIs;
   EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
+  document.documentElement()->setInnerHTML(
       "<style>.a+:is(.b, .c+.d) { color: red; }</style>");
   EXPECT_TRUE(document.IsUseCounted(feature));
   EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSSelectorPseudoWhere));
-}
-
-TEST_F(UseCounterHelperTest, CSSContainLayoutNonPositionedDescendants) {
-  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
-  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
-  Document& document = dummy_page_holder->GetDocument();
-  WebFeature feature = WebFeature::kCSSContainLayoutPositionedDescendants;
-  EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
-      "<div style='contain: layout;'>"
-      "</div>");
-  UpdateAllLifecyclePhases(document);
-  EXPECT_FALSE(document.IsUseCounted(feature));
-}
-
-TEST_F(UseCounterHelperTest, CSSContainLayoutAbsolutelyPositionedDescendants) {
-  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
-  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
-  Document& document = dummy_page_holder->GetDocument();
-  WebFeature feature = WebFeature::kCSSContainLayoutPositionedDescendants;
-  EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
-      "<div style='contain: layout;'>"
-      "  <div style='position: absolute;'></div>"
-      "</div>");
-  UpdateAllLifecyclePhases(document);
-  EXPECT_TRUE(document.IsUseCounted(feature));
-}
-
-TEST_F(UseCounterHelperTest,
-       CSSContainLayoutAbsolutelyPositionedDescendantsAlreadyContainingBlock) {
-  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
-  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
-  Document& document = dummy_page_holder->GetDocument();
-  WebFeature feature = WebFeature::kCSSContainLayoutPositionedDescendants;
-  EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
-      "<div style='position: relative; contain: layout;'>"
-      "  <div style='position: absolute;'></div>"
-      "</div>");
-  UpdateAllLifecyclePhases(document);
-  EXPECT_FALSE(document.IsUseCounted(feature));
-}
-
-TEST_F(UseCounterHelperTest, CSSContainLayoutFixedPositionedDescendants) {
-  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
-  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
-  Document& document = dummy_page_holder->GetDocument();
-  WebFeature feature = WebFeature::kCSSContainLayoutPositionedDescendants;
-  EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
-      "<div style='contain: layout;'>"
-      "  <div style='position: fixed;'></div>"
-      "</div>");
-  UpdateAllLifecyclePhases(document);
-  EXPECT_TRUE(document.IsUseCounted(feature));
-}
-
-TEST_F(UseCounterHelperTest,
-       CSSContainLayoutFixedPositionedDescendantsAlreadyContainingBlock) {
-  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
-  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
-  Document& document = dummy_page_holder->GetDocument();
-  WebFeature feature = WebFeature::kCSSContainLayoutPositionedDescendants;
-  EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
-      "<div style='transform: translateX(100px); contain: layout;'>"
-      "  <div style='position: fixed;'></div>"
-      "</div>");
-  UpdateAllLifecyclePhases(document);
-  EXPECT_FALSE(document.IsUseCounted(feature));
 }
 
 TEST_F(UseCounterHelperTest, CSSGridLayoutPercentageColumnIndefiniteWidth) {
@@ -256,24 +185,105 @@ TEST_F(UseCounterHelperTest, CSSGridLayoutPercentageColumnIndefiniteWidth) {
   Document& document = dummy_page_holder->GetDocument();
   WebFeature feature = WebFeature::kGridRowTrackPercentIndefiniteHeight;
   EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
+  document.documentElement()->setInnerHTML(
       "<div style='display: inline-grid; grid-template-columns: 50%;'>"
       "</div>");
   UpdateAllLifecyclePhases(document);
   EXPECT_FALSE(document.IsUseCounted(feature));
 }
 
-TEST_F(UseCounterHelperTest, CSSGridLayoutPercentageRowIndefiniteHeight) {
+TEST_F(UseCounterHelperTest, CSSGridLayoutPercentageRowIndefiniteHeight1) {
   auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
   Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
   Document& document = dummy_page_holder->GetDocument();
   WebFeature feature = WebFeature::kGridRowTrackPercentIndefiniteHeight;
   EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
+  document.documentElement()->setInnerHTML(
       "<div style='display: inline-grid; grid-template-rows: 50%;'>"
       "</div>");
   UpdateAllLifecyclePhases(document);
   EXPECT_TRUE(document.IsUseCounted(feature));
+}
+
+TEST_F(UseCounterHelperTest, CSSGridLayoutPercentageRowIndefiniteHeight2) {
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+  Document& document = dummy_page_holder->GetDocument();
+  WebFeature feature = WebFeature::kGridRowTrackPercentIndefiniteHeight;
+  EXPECT_FALSE(document.IsUseCounted(feature));
+  document.documentElement()->setInnerHTML(
+      "<div style='display: inline-grid; grid-template-rows: 50% 50%;'>"
+      "</div>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_TRUE(document.IsUseCounted(feature));
+}
+
+TEST_F(UseCounterHelperTest, CSSGridLayoutPercentageRowIndefiniteHeight3) {
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+  Document& document = dummy_page_holder->GetDocument();
+  WebFeature feature = WebFeature::kGridRowTrackPercentIndefiniteHeight;
+  EXPECT_FALSE(document.IsUseCounted(feature));
+  document.documentElement()->setInnerHTML(
+      "<div style='display: inline-grid; grid-template-rows: 100% 100%;'>"
+      "</div>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_TRUE(document.IsUseCounted(feature));
+}
+
+TEST_F(UseCounterHelperTest, CSSGridLayoutPercentageRowIndefiniteHeight4) {
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+  Document& document = dummy_page_holder->GetDocument();
+  WebFeature feature = WebFeature::kGridRowTrackPercentIndefiniteHeight;
+  EXPECT_FALSE(document.IsUseCounted(feature));
+  document.documentElement()->setInnerHTML(
+      "<div style='display: inline-grid; grid-template-rows: minmax(50%, "
+      "100%);'>"
+      "</div>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_TRUE(document.IsUseCounted(feature));
+}
+
+TEST_F(UseCounterHelperTest, CSSGridLayoutPercentageRowIndefiniteHeight5) {
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+  Document& document = dummy_page_holder->GetDocument();
+  WebFeature feature = WebFeature::kGridRowTrackPercentIndefiniteHeight;
+  EXPECT_FALSE(document.IsUseCounted(feature));
+  document.documentElement()->setInnerHTML(
+      "<div style='display: inline-grid; max-height: 0; grid-template-rows: "
+      "100%;'>"
+      "</div>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_TRUE(document.IsUseCounted(feature));
+}
+
+TEST_F(UseCounterHelperTest, CSSGridLayoutPercentageRowIndefiniteHeight6) {
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+  Document& document = dummy_page_holder->GetDocument();
+  WebFeature feature = WebFeature::kGridRowTrackPercentIndefiniteHeight;
+  EXPECT_FALSE(document.IsUseCounted(feature));
+  document.documentElement()->setInnerHTML(
+      "<div style='display: inline-grid; grid-template-rows: 100%;'>"
+      "</div>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(feature));
+}
+
+TEST_F(UseCounterHelperTest, CSSGridLayoutPercentageRowIndefiniteHeight7) {
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+  Document& document = dummy_page_holder->GetDocument();
+  WebFeature feature = WebFeature::kGridRowTrackPercentIndefiniteHeight;
+  EXPECT_FALSE(document.IsUseCounted(feature));
+  document.documentElement()->setInnerHTML(
+      "<div style='display: inline-grid; grid-template-rows: minmax(100%, "
+      "100%);'>"
+      "</div>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(feature));
 }
 
 TEST_F(UseCounterHelperTest, CSSFlexibleBox) {
@@ -282,7 +292,7 @@ TEST_F(UseCounterHelperTest, CSSFlexibleBox) {
   Document& document = dummy_page_holder->GetDocument();
   WebFeature feature = WebFeature::kCSSFlexibleBox;
   EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
+  document.documentElement()->setInnerHTML(
       "<div style='display: flex;'>flexbox</div>");
   UpdateAllLifecyclePhases(document);
   EXPECT_TRUE(document.IsUseCounted(feature));
@@ -294,7 +304,7 @@ TEST_F(UseCounterHelperTest, CSSFlexibleBoxInline) {
   Document& document = dummy_page_holder->GetDocument();
   WebFeature feature = WebFeature::kCSSFlexibleBox;
   EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString(
+  document.documentElement()->setInnerHTML(
       "<div style='display: inline-flex;'>flexbox</div>");
   UpdateAllLifecyclePhases(document);
   EXPECT_TRUE(document.IsUseCounted(feature));
@@ -308,7 +318,7 @@ TEST_F(UseCounterHelperTest, CSSFlexibleBoxButton) {
   Document& document = dummy_page_holder->GetDocument();
   WebFeature feature = WebFeature::kCSSFlexibleBox;
   EXPECT_FALSE(document.IsUseCounted(feature));
-  document.documentElement()->SetInnerHTMLFromString("<button>button</button>");
+  document.documentElement()->setInnerHTML("<button>button</button>");
   UpdateAllLifecyclePhases(document);
   EXPECT_FALSE(document.IsUseCounted(feature));
 }
@@ -340,26 +350,26 @@ TEST_F(DeprecationTest, InspectorDisablesDeprecation) {
   deprecation_.MuteForInspector();
   Deprecation::WarnOnDeprecatedProperties(GetFrame(), property);
   EXPECT_FALSE(deprecation_.IsSuppressed(property));
-  Deprecation::CountDeprecation(dummy_->GetDocument(), feature);
+  Deprecation::CountDeprecation(GetFrame()->DomWindow(), feature);
   EXPECT_FALSE(use_counter_.HasRecordedMeasurement(feature));
 
   deprecation_.MuteForInspector();
   Deprecation::WarnOnDeprecatedProperties(GetFrame(), property);
   EXPECT_FALSE(deprecation_.IsSuppressed(property));
-  Deprecation::CountDeprecation(dummy_->GetDocument(), feature);
+  Deprecation::CountDeprecation(GetFrame()->DomWindow(), feature);
   EXPECT_FALSE(use_counter_.HasRecordedMeasurement(feature));
 
   deprecation_.UnmuteForInspector();
   Deprecation::WarnOnDeprecatedProperties(GetFrame(), property);
   EXPECT_FALSE(deprecation_.IsSuppressed(property));
-  Deprecation::CountDeprecation(dummy_->GetDocument(), feature);
+  Deprecation::CountDeprecation(GetFrame()->DomWindow(), feature);
   EXPECT_FALSE(use_counter_.HasRecordedMeasurement(feature));
 
   deprecation_.UnmuteForInspector();
   Deprecation::WarnOnDeprecatedProperties(GetFrame(), property);
   // TODO: use the actually deprecated property to get a deprecation message.
   EXPECT_FALSE(deprecation_.IsSuppressed(property));
-  Deprecation::CountDeprecation(dummy_->GetDocument(), feature);
+  Deprecation::CountDeprecation(GetFrame()->DomWindow(), feature);
   EXPECT_TRUE(use_counter_.HasRecordedMeasurement(feature));
 }
 
@@ -370,7 +380,7 @@ TEST_F(UseCounterHelperTest, CSSUnknownNamespacePrefixInSelector) {
   WebFeature feature = WebFeature::kCSSUnknownNamespacePrefixInSelector;
   EXPECT_FALSE(document.IsUseCounted(feature));
 
-  document.documentElement()->SetInnerHTMLFromString(R"HTML(
+  document.documentElement()->setInnerHTML(R"HTML(
     <style>
       @namespace svg url(http://www.w3.org/2000/svg);
       svg|a {}
@@ -380,7 +390,7 @@ TEST_F(UseCounterHelperTest, CSSUnknownNamespacePrefixInSelector) {
   UpdateAllLifecyclePhases(document);
   EXPECT_FALSE(document.IsUseCounted(feature));
 
-  document.documentElement()->SetInnerHTMLFromString("<style>foo|a {}</style>");
+  document.documentElement()->setInnerHTML("<style>foo|a {}</style>");
   UpdateAllLifecyclePhases(document);
   EXPECT_TRUE(document.IsUseCounted(feature));
 }
@@ -391,7 +401,7 @@ TEST_F(UseCounterHelperTest, CSSSelectorHostContextInLiveProfile) {
   Document& document = dummy_page_holder->GetDocument();
   WebFeature feature = WebFeature::kCSSSelectorHostContextInLiveProfile;
 
-  document.body()->SetInnerHTMLFromString(R"HTML(
+  document.body()->setInnerHTML(R"HTML(
     <div id="parent">
       <div id="host"></div>
     </div>
@@ -404,7 +414,7 @@ TEST_F(UseCounterHelperTest, CSSSelectorHostContextInLiveProfile) {
   UpdateAllLifecyclePhases(document);
   EXPECT_FALSE(document.IsUseCounted(feature));
 
-  shadow_root.SetInnerHTMLFromString(R"HTML(
+  shadow_root.setInnerHTML(R"HTML(
       <style>
         :host-context(#parent) span {
           color: green
@@ -423,7 +433,7 @@ TEST_F(UseCounterHelperTest, CSSSelectorHostContextInSnapshotProfile) {
   Document& document = dummy_page_holder->GetDocument();
   WebFeature feature = WebFeature::kCSSSelectorHostContextInSnapshotProfile;
 
-  document.body()->SetInnerHTMLFromString(R"HTML(
+  document.body()->setInnerHTML(R"HTML(
     <div id="parent">
       <div id="host"></div>
     </div>
@@ -436,7 +446,7 @@ TEST_F(UseCounterHelperTest, CSSSelectorHostContextInSnapshotProfile) {
   UpdateAllLifecyclePhases(document);
   EXPECT_FALSE(document.IsUseCounted(feature));
 
-  shadow_root.SetInnerHTMLFromString("<span></span>");
+  shadow_root.setInnerHTML("<span></span>");
   UpdateAllLifecyclePhases(document);
   EXPECT_FALSE(document.IsUseCounted(feature));
 
@@ -475,6 +485,58 @@ TEST_F(UseCounterHelperTest, MaximumCSSSampleId) {
 
   EXPECT_EQ(static_cast<int>(mojom::blink::CSSSampleId::kMaxValue),
             max_sample_id);
+}
+
+TEST_F(UseCounterHelperTest, CSSMarkerPseudoElementUA) {
+  // Check that UA styles for list markers are not counted.
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+  Document& document = dummy_page_holder->GetDocument();
+  WebFeature feature = WebFeature::kHasMarkerPseudoElement;
+  EXPECT_FALSE(document.IsUseCounted(feature));
+  document.body()->setInnerHTML(R"HTML(
+    <style>
+      li::before {
+        content: "[before]";
+        display: list-item;
+      }
+    </style>
+    <ul>
+      <li style="list-style: decimal outside"></li>
+      <li style="list-style: decimal inside"></li>
+      <li style="list-style: disc outside"></li>
+      <li style="list-style: disc inside"></li>
+      <li style="list-style: '- ' outside"></li>
+      <li style="list-style: '- ' inside"></li>
+      <li style="list-style: linear-gradient(blue, cyan) outside"></li>
+      <li style="list-style: linear-gradient(blue, cyan) inside"></li>
+      <li style="list-style: none outside"></li>
+      <li style="list-style: none inside"></li>
+    </ul>
+  )HTML");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(feature));
+}
+
+TEST_F(UseCounterHelperTest, CSSMarkerPseudoElementAuthor) {
+  // Check that author styles for list markers are counted.
+  auto dummy_page_holder = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+  Document& document = dummy_page_holder->GetDocument();
+  WebFeature feature = WebFeature::kHasMarkerPseudoElement;
+  EXPECT_FALSE(document.IsUseCounted(feature));
+  document.body()->setInnerHTML(R"HTML(
+    <style>
+      li::marker {
+        color: blue;
+      }
+    </style>
+    <ul>
+      <li></li>
+    </ul>
+  )HTML");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_TRUE(document.IsUseCounted(feature));
 }
 
 }  // namespace blink

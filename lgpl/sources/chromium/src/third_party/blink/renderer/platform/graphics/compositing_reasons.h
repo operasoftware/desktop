@@ -6,10 +6,10 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_COMPOSITING_REASONS_H_
 
 #include <stdint.h>
+#include <vector>
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
@@ -18,6 +18,7 @@ using CompositingReasons = uint64_t;
 #define FOR_EACH_COMPOSITING_REASON(V)                                        \
   /* Intrinsic reasons that can be known right away by the layer. */          \
   V(3DTransform)                                                              \
+  V(Trivial3DTransform)                                                       \
   V(Video)                                                                    \
   V(Canvas)                                                                   \
   V(Plugin)                                                                   \
@@ -27,19 +28,23 @@ using CompositingReasons = uint64_t;
   V(ActiveOpacityAnimation)                                                   \
   V(ActiveFilterAnimation)                                                    \
   V(ActiveBackdropFilterAnimation)                                            \
-  V(ImmersiveArOverlay)                                                       \
   V(ScrollDependentPosition)                                                  \
-  V(OverflowScrollingTouch)                                                   \
+  V(OverflowScrolling)                                                        \
   V(OverflowScrollingParent)                                                  \
   V(OutOfFlowClipping)                                                        \
   V(VideoOverlay)                                                             \
   V(WillChangeTransform)                                                      \
   V(WillChangeOpacity)                                                        \
-  /* This flag is needed only when neither kWillChangeTransform nor           \
-     kWillChangeOpacity is set */                                             \
+  V(WillChangeFilter)                                                         \
+  V(WillChangeBackdropFilter)                                                 \
+  /* Reasons that depend on ancestor properties */                            \
+  V(BackfaceInvisibility3DAncestor)                                           \
+  /* This flag is needed only when none of the explicit kWillChange* reasons  \
+     are set. */                                                              \
   V(WillChangeOther)                                                          \
   V(BackdropFilter)                                                           \
   V(RootScroller)                                                             \
+  V(XrOverlay)                                                                \
                                                                               \
   /* Overlap reasons that require knowing what's behind you in paint-order    \
      before knowing the answer. */                                            \
@@ -50,42 +55,34 @@ using CompositingReasons = uint64_t;
                                                                               \
   /* Subtree reasons that require knowing what the status of your subtree is  \
      before knowing the answer. */                                            \
-  V(TransformWithCompositedDescendants)                                       \
   V(OpacityWithCompositedDescendants)                                         \
   V(MaskWithCompositedDescendants)                                            \
   V(ReflectionWithCompositedDescendants)                                      \
   V(FilterWithCompositedDescendants)                                          \
   V(BlendingWithCompositedDescendants)                                        \
-  V(ClipsCompositingDescendants)                                              \
   V(PerspectiveWith3DDescendants)                                             \
   V(Preserve3DWith3DDescendants)                                              \
-  V(ReflectionOfCompositedParent)                                             \
   V(IsolateCompositedDescendants)                                             \
-  V(PositionFixedWithCompositedDescendants)                                   \
+  V(FullscreenVideoWithCompositedDescendants)                                 \
                                                                               \
   /* The root layer is a special case. It may be forced to be a layer, but it \
   also needs to be a layer if anything else in the subtree is composited. */  \
   V(Root)                                                                     \
                                                                               \
-  /* CompositedLayerMapping internal hierarchy reasons. */                    \
-  V(LayerForAncestorClip)                                                     \
-  V(LayerForDescendantClip)                                                   \
+  /* CompositedLayerMapping internal hierarchy reasons. Some of them are also \
+  used in CompositeAfterPaint. */                                             \
   V(LayerForHorizontalScrollbar)                                              \
   V(LayerForVerticalScrollbar)                                                \
   V(LayerForOverflowControlsHost)                                             \
   V(LayerForScrollCorner)                                                     \
   V(LayerForScrollingContents)                                                \
-  V(LayerForScrollingContainer)                                               \
   V(LayerForSquashingContents)                                                \
-  V(LayerForSquashingContainer)                                               \
   V(LayerForForeground)                                                       \
-  V(LayerForBackground)                                                       \
   V(LayerForMask)                                                             \
-  V(LayerForClippingMask)                                                     \
-  V(LayerForAncestorClippingMask)                                             \
-  V(LayerForScrollingBlockSelection)                                          \
   /* Composited layer painted on top of all other layers as decoration. */    \
-  V(LayerForDecoration)
+  V(LayerForDecoration)                                                       \
+  /* Used in CompositeAfterPaint for link highlight, frame overlay, etc. */   \
+  V(LayerForOther)
 
 class PLATFORM_EXPORT CompositingReason {
   DISALLOW_NEW();
@@ -104,8 +101,8 @@ class PLATFORM_EXPORT CompositingReason {
 #undef V
 
  public:
-  static Vector<const char*> ShortNames(CompositingReasons);
-  static Vector<const char*> Descriptions(CompositingReasons);
+  static std::vector<const char*> ShortNames(CompositingReasons);
+  static std::vector<const char*> Descriptions(CompositingReasons);
   static String ToString(CompositingReasons);
 
   enum : CompositingReasons {
@@ -122,26 +119,32 @@ class PLATFORM_EXPORT CompositingReason {
         kActiveFilterAnimation | kActiveBackdropFilterAnimation,
 
     kComboAllDirectStyleDeterminedReasons =
-        k3DTransform | kBackfaceVisibilityHidden | kComboActiveAnimation |
-        kWillChangeTransform | kWillChangeOpacity | kWillChangeOther |
-        kBackdropFilter,
+        k3DTransform | kTrivial3DTransform | kBackfaceVisibilityHidden |
+        kComboActiveAnimation | kWillChangeTransform | kWillChangeOpacity |
+        kWillChangeFilter | kWillChangeOther | kBackdropFilter |
+        kWillChangeBackdropFilter,
 
     kComboAllDirectNonStyleDeterminedReasons =
         kVideo | kCanvas | kPlugin | kIFrame | kOverflowScrollingParent |
-        kOutOfFlowClipping | kVideoOverlay | kImmersiveArOverlay | kRoot |
-        kRootScroller | kScrollDependentPosition,
+        kOutOfFlowClipping | kVideoOverlay | kXrOverlay | kRoot |
+        kRootScroller | kScrollDependentPosition |
+        kBackfaceInvisibility3DAncestor,
 
     kComboAllDirectReasons = kComboAllDirectStyleDeterminedReasons |
                              kComboAllDirectNonStyleDeterminedReasons,
 
+    kComboTransformedRasterizationDisallowedReasons =
+        kComboAllDirectReasons & ~kScrollDependentPosition &
+        ~kTrivial3DTransform & ~kBackfaceVisibilityHidden,
+
     kComboAllCompositedScrollingDeterminedReasons =
-        kScrollDependentPosition | kOverflowScrollingTouch,
+        kScrollDependentPosition | kOverflowScrolling,
 
     kComboCompositedDescendants =
         kIsolateCompositedDescendants | kOpacityWithCompositedDescendants |
         kMaskWithCompositedDescendants | kFilterWithCompositedDescendants |
         kBlendingWithCompositedDescendants |
-        kReflectionWithCompositedDescendants | kClipsCompositingDescendants,
+        kReflectionWithCompositedDescendants,
 
     kCombo3DDescendants =
         kPreserve3DWith3DDescendants | kPerspectiveWith3DDescendants,
@@ -153,14 +156,20 @@ class PLATFORM_EXPORT CompositingReason {
     kComboSquashableReasons =
         kOverlap | kAssumedOverlap | kOverflowScrollingParent,
 
+    kDirectReasonsForPaintOffsetTranslationProperty =
+        kScrollDependentPosition | kVideo | kCanvas | kPlugin | kIFrame,
+
     kDirectReasonsForTransformProperty =
-        k3DTransform | kWillChangeTransform | kWillChangeOther |
-        kPerspectiveWith3DDescendants | kPreserve3DWith3DDescendants |
-        kActiveTransformAnimation,
-    kDirectReasonsForEffectProperty = kActiveOpacityAnimation |
-                                      kWillChangeOpacity | kBackdropFilter |
-                                      kActiveBackdropFilterAnimation,
-    kDirectReasonsForFilterProperty = kActiveFilterAnimation,
+        k3DTransform | kTrivial3DTransform | kWillChangeTransform |
+        kWillChangeOther | kPerspectiveWith3DDescendants |
+        kPreserve3DWith3DDescendants | kActiveTransformAnimation,
+    kDirectReasonsForScrollTranslationProperty =
+        kRootScroller | kOverflowScrolling,
+    kDirectReasonsForEffectProperty =
+        kActiveOpacityAnimation | kWillChangeOpacity | kBackdropFilter |
+        kWillChangeBackdropFilter | kActiveBackdropFilterAnimation,
+    kDirectReasonsForFilterProperty =
+        kActiveFilterAnimation | kWillChangeFilter,
   };
 };
 

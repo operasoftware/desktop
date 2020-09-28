@@ -9,7 +9,7 @@
 #include "base/debug/stack_trace.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/memory/ptr_util.h"
 #include "base/optional.h"
 #include "base/time/tick_clock.h"
@@ -17,6 +17,7 @@
 #include "third_party/blink/renderer/platform/scheduler/common/throttling/budget_pool.h"
 #include "third_party/blink/renderer/platform/scheduler/common/throttling/throttled_time_domain.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/frame_scheduler_impl.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 
 namespace blink {
 namespace scheduler {
@@ -31,39 +32,6 @@ base::Optional<base::TimeTicks> NextTaskRunTime(LazyNow* lazy_now,
   if (queue->HasTaskToRunImmediately())
     return lazy_now->Now();
   return queue->GetNextScheduledWakeUp();
-}
-
-template <class T>
-T Min(const base::Optional<T>& optional, const T& value) {
-  if (!optional) {
-    return value;
-  }
-  return std::min(optional.value(), value);
-}
-
-template <class T>
-base::Optional<T> Min(const base::Optional<T>& a, const base::Optional<T>& b) {
-  if (!b)
-    return a;
-  if (!a)
-    return b;
-  return std::min(a.value(), b.value());
-}
-
-template <class T>
-T Max(const base::Optional<T>& optional, const T& value) {
-  if (!optional)
-    return value;
-  return std::max(optional.value(), value);
-}
-
-template <class T>
-base::Optional<T> Max(const base::Optional<T>& a, const base::Optional<T>& b) {
-  if (!b)
-    return a;
-  if (!a)
-    return b;
-  return std::max(a.value(), b.value());
 }
 
 }  // namespace
@@ -213,7 +181,7 @@ void TaskQueueThrottler::OnQueueNextWakeUpChanged(
   // TODO(altimin): This probably can be removed —- budget pools should
   // schedule this.
   base::TimeTicks next_allowed_run_time =
-      GetNextAllowedRunTime(queue, next_wake_up);
+      UpdateNextAllowedRunTime(queue, next_wake_up);
   MaybeSchedulePumpThrottledTasks(
       FROM_HERE, now, std::max(next_wake_up, next_allowed_run_time));
 }
@@ -224,9 +192,26 @@ void TaskQueueThrottler::PumpThrottledTasks() {
 
   LazyNow lazy_now(tick_clock_);
 
-  for (const auto& pair : budget_pools_)
-    pair.key->OnWakeUp(lazy_now.Now());
+  // Collect BudgetPools for which at least one queue has reached its next
+  // granted run time.
+  HashSet<BudgetPool*> budget_pools_at_next_granted_run_time;
+  for (const TaskQueueMap::value_type& map_entry : queue_details_) {
+    const base::TimeTicks next_granted_run_time =
+        map_entry.value->next_granted_run_time();
+    if (next_granted_run_time <= lazy_now.Now()) {
+      budget_pools_at_next_granted_run_time.ReserveCapacityForSize(
+          map_entry.value->budget_pools().size());
+      for (BudgetPool* budget_pool : map_entry.value->budget_pools())
+        budget_pools_at_next_granted_run_time.insert(budget_pool);
+    }
+  }
 
+  // Notify BudgetPools for which at least one queue has reached its next
+  // granted run time about the wake up.
+  for (BudgetPool* budget_pool : budget_pools_at_next_granted_run_time)
+    budget_pool->OnWakeUp(lazy_now.Now());
+
+  // Update throttling state for all queues.
   for (const TaskQueueMap::value_type& map_entry : queue_details_) {
     TaskQueue* task_queue = map_entry.key;
     UpdateQueueSchedulingLifecycleStateInternal(lazy_now.Now(), task_queue,
@@ -315,6 +300,13 @@ void TaskQueueThrottler::UpdateQueueSchedulingLifecycleStateInternal(
     base::TimeTicks now,
     TaskQueue* queue,
     bool is_wake_up) {
+  // Clear the next granted run time, to ensure that the queue's BudgetPools
+  // aren't incorrectly informed of a wake up at the next PumpThrottledTasks().
+  // If necessary, an up-to-date next granted run time will be set below.
+  auto find_it = queue_details_.find(queue);
+  if (find_it != queue_details_.end())
+    find_it->value->set_next_granted_run_time(base::TimeTicks::Max());
+
   if (!queue->IsQueueEnabled() || !IsThrottled(queue)) {
     return;
   }
@@ -326,20 +318,22 @@ void TaskQueueThrottler::UpdateQueueSchedulingLifecycleStateInternal(
 
   if (CanRunTasksAt(queue, now, is_wake_up)) {
     // Unblock queue if we can run tasks immediately.
-    base::Optional<base::TimeTicks> unblock_until =
+    base::TimeTicks unblock_until =
         GetTimeTasksCanRunUntil(queue, now, is_wake_up);
-    DCHECK(unblock_until);
-    if (unblock_until.value() > now) {
-      queue->InsertFenceAt(unblock_until.value());
-    } else if (unblock_until.value() == now) {
-      queue->InsertFence(TaskQueue::InsertFencePosition::kNow);
+    if (unblock_until.is_max()) {
+      queue->RemoveFence();
+    } else if (unblock_until > now) {
+      queue->InsertFenceAt(unblock_until);
     } else {
-      DCHECK_GE(unblock_until.value(), now);
+      DCHECK_EQ(unblock_until, now);
+      queue->InsertFence(TaskQueue::InsertFencePosition::kNow);
     }
 
-    // Throttled time domain does not schedule wake-ups without explicitly
-    // being told so.
-    if (next_desired_run_time && next_desired_run_time.value() != now &&
+    // Throttled time domain does not schedule wake-ups without explicitly being
+    // told so. Schedule a wake up if there is a next desired run time in the
+    // future, and tasks can run at that time.
+    if (next_desired_run_time.has_value() &&
+        next_desired_run_time.value() != now &&
         next_desired_run_time.value() < unblock_until) {
       time_domain_->SetNextTaskRunTime(next_desired_run_time.value());
     }
@@ -350,7 +344,8 @@ void TaskQueueThrottler::UpdateQueueSchedulingLifecycleStateInternal(
     // mentioned in the bug.
     if (next_wake_up) {
       MaybeSchedulePumpThrottledTasks(
-          FROM_HERE, now, GetNextAllowedRunTime(queue, next_wake_up.value()));
+          FROM_HERE, now,
+          UpdateNextAllowedRunTime(queue, next_wake_up.value()));
     }
 
     return;
@@ -359,8 +354,8 @@ void TaskQueueThrottler::UpdateQueueSchedulingLifecycleStateInternal(
   if (!next_desired_run_time)
     return;
 
-  base::TimeTicks next_run_time =
-      GetNextAllowedRunTime(queue, next_desired_run_time.value());
+  const base::TimeTicks next_run_time =
+      UpdateNextAllowedRunTime(queue, next_desired_run_time.value());
 
   // Insert a fence of an approriate type.
   base::Optional<QueueBlockType> block_type = GetQueueBlockType(now, queue);
@@ -473,7 +468,7 @@ void TaskQueueThrottler::UnregisterBudgetPool(BudgetPool* budget_pool) {
   budget_pools_.erase(budget_pool);
 }
 
-base::TimeTicks TaskQueueThrottler::GetNextAllowedRunTime(
+base::TimeTicks TaskQueueThrottler::UpdateNextAllowedRunTime(
     TaskQueue* queue,
     base::TimeTicks desired_run_time) {
   base::TimeTicks next_run_time = desired_run_time;
@@ -486,6 +481,8 @@ base::TimeTicks TaskQueueThrottler::GetNextAllowedRunTime(
     next_run_time = std::max(
         next_run_time, budget_pool->GetNextAllowedRunTime(desired_run_time));
   }
+
+  find_it->value->set_next_granted_run_time(next_run_time);
 
   return next_run_time;
 }
@@ -505,17 +502,20 @@ bool TaskQueueThrottler::CanRunTasksAt(TaskQueue* queue,
   return true;
 }
 
-base::Optional<base::TimeTicks> TaskQueueThrottler::GetTimeTasksCanRunUntil(
+base::TimeTicks TaskQueueThrottler::GetTimeTasksCanRunUntil(
     TaskQueue* queue,
     base::TimeTicks now,
     bool is_wake_up) const {
-  base::Optional<base::TimeTicks> result;
+  // Start with no known limit for the time tasks can run until.
+  base::TimeTicks result = base::TimeTicks::Max();
+
   auto find_it = queue_details_.find(queue);
   if (find_it == queue_details_.end())
     return result;
 
   for (BudgetPool* budget_pool : find_it->value->budget_pools()) {
-    result = Min(result, budget_pool->GetTimeTasksCanRunUntil(now, is_wake_up));
+    result =
+        std::min(result, budget_pool->GetTimeTasksCanRunUntil(now, is_wake_up));
   }
 
   return result;
@@ -601,9 +601,6 @@ bool TaskQueueThrottler::Metadata::DecrementRefCount() {
   }
   return false;
 }
-
-void TaskQueueThrottler::Metadata::OnPostTask(base::Location from_here,
-                                              base::TimeDelta delay) {}
 
 void TaskQueueThrottler::Metadata::OnQueueNextWakeUpChanged(
     base::TimeTicks wake_up) {

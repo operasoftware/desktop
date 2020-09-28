@@ -31,8 +31,8 @@ bool StructTraits<blink::mojom::blink::TransferableMessage::DataView,
                   blink::BlinkTransferableMessage>::
     Read(blink::mojom::blink::TransferableMessage::DataView data,
          blink::BlinkTransferableMessage* out) {
-  Vector<mojo::ScopedMessagePipeHandle> ports;
-  Vector<mojo::ScopedMessagePipeHandle> stream_channels;
+  Vector<blink::MessagePortDescriptor> ports;
+  Vector<blink::MessagePortDescriptor> stream_channels;
   blink::SerializedScriptValue::ArrayBufferContentsArray
       array_buffer_contents_array;
   Vector<SkBitmap> sk_bitmaps;
@@ -75,17 +75,17 @@ bool StructTraits<blink::mojom::blink::TransferableMessage::DataView,
 }
 
 bool StructTraits<blink::mojom::blink::SerializedArrayBufferContents::DataView,
-                  WTF::ArrayBufferContents>::
+                  blink::ArrayBufferContents>::
     Read(blink::mojom::blink::SerializedArrayBufferContents::DataView data,
-         WTF::ArrayBufferContents* out) {
+         blink::ArrayBufferContents* out) {
   mojo_base::BigBufferView contents_view;
   if (!data.ReadContents(&contents_view))
     return false;
   auto contents_data = contents_view.data();
 
-  WTF::ArrayBufferContents array_buffer_contents(
-      contents_data.size(), 1, WTF::ArrayBufferContents::kNotShared,
-      WTF::ArrayBufferContents::kDontInitialize);
+  blink::ArrayBufferContents array_buffer_contents(
+      contents_data.size(), 1, blink::ArrayBufferContents::kNotShared,
+      blink::ArrayBufferContents::kDontInitialize);
   if (contents_data.size() != array_buffer_contents.DataLength()) {
     return false;
   }

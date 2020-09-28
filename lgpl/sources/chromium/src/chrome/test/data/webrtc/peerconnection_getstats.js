@@ -117,8 +117,11 @@ let kRTCInboundRtpStreamStats = new RTCStats(kRTCReceivedRtpStreamStats, {
   remoteId: 'string',
   framesDecoded: 'number',
   keyFramesDecoded: 'number',
+  frameBitDepth: 'number',
   qpSum: 'number',
   totalDecodeTime: 'number',
+  totalInterFrameDelay: 'number',
+  totalSquaredInterFrameDelay: 'number',
   lastPacketReceivedTimestamp: 'number',
   averageRtcpInterval: 'number',
   fecPacketsReceived: 'number',
@@ -132,6 +135,7 @@ let kRTCInboundRtpStreamStats = new RTCStats(kRTCReceivedRtpStreamStats, {
   firCount: 'number',
   pliCount: 'number',
   sliCount: 'number',
+  estimatedPlayoutTimestamp: 'number',
   fractionLost: 'number',  // Obsolete, moved to RTCRemoteInboundRtpStreamStats.
   decoderImplementation: 'string',
 });
@@ -184,6 +188,7 @@ let kRTCOutboundRtpStreamStats = new RTCStats(kRTCSentRtpStreamStats, {
   headerBytesSent: 'number',
   targetBitrate: 'number',
   totalEncodedBytesTarget: 'number',
+  frameBitDepth: 'number',
   framesEncoded: 'number',
   keyFramesEncoded: 'number',
   qpSum: 'number',
@@ -199,6 +204,12 @@ let kRTCOutboundRtpStreamStats = new RTCStats(kRTCSentRtpStreamStats, {
   pliCount: 'number',
   sliCount: 'number',
   encoderImplementation: 'string',
+  rid: 'string',
+  frameWidth: 'number',
+  frameHeight: 'number',
+  framesPerSecond: 'number',
+  framesSent: 'number',
+  hugeFramesSent: 'number',
 });
 addRTCStatsToWhitelist(
     Presence.MANDATORY, 'outbound-rtp', kRTCOutboundRtpStreamStats);
@@ -247,6 +258,7 @@ addRTCStatsToWhitelist(
 const kRTCVideoSourceStats = new RTCStats(kRTCMediaSourceStats, {
   width: 'number',
   height: 'number',
+  bitDepth: 'number',
   frames: 'number',
   framesPerSecond: 'number',
 });
@@ -465,7 +477,7 @@ addRTCStatsToWhitelist(
 let kRTCDataChannelStats = new RTCStats(null, {
   label: 'string',
   protocol: 'string',
-  datachannelid: 'number',
+  dataChannelIdentifier: 'number',
   state: 'string',
   messagesSent: 'number',
   bytesSent: 'number',
@@ -488,6 +500,9 @@ let kRTCTransportStats = new RTCStats(null, {
   selectedCandidatePairId: 'string',
   localCertificateId: 'string',
   remoteCertificateId: 'string',
+  tlsVersion: 'string',
+  dtlsCipher: 'string',
+  srtpCipher: 'string',
   selectedCandidatePairChanges: 'number',
 });
 addRTCStatsToWhitelist(Presence.MANDATORY, 'transport', kRTCTransportStats);

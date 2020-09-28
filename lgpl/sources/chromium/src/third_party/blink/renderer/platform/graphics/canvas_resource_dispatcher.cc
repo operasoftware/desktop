@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/debug/stack_trace.h"
 #include "base/single_thread_task_runner.h"
 #include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/common/quads/texture_draw_quad.h"
@@ -13,8 +14,8 @@
 #include "components/viz/common/resources/single_release_callback.h"
 #include "services/viz/public/mojom/compositing/frame_timing_details.mojom-blink.h"
 #include "services/viz/public/mojom/hit_test/hit_test_region_list.mojom-blink.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/frame_sinks/embedded_frame_sink.mojom-blink.h"
-#include "third_party/blink/public/platform/interface_provider.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource.h"
@@ -68,7 +69,7 @@ CanvasResourceDispatcher::CanvasResourceDispatcher(
 
   DCHECK(!sink_.is_bound());
   mojo::Remote<mojom::blink::EmbeddedFrameSinkProvider> provider;
-  Platform::Current()->GetInterfaceProvider()->GetInterface(
+  Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
       provider.BindNewPipeAndPassReceiver());
 
   DCHECK(provider);
@@ -84,8 +85,6 @@ CanvasResourceDispatcher::~CanvasResourceDispatcher() = default;
 namespace {
 
 void UpdatePlaceholderImage(
-    base::WeakPtr<CanvasResourceDispatcher> dispatcher,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     int placeholder_canvas_id,
     scoped_refptr<blink::CanvasResource> canvas_resource,
     viz::ResourceId resource_id) {
@@ -94,10 +93,22 @@ void UpdatePlaceholderImage(
       OffscreenCanvasPlaceholder::GetPlaceholderCanvasById(
           placeholder_canvas_id);
   if (placeholder_canvas) {
-    placeholder_canvas->SetOffscreenCanvasFrame(
-        std::move(canvas_resource), std::move(dispatcher),
-        std::move(task_runner), resource_id);
+    placeholder_canvas->SetOffscreenCanvasResource(std::move(canvas_resource),
+                                                   resource_id);
   }
+}
+
+void UpdatePlaceholderDispatcher(
+    base::WeakPtr<CanvasResourceDispatcher> dispatcher,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    int placeholder_canvas_id) {
+  OffscreenCanvasPlaceholder* placeholder_canvas =
+      OffscreenCanvasPlaceholder::GetPlaceholderCanvasById(
+          placeholder_canvas_id);
+  // Note that the placeholder canvas may be destroyed when this post task get
+  // to executed.
+  if (placeholder_canvas)
+    placeholder_canvas->SetOffscreenCanvasDispatcher(dispatcher, task_runner);
 }
 
 }  // namespace
@@ -131,17 +142,13 @@ void CanvasResourceDispatcher::PostImageToPlaceholder(
     viz::ResourceId resource_id) {
   scoped_refptr<base::SingleThreadTaskRunner> dispatcher_task_runner =
       Thread::Current()->GetTaskRunner();
-
   // After this point, |canvas_resource| can only be used on the main thread,
   // until it is returned.
   canvas_resource->Transfer();
-
   PostCrossThreadTask(
       *Thread::MainThread()->Scheduler()->CompositorTaskRunner(), FROM_HERE,
-      CrossThreadBindOnce(UpdatePlaceholderImage, this->GetWeakPtr(),
-                          WTF::Passed(std::move(dispatcher_task_runner)),
-                          placeholder_canvas_id_, std::move(canvas_resource),
-                          resource_id));
+      CrossThreadBindOnce(UpdatePlaceholderImage, placeholder_canvas_id_,
+                          std::move(canvas_resource), resource_id));
 }
 
 void CanvasResourceDispatcher::DispatchFrameSync(
@@ -162,7 +169,7 @@ void CanvasResourceDispatcher::DispatchFrameSync(
   sink_->SubmitCompositorFrameSync(
       parent_local_surface_id_allocator_.GetCurrentLocalSurfaceIdAllocation()
           .local_surface_id(),
-      std::move(frame), nullptr, 0, &resources);
+      std::move(frame), base::nullopt, 0, &resources);
   DidReceiveCompositorFrameAck(resources);
 }
 
@@ -183,7 +190,7 @@ void CanvasResourceDispatcher::DispatchFrame(
   sink_->SubmitCompositorFrame(
       parent_local_surface_id_allocator_.GetCurrentLocalSurfaceIdAllocation()
           .local_surface_id(),
-      std::move(frame), nullptr, 0);
+      std::move(frame), base::nullopt, 0);
 }
 
 bool CanvasResourceDispatcher::PrepareFrame(
@@ -209,8 +216,7 @@ bool CanvasResourceDispatcher::PrepareFrame(
 
   // TODO(crbug.com/652931): update the device_scale_factor
   frame->metadata.device_scale_factor = 1.0f;
-  if (current_begin_frame_ack_.sequence_number ==
-      viz::BeginFrameArgs::kInvalidFrameNumber) {
+  if (!current_begin_frame_ack_.frame_id.IsSequenceValid()) {
     // TODO(eseckler): This shouldn't be necessary when OffscreenCanvas no
     // longer submits CompositorFrames without prior BeginFrame.
     current_begin_frame_ack_ = viz::BeginFrameAck::CreateManualAckWithDamage();
@@ -224,7 +230,8 @@ bool CanvasResourceDispatcher::PrepareFrame(
   const gfx::Rect bounds(size_.Width(), size_.Height());
   constexpr int kRenderPassId = 1;
   constexpr bool is_clipped = false;
-  std::unique_ptr<viz::RenderPass> pass = viz::RenderPass::Create();
+  auto pass = viz::RenderPass::Create(/*shared_quad_state_list_size=*/1u,
+                                      /*quad_list_size=*/1u);
   pass->SetNew(kRenderPassId, bounds,
                gfx::Rect(damage_rect.x(), damage_rect.y(), damage_rect.width(),
                          damage_rect.height()),
@@ -327,7 +334,7 @@ bool CanvasResourceDispatcher::HasTooManyPendingFrames() const {
 
 void CanvasResourceDispatcher::OnBeginFrame(
     const viz::BeginFrameArgs& begin_frame_args,
-    WTF::HashMap<uint32_t, ::viz::mojom::blink::FrameTimingDetailsPtr>) {
+    const WTF::HashMap<uint32_t, viz::FrameTimingDetails>&) {
   current_begin_frame_ack_ = viz::BeginFrameAck(begin_frame_args, false);
   if (HasTooManyPendingFrames() ||
       (begin_frame_args.type == viz::BeginFrameArgs::MISSED &&
@@ -346,7 +353,7 @@ void CanvasResourceDispatcher::OnBeginFrame(
   }
 
   // TODO(fserb): Update this with the correct value if we are on RAF submit.
-  current_begin_frame_ack_.sequence_number =
+  current_begin_frame_ack_.frame_id.sequence_number =
       viz::BeginFrameArgs::kInvalidFrameNumber;
 }
 
@@ -394,15 +401,40 @@ void CanvasResourceDispatcher::Reshape(const IntSize& size) {
 
 void CanvasResourceDispatcher::DidAllocateSharedBitmap(
     base::ReadOnlySharedMemoryRegion region,
-    ::gpu::mojom::blink::MailboxPtr id) {
+    const gpu::Mailbox& id) {
   if (sink_)
-    sink_->DidAllocateSharedBitmap(std::move(region), std::move(id));
+    sink_->DidAllocateSharedBitmap(std::move(region), id);
 }
 
-void CanvasResourceDispatcher::DidDeleteSharedBitmap(
-    ::gpu::mojom::blink::MailboxPtr id) {
+void CanvasResourceDispatcher::DidDeleteSharedBitmap(const gpu::Mailbox& id) {
   if (sink_)
-    sink_->DidDeleteSharedBitmap(std::move(id));
+    sink_->DidDeleteSharedBitmap(id);
+}
+
+void CanvasResourceDispatcher::SetFilterQuality(
+    SkFilterQuality filter_quality) {
+  if (Client())
+    Client()->SetFilterQualityInResource(filter_quality);
+}
+
+void CanvasResourceDispatcher::SetPlaceholderCanvasDispatcher(
+    int placeholder_canvas_id) {
+  scoped_refptr<base::SingleThreadTaskRunner> dispatcher_task_runner =
+      Thread::Current()->GetTaskRunner();
+
+  // If the offscreencanvas is in the same tread as the canvas, we will update
+  // the canvas resource dispatcher directly. So Offscreen Canvas can behave in
+  // a more synchronous way when it's on the main thread.
+  if (IsMainThread()) {
+    UpdatePlaceholderDispatcher(this->GetWeakPtr(), dispatcher_task_runner,
+                                placeholder_canvas_id);
+  } else {
+    PostCrossThreadTask(
+        *Thread::MainThread()->Scheduler()->CompositorTaskRunner(), FROM_HERE,
+        CrossThreadBindOnce(UpdatePlaceholderDispatcher, this->GetWeakPtr(),
+                            WTF::Passed(std::move(dispatcher_task_runner)),
+                            placeholder_canvas_id));
+  }
 }
 
 void CanvasResourceDispatcher::ReclaimResourceInternal(

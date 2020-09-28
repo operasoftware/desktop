@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
+#include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
@@ -50,8 +51,7 @@ void ImageBitmapRenderingContextBase::SetImage(ImageBitmap* image_bitmap) {
     image_bitmap->close();
 }
 
-scoped_refptr<StaticBitmapImage> ImageBitmapRenderingContextBase::GetImage(
-    AccelerationHint) {
+scoped_refptr<StaticBitmapImage> ImageBitmapRenderingContextBase::GetImage() {
   return image_layer_bridge_->GetImage();
 }
 
@@ -64,8 +64,8 @@ ImageBitmapRenderingContextBase::GetImageAndResetInternal() {
   SkBitmap black_bitmap;
   black_bitmap.allocN32Pixels(copy_image->width(), copy_image->height());
   black_bitmap.eraseARGB(0, 0, 0, 0);
-  image_layer_bridge_->SetImage(
-      StaticBitmapImage::Create(SkImage::MakeFromBitmap(black_bitmap)));
+  image_layer_bridge_->SetImage(UnacceleratedStaticBitmapImage::Create(
+      SkImage::MakeFromBitmap(black_bitmap)));
 
   return copy_image;
 }
@@ -83,7 +83,7 @@ bool ImageBitmapRenderingContextBase::IsPaintable() const {
   return !!image_layer_bridge_->GetImage();
 }
 
-void ImageBitmapRenderingContextBase::Trace(blink::Visitor* visitor) {
+void ImageBitmapRenderingContextBase::Trace(Visitor* visitor) const {
   visitor->Trace(image_layer_bridge_);
   CanvasRenderingContext::Trace(visitor);
 }

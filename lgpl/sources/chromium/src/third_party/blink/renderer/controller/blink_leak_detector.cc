@@ -67,10 +67,7 @@ void BlinkLeakDetector::PerformLeakDetection(
   for (auto resource_fetcher : ResourceFetcher::MainThreadFetchers())
     resource_fetcher->PrepareForLeakDetection();
 
-  // Internal settings are ScriptWrappable and thus may retain documents
-  // depending on whether the garbage collector(s) are able to find the settings
-  // object through the Page supplement.
-  InternalSettings::PrepareForLeakDetection();
+  Page::PrepareForLeakDetection();
 
   // Task queue may contain delayed object destruction tasks.
   // This method is called from navigation hook inside FrameLoader,
@@ -85,9 +82,7 @@ void BlinkLeakDetector::TimerFiredGC(TimerBase*) {
   // clean-up tasks to the next event loop. E.g. the third GC is necessary for
   // cleaning up Document after the worker object has been reclaimed.
 
-  V8GCController::CollectAllGarbageForTesting(
-      V8PerIsolateData::MainThreadIsolate(),
-      v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+  ThreadState::Current()->CollectAllGarbageForTesting();
   CoreInitializer::GetInstance()
       .CollectAllGarbageForAnimationAndPaintWorkletForTesting();
   // Note: Oilpan precise GC is scheduled at the end of the event loop.

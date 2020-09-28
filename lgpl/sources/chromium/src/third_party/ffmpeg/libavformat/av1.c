@@ -19,6 +19,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/avassert.h"
 #include "libavutil/mem.h"
 #include "libavcodec/av1.h"
 #include "libavcodec/av1_parse.h"
@@ -26,14 +27,22 @@
 #include "libavcodec/put_bits.h"
 #include "av1.h"
 #include "avio.h"
+#include "avio_internal.h"
 
-int ff_av1_filter_obus(AVIOContext *pb, const uint8_t *buf, int size)
+static int av1_filter_obus(AVIOContext *pb, const uint8_t *buf,
+                           int size, int *offset)
 {
-    const uint8_t *end = buf + size;
+    const uint8_t *start = buf, *end = buf + size;
     int64_t obu_size;
-    int start_pos, type, temporal_id, spatial_id;
+    int off, start_pos, type, temporal_id, spatial_id;
+    enum {
+        START_NOT_FOUND,
+        START_FOUND,
+        END_FOUND,
+        OFFSET_IMPOSSIBLE,
+    } state = START_NOT_FOUND;
 
-    size = 0;
+    off = size = 0;
     while (buf < end) {
         int len = parse_obu_header(buf, end - buf, &obu_size, &start_pos,
                                    &type, &temporal_id, &spatial_id);
@@ -45,48 +54,71 @@ int ff_av1_filter_obus(AVIOContext *pb, const uint8_t *buf, int size)
         case AV1_OBU_REDUNDANT_FRAME_HEADER:
         case AV1_OBU_TILE_LIST:
         case AV1_OBU_PADDING:
+            if (state == START_FOUND)
+                state = END_FOUND;
             break;
         default:
-            avio_write(pb, buf, len);
+            if (state == START_NOT_FOUND) {
+                off   = buf - start;
+                state = START_FOUND;
+            } else if (state == END_FOUND) {
+                state = OFFSET_IMPOSSIBLE;
+            }
+            if (pb)
+                avio_write(pb, buf, len);
             size += len;
             break;
         }
         buf += len;
     }
 
+    if (offset)
+        *offset = state != OFFSET_IMPOSSIBLE ? off : -1;
+
     return size;
 }
 
-int ff_av1_filter_obus_buf(const uint8_t *buf, uint8_t **out, int *size)
+int ff_av1_filter_obus(AVIOContext *pb, const uint8_t *buf, int size)
 {
-    AVIOContext *pb;
-    int ret;
-
-    ret = avio_open_dyn_buf(&pb);
-    if (ret < 0)
-        return ret;
-
-    ret = ff_av1_filter_obus(pb, buf, *size);
-    if (ret < 0)
-        return ret;
-
-    av_freep(out);
-    *size = avio_close_dyn_buf(pb, out);
-
-    return ret;
+    return av1_filter_obus(pb, buf, size, NULL);
 }
 
-typedef struct AV1SequenceParameters {
-    uint8_t seq_profile;
-    uint8_t seq_level_idx_0;
-    uint8_t seq_tier_0;
-    uint8_t high_bitdepth;
-    uint8_t twelve_bit;
-    uint8_t monochrome;
-    uint8_t chroma_subsampling_x;
-    uint8_t chroma_subsampling_y;
-    uint8_t chroma_sample_position;
-} AV1SequenceParameters;
+int ff_av1_filter_obus_buf(const uint8_t *in, uint8_t **out,
+                           int *size, int *offset)
+{
+    AVIOContext pb;
+    uint8_t *buf;
+    int len, off, ret;
+
+    len = ret = av1_filter_obus(NULL, in, *size, &off);
+    if (ret < 0) {
+        return ret;
+    }
+    if (off >= 0) {
+        *out    = (uint8_t *)in;
+        *size   = len;
+        *offset = off;
+
+        return 0;
+    }
+
+    buf = av_malloc(len + AV_INPUT_BUFFER_PADDING_SIZE);
+    if (!buf)
+        return AVERROR(ENOMEM);
+
+    ffio_init_context(&pb, buf, len, 1, NULL, NULL, NULL, NULL);
+
+    ret = av1_filter_obus(&pb, in, *size, NULL);
+    av_assert1(ret == len);
+
+    memset(buf + len, 0, AV_INPUT_BUFFER_PADDING_SIZE);
+
+    *out  = buf;
+    *size = len;
+    *offset = 0;
+
+    return 0;
+}
 
 static inline void uvlc(GetBitContext *gb)
 {
@@ -106,49 +138,51 @@ static inline void uvlc(GetBitContext *gb)
 
 static int parse_color_config(AV1SequenceParameters *seq_params, GetBitContext *gb)
 {
-    int color_primaries, transfer_characteristics, matrix_coefficients;
+    int twelve_bit = 0;
+    int high_bitdepth = get_bits1(gb);
+    if (seq_params->profile == FF_PROFILE_AV1_PROFESSIONAL && high_bitdepth)
+        twelve_bit = get_bits1(gb);
 
-    seq_params->high_bitdepth = get_bits1(gb);
-    if (seq_params->seq_profile == FF_PROFILE_AV1_PROFESSIONAL && seq_params->high_bitdepth)
-        seq_params->twelve_bit = get_bits1(gb);
+    seq_params->bitdepth = 8 + (high_bitdepth * 2) + (twelve_bit * 2);
 
-    if (seq_params->seq_profile == FF_PROFILE_AV1_HIGH)
+    if (seq_params->profile == FF_PROFILE_AV1_HIGH)
         seq_params->monochrome = 0;
     else
         seq_params->monochrome = get_bits1(gb);
 
-    if (get_bits1(gb)) { // color_description_present_flag
-        color_primaries          = get_bits(gb, 8);
-        transfer_characteristics = get_bits(gb, 8);
-        matrix_coefficients      = get_bits(gb, 8);
+    seq_params->color_description_present_flag = get_bits1(gb);
+    if (seq_params->color_description_present_flag) {
+        seq_params->color_primaries          = get_bits(gb, 8);
+        seq_params->transfer_characteristics = get_bits(gb, 8);
+        seq_params->matrix_coefficients      = get_bits(gb, 8);
     } else {
-        color_primaries          = AVCOL_PRI_UNSPECIFIED;
-        transfer_characteristics = AVCOL_TRC_UNSPECIFIED;
-        matrix_coefficients      = AVCOL_SPC_UNSPECIFIED;
+        seq_params->color_primaries          = AVCOL_PRI_UNSPECIFIED;
+        seq_params->transfer_characteristics = AVCOL_TRC_UNSPECIFIED;
+        seq_params->matrix_coefficients      = AVCOL_SPC_UNSPECIFIED;
     }
 
     if (seq_params->monochrome) {
-        skip_bits1(gb); // color_range
+        seq_params->color_range = get_bits1(gb);
         seq_params->chroma_subsampling_x = 1;
         seq_params->chroma_subsampling_y = 1;
         seq_params->chroma_sample_position = 0;
         return 0;
-    } else if (color_primaries          == AVCOL_PRI_BT709 &&
-               transfer_characteristics == AVCOL_TRC_IEC61966_2_1 &&
-               matrix_coefficients      == AVCOL_SPC_RGB) {
+    } else if (seq_params->color_primaries          == AVCOL_PRI_BT709 &&
+               seq_params->transfer_characteristics == AVCOL_TRC_IEC61966_2_1 &&
+               seq_params->matrix_coefficients      == AVCOL_SPC_RGB) {
         seq_params->chroma_subsampling_x = 0;
         seq_params->chroma_subsampling_y = 0;
     } else {
-        skip_bits1(gb); // color_range
+        seq_params->color_range = get_bits1(gb);
 
-        if (seq_params->seq_profile == FF_PROFILE_AV1_MAIN) {
+        if (seq_params->profile == FF_PROFILE_AV1_MAIN) {
             seq_params->chroma_subsampling_x = 1;
             seq_params->chroma_subsampling_y = 1;
-        } else if (seq_params->seq_profile == FF_PROFILE_AV1_HIGH) {
+        } else if (seq_params->profile == FF_PROFILE_AV1_HIGH) {
             seq_params->chroma_subsampling_x = 0;
             seq_params->chroma_subsampling_y = 0;
         } else {
-            if (seq_params->twelve_bit) {
+            if (twelve_bit) {
                 seq_params->chroma_subsampling_x = get_bits1(gb);
                 if (seq_params->chroma_subsampling_x)
                     seq_params->chroma_subsampling_y = get_bits1(gb);
@@ -185,14 +219,14 @@ static int parse_sequence_header(AV1SequenceParameters *seq_params, const uint8_
 
     memset(seq_params, 0, sizeof(*seq_params));
 
-    seq_params->seq_profile = get_bits(&gb, 3);
+    seq_params->profile = get_bits(&gb, 3);
 
     skip_bits1(&gb); // still_picture
     reduced_still_picture_header = get_bits1(&gb);
 
     if (reduced_still_picture_header) {
-        seq_params->seq_level_idx_0 = get_bits(&gb, 5);
-        seq_params->seq_tier_0 = 0;
+        seq_params->level = get_bits(&gb, 5);
+        seq_params->tier = 0;
     } else {
         int initial_display_delay_present_flag, operating_points_cnt_minus_1;
         int decoder_model_info_present_flag, buffer_delay_length_minus_1;
@@ -242,8 +276,8 @@ static int parse_sequence_header(AV1SequenceParameters *seq_params, const uint8_
             }
 
             if (i == 0) {
-               seq_params->seq_level_idx_0 = seq_level_idx;
-               seq_params->seq_tier_0 = seq_tier;
+               seq_params->level = seq_level_idx;
+               seq_params->tier = seq_tier;
             }
         }
     }
@@ -264,7 +298,7 @@ static int parse_sequence_header(AV1SequenceParameters *seq_params, const uint8_
     if (!reduced_still_picture_header) {
         int enable_order_hint, seq_force_screen_content_tools;
 
-        skip_bits(&gb, 4); // enable_intraintra_compound (1), enable_masked_compound (1)
+        skip_bits(&gb, 4); // enable_interintra_compound (1), enable_masked_compound (1)
                            // enable_warped_motion (1), enable_dual_filter (1)
 
         enable_order_hint = get_bits1(&gb);
@@ -297,13 +331,43 @@ static int parse_sequence_header(AV1SequenceParameters *seq_params, const uint8_
     return 0;
 }
 
+int ff_av1_parse_seq_header(AV1SequenceParameters *seq, const uint8_t *buf, int size)
+{
+    int64_t obu_size;
+    int start_pos, type, temporal_id, spatial_id;
+
+    if (size <= 0)
+        return AVERROR_INVALIDDATA;
+
+    while (size > 0) {
+        int len = parse_obu_header(buf, size, &obu_size, &start_pos,
+                                   &type, &temporal_id, &spatial_id);
+        if (len < 0)
+            return len;
+
+        switch (type) {
+        case AV1_OBU_SEQUENCE_HEADER:
+            if (!obu_size)
+                return AVERROR_INVALIDDATA;
+
+            return parse_sequence_header(seq, buf + start_pos, obu_size);
+        default:
+            break;
+        }
+        size -= len;
+        buf  += len;
+    }
+
+    return AVERROR_INVALIDDATA;
+}
+
 int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size)
 {
     AVIOContext *seq_pb = NULL, *meta_pb = NULL;
     AV1SequenceParameters seq_params;
     PutBitContext pbc;
     uint8_t header[4];
-    uint8_t *seq = NULL, *meta = NULL;
+    uint8_t *seq, *meta;
     int64_t obu_size;
     int start_pos, type, temporal_id, spatial_id;
     int ret, nb_seq = 0, seq_size, meta_size;
@@ -353,7 +417,7 @@ int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size)
         buf  += len;
     }
 
-    seq_size  = avio_close_dyn_buf(seq_pb, &seq);
+    seq_size  = avio_get_dyn_buf(seq_pb, &seq);
     if (!seq_size) {
         ret = AVERROR_INVALIDDATA;
         goto fail;
@@ -363,11 +427,11 @@ int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size)
 
     put_bits(&pbc, 1, 1); // marker
     put_bits(&pbc, 7, 1); // version
-    put_bits(&pbc, 3, seq_params.seq_profile);
-    put_bits(&pbc, 5, seq_params.seq_level_idx_0);
-    put_bits(&pbc, 1, seq_params.seq_tier_0);
-    put_bits(&pbc, 1, seq_params.high_bitdepth);
-    put_bits(&pbc, 1, seq_params.twelve_bit);
+    put_bits(&pbc, 3, seq_params.profile);
+    put_bits(&pbc, 5, seq_params.level);
+    put_bits(&pbc, 1, seq_params.tier);
+    put_bits(&pbc, 1, seq_params.bitdepth > 8);
+    put_bits(&pbc, 1, seq_params.bitdepth == 12);
     put_bits(&pbc, 1, seq_params.monochrome);
     put_bits(&pbc, 1, seq_params.chroma_subsampling_x);
     put_bits(&pbc, 1, seq_params.chroma_subsampling_y);
@@ -378,17 +442,13 @@ int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size)
     avio_write(pb, header, sizeof(header));
     avio_write(pb, seq, seq_size);
 
-    meta_size = avio_close_dyn_buf(meta_pb, &meta);
+    meta_size = avio_get_dyn_buf(meta_pb, &meta);
     if (meta_size)
         avio_write(pb, meta, meta_size);
 
 fail:
-    if (!seq)
-        avio_close_dyn_buf(seq_pb, &seq);
-    if (!meta)
-        avio_close_dyn_buf(meta_pb, &meta);
-    av_free(seq);
-    av_free(meta);
+    ffio_free_dyn_buf(&seq_pb);
+    ffio_free_dyn_buf(&meta_pb);
 
     return ret;
 }

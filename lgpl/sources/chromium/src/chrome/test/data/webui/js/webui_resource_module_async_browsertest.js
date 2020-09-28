@@ -6,6 +6,8 @@
  * @fileoverview JS tests for various chrome://resources JS modules.
  */
 
+GEN('#include "content/public/test/browser_test.h"');
+
 /** Test fixture for testing shared JS module resources. */
 var WebUIResourceModuleAsyncTest = class extends testing.Test {
   /** @override */
@@ -16,11 +18,6 @@ var WebUIResourceModuleAsyncTest = class extends testing.Test {
   /** @override */
   get isAsync() {
     return true;
-  }
-
-  /** @override */
-  get runAccessibilityChecks() {
-    return false;
   }
 
   /** @override */
@@ -75,6 +72,18 @@ var ParseHtmlSubsetModuleTest = class extends WebUIResourceModuleAsyncTest {
 };
 
 TEST_F('ParseHtmlSubsetModuleTest', 'All', function() {
+  mocha.run();
+});
+
+var ParseHtmlSubsetTrustedTypesTest =
+    class extends WebUIResourceModuleAsyncTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://test?module=js/parse_html_subset_trusted_types_test.js';
+  }
+};
+
+TEST_F('ParseHtmlSubsetTrustedTypesTest', 'All', function() {
   mocha.run();
 });
 

@@ -56,6 +56,7 @@ class HTMLElement;
 class HTMLSpanElement;
 struct LocalCaretRect;
 class Node;
+class SystemClipboard;
 
 // This file contains a set of helper functions used by the editing commands
 
@@ -122,6 +123,8 @@ HTMLSpanElement* TabSpanElement(const Node*);
 Element* TableElementJustAfter(const VisiblePosition&);
 CORE_EXPORT Element* TableElementJustBefore(const VisiblePosition&);
 CORE_EXPORT Element* TableElementJustBefore(const VisiblePositionInFlatTree&);
+Element* EnclosingTableCell(const Position&);
+Element* EnclosingTableCell(const PositionInFlatTree&);
 
 template <typename Strategy>
 ContainerNode* ParentCrossingShadowBoundaries(const Node&);
@@ -136,7 +139,7 @@ inline ContainerNode* ParentCrossingShadowBoundaries<EditingInFlatTreeStrategy>(
   return FlatTreeTraversal::Parent(node);
 }
 
-void WriteImageNodeToClipboard(const Node&, const String&);
+void WriteImageNodeToClipboard(SystemClipboard&, const Node&, const String&);
 
 // boolean functions on Node
 

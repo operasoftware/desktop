@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_REQUEST_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_REQUEST_H_
 
+#include "base/optional.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/web_url_request.h"
@@ -28,8 +29,11 @@ class RequestInit;
 
 using RequestInfo = RequestOrUSVString;
 
-class CORE_EXPORT Request final : public Body {
+class CORE_EXPORT Request final : public ScriptWrappable,
+                                  public ActiveScriptWrappable<Request>,
+                                  public Body {
   DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(Request);
 
  public:
   using ForServiceWorkerFetchEvent =
@@ -55,16 +59,14 @@ class CORE_EXPORT Request final : public Body {
                          ExceptionState&);
   static Request* Create(ScriptState*, FetchRequestData*);
   static Request* Create(ScriptState*,
-                         const mojom::blink::FetchAPIRequest&,
+                         mojom::blink::FetchAPIRequestPtr,
                          ForServiceWorkerFetchEvent);
 
   Request(ScriptState*, FetchRequestData*, Headers*, AbortSignal*);
   Request(ScriptState*, FetchRequestData*);
 
-  // Returns false if |credentials_mode| doesn't represent a valid credentials
-  // mode.
-  static bool ParseCredentialsMode(const String& credentials_mode,
-                                   network::mojom::CredentialsMode*);
+  static base::Optional<network::mojom::CredentialsMode> ParseCredentialsMode(
+      const String& credentials_mode);
 
   // From Request.idl:
   String method() const;
@@ -86,6 +88,11 @@ class CORE_EXPORT Request final : public Body {
   // This function must be called with entering an appropriate V8 context.
   Request* clone(ScriptState*, ExceptionState&);
 
+  // ScriptWrappable override
+  bool HasPendingActivity() const override {
+    return Body::HasPendingActivity();
+  }
+
   FetchRequestData* PassRequestData(ScriptState*, ExceptionState&);
   mojom::blink::FetchAPIRequestPtr CreateFetchAPIRequest() const;
   bool HasBody() const;
@@ -93,8 +100,10 @@ class CORE_EXPORT Request final : public Body {
   const BodyStreamBuffer* BodyBuffer() const override {
     return request_->Buffer();
   }
+  mojom::RequestContextType GetRequestContextType() const;
+  network::mojom::RequestDestination GetRequestDestination() const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   const FetchRequestData* GetRequest() const { return request_; }

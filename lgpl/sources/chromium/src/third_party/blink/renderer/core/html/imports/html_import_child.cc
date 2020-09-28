@@ -108,7 +108,7 @@ Document* HTMLImportChild::GetDocument() const {
 }
 
 void HTMLImportChild::StateWillChange() {
-  ToHTMLImportTreeRoot(Root())->ScheduleRecalcState();
+  To<HTMLImportTreeRoot>(Root())->ScheduleRecalcState();
 }
 
 void HTMLImportChild::StateDidChange() {
@@ -174,7 +174,7 @@ void HTMLImportChild::Normalize() {
   }
 }
 
-void HTMLImportChild::Trace(Visitor* visitor) {
+void HTMLImportChild::Trace(Visitor* visitor) const {
   visitor->Trace(custom_element_microtask_step_);
   visitor->Trace(loader_);
   visitor->Trace(client_);

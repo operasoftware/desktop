@@ -31,16 +31,8 @@ class ExecutionContext;
 // Agent is shared across a group of reachable and same-site frames.
 class CORE_EXPORT Agent : public GarbageCollected<Agent> {
  public:
-  static Agent* CreateForWorkerOrWorklet(
-      v8::Isolate* isolate,
-      const base::UnguessableToken& cluster_id,
-      std::unique_ptr<v8::MicrotaskQueue> microtask_queue = nullptr) {
-    return MakeGarbageCollected<Agent>(isolate, cluster_id,
-                                       std::move(microtask_queue));
-  }
-
   // Do not create the instance directly.
-  // Use Agent::CreateForWorkerOrWorklet() or
+  // Use MakeGarbageCollected<Agent>() or
   // WindowAgentFactory::GetAgentForOrigin().
   Agent(v8::Isolate* isolate,
         const base::UnguessableToken& cluster_id,
@@ -51,12 +43,24 @@ class CORE_EXPORT Agent : public GarbageCollected<Agent> {
     return event_loop_;
   }
 
-  virtual void Trace(blink::Visitor*);
+  virtual void Trace(Visitor*) const;
 
-  void AttachExecutionContext(ExecutionContext*);
-  void DetachExecutionContext(ExecutionContext*);
+  void AttachContext(ExecutionContext*);
+  void DetachContext(ExecutionContext*);
 
   const base::UnguessableToken& cluster_id() const { return cluster_id_; }
+
+  // Representing agent cluster's "cross-origin isolated" concept.
+  // TODO(yhirano): Have the spec URL.
+  // This property is renderer process global because we ensure that a
+  // renderer process host only cross-origin isolated agents or only
+  // non-cross-origin isolated agents, not both.
+  // This variable is initialized before any frame is created, and will not
+  // be modified after that. Hence this can be accessed from the main thread
+  // and worker/worklet threads.
+  static bool IsCrossOriginIsolated();
+  // Only called from blink::SetIsCrossOriginIsolated.
+  static void SetIsCrossOriginIsolated(bool value);
 
  private:
   scoped_refptr<scheduler::EventLoop> event_loop_;

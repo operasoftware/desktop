@@ -10,6 +10,7 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_promise_rejection_event_init.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/events/promise_rejection_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -207,8 +208,10 @@ void RejectedPromises::HandlerAdded(v8::PromiseRejectMessage data) {
     std::unique_ptr<Message>& message = reported_as_errors_.at(i);
     if (!message->IsCollected() && message->HasPromise(data.GetPromise())) {
       message->MakePromiseStrong();
-      message->GetContext()
-          ->GetTaskRunner(TaskType::kDOMManipulation)
+      // Since we move out of `message` below, we need to pull `context` out in
+      // a separate statement.
+      ExecutionContext* context = message->GetContext();
+      context->GetTaskRunner(TaskType::kDOMManipulation)
           ->PostTask(FROM_HERE, WTF::Bind(&RejectedPromises::RevokeNow,
                                           scoped_refptr<RejectedPromises>(this),
                                           WTF::Passed(std::move(message))));

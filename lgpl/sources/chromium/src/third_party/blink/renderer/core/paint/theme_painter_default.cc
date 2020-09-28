@@ -38,7 +38,7 @@
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
-#include "third_party/blink/renderer/platform/web_test_support.h"
+#include "ui/base/ui_base_features.h"
 
 namespace blink {
 
@@ -46,19 +46,11 @@ namespace {
 
 const unsigned kDefaultButtonBackgroundColor = 0xffdddddd;
 
-bool UseMockTheme() {
-  return WebTestSupport::IsMockThemeEnabledForTest();
-}
-
 WebThemeEngine::State GetWebThemeState(const Node* node) {
   if (!LayoutTheme::IsEnabled(node))
     return WebThemeEngine::kStateDisabled;
-  if (UseMockTheme() && LayoutTheme::IsReadOnlyControl(node))
-    return WebThemeEngine::kStateReadonly;
   if (LayoutTheme::IsPressed(node))
     return WebThemeEngine::kStatePressed;
-  if (UseMockTheme() && LayoutTheme::IsFocused(node))
-    return WebThemeEngine::kStateFocused;
   if (LayoutTheme::IsHovered(node))
     return WebThemeEngine::kStateHover;
 
@@ -156,11 +148,11 @@ bool ThemePainterDefault::PaintCheckbox(const Node* node,
   extra_params.button.checked = LayoutTheme::IsChecked(node);
   extra_params.button.indeterminate = LayoutTheme::IsIndeterminate(node);
 
-#if !defined(OPERA_DESKTOP)
   float zoom_level = style.EffectiveZoom();
+  extra_params.button.zoom = zoom_level;
   GraphicsContextStateSaver state_saver(paint_info.context, false);
   IntRect unzoomed_rect = rect;
-  if (zoom_level != 1) {
+  if (zoom_level != 1 && !features::IsFormControlsRefreshEnabled()) {
     state_saver.Save();
     unzoomed_rect.SetWidth(unzoomed_rect.Width() / zoom_level);
     unzoomed_rect.SetHeight(unzoomed_rect.Height() / zoom_level);
@@ -172,11 +164,6 @@ bool ThemePainterDefault::PaintCheckbox(const Node* node,
   Platform::Current()->ThemeEngine()->Paint(
       canvas, WebThemeEngine::kPartCheckbox, GetWebThemeState(node),
       WebRect(unzoomed_rect), &extra_params, style.UsedColorScheme());
-#else
-  Platform::Current()->ThemeEngine()->Paint(
-      canvas, WebThemeEngine::kPartCheckbox, GetWebThemeState(node),
-      WebRect(rect), &extra_params, style.UsedColorScheme());
-#endif  // !defined(OPERA_DESKTOP)
   return false;
 }
 
@@ -207,8 +194,7 @@ bool ThemePainterDefault::PaintButton(const Node* node,
   extra_params.button.has_border = true;
   extra_params.button.checked = false;
   extra_params.button.indeterminate = false;
-  extra_params.button.background_color =
-      UseMockTheme() ? 0xffc0c0c0 : kDefaultButtonBackgroundColor;
+  extra_params.button.background_color = kDefaultButtonBackgroundColor;
   if (style.HasBackground()) {
     extra_params.button.background_color =
         style.VisitedDependentColor(GetCSSPropertyBackgroundColor()).Rgb();
@@ -245,12 +231,15 @@ bool ThemePainterDefault::PaintTextField(const Node* node,
   WebThemeEngine::ExtraParams extra_params;
   extra_params.text_field.is_text_area = part == kTextAreaPart;
   extra_params.text_field.is_listbox = part == kListboxPart;
+  extra_params.text_field.has_border = true;
 
   cc::PaintCanvas* canvas = paint_info.context.Canvas();
 
   Color background_color =
       style.VisitedDependentColor(GetCSSPropertyBackgroundColor());
   extra_params.text_field.background_color = background_color.Rgb();
+  extra_params.text_field.auto_complete_active =
+      DynamicTo<HTMLFormControlElement>(node)->IsAutofilled();
 
   Platform::Current()->ThemeEngine()->Paint(
       canvas, WebThemeEngine::kPartTextField, GetWebThemeState(node),
@@ -324,36 +313,16 @@ void ThemePainterDefault::SetupMenuListArrow(
   float arrow_box_width =
       theme_.ClampedMenuListArrowPaddingSize(document.GetFrame(), style);
   float arrow_scale_factor = arrow_box_width / theme_.MenuListArrowWidthInDIP();
-  if (UseMockTheme()) {
-    // The size and position of the drop-down button is different between
-    // the mock theme and the regular aura theme.
-
-    // Padding inside the arrowBox.
-    float extra_padding = 2 * arrow_scale_factor;
-    float arrow_size =
-        std::min(arrow_box_width,
-                 static_cast<float>(rect.Height() - style.BorderTopWidth() -
-                                    style.BorderBottomWidth())) -
-        2 * extra_padding;
-    // |arrowX| is the middle position for mock theme engine.
-    extra_params.menu_list.arrow_x =
-        (style.Direction() == TextDirection::kRtl)
-            ? rect.X() + extra_padding + (arrow_size / 2)
-            : right - (arrow_size / 2) - extra_padding;
-    extra_params.menu_list.arrow_size = arrow_size;
-  } else {
-    // TODO(tkent): This should be 7.0 to match scroll bar buttons.
-    float arrow_size =
-        (RuntimeEnabledFeatures::FormControlsRefreshEnabled() ? 8.0 : 6.0) *
-        arrow_scale_factor;
-    // Put the arrow at the center of paddingForArrow area.
-    // |arrowX| is the left position for Aura theme engine.
-    extra_params.menu_list.arrow_x =
-        (style.Direction() == TextDirection::kRtl)
-            ? left + (arrow_box_width - arrow_size) / 2
-            : right - (arrow_box_width + arrow_size) / 2;
-    extra_params.menu_list.arrow_size = arrow_size;
-  }
+  // TODO(tkent): This should be 7.0 to match scroll bar buttons.
+  float arrow_size = (features::IsFormControlsRefreshEnabled() ? 8.0 : 6.0) *
+                     arrow_scale_factor;
+  // Put the arrow at the center of paddingForArrow area.
+  // |arrowX| is the left position for Aura theme engine.
+  extra_params.menu_list.arrow_x =
+      (style.Direction() == TextDirection::kRtl)
+          ? left + (arrow_box_width - arrow_size) / 2
+          : right - (arrow_box_width + arrow_size) / 2;
+  extra_params.menu_list.arrow_size = arrow_size;
   extra_params.menu_list.arrow_color =
       style.VisitedDependentColor(GetCSSPropertyColor()).Rgb();
 }
@@ -369,11 +338,11 @@ bool ThemePainterDefault::PaintSliderTrack(const LayoutObject& o,
 
   PaintSliderTicks(o, i, rect);
 
-  // FIXME: Mock theme doesn't handle zoomed sliders.
-  float zoom_level = UseMockTheme() ? 1 : o.StyleRef().EffectiveZoom();
+  float zoom_level = o.StyleRef().EffectiveZoom();
+  extra_params.slider.zoom = zoom_level;
   GraphicsContextStateSaver state_saver(i.context, false);
   IntRect unzoomed_rect = rect;
-  if (zoom_level != 1) {
+  if (zoom_level != 1 && !features::IsFormControlsRefreshEnabled()) {
     state_saver.Save();
     unzoomed_rect.SetWidth(unzoomed_rect.Width() / zoom_level);
     unzoomed_rect.SetHeight(unzoomed_rect.Height() / zoom_level);
@@ -382,20 +351,36 @@ bool ThemePainterDefault::PaintSliderTrack(const LayoutObject& o,
     i.context.Translate(-unzoomed_rect.X(), -unzoomed_rect.Y());
   }
 
-  const Node* node = o.GetNode();
-  auto* input = ToHTMLInputElementOrNull(node);
+  auto* input = DynamicTo<HTMLInputElement>(o.GetNode());
   extra_params.slider.thumb_x = 0;
   extra_params.slider.thumb_y = 0;
+  extra_params.slider.right_to_left = !o.StyleRef().IsLeftToRightDirection();
   if (input) {
     Element* thumb_element = input->UserAgentShadowRoot()
                                  ? input->UserAgentShadowRoot()->getElementById(
                                        shadow_element_names::SliderThumb())
                                  : nullptr;
     LayoutBox* thumb = thumb_element ? thumb_element->GetLayoutBox() : nullptr;
+    LayoutBox* input_box = input->GetLayoutBox();
     if (thumb) {
       IntRect thumb_rect = PixelSnappedIntRect(thumb->FrameRect());
-      extra_params.slider.thumb_x = thumb_rect.X() / zoom_level;
-      extra_params.slider.thumb_y = thumb_rect.Y() / zoom_level;
+      if (features::IsFormControlsRefreshEnabled()) {
+        extra_params.slider.thumb_x = thumb_rect.X() +
+                                      input_box->PaddingLeft().ToInt() +
+                                      input_box->BorderLeft().ToInt();
+        extra_params.slider.thumb_y = thumb_rect.Y() +
+                                      input_box->PaddingTop().ToInt() +
+                                      input_box->BorderTop().ToInt();
+      } else {
+        extra_params.slider.thumb_x =
+            (thumb_rect.X() + input_box->PaddingLeft().ToInt() +
+             input_box->BorderLeft().ToInt()) /
+            zoom_level;
+        extra_params.slider.thumb_y =
+            (thumb_rect.Y() + input_box->PaddingTop().ToInt() +
+             input_box->BorderTop().ToInt()) /
+            zoom_level;
+      }
     }
   }
 
@@ -415,11 +400,11 @@ bool ThemePainterDefault::PaintSliderThumb(const Node* node,
       style.EffectiveAppearance() == kSliderThumbVerticalPart;
   extra_params.slider.in_drag = LayoutTheme::IsPressed(node);
 
-  // FIXME: Mock theme doesn't handle zoomed sliders.
-  float zoom_level = UseMockTheme() ? 1 : style.EffectiveZoom();
+  float zoom_level = style.EffectiveZoom();
+  extra_params.slider.zoom = zoom_level;
   GraphicsContextStateSaver state_saver(paint_info.context, false);
   IntRect unzoomed_rect = rect;
-  if (zoom_level != 1) {
+  if (zoom_level != 1 && !features::IsFormControlsRefreshEnabled()) {
     state_saver.Save();
     unzoomed_rect.SetWidth(unzoomed_rect.Width() / zoom_level);
     unzoomed_rect.SetHeight(unzoomed_rect.Height() / zoom_level);

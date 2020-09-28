@@ -36,7 +36,7 @@ class TestDocumentSubresourceFilter : public WebDocumentSubresourceFilter {
       queried_subresource_paths_.push_back(resource_path);
     }
     String resource_string = resource_url.GetString();
-    for (const String& suffix : blacklisted_suffixes_) {
+    for (const String& suffix : blocklisted_suffixes_) {
       if (resource_string.EndsWith(suffix))
         return load_policy_;
     }
@@ -51,8 +51,8 @@ class TestDocumentSubresourceFilter : public WebDocumentSubresourceFilter {
 
   bool ShouldLogToConsole() override { return false; }
 
-  void AddToBlacklist(const String& suffix) {
-    blacklisted_suffixes_.push_back(suffix);
+  void AddToBlocklist(const String& suffix) {
+    blocklisted_suffixes_.push_back(suffix);
   }
 
   const Vector<String>& QueriedSubresourcePaths() const {
@@ -62,21 +62,20 @@ class TestDocumentSubresourceFilter : public WebDocumentSubresourceFilter {
  private:
   // Using STL types for compatibility with gtest/gmock.
   Vector<String> queried_subresource_paths_;
-  Vector<String> blacklisted_suffixes_;
+  Vector<String> blocklisted_suffixes_;
   LoadPolicy load_policy_;
 };
 
 class SubresourceFilteringWebFrameClient
     : public frame_test_helpers::TestWebFrameClient {
  public:
-  void DidStartProvisionalLoad(WebDocumentLoader* data_source) override {
-    // Normally, the filter should be set when the load is committed. For
-    // the sake of this test, however, inject it earlier to verify that it
-    // is not consulted for the main resource load.
+  void DidCommitNavigation(const WebHistoryItem&,
+                           WebHistoryCommitType,
+                           bool) override {
     subresource_filter_ =
         new TestDocumentSubresourceFilter(load_policy_for_next_load_);
-    subresource_filter_->AddToBlacklist("1x1.png");
-    data_source->SetSubresourceFilter(subresource_filter_);
+    subresource_filter_->AddToBlocklist("1x1.png");
+    Frame()->GetDocumentLoader()->SetSubresourceFilter(subresource_filter_);
   }
 
   void SetLoadPolicyFromNextLoad(
@@ -111,8 +110,7 @@ class WebDocumentSubresourceFilterTest : public testing::Test {
 
   void ExpectSubresourceWasLoaded(bool loaded) {
     WebElement web_element = MainFrame()->GetDocument().QuerySelector("img");
-    HTMLImageElement* image_element =
-        ToHTMLImageElement(web_element.Unwrap<Node>());
+    auto* image_element = To<HTMLImageElement>(web_element.Unwrap<Node>());
     EXPECT_EQ(loaded, !!image_element->naturalWidth());
   }
 

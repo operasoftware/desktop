@@ -41,8 +41,6 @@
 
 namespace blink {
 
-using namespace cssvalue;
-
 StylePropertySerializer::CSSPropertyValueSetForSerializer::
     CSSPropertyValueSetForSerializer(const CSSPropertyValueSet& properties)
     : property_set_(&properties),
@@ -73,7 +71,7 @@ StylePropertySerializer::CSSPropertyValueSetForSerializer::
 }
 
 void StylePropertySerializer::CSSPropertyValueSetForSerializer::Trace(
-    blink::Visitor* visitor) {
+    blink::Visitor* visitor) const {
   visitor->Trace(property_set_);
 }
 
@@ -341,7 +339,6 @@ static bool AllowInitialInShorthand(CSSPropertyID property_id) {
     case CSSPropertyID::kListStyle:
     case CSSPropertyID::kOffset:
     case CSSPropertyID::kTextDecoration:
-    case CSSPropertyID::kWebkitMarginCollapse:
     case CSSPropertyID::kWebkitMask:
     case CSSPropertyID::kWebkitTextEmphasis:
     case CSSPropertyID::kWebkitTextStroke:
@@ -354,7 +351,11 @@ static bool AllowInitialInShorthand(CSSPropertyID property_id) {
 String StylePropertySerializer::CommonShorthandChecks(
     const StylePropertyShorthand& shorthand) const {
   int longhand_count = shorthand.length();
-  DCHECK_LE(longhand_count, 17);
+  if (!longhand_count || longhand_count > 17) {
+    NOTREACHED();
+    return g_empty_string;
+  }
+
   const CSSValue* longhands[17] = {};
 
   bool has_important = false;
@@ -387,7 +388,7 @@ String StylePropertySerializer::CommonShorthandChecks(
     }
     if (success) {
       if (const auto* substitution_value =
-              DynamicTo<CSSPendingSubstitutionValue>(longhands[0])) {
+              DynamicTo<cssvalue::CSSPendingSubstitutionValue>(longhands[0])) {
         if (substitution_value->ShorthandPropertyId() != shorthand.id())
           return g_empty_string;
         return substitution_value->ShorthandValue()->CssText();
@@ -401,9 +402,10 @@ String StylePropertySerializer::CommonShorthandChecks(
     const CSSValue& value = *longhands[i];
     if (!allow_initial && value.IsInitialValue())
       return g_empty_string;
-    if (value.IsInheritedValue() || value.IsUnsetValue() ||
-        value.IsPendingSubstitutionValue())
+    if ((value.IsCSSWideKeyword() && !value.IsInitialValue()) ||
+        value.IsPendingSubstitutionValue()) {
       return g_empty_string;
+    }
     if (value.IsVariableReferenceValue())
       return g_empty_string;
   }
@@ -520,8 +522,6 @@ String StylePropertySerializer::SerializeShorthand(
       return Get2Values(marginInlineShorthand());
     case CSSPropertyID::kOffset:
       return OffsetValue();
-    case CSSPropertyID::kWebkitMarginCollapse:
-      return GetShorthandValue(webkitMarginCollapseShorthand());
     case CSSPropertyID::kOverflow:
       return Get2Values(overflowShorthand());
     case CSSPropertyID::kOverscrollBehavior:
@@ -533,7 +533,7 @@ String StylePropertySerializer::SerializeShorthand(
     case CSSPropertyID::kPaddingInline:
       return Get2Values(paddingInlineShorthand());
     case CSSPropertyID::kTextDecoration:
-      return GetShorthandValue(textDecorationShorthand());
+      return TextDecorationValue();
     case CSSPropertyID::kTransition:
       return GetLayeredShorthandValue(transitionShorthand());
     case CSSPropertyID::kListStyle:
@@ -815,6 +815,37 @@ String StylePropertySerializer::OffsetValue() const {
       result.Append(" / ");
       result.Append(anchor->CssText());
     }
+  }
+  return result.ToString();
+}
+
+String StylePropertySerializer::TextDecorationValue() const {
+  StringBuilder result;
+  const auto& shorthand = shorthandForProperty(CSSPropertyID::kTextDecoration);
+  for (unsigned i = 0; i < shorthand.length(); ++i) {
+    const CSSValue* value =
+        property_set_.GetPropertyCSSValue(*shorthand.properties()[i]);
+    String value_text = value->CssText();
+    if (value->IsInitialValue())
+      continue;
+    if (shorthand.properties()[i]->PropertyID() ==
+        CSSPropertyID::kTextDecorationThickness) {
+      if (auto* identifier_value = DynamicTo<CSSIdentifierValue>(value)) {
+        // Do not include initial value 'auto' for thickness.
+        // TODO(https://crbug.com/1093826): general shorthand serialization
+        // issues remain, in particular for text-decoration.
+        CSSValueID value_id = identifier_value->GetValueID();
+        if (value_id == CSSValueID::kAuto)
+          continue;
+      }
+    }
+    if (!result.IsEmpty())
+      result.Append(" ");
+    result.Append(value_text);
+  }
+
+  if (result.IsEmpty()) {
+    return "none";
   }
   return result.ToString();
 }

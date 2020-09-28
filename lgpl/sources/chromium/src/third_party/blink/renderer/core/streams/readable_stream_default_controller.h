@@ -13,7 +13,7 @@ namespace blink {
 
 class ExceptionState;
 class QueueWithSizes;
-class ReadableStreamNative;
+class ReadableStream;
 class ScriptState;
 class ScriptValue;
 class StrategySizeAlgorithm;
@@ -28,7 +28,7 @@ class ReadableStreamDefaultController : public ScriptWrappable {
   ReadableStreamDefaultController();
 
   // https://streams.spec.whatwg.org/#rs-default-controller-desired-size
-  double desiredSize(bool& is_null) const;
+  base::Optional<double> desiredSize() const { return GetDesiredSize(); }
 
   // https://streams.spec.whatwg.org/#rs-default-controller-close
   void close(ScriptState*, ExceptionState&);
@@ -70,10 +70,10 @@ class ReadableStreamDefaultController : public ScriptWrappable {
   static const char* EnqueueExceptionMessage(
       const ReadableStreamDefaultController*);
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
-  friend class ReadableStreamNative;
+  friend class ReadableStream;
   friend class ReadableStreamReader;
 
   // https://streams.spec.whatwg.org/#rs-default-controller-private-cancel
@@ -93,7 +93,7 @@ class ReadableStreamDefaultController : public ScriptWrappable {
 
   // https://streams.spec.whatwg.org/#set-up-readable-stream-default-controller
   static void SetUp(ScriptState*,
-                    ReadableStreamNative*,
+                    ReadableStream*,
                     ReadableStreamDefaultController*,
                     StreamStartAlgorithm* start_algorithm,
                     StreamAlgorithm* pull_algorithm,
@@ -104,7 +104,7 @@ class ReadableStreamDefaultController : public ScriptWrappable {
 
   // https://streams.spec.whatwg.org/#set-up-readable-stream-default-controller-from-underlying-source
   static void SetUpFromUnderlyingSource(ScriptState*,
-                                        ReadableStreamNative*,
+                                        ReadableStream*,
                                         v8::Local<v8::Object> underlying_source,
                                         double high_water_mark,
                                         StrategySizeAlgorithm* size_algorithm,
@@ -117,7 +117,7 @@ class ReadableStreamDefaultController : public ScriptWrappable {
   bool is_pulling_ = false;
   bool is_started_ = false;
   Member<StreamAlgorithm> cancel_algorithm_;
-  Member<ReadableStreamNative> controlled_readable_stream_;
+  Member<ReadableStream> controlled_readable_stream_;
   Member<StreamAlgorithm> pull_algorithm_;
   Member<QueueWithSizes> queue_;
   double strategy_high_water_mark_ = 0.0;

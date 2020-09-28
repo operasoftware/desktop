@@ -27,7 +27,7 @@
 #include "third_party/blink/renderer/core/editing/editing_behavior.h"
 
 #include "build/build_config.h"
-#include "third_party/blink/public/platform/web_input_event.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/platform/keyboard_codes.h"
@@ -84,7 +84,7 @@ struct DomKeyKeyDownEntry {
 
 // Key bindings with command key on Mac and alt key on other platforms are
 // marked as system key events and will be ignored (with the exception
-// of Command-B, Command-I and Alt-Backspace) so they shouldn't be added here.
+// of Command-B and Command-I) so they shouldn't be added here.
 const KeyboardCodeKeyDownEntry kKeyboardCodeKeyDownEntries[] = {
     {VKEY_LEFT, 0, "MoveLeft"},
     {VKEY_LEFT, kShiftKey, "MoveLeftAndModifySelection"},
@@ -236,7 +236,7 @@ const char* EditingBehavior::InterpretKeyEvent(
   unsigned modifiers =
       key_event->GetModifiers() & (kShiftKey | kAltKey | kCtrlKey | kMetaKey);
 
-  if (key_event->GetType() == WebInputEvent::kRawKeyDown) {
+  if (key_event->GetType() == WebInputEvent::Type::kRawKeyDown) {
     int map_key = modifiers << 16 | event.keyCode();
     const char* name = map_key ? key_down_commands_map->at(map_key) : nullptr;
     if (!name)

@@ -6,6 +6,8 @@
  * @fileoverview Tests for chrome://bluetooth-internals
  */
 
+GEN('#include "content/public/test/browser_test.h"');
+
 /**
  * Test fixture for BluetoothInternals WebUI testing.
  * @constructor
@@ -24,9 +26,6 @@ BluetoothInternalsTest.prototype = {
 
   /** @override */
   isAsync: true,
-
-  /** @override */
-  runAccessibilityChecks: false,
 
   /** @override */
   extraLibraries: [
@@ -228,6 +227,7 @@ BluetoothInternalsTest.prototype = {
       discovering: false,
       initialized: true,
       name: 'computer.example.com-0',
+      systemName: 'Example Bluetooth Stack 1.0',
       powered: true,
       present: true,
     };
@@ -759,7 +759,7 @@ TEST_F('BluetoothInternalsTest', 'Startup_BluetoothInternals', function() {
           value = value[part];
         }
 
-        if (propName == 'isGattConnected') {
+        if (propName === 'isGattConnected') {
           value = value ? 'Connected' : 'Not Connected';
         }
 

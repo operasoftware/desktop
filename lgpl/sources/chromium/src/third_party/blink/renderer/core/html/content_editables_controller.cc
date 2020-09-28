@@ -65,7 +65,7 @@ void ContentEditablesState::RestoreContentsIn(Element* element) {
   if (!content_editables_with_paths_.Contains(element))
     return;
 
-  HTMLElement* htmlElement = ToHTMLElement(element);
+  HTMLElement* htmlElement = To<HTMLElement>(element);
   DCHECK(htmlElement->contentEditable() == "true" ||
          htmlElement->contentEditable() == "plaintext-only");
   String elementPath = htmlElement->GetPath();
@@ -73,8 +73,8 @@ void ContentEditablesState::RestoreContentsIn(Element* element) {
   if (content_editables_with_paths_.at(htmlElement) == elementPath) {
     String content = saved_contents_.at(elementPath);
     if (!content.IsEmpty()) {
-      htmlElement->SetInnerHTMLFromString(content,
-                                          IGNORE_EXCEPTION_FOR_TESTING);
+      htmlElement->setInnerHTML(content,
+                                IGNORE_EXCEPTION_FOR_TESTING);
     }
   }
 }
@@ -87,7 +87,7 @@ Vector<String> ContentEditablesState::ToStateVector() {
     result.push_back(String::Number(kContentEditablesSavedContentsVersion, 0u));
     for (const auto& iter : content_editables_with_paths_) {
       result.push_back(iter.value);
-      result.push_back(ToHTMLElement(iter.key)->InnerHTMLAsString());
+      result.push_back(To<HTMLElement>(iter.key.Get())->innerHTML());
     }
   }
   return result;
@@ -108,7 +108,7 @@ ContentEditablesState::ContentEditablesState() {}
 
 ContentEditablesState::~ContentEditablesState() {}
 
-void ContentEditablesState::Trace(Visitor* visitor) {
+void ContentEditablesState::Trace(Visitor* visitor) const {
   visitor->Trace(content_editables_with_paths_);
 }
 
@@ -150,7 +150,7 @@ void ContentEditablesController::SetContentEditablesContent(
   state_->SetContentEditablesContent(contents);
 }
 
-void ContentEditablesController::Trace(Visitor* visitor) {
+void ContentEditablesController::Trace(Visitor* visitor) const {
   visitor->Trace(state_);
 }
 

@@ -630,28 +630,28 @@ yuv2mono_2_c_template(SwsContext *c, const int16_t *buf[2],
         }
         c->dither_error[0][i] = err;
     } else {
-    for (i = 0; i < dstW; i += 8) {
-        int Y, acc = 0;
+        for (i = 0; i < dstW; i += 8) {
+            int Y, acc = 0;
 
-        Y = (buf0[i + 0] * yalpha1 + buf1[i + 0] * yalpha) >> 19;
-        accumulate_bit(acc, Y + d128[0]);
-        Y = (buf0[i + 1] * yalpha1 + buf1[i + 1] * yalpha) >> 19;
-        accumulate_bit(acc, Y + d128[1]);
-        Y = (buf0[i + 2] * yalpha1 + buf1[i + 2] * yalpha) >> 19;
-        accumulate_bit(acc, Y + d128[2]);
-        Y = (buf0[i + 3] * yalpha1 + buf1[i + 3] * yalpha) >> 19;
-        accumulate_bit(acc, Y + d128[3]);
-        Y = (buf0[i + 4] * yalpha1 + buf1[i + 4] * yalpha) >> 19;
-        accumulate_bit(acc, Y + d128[4]);
-        Y = (buf0[i + 5] * yalpha1 + buf1[i + 5] * yalpha) >> 19;
-        accumulate_bit(acc, Y + d128[5]);
-        Y = (buf0[i + 6] * yalpha1 + buf1[i + 6] * yalpha) >> 19;
-        accumulate_bit(acc, Y + d128[6]);
-        Y = (buf0[i + 7] * yalpha1 + buf1[i + 7] * yalpha) >> 19;
-        accumulate_bit(acc, Y + d128[7]);
+            Y = (buf0[i + 0] * yalpha1 + buf1[i + 0] * yalpha) >> 19;
+            accumulate_bit(acc, Y + d128[0]);
+            Y = (buf0[i + 1] * yalpha1 + buf1[i + 1] * yalpha) >> 19;
+            accumulate_bit(acc, Y + d128[1]);
+            Y = (buf0[i + 2] * yalpha1 + buf1[i + 2] * yalpha) >> 19;
+            accumulate_bit(acc, Y + d128[2]);
+            Y = (buf0[i + 3] * yalpha1 + buf1[i + 3] * yalpha) >> 19;
+            accumulate_bit(acc, Y + d128[3]);
+            Y = (buf0[i + 4] * yalpha1 + buf1[i + 4] * yalpha) >> 19;
+            accumulate_bit(acc, Y + d128[4]);
+            Y = (buf0[i + 5] * yalpha1 + buf1[i + 5] * yalpha) >> 19;
+            accumulate_bit(acc, Y + d128[5]);
+            Y = (buf0[i + 6] * yalpha1 + buf1[i + 6] * yalpha) >> 19;
+            accumulate_bit(acc, Y + d128[6]);
+            Y = (buf0[i + 7] * yalpha1 + buf1[i + 7] * yalpha) >> 19;
+            accumulate_bit(acc, Y + d128[7]);
 
-        output_pixel(*dest++, acc);
-    }
+            output_pixel(*dest++, acc);
+        }
     }
 }
 
@@ -687,19 +687,19 @@ yuv2mono_1_c_template(SwsContext *c, const int16_t *buf0,
         }
         c->dither_error[0][i] = err;
     } else {
-    for (i = 0; i < dstW; i += 8) {
-        int acc = 0;
-        accumulate_bit(acc, ((buf0[i + 0] + 64) >> 7) + d128[0]);
-        accumulate_bit(acc, ((buf0[i + 1] + 64) >> 7) + d128[1]);
-        accumulate_bit(acc, ((buf0[i + 2] + 64) >> 7) + d128[2]);
-        accumulate_bit(acc, ((buf0[i + 3] + 64) >> 7) + d128[3]);
-        accumulate_bit(acc, ((buf0[i + 4] + 64) >> 7) + d128[4]);
-        accumulate_bit(acc, ((buf0[i + 5] + 64) >> 7) + d128[5]);
-        accumulate_bit(acc, ((buf0[i + 6] + 64) >> 7) + d128[6]);
-        accumulate_bit(acc, ((buf0[i + 7] + 64) >> 7) + d128[7]);
+        for (i = 0; i < dstW; i += 8) {
+            int acc = 0;
+            accumulate_bit(acc, ((buf0[i + 0] + 64) >> 7) + d128[0]);
+            accumulate_bit(acc, ((buf0[i + 1] + 64) >> 7) + d128[1]);
+            accumulate_bit(acc, ((buf0[i + 2] + 64) >> 7) + d128[2]);
+            accumulate_bit(acc, ((buf0[i + 3] + 64) >> 7) + d128[3]);
+            accumulate_bit(acc, ((buf0[i + 4] + 64) >> 7) + d128[4]);
+            accumulate_bit(acc, ((buf0[i + 5] + 64) >> 7) + d128[5]);
+            accumulate_bit(acc, ((buf0[i + 6] + 64) >> 7) + d128[6]);
+            accumulate_bit(acc, ((buf0[i + 7] + 64) >> 7) + d128[7]);
 
-        output_pixel(*dest++, acc);
-    }
+            output_pixel(*dest++, acc);
+        }
     }
 }
 
@@ -904,25 +904,28 @@ yuv2ya16_X_c_template(SwsContext *c, const int16_t *lumFilter,
 
     for (i = 0; i < dstW; i++) {
         int j;
-        int Y = 1 << 18;
-        int64_t A = 0xffff<<14;
+        int Y = -0x40000000;
+        int A = 0xffff;
 
         for (j = 0; j < lumFilterSize; j++)
             Y += lumSrc[j][i] * lumFilter[j];
 
         Y >>= 15;
+        Y += (1<<3) + 0x8000;
         Y = av_clip_uint16(Y);
 
         if (hasAlpha) {
+            A = -0x40000000 + (1<<14);
             for (j = 0; j < lumFilterSize; j++)
                 A += alpSrc[j][i] * lumFilter[j];
 
             A >>= 15;
+            A += 0x8000;
             A = av_clip_uint16(A);
         }
 
         output_pixel(&dest[2 * i    ], Y);
-        output_pixel(&dest[2 * i + 1], hasAlpha ? A : 65535);
+        output_pixel(&dest[2 * i + 1], A);
     }
 }
 
@@ -1847,9 +1850,9 @@ static av_always_inline void yuv2rgb_write_full(SwsContext *c,
     Y -= c->yuv2rgb_y_offset;
     Y *= c->yuv2rgb_y_coeff;
     Y += 1 << 21;
-    R = Y + V*c->yuv2rgb_v2r_coeff;
-    G = Y + V*c->yuv2rgb_v2g_coeff + U*c->yuv2rgb_u2g_coeff;
-    B = Y +                          U*c->yuv2rgb_u2b_coeff;
+    R = (unsigned)Y + V*c->yuv2rgb_v2r_coeff;
+    G = (unsigned)Y + V*c->yuv2rgb_v2g_coeff + U*c->yuv2rgb_u2g_coeff;
+    B = (unsigned)Y +                          U*c->yuv2rgb_u2b_coeff;
     if ((R | G | B) & 0xC0000000) {
         R = av_clip_uintp2(R, 30);
         G = av_clip_uintp2(G, 30);
@@ -2090,7 +2093,7 @@ yuv2rgb_full_1_c_template(SwsContext *c, const int16_t *buf0,
     if (uvalpha < 2048) {
         int A = 0; //init to silence warning
         for (i = 0; i < dstW; i++) {
-            int Y = buf0[i] << 2;
+            int Y = buf0[i] * 4;
             int U = (ubuf0[i] - (128<<7)) * 4;
             int V = (vbuf0[i] - (128<<7)) * 4;
 
@@ -2107,9 +2110,9 @@ yuv2rgb_full_1_c_template(SwsContext *c, const int16_t *buf0,
         const int16_t *ubuf1 = ubuf[1], *vbuf1 = vbuf[1];
         int A = 0; //init to silence warning
         for (i = 0; i < dstW; i++) {
-            int Y = buf0[i] << 2;
-            int U = (ubuf0[i] + ubuf1[i] - (128<<8)) << 1;
-            int V = (vbuf0[i] + vbuf1[i] - (128<<8)) << 1;
+            int Y = buf0[i] * 4;
+            int U = (ubuf0[i] + ubuf1[i] - (128<<8)) * 2;
+            int V = (vbuf0[i] + vbuf1[i] - (128<<8)) * 2;
 
             if (hasAlpha) {
                 A = (abuf0[i] + 64) >> 7;
@@ -2275,7 +2278,7 @@ yuv2gbrp16_full_X_c(SwsContext *c, const int16_t *lumFilter,
             A = -0x40000000;
 
             for (j = 0; j < lumFilterSize; j++)
-                A += alpSrc[j][i] * lumFilter[j];
+                A += alpSrc[j][i] * (unsigned)lumFilter[j];
 
             A >>= 1;
             A += 0x20002000;

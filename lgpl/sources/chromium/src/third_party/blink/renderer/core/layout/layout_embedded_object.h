@@ -32,7 +32,7 @@ namespace blink {
 // plugins. For example, <embed src="foo.html"> does not invoke a plugin.
 class LayoutEmbeddedObject final : public LayoutEmbeddedContent {
  public:
-  LayoutEmbeddedObject(Element*);
+  LayoutEmbeddedObject(HTMLFrameOwnerElement*);
   ~LayoutEmbeddedObject() override;
 
   enum PluginAvailability {
@@ -61,8 +61,6 @@ class LayoutEmbeddedObject final : public LayoutEmbeddedContent {
   }
   void ComputeIntrinsicSizingInfo(IntrinsicSizingInfo&) const override;
   bool NeedsPreferredWidthsRecalculation() const override;
-
-  CompositingReasons AdditionalCompositingReasons() const override;
 
   PluginAvailability plugin_availability_ = kPluginAvailable;
   String unavailable_plugin_replacement_text_;

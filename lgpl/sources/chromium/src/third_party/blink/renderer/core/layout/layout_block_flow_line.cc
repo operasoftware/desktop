@@ -36,6 +36,9 @@
 #include "third_party/blink/renderer/core/layout/line/line_layout_state.h"
 #include "third_party/blink/renderer/core/layout/line/line_width.h"
 #include "third_party/blink/renderer/core/layout/line/word_measurement.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_fragment_item.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_cursor.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
 #include "third_party/blink/renderer/core/layout/svg/line/svg_root_inline_box.h"
 #include "third_party/blink/renderer/core/layout/vertical_position_cache.h"
 #include "third_party/blink/renderer/core/paint/ng/ng_paint_fragment.h"
@@ -954,7 +957,7 @@ RootInlineBox* LayoutBlockFlow::CreateLineBoxesFromBidiRuns(
   // text selection in RTL boxes would not work as expected.
   if (is_svg_root_inline_box) {
     DCHECK(IsSVGText());
-    ToSVGRootInlineBox(line_box)->ComputePerCharacterLayoutInformation();
+    To<SVGRootInlineBox>(line_box)->ComputePerCharacterLayoutInformation();
   }
 
   // Compute our overflow now.
@@ -1177,7 +1180,13 @@ void LayoutBlockFlow::LayoutRunsAndFloatsInRange(
           resolver, bidi_runs, end_of_line, override,
           layout_state.GetLineInfo().PreviousLineBrokeCleanly(),
           is_new_uba_paragraph);
-      DCHECK(resolver.GetPosition() == end_of_line);
+      // |resolver| to be at |end_of_line| is critical, because
+      // |SetLineBreakInfo| below copies |end_of_line.current_| to
+      // |RootInlineBox::line_break_obj_|. When the object is destroyed,
+      // |RootInlineBox::ChildRemoved()| clears |line_break_obj_| to avoid
+      // use-after-free, but we cannot find the correct |RootInlineBox| if
+      // |end_of_line| is actually not in this |RootInlineBox|.
+      CHECK(resolver.GetPosition() == end_of_line);
 
       BidiRun* trailing_space_run = resolver.TrailingSpaceRun();
 
@@ -1688,7 +1697,7 @@ void LayoutBlockFlow::ComputeInlinePreferredLogicalWidths(
           // did change or is going to change size. However, this is our only
           // opportunity to make sure that it gets its min/max widths
           // calculated.
-          child->SetPreferredLogicalWidthsDirty();
+          child->SetIntrinsicLogicalWidthsDirty();
         }
 
         // Case (1) and (2). Inline replaced and inline flow elements.
@@ -1697,13 +1706,14 @@ void LayoutBlockFlow::ComputeInlinePreferredLogicalWidths(
                                     child_min, child_max);
           inline_min += child_min;
           inline_max += child_max;
-          child->ClearPreferredLogicalWidthsDirty();
+          child->ClearIntrinsicLogicalWidthsDirty();
         } else {
           AdjustMarginForInlineReplaced(child, child_min, child_max);
         }
       }
 
-      if (!child->IsLayoutInline() && !child->IsText()) {
+      if (!child->IsLayoutInline() && !child->IsText() &&
+          !child->IsOutsideListMarker()) {
         // Case (2). Inline replaced elements and floats.
         // Go ahead and terminate the current line as far as
         // minwidth is concerned.
@@ -1891,7 +1901,7 @@ void LayoutBlockFlow::ComputeInlinePreferredLogicalWidths(
       }
 
       // Ignore spaces after a list marker.
-      if (child->IsListMarkerIncludingNG())
+      if (child->IsBoxListMarkerIncludingNG())
         strip_front_spaces = true;
     } else {
       min_logical_width = std::max(min_logical_width, inline_min);
@@ -2375,12 +2385,8 @@ bool LayoutBlockFlow::GeneratesLineBoxesForInlineChild(LayoutObject* inline_obj)
 }
 
 void LayoutBlockFlow::AddVisualOverflowFromInlineChildren() {
-  LayoutUnit end_padding = HasOverflowClip() ? PaddingEnd() : LayoutUnit();
-  // FIXME: Need to find another way to do this, since scrollbars could show
-  // when we don't want them to.
-  if (HasOverflowClip() && !end_padding && GetNode() &&
-      IsRootEditableElement(*GetNode()) && StyleRef().IsLeftToRightDirection())
-    end_padding = LayoutUnit(1);
+  DCHECK(!NeedsLayout());
+  DCHECK(!PrePaintBlockedByDisplayLock(DisplayLockLifecycleTarget::kChildren));
 
   if (const NGPaintFragment* paint_fragment = PaintFragment()) {
     for (const NGPaintFragment* child : paint_fragment->Children()) {
@@ -2391,6 +2397,23 @@ void LayoutBlockFlow::AddVisualOverflowFromInlineChildren() {
         child_rect.offset += child->Offset();
         AddContentsVisualOverflow(child_rect);
       }
+    }
+  } else if (const NGPhysicalBoxFragment* fragment = CurrentFragment()) {
+    if (const NGFragmentItems* items = fragment->Items()) {
+      for (NGInlineCursor cursor(*items); cursor;
+           cursor.MoveToNextSkippingChildren()) {
+        const NGFragmentItem* child = cursor.CurrentItem();
+        DCHECK(child);
+        if (child->HasSelfPaintingLayer())
+          continue;
+        PhysicalRect child_rect = child->InkOverflow();
+        if (!child_rect.IsEmpty()) {
+          child_rect.offset += child->OffsetInContainerBlock();
+          AddContentsVisualOverflow(child_rect);
+        }
+      }
+    } else if (fragment->HasFloatingDescendantsForPaint()) {
+      AddVisualOverflowFromFloats(*fragment);
     }
   } else {
     for (RootInlineBox* curr = FirstRootBox(); curr;
@@ -2427,12 +2450,46 @@ void LayoutBlockFlow::AddVisualOverflowFromInlineChildren() {
 }
 
 void LayoutBlockFlow::AddLayoutOverflowFromInlineChildren() {
+  DCHECK(!LayoutBlockedByDisplayLock(DisplayLockLifecycleTarget::kChildren));
+
   LayoutUnit end_padding = HasOverflowClip() ? PaddingEnd() : LayoutUnit();
   // FIXME: Need to find another way to do this, since scrollbars could show
   // when we don't want them to.
+  // The test[1] verifies this.
+  // [1] editing/input/editable-container-with-word-wrap-normal.html
   if (HasOverflowClip() && !end_padding && GetNode() &&
-      IsRootEditableElement(*GetNode()) && StyleRef().IsLeftToRightDirection())
+      IsRootEditableElement(*GetNode()) &&
+      StyleRef().IsLeftToRightDirection()) {
+    if (const NGPhysicalBoxFragment* fragment = CurrentFragment()) {
+      if (const NGFragmentItems* items = fragment->Items()) {
+        for (NGInlineCursor cursor(*items); cursor;
+             cursor.MoveToNextSkippingChildren()) {
+          if (!cursor.Current().IsLineBox())
+            continue;
+          const NGFragmentItem& child = *cursor.CurrentItem();
+          LogicalRect logical_rect =
+              fragment->ConvertChildToLogical(child.RectInContainerBlock());
+          logical_rect.size.inline_size += 1;
+          AddLayoutOverflow(
+              fragment->ConvertChildToPhysical(logical_rect).ToLayoutRect());
+        }
+        return;
+      }
+      // Note: Paint fragment for this block isn't set yet.
+      for (const NGLink& child : fragment->Children()) {
+        if (!child->IsLineBox())
+          continue;
+        LogicalRect logical_rect = fragment->ConvertChildToLogical(
+            PhysicalRect(child.Offset(), child->Size()));
+        logical_rect.size.inline_size += 1;
+        AddLayoutOverflow(
+            fragment->ConvertChildToPhysical(logical_rect).ToLayoutRect());
+      }
+      return;
+    }
     end_padding = LayoutUnit(1);
+  }
+
   for (RootInlineBox* curr = FirstRootBox(); curr; curr = curr->NextRootBox())
     AddLayoutOverflow(curr->PaddedLayoutOverflowRect(end_padding));
 }
@@ -2730,18 +2787,40 @@ LayoutUnit LayoutBlockFlow::StartAlignedOffsetForLine(
 
 void LayoutBlockFlow::SetShouldDoFullPaintInvalidationForFirstLine() {
   DCHECK(ChildrenInline());
+
+  if (const NGPaintFragment* paint_fragment = PaintFragment()) {
+    paint_fragment->SetShouldDoFullPaintInvalidationForFirstLine();
+    return;
+  }
+
+  if (const NGFragmentItems* fragment_items = FragmentItems()) {
+    NGInlineCursor first_line(*fragment_items);
+    if (first_line) {
+      DCHECK(!FirstRootBox());
+      first_line.MoveToFirstLine();
+      if (first_line && first_line.Current().UsesFirstLineStyle()) {
+        // Mark all descendants of the first line if first-line style.
+        for (NGInlineCursor descendants = first_line.CursorForDescendants();
+             descendants; descendants.MoveToNext()) {
+          const NGFragmentItem* item = descendants.Current().Item();
+          if (UNLIKELY(item->IsLayoutObjectDestroyedOrMoved())) {
+            descendants.MoveToNextSkippingChildren();
+            continue;
+          }
+          LayoutObject* layout_object = item->GetMutableLayoutObject();
+          DCHECK(layout_object);
+          layout_object->StyleRef().ClearCachedPseudoElementStyles();
+          layout_object->SetShouldDoFullPaintInvalidation();
+        }
+        StyleRef().ClearCachedPseudoElementStyles();
+        SetShouldDoFullPaintInvalidation();
+      }
+    }
+    return;
+  }
+
   if (RootInlineBox* first_root_box = FirstRootBox())
     first_root_box->SetShouldDoFullPaintInvalidationForFirstLine();
-  else if (const NGPaintFragment* paint_fragment = PaintFragment())
-    paint_fragment->SetShouldDoFullPaintInvalidationForFirstLine();
-}
-
-bool LayoutBlockFlow::PaintedOutputOfObjectHasNoEffectRegardlessOfSize() const {
-  // LayoutBlockFlow is in charge of paint invalidation of the first line.
-  if (FirstLineBox())
-    return false;
-
-  return LayoutBlock::PaintedOutputOfObjectHasNoEffectRegardlessOfSize();
 }
 
 }  // namespace blink

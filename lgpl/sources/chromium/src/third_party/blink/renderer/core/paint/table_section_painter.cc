@@ -19,6 +19,7 @@
 #include "third_party/blink/renderer/core/paint/table_row_painter.h"
 #include "third_party/blink/renderer/platform/graphics/paint/display_item_cache_skipper.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
+#include "third_party/blink/renderer/platform/graphics/paint/scoped_display_item_fragment.h"
 
 namespace blink {
 
@@ -43,11 +44,14 @@ void TableSectionPainter::Paint(const PaintInfo& paint_info) {
     return;
   }
 
+  unsigned fragment_index = 0;
   for (const auto* fragment = &layout_table_section_.FirstFragment(); fragment;
        fragment = fragment->NextFragment()) {
     PaintInfo fragment_paint_info = paint_info;
     fragment_paint_info.SetFragmentLogicalTopInFlowThread(
         fragment->LogicalTopInFlowThread());
+    ScopedDisplayItemFragment scoped_display_item_fragment(
+        fragment_paint_info.context, fragment_index++);
     PaintSection(fragment_paint_info);
   }
 }
@@ -300,9 +304,13 @@ void TableSectionPainter::PaintBoxDecorationBackground(
   if (may_have_background) {
     PaintInfo paint_info_for_cells = paint_info.ForDescendants();
     for (auto r = dirtied_rows.Start(); r < dirtied_rows.End(); r++) {
+      base::Optional<ScopedPaintState> row_paint_state;
       for (auto c = dirtied_columns.Start(); c < dirtied_columns.End(); c++) {
-        if (const auto* cell = layout_table_section_.OriginatingCellAt(r, c))
-          PaintBackgroundsBehindCell(*cell, paint_info_for_cells);
+        if (const auto* cell = layout_table_section_.OriginatingCellAt(r, c)) {
+          if (!row_paint_state)
+            row_paint_state.emplace(*cell->Row(), paint_info_for_cells);
+          PaintBackgroundsBehindCell(*cell, row_paint_state->GetPaintInfo());
+        }
       }
     }
   }

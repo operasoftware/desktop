@@ -513,6 +513,7 @@ static bool ChildRulesHaveFailedOrCanceledSubresources(
       case StyleRuleBase::kProperty:
       case StyleRuleBase::kKeyframes:
       case StyleRuleBase::kKeyframe:
+      case StyleRuleBase::kScrollTimeline:
       case StyleRuleBase::kSupports:
       case StyleRuleBase::kViewport:
         break;
@@ -601,6 +602,8 @@ void StyleSheetContents::ClearReferencedFromResource() {
 
 RuleSet& StyleSheetContents::EnsureRuleSet(const MediaQueryEvaluator& medium,
                                            AddRuleFlags add_rule_flags) {
+  if (rule_set_ && rule_set_->DidMediaQueryResultsChange(medium))
+    rule_set_ = nullptr;
   if (!rule_set_) {
     rule_set_ = MakeGarbageCollected<RuleSet>();
     rule_set_->AddRulesFromSheet(this, medium, add_rule_flags);
@@ -674,7 +677,7 @@ void StyleSheetContents::FindFontFaceRules(
   FindFontFaceRulesFromRules(ChildRules(), font_face_rules);
 }
 
-void StyleSheetContents::Trace(blink::Visitor* visitor) {
+void StyleSheetContents::Trace(Visitor* visitor) const {
   visitor->Trace(owner_rule_);
   visitor->Trace(import_rules_);
   visitor->Trace(namespace_rules_);

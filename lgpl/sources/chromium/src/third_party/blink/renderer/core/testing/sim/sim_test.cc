@@ -14,20 +14,11 @@
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
-#include "third_party/blink/renderer/platform/web_test_support.h"
 
 namespace blink {
 
 SimTest::SimTest() {
   Document::SetThreadedParsingEnabledForTesting(false);
-  // Use the mock theme to get more predictable code paths, this also avoids
-  // the OS callbacks in ScrollAnimatorMac which can schedule frames
-  // unpredictably since the OS will randomly call into blink for
-  // updateScrollerStyleForNewRecommendedScrollerStyle which then does
-  // FrameView::scrollbarStyleChanged and will adjust the scrollbar existence
-  // in the middle of a test.
-  WebTestSupport::SetMockThemeEnabledForTest(true);
-  ScrollbarTheme::SetMockScrollbarsEnabled(true);
   // Threaded animations are usually enabled for blink. However these tests use
   // synchronous compositing, which can not run threaded animations.
   bool was_threaded_animation_enabled =
@@ -39,8 +30,6 @@ SimTest::SimTest() {
 
 SimTest::~SimTest() {
   Document::SetThreadedParsingEnabledForTesting(true);
-  WebTestSupport::SetMockThemeEnabledForTest(false);
-  ScrollbarTheme::SetMockScrollbarsEnabled(false);
   content::TestBlinkWebUnitTestSupport::SetThreadedAnimationEnabled(true);
   WebCache::Clear();
 }
@@ -55,18 +44,15 @@ void SimTest::SetUp() {
   compositor_ = std::make_unique<SimCompositor>();
   web_frame_client_ =
       std::make_unique<frame_test_helpers::TestWebFrameClient>();
-  web_widget_client_ =
-      std::make_unique<frame_test_helpers::TestWebWidgetClient>(
-          compositor_.get());
   web_view_client_ = std::make_unique<frame_test_helpers::TestWebViewClient>();
   page_ = std::make_unique<SimPage>();
   web_view_helper_ = std::make_unique<frame_test_helpers::WebViewHelper>();
 
   web_view_helper_->Initialize(web_frame_client_.get(), web_view_client_.get(),
-                               web_widget_client_.get());
-  compositor_->SetWebView(WebView(), *web_widget_client_->layer_tree_host(),
-                          *web_view_client_, *web_widget_client_);
+                               compositor_.get());
+  compositor_->SetWebView(WebView(), *web_view_client_);
   page_->SetPage(WebView().GetPage());
+  local_frame_root_ = WebView().MainFrameImpl();
 }
 
 void SimTest::TearDown() {
@@ -78,20 +64,32 @@ void SimTest::TearDown() {
   web_view_helper_.reset();
   page_.reset();
   web_view_client_.reset();
-  web_widget_client_.reset();
   web_frame_client_.reset();
   compositor_.reset();
   network_.reset();
+  local_frame_root_ = nullptr;
+}
+
+void SimTest::InitializeRemote() {
+  web_view_helper_->InitializeRemote();
+  compositor_->SetWebView(WebView(), *web_view_client_);
+  page_->SetPage(WebView().GetPage());
+  web_frame_client_ =
+      std::make_unique<frame_test_helpers::TestWebFrameClient>();
+  local_frame_root_ = frame_test_helpers::CreateLocalChild(
+      *WebView().MainFrame()->ToWebRemoteFrame(), "local_frame_root",
+      WebFrameOwnerProperties(), nullptr, web_frame_client_.get(),
+      compositor_.get());
 }
 
 void SimTest::LoadURL(const String& url_string) {
   KURL url(url_string);
-  frame_test_helpers::LoadFrameDontWait(WebView().MainFrameImpl(), url);
+  frame_test_helpers::LoadFrameDontWait(local_frame_root_.Get(), url);
   if (DocumentLoader::WillLoadUrlAsEmpty(url) || url.ProtocolIsData()) {
     // Empty documents and data urls are not using mocked out SimRequests,
     // but instead load data directly.
     frame_test_helpers::PumpPendingRequestsForFrameToLoad(
-        WebView().MainFrameImpl());
+        local_frame_root_.Get());
   }
 }
 
@@ -115,12 +113,16 @@ WebLocalFrameImpl& SimTest::MainFrame() {
   return *WebView().MainFrameImpl();
 }
 
+WebLocalFrameImpl& SimTest::LocalFrameRoot() {
+  return *local_frame_root_;
+}
+
 frame_test_helpers::TestWebViewClient& SimTest::WebViewClient() {
   return *web_view_client_;
 }
 
 frame_test_helpers::TestWebWidgetClient& SimTest::WebWidgetClient() {
-  return *web_widget_client_;
+  return *compositor_;
 }
 
 frame_test_helpers::TestWebFrameClient& SimTest::WebFrameClient() {

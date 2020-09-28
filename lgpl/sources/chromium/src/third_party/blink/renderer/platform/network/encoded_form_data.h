@@ -29,6 +29,8 @@
 
 #include <utility>
 
+#include "base/optional.h"
+#include "base/time/time.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -44,6 +46,7 @@ class FetchAPIRequestBodyDataView;
 }  // namespace mojom
 
 class BlobDataHandle;
+class ResourceRequestBody;
 class WrappedDataPipeGetter;
 
 class PLATFORM_EXPORT FormDataElement final {
@@ -52,10 +55,11 @@ class PLATFORM_EXPORT FormDataElement final {
  public:
   FormDataElement();
   explicit FormDataElement(const Vector<char>&);
-  FormDataElement(const String& filename,
-                  int64_t file_start,
-                  int64_t file_length,
-                  double expected_file_modification_time);
+  FormDataElement(
+      const String& filename,
+      int64_t file_start,
+      int64_t file_length,
+      const base::Optional<base::Time>& expected_file_modification_time);
   FormDataElement(const String& blob_uuid,
                   scoped_refptr<BlobDataHandle> optional_handle);
   explicit FormDataElement(scoped_refptr<WrappedDataPipeGetter>);
@@ -77,7 +81,7 @@ class PLATFORM_EXPORT FormDataElement final {
   scoped_refptr<BlobDataHandle> optional_blob_data_handle_;
   int64_t file_start_;
   int64_t file_length_;
-  double expected_file_modification_time_;
+  base::Optional<base::Time> expected_file_modification_time_;
   scoped_refptr<WrappedDataPipeGetter> data_pipe_getter_;
 };
 
@@ -107,11 +111,13 @@ class PLATFORM_EXPORT EncodedFormData : public RefCounted<EncodedFormData> {
   ~EncodedFormData();
 
   void AppendData(const void* data, wtf_size_t);
-  void AppendFile(const String& file_path);
-  void AppendFileRange(const String& filename,
-                       int64_t start,
-                       int64_t length,
-                       double expected_modification_time);
+  void AppendFile(const String& file_path,
+                  const base::Optional<base::Time>& expected_modification_time);
+  void AppendFileRange(
+      const String& filename,
+      int64_t start,
+      int64_t length,
+      const base::Optional<base::Time>& expected_modification_time);
   void AppendBlob(const String& blob_uuid,
                   scoped_refptr<BlobDataHandle> optional_handle);
   void AppendDataPipe(scoped_refptr<WrappedDataPipeGetter> handle);
@@ -150,8 +156,8 @@ class PLATFORM_EXPORT EncodedFormData : public RefCounted<EncodedFormData> {
   bool IsSafeToSendToAnotherThread() const;
 
  private:
-  friend struct mojo::StructTraits<blink::mojom::FetchAPIRequestBodyDataView,
-                                   scoped_refptr<blink::EncodedFormData>>;
+  friend struct mojo::StructTraits<mojom::FetchAPIRequestBodyDataView,
+                                   ResourceRequestBody>;
   EncodedFormData();
   EncodedFormData(const EncodedFormData&);
 

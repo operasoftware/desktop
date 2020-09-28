@@ -69,8 +69,6 @@
 
 namespace blink {
 
-using namespace html_names;
-
 static const unsigned kMaximumHTMLParserDOMTreeDepth = 512;
 
 static inline void SetAttributes(Element* element,
@@ -86,16 +84,21 @@ static inline void SetAttributes(Element* element,
 }
 
 static bool HasImpliedEndTag(const HTMLStackItem* item) {
-  return item->HasTagName(kDdTag) || item->HasTagName(kDtTag) ||
-         item->HasTagName(kLiTag) || item->HasTagName(kOptionTag) ||
-         item->HasTagName(kOptgroupTag) || item->HasTagName(kPTag) ||
-         item->HasTagName(kRbTag) || item->HasTagName(kRpTag) ||
-         item->HasTagName(kRtTag) || item->HasTagName(kRTCTag);
+  return item->HasTagName(html_names::kDdTag) ||
+         item->HasTagName(html_names::kDtTag) ||
+         item->HasTagName(html_names::kLiTag) ||
+         item->HasTagName(html_names::kOptionTag) ||
+         item->HasTagName(html_names::kOptgroupTag) ||
+         item->HasTagName(html_names::kPTag) ||
+         item->HasTagName(html_names::kRbTag) ||
+         item->HasTagName(html_names::kRpTag) ||
+         item->HasTagName(html_names::kRtTag) ||
+         item->HasTagName(html_names::kRTCTag);
 }
 
 static bool ShouldUseLengthLimit(const ContainerNode& node) {
-  return !IsHTMLScriptElement(node) && !IsHTMLStyleElement(node) &&
-         !IsSVGScriptElement(node);
+  return !IsA<HTMLScriptElement>(node) && !IsA<HTMLStyleElement>(node) &&
+         !IsA<SVGScriptElement>(node);
 }
 
 static unsigned TextLengthLimitForContainer(const ContainerNode& node) {
@@ -108,8 +111,17 @@ static inline bool IsAllWhitespace(const String& string) {
 }
 
 static inline void Insert(HTMLConstructionSiteTask& task) {
-  if (auto* template_element = ToHTMLTemplateElementOrNull(*task.parent))
-    task.parent = template_element->content();
+  // https://html.spec.whatwg.org/multipage/parsing.html#appropriate-place-for-inserting-a-node
+  // 3. If the adjusted insertion location is inside a template element, let it
+  // instead be inside the template element's template contents, after its last
+  // child (if any).
+  if (auto* template_element = DynamicTo<HTMLTemplateElement>(*task.parent)) {
+    task.parent = template_element->TemplateContentForHTMLConstructionSite();
+    // If the Document was detached in the middle of parsing, The template
+    // element won't be able to initialize its contents, so bail out.
+    if (!task.parent)
+      return;
+  }
 
   // https://html.spec.whatwg.org/C/#insert-a-foreign-element
   // 3.1, (3) Push (pop) an element queue
@@ -297,7 +309,7 @@ void HTMLConstructionSite::AttachLater(ContainerNode* parent,
   DCHECK(ScriptingContentIsAllowed(parser_content_policy_) || !element ||
          !element->IsScriptElement());
   DCHECK(PluginContentIsAllowed(parser_content_policy_) ||
-         !IsHTMLPlugInElement(child));
+         !IsA<HTMLPlugInElement>(child));
 
   HTMLConstructionSiteTask task(HTMLConstructionSiteTask::kInsert);
   task.parent = parent;
@@ -383,7 +395,7 @@ HTMLConstructionSite::~HTMLConstructionSite() {
   DCHECK(pending_text_.IsEmpty());
 }
 
-void HTMLConstructionSite::Trace(Visitor* visitor) {
+void HTMLConstructionSite::Trace(Visitor* visitor) const {
   visitor->Trace(document_);
   visitor->Trace(attachment_root_);
   visitor->Trace(head_);
@@ -569,16 +581,15 @@ void HTMLConstructionSite::SetCompatibilityModeFromDoctype(
           "-//W3C//DTD HTML Experimental 970421//") ||
       public_id.StartsWithIgnoringASCIICase("-//W3C//DTD W3 HTML//") ||
       public_id.StartsWithIgnoringASCIICase("-//W3O//DTD W3 HTML 3.0//") ||
-      DeprecatedEqualIgnoringCase(public_id,
-                                  "-//W3O//DTD W3 HTML Strict 3.0//EN//") ||
+      EqualIgnoringASCIICase(public_id,
+                             "-//W3O//DTD W3 HTML Strict 3.0//EN//") ||
       public_id.StartsWithIgnoringASCIICase(
           "-//WebTechs//DTD Mozilla HTML 2.0//") ||
       public_id.StartsWithIgnoringASCIICase(
           "-//WebTechs//DTD Mozilla HTML//") ||
-      DeprecatedEqualIgnoringCase(public_id,
-                                  "-/W3C/DTD HTML 4.0 Transitional/EN") ||
-      DeprecatedEqualIgnoringCase(public_id, "HTML") ||
-      DeprecatedEqualIgnoringCase(
+      EqualIgnoringASCIICase(public_id, "-/W3C/DTD HTML 4.0 Transitional/EN") ||
+      EqualIgnoringASCIICase(public_id, "HTML") ||
+      EqualIgnoringASCIICase(
           system_id,
           "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd") ||
       (system_id.IsEmpty() && public_id.StartsWithIgnoringASCIICase(
@@ -627,8 +638,8 @@ void HTMLConstructionSite::InsertDoctype(AtomicHTMLToken* token) {
       StringImpl::Create8BitIfPossible(token->PublicIdentifier());
   const String& system_id =
       StringImpl::Create8BitIfPossible(token->SystemIdentifier());
-  DocumentType* doctype =
-      DocumentType::Create(document_, token->GetName(), public_id, system_id);
+  auto* doctype = MakeGarbageCollected<DocumentType>(
+      document_, token->GetName(), public_id, system_id);
   AttachLater(attachment_root_, doctype);
 
   // DOCTYPE nodes are only processed when parsing fragments w/o
@@ -671,14 +682,14 @@ void HTMLConstructionSite::InsertCommentOnHTMLHtmlElement(
 void HTMLConstructionSite::InsertHTMLHeadElement(AtomicHTMLToken* token) {
   DCHECK(!ShouldFosterParent());
   head_ = MakeGarbageCollected<HTMLStackItem>(
-      CreateElement(token, xhtmlNamespaceURI), token);
+      CreateElement(token, html_names::xhtmlNamespaceURI), token);
   AttachLater(CurrentNode(), head_->GetElement());
   open_elements_.PushHTMLHeadElement(head_);
 }
 
 void HTMLConstructionSite::InsertHTMLBodyElement(AtomicHTMLToken* token) {
   DCHECK(!ShouldFosterParent());
-  Element* body = CreateElement(token, xhtmlNamespaceURI);
+  Element* body = CreateElement(token, html_names::xhtmlNamespaceURI);
   AttachLater(CurrentNode(), body);
   open_elements_.PushHTMLBodyElement(
       MakeGarbageCollected<HTMLStackItem>(body, token));
@@ -689,7 +700,7 @@ void HTMLConstructionSite::InsertHTMLBodyElement(AtomicHTMLToken* token) {
 void HTMLConstructionSite::InsertHTMLFormElement(AtomicHTMLToken* token,
                                                  bool is_demoted) {
   auto* form_element =
-      To<HTMLFormElement>(CreateElement(token, xhtmlNamespaceURI));
+      To<HTMLFormElement>(CreateElement(token, html_names::xhtmlNamespaceURI));
   if (!OpenElements()->HasTemplateInHTMLScope())
     form_ = form_element;
   if (is_demoted) {
@@ -700,8 +711,19 @@ void HTMLConstructionSite::InsertHTMLFormElement(AtomicHTMLToken* token,
   open_elements_.Push(MakeGarbageCollected<HTMLStackItem>(form_element, token));
 }
 
+void HTMLConstructionSite::InsertHTMLTemplateElement(
+    AtomicHTMLToken* token,
+    DeclarativeShadowRootType declarative_shadow_root_type) {
+  auto* template_element = To<HTMLTemplateElement>(
+      CreateElement(token, html_names::xhtmlNamespaceURI));
+  template_element->SetDeclarativeShadowRootType(declarative_shadow_root_type);
+  AttachLater(CurrentNode(), template_element);
+  open_elements_.Push(
+      MakeGarbageCollected<HTMLStackItem>(template_element, token));
+}
+
 void HTMLConstructionSite::InsertHTMLElement(AtomicHTMLToken* token) {
-  Element* element = CreateElement(token, xhtmlNamespaceURI);
+  Element* element = CreateElement(token, html_names::xhtmlNamespaceURI);
   AttachLater(CurrentNode(), element);
   open_elements_.Push(MakeGarbageCollected<HTMLStackItem>(element, token));
 }
@@ -712,7 +734,8 @@ void HTMLConstructionSite::InsertSelfClosingHTMLElementDestroyingToken(
   // Normally HTMLElementStack is responsible for calling finishParsingChildren,
   // but self-closing elements are never in the element stack so the stack
   // doesn't get a chance to tell them that we're done parsing their children.
-  AttachLater(CurrentNode(), CreateElement(token, xhtmlNamespaceURI), true);
+  AttachLater(CurrentNode(),
+              CreateElement(token, html_names::xhtmlNamespaceURI), true);
   // FIXME: Do we want to acknowledge the token's self-closing flag?
   // http://www.whatwg.org/specs/web-apps/current-work/multipage/tokenization.html#acknowledge-self-closing-flag
 }
@@ -727,6 +750,9 @@ void HTMLConstructionSite::InsertFormattingElement(AtomicHTMLToken* token) {
 
 void HTMLConstructionSite::InsertScriptElement(AtomicHTMLToken* token) {
   CreateElementFlags flags;
+  bool should_be_parser_inserted =
+      parser_content_policy_ !=
+      kAllowScriptingContentAndDoNotMarkAlreadyStarted;
   flags
       // http://www.whatwg.org/specs/web-apps/current-work/multipage/scripting-1.html#already-started
       // http://html5.org/specs/dom-parsing.html#dom-range-createcontextualfragment
@@ -734,12 +760,12 @@ void HTMLConstructionSite::InsertScriptElement(AtomicHTMLToken* token) {
       // parser-inserted and already-started and later unmark them. However, we
       // short circuit that logic to avoid the subtree traversal to find script
       // elements since scripts can never see those flags or effects thereof.
-      .SetCreatedByParser(parser_content_policy_ !=
-                          kAllowScriptingContentAndDoNotMarkAlreadyStarted)
+      .SetCreatedByParser(should_be_parser_inserted,
+                          should_be_parser_inserted ? document_ : nullptr)
       .SetAlreadyStarted(is_parsing_fragment_ && flags.IsCreatedByParser());
   HTMLScriptElement* element = nullptr;
   if (const auto* is_attribute = token->GetAttributeItem(html_names::kIsAttr)) {
-    element = ToHTMLScriptElement(OwnerDocumentForCurrentNode().CreateElement(
+    element = To<HTMLScriptElement>(OwnerDocumentForCurrentNode().CreateElement(
         html_names::kScriptTag, flags, is_attribute->Value()));
   } else {
     element = MakeGarbageCollected<HTMLScriptElement>(
@@ -777,9 +803,17 @@ void HTMLConstructionSite::InsertTextNode(const StringView& string,
   if (ShouldFosterParent())
     FindFosterSite(dummy_task);
 
-  // FIXME: This probably doesn't need to be done both here and in insert(Task).
-  if (auto* template_element = ToHTMLTemplateElementOrNull(*dummy_task.parent))
-    dummy_task.parent = template_element->content();
+  // TODO(crbug.com/1070669): This can likely be removed, because it is already
+  // handled in Insert().
+  if (auto* template_element =
+          DynamicTo<HTMLTemplateElement>(*dummy_task.parent)) {
+    // If the Document was detached in the middle of parsing, the template
+    // element won't be able to initialize its contents.
+    if (auto* content =
+            template_element->TemplateContentForHTMLConstructionSite()) {
+      dummy_task.parent = content;
+    }
+  }
 
   // Unclear when parent != case occurs. Somehow we insert text into two
   // separate nodes while processing the same Token. The nextChild !=
@@ -835,13 +869,24 @@ void HTMLConstructionSite::TakeAllChildren(
 }
 
 CreateElementFlags HTMLConstructionSite::GetCreateElementFlags() const {
-  return is_parsing_fragment_ ? CreateElementFlags::ByFragmentParser()
-                              : CreateElementFlags::ByParser();
+  return is_parsing_fragment_ ? CreateElementFlags::ByFragmentParser(document_)
+                              : CreateElementFlags::ByParser(document_);
 }
 
-inline Document& HTMLConstructionSite::OwnerDocumentForCurrentNode() {
-  if (auto* template_element = ToHTMLTemplateElementOrNull(*CurrentNode()))
-    return template_element->content()->GetDocument();
+Document& HTMLConstructionSite::OwnerDocumentForCurrentNode() {
+  // TODO(crbug.com/1070667): For <template> elements, many operations need to
+  // be re-targeted to the .content() document of the template. This function is
+  // used in those places. The spec needs to be updated to reflect this
+  // behavior, and when that happens, a link to the spec should be placed here.
+  if (auto* template_element = DynamicTo<HTMLTemplateElement>(*CurrentNode())) {
+    // If the Document was detached in the middle of parsing, The template
+    // element won't be able to initialize its contents. Fallback to the
+    // current node's document in that case..
+    if (auto* content =
+            template_element->TemplateContentForHTMLConstructionSite()) {
+      return content->GetDocument();
+    }
+  }
   return CurrentNode()->GetDocument();
 }
 
@@ -856,7 +901,7 @@ CustomElementDefinition* HTMLConstructionSite::LookUpCustomElementDefinition(
     return nullptr;
 
   // "2. If document does not have a browsing context, return null."
-  LocalDOMWindow* window = document.ExecutingWindow();
+  LocalDOMWindow* window = document.domWindow();
   if (!window)
     return nullptr;
 
@@ -914,8 +959,16 @@ Element* HTMLConstructionSite::CreateElement(
     // reactions stack."
     CEReactionsScope reactions;
 
-    // 7.
-    element = definition->CreateAutonomousCustomElementSync(document, tag_name);
+    // "7. Let element be the result of creating an element given document,
+    // localName, given namespace, null, and is. If will execute script is true,
+    // set the synchronous custom elements flag; otherwise, leave it unset."
+    // TODO(crbug.com/1080673): We clear the CreatedbyParser flag here, so that
+    // elements get fully constructed. Some elements (e.g. HTMLInputElement)
+    // only partially construct themselves when created by the parser, but since
+    // this is a custom element, we need a fully-constructed element here.
+    element = definition->CreateElement(
+        document, tag_name,
+        GetCreateElementFlags().SetCreatedByParser(false, nullptr));
 
     // "8. Append each attribute in the given token to element." We don't use
     // setAttributes here because the custom element constructor may have
@@ -1066,11 +1119,11 @@ bool HTMLConstructionSite::InQuirksMode() {
 void HTMLConstructionSite::FindFosterSite(HTMLConstructionSiteTask& task) {
   // 2.1
   HTMLElementStack::ElementRecord* last_template =
-      open_elements_.Topmost(kTemplateTag.LocalName());
+      open_elements_.Topmost(html_names::kTemplateTag.LocalName());
 
   // 2.2
   HTMLElementStack::ElementRecord* last_table =
-      open_elements_.Topmost(kTableTag.LocalName());
+      open_elements_.Topmost(html_names::kTableTag.LocalName());
 
   // 2.3
   if (last_template && (!last_table || last_template->IsAbove(last_table))) {
@@ -1110,7 +1163,7 @@ void HTMLConstructionSite::FosterParent(Node* node) {
   QueueTask(task);
 }
 
-void HTMLConstructionSite::PendingText::Trace(Visitor* visitor) {
+void HTMLConstructionSite::PendingText::Trace(Visitor* visitor) const {
   visitor->Trace(parent);
   visitor->Trace(next_child);
 }

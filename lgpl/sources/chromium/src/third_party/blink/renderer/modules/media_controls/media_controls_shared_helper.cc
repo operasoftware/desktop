@@ -65,7 +65,7 @@ void MediaControlsSharedHelpers::TransitionEventListener::Invoke(
 }
 
 void MediaControlsSharedHelpers::TransitionEventListener::Trace(
-    blink::Visitor* visitor) {
+    blink::Visitor* visitor) const {
   NativeEventListener::Trace(visitor);
   visitor->Trace(element_);
 }
@@ -143,7 +143,7 @@ bool MediaControlsSharedHelpers::ShouldShowFullscreenButton(
   if (media_element.IsFullscreen())
     return true;
 
-  if (!media_element.IsHTMLVideoElement())
+  if (!IsA<HTMLVideoElement>(media_element))
     return false;
 
   if (!media_element.HasVideo())

@@ -31,8 +31,14 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_ELEMENT_H_
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_ELEMENT_H_
 
+#include <vector>
+
 #include "third_party/blink/public/web/web_node.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+
+namespace gfx {
+class Size;
+}
 
 namespace v8 {
 class Isolate;
@@ -44,6 +50,7 @@ class Local;
 namespace blink {
 
 class Element;
+class Image;
 struct WebRect;
 
 // Provides access to some properties of a DOM element node.
@@ -74,12 +81,7 @@ class BLINK_EXPORT WebElement : public WebNode {
   WebString GetAttribute(const WebString&) const;
   void SetAttribute(const WebString& name, const WebString& value);
   WebString TextContent() const;
-  void RequestDetachedView();
-  void ReleaseDetachedView();
-  bool HasDetachedView();
-  bool IsVideoDetachAllowed();
-  void InvokeDetachedViewAction(const WebString&);
-  void UpdateDetachedViewSubtitle(const WebString&);
+  bool IsVideoDetachAllowed() const;
   WebString InnerHTML() const;
   WebString AttributeLocalName(unsigned index) const;
   WebString AttributeValue(unsigned index) const;
@@ -102,13 +104,36 @@ class BLINK_EXPORT WebElement : public WebNode {
   // Returns the image contents of this element or a null SkBitmap
   // if there isn't any.
   SkBitmap ImageContents();
+
+  // Returns a copy of original image data of this element or an empty vector
+  // if there isn't any.
+  std::vector<uint8_t> CopyOfImageData();
+
+  // Returns the original image file extension.
+  std::string ImageExtension();
+
+  // Returns the original image size.
+  gfx::Size GetImageSize();
+
   void RequestFullscreen();
+
+  // ComputedStyle property values. The following exposure is of CSS property
+  // values are part of the ComputedStyle set which is usually exposed through
+  // the Window object in WebIDL as window.getComputedStyle(element). Exposing
+  // ComputedStyle requires all of CSSComputedStyleDeclaration which is a pretty
+  // large interfaces. For now the we are exposing computed property values as
+  // strings directly to WebElement and enable public component usage through
+  // /public/web interfaces.
+  WebString GetComputedValue(const WebString& property_name);
 
 #if INSIDE_BLINK
   WebElement(Element*);
   WebElement& operator=(Element*);
   operator Element*() const;
 #endif
+
+ private:
+  Image* GetImage();
 };
 
 DECLARE_WEB_NODE_TYPE_CASTS(WebElement);

@@ -143,7 +143,7 @@ To<Longhand>(resolved_property).{{apply_call}};
   {# Check for equality in case we can bail out before creating a new NinePieceImage. #}
       {% if modifier_type == 'Outset' %}
   if (style_building_utils::BorderImageLengthMatchesAllSides(current_image.Outset(),
-                                       BorderImageLength(Length::Fixed(0))))
+                                       BorderImageLength(0)))
     return;
       {% elif modifier_type == 'Repeat' %}
   if (current_image.HorizontalRule() == kStretchImageRule &&
@@ -172,7 +172,7 @@ To<Longhand>(resolved_property).{{apply_call}};
       {% endif %}
   NinePieceImage image(current_image);
       {% if modifier_type == 'Outset' %}
-  image.SetOutset(Length::Fixed(0));
+  image.SetOutset(0);
       {% elif modifier_type == 'Repeat' %}
   image.SetHorizontalRule(kStretchImageRule);
   image.SetVerticalRule(kStretchImageRule);
@@ -359,8 +359,10 @@ To<Longhand>(resolved_property).{{apply_call}};
     map.insert(identifier, CounterDirectives()).stored_value->value;
         {% if action == 'Reset' %}
     directives.SetResetValue(counter_value);
-        {% else %}
+        {% elif action == 'Increment' %}
     directives.AddIncrementValue(counter_value);
+        {% else %}
+    directives.SetSetValue(counter_value);
         {% endif %}
   }
   DCHECK(!map.IsEmpty());

@@ -22,7 +22,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_HASH_TRAITS_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_HASH_TRAITS_H_
 
-#include <string.h>  // For memset.
 #include <limits>
 #include <memory>
 #include <type_traits>
@@ -42,6 +41,17 @@ template <bool is_enum, typename T>
 struct EnumOrGenericHashTraits;
 template <typename T>
 struct HashTraits;
+
+namespace {
+template <typename T, bool = IsTraceable<T>::value>
+struct ClearMemoryAtomicallyIfNeeded {
+  static void Clear(T* slot) { memset(static_cast<void*>(slot), 0, sizeof(T)); }
+};
+template <typename T>
+struct ClearMemoryAtomicallyIfNeeded<T, true> {
+  static void Clear(T* slot) { AtomicMemzero<sizeof(T)>(slot); }
+};
+}  // namespace
 
 template <typename T>
 struct GenericHashTraitsBase<false, T> {
@@ -86,9 +96,6 @@ struct GenericHashTraitsBase<false, T> {
     static const bool value = !std::is_pod<T>::value;
   };
 
-  static const WeakHandlingFlag kWeakHandlingFlag =
-      IsWeak<T>::value ? kWeakHandling : kNoWeakHandling;
-
   static constexpr bool kCanHaveDeletedValue = true;
 
   // The kHasMovingCallback value is only used for HashTable backing stores.
@@ -96,6 +103,11 @@ struct GenericHashTraitsBase<false, T> {
   // write barrier. Users of this value have to provide RegisterMovingCallback
   // function.
   static constexpr bool kHasMovingCallback = false;
+
+  // The kCanTraceConcurrently value is used by Oilpan concurrent marking. Only
+  // type for which HashTraits<T>::kCanTraceConcurrently is true can be traced
+  // on a concurrent thread.
+  static constexpr bool kCanTraceConcurrently = false;
 };
 
 // Default integer traits disallow both 0 and -1 as keys (max value instead of
@@ -199,7 +211,7 @@ struct HashTraits<P*> : GenericHashTraits<P*> {
   static void ConstructDeletedValue(P*& slot, bool) {
     slot = reinterpret_cast<P*>(-1);
   }
-  static bool IsDeletedValue(P* value) {
+  static bool IsDeletedValue(const P* value) {
     return value == reinterpret_cast<P*>(-1);
   }
 };
@@ -218,6 +230,12 @@ struct SimpleClassHashTraits : GenericHashTraits<T> {
     return value.IsHashTableDeletedValue();
   }
 };
+
+// Default traits disallow both 0 and max as keys -- use these traits to allow
+// all values as keys.
+template <typename T>
+struct HashTraits<IntegralWithAllKeys<T>>
+    : SimpleClassHashTraits<IntegralWithAllKeys<T>> {};
 
 template <typename P>
 struct HashTraits<scoped_refptr<P>> : SimpleClassHashTraits<scoped_refptr<P>> {
@@ -377,8 +395,10 @@ struct PairHashTraits
     // at a later point, the same assumptions around memory zeroing must
     // hold as they did at the initial allocation.  Therefore we zero the
     // value part of the slot here for GC collections.
-    if (zero_value)
-      memset(reinterpret_cast<void*>(&slot.second), 0, sizeof(slot.second));
+    if (zero_value) {
+      ClearMemoryAtomicallyIfNeeded<typename SecondTraits::TraitType>::Clear(
+          &slot.second);
+    }
   }
   static bool IsDeletedValue(const TraitType& value) {
     return FirstTraits::IsDeletedValue(value.first);
@@ -405,6 +425,10 @@ struct KeyValuePair {
   KeyTypeArg key;
   ValueTypeArg value;
 };
+
+template <typename K, typename V>
+struct IsWeak<KeyValuePair<K, V>>
+    : std::integral_constant<bool, IsWeak<K>::value || IsWeak<V>::value> {};
 
 template <typename KeyTraitsArg, typename ValueTraitsArg>
 struct KeyValuePairHashTraits
@@ -440,19 +464,15 @@ struct KeyValuePairHashTraits
         ValueTraits::template NeedsToForbidGCOnMove<>::value;
   };
 
-  static const WeakHandlingFlag kWeakHandlingFlag =
-      (KeyTraits::kWeakHandlingFlag == kWeakHandling ||
-       ValueTraits::kWeakHandlingFlag == kWeakHandling)
-          ? kWeakHandling
-          : kNoWeakHandling;
-
   static const unsigned kMinimumTableSize = KeyTraits::kMinimumTableSize;
 
   static void ConstructDeletedValue(TraitType& slot, bool zero_value) {
     KeyTraits::ConstructDeletedValue(slot.key, zero_value);
     // See similar code in this file for why we need to do this.
-    if (zero_value)
-      memset(reinterpret_cast<void*>(&slot.value), 0, sizeof(slot.value));
+    if (zero_value) {
+      ClearMemoryAtomicallyIfNeeded<typename ValueTraits::TraitType>::Clear(
+          &slot.value);
+    }
   }
   static bool IsDeletedValue(const TraitType& value) {
     return KeyTraits::IsDeletedValue(value.key);
@@ -461,7 +481,11 @@ struct KeyValuePairHashTraits
 
 template <typename Key, typename Value>
 struct HashTraits<KeyValuePair<Key, Value>>
-    : public KeyValuePairHashTraits<HashTraits<Key>, HashTraits<Value>> {};
+    : public KeyValuePairHashTraits<HashTraits<Key>, HashTraits<Value>> {
+  static constexpr bool kCanTraceConcurrently =
+      HashTraits<Key>::kCanTraceConcurrently &&
+      (HashTraits<Value>::kCanTraceConcurrently || !IsTraceable<Value>::value);
+};
 
 template <typename T>
 struct NullableHashTraits : public HashTraits<T> {

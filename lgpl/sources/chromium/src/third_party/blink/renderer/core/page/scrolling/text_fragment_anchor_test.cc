@@ -5,7 +5,6 @@
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
-#include "third_party/blink/renderer/bindings/core/v8/usv_string_or_trusted_url.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -21,7 +20,6 @@
 #include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
-#include "third_party/blink/renderer/core/trustedtypes/trusted_url.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
@@ -45,6 +43,17 @@ class TextFragmentAnchorTest : public SimTest {
     RunPendingTasks();
   }
 
+  void BeginEmptyFrame() {
+    // If a test case doesn't find a match and therefore doesn't schedule the
+    // beforematch event, we should still render a second frame as if we did
+    // schedule the event to retain test coverage.
+    // When the beforematch event is not scheduled, a DCHECK will fail on
+    // BeginFrame() because no event was scheduled, so we schedule an empty task
+    // here.
+    GetDocument().EnqueueAnimationFrameTask(WTF::Bind([]() {}));
+    Compositor().BeginFrame();
+  }
+
   ScrollableArea* LayoutViewport() {
     return GetDocument().View()->LayoutViewport();
   }
@@ -58,20 +67,20 @@ class TextFragmentAnchorTest : public SimTest {
   }
 
   void SimulateClick(int x, int y) {
-    WebMouseEvent event(
-        WebInputEvent::kMouseDown, WebFloatPoint(x, y), WebFloatPoint(x, y),
-        WebPointerProperties::Button::kLeft, 0,
-        WebInputEvent::Modifiers::kLeftButtonDown, base::TimeTicks::Now());
+    WebMouseEvent event(WebInputEvent::Type::kMouseDown, gfx::PointF(x, y),
+                        gfx::PointF(x, y), WebPointerProperties::Button::kLeft,
+                        0, WebInputEvent::Modifiers::kLeftButtonDown,
+                        base::TimeTicks::Now());
     event.SetFrameScale(1);
     GetDocument().GetFrame()->GetEventHandler().HandleMousePressEvent(event);
   }
 
   void SimulateTap(int x, int y) {
-    WebGestureEvent event(WebInputEvent::kGestureTap,
+    WebGestureEvent event(WebInputEvent::Type::kGestureTap,
                           WebInputEvent::kNoModifiers, base::TimeTicks::Now(),
                           WebGestureDevice::kTouchscreen);
-    event.SetPositionInWidget(FloatPoint(x, y));
-    event.SetPositionInScreen(FloatPoint(x, y));
+    event.SetPositionInWidget(gfx::PointF(x, y));
+    event.SetPositionInScreen(gfx::PointF(x, y));
     event.SetFrameScale(1);
     GetDocument().GetFrame()->GetEventHandler().HandleGestureEvent(event);
   }
@@ -94,12 +103,15 @@ TEST_F(TextFragmentAnchorTest, BasicSmokeTest) {
     </style>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& p = *GetDocument().getElementById("text");
 
+  EXPECT_EQ(p, *GetDocument().CssTarget());
   EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(p)))
       << "<p> Element wasn't scrolled into view, viewport's scroll offset: "
       << LayoutViewport()->GetScrollOffset().ToString();
@@ -124,8 +136,11 @@ TEST_F(TextFragmentAnchorTest, NonMatchingString) {
     </style>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  BeginEmptyFrame();
 
   EXPECT_EQ(ScrollOffset(), LayoutViewport()->GetScrollOffset());
 
@@ -133,6 +148,7 @@ TEST_F(TextFragmentAnchorTest, NonMatchingString) {
   GetDocument().body()->setAttribute(html_names::kStyleAttr, "height: 1300px");
   Compositor().BeginFrame();
 
+  EXPECT_EQ(nullptr, GetDocument().CssTarget());
   EXPECT_FALSE(GetDocument().View()->GetFragmentAnchor());
   EXPECT_TRUE(GetDocument().Markers().Markers().IsEmpty());
 }
@@ -159,12 +175,15 @@ TEST_F(TextFragmentAnchorTest, MultipleMatches) {
     <p id="first">This is a test page</p>
     <p id="second">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& first = *GetDocument().getElementById("first");
 
+  EXPECT_EQ(first, *GetDocument().CssTarget());
   EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(first)))
       << "First <p> wasn't scrolled into view, viewport's scroll offset: "
       << LayoutViewport()->GetScrollOffset().ToString();
@@ -193,12 +212,15 @@ TEST_F(TextFragmentAnchorTest, NestedBlocks) {
       </div>
     </body>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& match = *GetDocument().getElementById("match");
 
+  EXPECT_EQ(match, *GetDocument().CssTarget());
   EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(match)))
       << "<p> wasn't scrolled into view, viewport's scroll offset: "
       << LayoutViewport()->GetScrollOffset().ToString();
@@ -228,12 +250,15 @@ TEST_F(TextFragmentAnchorTest, MultipleTextFragments) {
     <p id="first">This is a test page</p>
     <p id="second">This is some more text</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& first = *GetDocument().getElementById("first");
 
+  EXPECT_EQ(first, *GetDocument().CssTarget());
   EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(first)))
       << "First <p> wasn't scrolled into view, viewport's scroll offset: "
       << LayoutViewport()->GetScrollOffset().ToString();
@@ -264,12 +289,15 @@ TEST_F(TextFragmentAnchorTest, FirstTextFragmentNotFound) {
     <p id="first">This is a page</p>
     <p id="second">This is some more text</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& second = *GetDocument().getElementById("second");
 
+  EXPECT_EQ(second, *GetDocument().CssTarget());
   EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(second)))
       << "Second <p> wasn't scrolled into view, viewport's scroll offset: "
       << LayoutViewport()->GetScrollOffset().ToString();
@@ -296,12 +324,15 @@ TEST_F(TextFragmentAnchorTest, OnlyFirstTextFragmentFound) {
     </style>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& p = *GetDocument().getElementById("text");
 
+  EXPECT_EQ(p, *GetDocument().CssTarget());
   EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(p)))
       << "<p> Element wasn't scrolled into view, viewport's scroll offset: "
       << LayoutViewport()->GetScrollOffset().ToString();
@@ -332,8 +363,11 @@ TEST_F(TextFragmentAnchorTest, MultipleNonMatchingStrings) {
     </style>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  BeginEmptyFrame();
 
   EXPECT_EQ(ScrollOffset(), LayoutViewport()->GetScrollOffset());
 
@@ -341,6 +375,7 @@ TEST_F(TextFragmentAnchorTest, MultipleNonMatchingStrings) {
   GetDocument().body()->setAttribute(html_names::kStyleAttr, "height: 1300px");
   Compositor().BeginFrame();
 
+  EXPECT_EQ(nullptr, GetDocument().CssTarget());
   EXPECT_FALSE(GetDocument().View()->GetFragmentAnchor());
   EXPECT_TRUE(GetDocument().Markers().Markers().IsEmpty());
 }
@@ -363,10 +398,13 @@ TEST_F(TextFragmentAnchorTest, SameElementTextRange) {
     </style>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
 
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
+  EXPECT_EQ(*GetDocument().getElementById("text"), *GetDocument().CssTarget());
   EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
 
   // Expect marker on "This is a test page".
@@ -397,10 +435,13 @@ TEST_F(TextFragmentAnchorTest, NeighboringElementTextRange) {
     <p id="text1">This is a test page</p>
     <p id="text2">with another paragraph of text</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
 
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
+  EXPECT_EQ(*GetDocument().body(), *GetDocument().CssTarget());
   EXPECT_EQ(2u, GetDocument().Markers().Markers().size());
 
   // Expect marker on "test page"
@@ -441,10 +482,13 @@ TEST_F(TextFragmentAnchorTest, DifferentDepthElementTextRange) {
       <p id="text2">with another paragraph of text</p>
     </div>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
 
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
+  EXPECT_EQ(*GetDocument().body(), *GetDocument().CssTarget());
   EXPECT_EQ(2u, GetDocument().Markers().Markers().size());
 
   // Expect marker on "test page"
@@ -482,10 +526,9 @@ TEST_F(TextFragmentAnchorTest, TextRangeEndTextNotFound) {
     </style>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
 
+  EXPECT_EQ(nullptr, GetDocument().CssTarget());
   EXPECT_EQ(0u, GetDocument().Markers().Markers().size());
   EXPECT_EQ(ScrollOffset(), LayoutViewport()->GetScrollOffset());
 }
@@ -515,10 +558,13 @@ TEST_F(TextFragmentAnchorTest, MultipleTextRanges) {
       <p id="text2">with another paragraph of text</p>
     </div>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
 
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
+  EXPECT_EQ(*GetDocument().body(), *GetDocument().CssTarget());
   EXPECT_EQ(3u, GetDocument().Markers().Markers().size());
 
   // Expect marker on "test page"
@@ -555,9 +601,11 @@ TEST_F(TextFragmentAnchorTest, DistantElementTextRange) {
     <p id="text">This is a test page</p>
     <p>with another paragraph of text</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& p = *GetDocument().getElementById("text");
   EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(p)))
@@ -575,10 +623,13 @@ TEST_F(TextFragmentAnchorTest, TextRangeWithContext) {
     <!DOCTYPE html>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
 
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
+  EXPECT_EQ(*GetDocument().getElementById("text"), *GetDocument().CssTarget());
   EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
 
   // Expect marker on "is a test".
@@ -600,10 +651,14 @@ TEST_F(TextFragmentAnchorTest, PrefixNotFound) {
     <!DOCTYPE html>
     <p id="text">This is a test page</p>
   )HTML");
+
+  // Render two frames to handle the async step added by the beforematch event.
   Compositor().BeginFrame();
+  BeginEmptyFrame();
 
   RunAsyncMatchingTasks();
 
+  EXPECT_EQ(nullptr, GetDocument().CssTarget());
   EXPECT_EQ(0u, GetDocument().Markers().Markers().size());
 }
 
@@ -617,10 +672,9 @@ TEST_F(TextFragmentAnchorTest, SuffixNotFound) {
     <!DOCTYPE html>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
 
+  EXPECT_EQ(nullptr, GetDocument().CssTarget());
   EXPECT_EQ(0u, GetDocument().Markers().Markers().size());
 }
 
@@ -644,10 +698,14 @@ TEST_F(TextFragmentAnchorTest, TextRangeWithCrossElementContext) {
     <p>A string of text</p>
     <p>Footer 2</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
 
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
+  EXPECT_EQ(*GetDocument().getElementById("expected"),
+            *GetDocument().CssTarget());
   EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
 
   // Expect marker on the expected "A string of text".
@@ -686,10 +744,14 @@ TEST_F(TextFragmentAnchorTest, CrossElementAndWhitespaceContext) {
       <p>&nbsp;Bad cat</p>
     </div>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
 
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
+  EXPECT_EQ(*GetDocument().getElementById("expected"),
+            *GetDocument().CssTarget());
   EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
 
   // Expect marker on the expected "cat".
@@ -722,10 +784,14 @@ TEST_F(TextFragmentAnchorTest, CrossEmptySiblingAndParentElementContext) {
       <p>suffix</p>
     <div>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
 
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
+  EXPECT_EQ(*GetDocument().getElementById("expected"),
+            *GetDocument().CssTarget());
   EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
 
   // Expect marker on "match".
@@ -755,9 +821,11 @@ TEST_F(TextFragmentAnchorTest, DistantElementContext) {
     <p id="text">Cats</p>
     <p>Suffix</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& p = *GetDocument().getElementById("text");
   EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(p)))
@@ -780,9 +848,13 @@ TEST_F(TextFragmentAnchorTest, OneContextTerm) {
     <p id="text1">This is a test page</p>
     <p id="text2">Not a page with real content</p>
   )HTML");
+  RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
   Compositor().BeginFrame();
 
-  RunAsyncMatchingTasks();
+  EXPECT_EQ(*GetDocument().getElementById("text1"), *GetDocument().CssTarget());
 
   // Expect marker on the first "page"
   auto* text1 = To<Text>(GetDocument().getElementById("text1")->firstChild());
@@ -801,10 +873,32 @@ TEST_F(TextFragmentAnchorTest, OneContextTerm) {
   EXPECT_EQ(10u, markers.at(0)->EndOffset());
 }
 
+class TextFragmentAnchorScrollTest
+    : public TextFragmentAnchorTest,
+      public testing::WithParamInterface<mojom::blink::ScrollType> {
+ protected:
+  bool IsUserScrollType() {
+    return GetParam() == mojom::blink::ScrollType::kCompositor ||
+           GetParam() == mojom::blink::ScrollType::kUser;
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    ScrollTypes,
+    TextFragmentAnchorScrollTest,
+    testing::Values(mojom::blink::ScrollType::kUser,
+                    mojom::blink::ScrollType::kProgrammatic,
+                    mojom::blink::ScrollType::kClamping,
+                    mojom::blink::ScrollType::kCompositor,
+                    mojom::blink::ScrollType::kAnchoring,
+                    mojom::blink::ScrollType::kSequenced));
+
 // Test that a user scroll cancels the scroll into view.
-TEST_F(TextFragmentAnchorTest, ScrollCancelled) {
+TEST_P(TextFragmentAnchorScrollTest, ScrollCancelled) {
   SimRequest request("https://example.com/test.html#:~:text=test", "text/html");
   SimSubresourceRequest css_request("https://example.com/test.css", "text/css");
+  SimSubresourceRequest img_request("https://example.com/test.png",
+                                    "image/png");
   LoadURL("https://example.com/test.html#:~:text=test");
   request.Complete(R"HTML(
     <!DOCTYPE html>
@@ -820,22 +914,60 @@ TEST_F(TextFragmentAnchorTest, ScrollCancelled) {
     </style>
     <link rel=stylesheet href=test.css>
     <p id="text">This is a test page</p>
+    <img src="test.png">
   )HTML");
 
   Compositor().PaintFrame();
-  GetDocument().View()->LayoutViewport()->ScrollBy(ScrollOffset(0, 100),
-                                                   kUserScroll);
+  mojom::blink::ScrollType scroll_type = GetParam();
 
-  // Set the target text to visible and change its position to cause a layout
-  // and invoke the fragment anchor.
-  css_request.Complete("p { visibility: visible; top: 1001px; }");
+  if (!RuntimeEnabledFeatures::BlockHTMLParserOnStyleSheetsEnabled()) {
+    GetDocument().View()->LayoutViewport()->ScrollBy(ScrollOffset(0, 100),
+                                                     scroll_type);
+    // Set the target text to visible and change its position to cause a layout
+    // and invoke the fragment anchor in the next begin frame.
+    css_request.Complete("p { visibility: visible; top: 1001px; }");
+    img_request.Complete("");
+  } else {
+    // Set the target text to visible and change its position to cause a layout
+    // and invoke the fragment anchor in the next begin frame.
+    css_request.Complete("p { visibility: visible; top: 1001px; }");
+    RunPendingTasks();
+    Compositor().BeginFrame();
+    Element& p = *GetDocument().getElementById("text");
 
-  Compositor().BeginFrame();
+    // We should have invoked the fragment and scrolled the <p> into view, but
+    // load should not yet be complete due to the image.
+    EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(p)));
+    ASSERT_FALSE(GetDocument().IsLoadCompleted());
+
+    // Before invoking again, perform a user scroll. This should abort future
+    // scrolls during fragment invocation.
+    GetDocument().View()->LayoutViewport()->SetScrollOffset(ScrollOffset(0, 0),
+                                                            scroll_type);
+    ASSERT_FALSE(ViewportRect().Contains(BoundingRectInFrame(p)));
+
+    img_request.Complete("");
+    RunPendingTasks();
+    ASSERT_TRUE(GetDocument().IsLoadCompleted());
+  }
+
   RunAsyncMatchingTasks();
 
-  Element& p = *GetDocument().getElementById("text");
-  EXPECT_FALSE(ViewportRect().Contains(BoundingRectInFrame(p)));
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
+  Element& p = *GetDocument().getElementById("text");
+
+  // If the scroll was a user scroll then we shouldn't try to keep the fragment
+  // in view. Otherwise, we should.
+  if (IsUserScrollType()) {
+    EXPECT_FALSE(ViewportRect().Contains(BoundingRectInFrame(p)));
+  } else {
+    EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(p)));
+  }
+
+  EXPECT_EQ(p, *GetDocument().CssTarget());
   EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
 
   // Expect marker on "test"
@@ -845,6 +977,55 @@ TEST_F(TextFragmentAnchorTest, ScrollCancelled) {
   ASSERT_EQ(1u, markers.size());
   EXPECT_EQ(10u, markers.at(0)->StartOffset());
   EXPECT_EQ(14u, markers.at(0)->EndOffset());
+}
+
+// Test that user scrolling dismisses the highlight.
+TEST_P(TextFragmentAnchorScrollTest, DismissTextHighlightOnUserScroll) {
+  SimRequest request(
+      "https://example.com/"
+      "test.html#:~:text=test%20page&text=more%20text",
+      "text/html");
+  LoadURL(
+      "https://example.com/"
+      "test.html#:~:text=test%20page&text=more%20text");
+  request.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>
+      body {
+        height: 2200px;
+      }
+      #first {
+        position: absolute;
+        top: 1000px;
+      }
+      #second {
+        position: absolute;
+        top: 2000px;
+      }
+    </style>
+    <p id="first">This is a test page</p>
+    <p id="second">With some more text</p>
+  )HTML");
+  RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
+  ASSERT_EQ(2u, GetDocument().Markers().Markers().size());
+
+  mojom::blink::ScrollType scroll_type = GetParam();
+  LayoutViewport()->ScrollBy(ScrollOffset(0, -10), scroll_type);
+
+  Compositor().BeginFrame();
+
+  if (IsUserScrollType()) {
+    EXPECT_EQ(0u, GetDocument().Markers().Markers().size());
+    EXPECT_FALSE(GetDocument().View()->GetFragmentAnchor());
+  } else {
+    EXPECT_EQ(2u, GetDocument().Markers().Markers().size());
+    EXPECT_TRUE(GetDocument().View()->GetFragmentAnchor());
+  }
 }
 
 // Ensure that the text fragment anchor has no effect in an iframe. This is
@@ -870,14 +1051,17 @@ TEST_F(TextFragmentAnchorTest, DisabledInIframes) {
       test
     </p>
   )HTML");
-
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  BeginEmptyFrame();
 
   Element* iframe = GetDocument().getElementById("iframe");
   auto* child_frame =
       To<LocalFrame>(To<HTMLFrameOwnerElement>(iframe)->ContentFrame());
 
+  EXPECT_EQ(nullptr, GetDocument().CssTarget());
   EXPECT_EQ(ScrollOffset(),
             child_frame->View()->GetScrollableArea()->GetScrollOffset());
 }
@@ -893,17 +1077,18 @@ TEST_F(TextFragmentAnchorTest, DisabledInWindowOpen) {
   main_request.Complete(R"HTML(
     <!DOCTYPE html>
   )HTML");
+  // Render two frames to handle the async step added by the beforematch event.
   Compositor().BeginFrame();
+  BeginEmptyFrame();
 
   LocalDOMWindow* main_window = GetDocument().GetFrame()->DomWindow();
 
   ScriptState* script_state =
       ToScriptStateForMainWorld(main_window->GetFrame());
   ScriptState::Scope entered_context_scope(script_state);
-  auto url = USVStringOrTrustedURL::FromTrustedURL(
-      MakeGarbageCollected<TrustedURL>(destination));
-  LocalDOMWindow* child_window = To<LocalDOMWindow>(main_window->open(
-      script_state->GetIsolate(), url, "frame1", "", ASSERT_NO_EXCEPTION));
+  LocalDOMWindow* child_window = To<LocalDOMWindow>(
+      main_window->open(script_state->GetIsolate(), destination, "frame1", "",
+                        ASSERT_NO_EXCEPTION));
   ASSERT_TRUE(child_window);
 
   RunPendingTasks();
@@ -921,11 +1106,13 @@ TEST_F(TextFragmentAnchorTest, DisabledInWindowOpen) {
 
   RunAsyncMatchingTasks();
 
+  EXPECT_EQ(nullptr, child_window->document()->CssTarget());
+
   LocalFrameView* child_view = child_window->GetFrame()->View();
   EXPECT_EQ(ScrollOffset(), child_view->GetScrollableArea()->GetScrollOffset());
 }
 
-// Ensure that the text fragment anchor is only allowed in full (non-same-page)
+// Ensure that the text fragment anchor is not activated by same-document script
 // navigations.
 TEST_F(TextFragmentAnchorTest, DisabledInSamePageNavigation) {
   SimRequest main_request("https://example.com/test.html", "text/html");
@@ -941,9 +1128,11 @@ TEST_F(TextFragmentAnchorTest, DisabledInSamePageNavigation) {
       test
     </p>
   )HTML");
-
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  BeginEmptyFrame();
 
   ASSERT_EQ(ScrollOffset(),
             GetDocument().View()->GetScrollableArea()->GetScrollOffset());
@@ -952,9 +1141,10 @@ TEST_F(TextFragmentAnchorTest, DisabledInSamePageNavigation) {
       ToScriptStateForMainWorld(GetDocument().GetFrame());
   ScriptState::Scope entered_context_scope(script_state);
   GetDocument().GetFrame()->DomWindow()->location()->setHash(
-      script_state->GetIsolate(), "text=test", ASSERT_NO_EXCEPTION);
+      script_state->GetIsolate(), ":~:text=test", ASSERT_NO_EXCEPTION);
   RunAsyncMatchingTasks();
 
+  EXPECT_EQ(nullptr, GetDocument().CssTarget());
   EXPECT_EQ(ScrollOffset(), LayoutViewport()->GetScrollOffset());
 }
 
@@ -975,8 +1165,11 @@ TEST_F(TextFragmentAnchorTest, CaseInsensitive) {
     </style>
     <p id="text">test</p>
   )HTML");
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& p = *GetDocument().getElementById("text");
 
@@ -1003,8 +1196,12 @@ TEST_F(TextFragmentAnchorTest, TargetStaysInView) {
     <img src="image.svg">
     <p id="text">test</p>
   )HTML");
-  Compositor().PaintFrame();
   RunAsyncMatchingTasks();
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
+  EXPECT_FALSE(GetDocument().IsLoadCompleted());
+  EXPECT_TRUE(GetDocument().HasFinishedParsing());
 
   ScrollOffset first_scroll_offset = LayoutViewport()->GetScrollOffset();
   ASSERT_NE(ScrollOffset(), first_scroll_offset);
@@ -1019,8 +1216,13 @@ TEST_F(TextFragmentAnchorTest, TargetStaysInView) {
       <rect fill="green" width="200" height="2000"/>
     </svg>
   )SVG");
-  Compositor().BeginFrame();
+  RunPendingTasks();
+  EXPECT_TRUE(GetDocument().IsLoadCompleted());
+  EXPECT_TRUE(GetDocument().HasFinishedParsing());
+
   RunAsyncMatchingTasks();
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   // Ensure the target text is still in view and stayed centered
   ASSERT_NE(first_scroll_offset, LayoutViewport()->GetScrollOffset());
@@ -1049,9 +1251,11 @@ TEST_F(TextFragmentAnchorTest, OverlappingTextRanges) {
     </style>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
 
@@ -1082,9 +1286,11 @@ TEST_F(TextFragmentAnchorTest, SpaceMatchesNbsp) {
     </style>
     <p id="text">This is a test&nbsp;page</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& p = *GetDocument().getElementById("text");
 
@@ -1114,9 +1320,11 @@ TEST_F(TextFragmentAnchorTest, CSSTextTransform) {
     </style>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& p = *GetDocument().getElementById("text");
 
@@ -1150,8 +1358,11 @@ TEST_F(TextFragmentAnchorTest, NoMatchFoundFallsBackToElementFragment) {
     <p>This is a test page</p>
     <div id="element">Some text</div>
   )HTML");
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   // The TextFragmentAnchor needs another frame to invoke the element anchor
   Compositor().BeginFrame();
@@ -1161,6 +1372,7 @@ TEST_F(TextFragmentAnchorTest, NoMatchFoundFallsBackToElementFragment) {
 
   Element& p = *GetDocument().getElementById("element");
 
+  EXPECT_EQ(p, *GetDocument().CssTarget());
   EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(p)))
       << "<p> Element wasn't scrolled into view, viewport's scroll offset: "
       << LayoutViewport()->GetScrollOffset().ToString();
@@ -1188,9 +1400,9 @@ TEST_F(TextFragmentAnchorTest, CheckForWordBoundary) {
     </style>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
 
+  EXPECT_EQ(nullptr, GetDocument().CssTarget());
   EXPECT_EQ(ScrollOffset(), LayoutViewport()->GetScrollOffset());
   EXPECT_TRUE(GetDocument().Markers().Markers().IsEmpty());
 }
@@ -1213,9 +1425,9 @@ TEST_F(TextFragmentAnchorTest, CheckForWordBoundaryWithContext) {
     </style>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
 
+  EXPECT_EQ(nullptr, GetDocument().CssTarget());
   EXPECT_EQ(ScrollOffset(), LayoutViewport()->GetScrollOffset());
   EXPECT_TRUE(GetDocument().Markers().Markers().IsEmpty());
 }
@@ -1244,11 +1456,15 @@ TEST_F(TextFragmentAnchorTest, CheckForWordBoundaryWithPartialWord) {
     <p id="first">This is a test page</p>
     <p id="second">This is a tes age</p>
   )HTML");
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& p = *GetDocument().getElementById("second");
 
+  EXPECT_EQ(p, *GetDocument().CssTarget());
   EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(p)))
       << "Should have scrolled <p> into view but didn't, scroll offset: "
       << LayoutViewport()->GetScrollOffset().ToString();
@@ -1289,8 +1505,11 @@ TEST_F(TextFragmentAnchorTest, DismissTextHighlightWithClick) {
     <p id="first">This is a test page</p>
     <p id="second">With some more text</p>
   )HTML");
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   EXPECT_EQ(2u, GetDocument().Markers().Markers().size());
 
@@ -1329,8 +1548,11 @@ TEST_F(TextFragmentAnchorTest, DismissTextHighlightWithTap) {
     <p id="first">This is a test page</p>
     <p id="second">With some more text</p>
   )HTML");
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   EXPECT_EQ(2u, GetDocument().Markers().Markers().size());
 
@@ -1370,9 +1592,11 @@ TEST_F(TextFragmentAnchorTest, DismissTextHighlightOutOfView) {
   // Set the target text to visible and change its position to cause a layout
   // and invoke the fragment anchor.
   css_request.Complete("p { visibility: visible; top: 1001px; }");
-
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
 
@@ -1404,8 +1628,11 @@ TEST_F(TextFragmentAnchorTest, DismissTextHighlightInView) {
     </style>
     <p>This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   EXPECT_EQ(ScrollOffset(), LayoutViewport()->GetScrollOffset());
   EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
@@ -1436,9 +1663,11 @@ TEST_F(TextFragmentAnchorTest, FragmentDirectiveDelimiter) {
     </style>
     <p id="text">This is a test page</p>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
 
@@ -1469,14 +1698,17 @@ TEST_F(TextFragmentAnchorTest, FragmentDirectiveDelimiterWithElementFragment) {
     <p id="text">This is a test page</p>
     <div id="element">Some text</div>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   EXPECT_EQ(GetDocument().Url(), "https://example.com/test.html#element");
 
   Element& p = *GetDocument().getElementById("text");
 
+  EXPECT_EQ(p, *GetDocument().CssTarget());
   EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(p)))
       << "<p> Element wasn't scrolled into view, viewport's scroll offset: "
       << LayoutViewport()->GetScrollOffset().ToString();
@@ -1505,13 +1737,16 @@ TEST_F(TextFragmentAnchorTest, IdFragmentWithFragmentDirective) {
     <p id="element">This is a test page</p>
     <div id="element:~:id">Some text</div>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
 
-  Element& div = *GetDocument().getElementById("element");
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
-  EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(div)))
+  Element& p = *GetDocument().getElementById("element");
+
+  EXPECT_EQ(p, *GetDocument().CssTarget());
+  EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(p)))
       << "Should have scrolled <div> into view but didn't, scroll offset: "
       << LayoutViewport()->GetScrollOffset().ToString();
 }
@@ -1533,12 +1768,15 @@ TEST_F(TextFragmentAnchorTest, TextDirectiveInSvg) {
     </style>
     <svg><text id="text" x="0" y="15">This is a test page</text></svg>
   )HTML");
-  Compositor().BeginFrame();
-
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   Element& text = *GetDocument().getElementById("text");
 
+  EXPECT_EQ(text, *GetDocument().CssTarget());
   EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(text)))
       << "<text> Element wasn't scrolled into view, viewport's scroll offset: "
       << LayoutViewport()->GetScrollOffset().ToString();
@@ -1547,7 +1785,11 @@ TEST_F(TextFragmentAnchorTest, TextDirectiveInSvg) {
 }
 
 // Ensure we restore the text highlight on page reload
-TEST_F(TextFragmentAnchorTest, HighlightOnReload) {
+// TODO(bokan): This test is disabled as this functionality was suppressed in
+// https://crrev.com/c/2135407; it would be better addressed by providing a
+// highlight-only function. See the TODO in
+// https://wicg.github.io/ScrollToTextFragment/#restricting-the-text-fragment
+TEST_F(TextFragmentAnchorTest, DISABLED_HighlightOnReload) {
   SimRequest request("https://example.com/test.html#:~:text=test", "text/html");
   LoadURL("https://example.com/test.html#:~:text=test");
   const String& html = R"HTML(
@@ -1564,9 +1806,11 @@ TEST_F(TextFragmentAnchorTest, HighlightOnReload) {
     <p id="text">This is a test page</p>
   )HTML";
   request.Complete(html);
-
-  Compositor().BeginFrame();
   RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
 
   EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
 
@@ -1580,10 +1824,158 @@ TEST_F(TextFragmentAnchorTest, HighlightOnReload) {
   MainFrame().StartReload(WebFrameLoadType::kReload);
   reload_request.Complete(html);
 
+  // Render two frames to handle the async step added by the beforematch event.
   Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
+  EXPECT_EQ(*GetDocument().getElementById("text"), *GetDocument().CssTarget());
+  EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
+}
+
+// Ensure that we can have text directives combined with non-text directives
+TEST_F(TextFragmentAnchorTest, NonTextDirectives) {
+  SimRequest request(
+      "https://example.com/test.html#:~:text=test&directive&text=more",
+      "text/html");
+  LoadURL("https://example.com/test.html#:~:text=test&directive&text=more");
+  request.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>
+      body {
+        height: 2200px;
+      }
+      #first {
+        position: absolute;
+        top: 1000px;
+      }
+      #second {
+        position: absolute;
+        top: 2000px;
+      }
+    </style>
+    <p id="first">This is a test page</p>
+    <p id="second">This is some more text</p>
+  )HTML");
+  RunPendingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
   RunAsyncMatchingTasks();
 
+  Element& first = *GetDocument().getElementById("first");
+
+  EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(first)))
+      << "First <p> wasn't scrolled into view, viewport's scroll offset: "
+      << LayoutViewport()->GetScrollOffset().ToString();
+
+  EXPECT_EQ(2u, GetDocument().Markers().Markers().size());
+}
+
+// Test that the text directive applies :target styling
+TEST_F(TextFragmentAnchorTest, CssTarget) {
+  SimRequest main_request("https://example.com/test.html#:~:text=test",
+                          "text/html");
+  SimRequest css_request("https://example.com/test.css", "text/css");
+  LoadURL("https://example.com/test.html#:~:text=test");
+  main_request.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>
+      p {
+        margin-top: 1000px;
+      }
+    </style>
+    <link rel="stylesheet" href="test.css">
+    <p id="text">test</p>
+  )HTML");
+
+  css_request.Complete(R"CSS(
+    :target {
+      margin-top: 2000px;
+    }
+  )CSS");
+  RunPendingTasks();
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  BeginEmptyFrame();
+
+  Element& p = *GetDocument().getElementById("text");
+  EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(p)));
   EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
+}
+
+// Ensure the text fragment anchor matching only occurs after the page becomes
+// visible.
+TEST_F(TextFragmentAnchorTest, PageVisibility) {
+  WebView().SetVisibilityState(mojom::blink::PageVisibilityState::kHidden,
+                               /*initial_state=*/true);
+  SimRequest request("https://example.com/test.html#:~:text=test", "text/html");
+  LoadURL("https://example.com/test.html#:~:text=test");
+  request.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>
+      body {
+        height: 1200px;
+      }
+      p {
+        position: absolute;
+        top: 1000px;
+      }
+    </style>
+    <p id="text">This is a test page</p>
+  )HTML");
+  RunAsyncMatchingTasks();
+
+  // Render two frames and ensure matching and scrolling does not occur.
+  BeginEmptyFrame();
+  BeginEmptyFrame();
+
+  Element& p = *GetDocument().getElementById("text");
+  EXPECT_FALSE(ViewportRect().Contains(BoundingRectInFrame(p)));
+  EXPECT_EQ(0u, GetDocument().Markers().Markers().size());
+  EXPECT_EQ(nullptr, GetDocument().CssTarget());
+
+  // Set the page visible and verify the match.
+  WebView().SetVisibilityState(mojom::blink::PageVisibilityState::kVisible,
+                               /*initial_state=*/false);
+  BeginEmptyFrame();
+  BeginEmptyFrame();
+
+  EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(p)));
+  EXPECT_EQ(1u, GetDocument().Markers().Markers().size());
+  EXPECT_EQ(p, *GetDocument().CssTarget());
+}
+
+// Test that a text directive can match across comment nodes
+TEST_F(TextFragmentAnchorTest, MatchAcrossCommentNode) {
+  SimRequest request("https://example.com/test.html#:~:text=abcdef",
+                     "text/html");
+  LoadURL("https://example.com/test.html#:~:text=abcdef");
+  request.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>
+      body {
+        height: 1200px;
+      }
+      div {
+        position: absolute;
+        top: 1000px;
+      }
+    </style>
+    <div id="text"><span>abc</span><!--comment--><span>def</span></div>
+  )HTML");
+  RunAsyncMatchingTasks();
+
+  // Render two frames to handle the async step added by the beforematch event.
+  Compositor().BeginFrame();
+  Compositor().BeginFrame();
+
+  Element& div = *GetDocument().getElementById("text");
+
+  EXPECT_EQ(div, *GetDocument().CssTarget());
+  EXPECT_TRUE(ViewportRect().Contains(BoundingRectInFrame(div)));
+  EXPECT_EQ(2u, GetDocument().Markers().Markers().size());
 }
 
 }  // namespace

@@ -4,10 +4,11 @@
 
 #include "third_party/blink/renderer/core/layout/ng/custom/layout_worklet_global_scope_proxy.h"
 
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/mojom/script/script_type.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
-#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/loader/worker_fetch_context.h"
@@ -31,30 +32,29 @@ LayoutWorkletGlobalScopeProxy::LayoutWorkletGlobalScopeProxy(
     PendingLayoutRegistry* pending_layout_registry,
     size_t global_scope_number) {
   DCHECK(IsMainThread());
-  Document* document = frame->GetDocument();
-  reporting_proxy_ =
-      std::make_unique<MainThreadWorkletReportingProxy>(document);
+  LocalDOMWindow* window = frame->DomWindow();
+  reporting_proxy_ = std::make_unique<MainThreadWorkletReportingProxy>(window);
 
   String global_scope_name =
       StringView("LayoutWorklet #") + String::Number(global_scope_number);
 
   auto creation_params = std::make_unique<GlobalScopeCreationParams>(
-      document->Url(), mojom::ScriptType::kModule,
-      OffMainThreadWorkerScriptFetchOption::kEnabled, global_scope_name,
-      document->UserAgent(document->Url()),
+      window->Url(), mojom::blink::ScriptType::kModule, global_scope_name,
+      window->UserAgent(window->Url()),
+      frame->Client()->UserAgentMetadata(window->Url()),
       frame->Client()->CreateWorkerFetchContext(),
-      document->GetContentSecurityPolicy()->Headers(),
-      document->GetReferrerPolicy(), document->GetSecurityOrigin(),
-      document->IsSecureContext(), document->GetHttpsState(),
+      window->GetContentSecurityPolicy()->Headers(),
+      window->GetReferrerPolicy(), window->GetSecurityOrigin(),
+      window->IsSecureContext(), window->GetHttpsState(),
       nullptr /* worker_clients */,
       frame->Client()->CreateWorkerContentSettingsClient(),
-      document->AddressSpace(), OriginTrialContext::GetTokens(document).get(),
+      window->GetSecurityContext().AddressSpace(),
+      OriginTrialContext::GetTokens(window).get(),
       base::UnguessableToken::Create(), nullptr /* worker_settings */,
       kV8CacheOptionsDefault, module_responses_map,
-      service_manager::mojom::blink::InterfaceProviderPtrInfo(),
-      mojo::NullRemote(), BeginFrameProviderParams(),
-      nullptr /* parent_feature_policy */,
-      base::UnguessableToken() /* agent_cluster_id */);
+      mojo::NullRemote() /* browser_interface_broker */,
+      BeginFrameProviderParams(), nullptr /* parent_feature_policy */,
+      window->GetAgentClusterID());
   global_scope_ = LayoutWorkletGlobalScope::Create(
       frame, std::move(creation_params), *reporting_proxy_,
       pending_layout_registry);
@@ -93,7 +93,7 @@ CSSLayoutDefinition* LayoutWorkletGlobalScopeProxy::FindDefinition(
   return global_scope_->FindDefinition(name);
 }
 
-void LayoutWorkletGlobalScopeProxy::Trace(blink::Visitor* visitor) {
+void LayoutWorkletGlobalScopeProxy::Trace(Visitor* visitor) const {
   visitor->Trace(global_scope_);
 }
 

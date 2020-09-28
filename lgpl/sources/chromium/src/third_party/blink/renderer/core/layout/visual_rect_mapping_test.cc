@@ -287,7 +287,7 @@ TEST_P(VisualRectMappingTest, LayoutView) {
   // This case involves clipping: frame height is 50, y-coordinate of result
   // rect is 13, so height should be clipped to (50 - 13) == 37.
   ChildDocument().View()->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, 47), kProgrammaticScroll);
+      ScrollOffset(0, 47), mojom::blink::ScrollType::kProgrammatic);
   UpdateAllLifecyclePhasesForTest();
 
   PhysicalRect original_rect(4, 60, 20, 80);
@@ -363,7 +363,7 @@ TEST_P(VisualRectMappingTest, LayoutViewDisplayNone) {
   // This part is copied from the LayoutView test, just to ensure that the
   // mapped rect is valid before display:none is set on the iframe.
   ChildDocument().View()->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, 47), kProgrammaticScroll);
+      ScrollOffset(0, 47), mojom::blink::ScrollType::kProgrammatic);
   UpdateAllLifecyclePhasesForTest();
 
   PhysicalRect original_rect(4, 60, 20, 80);
@@ -761,7 +761,8 @@ TEST_P(VisualRectMappingTest,
       To<LayoutBlock>(GetLayoutObjectByElementId("stacking-context"));
   auto* absolute = To<LayoutBlock>(GetLayoutObjectByElementId("absolute"));
   auto* container = To<LayoutBlock>(GetLayoutObjectByElementId("container"));
-  EXPECT_EQ(absolute->View(), &absolute->ContainerForPaintInvalidation());
+  if (!RuntimeEnabledFeatures::CompositeAfterPaintEnabled())
+    EXPECT_EQ(absolute->View(), &absolute->ContainerForPaintInvalidation());
   EXPECT_EQ(container, absolute->Container());
 
   PhysicalRect absolute_visual_rect = absolute->LocalVisualRect();
@@ -1188,7 +1189,7 @@ TEST_P(VisualRectMappingTest, FixedContentsInIframe) {
                                       root_view, kDefaultVisualRectFlags, true);
 
   ChildDocument().View()->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(0, 50), kProgrammaticScroll);
+      ScrollOffset(0, 50), mojom::blink::ScrollType::kProgrammatic);
   UpdateAllLifecyclePhasesForTest();
 
   // The fixed element should not scroll so the mapped visual rect should not
@@ -1221,8 +1222,8 @@ TEST_P(VisualRectMappingTest, FixedContentsWithScrollOffset) {
                                       PhysicalRect(0, -10, 400, 300), fixed,
                                       ancestor, kDefaultVisualRectFlags, true);
 
-  GetDocument().View()->LayoutViewport()->SetScrollOffset(ScrollOffset(0, 50),
-                                                          kProgrammaticScroll);
+  GetDocument().View()->LayoutViewport()->SetScrollOffset(
+      ScrollOffset(0, 50), mojom::blink::ScrollType::kProgrammatic);
   UpdateAllLifecyclePhasesForTest();
 
   // The fixed element does not scroll but the ancestor does which changes the
@@ -1249,8 +1250,8 @@ TEST_P(VisualRectMappingTest, FixedContentsUnderViewWithScrollOffset) {
       PhysicalRect(0, 0, 400, 300), PhysicalRect(0, 0, 400, 300), fixed,
       fixed->View(), kDefaultVisualRectFlags, true);
 
-  GetDocument().View()->LayoutViewport()->SetScrollOffset(ScrollOffset(0, 50),
-                                                          kProgrammaticScroll);
+  GetDocument().View()->LayoutViewport()->SetScrollOffset(
+      ScrollOffset(0, 50), mojom::blink::ScrollType::kProgrammatic);
   UpdateAllLifecyclePhasesForTest();
 
   // Results of mapping to ancestor are in absolute coordinates of the
@@ -1291,6 +1292,53 @@ TEST_P(VisualRectMappingTest, InclusiveIntersect) {
   CheckMapToVisualRectInAncestorSpace(PhysicalRect(0, 0, 10, 10),
                                       PhysicalRect(), child, ancestor,
                                       kDefaultVisualRectFlags, false);
+}
+
+TEST_P(VisualRectMappingTest, Perspective) {
+  ScopedTransformInteropForTest enabled(true);
+
+  GetDocument().SetBaseURLOverride(KURL("http://test.com"));
+  SetBodyInnerHTML(R"HTML(
+    <style>body { margin:0; }</style>
+    <div id='ancestor' style='perspective: 100px'>
+      <div>
+        <div id='child' style='width: 10px; height: 10px;
+            transform: rotateY(45deg); position: absolute'></div>
+      </div>
+    </div>
+  )HTML");
+
+  auto* ancestor =
+      ToLayoutBox(GetDocument().getElementById("ancestor")->GetLayoutObject());
+  auto* child =
+      ToLayoutBox(GetDocument().getElementById("child")->GetLayoutObject());
+
+  PhysicalRect rect(0, 0, 10, 10);
+  child->MapToVisualRectInAncestorSpace(ancestor, rect);
+  EXPECT_EQ(IntRect(1, 0, 8, 10), EnclosingIntRect(rect));
+}
+
+TEST_P(VisualRectMappingTest, PerspectiveWithAnonymousTable) {
+  ScopedTransformInteropForTest enabled(true);
+
+  GetDocument().SetBaseURLOverride(KURL("http://test.com"));
+  SetBodyInnerHTML(R"HTML(
+    <style>body { margin:0; }</style>
+    <div id='ancestor' style='display: table; perspective: 100px; width: 10px;
+        height: 10px;'>
+      <div id='child' style='display: table-cell; width: 10px; height: 10px;
+          transform: rotateY(45deg); position: absolute'></div>
+    </table>
+  )HTML");
+
+  auto* ancestor =
+      ToLayoutBox(GetDocument().getElementById("ancestor")->GetLayoutObject());
+  auto* child =
+      ToLayoutBox(GetDocument().getElementById("child")->GetLayoutObject());
+
+  PhysicalRect rect(0, 0, 10, 10);
+  child->MapToVisualRectInAncestorSpace(ancestor, rect);
+  EXPECT_EQ(IntRect(1, -1, 8, 12), EnclosingIntRect(rect));
 }
 
 }  // namespace blink

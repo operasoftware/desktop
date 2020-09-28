@@ -7,6 +7,7 @@
 
 #include <memory>
 #include "third_party/blink/public/platform/blame_context.h"
+#include "third_party/blink/public/platform/scheduler/web_scoped_virtual_time_pauser.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/page_lifecycle_state.h"
@@ -29,7 +30,7 @@ class PLATFORM_EXPORT PageScheduler {
     // Returns true if the request has been succcessfully relayed to the
     // compositor.
     virtual bool RequestBeginMainFrameNotExpected(bool new_state) = 0;
-    virtual void SetLifecycleState(PageLifecycleState) = 0;
+    virtual void OnSetPageFrozen(bool is_frozen) = 0;
     // Returns true iff the network is idle for the local main frame.
     // Always returns false if the main frame is remote.
     virtual bool LocalMainFrameNetworkIsAlmostIdle() const { return true; }
@@ -37,6 +38,9 @@ class PLATFORM_EXPORT PageScheduler {
 
   virtual ~PageScheduler() = default;
 
+  // Signals that communications with the user took place via either a title
+  // updates or a change to the favicon.
+  virtual void OnTitleOrFaviconUpdated() = 0;
   // The scheduler may throttle tasks associated with background pages.
   virtual void SetPageVisible(bool) = 0;
   // The scheduler transitions app to and from FROZEN state in background.
@@ -140,6 +144,16 @@ class PLATFORM_EXPORT PageScheduler {
   // Returns true if the request has been succcessfully relayed to the
   // compositor.
   virtual bool RequestBeginMainFrameNotExpected(bool new_state) = 0;
+
+  // Returns a WebScopedVirtualTimePauser which can be used to vote for pausing
+  // virtual time. Virtual time will be paused if any WebScopedVirtualTimePauser
+  // votes to pause it, and only unpaused only if all
+  // WebScopedVirtualTimePausers are either destroyed or vote to unpause.  Note
+  // the WebScopedVirtualTimePauser returned by this method is initially
+  // unpaused.
+  virtual WebScopedVirtualTimePauser CreateWebScopedVirtualTimePauser(
+      const String& name,
+      WebScopedVirtualTimePauser::VirtualTaskDuration) = 0;
 };
 
 }  // namespace blink

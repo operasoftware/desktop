@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 #include "third_party/blink/renderer/core/paint/image_paint_timing_detector.h"
 
+#include "third_party/blink/public/platform/web_float_rect.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/layout/layout_image_resource.h"
@@ -121,7 +122,9 @@ ImageRecord* ImagePaintTimingDetector::UpdateCandidate() {
   PaintTimingDetector& detector = frame_view_->GetPaintTimingDetector();
   // Two different candidates are rare to have the same time and size.
   // So when they are unchanged, the candidate is considered unchanged.
-  bool changed = detector.NotifyIfChangedLargestImagePaint(time, size);
+  bool changed = detector.NotifyIfChangedLargestImagePaint(
+      time, size, records_manager_.LargestRemovedImagePaintTime(),
+      records_manager_.LargestRemovedImageSize());
   if (changed) {
     if (!time.is_null()) {
       DCHECK(largest_image_record->loaded);
@@ -141,11 +144,11 @@ void ImagePaintTimingDetector::OnPaintFinished() {
         .UpdateLargestContentfulPaintCandidate();
   }
 
-  if (!records_manager_.HasUnregisteredRecordsInQueued(
+  if (!records_manager_.HasUnregisteredRecordsInQueue(
           last_registered_frame_index_))
     return;
 
-  last_registered_frame_index_ = records_manager_.LastQueuedFrameIndex();
+  last_registered_frame_index_ = frame_index_ - 1;
   RegisterNotifySwapTime();
 }
 
@@ -180,9 +183,8 @@ void ImagePaintTimingDetector::RegisterNotifySwapTime() {
   num_pending_swap_callbacks_++;
 }
 
-void ImagePaintTimingDetector::ReportSwapTime(
-    unsigned last_queued_frame_index,
-    base::TimeTicks timestamp) {
+void ImagePaintTimingDetector::ReportSwapTime(unsigned last_queued_frame_index,
+                                              base::TimeTicks timestamp) {
   if (!is_recording_)
     return;
   // The callback is safe from race-condition only when running on main-thread.
@@ -215,7 +217,8 @@ void ImagePaintTimingDetector::RecordImage(
     const IntSize& intrinsic_size,
     const ImageResourceContent& cached_image,
     const PropertyTreeState& current_paint_chunk_properties,
-    const StyleFetchedImage* style_image) {
+    const StyleFetchedImage* style_image,
+    const IntRect* image_border) {
   Node* node = object.GetNode();
   if (!node)
     return;
@@ -234,7 +237,8 @@ void ImagePaintTimingDetector::RecordImage(
             frame_view_->GetPaintTimingDetector().Visualizer()) {
       FloatRect mapped_visual_rect =
           frame_view_->GetPaintTimingDetector().CalculateVisualRect(
-              object.FragmentsVisualRectBoundingBox(),
+              image_border ? *image_border
+                           : object.FragmentsVisualRectBoundingBox(),
               current_paint_chunk_properties);
       visualizer->DumpImageDebuggingRect(object, mapped_visual_rect,
                                          cached_image);
@@ -244,7 +248,8 @@ void ImagePaintTimingDetector::RecordImage(
 
   if (is_recored_visible_image || !is_recording_)
     return;
-  IntRect visual_rect = object.FragmentsVisualRectBoundingBox();
+  IntRect visual_rect =
+      image_border ? *image_border : object.FragmentsVisualRectBoundingBox();
   // Before the image resource starts loading, <img> has no size info. We wait
   // until the size is known.
   if (visual_rect.IsEmpty())
@@ -338,7 +343,12 @@ ImageRecord* ImageRecordsManager::FindLargestPaintCandidate() const {
   return size_ordered_set_.begin()->get();
 }
 
-void ImagePaintTimingDetector::Trace(blink::Visitor* visitor) {
+void ImageRecordsManager::Trace(Visitor* visitor) const {
+  visitor->Trace(frame_view_);
+}
+
+void ImagePaintTimingDetector::Trace(Visitor* visitor) const {
+  visitor->Trace(records_manager_);
   visitor->Trace(frame_view_);
   visitor->Trace(callback_manager_);
 }

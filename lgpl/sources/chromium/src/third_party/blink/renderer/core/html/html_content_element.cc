@@ -39,10 +39,8 @@
 
 namespace blink {
 
-using namespace html_names;
-
 HTMLContentElement::HTMLContentElement(Document& document)
-    : V0InsertionPoint(kContentTag, document),
+    : V0InsertionPoint(html_names::kContentTag, document),
       should_parse_select_(false),
       is_valid_selector_(true) {
   UseCounter::Count(document, WebFeature::kHTMLContentElement);
@@ -50,7 +48,7 @@ HTMLContentElement::HTMLContentElement(Document& document)
 
 HTMLContentElement::~HTMLContentElement() = default;
 
-void HTMLContentElement::Trace(Visitor* visitor) {
+void HTMLContentElement::Trace(Visitor* visitor) const {
   V0InsertionPoint::Trace(visitor);
 }
 
@@ -67,7 +65,7 @@ void HTMLContentElement::ParseSelect() {
 
 void HTMLContentElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  if (params.name == kSelectAttr) {
+  if (params.name == html_names::kSelectAttr) {
     if (ShadowRoot* root = ContainingShadowRoot()) {
       if (!root->IsV1())
         root->V0().WillAffectSelector();

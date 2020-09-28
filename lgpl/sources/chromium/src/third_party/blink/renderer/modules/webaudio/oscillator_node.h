@@ -27,9 +27,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_OSCILLATOR_NODE_H_
 
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_oscillator_options.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_param.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_scheduled_source_node.h"
-#include "third_party/blink/renderer/modules/webaudio/oscillator_options.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 
@@ -86,6 +86,33 @@ class OscillatorHandler final : public AudioScheduledSourceHandler {
 
   bool PropagatesSilence() const override;
 
+  // Compute the output for k-rate AudioParams
+  double ProcessKRate(int n, float* dest_p, double virtual_read_index) const;
+
+  // Scalar version for the main loop in ProcessKRate().  Returns the updated
+  // virtual_read_index.
+  double ProcessKRateScalar(int start_index,
+                            int n,
+                            float* dest_p,
+                            double virtual_read_index,
+                            float frequency,
+                            float rate_scale) const;
+
+  // Vectorized version (if available) for the main loop in ProcessKRate().
+  // Returns the number of elements processed and the updated
+  // virtual_read_index.
+  std::tuple<int, double> ProcessKRateVector(int n,
+                                             float* dest_p,
+                                             double virtual_read_index,
+                                             float frequency,
+                                             float rate_scale) const;
+
+  // Compute the output for a-rate AudioParams
+  double ProcessARate(int n,
+                      float* dest_p,
+                      double virtual_read_index,
+                      float* phase_increments) const;
+
   // One of the waveform types defined in the enum.
   uint8_t type_;
 
@@ -125,7 +152,7 @@ class OscillatorNode final : public AudioScheduledSourceNode {
   OscillatorNode(BaseAudioContext&,
                  const String& oscillator_type,
                  PeriodicWave* wave_table);
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   String type() const;
   void setType(const String&, ExceptionState&);

@@ -61,7 +61,7 @@ FrameCaret::FrameCaret(LocalFrame& frame,
 
 FrameCaret::~FrameCaret() = default;
 
-void FrameCaret::Trace(Visitor* visitor) {
+void FrameCaret::Trace(Visitor* visitor) const {
   visitor->Trace(selection_editor_);
   visitor->Trace(frame_);
 }
@@ -152,7 +152,7 @@ void FrameCaret::UpdateStyleAndLayoutIfNeeded() {
       caret_visibility_ == CaretVisibility::kVisible &&
       (IsEditablePosition(
            selection_editor_->ComputeVisibleSelectionInDOMTree().Start()) ||
-       frame_->GetSettings()->GetCaretBrowsingEnabled());
+       frame_->IsCaretBrowsingEnabled());
 
   display_item_client_->UpdateStyleAndLayoutIfNeeded(
       should_paint_caret ? CaretPosition() : PositionWithAffinity());
@@ -202,7 +202,7 @@ bool FrameCaret::ShouldBlinkCaret() const {
   } else {
     // Caret is not contained in editable content--see if caret browsing is
     // enabled. If it isn't, don't blink the caret.
-    if (!frame_->GetSettings()->GetCaretBrowsingEnabled())
+    if (!frame_->IsCaretBrowsingEnabled())
       return false;
   }
 

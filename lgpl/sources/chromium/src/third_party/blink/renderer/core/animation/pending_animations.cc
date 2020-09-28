@@ -50,6 +50,8 @@ void PendingAnimations::Add(Animation* animation) {
 
   bool visible = document->GetPage() && document->GetPage()->IsPageVisible();
   if (!visible && !timer_.IsActive()) {
+    // Verify the timer is not activated in cycles.
+    CHECK(!inside_timer_fired_);
     timer_.StartOneShot(base::TimeDelta(), FROM_HERE);
   }
 }
@@ -73,13 +75,24 @@ bool PendingAnimations::Update(
     if (animation->PreCommit(animation->startTime() ? 1 : compositor_group,
                              paint_artifact_compositor, start_on_compositor)) {
       if (animation->HasActiveAnimationsOnCompositor() &&
-          !had_compositor_animation) {
+          !had_compositor_animation && !animation->startTime()) {
         started_synchronized_on_compositor = true;
       }
 
-      if (animation->Playing() && !animation->startTime() &&
-          animation->timeline() && animation->timeline()->IsActive()) {
+      if (!animation->timeline() || !animation->timeline()->IsActive())
+        continue;
+
+      if (animation->Playing() && !animation->startTime()) {
         waiting_for_start_time.push_back(animation.Get());
+      } else if (animation->PendingInternal()) {
+        DCHECK(animation->timeline()->IsActive() &&
+               animation->timeline()->CurrentTimeSeconds());
+        // A pending animation that is not waiting on a start time does not need
+        // to be synchronized with animations that are starting up. Nonetheless,
+        // it needs to notify the animation to resolve the ready promise and
+        // commit the pending state.
+        animation->NotifyReady(
+            animation->timeline()->CurrentTimeSeconds().value_or(0));
       }
     } else {
       deferred.push_back(animation);
@@ -90,23 +103,22 @@ bool PendingAnimations::Update(
   // remaining synchronized animations need to wait for the synchronized
   // start time. Otherwise they may start immediately.
   if (started_synchronized_on_compositor) {
+    FlushWaitingNonCompositedAnimations();
     waiting_for_compositor_animation_start_.AppendVector(
         waiting_for_start_time);
   } else {
     for (auto& animation : waiting_for_start_time) {
       DCHECK(!animation->startTime());
-      // TODO(crbug.com/916117): Handle start time of scroll-linked animations.
-      animation->NotifyCompositorStartTime(
+      DCHECK(animation->timeline()->IsActive() &&
+             animation->timeline()->CurrentTimeSeconds());
+      animation->NotifyReady(
           animation->timeline()->CurrentTimeSeconds().value_or(0));
     }
   }
 
   // FIXME: The postCommit should happen *after* the commit, not before.
-  for (auto& animation : animations) {
-    // TODO(crbug.com/916117): Handle NaN current time of scroll timeline.
-    animation->PostCommit(
-        animation->timeline()->CurrentTimeSeconds().value_or(0));
-  }
+  for (auto& animation : animations)
+    animation->PostCommit();
 
   DCHECK(pending_.IsEmpty());
   DCHECK(start_on_compositor || deferred.IsEmpty());
@@ -138,11 +150,12 @@ void PendingAnimations::NotifyCompositorAnimationStarted(
     double monotonic_animation_start_time,
     int compositor_group) {
   TRACE_EVENT0("blink", "PendingAnimations::notifyCompositorAnimationStarted");
+
   HeapVector<Member<Animation>> animations;
   animations.swap(waiting_for_compositor_animation_start_);
 
   for (auto animation : animations) {
-    if (animation->startTime() || !animation->NeedsCompositorTimeSync() ||
+    if (animation->startTime() || !animation->PendingInternal() ||
         !animation->timeline() || !animation->timeline()->IsActive()) {
       // Already started or no longer relevant.
       continue;
@@ -152,13 +165,8 @@ void PendingAnimations::NotifyCompositorAnimationStarted(
       waiting_for_compositor_animation_start_.push_back(animation);
       continue;
     }
-    DCHECK(animation->timeline()->IsDocumentTimeline());
-    animation->NotifyCompositorStartTime(
-        monotonic_animation_start_time -
-        ToDocumentTimeline(animation->timeline())
-            ->ZeroTime()
-            .since_origin()
-            .InSecondsF());
+    animation->NotifyReady(monotonic_animation_start_time -
+                           animation->timeline()->ZeroTimeInSeconds());
   }
 }
 
@@ -173,9 +181,36 @@ int PendingAnimations::NextCompositorGroup() {
   return compositor_group_;
 }
 
-void PendingAnimations::Trace(blink::Visitor* visitor) {
+void PendingAnimations::FlushWaitingNonCompositedAnimations() {
+  if (waiting_for_compositor_animation_start_.IsEmpty())
+    return;
+
+  // Start any main thread animations that were scheduled to wait on
+  // compositor synchronization from a previous frame. Otherwise, an
+  // continuous influx of new composited animations could delay the start
+  // of non-composited animations indefinitely (crbug.com/666710).
+  HeapVector<Member<Animation>> animations;
+  animations.swap(waiting_for_compositor_animation_start_);
+  for (auto& animation : animations) {
+    if (animation->HasActiveAnimationsOnCompositor()) {
+      waiting_for_compositor_animation_start_.push_back(animation);
+    } else {
+      DCHECK(animation->timeline()->IsActive() &&
+             animation->timeline()->CurrentTimeSeconds());
+      animation->NotifyReady(
+          animation->timeline()->CurrentTimeSeconds().value_or(0));
+    }
+  }
+}
+
+void PendingAnimations::Trace(Visitor* visitor) const {
   visitor->Trace(pending_);
   visitor->Trace(waiting_for_compositor_animation_start_);
+}
+
+void PendingAnimations::TimerFired(TimerBase*) {
+  base::AutoReset<bool> mark_inside(&inside_timer_fired_, true);
+  Update(nullptr, false);
 }
 
 }  // namespace blink

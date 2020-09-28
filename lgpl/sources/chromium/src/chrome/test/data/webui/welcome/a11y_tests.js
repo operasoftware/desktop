@@ -7,7 +7,9 @@ GEN_INCLUDE([
   '//chrome/test/data/webui/a11y/accessibility_test.js',
   '//chrome/test/data/webui/polymer_browser_test_base.js',
 ]);
+
 GEN('#include "chrome/browser/ui/webui/welcome/helpers.h"');
+GEN('#include "content/public/test/browser_test.h"');
 
 WelcomeA11y = class extends PolymerTest {
   /** @override */
@@ -23,7 +25,8 @@ WelcomeA11y = class extends PolymerTest {
   /** @override */
   get extraLibraries() {
     return [
-      ...super.extraLibraries,
+      '//third_party/mocha/mocha.js',
+      '//chrome/test/data/webui/mocha_adapter.js',
       '//ui/webui/resources/js/util.js',
     ];
   }

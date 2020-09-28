@@ -52,8 +52,8 @@
 namespace blink {
 
 class ExecutionContext;
-class Document;
 class KURL;
+class LocalFrame;
 class ResourceRequest;
 class SecurityOrigin;
 class ThreadableLoaderClient;
@@ -110,7 +110,7 @@ class CORE_EXPORT ThreadableLoader final
   CreateAccessControlPreflightRequestForTesting(const ResourceRequest&);
 
   // Must be called to actually begin the request.
-  void Start(const ResourceRequest&);
+  void Start(ResourceRequest);
 
   // A ThreadableLoader may have a timeout specified. It is possible, in some
   // cases, for the timeout to be overridden after the request is sent (for
@@ -131,7 +131,7 @@ class CORE_EXPORT ThreadableLoader final
 
   void SetDefersLoading(bool);
 
-  void Trace(blink::Visitor* visitor) override;
+  void Trace(Visitor* visitor) const override;
 
  private:
   class AssignOnScopeExit;
@@ -161,7 +161,6 @@ class CORE_EXPORT ThreadableLoader final
                         const ResourceResponse&) override;
   void RedirectBlocked() override;
   void DataDownloaded(Resource*, uint64_t) override;
-  void DidReceiveResourceTiming(Resource*, const ResourceTimingInfo&) override;
   void DidDownloadToBlob(Resource*, scoped_refptr<BlobDataHandle>) override;
 
   // Notify Inspector and log to console about resource response. Use this
@@ -204,9 +203,9 @@ class CORE_EXPORT ThreadableLoader final
 
   const SecurityOrigin* GetSecurityOrigin() const;
 
-  // Returns null if the loader is not associated with Document.
-  // TODO(kinuko): Remove dependency to document.
-  Document* GetDocument() const;
+  // Returns null if the loader is not associated with a frame.
+  // TODO(kinuko): Remove dependency to frame.
+  LocalFrame* GetFrame() const;
 
   Member<ThreadableLoaderClient> client_;
   Member<ExecutionContext> execution_context_;
@@ -219,7 +218,7 @@ class CORE_EXPORT ThreadableLoader final
   const ResourceLoaderOptions resource_loader_options_;
 
   // True when feature OutOfBlinkCors is enabled (https://crbug.com/736308).
-  bool out_of_blink_cors_;
+  const bool out_of_blink_cors_;
 
   // Corresponds to the CORS flag in the Fetch spec.
   bool cors_flag_ = false;

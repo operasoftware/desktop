@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/platform/wtf/stack_util.h"
 
+#include "base/notreached.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 
@@ -24,12 +25,11 @@ size_t GetUnderestimatedStackSize() {
 // and its size is different from the value which APIs tells us.
 #if defined(ADDRESS_SANITIZER)
   return 0;
-#endif
 
 // FIXME: On Mac OSX and Linux, this method cannot estimate stack size
 // correctly for the main thread.
 
-#if defined(__GLIBC__) || defined(OS_ANDROID) || defined(OS_FREEBSD) || \
+#elif defined(__GLIBC__) || defined(OS_ANDROID) || defined(OS_FREEBSD) || \
     defined(OS_FUCHSIA)
   // pthread_getattr_np() can fail if the thread is not invoked by
   // pthread_create() (e.g., the main thread of blink_unittests).

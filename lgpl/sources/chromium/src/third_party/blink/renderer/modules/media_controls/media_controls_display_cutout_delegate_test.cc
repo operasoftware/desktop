@@ -27,8 +27,11 @@ namespace {
 class DisplayCutoutMockChromeClient : public EmptyChromeClient {
  public:
   // ChromeClient overrides:
-  void EnterFullscreen(LocalFrame& frame, const FullscreenOptions*) override {
-    Fullscreen::DidEnterFullscreen(*frame.GetDocument());
+  void EnterFullscreen(LocalFrame& frame,
+                       const FullscreenOptions*,
+                       bool for_cross_process_descendant) override {
+    Fullscreen::DidResolveEnterFullscreenRequest(*frame.GetDocument(),
+                                                 true /* granted */);
   }
   void ExitFullscreen(LocalFrame& frame) override {
     Fullscreen::DidExitFullscreen(*frame.GetDocument());
@@ -58,8 +61,7 @@ class MediaControlsDisplayCutoutDelegateTest
 
   void SimulateEnterFullscreen() {
     {
-      std::unique_ptr<UserGestureIndicator> gesture =
-          LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
+      LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
       Fullscreen::RequestFullscreen(GetVideoElement());
     }
 
@@ -169,7 +171,7 @@ class MediaControlsDisplayCutoutDelegateTest
   }
 
   HTMLVideoElement& GetVideoElement() {
-    return *ToHTMLVideoElement(GetDocument().getElementById("video"));
+    return *To<HTMLVideoElement>(GetDocument().getElementById("video"));
   }
 
   Persistent<DisplayCutoutMockChromeClient> chrome_client_;
@@ -287,7 +289,11 @@ TEST_F(MediaControlsDisplayCutoutDelegateTest, SingleTouchGesture_Noop) {
   // Simulate a single touch gesture and make sure it had no effect.
   SimulateEnterFullscreen();
   SimulateSingleTouchGesture();
-  EXPECT_EQ(mojom::ViewportFit::kAuto, CurrentViewportFit());
+  mojom::ViewportFit expected =
+      RuntimeEnabledFeatures::MediaControlsUseCutOutByDefaultEnabled()
+          ? mojom::ViewportFit::kCoverForcedByUserAgent
+          : mojom::ViewportFit::kAuto;
+  EXPECT_EQ(expected, CurrentViewportFit());
 }
 
 TEST_F(MediaControlsDisplayCutoutDelegateTest, TouchCancelShouldClearState) {
@@ -302,7 +308,11 @@ TEST_F(MediaControlsDisplayCutoutDelegateTest, TouchCancelShouldClearState) {
   list = CreateTouchListWithTwoPoints(1, 1, -1, -1);
   SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchcancel, list));
   EXPECT_FALSE(HasGestureState());
-  EXPECT_EQ(mojom::ViewportFit::kAuto, CurrentViewportFit());
+  mojom::ViewportFit expected =
+      RuntimeEnabledFeatures::MediaControlsUseCutOutByDefaultEnabled()
+          ? mojom::ViewportFit::kCoverForcedByUserAgent
+          : mojom::ViewportFit::kAuto;
+  EXPECT_EQ(expected, CurrentViewportFit());
 }
 
 TEST_F(MediaControlsDisplayCutoutDelegateTest, TouchEndShouldClearState) {
@@ -317,6 +327,25 @@ TEST_F(MediaControlsDisplayCutoutDelegateTest, TouchEndShouldClearState) {
   list = CreateTouchListWithTwoPoints(1, 1, -1, -1);
   SimulateEvent(CreateTouchEventWithList(event_type_names::kTouchend, list));
   EXPECT_FALSE(HasGestureState());
+
+  mojom::ViewportFit expected =
+      RuntimeEnabledFeatures::MediaControlsUseCutOutByDefaultEnabled()
+          ? mojom::ViewportFit::kCoverForcedByUserAgent
+          : mojom::ViewportFit::kAuto;
+  EXPECT_EQ(expected, CurrentViewportFit());
+}
+
+TEST_F(MediaControlsDisplayCutoutDelegateTest, DefaultExpand) {
+  ScopedMediaControlsUseCutOutByDefaultForTest scoped_default_expand(true);
+
+  SimulateEnterFullscreen();
+  EXPECT_EQ(mojom::ViewportFit::kCoverForcedByUserAgent, CurrentViewportFit());
+}
+
+TEST_F(MediaControlsDisplayCutoutDelegateTest, DefaultNotExpand) {
+  ScopedMediaControlsUseCutOutByDefaultForTest scoped_default_expand(false);
+
+  SimulateEnterFullscreen();
   EXPECT_EQ(mojom::ViewportFit::kAuto, CurrentViewportFit());
 }
 

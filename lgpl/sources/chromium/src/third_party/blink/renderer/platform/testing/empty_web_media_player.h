@@ -22,14 +22,16 @@ class EmptyWebMediaPlayer : public WebMediaPlayer {
  public:
   ~EmptyWebMediaPlayer() override = default;
 
-  LoadTiming Load(LoadType, const WebMediaPlayerSource&, CorsMode,
-                  const WebString&, const WebString&) override;
+  LoadTiming Load(LoadType, const WebMediaPlayerSource&, CorsMode) override;
   void Play() override {}
   void Pause() override {}
   void Seek(double seconds) override {}
   void SetRate(double) override {}
   void SetVolume(double) override {}
+  void SetLatencyHint(double) override {}
+  void SetPreservesPitch(bool) override {}
   void OnRequestPictureInPicture() override {}
+  void OnPictureInPictureAvailabilityChanged(bool available) override {}
   SurfaceLayerMode GetVideoSurfaceLayerMode() const override {
     return SurfaceLayerMode::kNever;
   }
@@ -39,13 +41,14 @@ class EmptyWebMediaPlayer : public WebMediaPlayer {
                  WebSetSinkIdCompleteCallback) override {}
   bool HasVideo() const override { return false; }
   bool HasAudio() const override { return false; }
-  WebSize NaturalSize() const override;
-  WebSize VisibleRect() const override;
+  gfx::Size NaturalSize() const override;
+  gfx::Size VisibleSize() const override;
   bool Paused() const override { return false; }
   bool Seeking() const override { return false; }
   double Duration() const override { return 0.0; }
   double CurrentTime() const override { return 0.0; }
-  NetworkState GetNetworkState() const override { return kNetworkStateEmpty; }
+  bool IsEnded() const override { return false; }
+  NetworkState GetNetworkState() const override { return kNetworkStateIdle; }
   ReadyState GetReadyState() const override { return kReadyStateHaveNothing; }
   WebString GetErrorMessage() const override;
   bool DidLoadingProgress() override { return false; }

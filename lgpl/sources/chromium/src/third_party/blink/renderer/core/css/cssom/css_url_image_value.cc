@@ -20,8 +20,9 @@ base::Optional<IntSize> CSSURLImageValue::IntrinsicSize() const {
 
   DCHECK(!value_->IsCachePending());
   ImageResourceContent* resource_content = value_->CachedImage()->CachedImage();
+
   return resource_content
-             ? resource_content->IntrinsicSize(kDoNotRespectImageOrientation)
+             ? resource_content->IntrinsicSize(kRespectImageOrientation)
              : IntSize(0, 0);
 }
 
@@ -33,7 +34,6 @@ ResourceStatus CSSURLImageValue::Status() const {
 
 scoped_refptr<Image> CSSURLImageValue::GetSourceImageForCanvas(
     SourceImageStatus*,
-    AccelerationHint,
     const FloatSize&) {
   return GetImage();
 }
@@ -58,7 +58,7 @@ const CSSValue* CSSURLImageValue::ToCSSValue() const {
   return value_;
 }
 
-void CSSURLImageValue::Trace(blink::Visitor* visitor) {
+void CSSURLImageValue::Trace(Visitor* visitor) const {
   visitor->Trace(value_);
   CSSStyleImageValue::Trace(visitor);
 }

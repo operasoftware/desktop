@@ -10,7 +10,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_remote_playback_availability_callback.h"
 #include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
-#include "third_party/blink/renderer/core/dom/user_gesture_indicator.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
@@ -23,6 +23,8 @@
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
+
+namespace {
 
 class MockFunction : public ScriptFunction {
  public:
@@ -47,8 +49,8 @@ class MockEventListenerForRemotePlayback : public NativeEventListener {
 
 class MockPresentationController final : public PresentationController {
  public:
-  explicit MockPresentationController(LocalFrame& frame)
-      : PresentationController(frame) {}
+  explicit MockPresentationController(LocalDOMWindow& window)
+      : PresentationController(window) {}
   ~MockPresentationController() override = default;
 
   MOCK_METHOD1(AddAvailabilityObserver,
@@ -56,6 +58,7 @@ class MockPresentationController final : public PresentationController {
   MOCK_METHOD1(RemoveAvailabilityObserver,
                void(PresentationAvailabilityObserver*));
 };
+}  // namespace
 
 class RemotePlaybackTest : public testing::Test,
                            private ScopedRemotePlaybackBackendForTest {
@@ -92,9 +95,7 @@ TEST_F(RemotePlaybackTest, PromptCancelledRejectsWithNotAllowedError) {
   EXPECT_CALL(*resolve, Call(testing::_)).Times(0);
   EXPECT_CALL(*reject, Call(testing::_)).Times(1);
 
-  std::unique_ptr<UserGestureIndicator> indicator =
-      LocalFrame::NotifyUserActivation(&page_holder->GetFrame(),
-                                       UserGestureToken::kNewGesture);
+  LocalFrame::NotifyUserActivation(&page_holder->GetFrame());
   remote_playback.prompt(scope.GetScriptState())
       .Then(resolve->Bind(), reject->Bind());
   CancelPrompt(remote_playback);
@@ -126,9 +127,7 @@ TEST_F(RemotePlaybackTest, PromptConnectedRejectsWhenCancelled) {
   SetState(remote_playback,
            mojom::blink::PresentationConnectionState::CONNECTED);
 
-  std::unique_ptr<UserGestureIndicator> indicator =
-      LocalFrame::NotifyUserActivation(&page_holder->GetFrame(),
-                                       UserGestureToken::kNewGesture);
+  LocalFrame::NotifyUserActivation(&page_holder->GetFrame());
   remote_playback.prompt(scope.GetScriptState())
       .Then(resolve->Bind(), reject->Bind());
   CancelPrompt(remote_playback);
@@ -160,9 +159,7 @@ TEST_F(RemotePlaybackTest, PromptConnectedResolvesWhenDisconnected) {
   SetState(remote_playback,
            mojom::blink::PresentationConnectionState::CONNECTED);
 
-  std::unique_ptr<UserGestureIndicator> indicator =
-      LocalFrame::NotifyUserActivation(&page_holder->GetFrame(),
-                                       UserGestureToken::kNewGesture);
+  LocalFrame::NotifyUserActivation(&page_holder->GetFrame());
   remote_playback.prompt(scope.GetScriptState())
       .Then(resolve->Bind(), reject->Bind());
 
@@ -199,6 +196,7 @@ TEST_F(RemotePlaybackTest, StateChangeEvents) {
   remote_playback.addEventListener(event_type_names::kDisconnect,
                                    disconnect_handler);
 
+  // Verify a state changes when a route is connected and closed.
   EXPECT_CALL(*connecting_handler, Invoke(testing::_, testing::_)).Times(1);
   EXPECT_CALL(*connect_handler, Invoke(testing::_, testing::_)).Times(1);
   EXPECT_CALL(*disconnect_handler, Invoke(testing::_, testing::_)).Times(1);
@@ -219,6 +217,30 @@ TEST_F(RemotePlaybackTest, StateChangeEvents) {
   testing::Mock::VerifyAndClear(connecting_handler);
   testing::Mock::VerifyAndClear(connect_handler);
   testing::Mock::VerifyAndClear(disconnect_handler);
+
+  // Verify a state changes when a route is connected and terminated.
+  EXPECT_CALL(*connecting_handler, Invoke(testing::_, testing::_)).Times(1);
+  EXPECT_CALL(*connect_handler, Invoke(testing::_, testing::_)).Times(1);
+  EXPECT_CALL(*disconnect_handler, Invoke(testing::_, testing::_)).Times(1);
+
+  SetState(remote_playback,
+           mojom::blink::PresentationConnectionState::CONNECTING);
+  SetState(remote_playback,
+           mojom::blink::PresentationConnectionState::CONNECTED);
+  SetState(remote_playback,
+           mojom::blink::PresentationConnectionState::TERMINATED);
+
+  // Verify mock expectations explicitly as the mock objects are garbage
+  // collected.
+  testing::Mock::VerifyAndClear(connecting_handler);
+  testing::Mock::VerifyAndClear(connect_handler);
+  testing::Mock::VerifyAndClear(disconnect_handler);
+
+  // Verify we can connect after a route termination.
+  EXPECT_CALL(*connecting_handler, Invoke(testing::_, testing::_)).Times(1);
+  SetState(remote_playback,
+           mojom::blink::PresentationConnectionState::CONNECTING);
+  testing::Mock::VerifyAndClear(connecting_handler);
 }
 
 TEST_F(RemotePlaybackTest,
@@ -237,13 +259,11 @@ TEST_F(RemotePlaybackTest,
   EXPECT_CALL(*resolve, Call(testing::_)).Times(0);
   EXPECT_CALL(*reject, Call(testing::_)).Times(1);
 
-  std::unique_ptr<UserGestureIndicator> indicator =
-      LocalFrame::NotifyUserActivation(&page_holder->GetFrame(),
-                                       UserGestureToken::kNewGesture);
+  LocalFrame::NotifyUserActivation(&page_holder->GetFrame());
   remote_playback.prompt(scope.GetScriptState())
       .Then(resolve->Bind(), reject->Bind());
   HTMLMediaElementRemotePlayback::SetBooleanAttribute(
-      html_names::kDisableremoteplaybackAttr, *element, true);
+      *element, html_names::kDisableremoteplaybackAttr, true);
 
   // Runs pending promises.
   v8::MicrotasksScope::PerformCheckpoint(scope.GetIsolate());
@@ -283,7 +303,7 @@ TEST_F(RemotePlaybackTest, DisableRemotePlaybackCancelsAvailabilityCallbacks) {
       .Then(resolve->Bind(), reject->Bind());
 
   HTMLMediaElementRemotePlayback::SetBooleanAttribute(
-      html_names::kDisableremoteplaybackAttr, *element, true);
+      *element, html_names::kDisableremoteplaybackAttr, true);
 
   // Runs pending promises.
   v8::MicrotasksScope::PerformCheckpoint(scope.GetIsolate());
@@ -292,6 +312,59 @@ TEST_F(RemotePlaybackTest, DisableRemotePlaybackCancelsAvailabilityCallbacks) {
   // collected.
   testing::Mock::VerifyAndClear(resolve);
   testing::Mock::VerifyAndClear(reject);
+  testing::Mock::VerifyAndClear(callback_function);
+}
+
+TEST_F(RemotePlaybackTest, CallingWatchAvailabilityFromAvailabilityCallback) {
+  V8TestingScope scope;
+
+  auto page_holder = std::make_unique<DummyPageHolder>();
+
+  auto* element =
+      MakeGarbageCollected<HTMLVideoElement>(page_holder->GetDocument());
+  RemotePlayback& remote_playback = RemotePlayback::From(*element);
+
+  MockFunction* callback_function =
+      MockFunction::Create(scope.GetScriptState());
+  V8RemotePlaybackAvailabilityCallback* availability_callback =
+      V8RemotePlaybackAvailabilityCallback::Create(callback_function->Bind());
+
+  const int kNumberCallbacks = 10;
+  for (int i = 0; i < kNumberCallbacks; ++i) {
+    remote_playback.watchAvailability(scope.GetScriptState(),
+                                      availability_callback);
+  }
+
+  auto add_callback_lambda = [&]() {
+    remote_playback.watchAvailability(scope.GetScriptState(),
+                                      availability_callback);
+    return blink::ScriptValue::CreateNull(scope.GetScriptState()->GetIsolate());
+  };
+
+  // When the availability changes, we should get exactly kNumberCallbacks
+  // calls, due to the kNumberCallbacks initial current callbacks. The extra
+  // callbacks we are adding should not be executed.
+  EXPECT_CALL(*callback_function, Call(testing::_))
+      .Times(kNumberCallbacks)
+      .WillRepeatedly(testing::InvokeWithoutArgs(add_callback_lambda));
+
+  remote_playback.AvailabilityChangedForTesting(true);
+
+  v8::MicrotasksScope::PerformCheckpoint(scope.GetIsolate());
+  testing::Mock::VerifyAndClear(callback_function);
+
+  // We now have twice as many callbacks as we started with, and should get
+  // twice as many calls, but no more.
+  EXPECT_CALL(*callback_function, Call(testing::_))
+      .Times(kNumberCallbacks * 2)
+      .WillRepeatedly(testing::InvokeWithoutArgs(add_callback_lambda));
+
+  remote_playback.AvailabilityChangedForTesting(false);
+
+  v8::MicrotasksScope::PerformCheckpoint(scope.GetIsolate());
+
+  // Verify mock expectations explicitly as the mock objects are garbage
+  // collected.
   testing::Mock::VerifyAndClear(callback_function);
 }
 
@@ -311,9 +384,7 @@ TEST_F(RemotePlaybackTest, PromptThrowsWhenBackendDisabled) {
   EXPECT_CALL(*resolve, Call(testing::_)).Times(0);
   EXPECT_CALL(*reject, Call(testing::_)).Times(1);
 
-  std::unique_ptr<UserGestureIndicator> indicator =
-      LocalFrame::NotifyUserActivation(&page_holder->GetFrame(),
-                                       UserGestureToken::kNewGesture);
+  LocalFrame::NotifyUserActivation(&page_holder->GetFrame());
   remote_playback.prompt(scope.GetScriptState())
       .Then(resolve->Bind(), reject->Bind());
 
@@ -374,11 +445,11 @@ TEST_F(RemotePlaybackTest, IsListening) {
       MakeGarbageCollected<HTMLVideoElement>(page_holder->GetDocument());
   RemotePlayback& remote_playback = RemotePlayback::From(*element);
 
-  LocalFrame& frame = page_holder->GetFrame();
+  LocalDOMWindow& window = *page_holder->GetFrame().DomWindow();
   MockPresentationController* mock_controller =
-      MakeGarbageCollected<MockPresentationController>(frame);
-  Supplement<LocalFrame>::ProvideTo(
-      frame, static_cast<PresentationController*>(mock_controller));
+      MakeGarbageCollected<MockPresentationController>(window);
+  Supplement<LocalDOMWindow>::ProvideTo(
+      window, static_cast<PresentationController*>(mock_controller));
 
   EXPECT_CALL(*mock_controller,
               AddAvailabilityObserver(testing::Eq(&remote_playback)))
@@ -432,6 +503,17 @@ TEST_F(RemotePlaybackTest, IsListening) {
   // collected.
   testing::Mock::VerifyAndClear(callback_function);
   testing::Mock::VerifyAndClear(mock_controller);
+}
+
+TEST_F(RemotePlaybackTest, NullContextDoesntCrash) {
+  auto page_holder = std::make_unique<DummyPageHolder>();
+
+  auto* element =
+      MakeGarbageCollected<HTMLVideoElement>(page_holder->GetDocument());
+  RemotePlayback& remote_playback = RemotePlayback::From(*element);
+
+  remote_playback.SetExecutionContext(nullptr);
+  remote_playback.PromptInternal();
 }
 
 }  // namespace blink

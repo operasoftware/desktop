@@ -35,7 +35,8 @@
 
 namespace blink {
 
-// Wrapper functions defined in blink.h
+// ==== Functions defined in third_party/blink/public/web/blink.h. ====
+
 void SetWebTestMode(bool value) {
   WebTestSupport::SetIsRunningWebTest(value);
 }
@@ -52,8 +53,9 @@ bool FontAntialiasingEnabledForTest() {
   return WebTestSupport::IsFontAntialiasingEnabledForTest();
 }
 
+// ==== State methods defined in WebTestSupport. ====
+
 static bool g_is_running_web_test = false;
-static bool g_is_mock_theme_enabled = false;
 static bool g_is_font_antialiasing_enabled = false;
 static bool g_is_subpixel_positioning_allowed = true;
 
@@ -63,15 +65,6 @@ bool WebTestSupport::IsRunningWebTest() {
 
 void WebTestSupport::SetIsRunningWebTest(bool value) {
   g_is_running_web_test = value;
-}
-
-bool WebTestSupport::IsMockThemeEnabledForTest() {
-  return g_is_mock_theme_enabled;
-}
-
-void WebTestSupport::SetMockThemeEnabledForTest(bool value) {
-  DCHECK(g_is_running_web_test);
-  g_is_mock_theme_enabled = value;
 }
 
 bool WebTestSupport::IsFontAntialiasingEnabledForTest() {

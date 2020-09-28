@@ -55,13 +55,15 @@ namespace blink {
 static uint64_t ToIntegerMilliseconds(base::TimeDelta duration) {
   // TODO(npm): add histograms to understand when/why |duration| is sometimes
   // negative.
+  // TODO(crbug.com/1063989): stop clamping when it is not needed (i.e. for
+  // methods which do not expose the timestamp to a web perf API).
   double clamped_seconds =
       Performance::ClampTimeResolution(duration.InSecondsF());
   return static_cast<uint64_t>(clamped_seconds * 1000.0);
 }
 
 PerformanceTiming::PerformanceTiming(LocalFrame* frame)
-    : DOMWindowClient(frame) {}
+    : ExecutionContextClient(frame) {}
 
 uint64_t PerformanceTiming::navigationStart() const {
   DocumentLoadTiming* timing = GetDocumentLoadTiming();
@@ -311,12 +313,47 @@ uint64_t PerformanceTiming::loadEventEnd() const {
   return MonotonicTimeToIntegerMilliseconds(timing->LoadEventEnd());
 }
 
-uint64_t PerformanceTiming::FirstLayout() const {
-  const DocumentTiming* timing = GetDocumentTiming();
+base::TimeTicks PerformanceTiming::NavigationStartAsMonotonicTime() const {
+  DocumentLoadTiming* timing = GetDocumentLoadTiming();
   if (!timing)
-    return 0;
+    return base::TimeTicks();
 
-  return MonotonicTimeToIntegerMilliseconds(timing->FirstLayout());
+  return timing->NavigationStart();
+}
+
+PerformanceTiming::BackForwardCacheRestoreTimings
+PerformanceTiming::BackForwardCacheRestore() const {
+  DocumentLoadTiming* load_timing = GetDocumentLoadTiming();
+  if (!load_timing)
+    return {};
+
+  const PaintTiming* paint_timing = GetPaintTiming();
+  if (!paint_timing)
+    return {};
+
+  const InteractiveDetector* interactive_detector = GetInteractiveDetector();
+  if (!interactive_detector)
+    return {};
+
+  WTF::Vector<base::TimeTicks> navigation_starts =
+      load_timing->BackForwardCacheRestoreNavigationStarts();
+  WTF::Vector<base::TimeTicks> first_paints =
+      paint_timing->FirstPaintsAfterBackForwardCacheRestore();
+  WTF::Vector<base::Optional<base::TimeDelta>> first_input_delays =
+      interactive_detector->GetFirstInputDelaysAfterBackForwardCacheRestore();
+  DCHECK_EQ(navigation_starts.size(), first_paints.size());
+  DCHECK_EQ(navigation_starts.size(), first_input_delays.size());
+
+  WTF::Vector<BackForwardCacheRestoreTiming> restore_timings(
+      navigation_starts.size());
+  for (size_t i = 0; i < restore_timings.size(); i++) {
+    restore_timings[i].navigation_start =
+        MonotonicTimeToIntegerMilliseconds(navigation_starts[i]);
+    restore_timings[i].first_paint =
+        MonotonicTimeToIntegerMilliseconds(first_paints[i]);
+    restore_timings[i].first_input_delay = first_input_delays[i];
+  }
+  return restore_timings;
 }
 
 uint64_t PerformanceTiming::FirstPaint() const {
@@ -341,6 +378,14 @@ uint64_t PerformanceTiming::FirstContentfulPaint() const {
     return 0;
 
   return MonotonicTimeToIntegerMilliseconds(timing->FirstContentfulPaint());
+}
+
+base::TimeTicks PerformanceTiming::FirstContentfulPaintAsMonotonicTime() const {
+  const PaintTiming* timing = GetPaintTiming();
+  if (!timing)
+    return base::TimeTicks();
+
+  return timing->FirstContentfulPaint();
 }
 
 uint64_t PerformanceTiming::FirstMeaningfulPaint() const {
@@ -394,65 +439,117 @@ uint64_t PerformanceTiming::LargestTextPaintSize() const {
   return paint_timing_detector->LargestTextPaintSize();
 }
 
-uint64_t PerformanceTiming::PageInteractive() const {
-  InteractiveDetector* interactive_detector = GetInteractiveDetector();
-  if (!interactive_detector)
+uint64_t PerformanceTiming::ExperimentalLargestImagePaint() const {
+  PaintTimingDetector* paint_timing_detector = GetPaintTimingDetector();
+  if (!paint_timing_detector)
     return 0;
 
   return MonotonicTimeToIntegerMilliseconds(
-      interactive_detector->GetInteractiveTime());
+      paint_timing_detector->ExperimentalLargestImagePaint());
 }
 
-uint64_t PerformanceTiming::PageInteractiveDetection() const {
-  InteractiveDetector* interactive_detector = GetInteractiveDetector();
-  if (!interactive_detector)
+uint64_t PerformanceTiming::ExperimentalLargestImagePaintSize() const {
+  PaintTimingDetector* paint_timing_detector = GetPaintTimingDetector();
+  if (!paint_timing_detector)
+    return 0;
+
+  return paint_timing_detector->ExperimentalLargestImagePaintSize();
+}
+
+uint64_t PerformanceTiming::ExperimentalLargestTextPaint() const {
+  PaintTimingDetector* paint_timing_detector = GetPaintTimingDetector();
+  if (!paint_timing_detector)
     return 0;
 
   return MonotonicTimeToIntegerMilliseconds(
-      interactive_detector->GetInteractiveDetectionTime());
+      paint_timing_detector->ExperimentalLargestTextPaint());
 }
 
-uint64_t PerformanceTiming::FirstInputInvalidatingInteractive() const {
-  InteractiveDetector* interactive_detector = GetInteractiveDetector();
-  if (!interactive_detector)
+uint64_t PerformanceTiming::ExperimentalLargestTextPaintSize() const {
+  PaintTimingDetector* paint_timing_detector = GetPaintTimingDetector();
+  if (!paint_timing_detector)
+    return 0;
+
+  return paint_timing_detector->ExperimentalLargestTextPaintSize();
+}
+
+uint64_t PerformanceTiming::FirstEligibleToPaint() const {
+  const PaintTiming* timing = GetPaintTiming();
+  if (!timing)
+    return 0;
+
+  return MonotonicTimeToIntegerMilliseconds(timing->FirstEligibleToPaint());
+}
+
+uint64_t PerformanceTiming::FirstInputOrScrollNotifiedTimestamp() const {
+  PaintTimingDetector* paint_timing_detector = GetPaintTimingDetector();
+  if (!paint_timing_detector)
     return 0;
 
   return MonotonicTimeToIntegerMilliseconds(
-      interactive_detector->GetFirstInvalidatingInputTime());
+      paint_timing_detector->FirstInputOrScrollNotifiedTimestamp());
 }
 
-uint64_t PerformanceTiming::FirstInputDelay() const {
+base::Optional<base::TimeDelta> PerformanceTiming::FirstInputDelay() const {
   const InteractiveDetector* interactive_detector = GetInteractiveDetector();
   if (!interactive_detector)
-    return 0;
+    return base::nullopt;
 
-  return ToIntegerMilliseconds(interactive_detector->GetFirstInputDelay());
+  return interactive_detector->GetFirstInputDelay();
 }
 
-uint64_t PerformanceTiming::FirstInputTimestamp() const {
+base::Optional<base::TimeDelta> PerformanceTiming::FirstInputTimestamp() const {
   const InteractiveDetector* interactive_detector = GetInteractiveDetector();
   if (!interactive_detector)
-    return 0;
+    return base::nullopt;
 
-  return MonotonicTimeToIntegerMilliseconds(
+  return MonotonicTimeToPseudoWallTime(
       interactive_detector->GetFirstInputTimestamp());
 }
 
-uint64_t PerformanceTiming::LongestInputDelay() const {
+base::Optional<base::TimeDelta> PerformanceTiming::LongestInputDelay() const {
   const InteractiveDetector* interactive_detector = GetInteractiveDetector();
   if (!interactive_detector)
-    return 0;
+    return base::nullopt;
 
-  return ToIntegerMilliseconds(interactive_detector->GetLongestInputDelay());
+  return interactive_detector->GetLongestInputDelay();
 }
 
-uint64_t PerformanceTiming::LongestInputTimestamp() const {
+base::Optional<base::TimeDelta> PerformanceTiming::LongestInputTimestamp()
+    const {
   const InteractiveDetector* interactive_detector = GetInteractiveDetector();
   if (!interactive_detector)
-    return 0;
+    return base::nullopt;
 
-  return MonotonicTimeToIntegerMilliseconds(
+  return MonotonicTimeToPseudoWallTime(
       interactive_detector->GetLongestInputTimestamp());
+}
+
+base::Optional<base::TimeDelta> PerformanceTiming::FirstInputProcessingTime()
+    const {
+  const InteractiveDetector* interactive_detector = GetInteractiveDetector();
+  if (!interactive_detector)
+    return base::nullopt;
+
+  return interactive_detector->GetFirstInputProcessingTime();
+}
+
+base::Optional<base::TimeDelta> PerformanceTiming::FirstScrollDelay() const {
+  const InteractiveDetector* interactive_detector = GetInteractiveDetector();
+  if (!interactive_detector)
+    return base::nullopt;
+
+  return interactive_detector->GetFirstScrollDelay();
+}
+
+base::Optional<base::TimeDelta> PerformanceTiming::FirstScrollTimestamp()
+    const {
+  const InteractiveDetector* interactive_detector = GetInteractiveDetector();
+  if (!interactive_detector)
+    return base::nullopt;
+
+  return MonotonicTimeToPseudoWallTime(
+      interactive_detector->GetFirstScrollTimestamp());
 }
 
 uint64_t PerformanceTiming::ParseStart() const {
@@ -507,6 +604,15 @@ PerformanceTiming::ParseBlockedOnScriptExecutionFromDocumentWriteDuration()
 
   return ToIntegerMilliseconds(
       timing->ParserBlockedOnScriptExecutionFromDocumentWriteDuration());
+}
+
+base::Optional<base::TimeTicks> PerformanceTiming::LastPortalActivatedPaint()
+    const {
+  const PaintTiming* timing = GetPaintTiming();
+  if (!timing)
+    return base::nullopt;
+
+  return timing->LastPortalActivatedPaint();
 }
 
 DocumentLoader* PerformanceTiming::GetDocumentLoader() const {
@@ -587,6 +693,19 @@ PaintTimingDetector* PerformanceTiming::GetPaintTimingDetector() const {
   return &view->GetPaintTimingDetector();
 }
 
+base::Optional<base::TimeDelta>
+PerformanceTiming::MonotonicTimeToPseudoWallTime(
+    const base::Optional<base::TimeTicks>& time) const {
+  if (!time.has_value())
+    return base::nullopt;
+
+  const DocumentLoadTiming* timing = GetDocumentLoadTiming();
+  if (!timing)
+    return base::nullopt;
+
+  return timing->MonotonicTimeToPseudoWallTime(*time);
+}
+
 std::unique_ptr<TracedValue> PerformanceTiming::GetNavigationTracingData() {
   auto data = std::make_unique<TracedValue>();
   data->SetString("navigationId",
@@ -594,30 +713,47 @@ std::unique_ptr<TracedValue> PerformanceTiming::GetNavigationTracingData() {
   return data;
 }
 
+// static
+const PerformanceTiming::NameToAttributeMap&
+PerformanceTiming::GetAttributeMapping() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(ThreadSpecific<NameToAttributeMap>, map, ());
+  if (!map.IsSet()) {
+    *map = {
+        {"navigationStart", &PerformanceTiming::navigationStart},
+        {"unloadEventStart", &PerformanceTiming::unloadEventStart},
+        {"unloadEventEnd", &PerformanceTiming::unloadEventEnd},
+        {"redirectStart", &PerformanceTiming::redirectStart},
+        {"redirectEnd", &PerformanceTiming::redirectEnd},
+        {"fetchStart", &PerformanceTiming::fetchStart},
+        {"domainLookupStart", &PerformanceTiming::domainLookupStart},
+        {"domainLookupEnd", &PerformanceTiming::domainLookupEnd},
+        {"connectStart", &PerformanceTiming::connectStart},
+        {"connectEnd", &PerformanceTiming::connectEnd},
+        {"secureConnectionStart", &PerformanceTiming::secureConnectionStart},
+        {"requestStart", &PerformanceTiming::requestStart},
+        {"responseStart", &PerformanceTiming::responseStart},
+        {"responseEnd", &PerformanceTiming::responseEnd},
+        {"domLoading", &PerformanceTiming::domLoading},
+        {"domInteractive", &PerformanceTiming::domInteractive},
+        {"domContentLoadedEventStart",
+         &PerformanceTiming::domContentLoadedEventStart},
+        {"domContentLoadedEventEnd",
+         &PerformanceTiming::domContentLoadedEventEnd},
+        {"domComplete", &PerformanceTiming::domComplete},
+        {"loadEventStart", &PerformanceTiming::loadEventStart},
+        {"loadEventEnd", &PerformanceTiming::loadEventEnd},
+    };
+  }
+  return *map;
+}
+
 ScriptValue PerformanceTiming::toJSONForBinding(
     ScriptState* script_state) const {
   V8ObjectBuilder result(script_state);
-  result.AddNumber("navigationStart", navigationStart());
-  result.AddNumber("unloadEventStart", unloadEventStart());
-  result.AddNumber("unloadEventEnd", unloadEventEnd());
-  result.AddNumber("redirectStart", redirectStart());
-  result.AddNumber("redirectEnd", redirectEnd());
-  result.AddNumber("fetchStart", fetchStart());
-  result.AddNumber("domainLookupStart", domainLookupStart());
-  result.AddNumber("domainLookupEnd", domainLookupEnd());
-  result.AddNumber("connectStart", connectStart());
-  result.AddNumber("connectEnd", connectEnd());
-  result.AddNumber("secureConnectionStart", secureConnectionStart());
-  result.AddNumber("requestStart", requestStart());
-  result.AddNumber("responseStart", responseStart());
-  result.AddNumber("responseEnd", responseEnd());
-  result.AddNumber("domLoading", domLoading());
-  result.AddNumber("domInteractive", domInteractive());
-  result.AddNumber("domContentLoadedEventStart", domContentLoadedEventStart());
-  result.AddNumber("domContentLoadedEventEnd", domContentLoadedEventEnd());
-  result.AddNumber("domComplete", domComplete());
-  result.AddNumber("loadEventStart", loadEventStart());
-  result.AddNumber("loadEventEnd", loadEventEnd());
+  for (const auto& name_attribute_pair : GetAttributeMapping()) {
+    result.AddNumber(name_attribute_pair.key,
+                     (this->*(name_attribute_pair.value))());
+  }
   return result.GetScriptValue();
 }
 
@@ -630,9 +766,9 @@ uint64_t PerformanceTiming::MonotonicTimeToIntegerMilliseconds(
   return ToIntegerMilliseconds(timing->MonotonicTimeToPseudoWallTime(time));
 }
 
-void PerformanceTiming::Trace(blink::Visitor* visitor) {
+void PerformanceTiming::Trace(Visitor* visitor) const {
   ScriptWrappable::Trace(visitor);
-  DOMWindowClient::Trace(visitor);
+  ExecutionContextClient::Trace(visitor);
 }
 
 }  // namespace blink

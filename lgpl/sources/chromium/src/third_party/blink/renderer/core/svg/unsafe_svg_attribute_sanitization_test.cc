@@ -7,6 +7,7 @@
 
 #include <memory>
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/renderer/core/clipboard/system_clipboard.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
@@ -20,10 +21,11 @@
 #include "third_party/blink/renderer/core/svg/properties/svg_property_info.h"
 #include "third_party/blink/renderer/core/svg/svg_a_element.h"
 #include "third_party/blink/renderer/core/svg/svg_animate_element.h"
-#include "third_party/blink/renderer/core/svg/svg_discard_element.h"
 #include "third_party/blink/renderer/core/svg/svg_set_element.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
+#include "third_party/blink/renderer/core/testing/mock_clipboard_host.h"
+#include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/xlink_names.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
@@ -46,7 +48,6 @@
 // The following SVG elements, although related to animation, cannot
 // set JavaScript URLs:
 //
-// - 'discard' can only remove elements, not set their attributes
 // - 'animateMotion' does not use attribute name and produces floats
 // - 'animateTransform' can only animate transform lists
 
@@ -57,12 +58,17 @@ namespace blink {
 String ContentAfterPastingHTML(DummyPageHolder* page_holder,
                                const char* html_to_paste) {
   LocalFrame& frame = page_holder->GetFrame();
+
+  // Setup a mock clipboard host.
+  PageTestBase::MockClipboardHostProvider mock_clipboard_host_provider(
+      frame.GetBrowserInterfaceBroker());
+
   HTMLElement* body = page_holder->GetDocument().body();
 
   // Make the body editable, and put the caret in it.
   body->setAttribute(html_names::kContenteditableAttr, "true");
   body->focus();
-  frame.GetDocument()->UpdateStyleAndLayout();
+  frame.GetDocument()->UpdateStyleAndLayout(DocumentUpdateReason::kTest);
   frame.Selection().SetSelectionAndEndTyping(
       SelectionInDOMTree::Builder().SelectAllChildren(*body).Build());
   EXPECT_TRUE(frame.Selection().ComputeVisibleSelectionInDOMTree().IsCaret());
@@ -70,15 +76,15 @@ String ContentAfterPastingHTML(DummyPageHolder* page_holder,
       frame.Selection().ComputeVisibleSelectionInDOMTree().IsContentEditable())
       << "We should be pasting into something editable.";
 
-  SystemClipboard::GetInstance().WriteHTML(
-      html_to_paste, BlankURL(), "", SystemClipboard::kCannotSmartReplace);
-  SystemClipboard::GetInstance().CommitWrite();
+  frame.GetSystemClipboard()->WriteHTML(html_to_paste, BlankURL(), "",
+                                        SystemClipboard::kCannotSmartReplace);
+  frame.GetSystemClipboard()->CommitWrite();
   // Run all tasks in a message loop to allow asynchronous clipboard writing
   // to happen before reading from it synchronously.
   test::RunPendingTasks();
   EXPECT_TRUE(frame.GetEditor().ExecuteCommand("Paste"));
 
-  return body->InnerHTMLAsString();
+  return body->innerHTML();
 }
 
 // Integration tests.
@@ -267,7 +273,7 @@ TEST(
 // Element::stripScriptingAttributes, perhaps to strip all
 // SVG animation attributes.
 TEST(UnsafeSVGAttributeSanitizationTest, stringsShouldNotSupportAddition) {
-  auto* document = MakeGarbageCollected<Document>();
+  auto* document = Document::CreateForTest();
   auto* target = MakeGarbageCollected<SVGAElement>(*document);
   auto* element = MakeGarbageCollected<SVGAnimateElement>(*document);
   element->SetTargetElement(target);
@@ -294,7 +300,7 @@ TEST(UnsafeSVGAttributeSanitizationTest,
   attributes.push_back(Attribute(svg_names::kFromAttr, "/home"));
   attributes.push_back(Attribute(svg_names::kToAttr, "javascript:own3d()"));
 
-  auto* document = MakeGarbageCollected<Document>();
+  auto* document = Document::CreateForTest();
   auto* element = MakeGarbageCollected<SVGAnimateElement>(*document);
   element->StripScriptingAttributes(attributes);
 
@@ -314,7 +320,7 @@ TEST(UnsafeSVGAttributeSanitizationTest,
 TEST(UnsafeSVGAttributeSanitizationTest,
      isJavaScriptURLAttribute_hrefContainingJavascriptURL) {
   Attribute attribute(svg_names::kHrefAttr, "javascript:alert()");
-  auto* document = MakeGarbageCollected<Document>();
+  auto* document = Document::CreateForTest();
   auto* element = MakeGarbageCollected<SVGAElement>(*document);
   EXPECT_TRUE(element->IsJavaScriptURLAttribute(attribute))
       << "The 'a' element should identify an 'href' attribute with a "
@@ -324,7 +330,7 @@ TEST(UnsafeSVGAttributeSanitizationTest,
 TEST(UnsafeSVGAttributeSanitizationTest,
      isJavaScriptURLAttribute_xlinkHrefContainingJavascriptURL) {
   Attribute attribute(xlink_names::kHrefAttr, "javascript:alert()");
-  auto* document = MakeGarbageCollected<Document>();
+  auto* document = Document::CreateForTest();
   auto* element = MakeGarbageCollected<SVGAElement>(*document);
   EXPECT_TRUE(element->IsJavaScriptURLAttribute(attribute))
       << "The 'a' element should identify an 'xlink:href' attribute with a "
@@ -337,7 +343,7 @@ TEST(
   QualifiedName href_alternate_prefix("foo", "href",
                                       xlink_names::kNamespaceURI);
   Attribute evil_attribute(href_alternate_prefix, "javascript:alert()");
-  auto* document = MakeGarbageCollected<Document>();
+  auto* document = Document::CreateForTest();
   auto* element = MakeGarbageCollected<SVGAElement>(*document);
   EXPECT_TRUE(element->IsJavaScriptURLAttribute(evil_attribute))
       << "The XLink 'href' attribute with a JavaScript URL value should be "
@@ -348,7 +354,7 @@ TEST(
 TEST(UnsafeSVGAttributeSanitizationTest,
      isSVGAnimationAttributeSettingJavaScriptURL_fromContainingJavaScriptURL) {
   Attribute evil_attribute(svg_names::kFromAttr, "javascript:alert()");
-  auto* document = MakeGarbageCollected<Document>();
+  auto* document = Document::CreateForTest();
   auto* element = MakeGarbageCollected<SVGAnimateElement>(*document);
   EXPECT_TRUE(
       element->IsSVGAnimationAttributeSettingJavaScriptURL(evil_attribute))
@@ -359,7 +365,7 @@ TEST(UnsafeSVGAttributeSanitizationTest,
 TEST(UnsafeSVGAttributeSanitizationTest,
      isSVGAnimationAttributeSettingJavaScriptURL_toContainingJavaScripURL) {
   Attribute evil_attribute(svg_names::kToAttr, "javascript:window.close()");
-  auto* document = MakeGarbageCollected<Document>();
+  auto* document = Document::CreateForTest();
   auto* element = MakeGarbageCollected<SVGSetElement>(*document);
   EXPECT_TRUE(
       element->IsSVGAnimationAttributeSettingJavaScriptURL(evil_attribute))
@@ -371,7 +377,7 @@ TEST(
     UnsafeSVGAttributeSanitizationTest,
     isSVGAnimationAttributeSettingJavaScriptURL_valuesContainingJavaScriptURL) {
   Attribute evil_attribute(svg_names::kValuesAttr, "hi!; javascript:confirm()");
-  auto* document = MakeGarbageCollected<Document>();
+  auto* document = Document::CreateForTest();
   auto* element = MakeGarbageCollected<SVGAnimateElement>(*document);
   EXPECT_TRUE(
       element->IsSVGAnimationAttributeSettingJavaScriptURL(evil_attribute))
@@ -382,7 +388,7 @@ TEST(
 TEST(UnsafeSVGAttributeSanitizationTest,
      isSVGAnimationAttributeSettingJavaScriptURL_innocuousAnimationAttribute) {
   Attribute fine_attribute(svg_names::kFromAttr, "hello, world!");
-  auto* document = MakeGarbageCollected<Document>();
+  auto* document = Document::CreateForTest();
   auto* element = MakeGarbageCollected<SVGSetElement>(*document);
   EXPECT_FALSE(
       element->IsSVGAnimationAttributeSettingJavaScriptURL(fine_attribute))

@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/web_coalesced_input_event.h"
+#include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
+#include "ui/base/ime/mojom/text_input_state.mojom-blink.h"
 
 using blink::frame_test_helpers::LoadFrame;
 using blink::test::RunPendingTasks;
@@ -27,8 +28,10 @@ class ImeRequestTrackingWebWidgetClient
   ImeRequestTrackingWebWidgetClient() : virtual_keyboard_request_count_(0) {}
 
   // WebWidgetClient methods
-  void ShowVirtualKeyboardOnElementFocus() override {
-    ++virtual_keyboard_request_count_;
+  void TextInputStateChanged(
+      ui::mojom::blink::TextInputStatePtr state) override {
+    if (state->show_ime_if_needed)
+      ++virtual_keyboard_request_count_;
   }
 
   // Local methds
@@ -63,7 +66,7 @@ class ImeOnFocusTest : public testing::Test {
 };
 
 void ImeOnFocusTest::SendGestureTap(WebView* web_view, IntPoint client_point) {
-  WebGestureEvent web_gesture_event(WebInputEvent::kGestureTap,
+  WebGestureEvent web_gesture_event(WebInputEvent::Type::kGestureTap,
                                     WebInputEvent::kNoModifiers,
                                     WebInputEvent::GetStaticTimeStampForTests(),
                                     WebGestureDevice::kTouchscreen);
@@ -75,7 +78,7 @@ void ImeOnFocusTest::SendGestureTap(WebView* web_view, IntPoint client_point) {
   web_gesture_event.data.tap.height = 10;
 
   web_view->MainFrameWidget()->HandleInputEvent(
-      WebCoalescedInputEvent(web_gesture_event));
+      WebCoalescedInputEvent(web_gesture_event, ui::LatencyInfo()));
   RunPendingTasks();
 }
 
@@ -118,8 +121,15 @@ void ImeOnFocusTest::RunImeOnFocusTest(
 
   if (!focus_element.IsNull())
     Focus(focus_element);
-  EXPECT_EQ(expected_virtual_keyboard_request_count,
-            client.VirtualKeyboardRequestCount());
+  RunPendingTasks();
+  if (expected_virtual_keyboard_request_count == 0) {
+    EXPECT_EQ(0, client.VirtualKeyboardRequestCount());
+  } else {
+    // Some builds (Aura, android) request the virtual keyboard on
+    // gesture tap.
+    EXPECT_LE(expected_virtual_keyboard_request_count,
+              client.VirtualKeyboardRequestCount());
+  }
 
   web_view_helper_.Reset();
 }

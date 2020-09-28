@@ -31,7 +31,7 @@ function setupFakeHandler() {
  * @return {app_management.TestStore}
  */
 function replaceStore() {
-  let store = new app_management.TestStore();
+  const store = new app_management.TestStore();
   store.setReducersEnabled(true);
   store.replaceSingleton();
   return store;
@@ -112,6 +112,6 @@ function isHiddenByDomIf(element) {
   if (element.style.display === 'none') {
     return true;
   }
-  // The element is rendered and display != 'none'
+  // The element is rendered and display !== 'none'
   return false;
 }

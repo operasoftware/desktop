@@ -20,13 +20,16 @@ class FontDescription;
 class FontFallbackList;
 class SimpleFontData;
 
-class FontFallbackIterator : public RefCounted<FontFallbackIterator> {
-  USING_FAST_MALLOC(FontFallbackIterator);
+class FontFallbackIterator {
+  STACK_ALLOCATED();
 
  public:
-  static scoped_refptr<FontFallbackIterator> Create(const FontDescription&,
-                                             scoped_refptr<FontFallbackList>,
-                                             FontFallbackPriority);
+  FontFallbackIterator(const FontDescription&,
+                       scoped_refptr<FontFallbackList>,
+                       FontFallbackPriority);
+  FontFallbackIterator(FontFallbackIterator&&) = default;
+  FontFallbackIterator(const FontFallbackIterator&) = delete;
+  FontFallbackIterator& operator=(const FontFallbackIterator&) = delete;
 
   bool HasNext() const { return fallback_stage_ != kOutOfLuck; }
   // Returns whether the next call to Next() needs a full hint list, or whether
@@ -43,10 +46,7 @@ class FontFallbackIterator : public RefCounted<FontFallbackIterator> {
   scoped_refptr<FontDataForRangeSet> Next(const Vector<UChar32>& hint_list);
 
  private:
-  FontFallbackIterator(const FontDescription&,
-                       scoped_refptr<FontFallbackList>,
-                       FontFallbackPriority);
-  bool RangeSetContributesForHint(const Vector<UChar32> hint_list,
+  bool RangeSetContributesForHint(const Vector<UChar32>& hint_list,
                                   const FontDataForRangeSet*);
   bool AlreadyLoadingRangeForHintChar(UChar32 hint_char);
   void WillUseRange(const AtomicString& family, const FontDataForRangeSet&);
@@ -70,6 +70,7 @@ class FontFallbackIterator : public RefCounted<FontFallbackIterator> {
     kSegmentedFace,
     kPreferencesFonts,
     kSystemFonts,
+    kFirstCandidateForNotdefGlyph,
     kOutOfLuck
   };
 
@@ -77,14 +78,15 @@ class FontFallbackIterator : public RefCounted<FontFallbackIterator> {
   HashSet<UChar32> previously_asked_for_hint_;
   // FontFallbackIterator is meant for single use by HarfBuzzShaper,
   // traversing through the fonts for shaping only once. We must not return
-  // duplicate FontDataForRangeSet objects from the next() iteration functions
+  // duplicate FontDataForRangeSet objects from the Next() iteration function
   // as returning a duplicate value causes a shaping run that won't return any
-  // results.
+  // results. The exception is that if all fonts fail, we return the first
+  // candidate to be used for rendering the .notdef glyph, and set HasNext() to
+  // false.
   HashSet<uint32_t> unique_font_data_for_range_sets_returned_;
+  scoped_refptr<FontDataForRangeSet> first_candidate_ = nullptr;
   Vector<scoped_refptr<FontDataForRangeSet>> tracked_loading_range_sets_;
   FontFallbackPriority font_fallback_priority_;
-
-  DISALLOW_COPY_AND_ASSIGN(FontFallbackIterator);
 };
 
 }  // namespace blink

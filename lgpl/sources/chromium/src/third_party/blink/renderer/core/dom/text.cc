@@ -323,7 +323,7 @@ static bool IsSVGText(Text* text) {
   Node* parent_or_shadow_host_node = text->ParentOrShadowHostNode();
   DCHECK(parent_or_shadow_host_node);
   return parent_or_shadow_host_node->IsSVGElement() &&
-         !IsSVGForeignObjectElement(*parent_or_shadow_host_node);
+         !IsA<SVGForeignObjectElement>(*parent_or_shadow_host_node);
 }
 
 LayoutText* Text::CreateTextLayoutObject(const ComputedStyle& style,
@@ -470,7 +470,7 @@ Text* Text::CloneWithData(Document& factory, const String& data) const {
   return Create(factory, data);
 }
 
-void Text::Trace(Visitor* visitor) {
+void Text::Trace(Visitor* visitor) const {
   CharacterData::Trace(visitor);
 }
 

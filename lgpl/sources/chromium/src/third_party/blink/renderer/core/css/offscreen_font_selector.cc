@@ -85,15 +85,29 @@ bool OffscreenFontSelector::IsPlatformFamilyMatchAvailable(
 
 void OffscreenFontSelector::ReportNotDefGlyph() const {}
 
+// TODO(crbug.com/1025945): Find a way to access the document object to report
+// OffscreenCanvas font usage in workers.
+void OffscreenFontSelector::ReportSuccessfulFontFamilyMatch(
+    const AtomicString& font_family_name) {}
+
+void OffscreenFontSelector::ReportFailedFontFamilyMatch(
+    const AtomicString& font_family_name) {}
+
+void OffscreenFontSelector::ReportSuccessfulLocalFontMatch(
+    const AtomicString& font_name) {}
+
+void OffscreenFontSelector::ReportFailedLocalFontMatch(
+    const AtomicString& font_name) {}
+
 void OffscreenFontSelector::FontCacheInvalidated() {
   font_face_cache_.IncrementVersion();
 }
 
-void OffscreenFontSelector::FontFaceInvalidated() {
+void OffscreenFontSelector::FontFaceInvalidated(FontInvalidationReason) {
   FontCacheInvalidated();
 }
 
-void OffscreenFontSelector::Trace(blink::Visitor* visitor) {
+void OffscreenFontSelector::Trace(Visitor* visitor) const {
   visitor->Trace(execution_context_);
   visitor->Trace(font_face_cache_);
   FontSelector::Trace(visitor);

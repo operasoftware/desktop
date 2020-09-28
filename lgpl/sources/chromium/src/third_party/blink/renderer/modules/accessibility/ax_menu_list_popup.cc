@@ -62,11 +62,12 @@ AXMenuListOption* AXMenuListPopup::MenuListOptionAXObject(
   if (!IsA<HTMLOptionElement>(*element))
     return nullptr;
 
-  AXObject* object = AXObjectCache().GetOrCreate(element);
-  if (!object || !object->IsMenuListOption())
+  auto* ax_object =
+      DynamicTo<AXMenuListOption>(AXObjectCache().GetOrCreate(element));
+  if (!ax_object)
     return nullptr;
 
-  return ToAXMenuListOption(object);
+  return ax_object;
 }
 
 int AXMenuListPopup::GetSelectedIndex() const {
@@ -175,7 +176,7 @@ AXObject* AXMenuListPopup::ActiveDescendant() {
   if (parent_ && !parent_->IsFocused())
     return nullptr;
 
-  if (active_index_ < 0 || active_index_ >= static_cast<int>(Children().size()))
+  if (active_index_ < 0 || active_index_ >= ChildCountIncludingIgnored())
     return nullptr;
 
   return children_[active_index_].Get();

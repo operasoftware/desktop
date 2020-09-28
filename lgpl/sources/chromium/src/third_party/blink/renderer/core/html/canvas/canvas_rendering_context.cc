@@ -39,22 +39,17 @@ CanvasRenderingContext::CanvasRenderingContext(
     CanvasRenderingContextHost* host,
     const CanvasContextCreationAttributesCore& attrs)
     : host_(host),
-      color_params_(kSRGBCanvasColorSpace, kRGBA8CanvasPixelFormat, kNonOpaque),
+      color_params_(CanvasColorSpace::kSRGB,
+                    CanvasColorParams::GetNativeCanvasPixelFormat(),
+                    kNonOpaque),
       creation_attributes_(attrs) {
-  // Supported color spaces and pixel formats: sRGB in uint8, e-sRGB in f16,
-  // linear sRGB and p3 and rec2020 with linear gamma transfer function in f16.
-  // For wide gamut color spaces, user must explicitly request half float
-  // storage. Otherwise, we fall back to sRGB in uint8. Invalid requests fall
-  // back to sRGB in uint8 too.
-  if (creation_attributes_.pixel_format == kF16CanvasPixelFormatName) {
-    color_params_.SetCanvasPixelFormat(kF16CanvasPixelFormat);
-    if (creation_attributes_.color_space == kLinearRGBCanvasColorSpaceName)
-      color_params_.SetCanvasColorSpace(kLinearRGBCanvasColorSpace);
-    if (creation_attributes_.color_space == kRec2020CanvasColorSpaceName)
-      color_params_.SetCanvasColorSpace(kRec2020CanvasColorSpace);
-    else if (creation_attributes_.color_space == kP3CanvasColorSpaceName)
-      color_params_.SetCanvasColorSpace(kP3CanvasColorSpace);
-  }
+  if (creation_attributes_.pixel_format == kF16CanvasPixelFormatName)
+    color_params_.SetCanvasPixelFormat(CanvasPixelFormat::kF16);
+
+  if (creation_attributes_.color_space == kRec2020CanvasColorSpaceName)
+    color_params_.SetCanvasColorSpace(CanvasColorSpace::kRec2020);
+  else if (creation_attributes_.color_space == kP3CanvasColorSpaceName)
+    color_params_.SetCanvasColorSpace(CanvasColorSpace::kP3);
 
   if (!creation_attributes_.alpha)
     color_params_.SetOpacityMode(kOpaque);
@@ -67,13 +62,11 @@ CanvasRenderingContext::CanvasRenderingContext(
 
 WTF::String CanvasRenderingContext::ColorSpaceAsString() const {
   switch (color_params_.ColorSpace()) {
-    case kSRGBCanvasColorSpace:
+    case CanvasColorSpace::kSRGB:
       return kSRGBCanvasColorSpaceName;
-    case kLinearRGBCanvasColorSpace:
-      return kLinearRGBCanvasColorSpaceName;
-    case kRec2020CanvasColorSpace:
+    case CanvasColorSpace::kRec2020:
       return kRec2020CanvasColorSpaceName;
-    case kP3CanvasColorSpace:
+    case CanvasColorSpace::kP3:
       return kP3CanvasColorSpaceName;
   };
   CHECK(false);
@@ -82,10 +75,12 @@ WTF::String CanvasRenderingContext::ColorSpaceAsString() const {
 
 WTF::String CanvasRenderingContext::PixelFormatAsString() const {
   switch (color_params_.PixelFormat()) {
-    case kRGBA8CanvasPixelFormat:
+    case CanvasPixelFormat::kRGBA8:
       return kRGBA8CanvasPixelFormatName;
-    case kF16CanvasPixelFormat:
+    case CanvasPixelFormat::kF16:
       return kF16CanvasPixelFormatName;
+    case CanvasPixelFormat::kBGRA8:
+      return kBGRA8CanvasPixelFormatName;
   };
   CHECK(false);
   return "";
@@ -173,7 +168,7 @@ bool CanvasRenderingContext::WouldTaintOrigin(CanvasImageSource* image_source) {
   return image_source->WouldTaintOrigin();
 }
 
-void CanvasRenderingContext::Trace(Visitor* visitor) {
+void CanvasRenderingContext::Trace(Visitor* visitor) const {
   visitor->Trace(host_);
   ScriptWrappable::Trace(visitor);
 }

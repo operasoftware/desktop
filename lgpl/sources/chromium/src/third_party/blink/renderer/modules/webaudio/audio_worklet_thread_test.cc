@@ -5,8 +5,12 @@
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet_thread.h"
 
 #include <memory>
+#include "base/feature_list.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/module_record.h"
@@ -15,6 +19,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_cache_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/inspector/worker_devtools_params.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
@@ -31,35 +36,43 @@
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_position.h"
+#include "third_party/blink/renderer/platform/wtf/threading.h"
 
 namespace blink {
 
 class AudioWorkletThreadTest : public PageTestBase {
  public:
   void SetUp() override {
-    AudioWorkletThread::EnsureSharedBackingThread();
     PageTestBase::SetUp(IntSize());
     NavigateTo(KURL("https://example.com/"));
     reporting_proxy_ = std::make_unique<WorkerReportingProxy>();
   }
 
+  void TearDown() override {
+    AudioWorkletThread::ClearSharedBackingThread();
+  }
+
   std::unique_ptr<AudioWorkletThread> CreateAudioWorkletThread() {
     std::unique_ptr<AudioWorkletThread> thread =
         AudioWorkletThread::Create(*reporting_proxy_);
-    Document* document = &GetDocument();
+    LocalDOMWindow* window = GetFrame().DomWindow();
     thread->Start(
         std::make_unique<GlobalScopeCreationParams>(
-            document->Url(), mojom::ScriptType::kModule,
-            OffMainThreadWorkerScriptFetchOption::kEnabled, "AudioWorklet",
-            document->UserAgent(document->Url()), nullptr /* web_worker_fetch_context */,
-            Vector<CSPHeaderAndType>(), document->GetReferrerPolicy(),
-            document->GetSecurityOrigin(), document->IsSecureContext(),
-            document->GetHttpsState(), nullptr /* worker_clients */,
-            nullptr /* content_settings_client */, document->AddressSpace(),
-            OriginTrialContext::GetTokens(document).get(),
+            window->Url(), mojom::blink::ScriptType::kModule, "AudioWorklet",
+            window->UserAgent(window->Url()),
+            window->GetFrame()->Loader().UserAgentMetadata(window->Url()),
+            nullptr /* web_worker_fetch_context */, Vector<CSPHeaderAndType>(),
+            window->GetReferrerPolicy(), window->GetSecurityOrigin(),
+            window->IsSecureContext(), window->GetHttpsState(),
+            nullptr /* worker_clients */, nullptr /* content_settings_client */,
+            window->GetSecurityContext().AddressSpace(),
+            OriginTrialContext::GetTokens(window).get(),
             base::UnguessableToken::Create(), nullptr /* worker_settings */,
             kV8CacheOptionsDefault,
-            MakeGarbageCollected<WorkletModuleResponsesMap>()),
+            MakeGarbageCollected<WorkletModuleResponsesMap>(),
+            mojo::NullRemote() /* browser_interface_broker */,
+            BeginFrameProviderParams(), nullptr /* parent_feature_policy */,
+            window->GetAgentClusterID()),
         base::nullopt, std::make_unique<WorkerDevToolsParams>());
     return thread;
   }
@@ -73,6 +86,20 @@ class AudioWorkletThreadTest : public PageTestBase {
         CrossThreadBindOnce(&AudioWorkletThreadTest::ExecuteScriptInWorklet,
                             CrossThreadUnretained(this),
                             CrossThreadUnretained(thread),
+                            CrossThreadUnretained(&wait_event)));
+    wait_event.Wait();
+  }
+
+  void CheckWorkletThreadPriority(WorkerThread* thread,
+                                  base::ThreadPriority expected_priority) {
+    base::WaitableEvent wait_event;
+    PostCrossThreadTask(
+        *thread->GetWorkerBackingThread().BackingThread().GetTaskRunner(),
+        FROM_HERE,
+        CrossThreadBindOnce(&AudioWorkletThreadTest::CheckThreadPriority,
+                            CrossThreadUnretained(this),
+                            CrossThreadUnretained(thread),
+                            expected_priority,
                             CrossThreadUnretained(&wait_event)));
     wait_event.Wait();
   }
@@ -93,9 +120,25 @@ class AudioWorkletThreadTest : public PageTestBase {
     ScriptValue exception =
         ModuleRecord::Instantiate(script_state, module, js_url);
     EXPECT_TRUE(exception.IsEmpty());
-    ScriptValue value = ModuleRecord::Evaluate(script_state, module, js_url);
+    ModuleEvaluationResult result =
+        ModuleRecord::Evaluate(script_state, module, js_url);
+    EXPECT_TRUE(result.IsSuccess());
+    wait_event->Signal();
+  }
 
-    EXPECT_TRUE(value.IsEmpty());
+  void CheckThreadPriority(WorkerThread* thread,
+                           base::ThreadPriority expected_priority,
+                           base::WaitableEvent* wait_event) {
+    ASSERT_TRUE(thread->IsCurrentThread());
+// TODO(crbug.com/1022888): The worklet thread priority is always NORMAL on
+// linux.
+#if defined(OS_LINUX)
+    EXPECT_EQ(base::PlatformThread::GetCurrentThreadPriority(),
+              base::ThreadPriority::NORMAL);
+#else
+    EXPECT_EQ(base::PlatformThread::GetCurrentThreadPriority(),
+              expected_priority);
+#endif
     wait_event->Signal();
   }
 
@@ -193,6 +236,41 @@ TEST_F(AudioWorkletThreadTest, CreatingSecondDuringTerminationOfFirst) {
   CheckWorkletCanExecuteScript(second_worklet.get());
   second_worklet->Terminate();
   second_worklet->WaitForShutdownForTesting();
+}
+
+class AudioWorkletThreadDisplayPriorityTest : public AudioWorkletThreadTest {
+ public:
+  AudioWorkletThreadDisplayPriorityTest() {
+    feature_list_.InitAndDisableFeature(features::kAudioWorkletRealtimeThread);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+TEST_F(AudioWorkletThreadDisplayPriorityTest, DisplayPriority) {
+  std::unique_ptr<AudioWorkletThread> worklet = CreateAudioWorkletThread();
+  CheckWorkletThreadPriority(worklet.get(), base::ThreadPriority::DISPLAY);
+  worklet->Terminate();
+  worklet->WaitForShutdownForTesting();
+}
+
+class AudioWorkletThreadRealtimePriorityTest : public AudioWorkletThreadTest {
+ public:
+  AudioWorkletThreadRealtimePriorityTest() {
+    feature_list_.InitAndEnableFeature(features::kAudioWorkletRealtimeThread);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+TEST_F(AudioWorkletThreadRealtimePriorityTest, RealtimePriority) {
+  std::unique_ptr<AudioWorkletThread> worklet = CreateAudioWorkletThread();
+  CheckWorkletThreadPriority(worklet.get(),
+                             base::ThreadPriority::REALTIME_AUDIO);
+  worklet->Terminate();
+  worklet->WaitForShutdownForTesting();
 }
 
 }  // namespace blink

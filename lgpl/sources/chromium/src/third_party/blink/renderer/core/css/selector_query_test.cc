@@ -64,10 +64,10 @@ void RunTests(ContainerNode& scope, const QueryTest (&test_cases)[length]) {
 }  // namespace
 
 TEST(SelectorQueryTest, NotMatchingPseudoElement) {
-  auto* document = MakeGarbageCollected<Document>();
+  auto* document = Document::CreateForTest();
   auto* html = MakeGarbageCollected<HTMLHtmlElement>(*document);
   document->AppendChild(html);
-  document->documentElement()->SetInnerHTMLFromString(
+  document->documentElement()->setInnerHTML(
       "<body><style>span::before { content: 'X' }</style><span></span></body>");
 
   CSSSelectorList selector_list = CSSParser::ParseSelector(
@@ -93,10 +93,10 @@ TEST(SelectorQueryTest, NotMatchingPseudoElement) {
 }
 
 TEST(SelectorQueryTest, LastOfTypeNotFinishedParsing) {
-  auto* document = MakeGarbageCollected<HTMLDocument>();
+  auto* document = HTMLDocument::CreateForTest();
   auto* html = MakeGarbageCollected<HTMLHtmlElement>(*document);
   document->AppendChild(html);
-  document->documentElement()->SetInnerHTMLFromString(
+  document->documentElement()->setInnerHTML(
       "<body><p></p><p id=last></p></body>", ASSERT_NO_EXCEPTION);
 
   document->body()->BeginParsingChildren();
@@ -115,7 +115,7 @@ TEST(SelectorQueryTest, LastOfTypeNotFinishedParsing) {
 }
 
 TEST(SelectorQueryTest, StandardsModeFastPaths) {
-  auto* document = MakeGarbageCollected<HTMLDocument>();
+  auto* document = HTMLDocument::CreateForTest();
   document->write(R"HTML(
     <!DOCTYPE html>
     <html>
@@ -227,7 +227,7 @@ TEST(SelectorQueryTest, StandardsModeFastPaths) {
 }
 
 TEST(SelectorQueryTest, FastPathScoped) {
-  auto* document = MakeGarbageCollected<HTMLDocument>();
+  auto* document = HTMLDocument::CreateForTest();
   document->write(R"HTML(
     <!DOCTYPE html>
     <html id=root-id class=root-class>
@@ -293,7 +293,7 @@ TEST(SelectorQueryTest, FastPathScoped) {
 }
 
 TEST(SelectorQueryTest, QuirksModeSlowPath) {
-  auto* document = MakeGarbageCollected<HTMLDocument>();
+  auto* document = HTMLDocument::CreateForTest();
   document->write(R"HTML(
     <html>
       <head></head>
@@ -329,9 +329,9 @@ TEST(SelectorQueryTest, QuirksModeSlowPath) {
 }
 
 TEST(SelectorQueryTest, DisconnectedSubtree) {
-  auto* document = MakeGarbageCollected<HTMLDocument>();
+  auto* document = HTMLDocument::CreateForTest();
   Element* scope = document->CreateRawElement(html_names::kDivTag);
-  scope->SetInnerHTMLFromString(R"HTML(
+  scope->setInnerHTML(R"HTML(
     <section>
       <span id=first>
         <span id=A class=A></span>
@@ -356,11 +356,11 @@ TEST(SelectorQueryTest, DisconnectedSubtree) {
 }
 
 TEST(SelectorQueryTest, DisconnectedTreeScope) {
-  auto* document = MakeGarbageCollected<HTMLDocument>();
+  auto* document = HTMLDocument::CreateForTest();
   Element* host = document->CreateRawElement(html_names::kDivTag);
   ShadowRoot& shadowRoot =
       host->AttachShadowRootInternal(ShadowRootType::kOpen);
-  shadowRoot.SetInnerHTMLFromString(R"HTML(
+  shadowRoot.setInnerHTML(R"HTML(
     <section>
       <span id=first>
         <span id=A class=A></span>

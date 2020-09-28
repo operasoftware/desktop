@@ -39,13 +39,27 @@
 #include "third_party/blink/renderer/core/html/html_quote_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/layout_list_item.h"
+#include "third_party/blink/renderer/core/layout/ng/list/layout_ng_list_item.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
 
-using namespace html_names;
-
 namespace {
+
+base::Optional<int> GetListItemNumber(const Node* node) {
+  if (!node)
+    return base::nullopt;
+  // Because of elements with "display:list-item" has list item number,
+  // we use layout object instead of checking |HTMLLIElement|.
+  const LayoutObject* const layout_object = node->GetLayoutObject();
+  if (!layout_object)
+    return base::nullopt;
+  if (layout_object->IsLayoutNGListItem())
+    return ToLayoutNGListItem(layout_object)->Value();
+  if (layout_object->IsListItem())
+    return ToLayoutListItem(layout_object)->Value();
+  return base::nullopt;
+}
 
 bool IsFirstVisiblePositionInNode(const VisiblePosition& visible_position,
                                   const ContainerNode* node) {
@@ -85,7 +99,7 @@ static HTMLQuoteElement* TopBlockquoteOf(const Position& start) {
   // |position| will be in the first node that we need to move (there are a few
   // exceptions to this, see |doApply|).
   const Position& position = MostForwardCaretPosition(start);
-  return ToHTMLQuoteElement(
+  return To<HTMLQuoteElement>(
       HighestEnclosingNodeOfType(position, IsMailHTMLBlockquoteElement));
 }
 
@@ -153,7 +167,7 @@ void BreakBlockquoteCommand::DoApply(EditingState* editing_state) {
   if (editing_state->IsAborted())
     return;
 
-  GetDocument().UpdateStyleAndLayout();
+  GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kEditing);
 
   // If we're inserting the break at the end of the quoted content, we don't
   // need to break the quote.
@@ -174,7 +188,7 @@ void BreakBlockquoteCommand::DoApply(EditingState* editing_state) {
 
   // Adjust the position so we don't split at the beginning of a quote.
   while (IsFirstVisiblePositionInNode(CreateVisiblePosition(pos),
-                                      ToHTMLQuoteElement(EnclosingNodeOfType(
+                                      To<HTMLQuoteElement>(EnclosingNodeOfType(
                                           pos, IsMailHTMLBlockquoteElement)))) {
     pos = PreviousPositionOf(pos, PositionMoveType::kGraphemeCluster);
   }
@@ -236,11 +250,10 @@ void BreakBlockquoteCommand::DoApply(EditingState* editing_state) {
       // find the first one so that we know where to start numbering.
       while (list_child_node && !IsA<HTMLLIElement>(*list_child_node))
         list_child_node = list_child_node->nextSibling();
-      if (IsListItem(list_child_node))
-        SetNodeAttribute(
-            &cloned_child, kStartAttr,
-            AtomicString::Number(
-                ToLayoutListItem(list_child_node->GetLayoutObject())->Value()));
+      if (auto list_item_number = GetListItemNumber(list_child_node)) {
+        SetNodeAttribute(&cloned_child, html_names::kStartAttr,
+                         AtomicString::Number(*list_item_number));
+      }
     }
 
     AppendNode(&cloned_child, cloned_ancestor, editing_state);

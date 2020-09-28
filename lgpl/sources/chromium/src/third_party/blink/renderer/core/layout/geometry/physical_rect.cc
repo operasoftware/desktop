@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 
+#include "third_party/blink/renderer/core/layout/geometry/logical_rect.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_box_strut.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"

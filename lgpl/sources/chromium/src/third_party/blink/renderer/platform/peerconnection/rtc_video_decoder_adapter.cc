@@ -8,16 +8,19 @@
 #include <functional>
 #include <utility>
 
+#include "base/bind_helpers.h"
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "media/base/media_log.h"
 #include "media/base/media_switches.h"
@@ -68,12 +71,6 @@ const int32_t kMaxDecodeHistory = 32;
 // requesting fallback to software decode.
 const int32_t kMaxConsecutiveErrors = 5;
 
-// Currently, RTCVideoDecoderAdapter only tries one VideoDecoderImplementation.
-// Since we use it in multiple places, memorize it here to make it clear that
-// they must be changed together.
-constexpr media::VideoDecoderImplementation kImplementation =
-    media::VideoDecoderImplementation::kDefault;
-
 // Map webrtc::VideoCodecType to media::VideoCodec.
 media::VideoCodec ToVideoCodec(webrtc::VideoCodecType video_codec_type) {
   switch (video_codec_type) {
@@ -103,6 +100,8 @@ media::VideoCodecProfile GuessVideoCodecProfile(
       switch (vp9_profile) {
         case webrtc::VP9Profile::kProfile2:
           return media::VP9PROFILE_PROFILE2;
+        case webrtc::VP9Profile::kProfile1:
+          return media::VP9PROFILE_PROFILE1;
         case webrtc::VP9Profile::kProfile0:
         default:
           return media::VP9PROFILE_PROFILE0;
@@ -123,13 +122,36 @@ void FinishWait(base::WaitableEvent* waiter, bool* result_out, bool result) {
 }
 
 void OnRequestOverlayInfo(bool decoder_requires_restart_for_overlay,
-                          const media::ProvideOverlayInfoCB& overlay_info_cb) {
+                          media::ProvideOverlayInfoCB overlay_info_cb) {
   // Android overlays are not supported.
   if (overlay_info_cb)
-    overlay_info_cb.Run(media::OverlayInfo());
+    std::move(overlay_info_cb).Run(media::OverlayInfo());
+}
+
+void RecordInitializationLatency(base::TimeDelta latency) {
+  base::UmaHistogramTimes("Media.RTCVideoDecoderInitializationLatencyMs",
+                          latency);
+}
+
+void RecordReinitializationLatency(base::TimeDelta latency) {
+  base::UmaHistogramTimes("Media.RTCVideoDecoderReinitializationLatencyMs",
+                          latency);
 }
 
 }  // namespace
+
+// static
+std::vector<media::VideoDecoderImplementation>
+RTCVideoDecoderAdapter::SupportedImplementations() {
+#if defined(OS_WIN)
+  if (base::FeatureList::IsEnabled(media::kD3D11VideoDecoder)) {
+    // Push alternate ahead of default to prefer D3D11 decoders over DXVA.
+    return {media::VideoDecoderImplementation::kAlternate,
+            media::VideoDecoderImplementation::kDefault};
+  }
+#endif
+  return {media::VideoDecoderImplementation::kDefault};
+}
 
 // static
 std::unique_ptr<RTCVideoDecoderAdapter> RTCVideoDecoderAdapter::Create(
@@ -154,30 +176,38 @@ std::unique_ptr<RTCVideoDecoderAdapter> RTCVideoDecoderAdapter::Create(
       GuessVideoCodecProfile(format),
       media::VideoDecoderConfig::AlphaMode::kIsOpaque, media::VideoColorSpace(),
       media::kNoTransformation, kDefaultSize, gfx::Rect(kDefaultSize),
-      kDefaultSize, media::EmptyExtraData(), media::Unencrypted());
-  if (!gpu_factories->IsDecoderConfigSupported(kImplementation, config))
-    return nullptr;
+      kDefaultSize, media::EmptyExtraData(),
+      media::EncryptionScheme::kUnencrypted);
 
-  // Synchronously verify that the decoder can be initialized.
-  std::unique_ptr<RTCVideoDecoderAdapter> rtc_video_decoder_adapter =
-      base::WrapUnique(
-          new RTCVideoDecoderAdapter(gpu_factories, config, format));
-  if (!rtc_video_decoder_adapter->InitializeSync(config)) {
-    gpu_factories->GetTaskRunner()->DeleteSoon(
-        FROM_HERE, std::move(rtc_video_decoder_adapter));
-    return nullptr;
+  for (auto impl : SupportedImplementations()) {
+    std::unique_ptr<RTCVideoDecoderAdapter> rtc_video_decoder_adapter;
+    if (gpu_factories->IsDecoderConfigSupported(impl, config) !=
+        media::GpuVideoAcceleratorFactories::Supported::kFalse) {
+      // Synchronously verify that the decoder can be initialized.
+      rtc_video_decoder_adapter = base::WrapUnique(
+          new RTCVideoDecoderAdapter(gpu_factories, config, format, impl));
+      if (rtc_video_decoder_adapter->InitializeSync(config)) {
+        return rtc_video_decoder_adapter;
+      }
+      // Initialization failed - post delete task and try next supported
+      // implementation, if any.
+      gpu_factories->GetTaskRunner()->DeleteSoon(
+          FROM_HERE, std::move(rtc_video_decoder_adapter));
+    }
   }
 
-  return rtc_video_decoder_adapter;
+  return nullptr;
 }
 
 RTCVideoDecoderAdapter::RTCVideoDecoderAdapter(
     media::GpuVideoAcceleratorFactories* gpu_factories,
     const media::VideoDecoderConfig& config,
-    const webrtc::SdpVideoFormat& format)
+    const webrtc::SdpVideoFormat& format,
+    media::VideoDecoderImplementation implementation)
     : media_task_runner_(gpu_factories->GetTaskRunner()),
       gpu_factories_(gpu_factories),
       format_(format),
+      implementation_(implementation),
       config_(config) {
   DVLOG(1) << __func__;
   DETACH_FROM_SEQUENCE(decoding_sequence_checker_);
@@ -194,6 +224,7 @@ bool RTCVideoDecoderAdapter::InitializeSync(
   DVLOG(3) << __func__;
   // Can be called on |worker_thread_| or |decoding_thread_|.
   DCHECK(!media_task_runner_->BelongsToCurrentThread());
+  base::TimeTicks start_time = base::TimeTicks::Now();
 
   base::ScopedAllowBaseSyncPrimitivesOutsideBlockingScope allow_wait;
   bool result = false;
@@ -207,7 +238,13 @@ bool RTCVideoDecoderAdapter::InitializeSync(
           CrossThreadBindOnce(&RTCVideoDecoderAdapter::InitializeOnMediaThread,
                               CrossThreadUnretained(this), config,
                               std::move(init_cb)))) {
-    waiter.Wait();
+    // TODO(crbug.com/1076817) Remove if a root cause is found.
+    if (!waiter.TimedWait(base::TimeDelta::FromSeconds(10))) {
+      RecordInitializationLatency(base::TimeTicks::Now() - start_time);
+      return false;
+    }
+
+    RecordInitializationLatency(base::TimeTicks::Now() - start_time);
   }
   return result;
 }
@@ -223,6 +260,11 @@ int32_t RTCVideoDecoderAdapter::InitDecode(
 
   base::AutoLock auto_lock(lock_);
   UMA_HISTOGRAM_BOOLEAN("Media.RTCVideoDecoderInitDecodeSuccess", !has_error_);
+  if (!has_error_) {
+    UMA_HISTOGRAM_ENUMERATION("Media.RTCVideoDecoderProfile",
+                              GuessVideoCodecProfile(format_),
+                              media::VIDEO_CODEC_PROFILE_MAX + 1);
+  }
   return has_error_ ? WEBRTC_VIDEO_CODEC_UNINITIALIZED : WEBRTC_VIDEO_CODEC_OK;
 }
 
@@ -368,7 +410,7 @@ void RTCVideoDecoderAdapter::InitializeOnMediaThread(
     media_log_ = std::make_unique<media::NullMediaLog>();
 
     video_decoder_ = gpu_factories_->CreateVideoDecoder(
-        media_log_.get(), kImplementation,
+        media_log_.get(), implementation_,
         WTF::BindRepeating(&OnRequestOverlayInfo));
 
     if (!video_decoder_) {
@@ -384,11 +426,19 @@ void RTCVideoDecoderAdapter::InitializeOnMediaThread(
   // Encryption is not supported.
   media::CdmContext* cdm_context = nullptr;
 
-  media::VideoDecoder::OutputCB output_cb = ConvertToBaseCallback(
+  media::VideoDecoder::OutputCB output_cb = ConvertToBaseRepeatingCallback(
       CrossThreadBindRepeating(&RTCVideoDecoderAdapter::OnOutput, weak_this_));
-  video_decoder_->Initialize(config, low_delay, cdm_context,
-                             ConvertToBaseOnceCallback(std::move(init_cb)),
-                             output_cb, base::DoNothing());
+  video_decoder_->Initialize(
+      config, low_delay, cdm_context,
+      base::BindOnce(&RTCVideoDecoderAdapter::OnInitializeDone,
+                     ConvertToBaseOnceCallback(std::move(init_cb))),
+      output_cb, base::DoNothing());
+}
+
+// static
+void RTCVideoDecoderAdapter::OnInitializeDone(base::OnceCallback<void(bool)> cb,
+                                              media::Status status) {
+  std::move(cb).Run(status.is_ok());
 }
 
 void RTCVideoDecoderAdapter::DecodeOnMediaThread() {
@@ -452,7 +502,8 @@ void RTCVideoDecoderAdapter::OnOutput(scoped_refptr<media::VideoFrame> frame) {
       webrtc::VideoFrame::Builder()
           .set_video_frame_buffer(
               new rtc::RefCountedObject<blink::WebRtcVideoFrameAdapter>(
-                  std::move(frame)))
+                  std::move(frame),
+                  WebRtcVideoFrameAdapter::LogStatus::kNoLogging))
           .set_timestamp_rtp(static_cast<uint32_t>(timestamp.InMicroseconds()))
           .set_timestamp_us(0)
           .set_rotation(webrtc::kVideoRotation_0)
@@ -492,6 +543,7 @@ bool RTCVideoDecoderAdapter::ReinitializeSync(
     const media::VideoDecoderConfig& config) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(decoding_sequence_checker_);
 
+  base::TimeTicks start_time = base::TimeTicks::Now();
   base::ScopedAllowBaseSyncPrimitivesOutsideBlockingScope allow_wait;
   bool result = false;
   base::WaitableEvent waiter(base::WaitableEvent::ResetPolicy::MANUAL,
@@ -511,6 +563,7 @@ bool RTCVideoDecoderAdapter::ReinitializeSync(
                               weak_this_, std::move(flush_success_cb),
                               std::move(flush_fail_cb)))) {
     waiter.Wait();
+    RecordReinitializationLatency(base::TimeTicks::Now() - start_time);
   }
   return result;
 }

@@ -67,10 +67,14 @@ class CORE_EXPORT DocumentMarkerController final
   void AddCompositionMarker(const EphemeralRange&,
                             Color underline_color,
                             ui::mojom::ImeTextSpanThickness,
+                            ui::mojom::ImeTextSpanUnderlineStyle,
+                            Color text_color,
                             Color background_color);
   void AddActiveSuggestionMarker(const EphemeralRange&,
                                  Color underline_color,
                                  ui::mojom::ImeTextSpanThickness,
+                                 ui::mojom::ImeTextSpanUnderlineStyle,
+                                 Color text_color,
                                  Color background_color);
   void AddSuggestionMarker(const EphemeralRange&,
                            const SuggestionMarkerProperties&);
@@ -86,6 +90,9 @@ class CORE_EXPORT DocumentMarkerController final
       DocumentMarker::MarkerTypes = DocumentMarker::MarkerTypes::All());
   void RemoveSpellingMarkersUnderWords(const Vector<String>& words);
   void RemoveSuggestionMarkerByTag(const Text&, int32_t marker_tag);
+  void RemoveSuggestionMarkerByType(
+      const EphemeralRangeInFlatTree& range,
+      const SuggestionMarker::SuggestionType& type);
   // Removes suggestion marker with |RemoveOnFinishComposing::kRemove|.
   void RemoveSuggestionMarkerInRangeOnFinish(const EphemeralRangeInFlatTree&);
   void RepaintMarkers(
@@ -149,7 +156,7 @@ class CORE_EXPORT DocumentMarkerController final
   void InvalidateRectsForAllTextMatchMarkers();
   void InvalidateRectsForTextMatchMarkersInNode(const Text&);
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
 #if DCHECK_IS_ON()
   void ShowMarkers() const;
@@ -166,7 +173,8 @@ class CORE_EXPORT DocumentMarkerController final
  private:
   void AddMarkerInternal(
       const EphemeralRange&,
-      std::function<DocumentMarker*(int, int)> create_marker_from_offsets);
+      std::function<DocumentMarker*(int, int)> create_marker_from_offsets,
+      const TextIteratorBehavior& iterator_behavior = {});
   void AddMarkerToNode(const Text&, DocumentMarker*);
 
   using MarkerLists = HeapVector<Member<DocumentMarkerList>,
@@ -184,7 +192,7 @@ class CORE_EXPORT DocumentMarkerController final
                              DocumentMarker::MarkerTypes);
 
   // Called after weak processing of |markers_| is done.
-  void DidProcessMarkerMap(Visitor* visitor);
+  void DidProcessMarkerMap(const LivenessBroker&);
 
   MarkerMap markers_;
   // Provide a quick way to determine whether a particular marker type is absent

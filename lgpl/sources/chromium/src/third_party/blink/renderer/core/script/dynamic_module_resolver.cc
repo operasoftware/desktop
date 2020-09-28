@@ -4,8 +4,11 @@
 
 #include "third_party/blink/renderer/core/script/dynamic_module_resolver.h"
 
+#include "base/feature_list.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/referrer_script_info.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetch_request.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
@@ -27,7 +30,7 @@ class DynamicImportTreeClient final : public ModuleTreeClient {
                           ScriptPromiseResolver* promise_resolver)
       : url_(url), modulator_(modulator), promise_resolver_(promise_resolver) {}
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   // Implements ModuleTreeClient:
@@ -36,6 +39,84 @@ class DynamicImportTreeClient final : public ModuleTreeClient {
   const KURL url_;
   const Member<Modulator> modulator_;
   const Member<ScriptPromiseResolver> promise_resolver_;
+};
+
+// Abstract callback for modules resolution.
+class ModuleResolutionCallback : public ScriptFunction {
+ public:
+  ModuleResolutionCallback(ScriptState* script_state,
+                           ScriptPromiseResolver* promise_resolver)
+      : ScriptFunction(script_state), promise_resolver_(promise_resolver) {}
+
+  void Trace(Visitor* visitor) const override {
+    visitor->Trace(promise_resolver_);
+    ScriptFunction::Trace(visitor);
+  }
+
+ protected:
+  Member<ScriptPromiseResolver> promise_resolver_;
+};
+
+// Callback for modules with top-level await.
+// Called on successful resolution.
+class ModuleResolutionSuccessCallback final : public ModuleResolutionCallback {
+ public:
+  ModuleResolutionSuccessCallback(ScriptState* script_state,
+                                  ScriptPromiseResolver* promise_resolver,
+                                  ModuleScript* module_script)
+      : ModuleResolutionCallback(script_state, promise_resolver),
+        module_script_(module_script) {}
+
+  static v8::Local<v8::Function> CreateFunction(
+      ScriptState* script_state,
+      ScriptPromiseResolver* promise_resolver,
+      ModuleScript* module_script) {
+    ModuleResolutionSuccessCallback* self =
+        MakeGarbageCollected<ModuleResolutionSuccessCallback>(
+            script_state, promise_resolver, module_script);
+    return self->BindToV8Function();
+  }
+
+  void Trace(Visitor* visitor) const final {
+    visitor->Trace(module_script_);
+    ModuleResolutionCallback::Trace(visitor);
+  }
+
+ private:
+  ScriptValue Call(ScriptValue value) override {
+    ScriptState::Scope scope(GetScriptState());
+    v8::Local<v8::Module> record = module_script_->V8Module();
+    v8::Local<v8::Value> module_namespace = ModuleRecord::V8Namespace(record);
+    promise_resolver_->Resolve(module_namespace);
+    return ScriptValue();
+  }
+
+  Member<ModuleScript> module_script_;
+};
+
+// Callback for modules with top-level await.
+// Called on unsuccessful resolution.
+class ModuleResolutionFailureCallback final : public ModuleResolutionCallback {
+ public:
+  ModuleResolutionFailureCallback(ScriptState* script_state,
+                                  ScriptPromiseResolver* promise_resolver)
+      : ModuleResolutionCallback(script_state, promise_resolver) {}
+
+  static v8::Local<v8::Function> CreateFunction(
+      ScriptState* script_state,
+      ScriptPromiseResolver* promise_resolver) {
+    ModuleResolutionFailureCallback* self =
+        MakeGarbageCollected<ModuleResolutionFailureCallback>(script_state,
+                                                              promise_resolver);
+    return self->BindToV8Function();
+  }
+
+ private:
+  ScriptValue Call(ScriptValue exception) override {
+    ScriptState::Scope scope(GetScriptState());
+    promise_resolver_->Reject(exception);
+    return ScriptValue();
+  }
 };
 
 // Implements steps 2.[5-8] of
@@ -72,11 +153,11 @@ void DynamicImportTreeClient::NotifyModuleTreeLoadFinished(
 
   // <spec step="7">Run the module script result, with the rethrow errors
   // boolean set to true.</spec>
-  ScriptValue error = modulator_->ExecuteModule(
+  ModuleEvaluationResult result = modulator_->ExecuteModule(
       module_script, Modulator::CaptureEvalErrorFlag::kCapture);
 
   // <spec step="8">If running the module script throws an exception, ...</spec>
-  if (!error.IsEmpty()) {
+  if (result.IsException()) {
     // <spec step="8">... then perform
     // FinishDynamicImport(referencingScriptOrModule, specifier,
     // promiseCapability, the thrown exception completion).</spec>
@@ -88,7 +169,7 @@ void DynamicImportTreeClient::NotifyModuleTreeLoadFinished(
     // step="1">If completion is an abrupt completion, then perform !
     // Call(promiseCapability.[[Reject]], undefined, « completion.[[Value]]
     // »).</spec>
-    promise_resolver_->Reject(error);
+    promise_resolver_->Reject(result.GetException());
     return;
   }
 
@@ -100,7 +181,19 @@ void DynamicImportTreeClient::NotifyModuleTreeLoadFinished(
   // href="https://tc39.github.io/proposal-dynamic-import/#sec-finishdynamicimport"
   // step="2.1">Assert: completion is a normal completion and
   // completion.[[Value]] is undefined.</spec>
-  DCHECK(error.IsEmpty());
+  DCHECK(result.IsSuccess());
+
+  if (base::FeatureList::IsEnabled(features::kTopLevelAwait)) {
+    ScriptPromise promise = result.GetPromise(script_state);
+    v8::Local<v8::Function> callback_success =
+        ModuleResolutionSuccessCallback::CreateFunction(
+            script_state, promise_resolver_, module_script);
+    v8::Local<v8::Function> callback_failure =
+        ModuleResolutionFailureCallback::CreateFunction(script_state,
+                                                        promise_resolver_);
+    promise.Then(callback_success, callback_failure);
+    return;
+  }
 
   // <spec
   // href="https://tc39.github.io/proposal-dynamic-import/#sec-finishdynamicimport"
@@ -141,7 +234,7 @@ void DynamicImportTreeClient::NotifyModuleTreeLoadFinished(
   promise_resolver_->Resolve(module_namespace);
 }
 
-void DynamicImportTreeClient::Trace(Visitor* visitor) {
+void DynamicImportTreeClient::Trace(Visitor* visitor) const {
   visitor->Trace(modulator_);
   visitor->Trace(promise_resolver_);
   ModuleTreeClient::Trace(visitor);
@@ -149,7 +242,7 @@ void DynamicImportTreeClient::Trace(Visitor* visitor) {
 
 }  // namespace
 
-void DynamicModuleResolver::Trace(Visitor* visitor) {
+void DynamicModuleResolver::Trace(Visitor* visitor) const {
   visitor->Trace(modulator_);
 }
 
@@ -229,6 +322,27 @@ void DynamicModuleResolver::ResolveDynamically(
     return;
   }
 
+  switch (referrer_info.GetBaseUrlSource()) {
+    case ReferrerScriptInfo::BaseUrlSource::kClassicScriptCORSSameOrigin:
+      if (!modulator_->ResolveModuleSpecifier(specifier, BlankURL())
+               .IsValid()) {
+        UseCounter::Count(
+            ExecutionContext::From(modulator_->GetScriptState()),
+            WebFeature::kDynamicImportModuleScriptRelativeClassicSameOrigin);
+      }
+      break;
+    case ReferrerScriptInfo::BaseUrlSource::kClassicScriptCORSCrossOrigin:
+      if (!modulator_->ResolveModuleSpecifier(specifier, BlankURL())
+               .IsValid()) {
+        UseCounter::Count(
+            ExecutionContext::From(modulator_->GetScriptState()),
+            WebFeature::kDynamicImportModuleScriptRelativeClassicCrossOrigin);
+      }
+      break;
+    case ReferrerScriptInfo::BaseUrlSource::kOther:
+      break;
+  }
+
   // <spec step="4.4">Set fetch options to the descendant script fetch options
   // for referencing script's fetch options.</spec>
   //
@@ -265,7 +379,8 @@ void DynamicModuleResolver::ResolveDynamically(
   if (auto* scope = DynamicTo<WorkerGlobalScope>(*execution_context))
     scope->EnsureFetcher();
   modulator_->FetchTree(url, execution_context->Fetcher(),
-                        mojom::RequestContextType::SCRIPT, options,
+                        mojom::RequestContextType::SCRIPT,
+                        network::mojom::RequestDestination::kScript, options,
                         ModuleScriptCustomFetchType::kNone, tree_client);
 
   // Steps 6-9 are implemented at

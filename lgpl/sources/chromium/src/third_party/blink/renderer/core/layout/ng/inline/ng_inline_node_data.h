@@ -11,6 +11,9 @@
 
 namespace blink {
 
+template <typename OffsetMappingBuilder>
+class NGInlineItemsBuilderTemplate;
+
 // Data which is required for inline nodes.
 struct CORE_EXPORT NGInlineNodeData : NGInlineItemsData {
  public:
@@ -19,16 +22,19 @@ struct CORE_EXPORT NGInlineNodeData : NGInlineItemsData {
     return static_cast<TextDirection>(base_direction_);
   }
 
+  bool HasLineEvenIfEmpty() const { return has_line_even_if_empty_; }
+  bool HasRuby() const { return has_ruby_; }
   bool IsEmptyInline() const { return is_empty_inline_; }
 
   bool IsBlockLevel() const { return is_block_level_; }
 
- private:
   const NGInlineItemsData& ItemsData(bool is_first_line) const {
     return !is_first_line || !first_line_items_
                ? (const NGInlineItemsData&)*this
                : *first_line_items_;
   }
+
+ private:
   void SetBaseDirection(TextDirection direction) {
     base_direction_ = static_cast<unsigned>(direction);
   }
@@ -39,6 +45,9 @@ struct CORE_EXPORT NGInlineNodeData : NGInlineItemsData {
   friend class NGInlineNodeForTest;
   friend class NGOffsetMappingTest;
 
+  template <typename OffsetMappingBuilder>
+  friend class NGInlineItemsBuilderTemplate;
+
   // Items to use for the first line, when the node has :first-line rules.
   //
   // Items have different ComputedStyle, and may also have different
@@ -48,6 +57,14 @@ struct CORE_EXPORT NGInlineNodeData : NGInlineItemsData {
 
   unsigned is_bidi_enabled_ : 1;
   unsigned base_direction_ : 1;  // TextDirection
+
+  // True if there are no inline item items and the associated block is root
+  // editable element or having "-internal-empty-line-height:fabricated",
+  // e.g. <div contenteditable></div>, <input type=button value="">
+  unsigned has_line_even_if_empty_ : 1;
+
+  // The node contains <ruby>.
+  unsigned has_ruby_ : 1;
 
   // We use this flag to determine if the inline node is empty, and will
   // produce a single zero block-size line box. If the node has text, atomic

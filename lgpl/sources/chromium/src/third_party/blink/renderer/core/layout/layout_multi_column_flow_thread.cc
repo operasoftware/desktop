@@ -39,8 +39,9 @@ const LayoutBox* LayoutMultiColumnFlowThread::style_changed_box_;
 bool LayoutMultiColumnFlowThread::could_contain_spanners_;
 bool LayoutMultiColumnFlowThread::toggle_spanners_if_needed_;
 
-LayoutMultiColumnFlowThread::LayoutMultiColumnFlowThread()
-    : last_set_worked_on_(nullptr),
+LayoutMultiColumnFlowThread::LayoutMultiColumnFlowThread(bool needs_paint_layer)
+    : LayoutFlowThread(needs_paint_layer),
+      last_set_worked_on_(nullptr),
       column_count_(1),
       column_heights_changed_(false),
       is_being_evacuated_(false) {
@@ -51,9 +52,10 @@ LayoutMultiColumnFlowThread::~LayoutMultiColumnFlowThread() = default;
 
 LayoutMultiColumnFlowThread* LayoutMultiColumnFlowThread::CreateAnonymous(
     Document& document,
-    const ComputedStyle& parent_style) {
+    const ComputedStyle& parent_style,
+    bool needs_paint_layer) {
   LayoutMultiColumnFlowThread* layout_object =
-      new LayoutMultiColumnFlowThread();
+      new LayoutMultiColumnFlowThread(needs_paint_layer);
   layout_object->SetDocumentForAnonymous(&document);
   layout_object->SetStyle(ComputedStyle::CreateAnonymousStyleWithDisplay(
       parent_style, EDisplay::kBlock));
@@ -106,7 +108,7 @@ static inline bool CanContainSpannerInParentFragmentationContext(
   if (!block_flow)
     return false;
   return !block_flow->CreatesNewFormattingContext() &&
-         !block_flow->StyleRef().CanContainFixedPositionObjects(false) &&
+         !block_flow->CanContainFixedPositionObjects() &&
          block_flow->GetPaginationBreakability() != LayoutBox::kForbidBreaks &&
          !IsMultiColumnContainer(*block_flow);
 }
@@ -332,7 +334,7 @@ LayoutUnit LayoutMultiColumnFlowThread::MaxColumnLogicalHeight() const {
   const LayoutBlockFlow* multicol_block = MultiColumnBlockFlow();
   const Length& logical_max_height =
       multicol_block->StyleRef().LogicalMaxHeight();
-  if (!logical_max_height.IsMaxSizeNone()) {
+  if (!logical_max_height.IsNone()) {
     LayoutUnit resolved_logical_max_height =
         multicol_block->ComputeContentLogicalHeight(
             kMaxSize, logical_max_height, LayoutUnit(-1));
@@ -611,7 +613,7 @@ bool LayoutMultiColumnFlowThread::RemoveSpannerPlaceholderIfNoLongerValid(
   // We may have a new containing block, since we're no longer a spanner. Mark
   // it for relayout.
   spanner_object_in_flow_thread->ContainingBlock()
-      ->SetNeedsLayoutAndPrefWidthsRecalc(
+      ->SetNeedsLayoutAndIntrinsicWidthsRecalc(
           layout_invalidation_reason::kColumnsChanged);
 
   // Now generate a column set for this ex-spanner, if needed and none is there
@@ -729,7 +731,7 @@ void LayoutMultiColumnFlowThread::CalculateColumnHeightAvailable() {
   // have a definite height when they in fact don't.
   LayoutBlockFlow* container = MultiColumnBlockFlow();
   LayoutUnit column_height;
-  if (container->HasDefiniteLogicalHeight() || container->IsLayoutView()) {
+  if (container->HasDefiniteLogicalHeight() || IsA<LayoutView>(container)) {
     LogicalExtentComputedValues computed_values;
     container->ComputeLogicalHeight(LayoutUnit(), container->LogicalTop(),
                                     computed_values);
@@ -776,11 +778,11 @@ void LayoutMultiColumnFlowThread::CalculateColumnCountAndWidth(
 
 LayoutUnit LayoutMultiColumnFlowThread::ColumnGap(const ComputedStyle& style,
                                                   LayoutUnit available_width) {
-  if (style.ColumnGap().IsNormal()) {
-    // "1em" is recommended as the normal gap setting. Matches <p> margins.
-    return LayoutUnit(style.GetFontDescription().ComputedSize());
-  }
-  return ValueForLength(style.ColumnGap().GetLength(), available_width);
+  if (const base::Optional<Length>& column_gap = style.ColumnGap())
+    return ValueForLength(*column_gap, available_width);
+
+  // "1em" is recommended as the normal gap setting. Matches <p> margins.
+  return LayoutUnit(style.GetFontDescription().ComputedSize());
 }
 
 void LayoutMultiColumnFlowThread::CreateAndInsertMultiColumnSet(
@@ -1163,6 +1165,7 @@ void LayoutMultiColumnFlowThread::FlowThreadDescendantWillBeRemoved(
 }
 
 static inline bool NeedsToReinsertIntoFlowThread(
+    const LayoutBox& box,
     const ComputedStyle& old_style,
     const ComputedStyle& new_style) {
   // If we've become (or are about to become) a container for absolutely
@@ -1170,16 +1173,14 @@ static inline bool NeedsToReinsertIntoFlowThread(
   // re-evaluate the need for column sets. There may be out-of-flow descendants
   // further down that become part of the flow thread, or cease to be part of
   // the flow thread, because of this change.
-  if (old_style.CanContainFixedPositionObjects(false) !=
-      new_style.CanContainFixedPositionObjects(false))
+  if (box.ComputeIsFixedContainer(&old_style) !=
+      box.ComputeIsFixedContainer(&new_style))
     return true;
-  return (old_style.HasInFlowPosition() &&
-          new_style.GetPosition() == EPosition::kStatic) ||
-         (new_style.HasInFlowPosition() &&
-          old_style.GetPosition() == EPosition::kStatic);
+  return old_style.GetPosition() != new_style.GetPosition();
 }
 
-static inline bool NeedsToRemoveFromFlowThread(const ComputedStyle& old_style,
+static inline bool NeedsToRemoveFromFlowThread(const LayoutBox& box,
+                                               const ComputedStyle& old_style,
                                                const ComputedStyle& new_style) {
   // This function is called BEFORE computed style update. If an in-flow
   // descendant goes out-of-flow, we may have to remove column sets and spanner
@@ -1193,7 +1194,7 @@ static inline bool NeedsToRemoveFromFlowThread(const ComputedStyle& old_style,
   // been updated.
   return (new_style.HasOutOfFlowPosition() &&
           !old_style.HasOutOfFlowPosition()) ||
-         NeedsToReinsertIntoFlowThread(old_style, new_style);
+         NeedsToReinsertIntoFlowThread(box, old_style, new_style);
 }
 
 static inline bool NeedsToInsertIntoFlowThread(
@@ -1219,7 +1220,7 @@ static inline bool NeedsToInsertIntoFlowThread(
     if (containing_flow_thread == flow_thread)
       return true;
   }
-  return NeedsToReinsertIntoFlowThread(old_style, new_style);
+  return NeedsToReinsertIntoFlowThread(*flow_thread, old_style, new_style);
 }
 
 void LayoutMultiColumnFlowThread::FlowThreadDescendantStyleWillChange(
@@ -1227,7 +1228,8 @@ void LayoutMultiColumnFlowThread::FlowThreadDescendantStyleWillChange(
     StyleDifference diff,
     const ComputedStyle& new_style) {
   toggle_spanners_if_needed_ = false;
-  if (NeedsToRemoveFromFlowThread(descendant->StyleRef(), new_style)) {
+  if (NeedsToRemoveFromFlowThread(*descendant, descendant->StyleRef(),
+                                  new_style)) {
     FlowThreadDescendantWillBeRemoved(descendant);
     return;
   }
@@ -1332,35 +1334,33 @@ void LayoutMultiColumnFlowThread::ToggleSpannersInSubtree(
   }
 }
 
-void LayoutMultiColumnFlowThread::ComputePreferredLogicalWidths() {
+MinMaxSizes LayoutMultiColumnFlowThread::PreferredLogicalWidths() const {
   // The min/max intrinsic widths calculated really tell how much space elements
   // need when laid out inside the columns. In order to eventually end up with
   // the desired column width, we need to convert them to values pertaining to
   // the multicol container.
-  const ComputedStyle* multicol_style = MultiColumnBlockFlow()->Style();
+  auto* flow = MultiColumnBlockFlow();
+  const ComputedStyle* multicol_style = flow->Style();
   LayoutUnit column_count(
       multicol_style->HasAutoColumnCount() ? 1 : multicol_style->ColumnCount());
   LayoutUnit gap_extra((column_count - 1) *
                        ColumnGap(*multicol_style, LayoutUnit()));
+  MinMaxSizes sizes;
 
-  if (MultiColumnBlockFlow()->ShouldApplySizeContainment()) {
-    min_preferred_logical_width_ = max_preferred_logical_width_ =
-        MultiColumnBlockFlow()->ContentLogicalWidthForSizeContainment();
-    ClearPreferredLogicalWidthsDirty();
+  if (flow->HasOverrideIntrinsicContentLogicalWidth()) {
+    sizes = flow->OverrideIntrinsicContentLogicalWidth();
+  } else if (flow->ShouldApplySizeContainment()) {
+    sizes = LayoutUnit();
   } else {
-    // Calculate and set new min_preferred_logical_width_ and
-    // max_preferred_logical_width_.
-    LayoutFlowThread::ComputePreferredLogicalWidths();
+    sizes = LayoutFlowThread::PreferredLogicalWidths();
   }
 
   LayoutUnit column_width;
   if (multicol_style->HasAutoColumnWidth()) {
-    min_preferred_logical_width_ =
-        min_preferred_logical_width_ * column_count + gap_extra;
+    sizes.min_size = sizes.min_size * column_count + gap_extra;
   } else {
     column_width = LayoutUnit(multicol_style->ColumnWidth());
-    min_preferred_logical_width_ =
-        std::min(min_preferred_logical_width_, column_width);
+    sizes.min_size = std::min(sizes.min_size, column_width);
   }
   // Note that if column-count is auto here, we should resolve it to calculate
   // the maximum intrinsic width, instead of pretending that it's 1. The only
@@ -1368,9 +1368,9 @@ void LayoutMultiColumnFlowThread::ComputePreferredLogicalWidths() {
   // appropriate time or place for layout. The good news is that if height is
   // unconstrained and there are no explicit breaks, the resolved column-count
   // really should be 1.
-  max_preferred_logical_width_ =
-      std::max(max_preferred_logical_width_, column_width) * column_count +
-      gap_extra;
+  sizes.max_size =
+      std::max(sizes.max_size, column_width) * column_count + gap_extra;
+  return sizes;
 }
 
 void LayoutMultiColumnFlowThread::ComputeLogicalHeight(

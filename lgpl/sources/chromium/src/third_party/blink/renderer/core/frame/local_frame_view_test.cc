@@ -7,12 +7,15 @@
 #include <memory>
 
 #include "testing/gmock/include/gmock/gmock.h"
+#include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
 #include "third_party/blink/renderer/core/html/html_anchor_element.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/core/html/html_iframe_element.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/paint/paint_property_tree_printer.h"
+#include "third_party/blink/renderer/core/paint/paint_timing.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
@@ -114,16 +117,16 @@ TEST_F(LocalFrameViewTest, HideTooltipWhenScrollPositionChanges) {
 
   EXPECT_CALL(GetAnimationMockChromeClient(),
               MockSetToolTip(GetDocument().GetFrame(), String(), _));
-  GetDocument().View()->LayoutViewport()->SetScrollOffset(ScrollOffset(1, 1),
-                                                          kUserScroll);
+  GetDocument().View()->LayoutViewport()->SetScrollOffset(
+      ScrollOffset(1, 1), mojom::blink::ScrollType::kUser);
 
   // Programmatic scrolling should not dismiss the tooltip, so setToolTip
   // should not be called for this invocation.
   EXPECT_CALL(GetAnimationMockChromeClient(),
               MockSetToolTip(GetDocument().GetFrame(), String(), _))
       .Times(0);
-  GetDocument().View()->LayoutViewport()->SetScrollOffset(ScrollOffset(2, 2),
-                                                          kProgrammaticScroll);
+  GetDocument().View()->LayoutViewport()->SetScrollOffset(
+      ScrollOffset(2, 2), mojom::blink::ScrollType::kProgrammatic);
 }
 
 // NoOverflowInIncrementVisuallyNonEmptyPixelCount tests fail if the number of
@@ -157,8 +160,8 @@ TEST_F(LocalFrameViewTest,
   sticky->Layer()->UpdateAncestorOverflowLayer(nullptr);
 
   // This call should not crash.
-  GetDocument().View()->LayoutViewport()->SetScrollOffset(ScrollOffset(0, 100),
-                                                          kProgrammaticScroll);
+  GetDocument().View()->LayoutViewport()->SetScrollOffset(
+      ScrollOffset(0, 100), mojom::blink::ScrollType::kProgrammatic);
 }
 
 TEST_F(LocalFrameViewTest, UpdateLifecyclePhasesForPrintingDetachedFrame) {
@@ -181,15 +184,133 @@ TEST_F(LocalFrameViewTest, CanHaveScrollbarsIfScrollingAttrEqualsNoChanged) {
   SetBodyInnerHTML("<iframe scrolling='no'></iframe>");
   EXPECT_FALSE(ChildDocument().View()->CanHaveScrollbars());
 
-  ChildDocument().WillChangeFrameOwnerProperties(0, 0, ScrollbarMode::kAlwaysOn,
-                                                 false);
+  ChildDocument().WillChangeFrameOwnerProperties(
+      0, 0, mojom::blink::ScrollbarMode::kAlwaysOn, false);
   EXPECT_TRUE(ChildDocument().View()->CanHaveScrollbars());
+}
+
+TEST_F(LocalFrameViewTest,
+       MainThreadScrollingForBackgroundFixedAttachmentWithCompositing) {
+  GetDocument().GetFrame()->GetSettings()->SetPreferCompositingToLCDTextEnabled(
+      true);
+
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      .fixed-background {
+        background: linear-gradient(blue, red) fixed;
+      }
+    </style>
+    <div id="div" style="width: 5000px; height: 5000px"></div>
+  )HTML");
+
+  auto* frame_view = GetDocument().View();
+  EXPECT_EQ(0u, frame_view->BackgroundAttachmentFixedObjects().size());
+  EXPECT_FALSE(
+      frame_view->RequiresMainThreadScrollingForBackgroundAttachmentFixed());
+
+  Element* body = GetDocument().body();
+  Element* html = GetDocument().documentElement();
+  Element* div = GetDocument().getElementById("div");
+
+  // Only body has fixed background. No main thread scrolling.
+  body->setAttribute(html_names::kClassAttr, "fixed-background");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(1u, frame_view->BackgroundAttachmentFixedObjects().size());
+  EXPECT_FALSE(
+      frame_view->RequiresMainThreadScrollingForBackgroundAttachmentFixed());
+
+  // Both body and div have fixed background. Requires main thread scrolling.
+  div->setAttribute(html_names::kClassAttr, "fixed-background");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(2u, frame_view->BackgroundAttachmentFixedObjects().size());
+  EXPECT_TRUE(
+      frame_view->RequiresMainThreadScrollingForBackgroundAttachmentFixed());
+
+  // Only div has fixed background. Requires main thread scrolling.
+  body->removeAttribute(html_names::kClassAttr);
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(1u, frame_view->BackgroundAttachmentFixedObjects().size());
+  EXPECT_TRUE(
+      frame_view->RequiresMainThreadScrollingForBackgroundAttachmentFixed());
+
+  // Only html has fixed background. No main thread scrolling.
+  div->removeAttribute(html_names::kClassAttr);
+  html->setAttribute(html_names::kClassAttr, "fixed-background");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(1u, frame_view->BackgroundAttachmentFixedObjects().size());
+  EXPECT_FALSE(
+      frame_view->RequiresMainThreadScrollingForBackgroundAttachmentFixed());
+
+  // Both html and body have fixed background. Requires main thread scrolling.
+  body->setAttribute(html_names::kClassAttr, "fixed-background");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(2u, frame_view->BackgroundAttachmentFixedObjects().size());
+  EXPECT_TRUE(
+      frame_view->RequiresMainThreadScrollingForBackgroundAttachmentFixed());
+}
+
+TEST_F(LocalFrameViewTest,
+       MainThreadScrollingForBackgroundFixedAttachmentWithoutCompositing) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      .fixed-background {
+        background: linear-gradient(blue, red) fixed;
+      }
+    </style>
+    <div id="div" style="width: 5000px; height: 5000px"></div>
+  )HTML");
+
+  auto* frame_view = GetDocument().View();
+  EXPECT_EQ(0u, frame_view->BackgroundAttachmentFixedObjects().size());
+  EXPECT_FALSE(
+      frame_view->RequiresMainThreadScrollingForBackgroundAttachmentFixed());
+
+  Element* body = GetDocument().body();
+  Element* html = GetDocument().documentElement();
+  Element* div = GetDocument().getElementById("div");
+
+  // When not prefer compositing, we use main thread scrolling when there is
+  // any object with fixed-attachment background.
+  body->setAttribute(html_names::kClassAttr, "fixed-background");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(1u, frame_view->BackgroundAttachmentFixedObjects().size());
+  EXPECT_TRUE(
+      frame_view->RequiresMainThreadScrollingForBackgroundAttachmentFixed());
+
+  div->setAttribute(html_names::kClassAttr, "fixed-background");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(2u, frame_view->BackgroundAttachmentFixedObjects().size());
+  EXPECT_TRUE(
+      frame_view->RequiresMainThreadScrollingForBackgroundAttachmentFixed());
+
+  body->removeAttribute(html_names::kClassAttr);
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(1u, frame_view->BackgroundAttachmentFixedObjects().size());
+  EXPECT_TRUE(
+      frame_view->RequiresMainThreadScrollingForBackgroundAttachmentFixed());
+
+  div->removeAttribute(html_names::kClassAttr);
+  html->setAttribute(html_names::kClassAttr, "fixed-background");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(1u, frame_view->BackgroundAttachmentFixedObjects().size());
+  EXPECT_TRUE(
+      frame_view->RequiresMainThreadScrollingForBackgroundAttachmentFixed());
+
+  body->setAttribute(html_names::kClassAttr, "fixed-background");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(2u, frame_view->BackgroundAttachmentFixedObjects().size());
+  EXPECT_TRUE(
+      frame_view->RequiresMainThreadScrollingForBackgroundAttachmentFixed());
 }
 
 // Ensure the fragment navigation "scroll into view and focus" behavior doesn't
 // activate synchronously while rendering is blocked waiting on a stylesheet.
 // See https://crbug.com/851338.
 TEST_F(SimTest, FragmentNavChangesFocusWhileRenderingBlocked) {
+  // Style-sheets are parser-blocking, not render-blocking when
+  // BlockHTMLParserOnStyleSheets is enabled.
+  ScopedBlockHTMLParserOnStyleSheetsForTest scope(false);
+
   SimRequest main_resource("https://example.com/test.html", "text/html");
   SimSubresourceRequest css_resource("https://example.com/sheet.css",
                                      "text/css");
@@ -225,9 +346,9 @@ TEST_F(SimTest, FragmentNavChangesFocusWhileRenderingBlocked) {
       << "Scroll offset changed while rendering is blocked";
 
   // Force a layout.
-  anchor->style()->setProperty(&GetDocument(), "display", "block", String(),
-                               ASSERT_NO_EXCEPTION);
-  GetDocument().UpdateStyleAndLayout();
+  anchor->style()->setProperty(GetDocument().GetExecutionContext(), "display",
+                               "block", String(), ASSERT_NO_EXCEPTION);
+  GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kTest);
 
   EXPECT_EQ(GetDocument().body(), GetDocument().ActiveElement())
       << "Active element changed due to layout while rendering is blocked";
@@ -267,9 +388,173 @@ TEST_F(SimTest, ForcedLayoutWithIncompleteSVGChildFrame) {
   // Mark the top-level document for layout and then force layout. This will
   // cause the layout tree in the <object> object to be built.
   GetDocument().View()->SetNeedsLayout();
-  GetDocument().UpdateStyleAndLayout();
+  GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kTest);
 
   svg_resource.Finish();
+}
+
+TEST_F(LocalFrameViewTest, TogglePaintEligibility) {
+  SetBodyInnerHTML("<iframe><p>Hello</p></iframe>");
+
+  PaintTiming& parent_timing = PaintTiming::From(GetDocument());
+  PaintTiming& child_timing = PaintTiming::From(ChildDocument());
+
+  // Allow throttling.
+  DocumentLifecycle::AllowThrottlingScope throttling_scope(
+      GetDocument().Lifecycle());
+
+  // Mainframes are unthrottled by default.
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+  EXPECT_FALSE(parent_timing.FirstEligibleToPaint().is_null());
+
+  GetDocument().View()->MarkFirstEligibleToPaint();
+  EXPECT_FALSE(parent_timing.FirstEligibleToPaint().is_null());
+
+  // Subframes are throttled by default (when throttling is allowed).
+  EXPECT_TRUE(ChildDocument().View()->ShouldThrottleRendering());
+
+  // Toggle paint elgibility to true.
+  ChildDocument().View()->SetLifecycleUpdatesThrottledForTesting(
+      false /* throttled */);
+  ChildDocument().View()->UpdateRenderThrottlingStatus(
+      false /* hidden_for_throttling */, false /* subtree_throttled */);
+  ChildDocument().View()->MarkFirstEligibleToPaint();
+  EXPECT_FALSE(ChildDocument().View()->ShouldThrottleRendering());
+  EXPECT_FALSE(child_timing.FirstEligibleToPaint().is_null());
+
+  // Toggle paint elgibility to false.
+  ChildDocument().View()->SetLifecycleUpdatesThrottledForTesting(
+      true /* throttled */);
+  ChildDocument().View()->UpdateRenderThrottlingStatus(
+      true /* hidden_for_throttling */, true /* subtree_throttled */);
+  ChildDocument().View()->MarkIneligibleToPaint();
+  EXPECT_TRUE(ChildDocument().View()->ShouldThrottleRendering());
+  EXPECT_TRUE(child_timing.FirstEligibleToPaint().is_null());
+}
+
+TEST_F(SimTest, PaintEligibilityNoSubframe) {
+  SimRequest resource("https://example.com/", "text/html");
+
+  LoadURL("https://example.com/");
+  resource.Complete("<p>Hello</p>");
+
+  PaintTiming& timing = PaintTiming::From(GetDocument());
+
+  // Allow throttling.
+  DocumentLifecycle::AllowThrottlingScope throttling_scope(
+      GetDocument().Lifecycle());
+
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+  EXPECT_TRUE(timing.FirstEligibleToPaint().is_null());
+
+  Compositor().BeginFrame();
+
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+  EXPECT_FALSE(timing.FirstEligibleToPaint().is_null());
+}
+
+TEST_F(SimTest, SameOriginPaintEligibility) {
+  SimRequest resource("https://example.com/", "text/html");
+
+  LoadURL("https://example.com/");
+  resource.Complete(R"HTML(
+      <iframe id=frame top=4000px left=4000px>
+        <p>Hello</p>
+      </iframe>
+    )HTML");
+
+  auto* frame_element =
+      To<HTMLIFrameElement>(GetDocument().getElementById("frame"));
+  auto* frame_document = frame_element->contentDocument();
+  PaintTiming& frame_timing = PaintTiming::From(*frame_document);
+
+  // Allow throttling.
+  DocumentLifecycle::AllowThrottlingScope throttling_scope(
+      GetDocument().Lifecycle());
+
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+
+  // Same origin frames are not throttled.
+  EXPECT_FALSE(frame_document->View()->ShouldThrottleRendering());
+  EXPECT_TRUE(frame_timing.FirstEligibleToPaint().is_null());
+
+  Compositor().BeginFrame();
+
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+  EXPECT_FALSE(frame_document->View()->ShouldThrottleRendering());
+  EXPECT_FALSE(frame_timing.FirstEligibleToPaint().is_null());
+}
+
+TEST_F(SimTest, CrossOriginPaintEligibility) {
+  SimRequest resource("https://example.com/", "text/html");
+
+  LoadURL("https://example.com/");
+  resource.Complete(R"HTML(
+      <iframe id=frame srcdoc ="<p>Hello</p>" sandbox top=4000px left=4000px>
+      </iframe>
+    )HTML");
+
+  auto* frame_element =
+      To<HTMLIFrameElement>(GetDocument().getElementById("frame"));
+  auto* frame_document = frame_element->contentDocument();
+  PaintTiming& frame_timing = PaintTiming::From(*frame_document);
+
+  // Allow throttling.
+  DocumentLifecycle::AllowThrottlingScope throttling_scope(
+      GetDocument().Lifecycle());
+
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+
+  // Hidden cross origin frames are throttled.
+  EXPECT_TRUE(frame_document->View()->ShouldThrottleRendering());
+  EXPECT_TRUE(frame_timing.FirstEligibleToPaint().is_null());
+
+  Compositor().BeginFrame();
+
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+  EXPECT_TRUE(frame_document->View()->ShouldThrottleRendering());
+  EXPECT_TRUE(frame_timing.FirstEligibleToPaint().is_null());
+}
+
+TEST_F(SimTest, NestedCrossOriginPaintEligibility) {
+  // Create a document with doubly nested iframes.
+  SimRequest main_resource("https://example.com/", "text/html");
+  SimRequest frame_resource("https://example.com/iframe.html", "text/html");
+
+  LoadURL("https://example.com/");
+  main_resource.Complete("<iframe id=outer src=iframe.html></iframe>");
+  frame_resource.Complete(R"HTML(
+      <iframe id=inner srcdoc ="<p>Hello</p>" sandbox top=4000px left=4000px>
+      </iframe>
+    )HTML");
+
+  auto* outer_frame_element =
+      To<HTMLIFrameElement>(GetDocument().getElementById("outer"));
+  auto* outer_frame_document = outer_frame_element->contentDocument();
+  PaintTiming& outer_frame_timing = PaintTiming::From(*outer_frame_document);
+
+  auto* inner_frame_element =
+      To<HTMLIFrameElement>(outer_frame_document->getElementById("inner"));
+  auto* inner_frame_document = inner_frame_element->contentDocument();
+  PaintTiming& inner_frame_timing = PaintTiming::From(*inner_frame_document);
+
+  // Allow throttling.
+  DocumentLifecycle::AllowThrottlingScope throttling_scope(
+      GetDocument().Lifecycle());
+
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+  EXPECT_FALSE(outer_frame_document->View()->ShouldThrottleRendering());
+  EXPECT_TRUE(outer_frame_timing.FirstEligibleToPaint().is_null());
+  EXPECT_TRUE(inner_frame_document->View()->ShouldThrottleRendering());
+  EXPECT_TRUE(inner_frame_timing.FirstEligibleToPaint().is_null());
+
+  Compositor().BeginFrame();
+
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+  EXPECT_FALSE(outer_frame_document->View()->ShouldThrottleRendering());
+  EXPECT_FALSE(outer_frame_timing.FirstEligibleToPaint().is_null());
+  EXPECT_TRUE(inner_frame_document->View()->ShouldThrottleRendering());
+  EXPECT_TRUE(inner_frame_timing.FirstEligibleToPaint().is_null());
 }
 
 }  // namespace

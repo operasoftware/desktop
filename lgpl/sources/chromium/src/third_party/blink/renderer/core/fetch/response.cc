@@ -17,12 +17,12 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_blob.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_form_data.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_readable_stream.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_response_init.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_url_search_params.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fetch/blob_bytes_consumer.h"
 #include "third_party/blink/renderer/core/fetch/body_stream_buffer.h"
 #include "third_party/blink/renderer/core/fetch/form_data_bytes_consumer.h"
-#include "third_party/blink/renderer/core/fetch/response_init.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
@@ -54,7 +54,7 @@ FetchResponseData* FilterResponseDataInternal(
       return response->CreateBasicFilteredResponse();
       break;
     case network::mojom::FetchResponseType::kCors: {
-      WebHTTPHeaderSet header_names;
+      HTTPHeaderSet header_names;
       for (const auto& header : headers)
         header_names.insert(header.Ascii());
       return response->CreateCorsFilteredResponse(header_names);
@@ -85,11 +85,11 @@ FetchResponseData* CreateFetchResponseDataFromFetchAPIResponse(
           script_state, fetch_api_response);
 
   if (fetch_api_response.blob) {
-    response->ReplaceBodyStreamBuffer(MakeGarbageCollected<BodyStreamBuffer>(
+    response->ReplaceBodyStreamBuffer(BodyStreamBuffer::Create(
         script_state,
         MakeGarbageCollected<BlobBytesConsumer>(
             ExecutionContext::From(script_state), fetch_api_response.blob),
-        nullptr /* AbortSignal */));
+        nullptr /* AbortSignal */, fetch_api_response.side_data_blob));
   }
 
   // Filter the response according to |fetch_api_response|'s ResponseType.
@@ -148,7 +148,7 @@ Response* Response::Create(ScriptState* script_state,
     // https://crbug.com/335871.
   } else if (V8Blob::HasInstance(body, isolate)) {
     Blob* blob = V8Blob::ToImpl(body.As<v8::Object>());
-    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
+    body_buffer = BodyStreamBuffer::Create(
         script_state,
         MakeGarbageCollected<BlobBytesConsumer>(execution_context,
                                                 blob->GetBlobDataHandle()),
@@ -158,18 +158,32 @@ Response* Response::Create(ScriptState* script_state,
     // Avoid calling into V8 from the following constructor parameters, which
     // is potentially unsafe.
     DOMArrayBuffer* array_buffer = V8ArrayBuffer::ToImpl(body.As<v8::Object>());
-    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
-        script_state, MakeGarbageCollected<FormDataBytesConsumer>(array_buffer),
-        nullptr /* AbortSignal */);
+    if (!base::CheckedNumeric<wtf_size_t>(array_buffer->ByteLengthAsSizeT())
+             .IsValid()) {
+      exception_state.ThrowRangeError(
+          "The provided ArrayBuffer exceeds the maximum supported size");
+    } else {
+      body_buffer = BodyStreamBuffer::Create(
+          script_state,
+          MakeGarbageCollected<FormDataBytesConsumer>(array_buffer),
+          nullptr /* AbortSignal */);
+    }
   } else if (body->IsArrayBufferView()) {
     // Avoid calling into V8 from the following constructor parameters, which
     // is potentially unsafe.
     DOMArrayBufferView* array_buffer_view =
         V8ArrayBufferView::ToImpl(body.As<v8::Object>());
-    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
-        script_state,
-        MakeGarbageCollected<FormDataBytesConsumer>(array_buffer_view),
-        nullptr /* AbortSignal */);
+    if (!base::CheckedNumeric<wtf_size_t>(
+             array_buffer_view->byteLengthAsSizeT())
+             .IsValid()) {
+      exception_state.ThrowRangeError(
+          "The provided ArrayBufferView exceeds the maximum supported size");
+    } else {
+      body_buffer = BodyStreamBuffer::Create(
+          script_state,
+          MakeGarbageCollected<FormDataBytesConsumer>(array_buffer_view),
+          nullptr /* AbortSignal */);
+    }
   } else if (V8FormData::HasInstance(body, isolate)) {
     scoped_refptr<EncodedFormData> form_data =
         V8FormData::ToImpl(body.As<v8::Object>())->EncodeMultiPartFormData();
@@ -177,19 +191,19 @@ Response* Response::Create(ScriptState* script_state,
     // FormDataEncoder::generateUniqueBoundaryString.
     content_type = AtomicString("multipart/form-data; boundary=") +
                    form_data->Boundary().data();
-    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
-        script_state,
-        MakeGarbageCollected<FormDataBytesConsumer>(execution_context,
-                                                    std::move(form_data)),
-        nullptr /* AbortSignal */);
+    body_buffer =
+        BodyStreamBuffer::Create(script_state,
+                                 MakeGarbageCollected<FormDataBytesConsumer>(
+                                     execution_context, std::move(form_data)),
+                                 nullptr /* AbortSignal */);
   } else if (V8URLSearchParams::HasInstance(body, isolate)) {
     scoped_refptr<EncodedFormData> form_data =
         V8URLSearchParams::ToImpl(body.As<v8::Object>())->ToEncodedFormData();
-    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
-        script_state,
-        MakeGarbageCollected<FormDataBytesConsumer>(execution_context,
-                                                    std::move(form_data)),
-        nullptr /* AbortSignal */);
+    body_buffer =
+        BodyStreamBuffer::Create(script_state,
+                                 MakeGarbageCollected<FormDataBytesConsumer>(
+                                     execution_context, std::move(form_data)),
+                                 nullptr /* AbortSignal */);
     content_type = "application/x-www-form-urlencoded;charset=UTF-8";
   } else if (V8ReadableStream::HasInstance(body, isolate)) {
     UseCounter::Count(execution_context,
@@ -201,7 +215,7 @@ Response* Response::Create(ScriptState* script_state,
         isolate, body, exception_state);
     if (exception_state.HadException())
       return nullptr;
-    body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
+    body_buffer = BodyStreamBuffer::Create(
         script_state, MakeGarbageCollected<FormDataBytesConsumer>(string),
         nullptr /* AbortSignal */);
     content_type = "text/plain;charset=UTF-8";
@@ -279,12 +293,9 @@ Response* Response::Create(ScriptState* script_state,
     // then IsStreamLocked and IsStreamDisturbed will always be false.
     // So we don't have to check BodyStreamBuffer is a ReadableStream
     // or not.
-    if (body->IsStreamLocked(exception_state).value_or(true) ||
-        body->IsStreamDisturbed(exception_state).value_or(true)) {
-      if (!exception_state.HadException()) {
-        exception_state.ThrowTypeError(
-            "Response body object should not be disturbed or locked");
-      }
+    if (body->IsStreamLocked() || body->IsStreamDisturbed()) {
+      exception_state.ThrowTypeError(
+          "Response body object should not be disturbed or locked");
       return nullptr;
     }
 
@@ -370,18 +381,24 @@ FetchResponseData* Response::CreateUnfilteredFetchResponseDataWithoutBody(
   response->SetResponseTime(fetch_api_response.response_time);
   response->SetCacheStorageCacheName(
       fetch_api_response.cache_storage_cache_name);
-  response->SetSideDataBlob(fetch_api_response.side_data_blob);
+  response->SetConnectionInfo(fetch_api_response.connection_info);
+  response->SetAlpnNegotiatedProtocol(
+      WTF::AtomicString(fetch_api_response.alpn_negotiated_protocol));
+  response->SetLoadedWithCredentials(
+      fetch_api_response.loaded_with_credentials);
+  response->SetWasFetchedViaSpdy(fetch_api_response.was_fetched_via_spdy);
 
   for (const auto& header : fetch_api_response.headers)
     response->HeaderList()->Append(header.key, header.value);
 
-  // TODO(wanderview): This sets the mime type of the Response based on the
-  // current headers.  This should be correct for most cases, but technically
-  // the mime type should really be frozen at the initial Response
-  // construction.  We should plumb the value through the cache_storage
-  // persistence layer and include the explicit mime type in FetchAPIResponse
-  // to set here. See: crbug.com/938939
-  response->SetMimeType(response->HeaderList()->ExtractMIMEType());
+  // Use the |mime_type| provided by the FetchAPIResponse if its set.
+  // Otherwise fall back to extracting the mime type from the headers.  This
+  // can happen when the response is loaded from an older cache_storage
+  // instance that did not yet store the mime_type value.
+  if (!fetch_api_response.mime_type.IsNull())
+    response->SetMimeType(fetch_api_response.mime_type);
+  else
+    response->SetMimeType(response->HeaderList()->ExtractMIMEType());
 
   return response;
 }
@@ -454,15 +471,10 @@ Headers* Response::headers() const {
 
 Response* Response::clone(ScriptState* script_state,
                           ExceptionState& exception_state) {
-  if (IsBodyLocked(exception_state) == BodyLocked::kLocked ||
-      IsBodyUsed(exception_state) == BodyUsed::kUsed) {
-    DCHECK(!exception_state.HadException());
+  if (IsBodyLocked() || IsBodyUsed()) {
     exception_state.ThrowTypeError("Response body is already used");
     return nullptr;
   }
-
-  if (exception_state.HadException())
-    return nullptr;
 
   FetchResponseData* response = response_->Clone(script_state, exception_state);
   if (exception_state.HadException())
@@ -483,8 +495,9 @@ bool Response::HasPendingActivity() const {
   return Body::HasPendingActivity();
 }
 
-mojom::blink::FetchAPIResponsePtr Response::PopulateFetchAPIResponse() {
-  return response_->PopulateFetchAPIResponse();
+mojom::blink::FetchAPIResponsePtr Response::PopulateFetchAPIResponse(
+    const KURL& request_url) {
+  return response_->PopulateFetchAPIResponse(request_url);
 }
 
 Response::Response(ExecutionContext* context)
@@ -504,16 +517,9 @@ bool Response::HasBody() const {
   return response_->InternalBuffer();
 }
 
-Body::BodyUsed Response::IsBodyUsed(ExceptionState& exception_state) {
+bool Response::IsBodyUsed() const {
   auto* body_buffer = InternalBodyBuffer();
-  if (!body_buffer)
-    return BodyUsed::kUnused;
-  base::Optional<bool> stream_disturbed =
-      body_buffer->IsStreamDisturbed(exception_state);
-  if (exception_state.HadException())
-    return BodyUsed::kBroken;
-  DCHECK(stream_disturbed.has_value());
-  return stream_disturbed.value() ? BodyUsed::kUsed : BodyUsed::kUnused;
+  return body_buffer && body_buffer->IsStreamDisturbed();
 }
 
 String Response::MimeType() const {
@@ -534,15 +540,16 @@ const Vector<KURL>& Response::InternalURLList() const {
   return response_->InternalURLList();
 }
 
-void Response::Trace(blink::Visitor* visitor) {
+FetchHeaderList* Response::InternalHeaderList() const {
+  return response_->InternalHeaderList();
+}
+
+void Response::Trace(Visitor* visitor) const {
+  ScriptWrappable::Trace(visitor);
+  ActiveScriptWrappable<Response>::Trace(visitor);
   Body::Trace(visitor);
   visitor->Trace(response_);
   visitor->Trace(headers_);
-}
-
-bool Response::IsBodyUsedForDCheck(ExceptionState& exception_state) {
-  return InternalBodyBuffer() &&
-         InternalBodyBuffer()->IsStreamDisturbedForDCheck(exception_state);
 }
 
 }  // namespace blink

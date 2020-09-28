@@ -2,6 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import {FittingType, SaveRequestType} from 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/constants.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {listenOnce} from 'chrome://resources/js/util.m.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {createBookmarksForTest, testAsync} from './test_util.js';
+
 /**
  * Captures 'fit-to-changed' events and verifies the last one has the expected
  * paylod.
@@ -28,25 +35,25 @@ class FitToEventChecker {
 /**
  * Standalone unit tests of the PDF Polymer elements.
  */
-var tests = [
+const tests = [
   /**
    * Test that viewer-page-selector reacts correctly to text entry. The page
    * selector validates that input is an integer, and does not allow navigation
    * past document bounds.
    */
   function testPageSelectorChange() {
-    var selector = document.createElement('viewer-page-selector');
+    const selector = document.createElement('viewer-page-selector');
     selector.docLength = 1234;
     document.body.appendChild(selector);
 
-    var input = selector.pageSelector;
+    const input = selector.pageSelector;
     // Simulate entering text into `input` and pressing enter.
     function changeInput(newValue) {
       input.value = newValue;
       input.dispatchEvent(new CustomEvent('change'));
     }
 
-    var navigatedPages = [];
+    const navigatedPages = [];
     selector.addEventListener('change-page', function(e) {
       navigatedPages.push(e.detail.page);
       // A change-page handler is expected to set the pageNo to the new value.
@@ -75,7 +82,7 @@ var tests = [
    * Test that viewer-page-selector changes in response to setting docLength.
    */
   function testPageSelectorDocLength() {
-    var selector = document.createElement('viewer-page-selector');
+    const selector = document.createElement('viewer-page-selector');
     selector.docLength = 1234;
     document.body.appendChild(selector);
     chrome.test.assertEq('1234', selector.$.pagelength.textContent);
@@ -88,7 +95,7 @@ var tests = [
    * Test that clicking the dropdown icon opens/closes the dropdown.
    */
   function testToolbarDropdownShowHide() {
-    var dropdown = document.createElement('viewer-toolbar-dropdown');
+    const dropdown = document.createElement('viewer-toolbar-dropdown');
     dropdown.header = 'Test Menu';
     dropdown.closedIcon = 'closedIcon';
     dropdown.openIcon = 'openIcon';
@@ -115,7 +122,7 @@ var tests = [
    * structure and behaviour.
    */
   function testBookmarkStructure() {
-    var bookmarkContent = createBookmarksForTest();
+    const bookmarkContent = createBookmarksForTest();
     bookmarkContent.bookmarks = [{
       title: 'Test 1',
       page: 1,
@@ -127,23 +134,23 @@ var tests = [
     document.body.appendChild(bookmarkContent);
 
     // Force templates to render.
-    Polymer.dom.flush();
+    flush();
 
-    var rootBookmarks =
+    const rootBookmarks =
         bookmarkContent.shadowRoot.querySelectorAll('viewer-bookmark');
     chrome.test.assertEq(1, rootBookmarks.length, 'one root bookmark');
-    var rootBookmark = rootBookmarks[0];
+    const rootBookmark = rootBookmarks[0];
     rootBookmark.$.expand.click();
 
-    Polymer.dom.flush();
+    flush();
 
-    var subBookmarks =
+    const subBookmarks =
         rootBookmark.shadowRoot.querySelectorAll('viewer-bookmark');
     chrome.test.assertEq(2, subBookmarks.length, 'two sub bookmarks');
     chrome.test.assertEq(
         1, subBookmarks[1].depth, 'sub bookmark depth correct');
 
-    var lastPageChange;
+    let lastPageChange;
     rootBookmark.addEventListener('change-page', function(e) {
       lastPageChange = e.detail.page;
     });
@@ -162,15 +169,15 @@ var tests = [
    * fit-to-width buttons.
    */
   function testZoomToolbarToggle() {
-    var zoomToolbar = document.createElement('viewer-zoom-toolbar');
+    const zoomToolbar = document.createElement('viewer-zoom-toolbar');
     document.body.appendChild(zoomToolbar);
-    var fitButton = zoomToolbar.$['fit-button'];
-    var button = fitButton.$$('cr-icon-button');
+    const fitButton = zoomToolbar.$['fit-button'];
+    const button = fitButton.$$('cr-icon-button');
 
-    var fitWidthIcon = 'fullscreen';
-    var fitPageIcon = 'fullscreen-exit';
+    const fitWidthIcon = 'fullscreen';
+    const fitPageIcon = 'fullscreen-exit';
 
-    var fitToEventChecker = new FitToEventChecker(zoomToolbar);
+    const fitToEventChecker = new FitToEventChecker(zoomToolbar);
 
     // Initial: Show fit-to-page.
     // TODO(tsergeant): This assertion attempts to be resilient to iconset
@@ -213,15 +220,15 @@ var tests = [
   },
 
   function testZoomToolbarForceFitToPage() {
-    var zoomToolbar = document.createElement('viewer-zoom-toolbar');
+    const zoomToolbar = document.createElement('viewer-zoom-toolbar');
     document.body.appendChild(zoomToolbar);
-    var fitButton = zoomToolbar.$['fit-button'];
-    var button = fitButton.$$('cr-icon-button');
+    const fitButton = zoomToolbar.$['fit-button'];
+    const button = fitButton.$$('cr-icon-button');
 
-    var fitWidthIcon = 'fullscreen';
-    var fitPageIcon = 'fullscreen-exit';
+    const fitWidthIcon = 'fullscreen';
+    const fitPageIcon = 'fullscreen-exit';
 
-    var fitToEventChecker = new FitToEventChecker(zoomToolbar);
+    const fitToEventChecker = new FitToEventChecker(zoomToolbar);
 
     // Initial: Show fit-to-page.
     chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
@@ -255,15 +262,15 @@ var tests = [
   },
 
   function testZoomToolbarForceFitToWidth() {
-    var zoomToolbar = document.createElement('viewer-zoom-toolbar');
+    const zoomToolbar = document.createElement('viewer-zoom-toolbar');
     document.body.appendChild(zoomToolbar);
-    var fitButton = zoomToolbar.$['fit-button'];
-    var button = fitButton.$$('cr-icon-button');
+    const fitButton = zoomToolbar.$['fit-button'];
+    const button = fitButton.$$('cr-icon-button');
 
-    var fitWidthIcon = 'fullscreen';
-    var fitPageIcon = 'fullscreen-exit';
+    const fitWidthIcon = 'fullscreen';
+    const fitPageIcon = 'fullscreen-exit';
 
-    var fitToEventChecker = new FitToEventChecker(zoomToolbar);
+    const fitToEventChecker = new FitToEventChecker(zoomToolbar);
 
     // Initial: Show fit-to-page.
     chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
@@ -299,7 +306,116 @@ var tests = [
     chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
 
     chrome.test.succeed();
-  }
+  },
+
+  /**
+   * Test that the toolbar shows an option to download the edited PDF if
+   * available.
+   */
+  function testEditedPdfOption() {
+    const pdfToolbar = document.createElement('viewer-pdf-toolbar');
+    document.body.appendChild(pdfToolbar);
+    const downloadButton = pdfToolbar.$.download;
+    const actionMenu = pdfToolbar.$.downloadMenu;
+    chrome.test.assertFalse(actionMenu.open);
+    loadTimeData.overrideValues({pdfFormSaveEnabled: false});
+    pdfToolbar.strings = Object.assign({}, pdfToolbar.strings);
+    pdfToolbar.isFormFieldFocused = false;
+
+    let numRequests = 0;
+    pdfToolbar.addEventListener('save', () => numRequests++);
+
+    /** @return {!Promise<SaveRequestType>} */
+    const whenSave = function() {
+      return new Promise(resolve => {
+        listenOnce(pdfToolbar, 'save', e => resolve(e.detail));
+      });
+    };
+
+    /** @return {!Promise} */
+    const whenDownloadMenuShown = function() {
+      return new Promise(
+          resolve => listenOnce(
+              pdfToolbar, 'download-menu-shown-for-testing', resolve));
+    };
+
+    testAsync(async () => {
+      // No edits, and feature is off.
+      let onSave = whenSave();
+      downloadButton.click();
+      let requestType = await onSave;
+      chrome.test.assertFalse(actionMenu.open);
+      chrome.test.assertEq(SaveRequestType.ORIGINAL, requestType);
+      chrome.test.assertEq(1, numRequests);
+
+      // Still does not show the menu if there are no edits.
+      loadTimeData.overrideValues({pdfFormSaveEnabled: true});
+      pdfToolbar.strings = Object.assign({}, pdfToolbar.strings);
+      onSave = whenSave();
+      downloadButton.click();
+      requestType = await onSave;
+      chrome.test.assertFalse(actionMenu.open);
+      chrome.test.assertEq(SaveRequestType.ORIGINAL, requestType);
+      chrome.test.assertEq(2, numRequests);
+
+      // Set form field focused.
+      pdfToolbar.isFormFieldFocused = true;
+      onSave = whenSave();
+      downloadButton.click();
+
+      // Unfocus, without making any edits. Saves the original document.
+      pdfToolbar.isFormFieldFocused = false;
+      requestType = await onSave;
+      chrome.test.assertFalse(actionMenu.open);
+      chrome.test.assertEq(SaveRequestType.ORIGINAL, requestType);
+      chrome.test.assertEq(3, numRequests);
+
+      // Focus again.
+      pdfToolbar.isFormFieldFocused = true;
+      downloadButton.click();
+
+      // Set editing mode and change the form focus. Now, the menu should
+      // open.
+      pdfToolbar.hasEdits = true;
+      pdfToolbar.isFormFieldFocused = false;
+      await whenDownloadMenuShown();
+      chrome.test.assertTrue(actionMenu.open);
+      chrome.test.assertEq(3, numRequests);
+
+      // Click on "Edited".
+      const buttons = pdfToolbar.shadowRoot.querySelectorAll('button');
+      onSave = whenSave();
+      buttons[0].click();
+      requestType = await onSave;
+      chrome.test.assertEq(SaveRequestType.EDITED, requestType);
+      chrome.test.assertFalse(actionMenu.open);
+      chrome.test.assertEq(4, numRequests);
+
+      // Click again to re-open menu.
+      downloadButton.click();
+      await whenDownloadMenuShown();
+      chrome.test.assertTrue(actionMenu.open);
+
+      // Click on "Original".
+      onSave = whenSave();
+      buttons[1].click();
+      requestType = await onSave;
+      chrome.test.assertEq(SaveRequestType.ORIGINAL, requestType);
+      chrome.test.assertFalse(actionMenu.open);
+      chrome.test.assertEq(5, numRequests);
+
+      // Even if the document has been edited, always download the original
+      // if the feature flag is off.
+      loadTimeData.overrideValues({pdfFormSaveEnabled: false});
+      pdfToolbar.strings = Object.assign({}, pdfToolbar.strings);
+      onSave = whenSave();
+      downloadButton.click();
+      requestType = await onSave;
+      chrome.test.assertFalse(actionMenu.open);
+      chrome.test.assertEq(SaveRequestType.ORIGINAL, requestType);
+      chrome.test.assertEq(6, numRequests);
+    });
+  },
 ];
 
 chrome.test.runTests(tests);

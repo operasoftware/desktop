@@ -25,6 +25,8 @@ std::ostream& operator<<(std::ostream& ostream,
 class InlineBoxPositionTest : public EditingTestBase {};
 
 TEST_F(InlineBoxPositionTest, ComputeInlineBoxPositionBidiIsolate) {
+  if (RuntimeEnabledFeatures::LayoutNGFragmentItemEnabled())
+    return;
   // InlineBoxPosition is a legacy-only data structure.
   ScopedLayoutNGForTest scoped_layout_ng(false);
 
@@ -52,6 +54,10 @@ TEST_F(InlineBoxPositionTest, ComputeInlineBoxPositionMixedEditable) {
   Element* const input = GetDocument().QuerySelector("input");
   const InlineBox* const input_wrapper_box =
       ToLayoutBox(input->GetLayoutObject())->InlineBoxWrapper();
+  if (!input_wrapper_box) {
+    EXPECT_TRUE(RuntimeEnabledFeatures::LayoutNGEnabled());
+    return;
+  }
 
   const InlineBoxPosition& actual = ComputeInlineBoxPosition(
       PositionWithAffinity(Position::LastPositionInNode(*sample)));
@@ -69,6 +75,10 @@ TEST_F(InlineBoxPositionTest, InFlatTreeAfterInputWithPlaceholderDoesntCrash) {
   const Element* const input = GetDocument().QuerySelector("input");
   const LayoutBox* const input_layout = ToLayoutBox(input->GetLayoutObject());
   const InlineBox* const input_wrapper = input_layout->InlineBoxWrapper();
+  if (!input_wrapper) {
+    EXPECT_TRUE(RuntimeEnabledFeatures::LayoutNGEnabled());
+    return;
+  }
   const PositionInFlatTreeWithAffinity after_input(
       PositionInFlatTree::AfterNode(*input));
 
@@ -79,6 +89,8 @@ TEST_F(InlineBoxPositionTest, InFlatTreeAfterInputWithPlaceholderDoesntCrash) {
 }
 
 TEST_F(InlineBoxPositionTest, DownstreamBeforeLineBreakLTR) {
+  if (RuntimeEnabledFeatures::LayoutNGFragmentItemEnabled())
+    return;
   // InlineBoxPosition is a legacy-only data structure.
   ScopedLayoutNGForTest scoped_layout_ng(false);
 
@@ -101,6 +113,8 @@ TEST_F(InlineBoxPositionTest, DownstreamBeforeLineBreakLTR) {
 }
 
 TEST_F(InlineBoxPositionTest, DownstreamBeforeLineBreakRTL) {
+  if (RuntimeEnabledFeatures::LayoutNGFragmentItemEnabled())
+    return;
   // InlineBoxPosition is a legacy-only data structure.
   ScopedLayoutNGForTest scoped_layout_ng(false);
 

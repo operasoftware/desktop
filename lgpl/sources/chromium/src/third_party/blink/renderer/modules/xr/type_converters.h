@@ -20,17 +20,10 @@ struct TypeConverter<base::Optional<blink::XRPlane::Orientation>,
 };
 
 template <>
-struct TypeConverter<blink::TransformationMatrix,
-                     device::mojom::blink::VRPosePtr> {
-  static blink::TransformationMatrix Convert(
-      const device::mojom::blink::VRPosePtr& pose);
-};
-
-template <>
 struct TypeConverter<blink::HeapVector<blink::Member<blink::DOMPointReadOnly>>,
-                     WTF::Vector<device::mojom::blink::XRPlanePointDataPtr>> {
+                     Vector<device::mojom::blink::XRPlanePointDataPtr>> {
   static blink::HeapVector<blink::Member<blink::DOMPointReadOnly>> Convert(
-      const WTF::Vector<device::mojom::blink::XRPlanePointDataPtr>& vertices);
+      const Vector<device::mojom::blink::XRPlanePointDataPtr>& vertices);
 };
 
 }  // namespace mojo

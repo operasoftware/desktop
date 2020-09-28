@@ -31,11 +31,8 @@
 
 #include "third_party/blink/renderer/core/loader/prerenderer_client.h"
 
-#include "third_party/blink/public/platform/web_prerender.h"
 #include "third_party/blink/public/web/web_prerenderer_client.h"
-#include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/prerender.h"
 
 namespace blink {
 
@@ -52,14 +49,6 @@ PrerendererClient::PrerendererClient(Page& page, WebPrerendererClient* client)
 
 bool PrerendererClient::CanPrerender() {
   return client_ && client_->CanPrerender();
-}
-
-void PrerendererClient::WillAddPrerender(Prerender* prerender) {
-  if (!client_)
-    return;
-  DCHECK(CanPrerender());
-  WebPrerender web_prerender(prerender);
-  client_->WillAddPrerender(&web_prerender);
 }
 
 bool PrerendererClient::IsPrefetchOnly() {

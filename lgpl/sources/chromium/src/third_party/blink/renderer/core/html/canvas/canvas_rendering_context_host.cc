@@ -5,25 +5,27 @@
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context_host.h"
 
 #include "base/feature_list.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_image_encode_options.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_async_blob_creator.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_2d_layer_bridge.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
+#include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
 namespace blink {
-namespace {
-const base::Feature kLowLatencyCanvas2dSwapChain{
-    "LowLatencyCanvas2dSwapChain", base::FEATURE_DISABLED_BY_DEFAULT};
-}  // namespace
 
-CanvasRenderingContextHost::CanvasRenderingContextHost(HostType host_type)
-    : host_type_(host_type) {}
+CanvasRenderingContextHost::CanvasRenderingContextHost(
+    HostType host_type,
+    base::Optional<UkmParameters> ukm_params)
+    : host_type_(host_type), ukm_params_(ukm_params) {}
 
 void CanvasRenderingContextHost::RecordCanvasSizeToUMA(const IntSize& size) {
   if (did_record_canvas_size_to_uma_)
@@ -55,7 +57,7 @@ CanvasRenderingContextHost::CreateTransparentImage(const IntSize& size) const {
       SkSurface::MakeRaster(info, info.minRowBytes(), nullptr);
   if (!surface)
     return nullptr;
-  return StaticBitmapImage::Create(surface->makeImageSnapshot());
+  return UnacceleratedStaticBitmapImage::Create(surface->makeImageSnapshot());
 }
 
 void CanvasRenderingContextHost::Commit(scoped_refptr<CanvasResource>,
@@ -78,125 +80,192 @@ bool CanvasRenderingContextHost::Is3d() const {
   return RenderingContext() && RenderingContext()->Is3d();
 }
 
-bool CanvasRenderingContextHost::Is2d() const {
-  return RenderingContext() && RenderingContext()->Is2d();
+bool CanvasRenderingContextHost::IsRenderingContext2D() const {
+  return RenderingContext() && RenderingContext()->IsRenderingContext2D();
 }
 
 CanvasResourceProvider*
 CanvasRenderingContextHost::GetOrCreateCanvasResourceProvider(
-    AccelerationHint hint) {
+    RasterModeHint hint) {
   return GetOrCreateCanvasResourceProviderImpl(hint);
 }
 
 CanvasResourceProvider*
 CanvasRenderingContextHost::GetOrCreateCanvasResourceProviderImpl(
-    AccelerationHint hint) {
+    RasterModeHint hint) {
   if (!ResourceProvider() && !did_fail_to_create_resource_provider_) {
     if (IsValidImageSize(Size())) {
-      base::WeakPtr<CanvasResourceDispatcher> dispatcher =
-          GetOrCreateResourceDispatcher()
-              ? GetOrCreateResourceDispatcher()->GetWeakPtr()
-              : nullptr;
-
       if (Is3d()) {
-        CanvasResourceProvider::ResourceUsage usage;
-        if (SharedGpuContext::IsGpuCompositingEnabled()) {
-          if (LowLatencyEnabled()) {
-            usage = CanvasResourceProvider::ResourceUsage::
-                kAcceleratedDirect3DResourceUsage;
-          } else {
-            usage = CanvasResourceProvider::ResourceUsage::
-                kAcceleratedCompositedResourceUsage;
-          }
-        } else {
-          usage = CanvasResourceProvider::ResourceUsage::
-              kSoftwareCompositedResourceUsage;
-        }
-
-        uint8_t presentation_mode =
-            CanvasResourceProvider::kDefaultPresentationMode;
-        if (RuntimeEnabledFeatures::WebGLImageChromiumEnabled()) {
-          presentation_mode |=
-              CanvasResourceProvider::kAllowImageChromiumPresentationMode;
-        }
-        // Allow swap chain presentation only if 3d context is using a swap
-        // chain since we'll be importing it as a passthrough texture.
-        if (RenderingContext() && RenderingContext()->UsingSwapChain()) {
-          presentation_mode |=
-              CanvasResourceProvider::kAllowSwapChainPresentationMode;
-        }
-
-        ReplaceResourceProvider(CanvasResourceProvider::CreateForCanvas(
-            Size(), usage, SharedGpuContext::ContextProviderWrapper(),
-            0 /* msaa_sample_count */, FilterQuality(), ColorParams(),
-            presentation_mode, std::move(dispatcher),
-            RenderingContext()->IsOriginTopLeft()));
+        CreateCanvasResourceProvider3D();
       } else {
-        DCHECK(Is2d());
-        const bool want_acceleration =
-            hint == kPreferAcceleration && ShouldAccelerate2dContext();
-
-        CanvasResourceProvider::ResourceUsage usage;
-        if (want_acceleration) {
-          if (LowLatencyEnabled()) {
-            usage = CanvasResourceProvider::ResourceUsage::
-                kAcceleratedDirect2DResourceUsage;
-          } else {
-            usage = CanvasResourceProvider::ResourceUsage::
-                kAcceleratedCompositedResourceUsage;
-          }
-        } else {
-          if (LowLatencyEnabled()) {
-            usage = CanvasResourceProvider::ResourceUsage::
-                kSoftwareCompositedDirect2DResourceUsage;
-          } else {
-            usage = CanvasResourceProvider::ResourceUsage::
-                kSoftwareCompositedResourceUsage;
-          }
-        }
-
-        uint8_t presentation_mode =
-            CanvasResourceProvider::kDefaultPresentationMode;
-        // Allow GMB image resources if the runtime feature is enabled or if
-        // we want to use it for low latency mode.
-        if (RuntimeEnabledFeatures::Canvas2dImageChromiumEnabled() ||
-            (LowLatencyEnabled() && want_acceleration)) {
-          presentation_mode |=
-              CanvasResourceProvider::kAllowImageChromiumPresentationMode;
-        }
-        // Allow swap chains only if the runtime feature is enabled and we're
-        // in low latency mode too.
-        if (base::FeatureList::IsEnabled(kLowLatencyCanvas2dSwapChain) &&
-            LowLatencyEnabled() && want_acceleration) {
-          presentation_mode |=
-              CanvasResourceProvider::kAllowSwapChainPresentationMode;
-        }
-
-        // It is important to not use the context's IsOriginTopLeft() here
-        // because that denotes the current state and could change after the
-        // new resource provider is created e.g. due to switching between
-        // unaccelerated and accelerated modes during tab switching.
-        const bool is_origin_top_left =
-            !want_acceleration || LowLatencyEnabled();
-
-        ReplaceResourceProvider(CanvasResourceProvider::CreateForCanvas(
-            Size(), usage, SharedGpuContext::ContextProviderWrapper(),
-            GetMSAASampleCountFor2dContext(), FilterQuality(), ColorParams(),
-            presentation_mode, std::move(dispatcher), is_origin_top_left));
-
-        if (ResourceProvider()) {
-          // Always save an initial frame, to support resetting the top level
-          // matrix and clip.
-          ResourceProvider()->Canvas()->save();
-          ResourceProvider()->SetFilterQuality(FilterQuality());
-          ResourceProvider()->SetResourceRecyclingEnabled(true);
-        }
+        CreateCanvasResourceProvider2D(hint);
       }
     }
     if (!ResourceProvider())
       did_fail_to_create_resource_provider_ = true;
   }
   return ResourceProvider();
+}
+
+void CanvasRenderingContextHost::CreateCanvasResourceProvider3D() {
+  DCHECK(Is3d());
+
+  base::WeakPtr<CanvasResourceDispatcher> dispatcher =
+      GetOrCreateResourceDispatcher()
+          ? GetOrCreateResourceDispatcher()->GetWeakPtr()
+          : nullptr;
+
+  std::unique_ptr<CanvasResourceProvider> provider;
+
+  if (SharedGpuContext::IsGpuCompositingEnabled() && LowLatencyEnabled()) {
+    // If LowLatency is enabled, we need a resource that is able to perform well
+    // in such mode. It will first try a PassThrough provider and, if that is
+    // not possible, it will try a SharedImage with the appropriate flags.
+    if ((RenderingContext() && RenderingContext()->UsingSwapChain()) ||
+        RuntimeEnabledFeatures::WebGLImageChromiumEnabled()) {
+      // If either SwapChain is enabled or WebGLImage mode is enabled, we can
+      // try a passthrough provider.
+      DCHECK(LowLatencyEnabled());
+      provider = CanvasResourceProvider::CreatePassThroughProvider(
+          Size(), SharedGpuContext::ContextProviderWrapper(), FilterQuality(),
+          ColorParams(), RenderingContext()->IsOriginTopLeft(),
+          std::move(dispatcher));
+    }
+    if (!provider) {
+      // If PassThrough failed, try a SharedImage with usage display enabled,
+      // and if WebGLImageChromium is enabled, add concurrent read write and
+      // usage scanout (overlay).
+      uint32_t shared_image_usage_flags = gpu::SHARED_IMAGE_USAGE_DISPLAY;
+      if (RuntimeEnabledFeatures::WebGLImageChromiumEnabled()) {
+        shared_image_usage_flags |= gpu::SHARED_IMAGE_USAGE_SCANOUT;
+        shared_image_usage_flags |=
+            gpu::SHARED_IMAGE_USAGE_CONCURRENT_READ_WRITE;
+      }
+      provider = CanvasResourceProvider::CreateSharedImageProvider(
+          Size(), SharedGpuContext::ContextProviderWrapper(), FilterQuality(),
+          ColorParams(), RenderingContext()->IsOriginTopLeft(),
+          RasterMode::kGPU, shared_image_usage_flags);
+    }
+  } else if (SharedGpuContext::IsGpuCompositingEnabled()) {
+    // If there is no LawLatency mode, and GPU is enabled, will try a GPU
+    // SharedImage that should support Usage Display and probably Usage Canbout
+    // if WebGLImageChromium is enabled.
+    uint32_t shared_image_usage_flags = gpu::SHARED_IMAGE_USAGE_DISPLAY;
+    if (RuntimeEnabledFeatures::WebGLImageChromiumEnabled()) {
+      shared_image_usage_flags |= gpu::SHARED_IMAGE_USAGE_SCANOUT;
+    }
+    provider = CanvasResourceProvider::CreateSharedImageProvider(
+        Size(), SharedGpuContext::ContextProviderWrapper(), FilterQuality(),
+        ColorParams(), RenderingContext()->IsOriginTopLeft(), RasterMode::kGPU,
+        shared_image_usage_flags);
+  }
+
+  // If either of the other modes failed and / or it was not possible to do, we
+  // will backup with a SharedBitmap, and if that was not possible with a Bitmap
+  // provider.
+  if (!provider) {
+    provider = CanvasResourceProvider::CreateSharedBitmapProvider(
+        Size(), FilterQuality(), ColorParams(), std::move(dispatcher));
+  }
+  if (!provider) {
+    provider = CanvasResourceProvider::CreateBitmapProvider(
+        Size(), FilterQuality(), ColorParams());
+  }
+
+  ReplaceResourceProvider(std::move(provider));
+  if (ResourceProvider() && ResourceProvider()->IsValid()) {
+    base::UmaHistogramBoolean("Blink.Canvas.ResourceProviderIsAccelerated",
+                              ResourceProvider()->IsAccelerated());
+    base::UmaHistogramEnumeration("Blink.Canvas.ResourceProviderType",
+                                  ResourceProvider()->GetType());
+  }
+}
+
+void CanvasRenderingContextHost::CreateCanvasResourceProvider2D(
+    RasterModeHint hint) {
+  DCHECK(IsRenderingContext2D());
+  base::WeakPtr<CanvasResourceDispatcher> dispatcher =
+      GetOrCreateResourceDispatcher()
+          ? GetOrCreateResourceDispatcher()->GetWeakPtr()
+          : nullptr;
+
+  std::unique_ptr<CanvasResourceProvider> provider;
+  const bool use_gpu =
+      hint == RasterModeHint::kPreferGPU && ShouldAccelerate2dContext();
+  // It is important to not use the context's IsOriginTopLeft() here
+  // because that denotes the current state and could change after the
+  // new resource provider is created e.g. due to switching between
+  // unaccelerated and accelerated modes during tab switching.
+  const bool is_origin_top_left = !use_gpu || LowLatencyEnabled();
+  if (use_gpu && LowLatencyEnabled()) {
+    // If we can use the gpu and low latency is enabled, we will try to use a
+    // SwapChain if possible.
+    if (base::FeatureList::IsEnabled(features::kLowLatencyCanvas2dSwapChain)) {
+      provider = CanvasResourceProvider::CreateSwapChainProvider(
+          Size(), SharedGpuContext::ContextProviderWrapper(), FilterQuality(),
+          ColorParams(), is_origin_top_left, std::move(dispatcher));
+    }
+    // If SwapChain failed or it was not possible, we will try a SharedImage
+    // with a set of flags trying to add Usage Display and Usage Scanout and
+    // Concurrent Read and Write if possible.
+    if (!provider) {
+      uint32_t shared_image_usage_flags = gpu::SHARED_IMAGE_USAGE_DISPLAY;
+      if (RuntimeEnabledFeatures::Canvas2dImageChromiumEnabled() ||
+          base::FeatureList::IsEnabled(
+              features::kLowLatencyCanvas2dImageChromium)) {
+        shared_image_usage_flags |= gpu::SHARED_IMAGE_USAGE_SCANOUT;
+        shared_image_usage_flags |=
+            gpu::SHARED_IMAGE_USAGE_CONCURRENT_READ_WRITE;
+      }
+      provider = CanvasResourceProvider::CreateSharedImageProvider(
+          Size(), SharedGpuContext::ContextProviderWrapper(), FilterQuality(),
+          ColorParams(), is_origin_top_left, RasterMode::kGPU,
+          shared_image_usage_flags);
+    }
+  } else if (use_gpu) {
+    // First try to be optimized for displaying on screen. In the case we are
+    // hardware compositing, we also try to enable the usage of the image as
+    // scanout buffer (overlay)
+    uint32_t shared_image_usage_flags = gpu::SHARED_IMAGE_USAGE_DISPLAY;
+    if (RuntimeEnabledFeatures::Canvas2dImageChromiumEnabled())
+      shared_image_usage_flags |= gpu::SHARED_IMAGE_USAGE_SCANOUT;
+    provider = CanvasResourceProvider::CreateSharedImageProvider(
+        Size(), SharedGpuContext::ContextProviderWrapper(), FilterQuality(),
+        ColorParams(), is_origin_top_left, RasterMode::kGPU,
+        shared_image_usage_flags);
+  } else if (RuntimeEnabledFeatures::Canvas2dImageChromiumEnabled()) {
+    const uint32_t shared_image_usage_flags =
+        gpu::SHARED_IMAGE_USAGE_DISPLAY | gpu::SHARED_IMAGE_USAGE_SCANOUT;
+    provider = CanvasResourceProvider::CreateSharedImageProvider(
+        Size(), SharedGpuContext::ContextProviderWrapper(), FilterQuality(),
+        ColorParams(), is_origin_top_left, RasterMode::kCPU,
+        shared_image_usage_flags);
+  }
+
+  // If either of the other modes failed and / or it was not possible to do, we
+  // will backup with a SharedBitmap, and if that was not possible with a Bitmap
+  // provider.
+  if (!provider) {
+    provider = CanvasResourceProvider::CreateSharedBitmapProvider(
+        Size(), FilterQuality(), ColorParams(), std::move(dispatcher));
+  }
+  if (!provider) {
+    provider = CanvasResourceProvider::CreateBitmapProvider(
+        Size(), FilterQuality(), ColorParams());
+  }
+
+  ReplaceResourceProvider(std::move(provider));
+
+  if (ResourceProvider()) {
+    if (ResourceProvider()->IsValid()) {
+      base::UmaHistogramBoolean("Blink.Canvas.ResourceProviderIsAccelerated",
+                                ResourceProvider()->IsAccelerated());
+      base::UmaHistogramEnumeration("Blink.Canvas.ResourceProviderType",
+                                    ResourceProvider()->GetType());
+    }
+    ResourceProvider()->SetFilterQuality(FilterQuality());
+    ResourceProvider()->SetResourceRecyclingEnabled(true);
+  }
 }
 
 CanvasColorParams CanvasRenderingContextHost::ColorParams() const {
@@ -248,7 +317,7 @@ ScriptPromise CanvasRenderingContextHost::convertToBlob(
 
   base::TimeTicks start_time = base::TimeTicks::Now();
   scoped_refptr<StaticBitmapImage> image_bitmap =
-      RenderingContext()->GetImage(kPreferNoAcceleration);
+      RenderingContext()->GetImage();
   if (image_bitmap) {
     auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
     CanvasAsyncBlobCreator::ToBlobFunctionType function_type =
@@ -259,7 +328,7 @@ ScriptPromise CanvasRenderingContextHost::convertToBlob(
     }
     auto* async_creator = MakeGarbageCollected<CanvasAsyncBlobCreator>(
         image_bitmap, options, function_type, start_time,
-        ExecutionContext::From(script_state), resolver);
+        ExecutionContext::From(script_state), ukm_params_, resolver);
     async_creator->ScheduleAsyncBlobCreation(options->quality());
     return resolver->Promise();
   }

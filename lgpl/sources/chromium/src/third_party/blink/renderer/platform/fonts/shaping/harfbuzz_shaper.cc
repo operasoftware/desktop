@@ -319,7 +319,7 @@ void HarfBuzzShaper::CommitGlyphs(RangeData* range_data,
                                   const SimpleFontData* current_font,
                                   UScriptCode current_run_script,
                                   CanvasRotationInVertical canvas_rotation,
-                                  bool is_last_resort,
+                                  bool is_last_font,
                                   const BufferSlice& slice,
                                   ShapeResult* shape_result) const {
   hb_direction_t direction = range_data->HarfBuzzDirection(canvas_rotation);
@@ -346,7 +346,7 @@ void HarfBuzzShaper::CommitGlyphs(RangeData* range_data,
                   current_slice->num_glyphs - num_glyphs_inserted};
     current_slice = &next_slice;
   }
-  if (is_last_resort)
+  if (is_last_font)
     range_data->font->ReportNotDefGlyph();
 }
 
@@ -357,7 +357,7 @@ void HarfBuzzShaper::ExtractShapeResults(
     const SimpleFontData* current_font,
     UScriptCode current_run_script,
     CanvasRotationInVertical canvas_rotation,
-    bool is_last_resort,
+    bool is_last_font,
     ShapeResult* shape_result) const {
   enum ClusterResult { kShaped, kNotDef, kUnknown };
   ClusterResult current_cluster_result = kUnknown;
@@ -397,7 +397,7 @@ void HarfBuzzShaper::ExtractShapeResults(
         // If the most recent cluster is shaped and there is a state change,
         // it means the previous ones were unshaped, so we queue them, unless
         // we're using the last resort font.
-        if (current_cluster_result == kShaped && !is_last_resort) {
+        if (current_cluster_result == kShaped && !is_last_font) {
           QueueCharacters(range_data, current_font, font_cycle_queued, slice);
         } else {
           // If the most recent cluster is unshaped and there is a state
@@ -405,7 +405,7 @@ void HarfBuzzShaper::ExtractShapeResults(
           // the glyphs. We also commit when we've reached the last resort
           // font.
           CommitGlyphs(range_data, current_font, current_run_script,
-                       canvas_rotation, is_last_resort, slice, shape_result);
+                       canvas_rotation, is_last_font, slice, shape_result);
         }
         last_change_glyph_index = previous_cluster_start_glyph_index;
       }
@@ -427,7 +427,7 @@ void HarfBuzzShaper::ExtractShapeResults(
 
   // End of the run.
   if (current_cluster_result != previous_cluster_result &&
-      previous_cluster_result != kUnknown && !is_last_resort) {
+      previous_cluster_result != kUnknown && !is_last_font) {
     // The last cluster in the run still had shaping status different from
     // the cluster(s) before it, we need to submit one shaped and one
     // unshaped segment.
@@ -440,13 +440,13 @@ void HarfBuzzShaper::ExtractShapeResults(
           ComputeSlice(range_data, current_queue_item, glyph_info, num_glyphs,
                        previous_cluster_start_glyph_index, num_glyphs);
       CommitGlyphs(range_data, current_font, current_run_script,
-                   canvas_rotation, is_last_resort, slice, shape_result);
+                   canvas_rotation, is_last_font, slice, shape_result);
     } else {
       BufferSlice slice = ComputeSlice(
           range_data, current_queue_item, glyph_info, num_glyphs,
           last_change_glyph_index, previous_cluster_start_glyph_index);
       CommitGlyphs(range_data, current_font, current_run_script,
-                   canvas_rotation, is_last_resort, slice, shape_result);
+                   canvas_rotation, is_last_font, slice, shape_result);
       slice =
           ComputeSlice(range_data, current_queue_item, glyph_info, num_glyphs,
                        previous_cluster_start_glyph_index, num_glyphs);
@@ -458,11 +458,11 @@ void HarfBuzzShaper::ExtractShapeResults(
     BufferSlice slice =
         ComputeSlice(range_data, current_queue_item, glyph_info, num_glyphs,
                      last_change_glyph_index, num_glyphs);
-    if (current_cluster_result == kNotDef && !is_last_resort) {
+    if (current_cluster_result == kNotDef && !is_last_font) {
       QueueCharacters(range_data, current_font, font_cycle_queued, slice);
     } else {
       CommitGlyphs(range_data, current_font, current_run_script,
-                   canvas_rotation, is_last_resort, slice, shape_result);
+                   canvas_rotation, is_last_font, slice, shape_result);
     }
   }
 }
@@ -855,8 +855,8 @@ void HarfBuzzShaper::ShapeSegment(
       font_description.VariantCaps() != FontDescription::kCapsNormal;
   OpenTypeCapsSupport caps_support;
 
-  scoped_refptr<FontFallbackIterator> fallback_iterator =
-      font->CreateFontFallbackIterator(segment.font_fallback_priority);
+  FontFallbackIterator fallback_iterator(
+      font->CreateFontFallbackIterator(segment.font_fallback_priority));
 
   range_data->reshape_queue.push_back(
       ReshapeQueueItem(kReshapeQueueNextFont, 0, 0));
@@ -867,7 +867,7 @@ void HarfBuzzShaper::ShapeSegment(
   Vector<UChar32> fallback_chars_hint;
   // Reserve sufficient capacity to avoid multiple reallocations, only when a
   // full hint list is needed.
-  if (fallback_iterator->NeedsHintList()) {
+  if (fallback_iterator.NeedsHintList()) {
     fallback_chars_hint.ReserveInitialCapacity(range_data->end -
                                                range_data->start);
   }
@@ -877,7 +877,7 @@ void HarfBuzzShaper::ShapeSegment(
 
     if (current_queue_item.action_ == kReshapeQueueNextFont) {
       if (!CollectFallbackHintChars(range_data->reshape_queue,
-                                    fallback_iterator->NeedsHintList(),
+                                    fallback_iterator.NeedsHintList(),
                                     fallback_chars_hint)) {
         // Give up shaping since we cannot retrieve a font fallback
         // font without a hintlist.
@@ -886,7 +886,7 @@ void HarfBuzzShaper::ShapeSegment(
       }
 
       current_font_data_for_range_set =
-          fallback_iterator->Next(fallback_chars_hint);
+          fallback_iterator.Next(fallback_chars_hint);
       if (!current_font_data_for_range_set->FontData()) {
         DCHECK(range_data->reshape_queue.empty());
         break;
@@ -959,7 +959,7 @@ void HarfBuzzShaper::ShapeSegment(
 
     ExtractShapeResults(range_data, font_cycle_queued, current_queue_item,
                         adjusted_font, segment.script, canvas_rotation,
-                        !fallback_iterator->HasNext(), result);
+                        !fallback_iterator.HasNext(), result);
 
     hb_buffer_reset(range_data->buffer);
   }

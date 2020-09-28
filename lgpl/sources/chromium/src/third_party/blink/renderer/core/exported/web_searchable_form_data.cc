@@ -48,8 +48,6 @@
 
 namespace blink {
 
-using namespace html_names;
-
 namespace {
 
 // Gets the encoding for the form.
@@ -93,7 +91,7 @@ bool IsSelectInDefaultState(const HTMLSelectElement& select) {
   if (select.IsMultiple() || select.size() > 1) {
     for (auto* const option_element : select.GetOptionList()) {
       if (option_element->Selected() !=
-          option_element->FastHasAttribute(kSelectedAttr))
+          option_element->FastHasAttribute(html_names::kSelectedAttr))
         return false;
     }
     return true;
@@ -103,7 +101,7 @@ bool IsSelectInDefaultState(const HTMLSelectElement& select) {
   // least one item is selected, determine which one.
   HTMLOptionElement* initial_selected = nullptr;
   for (auto* const option_element : select.GetOptionList()) {
-    if (option_element->FastHasAttribute(kSelectedAttr)) {
+    if (option_element->FastHasAttribute(html_names::kSelectedAttr)) {
       // The page specified the option to select.
       initial_selected = option_element;
       break;
@@ -120,10 +118,12 @@ bool IsSelectInDefaultState(const HTMLSelectElement& select) {
 // in its default state if the checked state matches the state of the checked
 // attribute.
 bool IsInDefaultState(const HTMLFormControlElement& form_element) {
-  if (auto* input = ToHTMLInputElementOrNull(form_element)) {
+  if (auto* input = DynamicTo<HTMLInputElement>(form_element)) {
     if (input->type() == input_type_names::kCheckbox ||
-        input->type() == input_type_names::kRadio)
-      return input->checked() == input->FastHasAttribute(kCheckedAttr);
+        input->type() == input_type_names::kRadio) {
+      return input->checked() ==
+             input->FastHasAttribute(html_names::kCheckedAttr);
+    }
   } else if (auto* select = DynamicTo<HTMLSelectElement>(form_element)) {
     return IsSelectInDefaultState(*select);
   }
@@ -146,26 +146,25 @@ HTMLInputElement* FindSuitableSearchInputElement(const HTMLFormElement& form) {
     if (control->IsDisabledFormControl() || control->GetName().IsNull())
       continue;
 
-    if (!IsInDefaultState(*control) || IsHTMLTextAreaElement(*control))
+    if (!IsInDefaultState(*control) || IsA<HTMLTextAreaElement>(*control))
       return nullptr;
 
-    if (IsHTMLInputElement(*control) && control->willValidate()) {
-      const HTMLInputElement& input = ToHTMLInputElement(*control);
-
+    auto* input = DynamicTo<HTMLInputElement>(control);
+    if (input && input->willValidate()) {
       // Return nothing if a file upload field or a password field are
       // found.
-      if (input.type() == input_type_names::kFile ||
-          input.type() == input_type_names::kPassword)
+      if (input->type() == input_type_names::kFile ||
+          input->type() == input_type_names::kPassword)
         return nullptr;
 
-      if (input.IsTextField()) {
+      if (input->IsTextField()) {
         if (text_element) {
           // The auto-complete bar only knows how to fill in one
           // value.  This form has multiple fields; don't treat it as
           // searchable.
           return nullptr;
         }
-        text_element = ToHTMLInputElement(control);
+        text_element = input;
       }
     }
   }
@@ -224,8 +223,7 @@ WebSearchableFormData::WebSearchableFormData(
       static_cast<HTMLInputElement*>(selected_input_element);
 
   bool is_post_form = DeprecatedEqualIgnoringCase(
-      form_element->getAttribute(kMethodAttr), "post");
-
+      form_element->FastGetAttribute(html_names::kMethodAttr), "post");
   if (is_post_form &&
       !WebRuntimeFeatures::IsWebSearchableFormDataPOSTSupportEnabled())
     return;

@@ -26,15 +26,17 @@
 #include "third_party/blink/renderer/modules/accessibility/ax_menu_list.h"
 
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
-#include "third_party/blink/renderer/core/layout/layout_menu_list.h"
+#include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_menu_list_popup.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_object_cache_impl.h"
 
 namespace blink {
 
-AXMenuList::AXMenuList(LayoutMenuList* layout_object,
+AXMenuList::AXMenuList(LayoutObject* layout_object,
                        AXObjectCacheImpl& ax_object_cache)
-    : AXLayoutObject(layout_object, ax_object_cache) {}
+    : AXLayoutObject(layout_object, ax_object_cache) {
+  DCHECK(IsA<HTMLSelectElement>(layout_object->GetNode()));
+}
 
 ax::mojom::Role AXMenuList::DetermineAccessibilityRole() {
   if ((aria_role_ = DetermineAriaRoleAttribute()) != ax::mojom::Role::kUnknown)
@@ -47,7 +49,7 @@ bool AXMenuList::OnNativeClickAction() {
   if (!layout_object_)
     return false;
 
-  HTMLSelectElement* select = ToLayoutMenuList(layout_object_)->SelectElement();
+  HTMLSelectElement* select = To<HTMLSelectElement>(GetNode());
   if (select->PopupIsVisible())
     select->HidePopup();
   else
@@ -63,7 +65,7 @@ void AXMenuList::ClearChildren() {
   // There's no reason to clear our AXMenuListPopup child. If we get a
   // call to clearChildren, it's because the options might have changed,
   // so call it on our popup.
-  DCHECK(children_.size() == 1);
+  DCHECK_EQ(ChildCountIncludingIgnored(), 1);
   children_[0]->ClearChildren();
 }
 
@@ -77,7 +79,7 @@ void AXMenuList::AddChildren() {
   if (!popup)
     return;
 
-  ToAXMockObject(popup)->SetParent(this);
+  To<AXMockObject>(popup)->SetParent(this);
   if (!popup->AccessibilityIsIncludedInTree()) {
     cache.Remove(popup->AXObjectID());
     return;
@@ -94,7 +96,7 @@ bool AXMenuList::IsCollapsed() const {
   if (!layout_object_)
     return true;
 
-  return !ToLayoutMenuList(layout_object_)->SelectElement()->PopupIsVisible();
+  return !To<HTMLSelectElement>(GetNode())->PopupIsVisible();
 }
 
 AccessibilityExpanded AXMenuList::IsExpanded() const {
@@ -109,15 +111,13 @@ void AXMenuList::DidUpdateActiveOption(int option_index) {
       (GetNode() && !GetNode()->IsFinishedParsingChildren());
 
   if (HasChildren()) {
-    const auto& child_objects = Children();
+    const auto& child_objects = ChildrenIncludingIgnored();
     if (!child_objects.IsEmpty()) {
       DCHECK_EQ(child_objects.size(), 1ul);
-      DCHECK(child_objects[0]->IsMenuListPopup());
+      DCHECK(IsA<AXMenuListPopup>(child_objects[0].Get()));
 
-      if (child_objects[0]->IsMenuListPopup()) {
-        if (AXMenuListPopup* popup = ToAXMenuListPopup(child_objects[0].Get()))
-          popup->DidUpdateActiveOption(option_index, !suppress_notifications);
-      }
+      if (auto* popup = DynamicTo<AXMenuListPopup>(child_objects[0].Get()))
+        popup->DidUpdateActiveOption(option_index, !suppress_notifications);
     }
   }
 
@@ -126,18 +126,18 @@ void AXMenuList::DidUpdateActiveOption(int option_index) {
 }
 
 void AXMenuList::DidShowPopup() {
-  if (Children().size() != 1)
+  if (ChildCountIncludingIgnored() != 1)
     return;
 
-  AXMenuListPopup* popup = ToAXMenuListPopup(Children()[0].Get());
+  auto* popup = To<AXMenuListPopup>(ChildAtIncludingIgnored(0));
   popup->DidShow();
 }
 
 void AXMenuList::DidHidePopup() {
-  if (Children().size() != 1)
+  if (ChildCountIncludingIgnored() != 1)
     return;
 
-  AXMenuListPopup* popup = ToAXMenuListPopup(Children()[0].Get());
+  auto* popup = To<AXMenuListPopup>(ChildAtIncludingIgnored(0));
   popup->DidHide();
 
   if (GetNode() && GetNode()->IsFocused())

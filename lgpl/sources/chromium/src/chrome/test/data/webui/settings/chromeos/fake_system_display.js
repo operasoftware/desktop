@@ -61,16 +61,16 @@ cr.define('settings', function() {
         callback();
       }
 
-      if (info.mirroringSourceId != undefined) {
-        for (let d of this.fakeDisplays) {
+      if (info.mirroringSourceId !== undefined) {
+        for (const d of this.fakeDisplays) {
           d.mirroringSourceId = info.mirroringSourceId;
         }
       }
 
-      if (info.isPrimary != undefined) {
+      if (info.isPrimary !== undefined) {
         let havePrimary = info.isPrimary;
-        for (let d of this.fakeDisplays) {
-          if (d.id == id) {
+        for (const d of this.fakeDisplays) {
+          if (d.id === id) {
             d.isPrimary = info.isPrimary;
           } else if (havePrimary) {
             d.isPrimary = false;
@@ -81,7 +81,7 @@ cr.define('settings', function() {
         }
         this.updateLayouts_();
       }
-      if (info.rotation != undefined) {
+      if (info.rotation !== undefined) {
         display.rotation = info.rotation;
       }
     },
@@ -106,16 +106,16 @@ cr.define('settings', function() {
     /** @override */
     setMirrorMode(info, callback) {
       let mirroringSourceId = '';
-      if (info.mode == chrome.system.display.MirrorMode.NORMAL) {
+      if (info.mode === chrome.system.display.MirrorMode.NORMAL) {
         // Select the primary display as the mirroring source.
-        for (let d of this.fakeDisplays) {
+        for (const d of this.fakeDisplays) {
           if (d.isPrimary) {
             mirroringSourceId = d.id;
             break;
           }
         }
       }
-      for (let d of this.fakeDisplays) {
+      for (const d of this.fakeDisplays) {
         d.mirroringSourceId = mirroringSourceId;
       }
       callback();
@@ -127,7 +127,7 @@ cr.define('settings', function() {
     /** @private */
     getFakeDisplay_(id) {
       const idx = this.fakeDisplays.findIndex(function(display) {
-        return display.id == id;
+        return display.id === id;
       });
       if (idx >= 0) {
         return this.fakeDisplays[idx];
@@ -139,13 +139,13 @@ cr.define('settings', function() {
     updateLayouts_() {
       this.fakeLayouts = [];
       let primaryId = '';
-      for (let d of this.fakeDisplays) {
+      for (const d of this.fakeDisplays) {
         if (d.isPrimary) {
           primaryId = d.id;
           break;
         }
       }
-      for (let d of this.fakeDisplays) {
+      for (const d of this.fakeDisplays) {
         this.fakeLayouts.push({
           id: d.id,
           parentId: d.isPrimary ? '' : primaryId,

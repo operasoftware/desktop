@@ -9,9 +9,9 @@ namespace blink {
 
 // Use for passing preferred color scheme from the OS to the renderer.
 enum class PreferredColorScheme {
-  kNoPreference,
   kDark,
   kLight,
+  kMaxValue = kLight,
 };
 
 }  // namespace blink

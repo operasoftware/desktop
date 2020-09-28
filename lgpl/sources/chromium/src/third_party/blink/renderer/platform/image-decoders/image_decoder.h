@@ -142,6 +142,13 @@ class PLATFORM_EXPORT ImageDecoder {
     kMaxValue = kWebPAnimationFormat,
   };
 
+  // Enforces YUV decoding to be disallowed in the image decoder. The default
+  // value defers the YUV decoding decision to the decoder.
+  enum class OverrideAllowDecodeToYuv {
+    kDefault,
+    kDeny,
+  };
+
   virtual ~ImageDecoder() = default;
 
   // Returns a caller-owned decoder of the appropriate type.  Returns nullptr if
@@ -154,6 +161,8 @@ class PLATFORM_EXPORT ImageDecoder {
       AlphaOption,
       HighBitDepthDecodingOption,
       const ColorBehavior&,
+      const OverrideAllowDecodeToYuv allow_decode_to_yuv =
+          OverrideAllowDecodeToYuv::kDefault,
       const SkISize& desired_size = SkISize::MakeEmpty());
   static std::unique_ptr<ImageDecoder> Create(
       scoped_refptr<SharedBuffer> data,
@@ -161,11 +170,26 @@ class PLATFORM_EXPORT ImageDecoder {
       AlphaOption alpha_option,
       HighBitDepthDecodingOption high_bit_depth_decoding_option,
       const ColorBehavior& color_behavior,
+      const OverrideAllowDecodeToYuv allow_decode_to_yuv =
+          OverrideAllowDecodeToYuv::kDefault,
       const SkISize& desired_size = SkISize::MakeEmpty()) {
     return Create(SegmentReader::CreateFromSharedBuffer(std::move(data)),
                   data_complete, alpha_option, high_bit_depth_decoding_option,
-                  color_behavior, desired_size);
+                  color_behavior, allow_decode_to_yuv, desired_size);
   }
+
+  // Similar to above, but does not allow mime sniffing. Creates explicitly
+  // based on the |mime_type| value.
+  static std::unique_ptr<ImageDecoder> CreateByMimeType(
+      String mime_type,
+      scoped_refptr<SegmentReader> data,
+      bool data_complete,
+      AlphaOption alpha_option,
+      HighBitDepthDecodingOption high_bit_depth_decoding_option,
+      const ColorBehavior& color_behavior,
+      const OverrideAllowDecodeToYuv allow_decode_to_yuv =
+          OverrideAllowDecodeToYuv::kDefault,
+      const SkISize& desired_size = SkISize::MakeEmpty());
 
   virtual String FilenameExtension() const = 0;
 
@@ -180,10 +204,10 @@ class PLATFORM_EXPORT ImageDecoder {
   // Returns true if the buffer holds enough data to instantiate a decoder.
   // This is useful for callers to determine whether a decoder instantiation
   // failure is due to insufficient or bad data.
-  static bool HasSufficientDataToSniffImageType(const SharedBuffer&);
+  static bool HasSufficientDataToSniffMimeType(const SharedBuffer&);
 
   // Looks at the image data to determine and return the image MIME type.
-  static String SniffImageType(scoped_refptr<SharedBuffer> image_data);
+  static String SniffMimeType(scoped_refptr<SharedBuffer> image_data);
 
   // Returns the image data's compression format.
   static CompressionFormat GetCompressionFormat(
@@ -205,13 +229,7 @@ class PLATFORM_EXPORT ImageDecoder {
 
   virtual void OnSetData(SegmentReader* data) {}
 
-  bool IsSizeAvailable() {
-    if (failed_)
-      return false;
-    if (!size_available_)
-      DecodeSize();
-    return IsDecodedSizeAvailable();
-  }
+  bool IsSizeAvailable();
 
   bool IsDecodedSizeAvailable() const { return !failed_ && size_available_; }
 
@@ -250,9 +268,9 @@ class PLATFORM_EXPORT ImageDecoder {
   // method, i.e., IsDecodedSizeAvailable() must return true.
   virtual cc::ImageHeaderMetadata MakeMetadataForDecodeAcceleration() const;
 
-  // This will only differ from size() for ICO (where each frame is a
+  // This will only differ from Size() for ICO (where each frame is a
   // different icon) or other formats where different frames are different
-  // sizes. This does NOT differ from size() for GIF or WebP, since
+  // sizes. This does NOT differ from Size() for GIF or WebP, since
   // decoding GIF or WebP composites any smaller frames against previous
   // frames to create full-size frames.
   virtual IntSize FrameSizeAtIndex(size_t) const { return Size(); }
@@ -304,6 +322,7 @@ class PLATFORM_EXPORT ImageDecoder {
   virtual size_t FrameBytesAtIndex(size_t) const;
 
   ImageOrientation Orientation() const { return orientation_; }
+  IntSize DensityCorrectedSize() const { return density_corrected_size_; }
 
   bool IgnoresColorSpace() const { return color_behavior_.IsIgnore(); }
   const ColorBehavior& GetColorBehavior() const { return color_behavior_; }
@@ -364,7 +383,7 @@ class PLATFORM_EXPORT ImageDecoder {
     frame_buffer_cache_[0].SetMemoryAllocator(allocator);
   }
 
-  virtual bool CanDecodeToYUV() { return allow_decode_to_yuv_; }
+  bool CanDecodeToYUV() const { return allow_decode_to_yuv_; }
   // Should only be called if CanDecodeToYuv() returns true, in which case
   // the subclass of ImageDecoder must override this method.
   virtual void DecodeToYUV() { NOTREACHED(); }
@@ -376,12 +395,13 @@ class PLATFORM_EXPORT ImageDecoder {
   ImageDecoder(AlphaOption alpha_option,
                HighBitDepthDecodingOption high_bit_depth_decoding_option,
                const ColorBehavior& color_behavior,
-               size_t max_decoded_bytes)
+               size_t max_decoded_bytes,
+               const bool allow_decode_to_yuv = false)
       : premultiply_alpha_(alpha_option == kAlphaPremultiplied),
         high_bit_depth_decoding_option_(high_bit_depth_decoding_option),
         color_behavior_(color_behavior),
         max_decoded_bytes_(max_decoded_bytes),
-        allow_decode_to_yuv_(false),
+        allow_decode_to_yuv_(allow_decode_to_yuv),
         purge_aggressively_(false) {}
 
   // Calculates the most recent frame whose image data may be needed in
@@ -400,7 +420,7 @@ class PLATFORM_EXPORT ImageDecoder {
   //
   // Image formats which do not use more than one frame do not need to
   // worry about this; see comments on
-  // ImageFrame::required_previous_frame+index_.
+  // ImageFrame::required_previous_frame_index_.
   size_t FindRequiredPreviousFrame(size_t frame_index,
                                    bool frame_rect_is_opaque);
 
@@ -462,6 +482,7 @@ class PLATFORM_EXPORT ImageDecoder {
   const HighBitDepthDecodingOption high_bit_depth_decoding_option_;
   const ColorBehavior color_behavior_;
   ImageOrientation orientation_;
+  IntSize density_corrected_size_;
 
   // The maximum amount of memory a decoded image should require. Ideally,
   // image decoders should downsample large images to fit under this limit

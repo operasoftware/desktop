@@ -67,7 +67,7 @@ SVGGradientElement::SVGGradientElement(const QualifiedName& tag_name,
   AddToPropertyMap(gradient_units_);
 }
 
-void SVGGradientElement::Trace(blink::Visitor* visitor) {
+void SVGGradientElement::Trace(Visitor* visitor) const {
   visitor->Trace(gradient_transform_);
   visitor->Trace(spread_method_);
   visitor->Trace(gradient_units_);
@@ -146,10 +146,8 @@ void SVGGradientElement::RemovedFrom(ContainerNode& root_parent) {
 void SVGGradientElement::ChildrenChanged(const ChildrenChange& change) {
   SVGElement::ChildrenChanged(change);
 
-  if (change.by_parser)
-    return;
-
-  InvalidateGradient(layout_invalidation_reason::kChildChanged);
+  if (!change.ByParser())
+    InvalidateGradient(layout_invalidation_reason::kChildChanged);
 }
 
 void SVGGradientElement::InvalidateGradient(
@@ -170,10 +168,10 @@ void SVGGradientElement::InvalidateDependentGradients() {
 void SVGGradientElement::CollectCommonAttributes(
     GradientAttributes& attributes) const {
   if (!attributes.HasSpreadMethod() && spreadMethod()->IsSpecified())
-    attributes.SetSpreadMethod(spreadMethod()->CurrentValue()->EnumValue());
+    attributes.SetSpreadMethod(spreadMethod()->CurrentEnumValue());
 
   if (!attributes.HasGradientUnits() && gradientUnits()->IsSpecified())
-    attributes.SetGradientUnits(gradientUnits()->CurrentValue()->EnumValue());
+    attributes.SetGradientUnits(gradientUnits()->CurrentEnumValue());
 
   if (!attributes.HasGradientTransform() &&
       HasTransform(SVGElement::kExcludeMotionTransform)) {

@@ -39,22 +39,30 @@
 
 namespace blink {
 
-FontFallbackList::FontFallbackList()
+FontFallbackList::FontFallbackList(FontSelector* font_selector)
     : cached_primary_simple_font_data_(nullptr),
-      font_selector_(nullptr),
-      font_selector_version_(0),
+      font_selector_(font_selector),
+      font_selector_version_(font_selector ? font_selector->Version() : 0),
       family_index_(0),
       generation_(FontCache::GetFontCache()->Generation()),
-      has_loading_fallback_(false) {}
+      has_loading_fallback_(false),
+      has_custom_font_(false),
+      can_shape_word_by_word_(false),
+      can_shape_word_by_word_computed_(false),
+      is_invalid_(false) {}
 
-void FontFallbackList::Invalidate(FontSelector* font_selector) {
+void FontFallbackList::RevalidateDeprecated() {
+  DCHECK(RuntimeEnabledFeatures::CSSReducedFontLoadingInvalidationsEnabled());
+  DCHECK(!RuntimeEnabledFeatures::
+             CSSReducedFontLoadingLayoutInvalidationsEnabled());
   ReleaseFontData();
   font_list_.clear();
   cached_primary_simple_font_data_ = nullptr;
   family_index_ = 0;
   has_loading_fallback_ = false;
-  if (font_selector_ != font_selector)
-    font_selector_ = font_selector;
+  has_custom_font_ = false;
+  can_shape_word_by_word_ = false;
+  can_shape_word_by_word_computed_ = false;
   font_selector_version_ = font_selector_ ? font_selector_->Version() : 0;
   generation_ = FontCache::GetFontCache()->Generation();
 }
@@ -65,13 +73,18 @@ void FontFallbackList::ReleaseFontData() {
     if (!font_list_[i]->IsCustomFont()) {
       DCHECK(!font_list_[i]->IsSegmented());
       FontCache::GetFontCache()->ReleaseFontData(
-          ToSimpleFontData(font_list_[i]));
+          To<SimpleFontData>(font_list_[i].get()));
     }
   }
   shape_cache_.reset();  // Clear the weak pointer to the cache instance.
 }
 
 bool FontFallbackList::LoadingCustomFonts() const {
+  // This function is only used for style and layout invalidation purposes. We
+  // don't need it for invalidation when the feature below is enabled.
+  if (RuntimeEnabledFeatures::CSSReducedFontLoadingInvalidationsEnabled())
+    return false;
+
   if (!has_loading_fallback_)
     return false;
 
@@ -84,6 +97,11 @@ bool FontFallbackList::LoadingCustomFonts() const {
 }
 
 bool FontFallbackList::ShouldSkipDrawing() const {
+  // The DCHECK hit will be fixed by the runtime enabled feature below, so we
+  // don't fix it in the legacy code paths.
+  DCHECK(IsValid() || !RuntimeEnabledFeatures::
+                          CSSReducedFontLoadingLayoutInvalidationsEnabled());
+
   if (!has_loading_fallback_)
     return false;
 
@@ -96,7 +114,7 @@ bool FontFallbackList::ShouldSkipDrawing() const {
 }
 
 const SimpleFontData* FontFallbackList::DeterminePrimarySimpleFontData(
-    const FontDescription& font_description) const {
+    const FontDescription& font_description) {
   bool should_load_custom_font = true;
 
   for (unsigned font_index = 0;; ++font_index) {
@@ -114,8 +132,8 @@ const SimpleFontData* FontFallbackList::DeterminePrimarySimpleFontData(
       return last_resort_fallback;
     }
 
-    if (font_data->IsSegmented() &&
-        !ToSegmentedFontData(font_data)->ContainsCharacter(kSpaceCharacter))
+    const auto* segmented = DynamicTo<SegmentedFontData>(font_data);
+    if (segmented && !segmented->ContainsCharacter(kSpaceCharacter))
       continue;
 
     const SimpleFontData* font_data_for_space =
@@ -128,8 +146,7 @@ const SimpleFontData* FontFallbackList::DeterminePrimarySimpleFontData(
     if (!font_data_for_space->IsLoadingFallback())
       return font_data_for_space;
 
-    if (font_data->IsSegmented()) {
-      const SegmentedFontData* segmented = ToSegmentedFontData(font_data);
+    if (segmented) {
       for (unsigned i = 0; i < segmented->NumFaces(); i++) {
         const SimpleFontData* range_font_data =
             segmented->FaceAt(i)->FontData();
@@ -149,14 +166,13 @@ const SimpleFontData* FontFallbackList::DeterminePrimarySimpleFontData(
 }
 
 scoped_refptr<FontData> FontFallbackList::GetFontData(
-    const FontDescription& font_description,
-    int& family_index) const {
+    const FontDescription& font_description) {
   const FontFamily* curr_family = &font_description.Family();
-  for (int i = 0; curr_family && i < family_index; i++)
+  for (int i = 0; curr_family && i < family_index_; i++)
     curr_family = curr_family->Next();
 
   for (; curr_family; curr_family = curr_family->Next()) {
-    family_index++;
+    family_index_++;
     if (curr_family->Family().length()) {
       scoped_refptr<FontData> result;
       if (font_selector_)
@@ -165,11 +181,19 @@ scoped_refptr<FontData> FontFallbackList::GetFontData(
       if (!result)
         result = FontCache::GetFontCache()->GetFontData(font_description,
                                                         curr_family->Family());
-      if (result)
+      if (result) {
+        if (font_selector_) {
+          font_selector_->ReportSuccessfulFontFamilyMatch(
+              curr_family->Family());
+        }
         return result;
+      }
+
+      if (font_selector_)
+        font_selector_->ReportFailedFontFamilyMatch(curr_family->Family());
     }
   }
-  family_index = kCAllFamiliesScanned;
+  family_index_ = kCAllFamiliesScanned;
 
   if (font_selector_) {
     // Try the user's preferred standard font.
@@ -204,8 +228,9 @@ FallbackListCompositeKey FontFallbackList::CompositeKey(
       if (result) {
         bool is_unique_match = false;
         key.Add(font_description.CacheKey(params, is_unique_match));
-        if (!result->IsSegmented() && !result->IsCustomFont())
-          FontCache::GetFontCache()->ReleaseFontData(ToSimpleFontData(result));
+        auto* font_data = DynamicTo<SimpleFontData>(result.get());
+        if (!font_data && !result->IsCustomFont())
+          FontCache::GetFontCache()->ReleaseFontData(font_data);
       }
     }
     current_family = current_family->Next();
@@ -216,7 +241,7 @@ FallbackListCompositeKey FontFallbackList::CompositeKey(
 
 const FontData* FontFallbackList::FontDataAt(
     const FontDescription& font_description,
-    unsigned realized_font_index) const {
+    unsigned realized_font_index) {
   // This fallback font is already in our list.
   if (realized_font_index < font_list_.size())
     return font_list_[realized_font_index].get();
@@ -229,20 +254,53 @@ const FontData* FontFallbackList::FontDataAt(
 
   // Ask the font cache for the font data.
   // We are obtaining this font for the first time.  We keep track of the
-  // families we've looked at before in |m_familyIndex|, so that we never scan
-  // the same spot in the list twice.  getFontData will adjust our
-  // |m_familyIndex| as it scans for the right font to make.
+  // families we've looked at before in |family_index_|, so that we never scan
+  // the same spot in the list twice.  GetFontData will adjust our
+  // |family_index_| as it scans for the right font to make.
   DCHECK_EQ(FontCache::GetFontCache()->Generation(), generation_);
-  scoped_refptr<FontData> result = GetFontData(font_description, family_index_);
+  scoped_refptr<FontData> result = GetFontData(font_description);
   if (result) {
     font_list_.push_back(result);
     if (result->IsLoadingFallback())
       has_loading_fallback_ = true;
+    if (result->IsCustomFont())
+      has_custom_font_ = true;
   }
   return result.get();
 }
 
+bool FontFallbackList::ComputeCanShapeWordByWord(
+    const FontDescription& font_description) {
+  if (!font_description.GetTypesettingFeatures())
+    return true;
+
+  const SimpleFontData* primary_font = PrimarySimpleFontData(font_description);
+  if (!primary_font)
+    return false;
+
+  const FontPlatformData& platform_data = primary_font->PlatformData();
+  TypesettingFeatures features = font_description.GetTypesettingFeatures();
+  return !platform_data.HasSpaceInLigaturesOrKerning(features);
+}
+
+bool FontFallbackList::CanShapeWordByWord(
+    const FontDescription& font_description) {
+  if (!can_shape_word_by_word_computed_) {
+    can_shape_word_by_word_ = ComputeCanShapeWordByWord(font_description);
+    can_shape_word_by_word_computed_ = true;
+  }
+  return can_shape_word_by_word_;
+}
+
 bool FontFallbackList::IsValid() const {
+  if (RuntimeEnabledFeatures::
+          CSSReducedFontLoadingLayoutInvalidationsEnabled()) {
+    return !is_invalid_;
+  }
+
+  // The flag can be set only when the feature above is enabled.
+  DCHECK(!is_invalid_);
+
   if (!font_selector_)
     return font_selector_version_ == 0;
 

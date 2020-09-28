@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/platform/graphics/color_correction_test_utils.h"
 
+#include "base/notreached.h"
 #include "base/sys_byteorder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/third_party/skcms/skcms.h"
@@ -65,33 +66,6 @@ sk_sp<SkColorSpace> ColorCorrectionTestUtils::ColorSpinSkColorSpace() {
   skcms_Parse(colorspin_profile_data, sizeof(colorspin_profile_data),
               &colorspin_profile);
   return SkColorSpace::Make(colorspin_profile);
-}
-
-sk_sp<SkColorSpace>
-ColorCorrectionTestUtils::ColorSpaceConversionToSkColorSpace(
-    ColorSpaceConversion conversion) {
-  if (conversion == kColorSpaceConversion_Default ||
-      conversion == kColorSpaceConversion_SRGB) {
-    return SkColorSpace::MakeSRGB();
-  }
-  if (conversion == kColorSpaceConversion_LinearRGB)
-    return SkColorSpace::MakeSRGBLinear();
-  if (conversion == kColorSpaceConversion_P3) {
-    return SkColorSpace::MakeRGB(SkNamedTransferFn::kLinear,
-                                 SkNamedGamut::kDCIP3);
-  }
-  if (conversion == kColorSpaceConversion_Rec2020) {
-    return SkColorSpace::MakeRGB(SkNamedTransferFn::kLinear,
-                                 SkNamedGamut::kRec2020);
-  }
-  return nullptr;
-}
-
-String ColorCorrectionTestUtils::ColorSpaceConversionToString(
-    ColorSpaceConversion color_space_conversion) {
-  static const Vector<String> kConversions = {
-      "none", "default", "preserve", "srgb", "linear-rgb", "p3", "rec2020"};
-  return kConversions[static_cast<uint8_t>(color_space_conversion)];
 }
 
 void ColorCorrectionTestUtils::CompareColorCorrectedPixels(
@@ -194,7 +168,7 @@ void ColorCorrectionTestUtils::CompareColorCorrectedPixels(
 
 bool ColorCorrectionTestUtils::ConvertPixelsToColorSpaceAndPixelFormatForTest(
     void* src_data,
-    int num_elements,
+    size_t num_elements,
     CanvasColorSpace src_color_space,
     ImageDataStorageFormat src_storage_format,
     CanvasColorSpace dst_color_space,
@@ -209,7 +183,7 @@ bool ColorCorrectionTestUtils::ConvertPixelsToColorSpaceAndPixelFormatForTest(
   }
 
   skcms_PixelFormat dst_pixel_format = skcms_PixelFormat_RGBA_8888;
-  if (dst_canvas_pixel_format == kF16CanvasPixelFormat) {
+  if (dst_canvas_pixel_format == CanvasPixelFormat::kF16) {
     dst_pixel_format = (pixel_format_for_f16_canvas == kPixelFormat_hhhh)
                            ? skcms_PixelFormat_RGBA_hhhh
                            : skcms_PixelFormat_RGBA_ffff;
@@ -219,8 +193,8 @@ bool ColorCorrectionTestUtils::ConvertPixelsToColorSpaceAndPixelFormatForTest(
   src_sk_color_space =
       CanvasColorParams(src_color_space,
                         (src_storage_format == kUint8ClampedArrayStorageFormat)
-                            ? kRGBA8CanvasPixelFormat
-                            : kF16CanvasPixelFormat,
+                            ? CanvasPixelFormat::kRGBA8
+                            : CanvasPixelFormat::kF16,
                         kNonOpaque)
           .GetSkColorSpaceForSkSurfaces();
   if (!src_sk_color_space.get())

@@ -7,6 +7,7 @@ module blink.mojom;
 import "mojo/public/mojom/base/file_path.mojom";
 import "mojo/public/mojom/base/string16.mojom";
 import "mojo/public/mojom/base/time.mojom";
+import "ui/gfx/geometry/mojom/geometry.mojom";
 import "url/mojom/url.mojom";
 
 // FileChooserParams stores arguments for an operation to open a file
@@ -64,6 +65,9 @@ struct FileChooserParams {
   // initiated by a document. Note that this value should be considered
   // untrustworthy since it is specified by the sandbox and not validated.
   url.mojom.Url requestor;
+
+  // Position of the html element that triggered the dialog.
+  gfx.mojom.Rect triggering_rect;
 };
 
 struct NativeFileInfo {

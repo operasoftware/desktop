@@ -421,10 +421,10 @@ TEST_F(LayoutBoxModelObjectTest, StickyPositionConstraintInvalidation) {
       scrollable_area->GetStickyConstraintsMap().Contains(sticky->Layer()));
   EXPECT_EQ(25.f, scrollable_area->GetStickyConstraintsMap()
                       .at(sticky->Layer())
-                      .scroll_container_relative_sticky_box_rect.Location()
-                      .X());
+                      .scroll_container_relative_sticky_box_rect.X());
   To<HTMLElement>(target->GetNode())->classList().Add("hide");
-  GetDocument().View()->UpdateLifecycleToLayoutClean();
+  GetDocument().View()->UpdateLifecycleToLayoutClean(
+      DocumentUpdateReason::kTest);
   // Layout should invalidate the sticky constraints of the sticky element and
   // mark it as needing a compositing inputs update.
   EXPECT_FALSE(
@@ -435,8 +435,7 @@ TEST_F(LayoutBoxModelObjectTest, StickyPositionConstraintInvalidation) {
   UpdateAllLifecyclePhasesForTest();
   EXPECT_EQ(50.f, scrollable_area->GetStickyConstraintsMap()
                       .at(sticky->Layer())
-                      .scroll_container_relative_sticky_box_rect.Location()
-                      .X());
+                      .scroll_container_relative_sticky_box_rect.X());
 }
 
 // Verifies that the correct sticky-box shifting ancestor is found when
@@ -1071,27 +1070,29 @@ TEST_F(LayoutBoxModelObjectTest, InvalidatePaintLayerOnStackedChange) {
   auto* parent = target->Parent();
   auto* original_compositing_container =
       target->Layer()->CompositingContainer();
-  EXPECT_FALSE(target->StyleRef().IsStackingContext());
-  EXPECT_TRUE(target->StyleRef().IsStacked());
-  EXPECT_FALSE(parent->StyleRef().IsStacked());
+  EXPECT_FALSE(target->IsStackingContext());
+  EXPECT_TRUE(target->IsStacked());
+  EXPECT_FALSE(parent->IsStacked());
   EXPECT_NE(parent, original_compositing_container->GetLayoutObject());
 
   target_element->setAttribute(html_names::kClassAttr, "non-stacked");
-  GetDocument().View()->UpdateLifecycleToLayoutClean();
+  GetDocument().View()->UpdateLifecycleToLayoutClean(
+      DocumentUpdateReason::kTest);
 
-  EXPECT_FALSE(target->StyleRef().IsStacked());
-  EXPECT_TRUE(target->Layer()->NeedsRepaint());
-  EXPECT_TRUE(original_compositing_container->NeedsRepaint());
+  EXPECT_FALSE(target->IsStacked());
+  EXPECT_TRUE(target->Layer()->SelfNeedsRepaint());
+  EXPECT_TRUE(original_compositing_container->DescendantNeedsRepaint());
   auto* new_compositing_container = target->Layer()->CompositingContainer();
   EXPECT_EQ(parent, new_compositing_container->GetLayoutObject());
 
   UpdateAllLifecyclePhasesForTest();
   target_element->setAttribute(html_names::kClassAttr, "stacked");
-  GetDocument().View()->UpdateLifecycleToLayoutClean();
+  GetDocument().View()->UpdateLifecycleToLayoutClean(
+      DocumentUpdateReason::kTest);
 
-  EXPECT_TRUE(target->StyleRef().IsStacked());
-  EXPECT_TRUE(target->Layer()->NeedsRepaint());
-  EXPECT_TRUE(new_compositing_container->NeedsRepaint());
+  EXPECT_TRUE(target->IsStacked());
+  EXPECT_TRUE(target->Layer()->SelfNeedsRepaint());
+  EXPECT_TRUE(new_compositing_container->DescendantNeedsRepaint());
   EXPECT_EQ(original_compositing_container,
             target->Layer()->CompositingContainer());
 }
@@ -1154,20 +1155,152 @@ TEST_F(LayoutBoxModelObjectTest, BackfaceVisibilityChange) {
   auto* target_layer =
       ToLayoutBoxModelObject(target->GetLayoutObject())->Layer();
   ASSERT_NE(nullptr, target_layer);
-  EXPECT_FALSE(target_layer->NeedsRepaint());
+  EXPECT_FALSE(target_layer->SelfNeedsRepaint());
 
   target->setAttribute(html_names::kStyleAttr,
                        base_style + "; backface-visibility: hidden");
-  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
-  EXPECT_TRUE(target_layer->NeedsRepaint());
+  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint(
+      DocumentUpdateReason::kTest);
+  EXPECT_TRUE(target_layer->SelfNeedsRepaint());
   UpdateAllLifecyclePhasesForTest();
-  EXPECT_FALSE(target_layer->NeedsRepaint());
+  EXPECT_FALSE(target_layer->SelfNeedsRepaint());
 
   target->setAttribute(html_names::kStyleAttr, base_style);
-  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
-  EXPECT_TRUE(target_layer->NeedsRepaint());
+  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint(
+      DocumentUpdateReason::kTest);
+  EXPECT_TRUE(target_layer->SelfNeedsRepaint());
   UpdateAllLifecyclePhasesForTest();
-  EXPECT_FALSE(target_layer->NeedsRepaint());
+  EXPECT_FALSE(target_layer->SelfNeedsRepaint());
+}
+
+TEST_F(LayoutBoxModelObjectTest, ChangingFilterWithWillChange) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      #target {
+        width: 100px;
+        height: 100px;
+        will-change: filter;
+      }
+    </style>
+    <div id="target"></div>
+  )HTML");
+
+  // Adding a filter should not need to check for paint invalidation because
+  // will-change: filter is present.
+  auto* target = GetDocument().getElementById("target");
+  target->setAttribute(html_names::kStyleAttr, "filter: grayscale(1)");
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_FALSE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+
+  // Removing a filter should not need to check for paint invalidation because
+  // will-change: filter is present.
+  target->removeAttribute(html_names::kStyleAttr);
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_FALSE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+}
+
+TEST_F(LayoutBoxModelObjectTest, ChangingWillChangeFilter) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      .willChange {
+        will-change: filter;
+      }
+      #filter {
+        width: 100px;
+        height: 100px;
+      }
+    </style>
+    <div id="target"></div>
+  )HTML");
+
+  // Adding will-change: filter should check for paint invalidation and create
+  // a PaintLayer.
+  auto* target = GetDocument().getElementById("target");
+  target->classList().Add("willChange");
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_TRUE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+  EXPECT_TRUE(ToLayoutBoxModelObject(target->GetLayoutObject())->Layer());
+
+  // A lifecycle update should clear dirty bits.
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+  EXPECT_TRUE(ToLayoutBoxModelObject(target->GetLayoutObject())->Layer());
+
+  // Removing will-change: filter should check for paint invalidation and remove
+  // the PaintLayer.
+  target->classList().Remove("willChange");
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_TRUE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+  EXPECT_FALSE(ToLayoutBoxModelObject(target->GetLayoutObject())->Layer());
+}
+
+TEST_F(LayoutBoxModelObjectTest, ChangingBackdropFilterWithWillChange) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      #target {
+        width: 100px;
+        height: 100px;
+        will-change: backdrop-filter;
+      }
+    </style>
+    <div id="target"></div>
+  )HTML");
+
+  // Adding a backdrop-filter should not need to check for paint invalidation
+  // because will-change: backdrop-filter is present.
+  auto* target = GetDocument().getElementById("target");
+  target->setAttribute(html_names::kStyleAttr, "backdrop-filter: grayscale(1)");
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_FALSE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+
+  // Removing a backdrop-filter should not need to check for paint invalidation
+  // because will-change: backdrop-filter is present.
+  target->removeAttribute(html_names::kStyleAttr);
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_FALSE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+}
+
+TEST_F(LayoutBoxModelObjectTest, ChangingWillChangeBackdropFilter) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      .willChange {
+        will-change: backdrop-filter;
+      }
+      #filter {
+        width: 100px;
+        height: 100px;
+      }
+    </style>
+    <div id="target"></div>
+  )HTML");
+
+  // Adding will-change: backdrop-filter should check for paint invalidation and
+  // create a PaintLayer.
+  auto* target = GetDocument().getElementById("target");
+  target->classList().Add("willChange");
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_TRUE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+  EXPECT_TRUE(ToLayoutBoxModelObject(target->GetLayoutObject())->Layer());
+
+  // A lifecycle update should clear dirty bits.
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+  EXPECT_TRUE(ToLayoutBoxModelObject(target->GetLayoutObject())->Layer());
+
+  // Removing will-change: backdrop-filter should check for paint invalidation
+  // and remove the PaintLayer.
+  target->classList().Remove("willChange");
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_TRUE(target->GetLayoutObject()->ShouldCheckForPaintInvalidation());
+  EXPECT_FALSE(ToLayoutBoxModelObject(target->GetLayoutObject())->Layer());
 }
 
 TEST_F(LayoutBoxModelObjectTest, UpdateStackingContextForOption) {
@@ -1194,7 +1327,7 @@ TEST_F(LayoutBoxModelObjectTest, UpdateStackingContextForOption) {
   auto* option_element = GetDocument().getElementById("opt");
   auto* option_layout = option_element->GetLayoutObject();
   ASSERT_TRUE(option_layout);
-  EXPECT_TRUE(option_layout->StyleRef().IsStackingContext());
+  EXPECT_TRUE(option_layout->IsStackingContext());
   EXPECT_TRUE(option_layout->StyleRef().HasCurrentOpacityAnimation());
 }
 
@@ -1218,7 +1351,8 @@ TEST_F(LayoutBoxModelObjectTest,
   EXPECT_EQ(target->Layer(), target->Layer()->NearestContainedLayoutLayer());
 
   To<HTMLElement>(target->GetNode())->classList().Remove("contained");
-  GetDocument().View()->UpdateLifecycleToLayoutClean();
+  GetDocument().View()->UpdateLifecycleToLayoutClean(
+      DocumentUpdateReason::kTest);
 
   EXPECT_TRUE(target->Layer()->NeedsCompositingInputsUpdate());
 

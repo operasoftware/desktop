@@ -69,7 +69,10 @@ class SVGImageForContainer final : public Image {
         image, container_size_without_zoom, zoom, url));
   }
 
+  bool IsSVGImageForContainer() const override { return true; }
+
   IntSize Size() const override;
+  FloatSize SizeAsFloat(RespectImageOrientationEnum) const override;
 
   bool HasIntrinsicSize() const override { return image_->HasIntrinsicSize(); }
 
@@ -88,13 +91,6 @@ class SVGImageForContainer final : public Image {
 
   PaintImage PaintImageForCurrentFrame() override;
 
-  DarkModeClassification CheckTypeSpecificConditionsForDarkMode(
-      const FloatRect& dest_rect,
-      DarkModeImageClassifier* classifier) override {
-    return image_->CheckTypeSpecificConditionsForDarkMode(dest_rect,
-                                                          classifier);
-  }
-
  protected:
   void DrawPattern(GraphicsContext&,
                    const FloatRect&,
@@ -102,7 +98,8 @@ class SVGImageForContainer final : public Image {
                    const FloatPoint&,
                    SkBlendMode,
                    const FloatRect&,
-                   const FloatSize& repeat_spacing) override;
+                   const FloatSize& repeat_spacing,
+                   RespectImageOrientationEnum) override;
 
  private:
   SVGImageForContainer(SVGImage* image,

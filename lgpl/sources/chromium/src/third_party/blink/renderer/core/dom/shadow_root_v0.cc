@@ -145,8 +145,14 @@ ShadowRootV0::DescendantInsertionPoints() {
 
 const V0InsertionPoint* ShadowRootV0::FinalDestinationInsertionPointFor(
     const Node* key) const {
+#if DCHECK_IS_ON()
   DCHECK(key);
-  DCHECK(!key->NeedsDistributionRecalc());
+  // Allow traversal without V0 distribution up-to-date for marking ancestors
+  // with ChildNeedsStyleRecalc() for marking ancestors with child-needs-style-
+  // recalc on a tree with a dirty distribution.
+  DCHECK(!key->NeedsDistributionRecalc() ||
+         key->GetDocument().AllowDirtyShadowV0Traversal());
+#endif
   NodeToDestinationInsertionPoints::const_iterator it =
       node_to_insertion_points_.find(key);
   return it == node_to_insertion_points_.end() ? nullptr : it->value->back();
@@ -162,6 +168,8 @@ const DestinationInsertionPoints* ShadowRootV0::DestinationInsertionPointsFor(
 }
 
 void ShadowRootV0::Distribute() {
+  ClearDistribution();
+
   DistributionPool pool(GetShadowRoot().host());
   HTMLShadowElement* shadow_insertion_point = nullptr;
 

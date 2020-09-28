@@ -116,12 +116,16 @@ enum OpacityMode {
   kOpaque,
 };
 
-enum AccelerationHint {
-  kPreferAcceleration,
-  // The PreferAccelerationAfterVisibilityChange hint suggests we should switch
-  // back to acceleration in the context of the canvas becoming visible again.
-  kPreferAccelerationAfterVisibilityChange,
-  kPreferNoAcceleration,
+// Specifies whether the provider should rasterize paint commands on the CPU
+// or GPU. This is used to support software raster with GPU compositing.
+enum class RasterMode {
+  kGPU,
+  kCPU,
+};
+
+enum class RasterModeHint {
+  kPreferGPU,
+  kPreferCPU,
 };
 
 enum MailboxSyncMode {
@@ -197,8 +201,8 @@ enum ColorFilter {
 };
 
 enum WindRule {
-  RULE_NONZERO = SkPath::kWinding_FillType,
-  RULE_EVENODD = SkPath::kEvenOdd_FillType
+  RULE_NONZERO = static_cast<int>(SkPathFillType::kWinding),
+  RULE_EVENODD = static_cast<int>(SkPathFillType::kEvenOdd)
 };
 
 PLATFORM_EXPORT String CompositeOperatorName(CompositeOperator, BlendMode);

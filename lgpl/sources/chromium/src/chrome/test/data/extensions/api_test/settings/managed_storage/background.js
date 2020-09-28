@@ -13,9 +13,15 @@ chrome.test.runTests([
         }));
   },
 
+  // another-string-policy and no-such-thing should not be exposed to the
+  // extension: another-string-policy was filled with an int, and no-such-thing
+  // just does not exist in the extension's policy schema (see schema.json).
   function getListOfPolicies() {
     chrome.storage.managed.get(
-        ['string-policy', 'int-policy', 'no-such-thing'],
+        [
+          'string-policy', 'int-policy', 'another-string-policy',
+          'no-such-thing'
+        ],
         chrome.test.callbackPass(function(results) {
           chrome.test.assertEq({
             'string-policy': 'value',
@@ -29,7 +35,9 @@ chrome.test.runTests([
         chrome.test.callbackPass(function(results) {
           chrome.test.assertEq({
             'string-policy': 'value',
+            'string-enum-policy': 'value-1',
             'int-policy': -123,
+            'int-enum-policy': 1,
             'double-policy': 456e7,
             'boolean-policy': true,
             'list-policy': [ 'one', 'two', 'three' ],

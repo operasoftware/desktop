@@ -36,13 +36,13 @@ CanvasRenderingContext* CanvasFontCacheTest::Context2D() const {
   // If the following check fails, perhaps you forgot to call createContext
   // in your test?
   EXPECT_NE(nullptr, CanvasElement().RenderingContext());
-  EXPECT_TRUE(CanvasElement().RenderingContext()->Is2d());
+  EXPECT_TRUE(CanvasElement().RenderingContext()->IsRenderingContext2D());
   return CanvasElement().RenderingContext();
 }
 
 void CanvasFontCacheTest::SetUp() {
   PageTestBase::SetUp();
-  GetDocument().documentElement()->SetInnerHTMLFromString(
+  GetDocument().documentElement()->setInnerHTML(
       "<body><canvas id='c'></canvas></body>");
   UpdateAllLifecyclePhasesForTest();
   canvas_element_ = To<HTMLCanvasElement>(GetDocument().getElementById("c"));
@@ -71,7 +71,8 @@ TEST_F(CanvasFontCacheTest, CacheHardLimit) {
 TEST_F(CanvasFontCacheTest, PageVisibilityChange) {
   Context2D()->setFont("10px sans-serif");
   EXPECT_TRUE(Cache()->IsInCache("10px sans-serif"));
-  GetPage().SetIsHidden(/*is_hidden=*/true, /*initial_state=*/false);
+  GetPage().SetVisibilityState(mojom::blink::PageVisibilityState::kHidden,
+                               /*initial_state=*/false);
   EXPECT_FALSE(Cache()->IsInCache("10px sans-serif"));
 
   Context2D()->setFont("15px sans-serif");
@@ -82,7 +83,8 @@ TEST_F(CanvasFontCacheTest, PageVisibilityChange) {
   EXPECT_TRUE(Cache()->IsInCache("10px sans-serif"));
   EXPECT_FALSE(Cache()->IsInCache("15px sans-serif"));
 
-  GetPage().SetIsHidden(/*is_hidden=*/false, /*initial_state=*/false);
+  GetPage().SetVisibilityState(mojom::blink::PageVisibilityState::kVisible,
+                               /*initial_state=*/false);
   Context2D()->setFont("15px sans-serif");
   Context2D()->setFont("10px sans-serif");
   EXPECT_TRUE(Cache()->IsInCache("10px sans-serif"));

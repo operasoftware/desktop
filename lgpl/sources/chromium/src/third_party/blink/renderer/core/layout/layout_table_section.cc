@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/layout_analyzer.h"
+#include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 #include "third_party/blink/renderer/core/layout/layout_table_cell.h"
 #include "third_party/blink/renderer/core/layout/layout_table_col.h"
 #include "third_party/blink/renderer/core/layout/layout_table_row.h"
@@ -173,7 +174,8 @@ void LayoutTableSection::AddChild(LayoutObject* child,
       return;
     }
 
-    LayoutObject* row = LayoutTableRow::CreateAnonymousWithParent(this);
+    LayoutObject* row =
+        LayoutObjectFactory::CreateAnonymousTableRowWithParent(*this);
     AddChild(row, before_child);
     row->AddChild(child);
     return;
@@ -1096,6 +1098,11 @@ void LayoutTableSection::DistributeRemainingExtraLogicalHeight(
   int total_logical_height_added = 0;
   int previous_row_position = row_pos_[0];
   float total_row_size = row_pos_[total_rows] - previous_row_position;
+  if (total_row_size == 0) {
+    // crbug.com/1074722 prevents division by 0.
+    extra_logical_height = 0;
+    return;
+  }
   for (unsigned r = 0; r < total_rows; r++) {
     // weight with the original height
     float height_to_add = extra_logical_height *
@@ -1478,7 +1485,7 @@ void LayoutTableSection::MarkAllCellsWidthsDirtyAndOrNeedsLayout(
   for (LayoutTableRow* row = FirstRow(); row; row = row->NextRow()) {
     for (LayoutTableCell* cell = row->FirstCell(); cell;
          cell = cell->NextCell()) {
-      cell->SetPreferredLogicalWidthsDirty();
+      cell->SetIntrinsicLogicalWidthsDirty();
       if (what_to_mark == LayoutTable::kMarkDirtyAndNeedsLayout)
         cell->SetChildNeedsLayout();
     }
@@ -1863,15 +1870,9 @@ bool LayoutTableSection::NodeAtPoint(HitTestResult& result,
   return false;
 }
 
-LayoutTableSection* LayoutTableSection::CreateAnonymousWithParent(
-    const LayoutObject* parent) {
-  scoped_refptr<ComputedStyle> new_style =
-      ComputedStyle::CreateAnonymousStyleWithDisplay(parent->StyleRef(),
-                                                     EDisplay::kTableRowGroup);
-  LayoutTableSection* new_section = new LayoutTableSection(nullptr);
-  new_section->SetDocumentForAnonymous(&parent->GetDocument());
-  new_section->SetStyle(std::move(new_style));
-  return new_section;
+LayoutBox* LayoutTableSection::CreateAnonymousBoxWithSameTypeAs(
+    const LayoutObject* parent) const {
+  return LayoutObjectFactory::CreateAnonymousTableSectionWithParent(*parent);
 }
 
 void LayoutTableSection::SetLogicalPositionForCell(
@@ -2106,15 +2107,6 @@ bool LayoutTableSection::MapToVisualRectInAncestorSpaceInternal(
   }
   return LayoutTableBoxComponent::MapToVisualRectInAncestorSpaceInternal(
       ancestor, transform_state, flags);
-}
-
-bool LayoutTableSection::PaintedOutputOfObjectHasNoEffectRegardlessOfSize()
-    const {
-  // LayoutTableSection paints background from columns.
-  if (Table()->HasColElements())
-    return false;
-  return LayoutTableBoxComponent::
-      PaintedOutputOfObjectHasNoEffectRegardlessOfSize();
 }
 
 }  // namespace blink

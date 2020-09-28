@@ -24,6 +24,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_ANCHOR_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_ANCHOR_ELEMENT_H_
 
+#include "base/optional.h"
+#include "third_party/blink/public/platform/web_impression.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
@@ -58,9 +60,6 @@ enum {
   kRelationNoOpener = 0x00040000,
 };
 
-class ExceptionState;
-class USVStringOrTrustedURL;
-
 class CORE_EXPORT HTMLAnchorElement : public HTMLElement, public DOMURLUtils {
   DEFINE_WRAPPERTYPEINFO();
 
@@ -69,12 +68,8 @@ class CORE_EXPORT HTMLAnchorElement : public HTMLElement, public DOMURLUtils {
   HTMLAnchorElement(const QualifiedName&, Document&);
   ~HTMLAnchorElement() override;
 
-  // Returns attributes that should be checked against Trusted Types
-  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override;
-
   KURL Href() const;
   void SetHref(const AtomicString&);
-  void setHref(const USVStringOrTrustedURL&, ExceptionState&);
 
   const AtomicString& GetName() const;
 
@@ -97,9 +92,18 @@ class CORE_EXPORT HTMLAnchorElement : public HTMLElement, public DOMURLUtils {
   LinkHash VisitedLinkHash() const;
   void InvalidateCachedVisitedLinkHash() { cached_visited_link_hash_ = 0; }
 
+  // Returns whether this element is a valid impression declaration tag. This is
+  // determined by looking at the presence of required attributes.
+  bool HasImpression() const;
+
+  // Returns the WebImpression struct with all data declared by impression
+  // related attributes on |this|. If the impression attributes do not contain
+  // allowed values, base::nullopt is returned.
+  base::Optional<WebImpression> GetImpressionForNavigation() const;
+
   void SendPings(const KURL& destination_url) const;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  protected:
   void ParseAttribute(const AttributeModificationParams&) override;
@@ -117,7 +121,7 @@ class CORE_EXPORT HTMLAnchorElement : public HTMLElement, public DOMURLUtils {
   bool IsURLAttribute(const Attribute&) const final;
   bool HasLegalLinkAttribute(const QualifiedName&) const final;
   bool CanStartSelection(SelectionStartPolicy) const final;
-  int tabIndex() const final;
+  int DefaultTabIndex() const final;
   bool draggable() const final;
   bool IsInteractiveContent() const final;
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;

@@ -142,6 +142,10 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
 
   const char* GetName() const override;
 
+  virtual const NGPhysicalBoxFragment* CurrentFragment() const {
+    return nullptr;
+  }
+
  protected:
   // Insert a child correctly into the tree when |beforeDescendant| isn't a
   // direct child of |this|. This happens e.g. when there's an anonymous block
@@ -322,7 +326,6 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
 
  protected:
   bool RecalcNormalFlowChildLayoutOverflowIfNeeded(LayoutObject*);
-  void RecalcNormalFlowChildVisualOverflowIfNeeded(LayoutObject*);
   bool RecalcPositionedDescendantsLayoutOverflow();
   void RecalcPositionedDescendantsVisualOverflow();
   bool RecalcSelfLayoutOverflow();
@@ -396,6 +399,13 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   virtual void PaintChildren(const PaintInfo&,
                              const PhysicalOffset& paint_offset) const;
   void UpdateAfterLayout() override;
+  MinMaxSizes PreferredLogicalWidths() const override;
+
+  virtual bool HasLineIfEmpty() const;
+  // Returns baseline offset if we can get |SimpleFontData| from primary font.
+  // Or returns no value if we can't get font data.
+  base::Optional<LayoutUnit> BaselineForEmptyLine(
+      LineDirectionMode line_direction) const;
 
  protected:
   virtual void AdjustInlineDirectionLineBounds(
@@ -403,10 +413,7 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
       LayoutUnit& /* logicalLeft */,
       LayoutUnit& /* logicalWidth */) const {}
 
-  void ComputeIntrinsicLogicalWidths(
-      LayoutUnit& min_logical_width,
-      LayoutUnit& max_logical_width) const override;
-  void ComputePreferredLogicalWidths() override;
+  MinMaxSizes ComputeIntrinsicLogicalWidths() const override;
   void ComputeChildPreferredLogicalWidths(
       LayoutObject& child,
       LayoutUnit& min_preferred_logical_width,
@@ -415,17 +422,10 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   LayoutUnit FirstLineBoxBaseline() const override;
   LayoutUnit InlineBlockBaseline(LineDirectionMode) const override;
 
-  // This function disables the 'overflow' check in inlineBlockBaseline.
-  // For 'inline-block', CSS says that the baseline is the bottom margin edge
-  // if 'overflow' is not visible. But some descendant classes want to ignore
-  // this condition.
-  virtual bool ShouldIgnoreOverflowPropertyForInlineBlockBaseline() const {
-    return false;
-  }
-
-  bool HitTestOverflowControl(HitTestResult&,
-                              const HitTestLocation&,
-                              const PhysicalOffset& adjusted_location) override;
+  bool HitTestOverflowControl(
+      HitTestResult&,
+      const HitTestLocation&,
+      const PhysicalOffset& adjusted_location) const override;
   bool HitTestChildren(HitTestResult&,
                        const HitTestLocation&,
                        const PhysicalOffset& accumulated_offset,
@@ -440,8 +440,6 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   // hasOverflowClip() will be false and we won't create scrollable area for
   // this object even if overflow is non-visible.
   virtual bool AllowsOverflowClip() const;
-
-  virtual bool HasLineIfEmpty() const;
 
   bool SimplifiedLayout();
   virtual void SimplifiedNormalFlowLayout();
@@ -482,6 +480,11 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
     return hit_test_action == kHitTestBlockBackground ||
            hit_test_action == kHitTestChildBlockBackground;
   }
+
+  // Returns baseline offset of this block if is empty editable or having
+  // CSS property "--internal-empty-line-height"fabricated", otherwise
+  // returns |LayoutUnit(-1)|.
+  LayoutUnit EmptyLineBaseline(LineDirectionMode line_direction) const;
 
  private:
   LayoutObjectChildList* VirtualChildren() final { return Children(); }
@@ -559,7 +562,6 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
                                      // in LayoutBlockRareData since they are
                                      // set too frequently.
   unsigned has_margin_after_quirk_ : 1;
-  unsigned being_destroyed_ : 1;
   unsigned has_markup_truncation_ : 1;
   unsigned width_available_to_children_changed_ : 1;
   unsigned height_available_to_children_changed_ : 1;

@@ -38,19 +38,17 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
-#include "third_party/blink/public/platform/interface_provider.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
-#include "third_party/blink/public/platform/web_prerendering_support.h"
-#include "third_party/blink/public/platform/web_rtc_peer_connection_handler.h"
 #include "third_party/blink/public/platform/websocket_handshake_throttle.h"
+#include "third_party/blink/renderer/platform/bindings/blink_isolate/blink_isolate.h"
 #include "third_party/blink/renderer/platform/bindings/parkable_string_manager.h"
 #include "third_party/blink/renderer/platform/font_family_names.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache_memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/heap/blink_gc_memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/heap/gc_task_runner.h"
+#include "third_party/blink/renderer/platform/instrumentation/canvas_memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/instrumentation/instance_counters_memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/instrumentation/memory_pressure_listener.h"
 #include "third_party/blink/renderer/platform/instrumentation/partition_alloc_memory_dump_provider.h"
@@ -63,29 +61,12 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/webrtc/api/async_resolver_factory.h"
 #include "third_party/webrtc/api/rtp_parameters.h"
 #include "third_party/webrtc/p2p/base/port_allocator.h"
 
 namespace blink {
 
 namespace {
-
-class DefaultInterfaceProvider : public InterfaceProvider {
-  USING_FAST_MALLOC(DefaultInterfaceProvider);
-
- public:
-  DefaultInterfaceProvider() = default;
-  ~DefaultInterfaceProvider() = default;
-
-  // InterfaceProvider implementation:
-  void GetInterface(const char* interface_name,
-                    mojo::ScopedMessagePipeHandle interface_pipe) override {
-    Platform::Current()->GetBrowserInterfaceBrokerProxy()->GetInterface(
-        mojo::GenericPendingReceiver(interface_name,
-                                     std::move(interface_pipe)));
-  }
-};
 
 class DefaultBrowserInterfaceBrokerProxy
     : public ThreadSafeBrowserInterfaceBrokerProxy {
@@ -142,16 +123,9 @@ static Platform* g_platform = nullptr;
 
 static GCTaskRunner* g_gc_task_runner = nullptr;
 
-static void CallOnMainThreadFunction(WTF::MainThreadFunction function,
-                                     void* context) {
-  PostCrossThreadTask(
-      *Thread::MainThread()->GetTaskRunner(), FROM_HERE,
-      CrossThreadBindOnce(function, CrossThreadUnretained(context)));
-}
+static bool did_initialize_blink_ = false;
 
-Platform::Platform() {
-  WTF::Partitions::Initialize();
-}
+Platform::Platform() = default;
 
 Platform::~Platform() = default;
 
@@ -159,6 +133,8 @@ namespace {
 
 class SimpleMainThread : public Thread {
  public:
+  SimpleMainThread() : isolate_(WebIsolate::Create()) {}
+
   // We rely on base::ThreadTaskRunnerHandle for tasks posted on the main
   // thread. The task runner handle may not be available on Blink's startup
   // (== on SimpleMainThread's construction), because some tests like
@@ -192,6 +168,7 @@ class SimpleMainThread : public Thread {
  private:
   bool IsSimpleMainThread() const override { return true; }
 
+  std::unique_ptr<WebIsolate> isolate_;
   scheduler::SimpleThreadScheduler scheduler_;
   scoped_refptr<base::SingleThreadTaskRunner>
       main_thread_task_runner_for_testing_;
@@ -199,26 +176,34 @@ class SimpleMainThread : public Thread {
 
 }  // namespace
 
-void Platform::Initialize(
+void Platform::InitializeBlink() {
+  DCHECK(!did_initialize_blink_);
+  WTF::Partitions::Initialize();
+  WTF::Initialize();
+  did_initialize_blink_ = true;
+}
+
+void Platform::InitializeMainThread(
     Platform* platform,
     scheduler::WebThreadScheduler* main_thread_scheduler) {
   DCHECK(!g_platform);
   DCHECK(platform);
   g_platform = platform;
-  InitializeCommon(platform, main_thread_scheduler->CreateMainThread());
+  InitializeMainThreadCommon(platform,
+                             main_thread_scheduler->CreateMainThread());
 }
 
 void Platform::CreateMainThreadAndInitialize(Platform* platform) {
   DCHECK(!g_platform);
   DCHECK(platform);
   g_platform = platform;
-  InitializeCommon(platform, std::make_unique<SimpleMainThread>());
+  InitializeBlink();
+  InitializeMainThreadCommon(platform, std::make_unique<SimpleMainThread>());
 }
 
-void Platform::InitializeCommon(Platform* platform,
-                                std::unique_ptr<Thread> main_thread) {
-  WTF::Initialize(CallOnMainThreadFunction);
-
+void Platform::InitializeMainThreadCommon(Platform* platform,
+                                          std::unique_ptr<Thread> main_thread) {
+  DCHECK(did_initialize_blink_);
   Thread::SetMainThread(std::move(main_thread));
 
   ProcessHeap::Init();
@@ -252,6 +237,9 @@ void Platform::InitializeCommon(Platform* platform,
       base::ThreadTaskRunnerHandle::Get());
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
       ParkableStringManagerDumpProvider::Instance(), "ParkableStrings",
+      base::ThreadTaskRunnerHandle::Get());
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      CanvasMemoryDumpProvider::Instance(), "Canvas",
       base::ThreadTaskRunnerHandle::Get());
 
   RendererResourceCoordinator::MaybeInitialize();
@@ -289,13 +277,7 @@ Platform* Platform::Current() {
   return g_platform;
 }
 
-InterfaceProvider* Platform::GetInterfaceProvider() {
-  DEFINE_STATIC_LOCAL(DefaultInterfaceProvider, provider, ());
-  return &provider;
-}
-
-ThreadSafeBrowserInterfaceBrokerProxy*
-Platform::GetBrowserInterfaceBrokerProxy() {
+ThreadSafeBrowserInterfaceBrokerProxy* Platform::GetBrowserInterfaceBroker() {
   DEFINE_STATIC_LOCAL(DefaultBrowserInterfaceBrokerProxy, proxy, ());
   return &proxy;
 }
@@ -330,25 +312,8 @@ Platform::CreateSharedOffscreenGraphicsContext3DProvider() {
 }
 
 std::unique_ptr<WebGraphicsContext3DProvider>
-Platform::CreateWebGPUGraphicsContext3DProvider(const WebURL& top_document_url,
-                                                GraphicsInfo*) {
-  return nullptr;
-}
-
-std::unique_ptr<WebRTCPeerConnectionHandler>
-Platform::CreateRTCPeerConnectionHandler(
-    WebRTCPeerConnectionHandlerClient*,
-    scoped_refptr<base::SingleThreadTaskRunner>) {
-  return nullptr;
-}
-
-std::unique_ptr<cricket::PortAllocator> Platform::CreateWebRtcPortAllocator(
-    WebLocalFrame* frame) {
-  return nullptr;
-}
-
-std::unique_ptr<webrtc::AsyncResolverFactory>
-Platform::CreateWebRtcAsyncResolverFactory() {
+Platform::CreateWebGPUGraphicsContext3DProvider(
+    const WebURL& top_document_url) {
   return nullptr;
 }
 

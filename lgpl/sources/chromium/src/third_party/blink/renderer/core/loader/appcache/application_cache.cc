@@ -27,10 +27,9 @@
 
 #include "third_party/blink/public/mojom/appcache/appcache.mojom-blink.h"
 #include "third_party/blink/public/mojom/appcache/appcache_info.mojom-blink.h"
-#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
-#include "third_party/blink/renderer/core/frame/hosts_using_features.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/loader/appcache/application_cache_host_for_frame.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
@@ -40,15 +39,17 @@
 
 namespace blink {
 
-ApplicationCache::ApplicationCache(LocalFrame* frame) : DOMWindowClient(frame) {
+ApplicationCache::ApplicationCache(LocalFrame* frame)
+    : ExecutionContextClient(frame) {
+  DCHECK(RuntimeEnabledFeatures::AppCacheEnabled(frame->DomWindow()));
   ApplicationCacheHostForFrame* cache_host = GetApplicationCacheHost();
   if (cache_host)
     cache_host->SetApplicationCache(this);
 }
 
-void ApplicationCache::Trace(blink::Visitor* visitor) {
+void ApplicationCache::Trace(Visitor* visitor) const {
   EventTargetWithInlineData::Trace(visitor);
-  DOMWindowClient::Trace(visitor);
+  ExecutionContextClient::Trace(visitor);
 }
 
 ApplicationCacheHostForFrame* ApplicationCache::GetApplicationCacheHost()
@@ -119,7 +120,7 @@ const AtomicString& ApplicationCache::InterfaceName() const {
 }
 
 ExecutionContext* ApplicationCache::GetExecutionContext() const {
-  return GetFrame() ? GetFrame()->GetDocument() : nullptr;
+  return GetFrame() ? GetFrame()->DomWindow() : nullptr;
 }
 
 const AtomicString& ApplicationCache::ToEventType(mojom::AppCacheEventID id) {
@@ -148,22 +149,10 @@ const AtomicString& ApplicationCache::ToEventType(mojom::AppCacheEventID id) {
 void ApplicationCache::RecordAPIUseType() const {
   if (!GetFrame())
     return;
-
-  Document* document = GetFrame()->GetDocument();
-
-  if (!document)
-    return;
-
-  if (document->IsSecureContext()) {
-    Deprecation::CountDeprecation(document,
-                                  WebFeature::kApplicationCacheAPISecureOrigin);
-  } else {
-    Deprecation::CountDeprecation(
-        document, WebFeature::kApplicationCacheAPIInsecureOrigin);
-    HostsUsingFeatures::CountAnyWorld(
-        *document,
-        HostsUsingFeatures::Feature::kApplicationCacheAPIInsecureHost);
-  }
+  LocalDOMWindow* window = GetFrame()->DomWindow();
+  CHECK(GetFrame()->DomWindow()->IsSecureContext());
+  Deprecation::CountDeprecation(window,
+                                WebFeature::kApplicationCacheAPISecureOrigin);
 }
 
 }  // namespace blink

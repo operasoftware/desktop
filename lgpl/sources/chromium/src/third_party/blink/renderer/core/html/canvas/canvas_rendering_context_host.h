@@ -5,12 +5,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_CANVAS_CANVAS_RENDERING_CONTEXT_HOST_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_CANVAS_CANVAS_RENDERING_CONTEXT_HOST_H_
 
+#include "base/optional.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_image_source.h"
-#include "third_party/blink/renderer/core/html/canvas/image_encode_options.h"
+#include "third_party/blink/renderer/core/html/canvas/ukm_parameters.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
@@ -25,6 +27,7 @@ class CanvasRenderingContext;
 class CanvasResource;
 class CanvasResourceDispatcher;
 class FontSelector;
+class ImageEncodeOptions;
 class KURL;
 class StaticBitmapImage;
 
@@ -37,7 +40,8 @@ class CORE_EXPORT CanvasRenderingContextHost : public CanvasResourceHost,
     kCanvasHost,
     kOffscreenCanvasHost,
   };
-  CanvasRenderingContextHost(HostType host_type);
+  CanvasRenderingContextHost(HostType host_type,
+                             base::Optional<UkmParameters> ukm_params);
 
   void RecordCanvasSizeToUMA(const IntSize&);
 
@@ -72,13 +76,17 @@ class CORE_EXPORT CanvasRenderingContextHost : public CanvasResourceHost,
   virtual FontSelector* GetFontSelector() = 0;
 
   virtual bool ShouldAccelerate2dContext() const = 0;
-  virtual unsigned GetMSAASampleCountFor2dContext() const = 0;
 
   virtual bool IsNeutered() const { return false; }
 
   virtual void Commit(scoped_refptr<CanvasResource> canvas_resource,
                       const SkIRect& damage_rect);
-  virtual void SetNeedsMatrixClipRestore() {}
+
+  // For deferred canvases this will have the side effect of drawing recorded
+  // commands in order to finalize the frame.
+  virtual ScriptPromise convertToBlob(ScriptState*,
+                                      const ImageEncodeOptions*,
+                                      ExceptionState&);
 
   bool IsPaintable() const;
 
@@ -89,31 +97,31 @@ class CORE_EXPORT CanvasRenderingContextHost : public CanvasResourceHost,
   // Partial CanvasResourceHost implementation
   void RestoreCanvasMatrixClipStack(cc::PaintCanvas*) const final;
   CanvasResourceProvider* GetOrCreateCanvasResourceProviderImpl(
-      AccelerationHint hint) final;
+      RasterModeHint hint) final;
   CanvasResourceProvider* GetOrCreateCanvasResourceProvider(
-      AccelerationHint hint) override;
+      RasterModeHint hint) override;
 
   bool Is3d() const;
-  bool Is2d() const;
+  bool IsRenderingContext2D() const;
   CanvasColorParams ColorParams() const;
-
-  // For deferred canvases this will have the side effect of drawing recorded
-  // commands in order to finalize the frame.
-  ScriptPromise convertToBlob(ScriptState*,
-                              const ImageEncodeOptions*,
-                              ExceptionState&);
 
   // blink::CanvasImageSource
   bool IsOffscreenCanvas() const override;
+
+  base::Optional<UkmParameters> ukm_parameters() { return ukm_params_; }
 
  protected:
   ~CanvasRenderingContextHost() override {}
 
   scoped_refptr<StaticBitmapImage> CreateTransparentImage(const IntSize&) const;
 
+  void CreateCanvasResourceProvider2D(RasterModeHint hint);
+  void CreateCanvasResourceProvider3D();
+
   bool did_fail_to_create_resource_provider_ = false;
   bool did_record_canvas_size_to_uma_ = false;
   HostType host_type_ = kNone;
+  base::Optional<UkmParameters> ukm_params_;
 };
 
 }  // namespace blink

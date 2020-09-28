@@ -31,17 +31,19 @@
 #include "third_party/blink/renderer/core/html/shadow/details_marker_control.h"
 
 #include "third_party/blink/renderer/core/html/html_summary_element.h"
+#include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/layout/layout_details_marker.h"
 
 namespace blink {
 
 DetailsMarkerControl::DetailsMarkerControl(Document& document)
     : HTMLDivElement(document) {
-  SetShadowPseudoId(AtomicString("-webkit-details-marker"));
+  SetShadowPseudoId(shadow_element_names::WebKitDetailsMarker());
 }
 
 LayoutObject* DetailsMarkerControl::CreateLayoutObject(const ComputedStyle&,
                                                        LegacyLayout) {
+  UseCounter::Count(GetDocument(), WebFeature::kLegacyLayoutByDetailsMarker);
   return new LayoutDetailsMarker(this);
 }
 
@@ -52,7 +54,7 @@ bool DetailsMarkerControl::LayoutObjectIsNeeded(
 }
 
 HTMLSummaryElement* DetailsMarkerControl::SummaryElement() const {
-  return ToHTMLSummaryElement(OwnerShadowHost());
+  return To<HTMLSummaryElement>(OwnerShadowHost());
 }
 
 }  // namespace blink

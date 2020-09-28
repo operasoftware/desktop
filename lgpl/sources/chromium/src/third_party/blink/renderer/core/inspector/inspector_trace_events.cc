@@ -17,6 +17,9 @@
 #include "third_party/blink/renderer/core/css/invalidation/invalidation_set.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/events/keyboard_event.h"
+#include "third_party/blink/renderer/core/events/wheel_event.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
@@ -74,6 +77,20 @@ std::unique_ptr<TracedValue> GetNavigationTracingData(Document* document) {
                   IdentifiersFactory::LoaderId(document->Loader()));
   return data;
 }
+
+int GetModifierFromEvent(const UIEventWithKeyState& event) {
+  int modifier = 0;
+  if (event.altKey())
+    modifier |= 1;
+  if (event.ctrlKey())
+    modifier |= 2;
+  if (event.metaKey())
+    modifier |= 4;
+  if (event.shiftKey())
+    modifier |= 8;
+  return modifier;
+}
+
 }  //  namespace
 
 String ToHexString(const void* p) {
@@ -160,9 +177,12 @@ void InspectorTraceEvents::DidFinishLoading(uint64_t identifier,
                                             decoded_body_length));
 }
 
-void InspectorTraceEvents::DidFailLoading(uint64_t identifier,
-                                          DocumentLoader* loader,
-                                          const ResourceError&) {
+void InspectorTraceEvents::DidFailLoading(
+    CoreProbeSink* sink,
+    uint64_t identifier,
+    DocumentLoader* loader,
+    const ResourceError&,
+    const base::UnguessableToken& devtools_frame_or_worker_token) {
   TRACE_EVENT_INSTANT1("devtools.timeline", "ResourceFinish",
                        TRACE_EVENT_SCOPE_THREAD, "data",
                        inspector_resource_finish_event::Data(
@@ -291,6 +311,7 @@ const char* PseudoTypeToString(CSSSelector::PseudoType pseudo_type) {
     DEFINE_STRING_MAPPING(PseudoTarget)
     DEFINE_STRING_MAPPING(PseudoBefore)
     DEFINE_STRING_MAPPING(PseudoAfter)
+    DEFINE_STRING_MAPPING(PseudoMarker)
     DEFINE_STRING_MAPPING(PseudoBackdrop)
     DEFINE_STRING_MAPPING(PseudoLang)
     DEFINE_STRING_MAPPING(PseudoNot)
@@ -341,10 +362,11 @@ const char* PseudoTypeToString(CSSSelector::PseudoType pseudo_type) {
     DEFINE_STRING_MAPPING(PseudoSpatialNavigationInterest)
     DEFINE_STRING_MAPPING(PseudoIsHtml)
     DEFINE_STRING_MAPPING(PseudoListBox)
+    DEFINE_STRING_MAPPING(PseudoMultiSelectFocus)
     DEFINE_STRING_MAPPING(PseudoHostHasAppearance)
     DEFINE_STRING_MAPPING(PseudoVideoPersistent)
     DEFINE_STRING_MAPPING(PseudoVideoPersistentAncestor)
-    DEFINE_STRING_MAPPING(PseudoXrImmersiveDomOverlay)
+    DEFINE_STRING_MAPPING(PseudoXrOverlay)
 #undef DEFINE_STRING_MAPPING
   }
 
@@ -373,43 +395,47 @@ const char* CompileOptionsString(v8::ScriptCompiler::CompileOptions options) {
 
 const char* NotStreamedReasonString(ScriptStreamer::NotStreamingReason reason) {
   switch (reason) {
-    case ScriptStreamer::kNotHTTP:
+    case ScriptStreamer::NotStreamingReason::kNotHTTP:
       return "not http/https protocol";
-    case ScriptStreamer::kRevalidate:
+    case ScriptStreamer::NotStreamingReason::kRevalidate:
       return "revalidation event";
-    case ScriptStreamer::kContextNotValid:
+    case ScriptStreamer::NotStreamingReason::kContextNotValid:
       return "script context not valid";
-    case ScriptStreamer::kEncodingNotSupported:
+    case ScriptStreamer::NotStreamingReason::kEncodingNotSupported:
       return "encoding not supported";
-    case ScriptStreamer::kThreadBusy:
+    case ScriptStreamer::NotStreamingReason::kThreadBusy:
       return "script streamer thread busy";
-    case ScriptStreamer::kV8CannotStream:
+    case ScriptStreamer::NotStreamingReason::kV8CannotStream:
       return "V8 cannot stream script";
-    case ScriptStreamer::kScriptTooSmall:
+    case ScriptStreamer::NotStreamingReason::kScriptTooSmall:
       return "script too small";
-    case ScriptStreamer::kNoResourceBuffer:
+    case ScriptStreamer::NotStreamingReason::kNoResourceBuffer:
       return "resource no longer alive";
-    case ScriptStreamer::kHasCodeCache:
+    case ScriptStreamer::NotStreamingReason::kHasCodeCache:
       return "script has code-cache available";
-    case ScriptStreamer::kStreamerNotReadyOnGetSource:
+    case ScriptStreamer::NotStreamingReason::kStreamerNotReadyOnGetSource:
       return "streamer not ready";
-    case ScriptStreamer::kInlineScript:
+    case ScriptStreamer::NotStreamingReason::kInlineScript:
       return "inline script";
-    case ScriptStreamer::kDidntTryToStartStreaming:
-      return "start streaming not called";
-    case ScriptStreamer::kErrorOccurred:
+    case ScriptStreamer::NotStreamingReason::kErrorOccurred:
       return "an error occurred";
-    case ScriptStreamer::kStreamingDisabled:
+    case ScriptStreamer::NotStreamingReason::kStreamingDisabled:
       return "already disabled streaming";
-    case ScriptStreamer::kSecondScriptResourceUse:
+    case ScriptStreamer::NotStreamingReason::kSecondScriptResourceUse:
       return "already used streamed data";
-    case ScriptStreamer::kWorkerTopLevelScript:
+    case ScriptStreamer::NotStreamingReason::kWorkerTopLevelScript:
       return "worker top-level scripts are not streamable";
-    case ScriptStreamer::kModuleScript:
+    case ScriptStreamer::NotStreamingReason::kModuleScript:
       return "module script";
-    case ScriptStreamer::kAlreadyLoaded:
-    case ScriptStreamer::kCount:
-    case ScriptStreamer::kInvalid:
+    case ScriptStreamer::NotStreamingReason::kNoDataPipe:
+      return "no data pipe received";
+    case ScriptStreamer::NotStreamingReason::kDisabledByFeatureList:
+      return "streaming disabled from the feature list";
+    case ScriptStreamer::NotStreamingReason::kLoadingCancelled:
+      return "loading was cancelled";
+    case ScriptStreamer::NotStreamingReason::kDidntTryToStartStreaming:
+    case ScriptStreamer::NotStreamingReason::kAlreadyLoaded:
+    case ScriptStreamer::NotStreamingReason::kInvalid:
       NOTREACHED();
   }
   NOTREACHED();
@@ -592,6 +618,7 @@ inspector_style_invalidator_invalidate_event::InvalidationList(
 std::unique_ptr<TracedValue>
 inspector_style_recalc_invalidation_tracking_event::Data(
     Node* node,
+    StyleChangeType change_type,
     const StyleChangeReasonForTracing& reason) {
   DCHECK(node);
 
@@ -599,6 +626,7 @@ inspector_style_recalc_invalidation_tracking_event::Data(
   value->SetString("frame",
                    IdentifiersFactory::FrameId(node->GetDocument().GetFrame()));
   SetNodeInfo(value.get(), node, "nodeId", "nodeName");
+  value->SetBoolean("subtree", change_type == kSubtreeStyleChange);
   value->SetString("reason", reason.ReasonString());
   value->SetString("extraData", reason.GetExtraData());
   SourceLocation::Capture()->ToTracedValue(value.get(), "stackTrace");
@@ -678,6 +706,7 @@ const char kAttributeChanged[] = "Attribute changed";
 const char kColumnsChanged[] = "Attribute changed";
 const char kChildAnonymousBlockChanged[] = "Child anonymous block changed";
 const char kAnonymousBlockChange[] = "Anonymous block change";
+const char kFontsChanged[] = "Fonts changed";
 const char kFullscreen[] = "Fullscreen change";
 const char kChildChanged[] = "Child changed";
 const char kListValueChange[] = "List value change";
@@ -813,6 +842,30 @@ std::unique_ptr<TracedValue> inspector_receive_response_event::Data(
   value->SetDouble("encodedDataLength", response.EncodedDataLength());
   value->SetBoolean("fromCache", response.WasCached());
   value->SetBoolean("fromServiceWorker", response.WasFetchedViaServiceWorker());
+
+  if (response.WasFetchedViaServiceWorker()) {
+    switch (response.GetServiceWorkerResponseSource()) {
+      case network::mojom::FetchResponseSource::kCacheStorage:
+        value->SetString("serviceWorkerResponseSource", "cacheStorage");
+        break;
+      case network::mojom::FetchResponseSource::kHttpCache:
+        value->SetString("serviceWorkerResponseSource", "httpCache");
+        break;
+      case network::mojom::FetchResponseSource::kNetwork:
+        value->SetString("serviceWorkerResponseSource", "network");
+        break;
+      case network::mojom::FetchResponseSource::kUnspecified:
+        value->SetString("serviceWorkerResponseSource", "fallbackCode");
+    }
+  }
+
+  if (!response.ResponseTime().is_null()) {
+    value->SetDouble("responseTime", response.ResponseTime().ToJsTime());
+  }
+  if (!response.CacheStorageCacheName().IsEmpty()) {
+    value->SetString("cacheStorageCacheName", response.CacheStorageCacheName());
+  }
+
   if (response.GetResourceLoadTiming()) {
     value->BeginDictionary("timing");
     RecordTiming(*response.GetResourceLoadTiming(), value.get());
@@ -866,8 +919,8 @@ std::unique_ptr<TracedValue> inspector_mark_resource_cached_event::Data(
 }
 
 static LocalFrame* FrameForExecutionContext(ExecutionContext* context) {
-  if (auto* document = DynamicTo<Document>(context))
-    return document->GetFrame();
+  if (auto* window = DynamicTo<LocalDOMWindow>(context))
+    return window->GetFrame();
   return nullptr;
 }
 
@@ -911,9 +964,8 @@ std::unique_ptr<TracedValue> inspector_animation_frame_event::Data(
     int callback_id) {
   auto value = std::make_unique<TracedValue>();
   value->SetInteger("id", callback_id);
-  if (auto* document = DynamicTo<Document>(context)) {
-    value->SetString("frame",
-                     IdentifiersFactory::FrameId(document->GetFrame()));
+  if (auto* window = DynamicTo<LocalDOMWindow>(context)) {
+    value->SetString("frame", IdentifiersFactory::FrameId(window->GetFrame()));
   } else if (auto* scope = DynamicTo<WorkerGlobalScope>(context)) {
     value->SetString("worker", ToHexString(scope));
   }
@@ -1188,8 +1240,8 @@ std::unique_ptr<TracedValue> inspector_paint_image_event::Data(
     const FloatRect& dest_rect) {
   auto value = std::make_unique<TracedValue>();
   SetGeneratingNodeInfo(value.get(), &layout_image, "nodeId");
-  if (const ImageResourceContent* resource = layout_image.CachedImage())
-    value->SetString("url", resource->Url().GetString());
+  if (const ImageResourceContent* content = layout_image.CachedImage())
+    value->SetString("url", content->Url().GetString());
 
   value->SetInteger("x", dest_rect.X());
   value->SetInteger("y", dest_rect.Y());
@@ -1206,8 +1258,8 @@ std::unique_ptr<TracedValue> inspector_paint_image_event::Data(
     const StyleImage& style_image) {
   auto value = std::make_unique<TracedValue>();
   SetGeneratingNodeInfo(value.get(), &owning_layout_object, "nodeId");
-  if (const ImageResourceContent* resource = style_image.CachedImage())
-    value->SetString("url", resource->Url().GetString());
+  if (const ImageResourceContent* content = style_image.CachedImage())
+    value->SetString("url", content->Url().GetString());
   return value;
 }
 
@@ -1219,8 +1271,8 @@ std::unique_ptr<TracedValue> inspector_paint_image_event::Data(
   auto value = std::make_unique<TracedValue>();
   if (node)
     SetNodeInfo(value.get(), node, "nodeId", nullptr);
-  if (const ImageResourceContent* resource = style_image.CachedImage())
-    value->SetString("url", resource->Url().GetString());
+  if (const ImageResourceContent* content = style_image.CachedImage())
+    value->SetString("url", content->Url().GetString());
 
   value->SetInteger("x", dest_rect.X());
   value->SetInteger("y", dest_rect.Y());
@@ -1234,10 +1286,10 @@ std::unique_ptr<TracedValue> inspector_paint_image_event::Data(
 
 std::unique_ptr<TracedValue> inspector_paint_image_event::Data(
     const LayoutObject* owning_layout_object,
-    const ImageResourceContent& image_resource) {
+    const ImageResourceContent& image_content) {
   auto value = std::make_unique<TracedValue>();
   SetGeneratingNodeInfo(value.get(), owning_layout_object, "nodeId");
-  value->SetString("url", image_resource.Url().GetString());
+  value->SetString("url", image_content.Url().GetString());
   return value;
 }
 
@@ -1282,6 +1334,39 @@ std::unique_ptr<TracedValue> inspector_event_dispatch_event::Data(
     const Event& event) {
   auto value = std::make_unique<TracedValue>();
   value->SetString("type", event.type());
+  bool record_input_enabled;
+  TRACE_EVENT_CATEGORY_GROUP_ENABLED(
+      TRACE_DISABLED_BY_DEFAULT("devtools.timeline.inputs"),
+      &record_input_enabled);
+  if (record_input_enabled) {
+    const auto* keyboard_event = DynamicTo<KeyboardEvent>(event);
+    if (keyboard_event) {
+      value->SetInteger("modifier", GetModifierFromEvent(*keyboard_event));
+      value->SetDouble(
+          "timestamp",
+          keyboard_event->PlatformTimeStamp().since_origin().InMicroseconds());
+      value->SetString("code", keyboard_event->code());
+      value->SetString("key", keyboard_event->key());
+    }
+
+    const auto* mouse_event = DynamicTo<MouseEvent>(event);
+    const auto* wheel_event = DynamicTo<WheelEvent>(event);
+    if (mouse_event || wheel_event) {
+      value->SetDouble("x", mouse_event->x());
+      value->SetDouble("y", mouse_event->y());
+      value->SetInteger("modifier", GetModifierFromEvent(*mouse_event));
+      value->SetDouble(
+          "timestamp",
+          mouse_event->PlatformTimeStamp().since_origin().InMicroseconds());
+      value->SetInteger("button", mouse_event->button());
+      value->SetInteger("buttons", mouse_event->buttons());
+      value->SetInteger("clickCount", mouse_event->detail());
+      if (wheel_event) {
+        value->SetDouble("deltaX", wheel_event->deltaX());
+        value->SetDouble("deltaY", wheel_event->deltaY());
+      }
+    }
+  }
   SetCallStack(value.get());
   return value;
 }
@@ -1346,11 +1431,11 @@ std::unique_ptr<TracedValue> inspector_animation_event::Data(
     const Animation& animation) {
   auto value = std::make_unique<TracedValue>();
   value->SetString("id", String::Number(animation.SequenceNumber()));
-  value->SetString("state", animation.playState());
+  value->SetString("state", animation.PlayStateString());
   if (const AnimationEffect* effect = animation.effect()) {
     value->SetString("name", animation.id());
-    if (effect->IsKeyframeEffect()) {
-      if (Element* target = ToKeyframeEffect(effect)->target())
+    if (auto* frame_effect = DynamicTo<KeyframeEffect>(effect)) {
+      if (Element* target = frame_effect->EffectTarget())
         SetNodeInfo(value.get(), target, "nodeId", "nodeName");
     }
   }
@@ -1360,7 +1445,7 @@ std::unique_ptr<TracedValue> inspector_animation_event::Data(
 std::unique_ptr<TracedValue> inspector_animation_state_event::Data(
     const Animation& animation) {
   auto value = std::make_unique<TracedValue>();
-  value->SetString("state", animation.playState());
+  value->SetString("state", animation.PlayStateString());
   return value;
 }
 

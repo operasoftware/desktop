@@ -33,10 +33,10 @@
 #include "third_party/blink/renderer/bindings/core/v8/string_or_element_creation_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_document.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_element_registration_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_html_element.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_svg_element.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/element_registration_options.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/custom/v0_custom_element_definition.h"
 #include "third_party/blink/renderer/core/html/custom/v0_custom_element_descriptor.h"
@@ -49,17 +49,24 @@
 #include "third_party/blink/renderer/platform/bindings/v0_custom_element_binding.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_context_data.h"
 #include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
+
+const V8PrivateProperty::SymbolKey kPrivatePropertyDocument;
+const V8PrivateProperty::SymbolKey kPrivatePropertyIsInterfacePrototypeObject;
+const V8PrivateProperty::SymbolKey kPrivatePropertyNamespaceURI;
+const V8PrivateProperty::SymbolKey kPrivatePropertyTagName;
+const V8PrivateProperty::SymbolKey kPrivatePropertyType;
 
 static void ConstructCustomElement(const v8::FunctionCallbackInfo<v8::Value>&);
 
 V0CustomElementConstructorBuilder::V0CustomElementConstructorBuilder(
     ScriptState* script_state,
     const ElementRegistrationOptions* options)
-    : script_state_(script_state), options_(options) {
+    : script_state_(script_state), options_(options), callbacks_(nullptr) {
   DCHECK(script_state_->GetContext() ==
          script_state_->GetIsolate()->GetCurrentContext());
 }
@@ -85,7 +92,9 @@ bool V0CustomElementConstructorBuilder::ValidateOptions(
     return false;
   }
 
-  if (options_->hasPrototype()) {
+  // TODO(crbug.com/1070871): ElementRegistrationOptions.prototype has a default
+  // value, but we check |hasPrototype()| here for backward compatibility.
+  if (options_->hasPrototype() && !options_->prototype().IsNull()) {
     DCHECK(options_->prototype().IsObject());
     prototype_ = options_->prototype().V8Value().As<v8::Object>();
   } else {
@@ -111,7 +120,7 @@ bool V0CustomElementConstructorBuilder::ValidateOptions(
 
   AtomicString local_name;
 
-  if (options_->hasExtends()) {
+  if (!options_->extends().IsNull()) {
     local_name = AtomicString(options_->extends().DeprecatedLower());
 
     if (!Document::IsValidName(local_name)) {
@@ -157,10 +166,10 @@ V0CustomElementConstructorBuilder::CreateCallbacks() {
   v8::MaybeLocal<v8::Function> attribute_changed =
       RetrieveCallback("attributeChangedCallback");
 
-  callbacks_ = V8V0CustomElementLifecycleCallbacks::Create(
+  callbacks_ = MakeGarbageCollected<V8V0CustomElementLifecycleCallbacks>(
       script_state_, prototype_, created, attached, detached,
       attribute_changed);
-  return callbacks_.Get();
+  return callbacks_;
 }
 
 v8::MaybeLocal<v8::Function>
@@ -199,12 +208,14 @@ bool V0CustomElementConstructorBuilder::CreateConstructor(
     v8_type = v8::Null(isolate);
 
   v8::Local<v8::Object> data = v8::Object::New(isolate);
-  V8PrivateProperty::GetCustomElementDocument(isolate).Set(
-      data, ToV8(document, context->Global(), isolate));
-  V8PrivateProperty::GetCustomElementNamespaceURI(isolate).Set(
-      data, V8String(isolate, descriptor.NamespaceURI()));
-  V8PrivateProperty::GetCustomElementTagName(isolate).Set(data, v8_tag_name);
-  V8PrivateProperty::GetCustomElementType(isolate).Set(data, v8_type);
+  V8PrivateProperty::GetSymbol(isolate, kPrivatePropertyDocument)
+      .Set(data, ToV8(document, context->Global(), isolate));
+  V8PrivateProperty::GetSymbol(isolate, kPrivatePropertyNamespaceURI)
+      .Set(data, V8String(isolate, descriptor.NamespaceURI()));
+  V8PrivateProperty::GetSymbol(isolate, kPrivatePropertyTagName)
+      .Set(data, v8_tag_name);
+  V8PrivateProperty::GetSymbol(isolate, kPrivatePropertyType)
+      .Set(data, v8_type);
 
   v8::Local<v8::FunctionTemplate> constructor_template =
       v8::FunctionTemplate::New(isolate);
@@ -266,8 +277,9 @@ bool V0CustomElementConstructorBuilder::CreateConstructor(
     return false;
   }
 
-  V8PrivateProperty::GetCustomElementIsInterfacePrototypeObject(isolate).Set(
-      prototype_, v8::True(isolate));
+  V8PrivateProperty::GetSymbol(isolate,
+                               kPrivatePropertyIsInterfacePrototypeObject)
+      .Set(prototype_, v8::True(isolate));
 
   bool configured_constructor;
   if (!prototype_
@@ -288,7 +300,8 @@ bool V0CustomElementConstructorBuilder::PrototypeIsValid(
   v8::Local<v8::Context> context = script_state_->GetContext();
 
   if (prototype_->InternalFieldCount() ||
-      V8PrivateProperty::GetCustomElementIsInterfacePrototypeObject(isolate)
+      V8PrivateProperty::GetSymbol(isolate,
+                                   kPrivatePropertyIsInterfacePrototypeObject)
           .HasValue(prototype_)) {
     V0CustomElementException::ThrowException(
         V0CustomElementException::kPrototypeInUse, type, exception_state);
@@ -356,14 +369,14 @@ static void ConstructCustomElement(
 
   v8::Local<v8::Object> data = v8::Local<v8::Object>::Cast(info.Data());
   v8::Local<v8::Value> document_value;
-  if (!V8PrivateProperty::GetCustomElementDocument(isolate)
+  if (!V8PrivateProperty::GetSymbol(isolate, kPrivatePropertyDocument)
            .GetOrUndefined(data)
            .ToLocal(&document_value)) {
     return;
   }
   Document* document = V8Document::ToImpl(document_value.As<v8::Object>());
   v8::Local<v8::Value> namespace_uri_value;
-  if (!V8PrivateProperty::GetCustomElementNamespaceURI(isolate)
+  if (!V8PrivateProperty::GetSymbol(isolate, kPrivatePropertyNamespaceURI)
            .GetOrUndefined(data)
            .ToLocal(&namespace_uri_value) ||
       namespace_uri_value->IsUndefined()) {
@@ -371,7 +384,7 @@ static void ConstructCustomElement(
   }
   TOSTRING_VOID(V8StringResource<>, namespace_uri, namespace_uri_value);
   v8::Local<v8::Value> tag_name_value;
-  if (!V8PrivateProperty::GetCustomElementTagName(isolate)
+  if (!V8PrivateProperty::GetSymbol(isolate, kPrivatePropertyTagName)
            .GetOrUndefined(data)
            .ToLocal(&tag_name_value) ||
       tag_name_value->IsUndefined()) {
@@ -379,7 +392,7 @@ static void ConstructCustomElement(
   }
   TOSTRING_VOID(V8StringResource<>, tag_name, tag_name_value);
   v8::Local<v8::Value> maybe_type;
-  if (!V8PrivateProperty::GetCustomElementType(isolate)
+  if (!V8PrivateProperty::GetSymbol(isolate, kPrivatePropertyType)
            .GetOrUndefined(data)
            .ToLocal(&maybe_type) ||
       maybe_type->IsUndefined()) {

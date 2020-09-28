@@ -6,16 +6,20 @@
 
 #include <memory>
 
-#include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/modules/peerconnection/adapters/dtls_transport_proxy.h"
+#include "third_party/blink/renderer/modules/peerconnection/peer_connection_dependency_factory.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_error_util.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_ice_transport.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/boringssl/src/include/openssl/ssl.h"
 #include "third_party/webrtc/api/dtls_transport_interface.h"
 #include "third_party/webrtc/api/peer_connection_interface.h"
 
@@ -26,23 +30,17 @@ String TransportStateToString(webrtc::DtlsTransportState state) {
   switch (state) {
     case webrtc::DtlsTransportState::kNew:
       return String("new");
-      break;
     case webrtc::DtlsTransportState::kConnecting:
       return String("connecting");
-      break;
     case webrtc::DtlsTransportState::kConnected:
       return String("connected");
-      break;
     case webrtc::DtlsTransportState::kClosed:
       return String("closed");
-      break;
     case webrtc::DtlsTransportState::kFailed:
       return String("failed");
-      break;
     default:
       NOTREACHED();
       return String("failed");
-      break;
   }
 }
 
@@ -50,11 +48,13 @@ std::unique_ptr<DtlsTransportProxy> CreateProxy(
     ExecutionContext* context,
     webrtc::DtlsTransportInterface* native_transport,
     DtlsTransportProxy::Delegate* delegate) {
-  LocalFrame* frame = To<Document>(context)->GetFrame();
+  LocalFrame* frame = To<LocalDOMWindow>(context)->GetFrame();
   scoped_refptr<base::SingleThreadTaskRunner> proxy_thread =
       frame->GetTaskRunner(TaskType::kNetworking);
   scoped_refptr<base::SingleThreadTaskRunner> host_thread =
-      Platform::Current()->GetWebRtcWorkerThread();
+      PeerConnectionDependencyFactory::GetInstance()
+          ->GetWebRtcNetworkTaskRunner();
+
   return DtlsTransportProxy::Create(*frame, proxy_thread, host_thread,
                                     native_transport, delegate);
 }
@@ -65,7 +65,7 @@ RTCDtlsTransport::RTCDtlsTransport(
     ExecutionContext* context,
     rtc::scoped_refptr<webrtc::DtlsTransportInterface> native_transport,
     RTCIceTransport* ice_transport)
-    : ContextClient(context),
+    : ExecutionContextClient(context),
       current_state_(webrtc::DtlsTransportState::kNew),
       native_transport_(native_transport),
       proxy_(CreateProxy(context, native_transport, this)),
@@ -115,6 +115,20 @@ void RTCDtlsTransport::OnStateChange(webrtc::DtlsTransportInformation info) {
   // We depend on closed only happening once for safe garbage collection.
   DCHECK(current_state_.state() != webrtc::DtlsTransportState::kClosed);
   current_state_ = info;
+
+  // DTLS 1.0 is deprecated, emit a console warning.
+  if (current_state_.state() == webrtc::DtlsTransportState::kConnected) {
+    if (current_state_.tls_version()) {
+      if (*current_state_.tls_version() == DTLS1_VERSION ||
+          *current_state_.tls_version() == SSL3_VERSION ||
+          *current_state_.tls_version() == TLS1_VERSION ||
+          *current_state_.tls_version() == TLS1_1_VERSION) {
+        Deprecation::CountDeprecation(GetExecutionContext(),
+                                      WebFeature::kObsoleteWebrtcTlsVersion);
+      }
+    }
+  }
+
   // If the certificates have changed, copy them as DOMArrayBuffers.
   // This makes sure that getRemoteCertificates() == getRemoteCertificates()
   if (current_state_.remote_ssl_certificates()) {
@@ -139,9 +153,10 @@ void RTCDtlsTransport::OnStateChange(webrtc::DtlsTransportInformation info) {
             der_cert.data(), static_cast<unsigned int>(der_cert.size()));
         // Don't replace the certificate if it's unchanged.
         // Should have been "if (*dab_cert != *remote_certificates_[i])"
-        if (dab_cert->ByteLength() != remote_certificates_[i]->ByteLength() ||
+        if (dab_cert->ByteLengthAsSizeT() !=
+                remote_certificates_[i]->ByteLengthAsSizeT() ||
             memcmp(dab_cert->Data(), remote_certificates_[i]->Data(),
-                   dab_cert->ByteLength()) != 0) {
+                   dab_cert->ByteLengthAsSizeT()) != 0) {
           remote_certificates_[i] = dab_cert;
         }
       }
@@ -159,15 +174,15 @@ const AtomicString& RTCDtlsTransport::InterfaceName() const {
 }
 
 ExecutionContext* RTCDtlsTransport::GetExecutionContext() const {
-  return ContextClient::GetExecutionContext();
+  return ExecutionContextClient::GetExecutionContext();
 }
 
-void RTCDtlsTransport::Trace(Visitor* visitor) {
+void RTCDtlsTransport::Trace(Visitor* visitor) const {
   visitor->Trace(remote_certificates_);
   visitor->Trace(ice_transport_);
   DtlsTransportProxy::Delegate::Trace(visitor);
   EventTargetWithInlineData::Trace(visitor);
-  ContextClient::Trace(visitor);
+  ExecutionContextClient::Trace(visitor);
 }
 
 }  // namespace blink

@@ -152,6 +152,10 @@ void WebSettingsImpl::SetAccessibilityFontScaleFactor(float font_scale_factor) {
   settings_->SetAccessibilityFontScaleFactor(font_scale_factor);
 }
 
+void WebSettingsImpl::SetAccessibilityAlwaysShowFocus(bool always_show_focus) {
+  settings_->SetAccessibilityAlwaysShowFocus(always_show_focus);
+}
+
 void WebSettingsImpl::SetAccessibilityPasswordValuesEnabled(bool enabled) {
   settings_->SetAccessibilityPasswordValuesEnabled(enabled);
 }
@@ -465,10 +469,6 @@ void WebSettingsImpl::SetEditingBehavior(EditingBehavior behavior) {
   settings_->SetEditingBehaviorType(static_cast<EditingBehaviorType>(behavior));
 }
 
-void WebSettingsImpl::SetMockScrollbarsEnabled(bool enabled) {
-  settings_->SetMockScrollbarsEnabled(enabled);
-}
-
 void WebSettingsImpl::SetHideScrollbars(bool enabled) {
   dev_tools_emulator_->SetHideScrollbars(enabled);
 }
@@ -592,10 +592,6 @@ bool WebSettingsImpl::ShrinksViewportContentToFit() const {
   return settings_->GetShrinksViewportContentToFit();
 }
 
-void WebSettingsImpl::SetShouldRespectImageOrientation(bool enabled) {
-  settings_->SetShouldRespectImageOrientation(enabled);
-}
-
 void WebSettingsImpl::SetPictureInPictureEnabled(bool enabled) {
   settings_->SetPictureInPictureEnabled(enabled);
 }
@@ -666,10 +662,6 @@ void WebSettingsImpl::SetSelectionStrategy(SelectionStrategyType strategy) {
 
 void WebSettingsImpl::SetSmartInsertDeleteEnabled(bool enabled) {
   settings_->SetSmartInsertDeleteEnabled(enabled);
-}
-
-void WebSettingsImpl::SetUseSolidColorScrollbars(bool enabled) {
-  settings_->SetUseSolidColorScrollbars(enabled);
 }
 
 void WebSettingsImpl::SetMainFrameResizesAreOrientationChanges(bool enabled) {
@@ -794,6 +786,10 @@ void WebSettingsImpl::SetPreferredColorScheme(
 void WebSettingsImpl::SetNavigationControls(
     NavigationControls navigation_controls) {
   settings_->SetNavigationControls(navigation_controls);
+}
+
+void WebSettingsImpl::SetAriaModalPrunesAXTree(bool enabled) {
+  settings_->SetAriaModalPrunesAXTree(enabled);
 }
 
 STATIC_ASSERT_ENUM(WebSettings::ImageAnimationPolicy::kAllowed,

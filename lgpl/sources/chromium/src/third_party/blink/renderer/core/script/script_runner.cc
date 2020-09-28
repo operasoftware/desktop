@@ -26,28 +26,33 @@
 #include "third_party/blink/renderer/core/script/script_runner.h"
 
 #include <algorithm>
+#include "base/feature_list.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/script/script_loader.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/scheduler/public/cooperative_scheduling_manager.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
 ScriptRunner::ScriptRunner(Document* document)
-    : document_(document),
+    : ExecutionContextLifecycleStateObserver(document->GetExecutionContext()),
+      document_(document),
       task_runner_(document->GetTaskRunner(TaskType::kNetworking)) {
   DCHECK(document);
+  UpdateStateIfNeeded();
 }
 
 void ScriptRunner::QueueScriptForExecution(PendingScript* pending_script) {
   DCHECK(pending_script);
   document_->IncrementLoadEventDelayCount();
-  pending_script->StartStreamingIfPossible();
   switch (pending_script->GetSchedulingType()) {
     case ScriptSchedulingType::kAsync:
       pending_async_scripts_.insert(pending_script);
@@ -70,16 +75,15 @@ void ScriptRunner::PostTask(const base::Location& web_trace_location) {
       WTF::Bind(&ScriptRunner::ExecuteTask, WrapWeakPersistent(this)));
 }
 
-void ScriptRunner::Suspend() {
-  is_suspended_ = true;
-}
-
-void ScriptRunner::Resume() {
-  DCHECK(is_suspended_);
-
-  is_suspended_ = false;
+void ScriptRunner::ContextLifecycleStateChanged(
+    mojom::FrameLifecycleState state) {
   if (!IsExecutionSuspended())
     PostTasksForReadyScripts(FROM_HERE);
+}
+
+bool ScriptRunner::IsExecutionSuspended() {
+  return !GetExecutionContext() || GetExecutionContext()->IsContextPaused() ||
+         is_force_deferred_;
 }
 
 void ScriptRunner::SetForceDeferredExecution(bool force_deferred) {
@@ -112,8 +116,43 @@ void ScriptRunner::ScheduleReadyInOrderScripts() {
   }
 }
 
+void ScriptRunner::DelayAsyncScriptUntilMilestoneReached(
+    PendingScript* pending_script) {
+  DCHECK(!delay_async_script_milestone_reached_);
+  SECURITY_CHECK(pending_async_scripts_.Contains(pending_script));
+  pending_async_scripts_.erase(pending_script);
+
+  // When the ScriptRunner is notified via
+  // |NotifyDelayedAsyncScriptsMilestoneReached()|, the scripts in
+  // |pending_delayed_async_scripts_| will be scheduled for execution.
+  pending_delayed_async_scripts_.push_back(pending_script);
+}
+
+void ScriptRunner::NotifyDelayedAsyncScriptsMilestoneReached() {
+  delay_async_script_milestone_reached_ = true;
+  while (!pending_delayed_async_scripts_.IsEmpty()) {
+    PendingScript* pending_script = pending_delayed_async_scripts_.TakeFirst();
+    DCHECK_EQ(pending_script->GetSchedulingType(),
+              ScriptSchedulingType::kAsync);
+
+    async_scripts_to_execute_soon_.push_back(pending_script);
+    PostTask(FROM_HERE);
+  }
+}
+
+bool ScriptRunner::CanDelayAsyncScripts() {
+  static bool flags_enabled =
+      base::FeatureList::IsEnabled(features::kDelayAsyncScriptExecution) ||
+      RuntimeEnabledFeatures::
+          DelayAsyncScriptExecutionUntilFinishedParsingEnabled() ||
+      RuntimeEnabledFeatures::
+          DelayAsyncScriptExecutionUntilFirstPaintOrFinishedParsingEnabled();
+  return !delay_async_script_milestone_reached_ && flags_enabled;
+}
+
 void ScriptRunner::NotifyScriptReady(PendingScript* pending_script) {
   SECURITY_CHECK(pending_script);
+
   switch (pending_script->GetSchedulingType()) {
     case ScriptSchedulingType::kAsync:
       // SECURITY_CHECK() makes us crash in a controlled way in error cases
@@ -121,6 +160,11 @@ void ScriptRunner::NotifyScriptReady(PendingScript* pending_script) {
       // (otherwise we'd cause a use-after-free in ~ScriptRunner when it tries
       // to detach).
       SECURITY_CHECK(pending_async_scripts_.Contains(pending_script));
+
+      if (pending_script->IsEligibleForDelay() && CanDelayAsyncScripts()) {
+        DelayAsyncScriptUntilMilestoneReached(pending_script);
+        return;
+      }
 
       pending_async_scripts_.erase(pending_script);
       async_scripts_to_execute_soon_.push_back(pending_script);
@@ -156,27 +200,14 @@ bool ScriptRunner::RemovePendingInOrderScript(PendingScript* pending_script) {
 void ScriptRunner::MovePendingScript(Document& old_document,
                                      Document& new_document,
                                      ScriptLoader* script_loader) {
-  Document* new_context_document = new_document.ContextDocument();
-  if (!new_context_document) {
-    // Document's contextDocument() method will return no Document if the
-    // following conditions both hold:
-    //
-    //   - The Document wasn't created with an explicit context document
-    //     and that document is otherwise kept alive.
-    //   - The Document itself is detached from its frame.
-    //
-    // The script element's loader is in that case moved to document() and
-    // its script runner, which is the non-null Document that contextDocument()
-    // would return if not detached.
-    DCHECK(!new_document.GetFrame());
-    new_context_document = &new_document;
-  }
-  Document* old_context_document = old_document.ContextDocument();
-  if (!old_context_document) {
-    DCHECK(!old_document.GetFrame());
-    old_context_document = &old_document;
-  }
-
+  Document* new_context_document =
+      new_document.GetExecutionContext()
+          ? To<LocalDOMWindow>(new_document.GetExecutionContext())->document()
+          : &new_document;
+  Document* old_context_document =
+      old_document.GetExecutionContext()
+          ? To<LocalDOMWindow>(old_document.GetExecutionContext())->document()
+          : &old_document;
   if (old_context_document == new_context_document)
     return;
 
@@ -246,8 +277,7 @@ void ScriptRunner::ExecuteTask() {
   // This method is triggered by ScriptRunner::PostTask, and runs directly from
   // the scheduler. So, the call stack is safe to reenter.
   scheduler::CooperativeSchedulingManager::AllowedStackScope
-      whitelisted_stack_scope(
-          scheduler::CooperativeSchedulingManager::Instance());
+      allowed_stack_scope(scheduler::CooperativeSchedulingManager::Instance());
 
   if (IsExecutionSuspended())
     return;
@@ -259,10 +289,12 @@ void ScriptRunner::ExecuteTask() {
     return;
 }
 
-void ScriptRunner::Trace(Visitor* visitor) {
+void ScriptRunner::Trace(Visitor* visitor) const {
+  ExecutionContextLifecycleStateObserver::Trace(visitor);
   visitor->Trace(document_);
   visitor->Trace(pending_in_order_scripts_);
   visitor->Trace(pending_async_scripts_);
+  visitor->Trace(pending_delayed_async_scripts_);
   visitor->Trace(async_scripts_to_execute_soon_);
   visitor->Trace(in_order_scripts_to_execute_soon_);
 }

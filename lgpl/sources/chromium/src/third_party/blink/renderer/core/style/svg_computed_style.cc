@@ -120,9 +120,9 @@ StyleDifference SVGComputedStyle::Diff(const SVGComputedStyle& other) const {
 
   if (DiffNeedsLayoutAndPaintInvalidation(other)) {
     style_difference.SetNeedsFullLayout();
-    style_difference.SetNeedsPaintInvalidationObject();
+    style_difference.SetNeedsPaintInvalidation();
   } else if (DiffNeedsPaintInvalidation(other)) {
-    style_difference.SetNeedsPaintInvalidationObject();
+    style_difference.SetNeedsPaintInvalidation();
   }
 
   return style_difference;
@@ -208,12 +208,8 @@ bool SVGComputedStyle::DiffNeedsPaintInvalidation(
   // Painting related properties only need paint invalidation.
   if (misc.Get() != other.misc.Get()) {
     if (misc->flood_color != other.misc->flood_color ||
-        misc->flood_color_is_current_color !=
-            other.misc->flood_color_is_current_color ||
         misc->flood_opacity != other.misc->flood_opacity ||
-        misc->lighting_color != other.misc->lighting_color ||
-        misc->lighting_color_is_current_color !=
-            other.misc->lighting_color_is_current_color)
+        misc->lighting_color != other.misc->lighting_color)
       return true;
   }
 

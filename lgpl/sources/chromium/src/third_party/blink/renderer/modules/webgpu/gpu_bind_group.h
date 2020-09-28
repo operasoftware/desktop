@@ -9,15 +9,17 @@
 
 namespace blink {
 
+class ExceptionState;
 class GPUBindGroupDescriptor;
 
-class GPUBindGroup : public DawnObject<DawnBindGroup> {
+class GPUBindGroup : public DawnObject<WGPUBindGroup> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static GPUBindGroup* Create(GPUDevice* device,
-                              const GPUBindGroupDescriptor* webgpu_desc);
-  explicit GPUBindGroup(GPUDevice* device, DawnBindGroup bind_group);
+                              const GPUBindGroupDescriptor* webgpu_desc,
+                              ExceptionState& exception_state);
+  explicit GPUBindGroup(GPUDevice* device, WGPUBindGroup bind_group);
   ~GPUBindGroup() override;
 
  private:

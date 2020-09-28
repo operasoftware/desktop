@@ -41,8 +41,6 @@ StreamPromiseResolver::StreamPromiseResolver(ScriptState* script_state)
                 v8::Promise::Resolver::New(script_state->GetContext())
                     .ToLocalChecked()) {}
 
-StreamPromiseResolver::~StreamPromiseResolver() = default;
-
 void StreamPromiseResolver::Resolve(ScriptState* script_state,
                                     v8::Local<v8::Value> value) {
   DCHECK(!resolver_.IsEmpty());
@@ -95,7 +93,7 @@ v8::Promise::PromiseState StreamPromiseResolver::State(
   return V8Promise(isolate)->State();
 }
 
-void StreamPromiseResolver::Trace(Visitor* visitor) {
+void StreamPromiseResolver::Trace(Visitor* visitor) const {
   visitor->Trace(resolver_);
 }
 

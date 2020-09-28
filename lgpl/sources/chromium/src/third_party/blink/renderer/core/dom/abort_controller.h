@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_ABORT_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_ABORT_CONTROLLER_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 
@@ -16,13 +17,13 @@ class ExecutionContext;
 // Implementation of https://dom.spec.whatwg.org/#interface-abortcontroller
 // See also design doc at
 // https://docs.google.com/document/d/1OuoCG2uiijbAwbCw9jaS7tHEO0LBO_4gMNio1ox0qlY/edit
-class AbortController final : public ScriptWrappable {
+class CORE_EXPORT AbortController : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static AbortController* Create(ExecutionContext*);
 
-  explicit AbortController(ExecutionContext*);
+  explicit AbortController(AbortSignal*);
   ~AbortController() override;
 
   // abort_controller.idl
@@ -33,7 +34,7 @@ class AbortController final : public ScriptWrappable {
   // https://dom.spec.whatwg.org/#dom-abortcontroller-abort
   void abort();
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   Member<AbortSignal> signal_;

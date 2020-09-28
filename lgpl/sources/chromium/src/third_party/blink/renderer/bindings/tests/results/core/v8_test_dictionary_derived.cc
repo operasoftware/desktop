@@ -18,15 +18,15 @@
 
 namespace blink {
 
-static const v8::Eternal<v8::Name>* eternalV8TestDictionaryDerivedImplementedAsKeys(v8::Isolate* isolate) {
+static const base::span<const v8::Eternal<v8::Name>>
+eternalV8TestDictionaryDerivedImplementedAsKeys(v8::Isolate* isolate) {
   static const char* const kKeys[] = {
     "derivedStringMember",
     "derivedStringMemberWithDefault",
     "requiredLongMember",
     "stringOrDoubleSequenceMember",
   };
-  return V8PerIsolateData::From(isolate)->FindOrCreateEternalNameCache(
-      kKeys, kKeys, base::size(kKeys));
+  return V8PerIsolateData::From(isolate)->FindOrCreateEternalNameCache(kKeys, kKeys);
 }
 
 void V8TestDictionaryDerivedImplementedAs::ToImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8_value, TestDictionaryDerivedImplementedAs* impl, ExceptionState& exception_state) {
@@ -45,7 +45,7 @@ void V8TestDictionaryDerivedImplementedAs::ToImpl(v8::Isolate* isolate, v8::Loca
   if (exception_state.HadException())
     return;
 
-  const v8::Eternal<v8::Name>* keys = eternalV8TestDictionaryDerivedImplementedAsKeys(isolate);
+  const auto* keys = eternalV8TestDictionaryDerivedImplementedAsKeys(isolate).data();
   v8::TryCatch block(isolate);
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
   v8::Local<v8::Value> derived_string_member_value;
@@ -56,7 +56,7 @@ void V8TestDictionaryDerivedImplementedAs::ToImpl(v8::Isolate* isolate, v8::Loca
   if (derived_string_member_value.IsEmpty() || derived_string_member_value->IsUndefined()) {
     // Do nothing.
   } else {
-    V8StringResource<> derived_string_member_cpp_value = derived_string_member_value;
+    V8StringResource<> derived_string_member_cpp_value{ derived_string_member_value };
     if (!derived_string_member_cpp_value.Prepare(exception_state))
       return;
     impl->setDerivedStringMember(derived_string_member_cpp_value);
@@ -70,7 +70,7 @@ void V8TestDictionaryDerivedImplementedAs::ToImpl(v8::Isolate* isolate, v8::Loca
   if (derived_string_member_with_default_value.IsEmpty() || derived_string_member_with_default_value->IsUndefined()) {
     // Do nothing.
   } else {
-    V8StringResource<> derived_string_member_with_default_cpp_value = derived_string_member_with_default_value;
+    V8StringResource<> derived_string_member_with_default_cpp_value{ derived_string_member_with_default_value };
     if (!derived_string_member_with_default_cpp_value.Prepare(exception_state))
       return;
     impl->setDerivedStringMemberWithDefault(derived_string_member_with_default_cpp_value);
@@ -85,7 +85,7 @@ void V8TestDictionaryDerivedImplementedAs::ToImpl(v8::Isolate* isolate, v8::Loca
     exception_state.ThrowTypeError("required member requiredLongMember is undefined.");
     return;
   } else {
-    int32_t required_long_member_cpp_value = NativeValueTraits<IDLLong>::NativeValue(isolate, required_long_member_value, exception_state);
+    int32_t required_long_member_cpp_value{ NativeValueTraits<IDLLong>::NativeValue(isolate, required_long_member_value, exception_state) };
     if (exception_state.HadException())
       return;
     impl->setRequiredLongMember(required_long_member_cpp_value);
@@ -99,7 +99,7 @@ void V8TestDictionaryDerivedImplementedAs::ToImpl(v8::Isolate* isolate, v8::Loca
   if (string_or_double_sequence_member_value.IsEmpty() || string_or_double_sequence_member_value->IsUndefined()) {
     // Do nothing.
   } else {
-    HeapVector<StringOrDouble> string_or_double_sequence_member_cpp_value = NativeValueTraits<IDLSequence<StringOrDouble>>::NativeValue(isolate, string_or_double_sequence_member_value, exception_state);
+    HeapVector<StringOrDouble> string_or_double_sequence_member_cpp_value{ NativeValueTraits<IDLSequence<StringOrDouble>>::NativeValue(isolate, string_or_double_sequence_member_value, exception_state) };
     if (exception_state.HadException())
       return;
     impl->setStringOrDoubleSequenceMember(string_or_double_sequence_member_cpp_value);
@@ -117,7 +117,7 @@ bool toV8TestDictionaryDerivedImplementedAs(const TestDictionaryDerivedImplement
   if (!toV8TestDictionary(impl, dictionary, creationContext, isolate))
     return false;
 
-  const v8::Eternal<v8::Name>* keys = eternalV8TestDictionaryDerivedImplementedAsKeys(isolate);
+  const auto* keys = eternalV8TestDictionaryDerivedImplementedAsKeys(isolate).data();
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
 
   auto create_property = [dictionary, context, keys, isolate](
@@ -184,7 +184,7 @@ bool toV8TestDictionaryDerivedImplementedAs(const TestDictionaryDerivedImplement
 }
 
 TestDictionaryDerivedImplementedAs* NativeValueTraits<TestDictionaryDerivedImplementedAs>::NativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exception_state) {
-  TestDictionaryDerivedImplementedAs* impl = TestDictionaryDerivedImplementedAs::Create();
+  TestDictionaryDerivedImplementedAs* impl = MakeGarbageCollected<TestDictionaryDerivedImplementedAs>();
   V8TestDictionaryDerivedImplementedAs::ToImpl(isolate, value, impl, exception_state);
   return impl;
 }

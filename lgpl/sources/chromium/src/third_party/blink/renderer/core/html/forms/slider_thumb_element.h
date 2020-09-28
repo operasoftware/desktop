@@ -59,6 +59,7 @@ class SliderThumbElement final : public HTMLDivElement {
   HTMLInputElement* HostInput() const;
   void SetPositionFromPoint(const LayoutPoint&);
   void StopDragging();
+  bool IsSliderThumbElement() const override { return true; }
 
  private:
   LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
@@ -104,7 +105,6 @@ class SliderContainerElement final : public HTMLDivElement {
 
  private:
   LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
-  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() final;
   const AtomicString& ShadowPseudoId() const override;
   Direction GetDirection(LayoutPoint&, LayoutPoint&);
   bool CanSlide();

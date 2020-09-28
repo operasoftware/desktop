@@ -34,7 +34,7 @@ class QueueWithSizes::ValueSizePair final
 
   double Size() { return size_; }
 
-  void Trace(Visitor* visitor) { visitor->Trace(value_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(value_); }
 
  private:
   TraceWrapperV8Reference<v8::Value> value_;
@@ -42,7 +42,6 @@ class QueueWithSizes::ValueSizePair final
 };
 
 QueueWithSizes::QueueWithSizes() = default;
-QueueWithSizes::~QueueWithSizes() = default;
 
 v8::Local<v8::Value> QueueWithSizes::DequeueValue(v8::Isolate* isolate) {
   DCHECK(!queue_.empty());
@@ -112,7 +111,7 @@ void QueueWithSizes::ResetQueue() {
   queue_total_size_ = 0;
 }
 
-void QueueWithSizes::Trace(Visitor* visitor) {
+void QueueWithSizes::Trace(Visitor* visitor) const {
   visitor->Trace(queue_);
 }
 

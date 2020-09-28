@@ -22,6 +22,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_SVG_LAYOUT_SVG_FOREIGN_OBJECT_H_
 
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_block.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -80,8 +81,6 @@ class LayoutSVGForeignObject final : public LayoutSVGBlock {
            LayoutSVGBlock::IsOfType(type);
   }
 
-  void SetNeedsTransformUpdate() override { needs_transform_update_ = true; }
-
   PaintLayerType LayerTypeRequired() const override;
 
   bool CreatesNewFormattingContext() const final {
@@ -100,11 +99,14 @@ class LayoutSVGForeignObject final : public LayoutSVGBlock {
                             LayoutUnit logical_top,
                             LogicalExtentComputedValues&) const override;
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
-
-  bool needs_transform_update_;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutSVGForeignObject, IsSVGForeignObject());
+template <>
+struct DowncastTraits<LayoutSVGForeignObject> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsSVGForeignObject();
+  }
+};
 
 }  // namespace blink
 

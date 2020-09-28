@@ -1,5 +1,5 @@
 /*
- * The default style sheet used to render MathML.
+ * The default style sheet used to render MathML (MathMLCore enabled).
  *
  * Copyright (C) 2014 Google Inc. All rights reserved.
  *
@@ -29,21 +29,85 @@
 
 /* By default, we only display the MathML formulas without any formatting other than the one specified by the display attribute. */
 math {
-    display: inline;
+    display: inline-math;
+    math-superscript-shift-style: display;
 }
 
 math[display="block"] {
-    display: block;
+    display: math;
     text-align: center;
 }
 
-/* We hide the PresentationExpression constructions that are children of a <semantics> element.
-   http://www.w3.org/TR/MathML/appendixa.html#parsing_PresentationExpression */
-semantics > mi, semantics > mn, semantics > mo, semantics > mtext, semantics > mspace, semantics > ms, semantics > maligngroup, semantics > malignmark, semantics > mrow, semantics > mfrac, semantics > msqrt, semantics > mroot, semantics > mstyle, semantics > merror, semantics > mpadded, semantics > mphantom, semantics > mfenced, semantics > menclose, semantics > msub, semantics > msup, semantics > msubsup, semantics > munder, semantics > mover, semantics > munderover, semantics > mmultiscripts, semantics > mtable, semantics > mstack, semantics > mlongdiv, semantics > maction {
-    display: none;
+:-internal-spatial-navigation-interest {
+    outline: auto 1px -webkit-focus-ring-color;
+    box-shadow: none !important;
 }
 
-/* However, we display all the annotations. */
-annotation, annotation-xml {
-    display: inline-block;
+:focus {
+    outline: auto 1px -webkit-focus-ring-color;
 }
+
+maction, merror, mfrac, mphantom, mrow, mspace, mstyle, msub, msup, msubsup, munder, mover, munderover
+{
+    display: math;
+}
+
+mphantom {
+    visibility: hidden;
+}
+
+merror {
+    color: red;
+    background-color: lightYellow;
+}
+
+mspace {
+    overflow: hidden !important;
+}
+
+/* Token elements */
+mi {
+  text-transform: math-auto;
+}
+
+/* Fractions */
+mfrac {
+  padding-inline-start: 1px;
+  padding-inline-end: 1px;
+}
+
+mfrac > * {
+  font-size: scriptlevel(auto);
+  math-style: inline;
+}
+
+mfrac > :nth-child(2) {
+  math-superscript-shift-style: inline;
+}
+
+/* Other rules for scriptlevel, displaystyle and math-superscript-shift-style */
+msub > :not(:first-child),
+msup > :not(:first-child),
+msubsup > :not(:first-child),
+mmultiscripts > :not(:first-child),
+munder > :not(:first-child),
+mover > :not(:first-child),
+munderover > :not(:first-child) {
+  font-size: scriptlevel(add(1));
+  math-style: inline;
+}
+
+munder[accentunder="true" i] > :nth-child(2),
+mover[accent="true" i] > :nth-child(2),
+munderover[accentunder="true" i] > :nth-child(2),
+munderover[accent="true" i] > :nth-child(3) {
+  font-size: inherit;
+}
+
+munder > :nth-child(2),
+munderover > :nth-child(2),
+mover[accent="true" i] > :first-child,
+munderover[accent="true" i] > :first-child {
+  math-superscript-shift-style: inline;
+}
+

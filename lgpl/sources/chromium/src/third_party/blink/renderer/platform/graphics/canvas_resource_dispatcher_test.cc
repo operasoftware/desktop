@@ -87,13 +87,8 @@ class CanvasResourceDispatcherTest
 
   void CreateCanvasResourceDispatcher() {
     dispatcher_ = std::make_unique<MockCanvasResourceDispatcher>();
-    resource_provider_ = CanvasResourceProvider::Create(
-        IntSize(kWidth, kHeight),
-        CanvasResourceProvider::ResourceUsage::kSoftwareCompositedResourceUsage,
-        nullptr,  // context_provider_wrapper
-        0,        // msaa_sample_count
-        kLow_SkFilterQuality, CanvasColorParams(),
-        CanvasResourceProvider::kDefaultPresentationMode,
+    resource_provider_ = CanvasResourceProvider::CreateSharedBitmapProvider(
+        IntSize(kWidth, kHeight), kLow_SkFilterQuality, CanvasColorParams(),
         dispatcher_->GetWeakPtr());
   }
 
@@ -280,5 +275,7 @@ const TestParams kTestCases[] = {
     {true, false},
     {true, true}};
 
-INSTANTIATE_TEST_SUITE_P(, CanvasResourceDispatcherTest, ValuesIn(kTestCases));
+INSTANTIATE_TEST_SUITE_P(All,
+                         CanvasResourceDispatcherTest,
+                         ValuesIn(kTestCases));
 }  // namespace blink

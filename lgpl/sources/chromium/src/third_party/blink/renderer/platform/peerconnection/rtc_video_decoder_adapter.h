@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_PEERCONNECTION_RTC_VIDEO_DECODER_ADAPTER_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
@@ -14,9 +15,11 @@
 #include "base/sequence_checker.h"
 #include "base/synchronization/lock.h"
 #include "media/base/decode_status.h"
+#include "media/base/status.h"
 #include "media/base/video_codecs.h"
 #include "media/base/video_decoder.h"
 #include "media/base/video_decoder_config.h"
+#include "media/video/supported_video_decoder_config.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -51,6 +54,11 @@ namespace blink {
 // way to synchronize this correctly.
 class PLATFORM_EXPORT RTCVideoDecoderAdapter : public webrtc::VideoDecoder {
  public:
+  // Lists which implementations can be queried, this can vary based on platform
+  // and enabled features.
+  static std::vector<media::VideoDecoderImplementation>
+  SupportedImplementations();
+
   // Creates and initializes an RTCVideoDecoderAdapter. Returns nullptr if
   // |format| cannot be supported.
   // Called on the worker thread.
@@ -87,11 +95,14 @@ class PLATFORM_EXPORT RTCVideoDecoderAdapter : public webrtc::VideoDecoder {
   // Called on the worker thread.
   RTCVideoDecoderAdapter(media::GpuVideoAcceleratorFactories* gpu_factories,
                          const media::VideoDecoderConfig& config,
-                         const webrtc::SdpVideoFormat& format);
+                         const webrtc::SdpVideoFormat& format,
+                         media::VideoDecoderImplementation implementation);
 
   bool InitializeSync(const media::VideoDecoderConfig& config);
   void InitializeOnMediaThread(const media::VideoDecoderConfig& config,
                                InitCB init_cb);
+  static void OnInitializeDone(base::OnceCallback<void(bool)> cb,
+                               media::Status status);
   void DecodeOnMediaThread();
   void OnDecodeDone(media::DecodeStatus status);
   void OnOutput(scoped_refptr<media::VideoFrame> frame);
@@ -103,9 +114,10 @@ class PLATFORM_EXPORT RTCVideoDecoderAdapter : public webrtc::VideoDecoder {
                           FlushDoneCB flush_fail_cb);
 
   // Construction parameters.
-  scoped_refptr<base::SingleThreadTaskRunner> media_task_runner_;
-  media::GpuVideoAcceleratorFactories* gpu_factories_;
-  webrtc::SdpVideoFormat format_;
+  const scoped_refptr<base::SingleThreadTaskRunner> media_task_runner_;
+  media::GpuVideoAcceleratorFactories* const gpu_factories_;
+  const webrtc::SdpVideoFormat format_;
+  const media::VideoDecoderImplementation implementation_;
   media::VideoDecoderConfig config_;
 
   // Media thread members.

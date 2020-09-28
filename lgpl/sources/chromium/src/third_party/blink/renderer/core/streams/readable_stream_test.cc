@@ -13,7 +13,8 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_extras_test_utils.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_iterator_result_value.h"
 #include "third_party/blink/renderer/core/messaging/message_channel.h"
-#include "third_party/blink/renderer/core/streams/readable_stream_default_controller_interface.h"
+#include "third_party/blink/renderer/core/streams/readable_stream_default_controller_with_script_scope.h"
+#include "third_party/blink/renderer/core/streams/readable_stream_default_reader.h"
 #include "third_party/blink/renderer/core/streams/test_underlying_source.h"
 #include "third_party/blink/renderer/core/streams/underlying_source_base.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -174,42 +175,20 @@ TEST_F(ReadableStreamTest, GetReader) {
       script_state, js_underlying_source, ASSERT_NO_EXCEPTION);
   ASSERT_TRUE(stream);
 
-  EXPECT_EQ(stream->IsLocked(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(false));
-  EXPECT_EQ(stream->IsLocked(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(false));
-  EXPECT_EQ(stream->IsDisturbed(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(false));
+  EXPECT_FALSE(stream->locked());
+  EXPECT_FALSE(stream->IsLocked());
+  EXPECT_FALSE(stream->IsDisturbed());
 
-  ScriptValue reader = stream->getReader(script_state, ASSERT_NO_EXCEPTION);
+  ReadableStreamDefaultReader* reader =
+      stream->getReader(script_state, ASSERT_NO_EXCEPTION);
 
-  EXPECT_TRUE(stream->locked(script_state, ASSERT_NO_EXCEPTION));
-  EXPECT_EQ(stream->IsLocked(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(true));
-  EXPECT_EQ(stream->IsDisturbed(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(false));
+  EXPECT_TRUE(stream->locked());
+  EXPECT_TRUE(stream->IsLocked());
+  EXPECT_FALSE(stream->IsDisturbed());
 
-  ASSERT_TRUE(reader.V8Value()->IsObject());
-  v8::Local<v8::Object> v8_reader = reader.V8Value().As<v8::Object>();
+  reader->read(script_state, ASSERT_NO_EXCEPTION);
 
-  v8::Local<v8::Value> v8_read;
-  ASSERT_TRUE(v8_reader
-                  ->Get(script_state->GetContext(),
-                        V8String(script_state->GetIsolate(), "read"))
-                  .ToLocal(&v8_read));
-  ASSERT_TRUE(v8_read->IsFunction());
-
-  EXPECT_EQ(stream->IsDisturbed(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(false));
-
-  v8::Local<v8::Value> v8_read_result;
-  v8::Local<v8::Value> args[] = {};
-  ASSERT_TRUE(v8_read.As<v8::Function>()
-                  ->Call(script_state->GetContext(), v8_reader, 0, args)
-                  .ToLocal(&v8_read_result));
-
-  EXPECT_EQ(stream->IsDisturbed(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(true));
+  EXPECT_TRUE(stream->IsDisturbed());
 }
 
 TEST_F(ReadableStreamTest, Cancel) {
@@ -287,29 +266,22 @@ TEST_F(ReadableStreamTest, Tee) {
   ReadableStream* branch2 = nullptr;
   stream->Tee(script_state, &branch1, &branch2, ASSERT_NO_EXCEPTION);
 
-  EXPECT_EQ(stream->IsLocked(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(true));
-  EXPECT_EQ(stream->IsDisturbed(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(false));
+  EXPECT_TRUE(stream->IsLocked());
+  EXPECT_FALSE(stream->IsDisturbed());
 
   ASSERT_TRUE(branch1);
   ASSERT_TRUE(branch2);
 
-  EXPECT_EQ(branch1->IsLocked(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(false));
-  EXPECT_EQ(branch1->IsDisturbed(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(false));
-  EXPECT_EQ(branch2->IsLocked(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(false));
-  EXPECT_EQ(branch2->IsDisturbed(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(false));
+  EXPECT_FALSE(branch1->IsLocked());
+  EXPECT_FALSE(branch1->IsDisturbed());
+  EXPECT_FALSE(branch2->IsLocked());
+  EXPECT_FALSE(branch2->IsDisturbed());
 
   auto result1 = ReadAll(scope, branch1);
   ASSERT_TRUE(result1);
   EXPECT_EQ(*result1, "hello, bye");
 
-  EXPECT_EQ(stream->IsDisturbed(script_state, ASSERT_NO_EXCEPTION),
-            base::make_optional(true));
+  EXPECT_TRUE(stream->IsDisturbed());
 
   auto result2 = ReadAll(scope, branch2);
   ASSERT_TRUE(result2);
@@ -319,7 +291,6 @@ TEST_F(ReadableStreamTest, Tee) {
 TEST_F(ReadableStreamTest, Close) {
   V8TestingScope scope;
   ScriptState* script_state = scope.GetScriptState();
-  ExceptionState& exception_state = scope.GetExceptionState();
 
   auto* underlying_source =
       MakeGarbageCollected<TestUnderlyingSource>(script_state);
@@ -328,28 +299,21 @@ TEST_F(ReadableStreamTest, Close) {
 
   ASSERT_TRUE(stream);
 
-  EXPECT_EQ(stream->IsReadable(script_state, exception_state),
-            base::make_optional(true));
-  EXPECT_EQ(stream->IsClosed(script_state, exception_state),
-            base::make_optional(false));
-  EXPECT_EQ(stream->IsErrored(script_state, exception_state),
-            base::make_optional(false));
+  EXPECT_TRUE(stream->IsReadable());
+  EXPECT_FALSE(stream->IsClosed());
+  EXPECT_FALSE(stream->IsErrored());
 
   underlying_source->Close();
 
-  EXPECT_EQ(stream->IsReadable(script_state, exception_state),
-            base::make_optional(false));
-  EXPECT_EQ(stream->IsClosed(script_state, exception_state),
-            base::make_optional(true));
-  EXPECT_EQ(stream->IsErrored(script_state, exception_state),
-            base::make_optional(false));
+  EXPECT_FALSE(stream->IsReadable());
+  EXPECT_TRUE(stream->IsClosed());
+  EXPECT_FALSE(stream->IsErrored());
 }
 
 TEST_F(ReadableStreamTest, Error) {
   V8TestingScope scope;
   ScriptState* script_state = scope.GetScriptState();
   v8::Isolate* isolate = scope.GetIsolate();
-  ExceptionState& exception_state = scope.GetExceptionState();
 
   auto* underlying_source =
       MakeGarbageCollected<TestUnderlyingSource>(script_state);
@@ -358,21 +322,15 @@ TEST_F(ReadableStreamTest, Error) {
 
   ASSERT_TRUE(stream);
 
-  EXPECT_EQ(stream->IsReadable(script_state, exception_state),
-            base::make_optional(true));
-  EXPECT_EQ(stream->IsClosed(script_state, exception_state),
-            base::make_optional(false));
-  EXPECT_EQ(stream->IsErrored(script_state, exception_state),
-            base::make_optional(false));
+  EXPECT_TRUE(stream->IsReadable());
+  EXPECT_FALSE(stream->IsClosed());
+  EXPECT_FALSE(stream->IsErrored());
 
   underlying_source->Error(ScriptValue(isolate, v8::Undefined(isolate)));
 
-  EXPECT_EQ(stream->IsReadable(script_state, exception_state),
-            base::make_optional(false));
-  EXPECT_EQ(stream->IsClosed(script_state, exception_state),
-            base::make_optional(false));
-  EXPECT_EQ(stream->IsErrored(script_state, exception_state),
-            base::make_optional(true));
+  EXPECT_FALSE(stream->IsReadable());
+  EXPECT_FALSE(stream->IsClosed());
+  EXPECT_TRUE(stream->IsErrored());
 }
 
 TEST_F(ReadableStreamTest, LockAndDisturb) {
@@ -387,18 +345,14 @@ TEST_F(ReadableStreamTest, LockAndDisturb) {
 
   ASSERT_TRUE(stream);
 
-  EXPECT_EQ(stream->IsLocked(script_state, exception_state),
-            base::make_optional(false));
-  EXPECT_EQ(stream->IsDisturbed(script_state, exception_state),
-            base::make_optional(false));
+  EXPECT_FALSE(stream->IsLocked());
+  EXPECT_FALSE(stream->IsDisturbed());
 
   stream->LockAndDisturb(script_state, exception_state);
   ASSERT_FALSE(exception_state.HadException());
 
-  EXPECT_EQ(stream->IsLocked(script_state, exception_state),
-            base::make_optional(true));
-  EXPECT_EQ(stream->IsDisturbed(script_state, exception_state),
-            base::make_optional(true));
+  EXPECT_TRUE(stream->IsLocked());
+  EXPECT_TRUE(stream->IsDisturbed());
 }
 
 TEST_F(ReadableStreamTest, Serialize) {
@@ -418,7 +372,7 @@ TEST_F(ReadableStreamTest, Serialize) {
       MakeGarbageCollected<MessageChannel>(scope.GetExecutionContext());
 
   stream->Serialize(script_state, channel->port1(), ASSERT_NO_EXCEPTION);
-  EXPECT_TRUE(stream->IsLocked(script_state, ASSERT_NO_EXCEPTION));
+  EXPECT_TRUE(stream->IsLocked());
 
   auto* transferred = ReadableStream::Deserialize(
       script_state, channel->port2(), ASSERT_NO_EXCEPTION);
@@ -432,84 +386,54 @@ TEST_F(ReadableStreamTest, Serialize) {
             base::make_optional<String>("hello, bye"));
 }
 
-TEST_F(ReadableStreamTest, GetReadHandle) {
+TEST_F(ReadableStreamTest, GarbageCollectJavaScriptUnderlyingSource) {
   V8TestingScope scope;
-  ScriptState* script_state = scope.GetScriptState();
   auto* isolate = scope.GetIsolate();
 
-  auto* underlying_source =
-      MakeGarbageCollected<TestUnderlyingSource>(script_state);
+  v8::Global<v8::Object> weak_underlying_source;
 
-  ScriptValue js_underlying_source = ScriptValue(
-      isolate,
-      ToV8(underlying_source, script_state->GetContext()->Global(), isolate));
-  ReadableStream* stream = ReadableStream::Create(
-      script_state, js_underlying_source, ASSERT_NO_EXCEPTION);
-  ASSERT_TRUE(stream);
+  {
+    v8::HandleScope handle_scope(isolate);
+    v8::Local<v8::Object> underlying_source = v8::Object::New(isolate);
+    ReadableStream::Create(scope.GetScriptState(),
+                           ScriptValue(isolate, underlying_source),
+                           ASSERT_NO_EXCEPTION);
+    weak_underlying_source = v8::Global<v8::Object>(isolate, underlying_source);
+    weak_underlying_source.SetWeak();
+  }
 
-  ScriptValue abc = ScriptValue(isolate, V8String(isolate, "abc"));
-  underlying_source->Enqueue(abc);
-  underlying_source->Close();
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
-  ReadableStream::ReadHandle* read_handle =
-      stream->GetReadHandle(script_state, ASSERT_NO_EXCEPTION);
+  EXPECT_TRUE(weak_underlying_source.IsEmpty());
+}
 
-  class CaptureFunction : public ScriptFunction {
+TEST_F(ReadableStreamTest, GarbageCollectCPlusPlusUnderlyingSource) {
+  class NoopUnderlyingSource : public UnderlyingSourceBase {
    public:
-    static v8::Local<v8::Function> CreateFunction(
-        ScriptState* script_state,
-        base::Optional<ScriptValue>* out_value) {
-      return MakeGarbageCollected<CaptureFunction>(script_state, out_value)
-          ->BindToV8Function();
-    }
-
-    CaptureFunction(ScriptState* script_state,
-                    base::Optional<ScriptValue>* out_value)
-        : ScriptFunction(script_state), out_value_(out_value) {}
-
-    ScriptValue Call(ScriptValue value) override {
-      *out_value_ = value;
-      return value;
-    }
-
-   private:
-    base::Optional<ScriptValue>* out_value_;
+    NoopUnderlyingSource(ScriptState* script_state)
+        : UnderlyingSourceBase(script_state) {}
   };
 
-  base::Optional<ScriptValue> iterator;
-  base::Optional<ScriptValue> not_reached;
+  V8TestingScope scope;
+  auto* isolate = scope.GetIsolate();
 
-  read_handle->Read(script_state)
-      .Then(CaptureFunction::CreateFunction(script_state, &iterator),
-            CaptureFunction::CreateFunction(script_state, &not_reached));
-  // Resolve promise and run callbacks.
+  WeakPersistent<NoopUnderlyingSource> weak_underlying_source;
+
+  {
+    v8::HandleScope handle_scope(isolate);
+    auto* underlying_source =
+        MakeGarbageCollected<NoopUnderlyingSource>(scope.GetScriptState());
+    weak_underlying_source = underlying_source;
+    ReadableStream::CreateWithCountQueueingStrategy(scope.GetScriptState(),
+                                                    underlying_source, 0);
+  }
+
+  // Allow Promises to resolve.
   v8::MicrotasksScope::PerformCheckpoint(isolate);
 
-  ASSERT_TRUE(iterator.has_value());
-  EXPECT_FALSE(not_reached.has_value());
-  ASSERT_FALSE(iterator->IsEmpty());
+  ThreadState::Current()->CollectAllGarbageForTesting();
 
-  bool done = false;
-  auto maybe_value = V8UnpackIteratorResult(
-      script_state, iterator->V8Value().As<v8::Object>(), &done);
-  EXPECT_FALSE(done);
-  auto value_as_string = ToBlinkString<String>(
-      maybe_value.ToLocalChecked().As<v8::String>(), kDoNotExternalize);
-  EXPECT_EQ(value_as_string, "abc");
-
-  iterator.reset();
-  read_handle->Read(script_state)
-      .Then(CaptureFunction::CreateFunction(script_state, &iterator),
-            CaptureFunction::CreateFunction(script_state, &not_reached));
-  v8::MicrotasksScope::PerformCheckpoint(isolate);
-
-  ASSERT_TRUE(iterator.has_value());
-  EXPECT_FALSE(not_reached.has_value());
-  ASSERT_FALSE(iterator->IsEmpty());
-
-  maybe_value = V8UnpackIteratorResult(
-      script_state, iterator->V8Value().As<v8::Object>(), &done);
-  EXPECT_TRUE(done);
+  EXPECT_FALSE(weak_underlying_source);
 }
 
 }  // namespace

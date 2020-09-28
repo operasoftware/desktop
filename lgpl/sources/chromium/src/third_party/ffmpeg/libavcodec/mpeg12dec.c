@@ -35,7 +35,7 @@
 #include "avcodec.h"
 #include "bytestream.h"
 #include "error_resilience.h"
-#include "hwaccel.h"
+#include "hwconfig.h"
 #include "idctdsp.h"
 #include "internal.h"
 #include "mpeg_er.h"
@@ -63,6 +63,7 @@ typedef struct Mpeg1Context {
     int slice_count;
     AVRational save_aspect;
     int save_width, save_height, save_progressive_seq;
+    int rc_buffer_size;
     AVRational frame_rate_ext;  /* MPEG-2 specific framerate modificator */
     int sync;                   /* Did we reach a sync point like a GOP/SEQ/KEYFrame? */
     int tmpgexs;
@@ -585,7 +586,7 @@ static inline int mpeg2_fast_decode_block_intra(MpegEncContext *s,
     dc = s->last_dc[component];
     dc += diff;
     s->last_dc[component] = dc;
-    block[0] = dc << (3 - s->intra_dc_precision);
+    block[0] = dc * (1 << (3 - s->intra_dc_precision));
     i = 0;
     if (s->intra_vlc_format)
         rl = &ff_rl_mpeg2;
@@ -1397,6 +1398,7 @@ static void mpeg_decode_sequence_extension(Mpeg1Context *s1)
     MpegEncContext *s = &s1->mpeg_enc_ctx;
     int horiz_size_ext, vert_size_ext;
     int bit_rate_ext;
+    AVCPBProperties *cpb_props;
 
     skip_bits(&s->gb, 1); /* profile and level esc*/
     s->avctx->profile       = get_bits(&s->gb, 3);
@@ -1416,7 +1418,7 @@ static void mpeg_decode_sequence_extension(Mpeg1Context *s1)
     bit_rate_ext = get_bits(&s->gb, 12);  /* XXX: handle it */
     s->bit_rate += (bit_rate_ext << 18) * 400LL;
     check_marker(s->avctx, &s->gb, "after bit rate extension");
-    s->avctx->rc_buffer_size += get_bits(&s->gb, 8) * 1024 * 16 << 10;
+    s1->rc_buffer_size += get_bits(&s->gb, 8) * 1024 * 16 << 10;
 
     s->low_delay = get_bits1(&s->gb);
     if (s->avctx->flags & AV_CODEC_FLAG_LOW_DELAY)
@@ -1428,11 +1430,17 @@ static void mpeg_decode_sequence_extension(Mpeg1Context *s1)
     ff_dlog(s->avctx, "sequence extension\n");
     s->codec_id = s->avctx->codec_id = AV_CODEC_ID_MPEG2VIDEO;
 
+    if (cpb_props = ff_add_cpb_side_data(s->avctx)) {
+        cpb_props->buffer_size = s1->rc_buffer_size;
+        if (s->bit_rate != 0x3FFFF*400)
+            cpb_props->max_bitrate = s->bit_rate;
+    }
+
     if (s->avctx->debug & FF_DEBUG_PICT_INFO)
         av_log(s->avctx, AV_LOG_DEBUG,
                "profile: %d, level: %d ps: %d cf:%d vbv buffer: %d, bitrate:%"PRId64"\n",
                s->avctx->profile, s->avctx->level, s->progressive_sequence, s->chroma_format,
-               s->avctx->rc_buffer_size, s->bit_rate);
+               s1->rc_buffer_size, s->bit_rate);
 }
 
 static void mpeg_decode_sequence_display_extension(Mpeg1Context *s1)
@@ -1595,6 +1603,11 @@ static int mpeg_field_start(MpegEncContext *s, const uint8_t *buf, int buf_size)
     Mpeg1Context *s1      = (Mpeg1Context *) s;
     int ret;
 
+    if (!(avctx->flags2 & AV_CODEC_FLAG2_CHUNKS)) {
+        if (s->mb_width * s->mb_height * 11LL / (33 * 2 * 8) > buf_size)
+            return AVERROR_INVALIDDATA;
+    }
+
     /* start frame decoding */
     if (s->first_field || s->picture_structure == PICT_FRAME) {
         AVFrameSideData *pan_scan;
@@ -1663,8 +1676,7 @@ static int mpeg_field_start(MpegEncContext *s, const uint8_t *buf, int buf_size)
             return AVERROR_INVALIDDATA;
         }
 
-        if (s->avctx->hwaccel &&
-            (s->avctx->slice_flags & SLICE_FLAG_ALLOW_FIELD)) {
+        if (s->avctx->hwaccel) {
             if ((ret = s->avctx->hwaccel->end_frame(s->avctx)) < 0) {
                 av_log(avctx, AV_LOG_ERROR,
                        "hardware accelerator failed to decode first field\n");
@@ -2010,13 +2022,15 @@ static int slice_decode_thread(AVCodecContext *c, void *arg)
 
         start_code = -1;
         buf        = avpriv_find_start_code(buf, s->gb.buffer_end, &start_code);
+        if (start_code < SLICE_MIN_START_CODE || start_code > SLICE_MAX_START_CODE)
+            return AVERROR_INVALIDDATA;
         mb_y       = start_code - SLICE_MIN_START_CODE;
         if (s->codec_id != AV_CODEC_ID_MPEG1VIDEO && s->mb_height > 2800/16)
             mb_y += (*buf&0xE0)<<2;
         mb_y <<= field_pic;
         if (s->picture_structure == PICT_BOTTOM_FIELD)
             mb_y++;
-        if (mb_y < 0 || mb_y >= s->end_mb_y)
+        if (mb_y >= s->end_mb_y)
             return AVERROR_INVALIDDATA;
     }
 }
@@ -2111,7 +2125,7 @@ static int mpeg1_decode_sequence(AVCodecContext *avctx,
         return AVERROR_INVALIDDATA;
     }
 
-    s->avctx->rc_buffer_size = get_bits(&s->gb, 10) * 1024 * 16;
+    s1->rc_buffer_size = get_bits(&s->gb, 10) * 1024 * 16;
     skip_bits(&s->gb, 1);
 
     /* get matrix */
@@ -2160,7 +2174,7 @@ static int mpeg1_decode_sequence(AVCodecContext *avctx,
 
     if (s->avctx->debug & FF_DEBUG_PICT_INFO)
         av_log(s->avctx, AV_LOG_DEBUG, "vbv buffer: %d, bitrate:%"PRId64", aspect_ratio_info: %d \n",
-               s->avctx->rc_buffer_size, s->bit_rate, s->aspect_ratio_info);
+               s1->rc_buffer_size, s->bit_rate, s->aspect_ratio_info);
 
     return 0;
 }

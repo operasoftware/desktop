@@ -33,8 +33,6 @@
     LegacyTreatAsPartialInterface
 ] interface mixin GlobalEventHandlers {
     attribute EventHandler onabort;
-    [RuntimeEnabled=InvisibleDOM] attribute EventHandler onactivateinvisible;
-    [RuntimeEnabled=DisplayLocking] attribute EventHandler onbeforeactivate;
     attribute EventHandler onblur;
     attribute EventHandler oncancel;
     attribute EventHandler oncanplay;
@@ -56,10 +54,9 @@
     attribute EventHandler ondurationchange;
     attribute EventHandler onemptied;
     attribute EventHandler onended;
-    // FIXME: onerror should be an OnErrorEventHandler.
-    attribute EventHandler onerror;
+    attribute OnErrorEventHandler onerror;
     attribute EventHandler onfocus;
-    [RuntimeEnabled=FormDataEvent] attribute EventHandler onformdata;
+    attribute EventHandler onformdata;
     attribute EventHandler oninput;
     attribute EventHandler oninvalid;
     attribute EventHandler onkeydown;
@@ -77,8 +74,6 @@
     attribute EventHandler onmouseover;
     attribute EventHandler onmouseup;
     attribute EventHandler onmousewheel;
-    attribute EventHandler onoperadetachedviewchange;
-    attribute EventHandler onoperadetachedviewcontrol;
     [RuntimeEnabled=OverscrollCustomization] attribute EventHandler onoverscroll;
     attribute EventHandler onpause;
     attribute EventHandler onplay;
@@ -100,6 +95,10 @@
     attribute EventHandler ontoggle;
     attribute EventHandler onvolumechange;
     attribute EventHandler onwaiting;
+    attribute EventHandler onwebkitanimationend;
+    attribute EventHandler onwebkitanimationiteration;
+    attribute EventHandler onwebkitanimationstart;
+    attribute EventHandler onwebkittransitionend;
     attribute EventHandler onwheel;
 
     // auxclick

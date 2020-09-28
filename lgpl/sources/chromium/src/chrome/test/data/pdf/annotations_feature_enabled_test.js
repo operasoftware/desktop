@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {testAsync} from './test_util.js';
+
 window.onerror = e => chrome.test.fail(e.stack);
 window.onunhandledrejection = e => chrome.test.fail(e.reason);
 
@@ -20,26 +23,17 @@ function waitFor(predicate) {
 }
 
 function contentElement() {
-  return document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+  return viewer.shadowRoot.elementFromPoint(innerWidth / 2, innerHeight / 2);
 }
 
 function isAnnotationMode() {
-  return document.querySelector('#toolbar').annotationMode;
-}
-
-async function testAsync(f) {
-  try {
-    await f();
-    chrome.test.succeed();
-  } catch (e) {
-    chrome.test.fail(e.stack);
-  }
+  return viewer.shadowRoot.querySelector('#toolbar').annotationMode;
 }
 
 chrome.test.runTests([
   function testAnnotationsEnabled() {
-    const toolbar = document.body.querySelector('#toolbar');
-    chrome.test.assertTrue(toolbar.pdfAnnotationsEnabled);
+    const toolbar = viewer.shadowRoot.querySelector('#toolbar');
+    chrome.test.assertTrue(loadTimeData.getBoolean('pdfAnnotationsEnabled'));
     chrome.test.assertTrue(
         toolbar.shadowRoot.querySelector('#annotate') != null);
     chrome.test.succeed();
@@ -49,7 +43,7 @@ chrome.test.runTests([
       chrome.test.assertEq('EMBED', contentElement().tagName);
 
       // Enter annotation mode.
-      $('toolbar').toggleAnnotation();
+      viewer.shadowRoot.querySelector('#toolbar').toggleAnnotation();
       await viewer.loaded;
       chrome.test.assertEq('VIEWER-INK-HOST', contentElement().tagName);
     });
@@ -61,8 +55,8 @@ chrome.test.runTests([
       const cameras = [];
       inkHost.ink_.setCamera = camera => cameras.push(camera);
 
-      viewer.viewport_.setZoom(1);
-      viewer.viewport_.setZoom(2);
+      viewer.viewport.setZoom(1);
+      viewer.viewport.setZoom(2);
       chrome.test.assertEq(2, cameras.length);
 
       window.scrollTo(100, 100);
@@ -71,9 +65,9 @@ chrome.test.runTests([
       chrome.test.assertEq(3, cameras.length);
 
       const expectations = [
-        {top: 44.25, left: -106.5, right: 718.5, bottom: -442.5},
-        {top: 23.25, left: -3.75, right: 408.75, bottom: -220.125},
-        {top: -14.25, left: 33.75, right: 446.25, bottom: -257.625},
+        {top: 44.25, left: -106.5, right: 718.5, bottom: -448.5},
+        {top: 23.25, left: -3.75, right: 408.75, bottom: -223.125},
+        {top: -14.25, left: 33.75, right: 446.25, bottom: -260.625},
       ];
 
       for (const expectation of expectations) {
@@ -93,7 +87,8 @@ chrome.test.runTests([
       inkHost.ink_.setAnnotationTool = value => tool = value;
 
       // Pen defaults.
-      const viewerPdfToolbar = document.querySelector('viewer-pdf-toolbar');
+      const viewerPdfToolbar =
+          viewer.shadowRoot.querySelector('viewer-pdf-toolbar');
       const pen = viewerPdfToolbar.$$('#pen');
       pen.click();
       chrome.test.assertEq('pen', tool.tool);
@@ -150,7 +145,8 @@ chrome.test.runTests([
   function testStrokeUndoRedo() {
     testAsync(async () => {
       const inkHost = contentElement();
-      const viewerPdfToolbar = document.querySelector('viewer-pdf-toolbar');
+      const viewerPdfToolbar =
+          viewer.shadowRoot.querySelector('viewer-pdf-toolbar');
       const undo = viewerPdfToolbar.$$('#undo');
       const redo = viewerPdfToolbar.$$('#redo');
 
@@ -172,15 +168,15 @@ chrome.test.runTests([
       inkHost.dispatchEvent(new PointerEvent('pointermove', pen));
       inkHost.dispatchEvent(new PointerEvent('pointerup', pen));
 
-      await waitFor(() => undo.disabled == false);
+      await waitFor(() => undo.disabled === false);
       chrome.test.assertEq(redo.disabled, true);
 
       undo.click();
-      await waitFor(() => undo.disabled == true);
+      await waitFor(() => undo.disabled === true);
       chrome.test.assertEq(redo.disabled, false);
 
       redo.click();
-      await waitFor(() => undo.disabled == false);
+      await waitFor(() => undo.disabled === false);
       chrome.test.assertEq(redo.disabled, true);
     });
   },
@@ -190,8 +186,7 @@ chrome.test.runTests([
       const inkHost = contentElement();
       inkHost.resetPenMode();
       const events = [];
-      inkHost.ink_.dispatchPointerEvent = (type, init) =>
-          events.push({type: type, init: init});
+      inkHost.ink_.dispatchPointerEvent = (ev) => void events.push(ev);
 
       const mouse = {pointerId: 1, pointerType: 'mouse', buttons: 1};
       const pen = {
@@ -212,7 +207,7 @@ chrome.test.runTests([
           const expectation = expectations.shift();
           chrome.test.assertEq(expectation.type, event.type);
           for (const key of Object.keys(expectation.init)) {
-            chrome.test.assertEq(expectation.init[key], event.init[key]);
+            chrome.test.assertEq(expectation.init[key], event[key]);
           }
         }
       }
@@ -374,7 +369,7 @@ chrome.test.runTests([
     testAsync(async () => {
       chrome.test.assertTrue(isAnnotationMode());
       // Exit annotation mode.
-      $('toolbar').toggleAnnotation();
+      viewer.shadowRoot.querySelector('#toolbar').toggleAnnotation();
       await viewer.loaded;
       chrome.test.assertEq('EMBED', contentElement().tagName);
     });

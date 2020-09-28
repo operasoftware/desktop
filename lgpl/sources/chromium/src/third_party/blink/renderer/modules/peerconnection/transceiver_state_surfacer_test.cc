@@ -2,26 +2,26 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "third_party/blink/public/web/modules/peerconnection/transceiver_state_surfacer.h"
+#include "third_party/blink/renderer/modules/peerconnection/transceiver_state_surfacer.h"
 
 #include <memory>
 #include <tuple>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/modules/mediastream/media_stream_audio_source.h"
-#include "third_party/blink/public/platform/modules/peerconnection/webrtc_util.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
-#include "third_party/blink/public/platform/web_media_stream_source.h"
-#include "third_party/blink/public/platform/web_media_stream_track.h"
-#include "third_party/blink/public/platform/web_string.h"
-#include "third_party/blink/public/web/modules/peerconnection/mock_peer_connection_dependency_factory.h"
-#include "third_party/blink/public/web/modules/peerconnection/mock_peer_connection_impl.h"
 #include "third_party/blink/public/web/web_heap.h"
+#include "third_party/blink/renderer/modules/peerconnection/mock_peer_connection_dependency_factory.h"
+#include "third_party/blink/renderer/modules/peerconnection/mock_peer_connection_impl.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
+#include "third_party/blink/renderer/platform/peerconnection/webrtc_util.h"
 
 using testing::AnyNumber;
 using testing::Return;
@@ -45,8 +45,9 @@ class TransceiverStateSurfacerTest : public ::testing::Test {
   void SetUp() override {
     dependency_factory_.reset(new blink::MockPeerConnectionDependencyFactory());
     main_task_runner_ = blink::scheduler::GetSingleThreadTaskRunnerForTesting();
-    track_adapter_map_ = new blink::WebRtcMediaStreamTrackAdapterMap(
-        dependency_factory_.get(), main_task_runner_);
+    track_adapter_map_ =
+        base::MakeRefCounted<blink::WebRtcMediaStreamTrackAdapterMap>(
+            dependency_factory_.get(), main_task_runner_);
     surfacer_.reset(new TransceiverStateSurfacer(main_task_runner_,
                                                  signaling_task_runner()));
     peer_connection_ = dependency_factory_->CreatePeerConnection(
@@ -71,7 +72,7 @@ class TransceiverStateSurfacerTest : public ::testing::Test {
   std::unique_ptr<blink::WebRtcMediaStreamTrackAdapterMap::AdapterRef>
   CreateLocalTrackAndAdapter(const std::string& id) {
     return track_adapter_map_->GetOrCreateLocalTrackAdapter(
-        CreateBlinkLocalTrack(id));
+        CreateLocalTrack(id));
   }
 
   rtc::scoped_refptr<blink::FakeRtpTransceiver> CreateWebRtcTransceiver(
@@ -221,21 +222,20 @@ class TransceiverStateSurfacerTest : public ::testing::Test {
   }
 
  private:
-  blink::WebMediaStreamTrack CreateBlinkLocalTrack(const std::string& id) {
-    blink::WebMediaStreamSource web_source;
-    web_source.Initialize(
-        blink::WebString::FromUTF8(id), blink::WebMediaStreamSource::kTypeAudio,
-        blink::WebString::FromUTF8("local_audio_track"), false);
-    blink::MediaStreamAudioSource* audio_source =
-        new blink::MediaStreamAudioSource(
-            blink::scheduler::GetSingleThreadTaskRunnerForTesting(), true);
-    // Takes ownership of |audio_source|.
-    web_source.SetPlatformSource(base::WrapUnique(audio_source));
+  MediaStreamComponent* CreateLocalTrack(const std::string& id) {
+    auto* source = MakeGarbageCollected<MediaStreamSource>(
+        String::FromUTF8(id), MediaStreamSource::kTypeAudio,
+        String::FromUTF8("local_audio_track"), false);
+    auto audio_source = std::make_unique<MediaStreamAudioSource>(
+        scheduler::GetSingleThreadTaskRunnerForTesting(), true);
+    auto* audio_source_ptr = audio_source.get();
+    audio_source->SetOwner(source);
+    source->SetPlatformSource(std::move(audio_source));
 
-    blink::WebMediaStreamTrack web_track;
-    web_track.Initialize(web_source.Id(), web_source);
-    audio_source->ConnectToTrack(web_track);
-    return web_track;
+    auto* component =
+        MakeGarbageCollected<MediaStreamComponent>(source->Id(), source);
+    audio_source_ptr->ConnectToTrack(component);
+    return component;
   }
 
   void AsyncInitializeSurfacerWithWaitableEventOnSignalingThread(

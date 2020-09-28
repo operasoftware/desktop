@@ -41,7 +41,7 @@ class RadioButtonGroup : public GarbageCollected<RadioButtonGroup> {
   bool Contains(HTMLInputElement*) const;
   unsigned size() const;
 
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   void SetNeedsValidityCheckForAllButtons();
@@ -189,7 +189,7 @@ unsigned RadioButtonGroup::size() const {
   return members_.size();
 }
 
-void RadioButtonGroup::Trace(Visitor* visitor) {
+void RadioButtonGroup::Trace(Visitor* visitor) const {
   visitor->Trace(members_);
   visitor->Trace(checked_button_);
 }
@@ -200,8 +200,6 @@ void RadioButtonGroup::Trace(Visitor* visitor) {
 // compiler from generating them as inlines. So we don't need to to define
 // RadioButtonGroup in the header.
 RadioButtonGroupScope::RadioButtonGroupScope() = default;
-
-RadioButtonGroupScope::~RadioButtonGroupScope() = default;
 
 void RadioButtonGroupScope::AddButton(HTMLInputElement* element) {
   DCHECK_EQ(element->type(), input_type_names::kRadio);
@@ -291,7 +289,7 @@ void RadioButtonGroupScope::RemoveButton(HTMLInputElement* element) {
   }
 }
 
-void RadioButtonGroupScope::Trace(Visitor* visitor) {
+void RadioButtonGroupScope::Trace(Visitor* visitor) const {
   visitor->Trace(name_to_group_map_);
 }
 

@@ -37,6 +37,8 @@
 
 #include "base/stl_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "url/url_util.h"
@@ -849,28 +851,101 @@ TEST(KURLTest, ProtocolIs) {
   EXPECT_EQ(capital.Protocol(), "http");
 }
 
-TEST(KURLTest, strippedForUseAsReferrer) {
+TEST(KURLTest, urlStrippedForUseAsReferrer) {
   struct ReferrerCase {
-    const char* input;
-    const char* output;
+    const String input;
+    const String output;
   } referrer_cases[] = {
-      {"data:text/html;charset=utf-8,<html></html>", ""},
-      {"javascript:void(0);", ""},
-      {"about:config", ""},
+      {"data:text/html;charset=utf-8,<html></html>", String()},
+      {"javascript:void(0);", String()},
+      {"about:config", String()},
       {"https://www.google.com/", "https://www.google.com/"},
       {"http://me@news.google.com:8888/", "http://news.google.com:8888/"},
       {"http://:pass@news.google.com:8888/foo",
        "http://news.google.com:8888/foo"},
       {"http://me:pass@news.google.com:8888/", "http://news.google.com:8888/"},
       {"https://www.google.com/a?f#b", "https://www.google.com/a?f"},
-      {"file:///tmp/test.html", ""},
+      {"file:///tmp/test.html", String()},
       {"https://www.google.com/#", "https://www.google.com/"},
   };
 
-  for (size_t i = 0; i < base::size(referrer_cases); i++) {
-    const KURL kurl(referrer_cases[i].input);
-    EXPECT_EQ(referrer_cases[i].output, kurl.StrippedForUseAsReferrer().Utf8());
+  for (const ReferrerCase& referrer_case : referrer_cases) {
+    const KURL kurl(referrer_case.input);
+    EXPECT_EQ(KURL(referrer_case.output), kurl.UrlStrippedForUseAsReferrer());
   }
+}
+
+TEST(KURLTest, urlStrippedForUseAsReferrerRespectsReferrerScheme) {
+  const KURL example_http_url = KURL("http://example.com/");
+  const KURL foobar_url = KURL("foobar://somepage/");
+  const String foobar_scheme = String::FromUTF8("foobar");
+
+  EXPECT_EQ("", foobar_url.StrippedForUseAsReferrer().Utf8());
+
+  SchemeRegistry::RegisterURLSchemeAsAllowedForReferrer(foobar_scheme);
+  EXPECT_EQ("foobar://somepage/", foobar_url.StrippedForUseAsReferrer());
+  SchemeRegistry::RemoveURLSchemeAsAllowedForReferrer(foobar_scheme);
+}
+
+TEST(KURLTest, strippedForUseAsReferrer) {
+  struct ReferrerCase {
+    const char* input;
+    const String output;
+  } referrer_cases[] = {
+      {"data:text/html;charset=utf-8,<html></html>", String()},
+      {"javascript:void(0);", String()},
+      {"about:config", String()},
+      {"https://www.google.com/", "https://www.google.com/"},
+      {"http://me@news.google.com:8888/", "http://news.google.com:8888/"},
+      {"http://:pass@news.google.com:8888/foo",
+       "http://news.google.com:8888/foo"},
+      {"http://me:pass@news.google.com:8888/", "http://news.google.com:8888/"},
+      {"https://www.google.com/a?f#b", "https://www.google.com/a?f"},
+      {"file:///tmp/test.html", String()},
+      {"https://www.google.com/#", "https://www.google.com/"},
+  };
+
+  for (const ReferrerCase& referrer_case : referrer_cases) {
+    const KURL kurl(referrer_case.input);
+    EXPECT_EQ(referrer_case.output, kurl.StrippedForUseAsReferrer());
+  }
+}
+
+TEST(KURLTest, ThreadSafesStaticKurlGetters) {
+#if DCHECK_IS_ON()
+  // Simulate the static getters being called during/after threads have been
+  // started, so that StaticSingleton's thread checks will be applied.
+  WTF::WillCreateThread();
+#endif
+
+  // Take references to the static KURLs, so that each has two references to
+  // its internal StringImpl, rather than one.
+  KURL blank_url = BlankURL();
+  EXPECT_FALSE(blank_url.IsEmpty());
+  KURL srcdoc_url = SrcdocURL();
+  EXPECT_FALSE(srcdoc_url.IsEmpty());
+  KURL null_url = NullURL();
+  EXPECT_TRUE(null_url.IsNull());
+
+  auto thread =
+      Thread::CreateThread(ThreadCreationParams(ThreadType::kTestThread));
+  thread->GetTaskRunner()->PostTask(FROM_HERE, base::BindOnce([]() {
+                                      // Reference each of the static KURLs
+                                      // again, from the background thread,
+                                      // which should succeed without thread
+                                      // verifier checks firing.
+                                      KURL blank_url = BlankURL();
+                                      EXPECT_FALSE(blank_url.IsEmpty());
+                                      KURL srcdoc_url = SrcdocURL();
+                                      EXPECT_FALSE(srcdoc_url.IsEmpty());
+                                      KURL null_url = NullURL();
+                                      EXPECT_TRUE(null_url.IsNull());
+                                    }));
+
+#if DCHECK_IS_ON()
+  // Restore the IsBeforeThreadCreated() flag.
+  WTF::SetIsBeforeThreadCreatedForTest();
+#endif
 }
 
 enum class PortIsValid {
@@ -987,6 +1062,8 @@ TEST_P(KURLPortTest, SetHostAndPort) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(, KURLPortTest, ::testing::ValuesIn(port_test_cases));
+INSTANTIATE_TEST_SUITE_P(All,
+                         KURLPortTest,
+                         ::testing::ValuesIn(port_test_cases));
 
 }  // namespace blink

@@ -23,11 +23,13 @@ void DetachableResourceFetcherProperties::Detach() {
   load_complete_ = properties_->IsLoadComplete();
   is_subframe_deprioritization_enabled_ =
       properties_->IsSubframeDeprioritizationEnabled();
+  web_bundle_physical_url_ = properties_->WebBundlePhysicalUrl();
+  outstanding_throttled_limit_ = properties_->GetOutstandingThrottledLimit();
 
   properties_ = nullptr;
 }
 
-void DetachableResourceFetcherProperties::Trace(Visitor* visitor) {
+void DetachableResourceFetcherProperties::Trace(Visitor* visitor) const {
   visitor->Trace(properties_);
   visitor->Trace(fetch_client_settings_object_);
   ResourceFetcherProperties::Trace(visitor);

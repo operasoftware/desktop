@@ -56,7 +56,7 @@
 }
 
 .controls-refresh .suggestion-list {
-  border-color: transparent;
+  border-color: #bfbfbf;
   padding: 4px;
 }
 
@@ -69,6 +69,8 @@
 
 .controls-refresh .suggestion-list-entry:focus {
   background-color: #E5E5E5;
+  outline: solid 2px -webkit-focus-ring-color;
+  outline-offset: -2px;
 }
 
 .controls-refresh .suggestion-list-entry .title {
@@ -80,13 +82,18 @@
 }
 
 @media (forced-colors: active) {
-  .suggestion-list-entry:focus {
+  .controls-refresh .suggestion-list-entry:focus {
     background-color: Highlight !important;
-    color: Window !important;
     forced-color-adjust: none;
   }
 
-  .suggestion-list-entry:focus .label {
-    color: Window !important;
+  .controls-refresh .suggestion-list-entry:focus .label,
+  .controls-refresh .suggestion-list-entry:focus .title {
+    color: HighlightText !important;
+  }
+
+  .controls-refresh .suggestion-list-entry .label,
+  .controls-refresh .suggestion-list-entry .title {
+    color: WindowText !important;
   }
 }

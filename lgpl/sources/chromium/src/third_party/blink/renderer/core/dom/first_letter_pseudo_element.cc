@@ -116,10 +116,6 @@ LayoutText* FirstLetterPseudoElement::FirstLetterTextLayoutObject(
       !parent_layout_object->BehavesLikeBlockContainer())
     return nullptr;
 
-  LayoutObject* marker =
-      parent_layout_object->IsLayoutNGListItem()
-          ? ToLayoutNGListItem(parent_layout_object)->Marker()
-          : nullptr;
   // Drill down into our children and look for our first text child.
   LayoutObject* first_letter_text_layout_object =
       parent_layout_object->SlowFirstChild();
@@ -146,8 +142,7 @@ LayoutText* FirstLetterPseudoElement::FirstLetterTextLayoutObject(
         break;
       first_letter_text_layout_object =
           first_letter_text_layout_object->NextSibling();
-    } else if (first_letter_text_layout_object->IsListMarker() ||
-               first_letter_text_layout_object == marker) {
+    } else if (first_letter_text_layout_object->IsListMarkerIncludingAll()) {
       // The list item marker may have out-of-flow siblings inside an anonymous
       // block. Skip them to make sure we leave the anonymous block before
       // continuing looking for the first letter text.
@@ -170,7 +165,7 @@ LayoutText* FirstLetterPseudoElement::FirstLetterTextLayoutObject(
           first_letter_text_layout_object->NextSibling();
     } else if (first_letter_text_layout_object->IsAtomicInlineLevel() ||
                first_letter_text_layout_object->IsLayoutButton() ||
-               first_letter_text_layout_object->IsMenuList()) {
+               IsMenuList(first_letter_text_layout_object)) {
       return nullptr;
     } else if (first_letter_text_layout_object
                    ->IsFlexibleBoxIncludingDeprecatedAndNG() ||
@@ -186,16 +181,13 @@ LayoutText* FirstLetterPseudoElement::FirstLetterTextLayoutObject(
       // setting up the first letter then.
       return nullptr;
     } else {
-      if (first_letter_text_layout_object->IsLayoutNGListItem())
-        marker = ToLayoutNGListItem(first_letter_text_layout_object)->Marker();
-
       first_letter_text_layout_object =
           first_letter_text_layout_object->SlowFirstChild();
     }
   }
 
   // No first letter text to display, we're done.
-  // FIXME: This black-list of disallowed LayoutText subclasses is fragile.
+  // FIXME: This list of disallowed LayoutText subclasses is fragile.
   // crbug.com/422336.
   // Should counter be on this list? What about LayoutTextFragment?
   if (!first_letter_text_layout_object ||
@@ -239,7 +231,7 @@ void FirstLetterPseudoElement::UpdateTextFragments() {
     // Make sure the first-letter layoutObject is set to require a layout as it
     // needs to re-create the line boxes. The remaining text layoutObject
     // will be marked by the LayoutText::setText.
-    child_fragment->SetNeedsLayoutAndPrefWidthsRecalc(
+    child_fragment->SetNeedsLayoutAndIntrinsicWidthsRecalc(
         layout_invalidation_reason::kTextChanged);
     break;
   }

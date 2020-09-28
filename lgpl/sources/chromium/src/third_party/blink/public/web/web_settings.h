@@ -194,7 +194,6 @@ class WebSettings {
   virtual void SetImmersiveModeEnabled(bool) = 0;
   virtual void SetMinimumFontSize(int) = 0;
   virtual void SetMinimumLogicalFontSize(int) = 0;
-  virtual void SetMockScrollbarsEnabled(bool) = 0;
   virtual void SetHideScrollbars(bool) = 0;
   virtual void SetOfflineWebApplicationCacheEnabled(bool) = 0;
   virtual void SetPassiveEventListenerDefault(PassiveEventListenerDefault) = 0;
@@ -222,7 +221,6 @@ class WebSettings {
                                   UScriptCode = USCRIPT_COMMON) = 0;
   virtual void SetShouldPrintBackgrounds(bool) = 0;
   virtual void SetShouldClearDocumentBackground(bool) = 0;
-  virtual void SetShouldRespectImageOrientation(bool) = 0;
   virtual void SetShowContextMenuOnMouseUp(bool) = 0;
   virtual void SetShrinksViewportContentToFit(bool) = 0;
   virtual void SetSmartInsertDeleteEnabled(bool) = 0;
@@ -247,6 +245,7 @@ class WebSettings {
   virtual void SetTextAreasAreResizable(bool) = 0;
   virtual void SetTextAutosizingEnabled(bool) = 0;
   virtual void SetAccessibilityFontScaleFactor(float) = 0;
+  virtual void SetAccessibilityAlwaysShowFocus(bool) = 0;
   virtual void SetTextTrackKindUserPreference(TextTrackKindUserPreference) = 0;
   virtual void SetTextTrackBackgroundColor(const WebString&) = 0;
   virtual void SetTextTrackFontFamily(const WebString&) = 0;
@@ -264,7 +263,6 @@ class WebSettings {
   virtual void SetBarrelButtonForDragEnabled(bool) = 0;
   virtual void SetUseLegacyBackgroundSizeShorthandBehavior(bool) = 0;
   virtual void SetViewportStyle(WebViewportStyle) = 0;
-  virtual void SetUseSolidColorScrollbars(bool) = 0;
   virtual void SetUseWideViewport(bool) = 0;
   virtual void SetV8CacheOptions(V8CacheOptions) = 0;
   virtual void SetValidationMessageTimerMagnification(int) = 0;
@@ -300,6 +298,7 @@ class WebSettings {
   virtual void SetForceDarkModeEnabled(bool) = 0;
   virtual void SetPreferredColorScheme(PreferredColorScheme) = 0;
   virtual void SetNavigationControls(NavigationControls) = 0;
+  virtual void SetAriaModalPrunesAXTree(bool) = 0;
 
  protected:
   ~WebSettings() = default;

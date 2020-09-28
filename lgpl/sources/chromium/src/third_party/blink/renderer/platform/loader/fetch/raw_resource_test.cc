@@ -92,7 +92,7 @@ TEST_F(RawResourceTest, DontIgnoreAcceptForCacheReuse) {
   ResourceRequest png_request;
   png_request.SetHTTPAccept("image/png");
   png_request.SetRequestorOrigin(source_origin);
-  EXPECT_NE(jpeg_resource->CanReuse(FetchParameters(png_request)),
+  EXPECT_NE(jpeg_resource->CanReuse(FetchParameters(std::move(png_request))),
             Resource::MatchStatus::kOk);
 }
 
@@ -124,7 +124,7 @@ class DummyClient final : public GarbageCollected<DummyClient>,
     return number_of_redirects_received_;
   }
   const Vector<char>& Data() { return data_; }
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     RawResourceClient::Trace(visitor);
   }
 
@@ -162,7 +162,7 @@ class AddingClient final : public GarbageCollected<AddingClient>,
 
   void RemoveClient() { resource_->RemoveClient(dummy_client_); }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(dummy_client_);
     visitor->Trace(resource_);
     RawResourceClient::Trace(visitor);
@@ -207,7 +207,7 @@ class RemovingClient : public GarbageCollected<RemovingClient>,
     resource->RemoveClient(this);
   }
   String DebugName() const override { return "RemovingClient"; }
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(dummy_client_);
     RawResourceClient::Trace(visitor);
   }
@@ -255,9 +255,10 @@ TEST_F(RawResourceTest, PreloadWithAsynchronousAddClient) {
   // Set the response first to make ResourceClient addition asynchronous.
   raw->SetResponse(ResourceResponse(KURL("http://600.613/")));
 
-  FetchParameters params(request);
+  FetchParameters params(std::move(request));
   params.MutableResourceRequest().SetUseStreamOnResponse(false);
-  raw->MatchPreload(params, platform_->test_task_runner().get());
+  raw->MatchPreload(params);
+  EXPECT_FALSE(raw->IsUnusedPreload());
   raw->AddClient(dummy_client, platform_->test_task_runner().get());
 
   raw->ResponseBodyReceived(*body_loader, platform_->test_task_runner());

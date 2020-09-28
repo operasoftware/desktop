@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/modules/quota/navigator_storage_quota.h"
 
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
 #include "third_party/blink/renderer/modules/quota/deprecated_storage_quota.h"
 #include "third_party/blink/renderer/modules/quota/storage_manager.h"
@@ -51,7 +52,6 @@ NavigatorStorageQuota& NavigatorStorageQuota::From(Navigator& navigator) {
   return *supplement;
 }
 
-
 DeprecatedStorageQuota* NavigatorStorageQuota::webkitTemporaryStorage(
     Navigator& navigator) {
   return NavigatorStorageQuota::From(navigator).webkitTemporaryStorage();
@@ -69,7 +69,7 @@ StorageManager* NavigatorStorageQuota::storage(Navigator& navigator) {
 DeprecatedStorageQuota* NavigatorStorageQuota::webkitTemporaryStorage() const {
   if (!temporary_storage_) {
     temporary_storage_ = MakeGarbageCollected<DeprecatedStorageQuota>(
-        DeprecatedStorageQuota::kTemporary);
+        DeprecatedStorageQuota::kTemporary, GetSupplementable()->DomWindow());
   }
   return temporary_storage_.Get();
 }
@@ -77,18 +77,20 @@ DeprecatedStorageQuota* NavigatorStorageQuota::webkitTemporaryStorage() const {
 DeprecatedStorageQuota* NavigatorStorageQuota::webkitPersistentStorage() const {
   if (!persistent_storage_) {
     persistent_storage_ = MakeGarbageCollected<DeprecatedStorageQuota>(
-        DeprecatedStorageQuota::kPersistent);
+        DeprecatedStorageQuota::kPersistent, GetSupplementable()->DomWindow());
   }
   return persistent_storage_.Get();
 }
 
 StorageManager* NavigatorStorageQuota::storage() const {
-  if (!storage_manager_)
-    storage_manager_ = MakeGarbageCollected<StorageManager>();
+  if (!storage_manager_) {
+    storage_manager_ =
+        MakeGarbageCollected<StorageManager>(GetSupplementable()->DomWindow());
+  }
   return storage_manager_.Get();
 }
 
-void NavigatorStorageQuota::Trace(blink::Visitor* visitor) {
+void NavigatorStorageQuota::Trace(Visitor* visitor) const {
   visitor->Trace(temporary_storage_);
   visitor->Trace(persistent_storage_);
   visitor->Trace(storage_manager_);

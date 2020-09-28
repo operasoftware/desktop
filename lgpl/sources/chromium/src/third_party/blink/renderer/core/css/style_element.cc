@@ -40,9 +40,9 @@
 namespace blink {
 
 static bool IsCSS(const Element& element, const AtomicString& type) {
-  return type.IsEmpty() || (element.IsHTMLElement()
-                                ? DeprecatedEqualIgnoringCase(type, "text/css")
-                                : (type == "text/css"));
+  return type.IsEmpty() ||
+         (element.IsHTMLElement() ? EqualIgnoringASCIICase(type, "text/css")
+                                  : (type == "text/css"));
 }
 
 StyleElement::StyleElement(Document* document, bool created_by_parser)
@@ -132,14 +132,16 @@ StyleElement::ProcessingResult StyleElement::CreateSheet(Element& element,
   Document& document = element.GetDocument();
 
   const ContentSecurityPolicy* csp =
-      document.GetContentSecurityPolicyForWorld();
+      element.GetExecutionContext()
+          ? element.GetExecutionContext()->GetContentSecurityPolicyForWorld()
+          : nullptr;
 
   // CSP is bypassed for style elements in user agent shadow DOM.
   bool passes_content_security_policy_checks =
       IsInUserAgentShadowDOM(element) ||
-      csp->AllowInline(ContentSecurityPolicy::InlineType::kStyle, &element,
-                       text, element.nonce(), document.Url(),
-                       start_position_.line_);
+      (csp && csp->AllowInline(ContentSecurityPolicy::InlineType::kStyle,
+                               &element, text, element.nonce(), document.Url(),
+                               start_position_.line_));
 
   // Clearing the current sheet may remove the cache entry so create the new
   // sheet first
@@ -150,8 +152,10 @@ StyleElement::ProcessingResult StyleElement::CreateSheet(Element& element,
   if (IsCSS(element, type) && passes_content_security_policy_checks) {
     scoped_refptr<MediaQuerySet> media_queries;
     const AtomicString& media_string = media();
-    if (!media_string.IsEmpty())
-      media_queries = MediaQuerySet::Create(media_string);
+    if (!media_string.IsEmpty()) {
+      media_queries =
+          MediaQuerySet::Create(media_string, element.GetExecutionContext());
+    }
     loading_ = true;
     TextPosition start_position =
         start_position_ == TextPosition::BelowRangePosition()
@@ -193,7 +197,7 @@ void StyleElement::StartLoadingDynamicSheet(Document& document) {
   document.GetStyleEngine().AddPendingSheet(style_engine_context_);
 }
 
-void StyleElement::Trace(blink::Visitor* visitor) {
+void StyleElement::Trace(Visitor* visitor) const {
   visitor->Trace(sheet_);
 }
 

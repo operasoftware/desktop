@@ -7,47 +7,47 @@
 #include "third_party/blink/renderer/platform/peerconnection/rtc_stats.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/web_rtc_stats.h"
+#include "third_party/blink/renderer/platform/peerconnection/rtc_stats.h"
 #include "third_party/webrtc/api/stats/rtc_stats_report.h"
 #include "third_party/webrtc/api/stats/rtcstats_objects.h"
 #include "third_party/webrtc/stats/test/rtc_test_stats.h"
 
 namespace blink {
 
-TEST(RTCStatsTest, OnlyIncludeWhitelistedStats_GetStats) {
-  const char* not_whitelisted_id = "NotWhitelistedId";
-  const char* whitelisted_id = "WhitelistedId";
+TEST(RTCStatsTest, OnlyIncludeAllowlistedStats_GetStats) {
+  const char* not_allowlisted_id = "NotAllowlistedId";
+  const char* allowlisted_id = "AllowlistedId";
 
   rtc::scoped_refptr<webrtc::RTCStatsReport> webrtc_report =
       webrtc::RTCStatsReport::Create(42);
   webrtc_report->AddStats(std::unique_ptr<webrtc::RTCTestStats>(
-      new webrtc::RTCTestStats(not_whitelisted_id, 42)));
+      new webrtc::RTCTestStats(not_allowlisted_id, 42)));
   webrtc_report->AddStats(std::unique_ptr<webrtc::RTCPeerConnectionStats>(
-      new webrtc::RTCPeerConnectionStats(whitelisted_id, 42)));
+      new webrtc::RTCPeerConnectionStats(allowlisted_id, 42)));
 
   RTCStatsReportPlatform report(webrtc_report.get(), {});
-  EXPECT_FALSE(report.GetStats(blink::WebString::FromUTF8(not_whitelisted_id)));
-  EXPECT_TRUE(report.GetStats(blink::WebString::FromUTF8(whitelisted_id)));
+  EXPECT_FALSE(report.GetStats(not_allowlisted_id));
+  EXPECT_TRUE(report.GetStats(allowlisted_id));
 }
 
-TEST(RTCStatsTest, OnlyIncludeWhitelistedStats_Iteration) {
-  const char* not_whitelisted_id = "NotWhitelistedId";
-  const char* whitelisted_id = "WhitelistedId";
+TEST(RTCStatsTest, OnlyIncludeAllowlistedStats_Iteration) {
+  const char* not_allowlisted_id = "NotAllowlistedId";
+  const char* allowlisted_id = "AllowlistedId";
 
   rtc::scoped_refptr<webrtc::RTCStatsReport> webrtc_report =
       webrtc::RTCStatsReport::Create(42);
   webrtc_report->AddStats(std::unique_ptr<webrtc::RTCTestStats>(
-      new webrtc::RTCTestStats(not_whitelisted_id, 42)));
+      new webrtc::RTCTestStats(not_allowlisted_id, 42)));
   webrtc_report->AddStats(std::unique_ptr<webrtc::RTCPeerConnectionStats>(
-      new webrtc::RTCPeerConnectionStats(whitelisted_id, 42)));
+      new webrtc::RTCPeerConnectionStats(allowlisted_id, 42)));
 
   RTCStatsReportPlatform report(webrtc_report.get(), {});
-  // Only whitelisted stats are counted.
+  // Only allowlisted stats are counted.
   EXPECT_EQ(report.Size(), 1u);
 
-  std::unique_ptr<blink::WebRTCStats> stats = report.Next();
+  std::unique_ptr<RTCStats> stats = report.Next();
   EXPECT_TRUE(stats);
-  EXPECT_EQ(stats->Id(), whitelisted_id);
+  EXPECT_EQ(stats->Id(), allowlisted_id);
   EXPECT_FALSE(report.Next());
 }
 
@@ -78,18 +78,18 @@ TestStats::TestStats(const std::string& id, int64_t timestamp_us)
                        {webrtc::NonStandardGroupId::kGroupIdForTesting}) {}
 }  // namespace
 
-// Similar to how only whitelisted stats objects should be surfaced, only
-// standardized members of the whitelisted objects should be surfaced.
+// Similar to how only allowlisted stats objects should be surfaced, only
+// standardized members of the allowlisted objects should be surfaced.
 TEST(RTCStatsTest, OnlyIncludeStandarizedMembers) {
   rtc::scoped_refptr<webrtc::RTCStatsReport> webrtc_report =
       webrtc::RTCStatsReport::Create(42);
-  WhitelistStatsForTesting(TestStats::kType);
+  AllowStatsForTesting(TestStats::kType);
   webrtc_report->AddStats(std::make_unique<TestStats>("id", 0));
 
   // TestStats has two members, but the non-standard member should be filtered
   // out.
   RTCStatsReportPlatform report(webrtc_report.get(), {});
-  std::unique_ptr<blink::WebRTCStats> stats = report.Next();
+  std::unique_ptr<RTCStats> stats = report.Next();
   ASSERT_NE(nullptr, stats);
   ASSERT_EQ(1u, stats->MembersCount());
   EXPECT_EQ("standardized", stats->GetMember(0)->GetName());
@@ -98,14 +98,14 @@ TEST(RTCStatsTest, OnlyIncludeStandarizedMembers) {
 TEST(RTCStatsTest, IncludeAllMembers) {
   rtc::scoped_refptr<webrtc::RTCStatsReport> webrtc_report =
       webrtc::RTCStatsReport::Create(7);
-  WhitelistStatsForTesting(TestStats::kType);
+  AllowStatsForTesting(TestStats::kType);
   webrtc_report->AddStats(std::make_unique<TestStats>("id", 0));
 
   // Include both standard and non-standard member.
   RTCStatsReportPlatform report(
-      webrtc_report.get(), std::vector<webrtc::NonStandardGroupId>{
+      webrtc_report.get(), Vector<webrtc::NonStandardGroupId>{
                                webrtc::NonStandardGroupId::kGroupIdForTesting});
-  std::unique_ptr<blink::WebRTCStats> stats = report.GetStats("id");
+  std::unique_ptr<RTCStats> stats = report.GetStats("id");
   ASSERT_NE(nullptr, stats);
   ASSERT_EQ(2u, stats->MembersCount());
   EXPECT_EQ("standardized", stats->GetMember(0)->GetName());
@@ -115,21 +115,21 @@ TEST(RTCStatsTest, IncludeAllMembers) {
 TEST(RTCStatsTest, CopyHandle) {
   rtc::scoped_refptr<webrtc::RTCStatsReport> webrtc_report =
       webrtc::RTCStatsReport::Create(17);
-  WhitelistStatsForTesting(TestStats::kType);
+  AllowStatsForTesting(TestStats::kType);
   webrtc_report->AddStats(std::make_unique<TestStats>("id", 0));
 
   // Check that filtering options are preserved during copy.
   RTCStatsReportPlatform standard_members_report(webrtc_report.get(), {});
-  std::unique_ptr<blink::WebRTCStatsReport> standard_members_copy =
+  std::unique_ptr<RTCStatsReportPlatform> standard_members_copy =
       standard_members_report.CopyHandle();
 
   ASSERT_EQ(1u, standard_members_report.GetStats("id")->MembersCount());
   ASSERT_EQ(1u, standard_members_copy->GetStats("id")->MembersCount());
 
   RTCStatsReportPlatform all_members_report(
-      webrtc_report.get(), std::vector<webrtc::NonStandardGroupId>{
+      webrtc_report.get(), Vector<webrtc::NonStandardGroupId>{
                                webrtc::NonStandardGroupId::kGroupIdForTesting});
-  std::unique_ptr<blink::WebRTCStatsReport> all_members_copy =
+  std::unique_ptr<RTCStatsReportPlatform> all_members_copy =
       all_members_report.CopyHandle();
   ASSERT_EQ(2u, all_members_report.GetStats("id")->MembersCount());
   ASSERT_EQ(2u, all_members_copy->GetStats("id")->MembersCount());

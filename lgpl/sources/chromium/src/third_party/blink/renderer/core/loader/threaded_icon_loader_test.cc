@@ -35,7 +35,7 @@ class ThreadedIconLoaderTest : public PageTestBase {
   }
 
   void TearDown() override {
-    platform_->GetURLLoaderMockFactory()
+    WebURLLoaderMockFactory::GetSingletonInstance()
         ->UnregisterAllURLsAndClearMemoryCache();
   }
 
@@ -49,7 +49,7 @@ class ThreadedIconLoaderTest : public PageTestBase {
 
   std::pair<SkBitmap, double> LoadIcon(
       const KURL& url,
-      base::Optional<WebSize> resize_dimensions = base::nullopt) {
+      base::Optional<gfx::Size> resize_dimensions = base::nullopt) {
     auto* icon_loader = MakeGarbageCollected<ThreadedIconLoader>();
 
     ResourceRequest resource_request(url);
@@ -60,11 +60,13 @@ class ThreadedIconLoaderTest : public PageTestBase {
     double resize_scale;
     base::RunLoop run_loop;
     icon_loader->Start(
-        &GetDocument(), resource_request, resize_dimensions,
+        GetDocument().GetExecutionContext(), resource_request,
+        resize_dimensions,
         WTF::Bind(&ThreadedIconLoaderTest::DidGetIcon, WTF::Unretained(this),
                   run_loop.QuitClosure(), WTF::Unretained(&icon),
                   WTF::Unretained(&resize_scale)));
-    platform_->GetURLLoaderMockFactory()->ServeAsynchronousRequests();
+    WebURLLoaderMockFactory::GetSingletonInstance()
+        ->ServeAsynchronousRequests();
     run_loop.Run();
 
     return {icon, resize_scale};
@@ -97,7 +99,7 @@ TEST_F(ThreadedIconLoaderTest, LoadIcon) {
 }
 
 TEST_F(ThreadedIconLoaderTest, LoadAndDownscaleIcon) {
-  WebSize dimensions = {50, 50};
+  gfx::Size dimensions = {50, 50};
   auto result = LoadIcon(RegisterMockedURL(kIconLoaderIcon100x100), dimensions);
   const SkBitmap& icon = result.first;
   double resize_scale = result.second;
@@ -110,7 +112,7 @@ TEST_F(ThreadedIconLoaderTest, LoadAndDownscaleIcon) {
 }
 
 TEST_F(ThreadedIconLoaderTest, LoadIconAndUpscaleIgnored) {
-  WebSize dimensions = {500, 500};
+  gfx::Size dimensions = {500, 500};
   auto result = LoadIcon(RegisterMockedURL(kIconLoaderIcon100x100), dimensions);
   const SkBitmap& icon = result.first;
   double resize_scale = result.second;
@@ -138,7 +140,7 @@ TEST_F(ThreadedIconLoaderTest, LoadTimeRecordedByUMA) {
 }
 
 TEST_F(ThreadedIconLoaderTest, ResizeFailed) {
-  WebSize dimensions = {25, 0};
+  gfx::Size dimensions = {25, 0};
   auto result = LoadIcon(RegisterMockedURL(kIconLoaderIcon100x100), dimensions);
   const SkBitmap& icon = result.first;
   double resize_scale = result.second;

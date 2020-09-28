@@ -20,19 +20,20 @@
 
 // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#htmliframeelement
 
-// The `HTMLString` and `URLString` references below are from Trusted Types:
+// The `HTMLString` references below are from Trusted Types:
 // https://github.com/WICG/trusted-types/, which is still WIP.
 // https://crbug.com/739170.
 [
     Exposed=Window,
     HTMLConstructor
 ] interface HTMLIFrameElement : HTMLElement {
-    [CEReactions, Reflect, URL, RaisesException=Setter] attribute URLString src;
+    [CEReactions, Reflect, URL] attribute USVString src;
     [CEReactions, Reflect, RaisesException=Setter] attribute HTMLString srcdoc;
     [CEReactions, Reflect] attribute DOMString name;
     [PutForwards=value] readonly attribute DOMTokenList sandbox;
     // Note: The seamless attribute was once supported, but was removed.
     [CEReactions, Reflect] attribute boolean allowFullscreen;
+    [RuntimeEnabled=DisallowDocumentAccess, CEReactions, Reflect] attribute boolean disallowDocumentAccess;
     [CEReactions, Reflect] attribute DOMString width;
     [CEReactions, Reflect] attribute DOMString height;
 
@@ -46,9 +47,15 @@
     // Feature Policy
     [CEReactions, Reflect] attribute DOMString allow;
     // https://w3c.github.io/webappsec-feature-policy/#the-policy-object
-    [RuntimeEnabled=FeaturePolicyJavaScriptInterface] readonly attribute FeaturePolicy featurePolicy;
+    readonly attribute FeaturePolicy featurePolicy;
+
+    // Document Policy
+    [RuntimeEnabled=DocumentPolicy, CEReactions, Reflect] attribute DOMString policy;
 
     [RuntimeEnabled=LazyFrameLoading, CEReactions, Reflect, ReflectOnly=("lazy", "eager", "auto"), ReflectMissing="auto", ReflectInvalid="auto"] attribute DOMString loading;
+
+    // Trust Tokens request parameters (https://github.com/wicg/trust-token-api)
+    [RuntimeEnabled=TrustTokens, SecureContext, Reflect, MeasureAs=TrustTokenIframe] attribute DOMString trustToken;
 
     // obsolete members
     // https://html.spec.whatwg.org/C/#HTMLIFrameElement-partial

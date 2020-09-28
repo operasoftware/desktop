@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/strings/string16.h"
 #include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/indexeddb/web_idb_types.h"
@@ -69,6 +69,8 @@ class BLINK_COMMON_EXPORT IndexedDBKey {
   // given primary key. Used in cases where a compound key references an
   // auto-generated primary key.
   IndexedDBKey FillHoles(const IndexedDBKey&) const WARN_UNUSED_RESULT;
+
+  std::string DebugString() const;
 
  private:
   int CompareTo(const IndexedDBKey& other) const;

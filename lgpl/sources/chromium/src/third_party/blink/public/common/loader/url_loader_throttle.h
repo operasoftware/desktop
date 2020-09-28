@@ -9,6 +9,8 @@
 #include <vector>
 
 #include "base/strings/string_piece.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "net/base/request_priority.h"
 #include "services/network/public/mojom/url_loader.mojom-forward.h"
 #include "services/network/public/mojom/url_response_head.mojom-forward.h"
@@ -22,7 +24,6 @@ struct RedirectInfo;
 
 namespace network {
 struct ResourceRequest;
-struct ResourceResponseHead;
 }  // namespace network
 
 namespace blink {
@@ -49,7 +50,7 @@ class BLINK_COMMON_EXPORT URLLoaderThrottle {
     // Cancels the resource load with the specified error code and an optional,
     // application-defined reason description.
     virtual void CancelWithError(int error_code,
-                                 base::StringPiece custom_reason = nullptr) = 0;
+                                 base::StringPiece custom_reason = "") = 0;
 
     // Resumes the deferred resource load. It is a no-op if the resource load is
     // not deferred or has already been canceled.
@@ -79,10 +80,12 @@ class BLINK_COMMON_EXPORT URLLoaderThrottle {
     // Replaces the URLLoader and URLLoaderClient endpoints held by the
     // ThrottlingURLLoader instance.
     virtual void InterceptResponse(
-        network::mojom::URLLoaderPtr new_loader,
-        network::mojom::URLLoaderClientRequest new_client_request,
-        network::mojom::URLLoaderPtr* original_loader,
-        network::mojom::URLLoaderClientRequest* original_client_request);
+        mojo::PendingRemote<network::mojom::URLLoader> new_loader,
+        mojo::PendingReceiver<network::mojom::URLLoaderClient>
+            new_client_receiver,
+        mojo::PendingRemote<network::mojom::URLLoader>* original_loader,
+        mojo::PendingReceiver<network::mojom::URLLoaderClient>*
+            original_client_receiver);
 
     // Restarts the URL loader using |additional_load_flags|.
     //
@@ -118,6 +121,12 @@ class BLINK_COMMON_EXPORT URLLoaderThrottle {
     // using a combined value of all of the |additional_load_flags|.
     virtual void RestartWithURLResetAndFlags(int additional_load_flags);
 
+    // Restarts the URL loader immediately using |additional_load_flags| and the
+    // unmodified URL if it was changed in WillStartRequest().
+    //
+    // Restarting is only valid before BeforeWillProcessResponse() is called.
+    virtual void RestartWithURLResetAndFlagsNow(int additional_load_flags);
+
    protected:
     virtual ~Delegate();
   };
@@ -151,8 +160,9 @@ class BLINK_COMMON_EXPORT URLLoaderThrottle {
   //
   // Request headers added to |to_be_removed_request_headers| will be removed
   // before the redirect is followed. Headers added to
-  // |modified_request_headers| will be merged into the existing request headers
-  // before the redirect is followed.
+  // |modified_request_headers| and |modified_cors_exempt_request_headers| will
+  // be merged into the existing request headers and cors_exempt_headers before
+  // the redirect is followed.
   //
   // If |redirect_info->new_url| is modified by a throttle, the request will be
   // redirected to the new URL. Only one throttle can update this and it must
@@ -160,16 +170,18 @@ class BLINK_COMMON_EXPORT URLLoaderThrottle {
   // WillStartRequest on possible side-effects.
   virtual void WillRedirectRequest(
       net::RedirectInfo* redirect_info,
-      const network::ResourceResponseHead& response_head,
+      const network::mojom::URLResponseHead& response_head,
       bool* defer,
       std::vector<std::string>* to_be_removed_request_headers,
-      net::HttpRequestHeaders* modified_request_headers);
+      net::HttpRequestHeaders* modified_request_headers,
+      net::HttpRequestHeaders* modified_cors_exempt_request_headers);
 
   // Called when the response headers and meta data are available.
-  // TODO(776312): Migrate this URL to ResourceResponseHead.
-  virtual void WillProcessResponse(const GURL& response_url,
-                                   network::ResourceResponseHead* response_head,
-                                   bool* defer);
+  // TODO(776312): Migrate this URL to URLResponseHead.
+  virtual void WillProcessResponse(
+      const GURL& response_url,
+      network::mojom::URLResponseHead* response_head,
+      bool* defer);
 
   // Called prior WillProcessResponse() to allow throttles to restart the URL
   // load by calling delegate_->RestartWithFlags().
@@ -179,7 +191,7 @@ class BLINK_COMMON_EXPORT URLLoaderThrottle {
   // restarts.
   virtual void BeforeWillProcessResponse(
       const GURL& response_url,
-      const network::ResourceResponseHead& response_head,
+      const network::mojom::URLResponseHead& response_head,
       bool* defer);
 
   // Called if there is a non-OK net::Error in the completion status.

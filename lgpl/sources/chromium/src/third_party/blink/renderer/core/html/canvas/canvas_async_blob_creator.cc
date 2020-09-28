@@ -8,6 +8,9 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_metrics.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_study_participation.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -17,9 +20,9 @@
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
 #include "third_party/blink/renderer/platform/graphics/image_data_buffer.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
+#include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/image-encoders/image_encoder_utils.h"
-#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
@@ -146,6 +149,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
     ToBlobFunctionType function_type,
     base::TimeTicks start_time,
     ExecutionContext* context,
+    base::Optional<UkmParameters> ukm_params,
     ScriptPromiseResolver* resolver)
     : CanvasAsyncBlobCreator(image,
                              options,
@@ -153,6 +157,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
                              nullptr,
                              start_time,
                              context,
+                             ukm_params,
                              resolver) {}
 
 CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
@@ -162,6 +167,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
     V8BlobCallback* callback,
     base::TimeTicks start_time,
     ExecutionContext* context,
+    base::Optional<UkmParameters> ukm_params,
     ScriptPromiseResolver* resolver)
     : fail_encoder_initialization_for_test_(false),
       enforce_idle_encoding_for_test_(false),
@@ -174,6 +180,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
       callback_(callback),
       script_promise_resolver_(resolver) {
   DCHECK(image);
+  DCHECK(context);
 
   mime_type_ = ImageEncoderUtils::ToEncodingMimeType(
       encode_options_->type(),
@@ -185,6 +192,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
 
   sk_sp<SkImage> skia_image = image_->PaintImageForCurrentFrame().GetSkImage();
   DCHECK(skia_image);
+  DCHECK(!skia_image->isTextureBacked());
 
   // If image is lazy decoded, call readPixels() to trigger decoding.
   if (skia_image->isLazyGenerated()) {
@@ -229,7 +237,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
       target_color_type = kRGBA_F16_SkColorType;
     // We can do color space and color type conversion together.
     if (needs_color_space_conversion) {
-      image_ = StaticBitmapImage::Create(skia_image);
+      image_ = UnacceleratedStaticBitmapImage::Create(skia_image);
       image_ = image_->ConvertToColorSpace(blob_color_space, target_color_type);
       skia_image = image_->PaintImageForCurrentFrame().GetSkImage();
     } else if (skia_image->colorType() != target_color_type) {
@@ -243,7 +251,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
                             info.minRowBytes());
       skia_image->readPixels(src_data_f16, 0, 0);
       skia_image = SkImage::MakeFromRaster(src_data_f16, nullptr, nullptr);
-      image_ = StaticBitmapImage::Create(skia_image);
+      image_ = UnacceleratedStaticBitmapImage::Create(skia_image);
     }
 
     if (skia_image->peekPixels(&src_data_))
@@ -308,8 +316,11 @@ void CanvasAsyncBlobCreator::ScheduleAsyncBlobCreation(const double& quality) {
   // deadlines (6.7s or 13s) bypass the web test running deadline (6s)
   // and result in timeouts on different tests. We use
   // enforce_idle_encoding_for_test_ to test idle encoding in unit tests.
+  // We also don't use idle tasks in workers because the short idle periods are
+  // not implemented, so the idle task can take a long time even when the thread
+  // is not busy.
   bool use_idle_encoding =
-      (mime_type_ != kMimeTypeWebp) &&
+      WTF::IsMainThread() && (mime_type_ != kMimeTypeWebp) &&
       (enforce_idle_encoding_for_test_ ||
        !RuntimeEnabledFeatures::NoIdleEncodingForWebTestsEnabled());
 
@@ -463,11 +474,43 @@ void CanvasAsyncBlobCreator::CreateBlobAndReturnResult() {
                              WrapPersistent(result_blob)));
   }
 
+  RecordIdentifiabilityMetric();
+
   RecordScaledDurationHistogram(mime_type_,
                                 base::TimeTicks::Now() - start_time_,
                                 image_->width(), image_->height());
   // Avoid unwanted retention, see dispose().
   Dispose();
+}
+
+void CanvasAsyncBlobCreator::RecordIdentifiabilityMetric() {
+  if (!ukm_params_.has_value() || !IsUserInIdentifiabilityStudy())
+    return;
+  // Creating this ImageDataBuffer has some overhead, namely getting the SkImage
+  // and computing the pixmap.
+  // We need the StaticBitmapImage to be deleted on the same thread on which it
+  // was created, so we use the same TaskType here in order to get the same
+  // TaskRunner.
+  context_->GetTaskRunner(TaskType::kCanvasBlobSerialization)
+      ->PostTask(
+          FROM_HERE,
+          WTF::Bind(
+              [](scoped_refptr<StaticBitmapImage> image,
+                 UkmParameters ukm_params) {
+                std::unique_ptr<ImageDataBuffer> data_buffer =
+                    ImageDataBuffer::Create(image);
+                if (!data_buffer)
+                  return;
+                blink::IdentifiabilityMetricBuilder(ukm_params.source_id)
+                    .Set(blink::IdentifiableSurface::FromTypeAndInput(
+                             blink::IdentifiableSurface::Type::kCanvasReadback,
+                             0),
+                         blink::IdentifiabilityDigestOfBytes(
+                             base::make_span(data_buffer->Pixels(),
+                                             data_buffer->ComputeByteSize())))
+                    .Record(ukm_params.ukm_recorder);
+              },
+              image_, ukm_params_.value()));
 }
 
 void CanvasAsyncBlobCreator::CreateNullAndReturnResult() {
@@ -600,7 +643,7 @@ void CanvasAsyncBlobCreator::PostDelayedTaskToCurrentThread(
                         base::TimeDelta::FromMillisecondsD(delay_ms));
 }
 
-void CanvasAsyncBlobCreator::Trace(Visitor* visitor) {
+void CanvasAsyncBlobCreator::Trace(Visitor* visitor) const {
   visitor->Trace(context_);
   visitor->Trace(encode_options_);
   visitor->Trace(callback_);
@@ -611,7 +654,7 @@ sk_sp<SkColorSpace> CanvasAsyncBlobCreator::BlobColorSpaceToSkColorSpace(
     String blob_color_space) {
   skcms_Matrix3x3 gamut = SkNamedGamut::kSRGB;
   if (blob_color_space == kDisplayP3ImageColorSpaceName)
-    gamut = SkNamedGamut::kDCIP3;
+    gamut = SkNamedGamut::kDisplayP3;
   else if (blob_color_space == kRec2020ImageColorSpaceName)
     gamut = SkNamedGamut::kRec2020;
   return SkColorSpace::MakeRGB(SkNamedTransferFn::kSRGB, gamut);

@@ -15,8 +15,9 @@ WorkerAnimationFrameProvider::WorkerAnimationFrameProvider(
     ExecutionContext* context,
     const BeginFrameProviderParams& begin_frame_provider_params)
     : begin_frame_provider_(
-          std::make_unique<BeginFrameProvider>(begin_frame_provider_params,
-                                               this)),
+          MakeGarbageCollected<BeginFrameProvider>(begin_frame_provider_params,
+                                                   this,
+                                                   context)),
       callback_collection_(context),
       context_(context) {}
 
@@ -42,7 +43,7 @@ void WorkerAnimationFrameProvider::BeginFrame(const viz::BeginFrameArgs& args) {
                          TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
 
   Microtask::EnqueueMicrotask(WTF::Bind(
-      [](base::WeakPtr<WorkerAnimationFrameProvider> provider,
+      [](WeakPersistent<WorkerAnimationFrameProvider> provider,
          const viz::BeginFrameArgs& args) {
         if (!provider)
           return;
@@ -66,26 +67,26 @@ void WorkerAnimationFrameProvider::BeginFrame(const viz::BeginFrameArgs& args) {
         }
         provider->begin_frame_provider_->FinishBeginFrame(args);
       },
-      weak_factory_.GetWeakPtr(), args));
+      WrapWeakPersistent(this), args));
 }
 
 void WorkerAnimationFrameProvider::RegisterOffscreenCanvas(
     OffscreenCanvas* context) {
-  DCHECK(offscreen_canvases_.Find(context) == kNotFound);
-  offscreen_canvases_.push_back(context);
+  auto result = offscreen_canvases_.insert(context);
+  DCHECK(result.is_new_entry);
 }
 
 void WorkerAnimationFrameProvider::DeregisterOffscreenCanvas(
     OffscreenCanvas* offscreen_canvas) {
-  wtf_size_t pos = offscreen_canvases_.Find(offscreen_canvas);
-  if (pos != kNotFound) {
-    offscreen_canvases_.EraseAt(pos);
-  }
+  offscreen_canvases_.erase(offscreen_canvas);
 }
 
-void WorkerAnimationFrameProvider::Trace(blink::Visitor* visitor) {
+void WorkerAnimationFrameProvider::Trace(Visitor* visitor) const {
+  visitor->Trace(begin_frame_provider_);
   visitor->Trace(callback_collection_);
+  visitor->Trace(offscreen_canvases_);
   visitor->Trace(context_);
+  BeginFrameProviderClient::Trace(visitor);
 }
 
 }  // namespace blink

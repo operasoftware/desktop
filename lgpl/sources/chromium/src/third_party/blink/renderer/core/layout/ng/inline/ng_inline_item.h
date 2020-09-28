@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_item_segment.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_offset_mapping.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_text_type.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_style_variant.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/run_segmenter.h"
@@ -43,13 +44,6 @@ class CORE_EXPORT NGInlineItem {
     kBidiControl
   };
 
-  // Whether pre- and post-context should be used for shaping.
-  enum NGLayoutInlineShapeOptions {
-    kNoContext = 0,
-    kPreContext = 1,
-    kPostContext = 2
-  };
-
   enum NGCollapseType {
     // No collapsible spaces.
     kNotCollapsible,
@@ -66,7 +60,7 @@ class CORE_EXPORT NGInlineItem {
   NGInlineItem(NGInlineItemType type,
                unsigned start,
                unsigned end,
-               LayoutObject* layout_object = nullptr);
+               LayoutObject* layout_object);
   ~NGInlineItem();
 
   // Copy constructor adjusting start/end and shape results.
@@ -78,10 +72,20 @@ class CORE_EXPORT NGInlineItem {
   NGInlineItemType Type() const { return type_; }
   const char* NGInlineItemTypeToString(int val) const;
 
-  const ShapeResult* TextShapeResult() const { return shape_result_.get(); }
-  NGLayoutInlineShapeOptions ShapeOptions() const {
-    return static_cast<NGLayoutInlineShapeOptions>(shape_options_);
+  NGTextType TextType() const { return static_cast<NGTextType>(text_type_); }
+  void SetTextType(NGTextType text_type) {
+    text_type_ = static_cast<unsigned>(text_type);
   }
+  bool IsSymbolMarker() const {
+    return TextType() == NGTextType::kSymbolMarker;
+  }
+  void SetIsSymbolMarker() {
+    DCHECK(TextType() == NGTextType::kNormal ||
+           TextType() == NGTextType::kSymbolMarker);
+    SetTextType(NGTextType::kSymbolMarker);
+  }
+
+  const ShapeResult* TextShapeResult() const { return shape_result_.get(); }
 
   // If this item is "empty" for the purpose of empty block calculation.
   bool IsEmptyItem() const { return is_empty_item_; }
@@ -111,6 +115,8 @@ class CORE_EXPORT NGInlineItem {
   unsigned EndOffset() const { return end_offset_; }
   unsigned Length() const { return end_offset_ - start_offset_; }
 
+  bool IsValidOffset(unsigned offset) const;
+
   TextDirection Direction() const { return DirectionFromLevel(BidiLevel()); }
   UBiDiLevel BidiLevel() const { return static_cast<UBiDiLevel>(bidi_level_); }
   // Resolved bidi level for the reordering algorithm. Certain items have
@@ -126,6 +132,9 @@ class CORE_EXPORT NGInlineItem {
 
   bool IsImage() const {
     return GetLayoutObject() && GetLayoutObject()->IsLayoutImage();
+  }
+  bool IsRubyRun() const {
+    return GetLayoutObject() && GetLayoutObject()->IsRubyRun();
   }
 
   void SetOffset(unsigned start, unsigned end) {
@@ -180,6 +189,10 @@ class CORE_EXPORT NGInlineItem {
            (Type() == NGInlineItem::kControl && type == kCollapsible));
     end_collapse_type_ = type;
   }
+  bool IsCollapsibleSpaceOnly() const {
+    return Type() == NGInlineItem::kText &&
+           end_collapse_type_ == kCollapsible && Length() == 1u;
+  }
 
   // True if this item was generated (not in DOM).
   // NGInlineItemsBuilder may generate break opportunitites to express the
@@ -225,11 +238,8 @@ class CORE_EXPORT NGInlineItem {
                                unsigned end_offset,
                                UBiDiLevel);
 
-  void AssertOffset(unsigned offset) const;
+  void AssertOffset(unsigned offset) const { DCHECK(IsValidOffset(offset)); }
   void AssertEndOffset(unsigned offset) const;
-
-  bool IsSymbolMarker() const { return is_symbol_marker_; }
-  void SetIsSymbolMarker(bool b) { is_symbol_marker_ = b; }
 
   String ToString() const;
 
@@ -242,24 +252,23 @@ class CORE_EXPORT NGInlineItem {
   LayoutObject* layout_object_;
 
   NGInlineItemType type_;
+  unsigned text_type_ : 3;          // NGTextType
+  unsigned style_variant_ : 2;      // NGStyleVariant
+  unsigned end_collapse_type_ : 2;  // NGCollapseType
+  unsigned bidi_level_ : 8;         // UBiDiLevel is defined as uint8_t.
   // |segment_data_| is valid only for |type_ == NGInlineItem::kText|.
   unsigned segment_data_ : NGInlineItemSegment::kSegmentDataBits;
-  unsigned bidi_level_ : 8;              // UBiDiLevel is defined as uint8_t.
-  unsigned shape_options_ : 2;
   unsigned is_empty_item_ : 1;
   unsigned is_block_level_ : 1;
-  unsigned style_variant_ : 2;
-  unsigned end_collapse_type_ : 2;  // NGCollapseType
   unsigned is_end_collapsible_newline_ : 1;
-  unsigned is_symbol_marker_ : 1;
   unsigned is_generated_for_line_break_ : 1;
   friend class NGInlineNode;
   friend class NGInlineNodeDataEditor;
 };
 
-inline void NGInlineItem::AssertOffset(unsigned offset) const {
-  DCHECK((offset >= start_offset_ && offset < end_offset_) ||
-         (offset == start_offset_ && start_offset_ == end_offset_));
+inline bool NGInlineItem::IsValidOffset(unsigned offset) const {
+  return (offset >= start_offset_ && offset < end_offset_) ||
+         (start_offset_ == end_offset_ && offset == start_offset_);
 }
 
 inline void NGInlineItem::AssertEndOffset(unsigned offset) const {
@@ -286,6 +295,10 @@ struct CORE_EXPORT NGInlineItemsData {
 
   // The DOM to text content offset mapping of this inline node.
   std::unique_ptr<NGOffsetMapping> offset_mapping;
+
+  bool IsValidOffset(unsigned index, unsigned offset) const {
+    return index < items.size() && items[index].IsValidOffset(offset);
+  }
 
   void AssertOffset(unsigned index, unsigned offset) const {
     items[index].AssertOffset(offset);

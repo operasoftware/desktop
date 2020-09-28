@@ -40,6 +40,7 @@ namespace shadow_element_names {
 
 const AtomicString& DetailsContent();
 const AtomicString& DetailsSummary();
+// An ID attribute value for a details marker.
 const AtomicString& DetailsMarker();
 const AtomicString& DateTimeEdit();
 CORE_EXPORT const AtomicString& SpinButton();
@@ -48,11 +49,13 @@ const AtomicString& EditingViewPort();
 const AtomicString& PickerIndicator();
 const AtomicString& Placeholder();
 const AtomicString& SearchClearButton();
-const AtomicString& SearchDecoration();
 const AtomicString& PasswordRevealButton();
 CORE_EXPORT const AtomicString& SliderThumb();
 const AtomicString& SliderTrack();
 const AtomicString& TextFieldContainer();
+// Pseudo element name ::-webkit-details-marker
+const AtomicString& WebKitDetailsMarker();
+const AtomicString& FileUploadButton();
 const AtomicString& OptGroupLabel();
 
 }  // namespace shadow_element_names

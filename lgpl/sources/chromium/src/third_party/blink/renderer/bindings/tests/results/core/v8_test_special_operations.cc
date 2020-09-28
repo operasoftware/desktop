@@ -105,14 +105,14 @@ static void NamedPropertySetter(
     v8::Local<v8::Value> v8_value,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
   TestSpecialOperations* impl = V8TestSpecialOperations::ToImpl(info.Holder());
-  Node* property_value = V8Node::ToImplWithTypeCheck(info.GetIsolate(), v8_value);
+  Node* property_value{ V8Node::ToImplWithTypeCheck(info.GetIsolate(), v8_value) };
   if (!property_value && !IsUndefinedOrNull(v8_value)) {
     exception_state.ThrowTypeError("The provided value is not of type 'Node'.");
     return;
   }
 
-  bool result = impl->AnonymousNamedSetter(name, property_value);
-  if (!result)
+  NamedPropertySetterResult result = impl->AnonymousNamedSetter(name, property_value);
+  if (result == NamedPropertySetterResult::kDidNotIntercept)
     return;
   V8SetReturnValue(info, v8_value);
 }
@@ -189,6 +189,7 @@ static void NamedPropertyEnumerator(const v8::PropertyCallbackInfo<v8::Array>& i
 }  // namespace test_special_operations_v8_internal
 
 void V8TestSpecialOperations::NamedItemMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  BLINK_BINDINGS_TRACE_EVENT("TestSpecialOperations.namedItem");
   RUNTIME_CALL_TIMER_SCOPE_DISABLED_BY_DEFAULT(info.GetIsolate(), "Blink_TestSpecialOperations_namedItem");
 
   test_special_operations_v8_internal::NamedItemMethod(info);
@@ -337,16 +338,6 @@ v8::Local<v8::Object> V8TestSpecialOperations::FindInstanceInPrototypeChain(
 TestSpecialOperations* V8TestSpecialOperations::ToImplWithTypeCheck(
     v8::Isolate* isolate, v8::Local<v8::Value> value) {
   return HasInstance(value, isolate) ? ToImpl(v8::Local<v8::Object>::Cast(value)) : nullptr;
-}
-
-TestSpecialOperations* NativeValueTraits<TestSpecialOperations>::NativeValue(
-    v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exception_state) {
-  TestSpecialOperations* native_value = V8TestSpecialOperations::ToImplWithTypeCheck(isolate, value);
-  if (!native_value) {
-    exception_state.ThrowTypeError(ExceptionMessages::FailedToConvertJSValue(
-        "TestSpecialOperations"));
-  }
-  return native_value;
 }
 
 }  // namespace blink

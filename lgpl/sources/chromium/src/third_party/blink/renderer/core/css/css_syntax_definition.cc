@@ -11,8 +11,8 @@
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/css_variable_reference_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_idioms.h"
-#include "third_party/blink/renderer/core/css/parser/css_property_parser_helpers.h"
 #include "third_party/blink/renderer/core/css/parser/css_variable_parser.h"
+#include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
@@ -29,8 +29,8 @@ namespace {
 bool IsReservedIdentToken(const CSSParserToken& token) {
   if (token.GetType() != kIdentToken)
     return false;
-  return css_property_parser_helpers::IsRevertKeyword(token.Value()) ||
-         css_property_parser_helpers::IsDefaultKeyword(token.Value());
+  return css_parsing_utils::IsRevertKeyword(token.Value()) ||
+         css_parsing_utils::IsDefaultKeyword(token.Value());
 }
 
 bool CouldConsumeReservedKeyword(CSSParserTokenRange range) {
@@ -42,9 +42,7 @@ bool CouldConsumeReservedKeyword(CSSParserTokenRange range) {
 
 const CSSValue* ConsumeSingleType(const CSSSyntaxComponent& syntax,
                                   CSSParserTokenRange& range,
-                                  const CSSParserContext* context) {
-  using namespace css_property_parser_helpers;
-
+                                  const CSSParserContext& context) {
   switch (syntax.GetType()) {
     case CSSSyntaxType::kIdent:
       if (range.Peek().GetType() == kIdentToken &&
@@ -54,40 +52,53 @@ const CSSValue* ConsumeSingleType(const CSSSyntaxComponent& syntax,
             AtomicString(syntax.GetString()));
       }
       return nullptr;
-    case CSSSyntaxType::kLength:
-      return ConsumeLength(range, kHTMLStandardMode,
-                           ValueRange::kValueRangeAll);
+    case CSSSyntaxType::kLength: {
+      CSSParserContext::ParserModeOverridingScope scope(context,
+                                                        kHTMLStandardMode);
+      return css_parsing_utils::ConsumeLength(range, context,
+                                              ValueRange::kValueRangeAll);
+    }
     case CSSSyntaxType::kNumber:
-      return ConsumeNumber(range, ValueRange::kValueRangeAll);
+      return css_parsing_utils::ConsumeNumber(range, context,
+                                              ValueRange::kValueRangeAll);
     case CSSSyntaxType::kPercentage:
-      return ConsumePercent(range, ValueRange::kValueRangeAll);
-    case CSSSyntaxType::kLengthPercentage:
-      return ConsumeLengthOrPercent(range, kHTMLStandardMode,
-                                    ValueRange::kValueRangeAll);
-    case CSSSyntaxType::kColor:
-      return ConsumeColor(range, kHTMLStandardMode);
+      return css_parsing_utils::ConsumePercent(range, context,
+                                               ValueRange::kValueRangeAll);
+    case CSSSyntaxType::kLengthPercentage: {
+      CSSParserContext::ParserModeOverridingScope scope(context,
+                                                        kHTMLStandardMode);
+      return css_parsing_utils::ConsumeLengthOrPercent(
+          range, context, ValueRange::kValueRangeAll);
+    }
+    case CSSSyntaxType::kColor: {
+      CSSParserContext::ParserModeOverridingScope scope(context,
+                                                        kHTMLStandardMode);
+      return css_parsing_utils::ConsumeColor(range, context);
+    }
     case CSSSyntaxType::kImage:
-      return ConsumeImage(range, context);
+      return css_parsing_utils::ConsumeImage(range, context);
     case CSSSyntaxType::kUrl:
-      return ConsumeUrl(range, context);
+      return css_parsing_utils::ConsumeUrl(range, context);
     case CSSSyntaxType::kInteger:
-      return ConsumeIntegerOrNumberCalc(range);
+      return css_parsing_utils::ConsumeIntegerOrNumberCalc(range, context);
     case CSSSyntaxType::kAngle:
-      return ConsumeAngle(range, context, base::Optional<WebFeature>());
+      return css_parsing_utils::ConsumeAngle(range, context,
+                                             base::Optional<WebFeature>());
     case CSSSyntaxType::kTime:
-      return ConsumeTime(range, ValueRange::kValueRangeAll);
+      return css_parsing_utils::ConsumeTime(range, context,
+                                            ValueRange::kValueRangeAll);
     case CSSSyntaxType::kResolution:
-      return ConsumeResolution(range);
+      return css_parsing_utils::ConsumeResolution(range);
     case CSSSyntaxType::kTransformFunction:
-      return ConsumeTransformValue(range, *context);
+      return css_parsing_utils::ConsumeTransformValue(range, context);
     case CSSSyntaxType::kTransformList:
-      return ConsumeTransformList(range, *context);
+      return css_parsing_utils::ConsumeTransformList(range, context);
     case CSSSyntaxType::kCustomIdent:
       // TODO(crbug.com/579788): Implement 'revert'.
       // TODO(crbug.com/882285): Make 'default' invalid as <custom-ident>.
       if (IsReservedIdentToken(range.Peek()))
         return nullptr;
-      return ConsumeCustomIdent(range, *context);
+      return css_parsing_utils::ConsumeCustomIdent(range, context);
     default:
       NOTREACHED();
       return nullptr;
@@ -96,7 +107,7 @@ const CSSValue* ConsumeSingleType(const CSSSyntaxComponent& syntax,
 
 const CSSValue* ConsumeSyntaxComponent(const CSSSyntaxComponent& syntax,
                                        CSSParserTokenRange range,
-                                       const CSSParserContext* context) {
+                                       const CSSParserContext& context) {
   // CSS-wide keywords are already handled by the CSSPropertyParser
   if (syntax.GetRepeat() == CSSSyntaxRepeat::kSpaceSeparated) {
     CSSValueList* list = CSSValueList::CreateSpaceSeparated();
@@ -115,8 +126,7 @@ const CSSValue* ConsumeSyntaxComponent(const CSSSyntaxComponent& syntax,
       if (!value)
         return nullptr;
       list->Append(*value);
-    } while (
-        css_property_parser_helpers::ConsumeCommaIncludingWhitespace(range));
+    } while (css_parsing_utils::ConsumeCommaIncludingWhitespace(range));
     return list->length() ? list : nullptr;
   }
   const CSSValue* result = ConsumeSingleType(syntax, range, context);
@@ -128,15 +138,15 @@ const CSSValue* ConsumeSyntaxComponent(const CSSSyntaxComponent& syntax,
 }  // namespace
 
 const CSSValue* CSSSyntaxDefinition::Parse(CSSParserTokenRange range,
-                                           const CSSParserContext* context,
+                                           const CSSParserContext& context,
                                            bool is_animation_tainted) const {
-  if (IsTokenStream()) {
+  if (IsUniversal()) {
     // TODO(crbug.com/579788): Implement 'revert'.
     // TODO(crbug.com/882285): Make 'default' invalid as <custom-ident>.
     if (CouldConsumeReservedKeyword(range))
       return nullptr;
     return CSSVariableParser::ParseRegisteredPropertyValue(
-        range, *context, false, is_animation_tainted);
+        range, context, false, is_animation_tainted);
   }
   range.ConsumeWhitespace();
   for (const CSSSyntaxComponent& component : syntax_components_) {
@@ -144,7 +154,7 @@ const CSSValue* CSSSyntaxDefinition::Parse(CSSParserTokenRange range,
             ConsumeSyntaxComponent(component, range, context))
       return result;
   }
-  return CSSVariableParser::ParseRegisteredPropertyValue(range, *context, true,
+  return CSSVariableParser::ParseRegisteredPropertyValue(range, context, true,
                                                          is_animation_tainted);
 }
 

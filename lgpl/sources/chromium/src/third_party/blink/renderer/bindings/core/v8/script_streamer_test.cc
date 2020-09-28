@@ -79,18 +79,30 @@ class NoopLoaderFactory final : public ResourceFetcher::LoaderFactory {
   class NoopWebURLLoader final : public WebURLLoader {
    public:
     ~NoopWebURLLoader() override = default;
-    void LoadSynchronously(const WebURLRequest&,
-                           WebURLLoaderClient*,
-                           WebURLResponse&,
-                           base::Optional<WebURLError>&,
-                           WebData&,
-                           int64_t& encoded_data_length,
-                           int64_t& encoded_body_length,
-                           WebBlobInfo& downloaded_blob) override {
+    void LoadSynchronously(
+        std::unique_ptr<network::ResourceRequest> request,
+        scoped_refptr<WebURLRequest::ExtraData> request_extra_data,
+        int requestor_id,
+        bool download_to_network_cache_only,
+        bool pass_response_pipe_to_client,
+        bool no_mime_sniffing,
+        base::TimeDelta timeout_interval,
+        WebURLLoaderClient*,
+        WebURLResponse&,
+        base::Optional<WebURLError>&,
+        WebData&,
+        int64_t& encoded_data_length,
+        int64_t& encoded_body_length,
+        WebBlobInfo& downloaded_blob) override {
       NOTREACHED();
     }
-    void LoadAsynchronously(const WebURLRequest&,
-                            WebURLLoaderClient*) override {}
+    void LoadAsynchronously(
+        std::unique_ptr<network::ResourceRequest> request,
+        scoped_refptr<WebURLRequest::ExtraData> request_extra_data,
+        int requestor_id,
+        bool download_to_network_cache_only,
+        bool no_mime_sniffing,
+        WebURLLoaderClient*) override {}
     void SetDefersLoading(bool) override {}
     void DidChangePriority(WebURLRequest::Priority, int) override {
       NOTREACHED();
@@ -116,7 +128,7 @@ class ScriptStreamingTest : public testing::Test {
     request.SetRequestContext(mojom::RequestContextType::SCRIPT);
 
     resource_client_ = MakeGarbageCollected<TestResourceClient>();
-    FetchParameters params(request);
+    FetchParameters params(std::move(request));
     resource_ = ScriptResource::Fetch(params, fetcher, resource_client_,
                                       ScriptResource::kAllowStreaming);
     resource_->AddClient(resource_client_, loading_task_runner_.get());
@@ -135,11 +147,12 @@ class ScriptStreamingTest : public testing::Test {
   ScriptSourceCode GetScriptSourceCode() const {
     ScriptStreamer* streamer = resource_->TakeStreamer();
     if (streamer) {
-      if (streamer->StreamingSuppressed()) {
+      if (streamer->IsStreamingSuppressed()) {
         return ScriptSourceCode(nullptr, resource_,
                                 streamer->StreamingSuppressedReason());
       }
-      return ScriptSourceCode(streamer, resource_, ScriptStreamer::kInvalid);
+      return ScriptSourceCode(streamer, resource_,
+                              ScriptStreamer::NotStreamingReason::kInvalid);
     }
     return ScriptSourceCode(nullptr, resource_, resource_->NoStreamerReason());
   }
@@ -196,12 +209,8 @@ class ScriptStreamingTest : public testing::Test {
 // TODO(crbug.com/939054): Tests are disabled due to flakiness caused by being
 // currently unable to block and wait for the script streaming thread.
 TEST_F(ScriptStreamingTest, DISABLED_CompilingStreamedScript) {
-  return;
-
   // Test that we can successfully compile a streamed script.
   V8TestingScope scope;
-  resource_->StartStreaming(loading_task_runner_);
-  resource_->SetClientIsWaitingForFinished();
 
   AppendData("function foo() {");
   AppendPadding();
@@ -238,8 +247,6 @@ TEST_F(ScriptStreamingTest, DISABLED_CompilingStreamedScriptWithParseError) {
   // Test that scripts with parse errors are handled properly. In those cases,
   // V8 stops reading the network stream: make sure we handle it gracefully.
   V8TestingScope scope;
-  resource_->StartStreaming(loading_task_runner_);
-  resource_->SetClientIsWaitingForFinished();
   AppendData("function foo() {");
   AppendData("this is the part which will be a parse error");
   // V8 won't realize the parse error until it actually starts parsing the
@@ -276,8 +283,6 @@ TEST_F(ScriptStreamingTest, DISABLED_CancellingStreaming) {
   // Test that the upper layers (PendingScript and up) can be ramped down
   // while streaming is ongoing, and ScriptStreamer handles it gracefully.
   V8TestingScope scope;
-  resource_->StartStreaming(loading_task_runner_);
-  resource_->SetClientIsWaitingForFinished();
   AppendData("function foo() {");
 
   // In general, we cannot control what the background thread is doing
@@ -301,8 +306,6 @@ TEST_F(ScriptStreamingTest, DISABLED_DataAfterDisposingPendingScript) {
   // Test that the upper layers (PendingScript and up) can be ramped down
   // before streaming is started, and ScriptStreamer handles it gracefully.
   V8TestingScope scope;
-  resource_->StartStreaming(loading_task_runner_);
-  resource_->SetClientIsWaitingForFinished();
 
   // In general, we cannot control what the background thread is doing
   // (whether it's parsing or waiting for more data). In this test, we have
@@ -336,14 +339,12 @@ TEST_F(ScriptStreamingTest, DISABLED_SuppressingStreaming) {
   // upper layer (ScriptResourceClient) should get a notification when the
   // script is loaded.
   V8TestingScope scope;
-  resource_->StartStreaming(loading_task_runner_);
-  resource_->SetClientIsWaitingForFinished();
 
   SingleCachedMetadataHandler* cache_handler = resource_->CacheHandler();
   EXPECT_TRUE(cache_handler);
+  cache_handler->DisableSendToPlatformForTesting();
   cache_handler->SetCachedMetadata(V8CodeCache::TagForCodeCache(cache_handler),
-                                   reinterpret_cast<const uint8_t*>("X"), 1,
-                                   CachedMetadataHandler::kCacheLocally);
+                                   reinterpret_cast<const uint8_t*>("X"), 1);
 
   AppendData("function foo() {");
   AppendPadding();
@@ -365,8 +366,6 @@ TEST_F(ScriptStreamingTest, DISABLED_EmptyScripts) {
   // (ScriptResourceClient) should be notified when an empty script has been
   // loaded.
   V8TestingScope scope;
-  resource_->StartStreaming(loading_task_runner_);
-  resource_->SetClientIsWaitingForFinished();
 
   // Finish the script without sending any data.
   Finish();
@@ -383,9 +382,6 @@ TEST_F(ScriptStreamingTest, DISABLED_SmallScripts) {
   // Small scripts shouldn't be streamed.
   V8TestingScope scope;
   ScriptStreamer::SetSmallScriptThresholdForTesting(100);
-
-  resource_->StartStreaming(loading_task_runner_);
-  resource_->SetClientIsWaitingForFinished();
 
   AppendData("function foo() { }");
 
@@ -404,9 +400,6 @@ TEST_F(ScriptStreamingTest, DISABLED_ScriptsWithSmallFirstChunk) {
   // chunk is small.
   V8TestingScope scope;
   ScriptStreamer::SetSmallScriptThresholdForTesting(100);
-
-  resource_->StartStreaming(loading_task_runner_);
-  resource_->SetClientIsWaitingForFinished();
 
   // This is the first data chunk which is small.
   AppendData("function foo() { }");
@@ -442,9 +435,6 @@ TEST_F(ScriptStreamingTest, DISABLED_EncodingChanges) {
   // loading it.
   V8TestingScope scope;
   resource_->SetEncodingForTest("windows-1252");
-
-  resource_->StartStreaming(loading_task_runner_);
-  resource_->SetClientIsWaitingForFinished();
 
   resource_->SetEncodingForTest("UTF-8");
   // \xec\x92\x81 are the raw bytes for \uc481.
@@ -483,9 +473,6 @@ TEST_F(ScriptStreamingTest, DISABLED_EncodingFromBOM) {
   // This encoding is wrong on purpose.
   resource_->SetEncodingForTest("windows-1252");
 
-  resource_->StartStreaming(loading_task_runner_);
-  resource_->SetClientIsWaitingForFinished();
-
   // \xef\xbb\xbf is the UTF-8 byte order mark. \xec\x92\x81 are the raw bytes
   // for \uc481.
   AppendData(
@@ -517,9 +504,7 @@ TEST_F(ScriptStreamingTest, DISABLED_EncodingFromBOM) {
 // A test for crbug.com/711703. Should not crash.
 TEST_F(ScriptStreamingTest, DISABLED_GarbageCollectDuringStreaming) {
   V8TestingScope scope;
-  resource_->StartStreaming(loading_task_runner_);
 
-  resource_->SetClientIsWaitingForFinished();
   EXPECT_FALSE(resource_client_->Finished());
 
   resource_ = nullptr;
@@ -531,9 +516,6 @@ TEST_F(ScriptStreamingTest, DISABLED_GarbageCollectDuringStreaming) {
 // currently unable to block and wait for the script streaming thread.
 TEST_F(ScriptStreamingTest, DISABLED_ResourceSetRevalidatingRequest) {
   V8TestingScope scope;
-  resource_->StartStreaming(loading_task_runner_);
-
-  resource_->SetClientIsWaitingForFinished();
 
   // Kick the streaming off.
   AppendData("function foo() {");
@@ -542,18 +524,18 @@ TEST_F(ScriptStreamingTest, DISABLED_ResourceSetRevalidatingRequest) {
   Finish();
   ProcessTasksUntilStreamingComplete();
 
-  // Second start streaming should fail.
-  resource_->StartStreaming(loading_task_runner_);
+  // Should be done streaming by now.
+  EXPECT_TRUE(resource_->HasStreamer());
   EXPECT_FALSE(resource_->HasRunningStreamer());
 
   ResourceRequest request(resource_->Url());
   resource_->SetRevalidatingRequest(request);
 
-  // The next streaming should still fail, but the reason should be
+  // Now there shouldn't be a streamer at all, and the reason should be
   // "kRevalidate".
-  resource_->StartStreaming(loading_task_runner_);
-  EXPECT_FALSE(resource_->HasRunningStreamer());
-  EXPECT_EQ(resource_->NoStreamerReason(), ScriptStreamer::kRevalidate);
+  EXPECT_FALSE(resource_->HasStreamer());
+  EXPECT_EQ(resource_->NoStreamerReason(),
+            ScriptStreamer::NotStreamingReason::kRevalidate);
 }
 
 }  // namespace

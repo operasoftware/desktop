@@ -39,7 +39,6 @@ class LayoutSVGText final : public LayoutSVGBlock {
   void SetNeedsPositioningValuesUpdate() {
     needs_positioning_values_update_ = true;
   }
-  void SetNeedsTransformUpdate() override { needs_transform_update_ = true; }
   void SetNeedsTextMetricsUpdate() { needs_text_metrics_update_ = true; }
   FloatRect VisualRectInLocalSVGCoordinates() const override;
   FloatRect ObjectBoundingBox() const override;
@@ -53,14 +52,13 @@ class LayoutSVGText final : public LayoutSVGBlock {
   static LayoutSVGText* LocateLayoutSVGTextAncestor(LayoutObject*);
   static const LayoutSVGText* LocateLayoutSVGTextAncestor(const LayoutObject*);
 
+  static void NotifySubtreeStructureChanged(LayoutObject*,
+                                            LayoutInvalidationReasonForTracing);
+
   bool NeedsReordering() const { return needs_reordering_; }
   const Vector<LayoutSVGInlineText*>& DescendantTextNodes() const {
     return descendant_text_nodes_;
   }
-
-  void SubtreeChildWasAdded();
-  void SubtreeChildWillBeRemoved();
-  void SubtreeTextDidChange();
 
   void RecalcVisualOverflow() override;
 
@@ -94,11 +92,10 @@ class LayoutSVGText final : public LayoutSVGBlock {
 
   RootInlineBox* CreateRootInlineBox() override;
 
-  void InvalidatePositioningValues(LayoutInvalidationReasonForTracing);
+  void SubtreeStructureChanged(LayoutInvalidationReasonForTracing);
 
   bool needs_reordering_ : 1;
   bool needs_positioning_values_update_ : 1;
-  bool needs_transform_update_ : 1;
   bool needs_text_metrics_update_ : 1;
   Vector<LayoutSVGInlineText*> descendant_text_nodes_;
 };

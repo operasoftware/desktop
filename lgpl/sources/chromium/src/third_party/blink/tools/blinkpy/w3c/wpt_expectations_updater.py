@@ -1,7 +1,6 @@
 # Copyright 2016 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 """Updates expectations and baselines when updating web-platform-tests.
 
 Specifically, this class fetches results from try bots for the current CL, then
@@ -19,43 +18,106 @@ from blinkpy.common.net.git_cl import GitCL
 from blinkpy.common.path_finder import PathFinder
 from blinkpy.common.system.executive import ScriptError
 from blinkpy.common.system.log_utils import configure_logging
+from blinkpy.web_tests.models.test_expectations import TestExpectations
+from blinkpy.web_tests.port.android import (
+    PRODUCTS, PRODUCTS_TO_EXPECTATION_FILE_PATHS)
 
 _log = logging.getLogger(__name__)
 
-MARKER_COMMENT = '# ====== New tests from wpt-importer added here ======'
-UMBRELLA_BUG = 'crbug.com/626703'
 
 # TODO(robertma): Investigate reusing web_tests.models.test_expectations and
 # alike in this module.
 
 SimpleTestResult = namedtuple('SimpleTestResult', ['expected', 'actual', 'bug'])
 
+DesktopConfig = namedtuple('DesktopConfig', ['port_name'])
+
 
 class WPTExpectationsUpdater(object):
+    MARKER_COMMENT = '# ====== New tests from wpt-importer added here ======'
+    UMBRELLA_BUG = 'crbug.com/626703'
 
-    def __init__(self, host):
+    def __init__(self, host, args=None):
         self.host = host
         self.port = self.host.port_factory.get()
-        self.git_cl = GitCL(host)
         self.finder = PathFinder(self.host.filesystem)
-        self.ports_with_no_results = set()
-        self.ports_with_all_pass = set()
+        self.git_cl = GitCL(host)
+        self.git = self.host.git(self.finder.chromium_base())
+        self.configs_with_no_results = []
+        self.configs_with_all_pass = []
         self.patchset = None
 
-    def run(self, args=None):
+        # Get options from command line arguments.
         parser = argparse.ArgumentParser(description=__doc__)
-        parser.add_argument('--patchset', default=None,
-                            help='Patchset number to fetch new baselines from.')
-        parser.add_argument('-v', '--verbose', action='store_true', help='More verbose logging.')
-        args = parser.parse_args(args)
+        self.add_arguments(parser)
+        self.options = parser.parse_args(args or [])
 
-        log_level = logging.DEBUG if args.verbose else logging.INFO
+        # Set up TestExpectations instance which contains all
+        # expectations files associated with the platform.
+        expectations_dict = {p: self.host.filesystem.read_text_file(p)
+                             for p in self.expectations_files()}
+        self._test_expectations = TestExpectations(
+            self.port, expectations_dict=expectations_dict)
+
+    def expectations_files(self):
+        """Returns list of expectations files.
+
+        Each expectation file in the list will be cleaned of expectations
+        for tests that were removed and will also have test names renamed
+        for tests that were renamed. Also the files may have their expectations
+        updated using builder results.
+        """
+        return (self.port.all_expectations_dict().keys() +
+                PRODUCTS_TO_EXPECTATION_FILE_PATHS.values())
+
+    def run(self):
+        """Does required setup before calling update_expectations().
+
+        Do not override this function!
+        """
+        log_level = logging.DEBUG if self.options.verbose else logging.INFO
         configure_logging(logging_level=log_level, include_time=True)
 
-        self.patchset = args.patchset
-        self.update_expectations()
+        self.patchset = self.options.patchset
+
+        # Remove expectations for deleted tests and rename tests in expectations
+        # for renamed tests.
+        self.cleanup_test_expectations_files()
+
+        if not self.options.cleanup_test_expectations_only:
+            # Use try job results to update expectations and baselines
+            self.update_expectations()
 
         return 0
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--patchset',
+            default=None,
+            help='Patchset number to fetch new baselines from.')
+        parser.add_argument(
+            '-v',
+            '--verbose',
+            action='store_true',
+            help='More verbose logging.')
+        parser.add_argument(
+            '--clean-up-affected-tests-only',
+            action='store_true',
+            help='Only cleanup expectations deleted or renamed in current CL. '
+                 'If flag is not used then a full cleanup of deleted or '
+                 'renamed tests will be done in expectations.')
+        parser.add_argument(
+            '--cleanup-test-expectations-only',
+            action='store_true',
+            help='Cleanup test expectations files and then exit script.')
+        # TODO(rmhasan): Move this argument to the
+        # AndroidWPTExpectationsUpdater add_arguments implementation.
+        # Also look into using sub parsers to separate android and
+        # desktop specific arguments.
+        parser.add_argument(
+            '--android-product', action='append', default=[],
+            help='Android products whose baselines will be updated.',
+            choices=PRODUCTS)
 
     def update_expectations(self):
         """Downloads text new baselines and adds test expectations lines.
@@ -78,26 +140,38 @@ class WPTExpectationsUpdater(object):
         test_expectations = {}
         for build, job_status in build_to_status.iteritems():
             if job_status.result == 'SUCCESS':
-                self.ports_with_all_pass.add(self.port_name(build))
-            port_results = self.get_failing_results_dict(build)
-            test_expectations = self.merge_dicts(test_expectations, port_results)
-
-        # And then we merge results for different platforms that had the same results.
-        for test_name, platform_result in test_expectations.iteritems():
-            # platform_result is a dict mapping platforms to results.
-            test_expectations[test_name] = self.merge_same_valued_keys(platform_result)
+                self.configs_with_all_pass.extend(
+                    self.get_builder_configs(build))
+                continue
+            result_dicts = self.get_failing_results_dicts(build)
+            for result_dict in result_dicts:
+                test_expectations = self.merge_dicts(
+                    test_expectations, result_dict)
 
         # At this point, test_expectations looks like: {
         #     'test-with-failing-result': {
-        #         ('port-name1', 'port-name2'): SimpleTestResult,
-        #         'port-name3': AnotherSimpleTestResult
+        #         config1: SimpleTestResult,
+        #         config2: SimpleTestResult,
+        #         config3: AnotherSimpleTestResult
+        #     }
+        # }
+        # And then we merge results for different platforms that had the same results.
+        for test_name, platform_result in test_expectations.iteritems():
+            # platform_result is a dict mapping platforms to results.
+            test_expectations[test_name] = self.merge_same_valued_keys(
+                platform_result)
+
+        # At this point, test_expectations looks like: {
+        #     'test-with-failing-result': {
+        #         (config1, config2): SimpleTestResult,
+        #         (config3,): AnotherSimpleTestResult
         #     }
         # }
 
-        rebaselined_tests, test_expectations = self.download_text_baselines(test_expectations)
-        test_expectation_lines = self.create_line_dict(test_expectations)
-        self.write_to_test_expectations(test_expectation_lines)
-        return rebaselined_tests, test_expectation_lines
+        rebaselined_tests, test_expectations = self.download_text_baselines(
+            test_expectations)
+        exp_lines_dict = self.write_to_test_expectations(test_expectations)
+        return rebaselined_tests, exp_lines_dict
 
     def get_issue_number(self):
         """Returns current CL number. Can be replaced in unit tests."""
@@ -105,10 +179,11 @@ class WPTExpectationsUpdater(object):
 
     def get_latest_try_jobs(self):
         """Returns the latest finished try jobs as Build objects."""
-        return self.git_cl.latest_try_jobs(builder_names=self._get_try_bots(), patchset=self.patchset)
+        return self.git_cl.latest_try_jobs(
+            builder_names=self._get_try_bots(), patchset=self.patchset)
 
-    def get_failing_results_dict(self, build):
-        """Returns a nested dict of failing test results.
+    def get_failing_results_dicts(self, build):
+        """Returns a list of nested dicts of failing test results.
 
         Retrieves a full list of web test results from a builder result URL.
         Collects the builder name, platform and a list of tests that did not
@@ -118,74 +193,126 @@ class WPTExpectationsUpdater(object):
             build: A Build object.
 
         Returns:
-            A dictionary with the structure: {
+            A list of dictionaries that have the following structure.
+
+            {
                 'test-with-failing-result': {
-                    'full-port-name': SimpleTestResult
+                    config: SimpleTestResult
                 }
             }
-            If results could be fetched but none are failing,
-            this will return an empty dictionary.
-        """
-        port_name = self.port_name(build)
-        if port_name in self.ports_with_all_pass:
-            # All tests passed, so there should be no failing results.
-            return {}
 
-        test_result_list = [self.host.buildbot.fetch_results(build)]
+            If results could be fetched but none are failing,
+            this will return an empty list.
+        """
+
+        test_results_list = self._get_web_test_results(build)
+
         has_webdriver_tests = self.host.builders.has_webdriver_tests_for_builder(
             build.builder_name)
-        if has_webdriver_tests:
-            master = self.host.builders.master_for_builder(
-                build.builder_name)
-            test_result_list.append(
-                self.host.buildbot.fetch_webdriver_test_results(build, master))
 
-        test_result_list = filter(None, test_result_list)
-        if not test_result_list:
+        if has_webdriver_tests:
+            master = self.host.builders.master_for_builder(build.builder_name)
+            test_results_list.append(
+                self.host.results_fetcher.fetch_webdriver_test_results(
+                    build, master))
+
+        test_results_list = filter(None, test_results_list)
+        if not test_results_list:
             _log.warning('No results for build %s', build)
-            self.ports_with_no_results.add(self.port_name(build))
-            return {}
+            self.configs_with_no_results.extend(self.get_builder_configs(build))
+            return []
 
         failing_test_results = []
-        for test_result in test_result_list:
-            failing_test_results += [
-                result for result in test_result.didnt_run_as_expected_results() if not result.did_pass()]
+        for results_set in test_results_list:
+            results_dict = self.generate_failing_results_dict(
+                build, results_set)
+            if results_dict:
+                failing_test_results.append(results_dict)
+        return failing_test_results
 
-        return self.generate_results_dict(self.port_name(build), failing_test_results)
+    def _get_web_test_results(self, build):
+        """Gets web tests results for a builder.
+
+        Args:
+            build: Named tuple containing builder name and number
+
+        Returns:
+            List of web tests results for each web test step
+            in build.
+        """
+        return [self.host.results_fetcher.fetch_results(build)]
+
+    def get_builder_configs(self, build, *_):
+        return [DesktopConfig(port_name=self.port_name(build))]
 
     @memoized
     def port_name(self, build):
-        return self.host.builders.port_name_for_builder_name(build.builder_name)
+        return self.host.builders.port_name_for_builder_name(
+            build.builder_name)
 
-    def generate_results_dict(self, full_port_name, web_test_results):
+    def generate_failing_results_dict(self, build, web_test_results):
         """Makes a dict with results for one platform.
 
         Args:
-            full_port_name: The fully-qualified port name, e.g. "win-win10".
+            builder: Builder instance containing builder information..
             web_test_results: A list of WebTestResult objects.
 
         Returns:
             A dictionary with the structure: {
                 'test-name': {
-                    'full-port-name': SimpleTestResult
+                    ('full-port-name',): SimpleTestResult
                 }
             }
         """
         test_dict = {}
-        for result in web_test_results:
-            test_name = result.test_name()
+        configs = self.get_builder_configs(build, web_test_results)
+        _log.debug('Getting failing results dictionary'
+                   ' for %s step in latest %s build' % (
+                       web_test_results.step_name(), build.builder_name))
 
-            if not self.port.is_wpt_test(test_name):
+        if len(configs) > 1:
+            raise ScriptError('More than one configs were produced for'
+                              ' builder and web tests step combination')
+        if not configs:
+            raise ScriptError('No configuration was found for builder and web test'
+                              ' step combination ')
+        config = configs[0]
+        if config in self.configs_with_all_pass:
+            return {}
+
+        for result in web_test_results.didnt_run_as_expected_results():
+            # TODO(rmhasan) If a test fails unexpectedly then it runs multiple
+            # times until, it passes or a retry limit is reached. Even though
+            # it passed we there are still flaky failures that we are not
+            # creating test expectations for. Maybe we should add a mode
+            # which creates expectations for tests that are flaky but still
+            # pass in a web test step.
+            if result.did_pass():
                 continue
 
+            test_name = result.test_name()
+            if not self._is_wpt_test(test_name):
+                continue
             test_dict[test_name] = {
-                full_port_name: SimpleTestResult(
+                config:
+                SimpleTestResult(
                     expected=result.expected_results(),
                     actual=result.actual_results(),
-                    bug=UMBRELLA_BUG
-                )
+                    bug=self.UMBRELLA_BUG)
             }
         return test_dict
+
+    def _is_wpt_test(self, test_name):
+        """Check if a web test is a WPT tests.
+
+        In blink web tests results, each test name is relative to
+        the web_tests directory instead of the wpt directory. We
+        need to use the port.is_wpt_test() function to find out if a test
+        is from the WPT suite.
+
+        Returns: True if a test is in the external/wpt subdirectory of
+            the web_tests directory."""
+        return self.port.is_wpt_test(test_name)
 
     def merge_dicts(self, target, source, path=None):
         """Recursively merges nested dictionaries.
@@ -201,12 +328,16 @@ class WPTExpectationsUpdater(object):
         path = path or []
         for key in source:
             if key in target:
-                if (isinstance(target[key], dict)) and isinstance(source[key], dict):
-                    self.merge_dicts(target[key], source[key], path + [str(key)])
+                if (isinstance(target[key], dict)) and isinstance(
+                        source[key], dict):
+                    self.merge_dicts(target[key], source[key],
+                                     path + [str(key)])
                 elif target[key] == source[key]:
                     pass
                 else:
-                    raise ValueError('The key: %s already exist in the target dictionary.' % '.'.join(path))
+                    raise ValueError(
+                        'The key: %s already exist in the target dictionary.' %
+                        '.'.join(path))
             else:
                 target[key] = source[key]
         return target
@@ -238,7 +369,7 @@ class WPTExpectationsUpdater(object):
             current_key = keys[0]
             found_match = False
             if current_key == keys[-1]:
-                merged_dict[current_key] = dictionary[current_key]
+                merged_dict[tuple([current_key])] = dictionary[current_key]
                 keys.remove(current_key)
                 break
 
@@ -249,10 +380,13 @@ class WPTExpectationsUpdater(object):
 
                 if next_item == keys[-1]:
                     if found_match:
-                        merged_dict[tuple(matching_value_keys)] = dictionary[current_key]
-                        keys = [k for k in keys if k not in matching_value_keys]
+                        merged_dict[
+                            tuple(matching_value_keys)] = dictionary[current_key]
+                        keys = [
+                            k for k in keys if k not in matching_value_keys
+                        ]
                     else:
-                        merged_dict[current_key] = dictionary[current_key]
+                        merged_dict[tuple([current_key])] = dictionary[current_key]
                         keys.remove(current_key)
             matching_value_keys = set()
         return merged_dict
@@ -283,7 +417,7 @@ class WPTExpectationsUpdater(object):
         if 'MISSING' in actual_results:
             return {'Skip'}
         if '-manual.' in test_name and 'TIMEOUT' in actual_results:
-            return {'WontFix'}
+            return {'Skip'}
         expectations = set()
         failure_types = {'TEXT', 'IMAGE+TEXT', 'IMAGE', 'AUDIO', 'FAIL'}
         other_types = {'TIMEOUT', 'CRASH', 'PASS'}
@@ -307,8 +441,8 @@ class WPTExpectationsUpdater(object):
             merged_results: A dictionary with the format:
                 {
                     'test-with-failing-result': {
-                        ('port-name1', 'port-name2'): SimpleTestResult,
-                        'port-name3': SimpleTestResult
+                        (config1, config2): SimpleTestResult,
+                        (config3,): SimpleTestResult
                     }
                 }
 
@@ -317,20 +451,23 @@ class WPTExpectationsUpdater(object):
             (each SimpleTestResult turns into a line).
         """
         line_dict = defaultdict(list)
-        for test_name, port_results in sorted(merged_results.iteritems()):
-            if not self.port.is_wpt_test(test_name):
-                _log.warning('Non-WPT test "%s" unexpectedly passed to create_line_dict.', test_name)
+        for test_name, test_results in sorted(merged_results.iteritems()):
+            if not self._is_wpt_test(test_name):
+                _log.warning(
+                    'Non-WPT test "%s" unexpectedly passed to create_line_dict.',
+                    test_name)
                 continue
-            for port_names, result in sorted(port_results.iteritems()):
-                line_dict[test_name].extend(self._create_lines(test_name, port_names, result))
+            for configs, result in sorted(test_results.iteritems()):
+                line_dict[test_name].extend(
+                    self._create_lines(test_name, configs, result))
         return line_dict
 
-    def _create_lines(self, test_name, port_names, result):
+    def _create_lines(self, test_name, configs, result):
         """Constructs test expectation line strings.
 
         Args:
             test_name: The test name string.
-            port_names: A list of full port names that the line should apply to.
+            configs: A list of full configs that the line should apply to.
             result: A SimpleTestResult.
 
         Returns:
@@ -338,63 +475,59 @@ class WPTExpectationsUpdater(object):
             |test_name|.
         """
         lines = []
-        port_names = self.tuple_or_value_to_list(port_names)
-
         # The set of ports with no results is assumed to have have no
         # overlap with the set of port names passed in here.
-        assert (set(port_names) & self.ports_with_no_results) == set()
+        assert set(configs) & set(self.configs_with_no_results) == set()
 
         # The ports with no results are generally ports of builders that
         # failed, maybe for unrelated reasons. At this point, we add ports
         # with no results to the list of platforms because we're guessing
         # that this new expectation might be cross-platform and should
         # also apply to any ports that we weren't able to get results for.
-        port_names.extend(self.ports_with_no_results)
+        configs = tuple(list(configs) + self.configs_with_no_results)
 
-        expectations = '[ %s ]' % ' '.join(self.get_expectations(result, test_name))
-        for specifier in self.normalized_specifiers(test_name, port_names):
+        expectations = '[ %s ]' % \
+            ' '.join(self.get_expectations(result, test_name))
+        for specifier in self.normalized_specifiers(test_name, configs):
             line_parts = []
             if specifier:
                 line_parts.append('[ %s ]' % specifier)
-            line_parts.append(test_name)
+            # Escape literal asterisks for typ (https://crbug.com/1036130).
+            line_parts.append(test_name.replace('*', '\\*'))
             line_parts.append(expectations)
 
             # Only add the bug link if the expectations do not include WontFix.
-            if 'WontFix' not in expectations:
+            if 'WontFix' not in expectations and result.bug:
                 line_parts.insert(0, result.bug)
 
             lines.append(' '.join(line_parts))
         return lines
 
-    def normalized_specifiers(self, test_name, port_names):
+    def normalized_specifiers(self, test_name, configs):
         """Converts and simplifies ports into platform specifiers.
 
         Args:
             test_name: The test name string.
-            port_names: A list of full port names that the line should apply to.
+            configs: A list of full configs that the line should apply to.
 
         Returns:
             A list of specifier string, e.g. ["Mac", "Win"].
             [''] will be returned if the line should apply to all platforms.
         """
         specifiers = []
-        for name in sorted(port_names):
-            specifiers.append(self.host.builders.version_specifier_for_port_name(name))
+        for config in configs:
+            specifiers.append(
+                self.host.builders.version_specifier_for_port_name(
+                    config.port_name))
 
         if self.specifiers_can_extend_to_all_platforms(specifiers, test_name):
             return ['']
 
-        specifiers = self.simplify_specifiers(specifiers, self.port.configuration_specifier_macros())
+        specifiers = self.simplify_specifiers(
+            specifiers, self.port.configuration_specifier_macros())
         if not specifiers:
             return ['']
         return specifiers
-
-    @staticmethod
-    def tuple_or_value_to_list(tuple_or_value):
-        """Converts a tuple to a list, and a string value to a one-item list."""
-        if isinstance(tuple_or_value, tuple):
-            return list(tuple_or_value)
-        return [tuple_or_value]
 
     def specifiers_can_extend_to_all_platforms(self, specifiers, test_name):
         """Tests whether a list of specifiers can be extended to all platforms.
@@ -404,20 +537,26 @@ class WPTExpectationsUpdater(object):
         """
         extended_specifiers = specifiers + self.skipped_specifiers(test_name)
         # If the list is simplified to empty, then all platforms are covered.
-        return not self.simplify_specifiers(extended_specifiers, self.port.configuration_specifier_macros())
+        return not self.simplify_specifiers(
+            extended_specifiers, self.port.configuration_specifier_macros())
 
     def skipped_specifiers(self, test_name):
         """Returns a list of platform specifiers for which the test is skipped."""
         specifiers = []
         for port in self.all_try_builder_ports():
             if port.skips_test(test_name):
-                specifiers.append(self.host.builders.version_specifier_for_port_name(port.name()))
+                specifiers.append(
+                    self.host.builders.version_specifier_for_port_name(
+                        port.name()))
         return specifiers
 
     @memoized
     def all_try_builder_ports(self):
         """Returns a list of Port objects for all try builders."""
-        return [self.host.port_factory.get_from_builder_name(name) for name in self._get_try_bots()]
+        return [
+            self.host.port_factory.get_from_builder_name(name)
+            for name in self._get_try_bots()
+        ]
 
     def simplify_specifiers(self, specifiers, specifier_macros):
         """Simplifies the specifier part of an expectation line if possible.
@@ -445,7 +584,10 @@ class WPTExpectationsUpdater(object):
             macro = macro.lower()
 
             # Only consider version specifiers that have corresponding try bots.
-            versions = {s.lower() for s in versions if s.lower() in covered_by_try_bots}
+            versions = {
+                s.lower()
+                for s in versions if s.lower() in covered_by_try_bots
+            }
             if len(versions) == 0:
                 continue
             if versions <= specifiers:
@@ -459,10 +601,11 @@ class WPTExpectationsUpdater(object):
         all_platform_specifiers = set()
         for builder_name in self._get_try_bots():
             all_platform_specifiers.add(
-                self.host.builders.platform_specifier_for_builder(builder_name).lower())
+                self.host.builders.platform_specifier_for_builder(
+                    builder_name).lower())
         return frozenset(all_platform_specifiers)
 
-    def write_to_test_expectations(self, line_dict):
+    def write_to_test_expectations(self, test_expectations):
         """Writes the given lines to the TestExpectations file.
 
         The place in the file where the new lines are inserted is after a marker
@@ -473,19 +616,25 @@ class WPTExpectationsUpdater(object):
         file.
 
         Args:
-            line_dict: A dictionary from test names to a list of test expectation lines.
+            test_expectations: A dictionary mapping test names to a dictionary
+            mapping platforms and test results.
+        Returns:
+            Dictionary mapping test names to lists of test expectation strings.
         """
+        line_dict = self.create_line_dict(test_expectations)
         if not line_dict:
             _log.info(
-                'No lines to write to TestExpectations, WebdriverExpectations or NeverFixTests.')
-            return
+                'No lines to write to TestExpectations,'
+                ' WebdriverExpectations or NeverFixTests.'
+            )
+            return {}
 
         line_list = []
         wont_fix_list = []
         webdriver_list = []
         for lines in line_dict.itervalues():
             for line in lines:
-                if 'WontFix' in line:
+                if 'Skip' in line and '-manual.' in line:
                     wont_fix_list.append(line)
                 elif self.finder.webdriver_prefix() in line:
                     webdriver_list.append(line)
@@ -500,30 +649,197 @@ class WPTExpectationsUpdater(object):
             if not lines:
                 continue
 
-            _log.info('Lines to write to %s:\n %s', expectations_file_path, '\n'.join(lines))
+            _log.info('Lines to write to %s:\n %s', expectations_file_path,
+                      '\n'.join(lines))
             # Writes to TestExpectations file.
-            file_contents = self.host.filesystem.read_text_file(expectations_file_path)
+            file_contents = self.host.filesystem.read_text_file(
+                expectations_file_path)
 
-            marker_comment_index = file_contents.find(MARKER_COMMENT)
+            marker_comment_index = file_contents.find(self.MARKER_COMMENT)
             if marker_comment_index == -1:
-                file_contents += '\n%s\n' % MARKER_COMMENT
+                file_contents += '\n%s\n' % self.MARKER_COMMENT
                 file_contents += '\n'.join(lines)
             else:
-                end_of_marker_line = (file_contents[marker_comment_index:].find('\n')) + marker_comment_index
-                file_contents = file_contents[:end_of_marker_line + 1] + '\n'.join(lines) + file_contents[end_of_marker_line:]
+                end_of_marker_line = (file_contents[marker_comment_index:].
+                                      find('\n')) + marker_comment_index
+                file_contents = (
+                    file_contents[:end_of_marker_line + 1] + '\n'.join(lines) +
+                    file_contents[end_of_marker_line:])
 
-            self.host.filesystem.write_text_file(expectations_file_path, file_contents)
+            self.host.filesystem.write_text_file(expectations_file_path,
+                                                 file_contents)
 
         if wont_fix_list:
-            _log.info('Lines to write to NeverFixTests:\n %s', '\n'.join(wont_fix_list))
+            _log.info('Lines to write to NeverFixTests:\n %s',
+                      '\n'.join(wont_fix_list))
             # Writes to NeverFixTests file.
             wont_fix_path = self.port.path_to_never_fix_tests_file()
-            wont_fix_file_content = self.host.filesystem.read_text_file(wont_fix_path)
+            wont_fix_file_content = self.host.filesystem.read_text_file(
+                wont_fix_path)
             if not wont_fix_file_content.endswith('\n'):
                 wont_fix_file_content += '\n'
             wont_fix_file_content += '\n'.join(wont_fix_list)
             wont_fix_file_content += '\n'
-            self.host.filesystem.write_text_file(wont_fix_path, wont_fix_file_content)
+            self.host.filesystem.write_text_file(wont_fix_path,
+                                                 wont_fix_file_content)
+        return line_dict
+
+    def cleanup_test_expectations_files(self):
+        """Removes deleted tests from expectations files.
+
+        Removes expectations for deleted tests or renames test names in
+        expectation files for tests that were renamed. If the
+        --clean-up-affected-tests-only command line argument is used then
+        only tests deleted in the CL will have their expectations removed
+        through this script. If that command line argument is not used then
+        expectations for test files that no longer exist will be deleted.
+        """
+        deleted_test_files = self._list_deleted_test_files()
+        renamed_test_files = self._list_renamed_test_files()
+
+        for path in self._test_expectations.expectations_dict:
+            _log.info(
+                'Updating %s for any removed or renamed tests.' %
+                self.host.filesystem.basename(path))
+            self._clean_single_test_expectations_file(
+                path, deleted_test_files, renamed_test_files)
+        self._test_expectations.commit_changes()
+
+    def _clean_single_test_expectations_file(
+            self, path, deleted_files, renamed_files):
+        """Cleans up a single test expectations file.
+
+        Args:
+            path: Path of expectations file that is being cleaned up.
+            deleted_files: List of test file paths relative to the web tests
+                directory which were deleted.
+            renamed_files: Dictionary mapping test file paths to their new file
+                name after renaming.
+        """
+        for line in self._test_expectations.get_updated_lines(path):
+            # if a test is a glob type expectation or empty line or comment then
+            # add it to the updated expectations file without modifications
+            if not line.test or line.is_glob:
+                continue
+            root_test_file = self._get_root_file(line.test)
+
+            if root_test_file in renamed_files:
+                self._test_expectations.remove_expectations(path, [line])
+                new_file_name = renamed_files[root_test_file]
+                if self.finder.is_webdriver_test_path(root_test_file):
+                    _, subtest_suffix = self.port.split_webdriver_test_name(
+                        line.test)
+                    line.test = self.port.add_webdriver_subtest_suffix(
+                        new_file_name, subtest_suffix)
+                elif '?' in line.test:
+                    line.test = (
+                        new_file_name + line.test[line.test.find('?'):])
+                else:
+                    line.test = new_file_name
+                self._test_expectations.add_expectations(
+                    path, [line], lineno=line.lineno)
+            elif root_test_file in deleted_files:
+                self._test_expectations.remove_expectations(
+                    path, [line])
+
+    @memoized
+    def _get_root_file(self, test_name):
+        """Strips arguments from a web test name in order to get the file name.
+
+        It also removes the arguments for web driver tests. For instances for
+        the test test1/example.html?Hello this function will return
+        test1/example.html. For a webdriver test it would include arguments and
+        would have the following format, {test file}>>{argument}.
+
+        Args:
+            test_name: Test name which may include test arguments.
+
+        Returns:
+            Returns the test file which is the root of a test.
+        """
+        if self.finder.is_webdriver_test_path(test_name):
+            root_test_file, _ = (
+                self.port.split_webdriver_test_name(test_name))
+        elif '?' in test_name:
+            root_test_file = test_name[:test_name.find('?')]
+        else:
+            root_test_file = test_name
+        return root_test_file
+
+    def _list_deleted_test_files(self):
+        """Returns a list of web tests that have been deleted.
+
+        If --clean-up-affected-tests-only is true then only test files deleted
+        in the current CL may be removed from expectations. Otherwise, any test
+        file may be removed from expectations if it has been deleted.
+
+        Returns: A list of web test files that have been deleted.
+        """
+        if self.options.clean_up_affected_tests_only:
+            # TODO(robertma): Improve Git.changed_files so that we can use
+            # it here.
+            paths = set(self.git.run(
+                ['diff', 'origin/master', '-M100%', '--diff-filter=D',
+                 '--name-only']).splitlines())
+            deleted_tests = set()
+            for path in paths:
+                test = self._relative_to_web_test_dir(path)
+                if test:
+                    deleted_tests.add(test)
+        else:
+            # Remove expectations for all test which have files that
+            # were deleted. Paths are already relative to the web_tests
+            # directory
+            deleted_tests = self._deleted_test_files_in_expectations()
+        return deleted_tests
+
+    def _list_renamed_test_files(self):
+        """Returns a dictionary mapping tests to their new name.
+
+        Regardless of the command line arguments used this test will only
+        return a dictionary for tests affected in the current CL.
+
+        Returns a dictionary mapping source name to destination name.
+        """
+        out = self.git.run(
+            ['diff', 'origin/master', '-M100%', '--diff-filter=R',
+             '--name-status'])
+        renamed_tests = {}
+        for line in out.splitlines():
+            _, source_path, dest_path = line.split()
+            source_test = self._relative_to_web_test_dir(source_path)
+            dest_test = self._relative_to_web_test_dir(dest_path)
+            if source_test and dest_test:
+                renamed_tests[source_test] = dest_test
+        return renamed_tests
+
+    def _relative_to_web_test_dir(self, path_relative_to_repo_root):
+        """Returns a path that's relative to the web tests directory."""
+        abs_path = self.finder.path_from_chromium_base(
+            path_relative_to_repo_root)
+        if not abs_path.startswith(self.finder.web_tests_dir()):
+            return None
+        return self.host.filesystem.relpath(
+            abs_path, self.finder.web_tests_dir())
+
+    def _deleted_test_files_in_expectations(self):
+        """Returns a list of test files that were deleted.
+
+        Returns a list of test file names that are still in the expectations
+        files but no longer exists in the web tests directory.
+        """
+        deleted_files = set()
+        existing_files = {
+            self._get_root_file(p)
+            for p in self.port.tests()}
+        for path in self._test_expectations.expectations_dict:
+            for line in self._test_expectations.get_updated_lines(path):
+                if not line.test or line.is_glob:
+                    continue
+                root_test_file = self._get_root_file(line.test)
+                if root_test_file not in existing_files:
+                    deleted_files.add(root_test_file)
+        return deleted_files
 
     # TODO(robertma): Unit test this method.
     def download_text_baselines(self, test_results):
@@ -543,7 +859,8 @@ class WPTExpectationsUpdater(object):
             the test_results dictionary containing only tests that couldn't be
             rebaselined.
         """
-        tests_to_rebaseline, test_results = self.get_tests_to_rebaseline(test_results)
+        tests_to_rebaseline, test_results = self.get_tests_to_rebaseline(
+            test_results)
         if not tests_to_rebaseline:
             _log.info('No tests to rebaseline.')
             return tests_to_rebaseline, test_results
@@ -614,5 +931,7 @@ class WPTExpectationsUpdater(object):
         """Checks whether a given test is a WebDriver test."""
         return self.finder.is_webdriver_test_path(test_name)
 
+    @memoized
     def _get_try_bots(self):
-        return self.host.builders.all_try_builder_names()
+        return self.host.builders.filter_builders(
+            is_try=True, exclude_specifiers={'android'})

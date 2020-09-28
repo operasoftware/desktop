@@ -12,12 +12,12 @@
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/oom_intervention/oom_intervention_types.h"
 #include "third_party/blink/renderer/controller/crash_memory_metrics_reporter_impl.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
@@ -264,13 +264,9 @@ TEST_F(OomInterventionImplTest, V1DetectionAdsNavigation) {
   WebViewImpl* web_view = web_view_helper_.InitializeAndLoad("about:blank");
   Page* page = web_view->MainFrameImpl()->GetFrame()->GetPage();
 
-  web_view->MainFrameImpl()
-      ->GetFrame()
-      ->GetDocument()
-      ->body()
-      ->SetInnerHTMLFromString(
-          "<iframe name='ad' src='data:text/html,'></iframe><iframe "
-          "name='non-ad' src='data:text/html,'>");
+  web_view->MainFrameImpl()->GetFrame()->GetDocument()->body()->setInnerHTML(
+      "<iframe name='ad' src='data:text/html,'></iframe><iframe "
+      "name='non-ad' src='data:text/html,'>");
 
   WebFrame* ad_iframe = web_view_helper_.LocalMainFrame()->FindFrameByName(
       WebString::FromUTF8("ad"));
@@ -319,9 +315,9 @@ TEST_F(OomInterventionImplTest, V2DetectionV8PurgeMemory) {
   WebViewImpl* web_view = web_view_helper_.InitializeAndLoad("about:blank");
   Page* page = web_view->MainFrameImpl()->GetFrame()->GetPage();
   auto* frame = To<LocalFrame>(page->MainFrame());
-  EXPECT_FALSE(frame->GetDocument()->ExecutionContext::IsContextDestroyed());
+  EXPECT_FALSE(frame->DomWindow()->IsContextDestroyed());
   RunDetection(true, true, true);
-  EXPECT_TRUE(frame->GetDocument()->ExecutionContext::IsContextDestroyed());
+  EXPECT_TRUE(frame->DomWindow()->IsContextDestroyed());
 }
 
 TEST_F(OomInterventionImplTest, ReducedMemoryMetricReporting) {

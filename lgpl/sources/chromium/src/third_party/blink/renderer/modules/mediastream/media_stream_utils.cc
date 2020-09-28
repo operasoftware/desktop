@@ -4,10 +4,11 @@
 
 #include "third_party/blink/renderer/modules/mediastream/media_stream_utils.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
-#include "third_party/blink/public/platform/modules/mediastream/media_stream_audio_source.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_source.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_track.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
 #include "third_party/blink/renderer/platform/mediastream/webaudio_media_stream_source.h"
@@ -17,26 +18,25 @@ namespace blink {
 
 namespace {
 
-void CreateNativeVideoMediaStreamTrack(blink::WebMediaStreamTrack track) {
-  DCHECK(!track.GetPlatformTrack());
-  blink::WebMediaStreamSource source = track.Source();
-  DCHECK_EQ(source.GetType(), blink::WebMediaStreamSource::kTypeVideo);
-  blink::MediaStreamVideoSource* native_source =
-      blink::MediaStreamVideoSource::GetVideoSource(source);
+void CreateNativeVideoMediaStreamTrack(MediaStreamComponent* component) {
+  DCHECK(!component->GetPlatformTrack());
+  MediaStreamSource* source = component->Source();
+  DCHECK_EQ(source->GetType(), MediaStreamSource::kTypeVideo);
+  MediaStreamVideoSource* native_source =
+      MediaStreamVideoSource::GetVideoSource(source);
   DCHECK(native_source);
-  track.SetPlatformTrack(std::make_unique<blink::MediaStreamVideoTrack>(
-      native_source, blink::MediaStreamVideoSource::ConstraintsCallback(),
-      track.IsEnabled()));
+  component->SetPlatformTrack(std::make_unique<blink::MediaStreamVideoTrack>(
+      native_source, blink::MediaStreamVideoSource::ConstraintsOnceCallback(),
+      component->Enabled()));
 }
 
 }  // namespace
 
 void MediaStreamUtils::CreateNativeAudioMediaStreamTrack(
-    const blink::WebMediaStreamTrack& track,
+    MediaStreamComponent* component,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  WebMediaStreamSource source = track.Source();
-  MediaStreamAudioSource* media_stream_source =
-      blink::MediaStreamAudioSource::From(source);
+  MediaStreamSource* source = component->Source();
+  MediaStreamAudioSource* audio_source = MediaStreamAudioSource::From(source);
 
   // At this point, a MediaStreamAudioSource instance must exist. The one
   // exception is when a WebAudio destination node is acting as a source of
@@ -45,15 +45,16 @@ void MediaStreamUtils::CreateNativeAudioMediaStreamTrack(
   // TODO(miu): This needs to be moved to an appropriate location. A WebAudio
   // source should have been created before this method was called so that this
   // special case code isn't needed here.
-  if (!media_stream_source && source.RequiresAudioConsumer()) {
+  if (!audio_source && source->RequiresAudioConsumer()) {
     DVLOG(1) << "Creating WebAudio media stream source.";
-    media_stream_source =
-        new blink::WebAudioMediaStreamSource(&source, task_runner);
-    source.SetPlatformSource(
-        base::WrapUnique(media_stream_source));  // Takes ownership.
+    audio_source = new WebAudioMediaStreamSource(source, task_runner);
+    // |source| takes ownership of |audio_source|.
+    audio_source->SetOwner(source);
+    source->SetPlatformSource(
+        base::WrapUnique(audio_source));  // Takes ownership.
 
-    blink::WebMediaStreamSource::Capabilities capabilities;
-    capabilities.device_id = source.Id();
+    WebMediaStreamSource::Capabilities capabilities;
+    capabilities.device_id = source->Id();
     // TODO(crbug.com/704136): Switch away from std::vector.
     capabilities.echo_cancellation = std::vector<bool>({false});
     capabilities.auto_gain_control = std::vector<bool>({false});
@@ -62,7 +63,7 @@ void MediaStreamUtils::CreateNativeAudioMediaStreamTrack(
         media::SampleFormatToBitsPerChannel(media::kSampleFormatS16),  // min
         media::SampleFormatToBitsPerChannel(media::kSampleFormatS16)   // max
     };
-    auto parameters = media_stream_source->GetAudioParameters();
+    auto parameters = audio_source->GetAudioParameters();
     if (parameters.IsValid()) {
       capabilities.channel_count = {1, parameters.channels()};
       capabilities.sample_rate = {parameters.sample_rate(),
@@ -70,30 +71,30 @@ void MediaStreamUtils::CreateNativeAudioMediaStreamTrack(
       capabilities.latency = {parameters.GetBufferDuration().InSecondsF(),
                               parameters.GetBufferDuration().InSecondsF()};
     }
-    source.SetCapabilities(capabilities);
+    source->SetCapabilities(capabilities);
   }
 
-  if (media_stream_source)
-    media_stream_source->ConnectToTrack(track);
+  if (audio_source)
+    audio_source->ConnectToTrack(component);
   else
-    LOG(DFATAL) << "WebMediaStreamSource missing its MediaStreamAudioSource.";
+    LOG(DFATAL) << "MediaStreamSource missing its MediaStreamAudioSource.";
 }
 
 // TODO(crbug.com/704136): Change this method to take the task
 // runner instance, and use per thread task runner on the call site.
 void MediaStreamUtils::DidCreateMediaStreamTrack(
     MediaStreamComponent* component) {
-  WebMediaStreamTrack track(component);
-  DCHECK(!track.IsNull() && !track.GetPlatformTrack());
-  DCHECK(!track.Source().IsNull());
+  DCHECK(component);
+  DCHECK(!component->GetPlatformTrack());
+  DCHECK(component->Source());
 
-  switch (track.Source().GetType()) {
-    case blink::WebMediaStreamSource::kTypeAudio:
-      CreateNativeAudioMediaStreamTrack(track,
+  switch (component->Source()->GetType()) {
+    case MediaStreamSource::kTypeAudio:
+      CreateNativeAudioMediaStreamTrack(component,
                                         Thread::MainThread()->GetTaskRunner());
       break;
-    case blink::WebMediaStreamSource::kTypeVideo:
-      CreateNativeVideoMediaStreamTrack(track);
+    case MediaStreamSource::kTypeVideo:
+      CreateNativeVideoMediaStreamTrack(component);
       break;
   }
 }

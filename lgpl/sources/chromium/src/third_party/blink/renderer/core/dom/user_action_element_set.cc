@@ -33,8 +33,6 @@ namespace blink {
 
 UserActionElementSet::UserActionElementSet() = default;
 
-UserActionElementSet::~UserActionElementSet() = default;
-
 void UserActionElementSet::DidDetach(Element& element) {
   DCHECK(element.IsUserActionElement());
   ClearFlags(&element, kIsActiveFlag | kInActiveChainFlag | kIsHoveredFlag |
@@ -104,7 +102,7 @@ inline void UserActionElementSet::SetFlags(Element* element, unsigned flags) {
   elements_.insert(element, flags);
 }
 
-void UserActionElementSet::Trace(Visitor* visitor) {
+void UserActionElementSet::Trace(Visitor* visitor) const {
   visitor->Trace(elements_);
 }
 

@@ -87,6 +87,11 @@ class LayoutGrid final : public LayoutBlock {
     return grid_->AutoRepeatTracks(direction);
   }
 
+  size_t ExplicitGridStartForDirection(
+      GridTrackSizingDirection direction) const {
+    return grid_->ExplicitGridStart(direction);
+  }
+
   LayoutUnit TranslateOutOfFlowRTLCoordinate(const LayoutBox&,
                                              LayoutUnit) const;
 
@@ -113,6 +118,8 @@ class LayoutGrid final : public LayoutBlock {
 
   StyleContentAlignmentData ContentAlignment(GridTrackSizingDirection) const;
 
+  size_t ExplicitGridEndForDirection(GridTrackSizingDirection) const;
+
   // Exposed for testing *ONLY*.
   Grid* InternalGrid() const { return grid_.get(); }
 
@@ -128,9 +135,7 @@ class LayoutGrid final : public LayoutBlock {
   bool IsOfType(LayoutObjectType type) const override {
     return type == kLayoutObjectLayoutGrid || LayoutBlock::IsOfType(type);
   }
-  void ComputeIntrinsicLogicalWidths(
-      LayoutUnit& min_logical_width,
-      LayoutUnit& max_logical_width) const override;
+  MinMaxSizes ComputeIntrinsicLogicalWidths() const override;
 
   void AddChild(LayoutObject* new_child,
                 LayoutObject* before_child = nullptr) override;
@@ -178,6 +183,9 @@ class LayoutGrid final : public LayoutBlock {
       std::pair<size_t, size_t>& auto_placement_cursor) const;
   GridTrackSizingDirection AutoPlacementMajorAxisDirection() const;
   GridTrackSizingDirection AutoPlacementMinorAxisDirection() const;
+
+  base::Optional<LayoutUnit> OverrideIntrinsicContentLogicalSize(
+      GridTrackSizingDirection) const;
 
   void ComputeTrackSizesForIndefiniteSize(GridTrackSizingAlgorithm&,
                                           GridTrackSizingDirection) const;

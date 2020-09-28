@@ -6,22 +6,31 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_DISALLOW_NEW_WRAPPER_H_
 
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 
 namespace blink {
 
 // DisallowNewWrapper wraps a disallow new type in a GarbageCollected class.
 template <typename T>
-class DisallowNewWrapper : public GarbageCollected<DisallowNewWrapper<T>> {
+class DisallowNewWrapper final
+    : public GarbageCollected<DisallowNewWrapper<T>> {
  public:
   explicit DisallowNewWrapper(const T& value) : value_(value) {
     static_assert(WTF::IsDisallowNew<T>::value,
                   "T needs to be a disallow new type");
     static_assert(WTF::IsTraceable<T>::value, "T needs to be traceable");
   }
+  explicit DisallowNewWrapper(T&& value) : value_(std::forward<T>(value)) {
+    static_assert(WTF::IsDisallowNew<T>::value,
+                  "T needs to be a disallow new type");
+    static_assert(WTF::IsTraceable<T>::value, "T needs to be traceable");
+  }
 
   const T& Value() const { return value_; }
+  T&& TakeValue() { return std::move(value_); }
 
-  void Trace(Visitor* visitor) { visitor->Trace(value_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(value_); }
 
  private:
   T value_;
@@ -32,6 +41,11 @@ class DisallowNewWrapper : public GarbageCollected<DisallowNewWrapper<T>> {
 template <typename T>
 DisallowNewWrapper<T>* WrapDisallowNew(const T& value) {
   return MakeGarbageCollected<DisallowNewWrapper<T>>(value);
+}
+
+template <typename T>
+DisallowNewWrapper<T>* WrapDisallowNew(T&& value) {
+  return MakeGarbageCollected<DisallowNewWrapper<T>>(std::forward<T>(value));
 }
 
 }  // namespace blink

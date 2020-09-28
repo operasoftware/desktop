@@ -32,23 +32,26 @@
 
 #include <memory>
 
+#include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/public/web/web_remote_frame_client.h"
 #include "third_party/blink/renderer/bindings/core/v8/window_proxy_manager.h"
 #include "third_party/blink/renderer/core/dom/document_type.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
-#include "third_party/blink/renderer/core/dom/user_gesture_indicator.h"
 #include "third_party/blink/renderer/core/execution_context/window_agent_factory.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/remote_frame_owner.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/html_frame_element_base.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
+#include "third_party/blink/renderer/core/loader/form_submission.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
+#include "third_party/blink/renderer/core/xmlhttprequest/main_thread_disallow_synchronous_xhr_scope.h"
 #include "third_party/blink/renderer/platform/instrumentation/instance_counters.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_error.h"
@@ -56,13 +59,31 @@
 
 namespace blink {
 
+// static
+Frame* Frame::ResolveFrame(const base::UnguessableToken& frame_token) {
+  if (!frame_token)
+    return nullptr;
+
+  // The frame token could refer to either a RemoteFrame or a LocalFrame, so
+  // need to check both.
+  auto* remote = RemoteFrame::FromFrameToken(frame_token);
+  if (remote)
+    return remote;
+
+  auto* local = LocalFrame::FromFrameToken(frame_token);
+  if (local)
+    return local;
+
+  return nullptr;
+}
+
 Frame::~Frame() {
   InstanceCounters::DecrementCounter(InstanceCounters::kFrameCounter);
   DCHECK(!owner_);
   DCHECK(IsDetached());
 }
 
-void Frame::Trace(blink::Visitor* visitor) {
+void Frame::Trace(Visitor* visitor) const {
   visitor->Trace(tree_node_);
   visitor->Trace(page_);
   visitor->Trace(owner_);
@@ -78,6 +99,7 @@ void Frame::Detach(FrameDetachType type) {
   // Detach() can be re-entered, so this can't simply DCHECK(IsAttached()).
   DCHECK(!IsDetached());
   lifecycle_.AdvanceTo(FrameLifecycle::kDetaching);
+  MainThreadDisallowSynchronousXHRScope disallow_synchronous_xhr;
 
   DetachImpl(type);
 
@@ -90,7 +112,7 @@ void Frame::Detach(FrameDetachType type) {
   if (!client_)
     return;
 
-  client_->SetOpener(nullptr);
+  SetOpener(nullptr);
   // After this, we must no longer talk to the client since this clears
   // its owning reference back to our owning LocalFrame.
   client_->Detached(type);
@@ -129,12 +151,24 @@ bool Frame::IsMainFrame() const {
   return !Tree().Parent();
 }
 
-bool Frame::IsCrossOriginSubframe() const {
+bool Frame::IsCrossOriginToMainFrame() const {
   DCHECK(GetSecurityContext());
   const SecurityOrigin* security_origin =
       GetSecurityContext()->GetSecurityOrigin();
   return !security_origin->CanAccess(
       Tree().Top().GetSecurityContext()->GetSecurityOrigin());
+}
+
+bool Frame::IsCrossOriginToParentFrame() const {
+  DCHECK(GetSecurityContext());
+  if (IsMainFrame())
+    return false;
+  Frame* parent = Tree().Parent();
+  const SecurityOrigin* parent_security_origin =
+      parent->GetSecurityContext()->GetSecurityOrigin();
+  const SecurityOrigin* security_origin =
+      GetSecurityContext()->GetSecurityOrigin();
+  return !security_origin->CanAccess(parent_security_origin);
 }
 
 HTMLFrameOwnerElement* Frame::DeprecatedLocalOwner() const {
@@ -199,7 +233,7 @@ void Frame::NotifyUserActivationInLocalTree() {
   // See the "Same-origin Visibility" section in |UserActivationState| class
   // doc.
   auto* local_frame = DynamicTo<LocalFrame>(this);
-  if (local_frame && RuntimeEnabledFeatures::UserActivationV2Enabled() &&
+  if (local_frame &&
       RuntimeEnabledFeatures::UserActivationSameOriginVisibilityEnabled()) {
     const SecurityOrigin* security_origin =
         local_frame->GetSecurityContext()->GetSecurityOrigin();
@@ -292,11 +326,13 @@ const std::string& Frame::ToTraceValue() {
 Frame::Frame(FrameClient* client,
              Page& page,
              FrameOwner* owner,
+             const base::UnguessableToken& frame_token,
              WindowProxyManager* window_proxy_manager,
              WindowAgentFactory* inheriting_agent_factory)
     : tree_node_(this),
       page_(&page),
       owner_(owner),
+      ad_frame_type_(mojom::blink::AdFrameType::kNonAd),
       client_(client),
       window_proxy_manager_(window_proxy_manager),
       navigation_rate_limiter_(*this),
@@ -304,7 +340,8 @@ Frame::Frame(FrameClient* client,
                                 ? inheriting_agent_factory
                                 : MakeGarbageCollected<WindowAgentFactory>()),
       is_loading_(false),
-      devtools_frame_token_(client->GetDevToolsFrameToken()) {
+      devtools_frame_token_(client->GetDevToolsFrameToken()),
+      frame_token_(frame_token) {
   InstanceCounters::IncrementCounter(InstanceCounters::kFrameCounter);
 }
 
@@ -316,6 +353,65 @@ void Frame::Initialize() {
     owner_->SetContentFrame(*this);
   else
     page_->SetMainFrame(this);
+}
+
+void Frame::FocusImpl() {
+  // This uses FocusDocumentView rather than SetFocusedFrame so that blur
+  // events are properly dispatched on any currently focused elements.
+  // It is currently only used when replicating focus changes for
+  // cross-process frames so |notify_embedder| is false to avoid sending
+  // DidFocus updates from FocusController to the browser process,
+  // which already knows the latest focused frame.
+  GetPage()->GetFocusController().FocusDocumentView(
+      this, false /* notify_embedder */);
+}
+
+void Frame::ApplyFrameOwnerProperties(
+    mojom::blink::FrameOwnerPropertiesPtr properties) {
+  // At the moment, this is only used to replicate frame owner properties
+  // for frames with a remote owner.
+  auto* owner = To<RemoteFrameOwner>(Owner());
+
+  owner->SetBrowsingContextContainerName(properties->name);
+  owner->SetScrollbarMode(properties->scrollbar_mode);
+  owner->SetMarginWidth(properties->margin_width);
+  owner->SetMarginHeight(properties->margin_height);
+  owner->SetAllowFullscreen(properties->allow_fullscreen);
+  owner->SetAllowPaymentRequest(properties->allow_payment_request);
+  owner->SetIsDisplayNone(properties->is_display_none);
+  owner->SetRequiredCsp(properties->required_csp);
+}
+
+void Frame::ScheduleFormSubmission(FrameScheduler* scheduler,
+                                   FormSubmission* form_submission) {
+  form_submit_navigation_task_ = PostCancellableTask(
+      *scheduler->GetTaskRunner(TaskType::kDOMManipulation), FROM_HERE,
+      WTF::Bind(&FormSubmission::Navigate, WrapPersistent(form_submission)));
+}
+
+void Frame::CancelFormSubmission() {
+  form_submit_navigation_task_.Cancel();
+}
+
+bool Frame::IsFormSubmissionPending() {
+  return form_submit_navigation_task_.IsActive();
+}
+
+void Frame::FocusPage(LocalFrame* originating_frame) {
+  // We only allow focus to move to the |frame|'s page when the request comes
+  // from a user gesture. (See https://bugs.webkit.org/show_bug.cgi?id=33389.)
+  if (originating_frame &&
+      LocalFrame::HasTransientUserActivation(originating_frame)) {
+    // Ask the broswer process to focus the page.
+    GetPage()->GetChromeClient().FocusPage();
+
+    // Tattle on the frame that called |window.focus()|.
+    originating_frame->GetLocalFrameHostRemote().DidCallFocus();
+  }
+
+  // Always report the attempt to focus the page to the Chrome client for
+  // testing purposes (i.e. see WebViewTest.FocusExistingFrameOnNavigate()).
+  GetPage()->GetChromeClient().DidFocusPage();
 }
 
 STATIC_ASSERT_ENUM(FrameDetachType::kRemove,

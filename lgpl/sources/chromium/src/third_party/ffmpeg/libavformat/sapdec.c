@@ -142,6 +142,10 @@ static int sap_read_header(AVFormatContext *s)
         }
 
         sap->sdp = av_strdup(&recvbuf[pos]);
+        if (!sap->sdp) {
+            ret = AVERROR(ENOMEM);
+            goto fail;
+        }
         break;
     }
 
@@ -221,7 +225,6 @@ static int sap_fetch_packet(AVFormatContext *s, AVPacket *pkt)
             int i = s->nb_streams;
             AVStream *st = avformat_new_stream(s, NULL);
             if (!st) {
-                av_packet_unref(pkt);
                 return AVERROR(ENOMEM);
             }
             st->id = i;

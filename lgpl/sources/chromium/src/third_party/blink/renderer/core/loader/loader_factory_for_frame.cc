@@ -12,28 +12,26 @@
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_network_provider.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_url_loader_factory.h"
-#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/fileapi/public_url_manager.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
-#include "third_party/blink/renderer/core/loader/frame_or_imported_document.h"
 #include "third_party/blink/renderer/core/loader/prefetched_signed_exchange_manager.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_request.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
 namespace blink {
 
-LoaderFactoryForFrame::LoaderFactoryForFrame(
-    const FrameOrImportedDocument& frame_or_imported_document)
-    : frame_or_imported_document_(frame_or_imported_document),
+LoaderFactoryForFrame::LoaderFactoryForFrame(DocumentLoader& document_loader,
+                                             LocalDOMWindow& window)
+    : document_loader_(document_loader),
+      window_(window),
       prefetched_signed_exchange_manager_(
-          frame_or_imported_document_->GetDocumentLoader()
-              ? frame_or_imported_document_->GetDocumentLoader()
-                    ->GetPrefetchedSignedExchangeManager()
-              : nullptr) {}
+          document_loader.GetPrefetchedSignedExchangeManager()) {}
 
-void LoaderFactoryForFrame::Trace(Visitor* visitor) {
-  visitor->Trace(frame_or_imported_document_);
+void LoaderFactoryForFrame::Trace(Visitor* visitor) const {
+  visitor->Trace(document_loader_);
+  visitor->Trace(window_);
   visitor->Trace(prefetched_signed_exchange_manager_);
   LoaderFactory::Trace(visitor);
 }
@@ -71,11 +69,12 @@ std::unique_ptr<WebURLLoader> LoaderFactoryForFrame::CreateURLLoader(
   // callsite when we make Shared Worker loading off-main-thread.
   if (request.Url().ProtocolIs("blob") && !url_loader_factory &&
       request.GetRequestContext() != mojom::RequestContextType::SHARED_WORKER) {
-    frame_or_imported_document_->GetDocument().GetPublicURLManager().Resolve(
+    window_->GetPublicURLManager().Resolve(
         request.Url(), url_loader_factory.InitWithNewPipeAndPassReceiver());
   }
-  LocalFrame& frame = frame_or_imported_document_->GetFrame();
-  FrameScheduler* frame_scheduler = frame.GetFrameScheduler();
+  LocalFrame* frame = window_->GetFrame();
+  DCHECK(frame);
+  FrameScheduler* frame_scheduler = frame->GetFrameScheduler();
   DCHECK(frame_scheduler);
 
   // TODO(altimin): frame_scheduler->CreateResourceLoadingTaskRunnerHandle is
@@ -85,16 +84,14 @@ std::unique_ptr<WebURLLoader> LoaderFactoryForFrame::CreateURLLoader(
   // resource loader handle's task runner.
   if (url_loader_factory) {
     return Platform::Current()
-        ->WrapURLLoaderFactory(url_loader_factory.PassPipe())
+        ->WrapURLLoaderFactory(std::move(url_loader_factory))
         ->CreateURLLoader(
             webreq, frame_scheduler->CreateResourceLoadingTaskRunnerHandle());
   }
 
-  DocumentLoader& document_loader =
-      frame_or_imported_document_->GetMasterDocumentLoader();
-  if (document_loader.GetServiceWorkerNetworkProvider()) {
+  if (document_loader_->GetServiceWorkerNetworkProvider()) {
     auto loader =
-        document_loader.GetServiceWorkerNetworkProvider()->CreateURLLoader(
+        document_loader_->GetServiceWorkerNetworkProvider()->CreateURLLoader(
             webreq, frame_scheduler->CreateResourceLoadingTaskRunnerHandle());
     if (loader)
       return loader;
@@ -106,7 +103,7 @@ std::unique_ptr<WebURLLoader> LoaderFactoryForFrame::CreateURLLoader(
     if (loader)
       return loader;
   }
-  return frame.GetURLLoaderFactory()->CreateURLLoader(
+  return frame->GetURLLoaderFactory()->CreateURLLoader(
       webreq, frame_scheduler->CreateResourceLoadingTaskRunnerHandle());
 }
 

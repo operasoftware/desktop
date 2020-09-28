@@ -42,7 +42,7 @@ DocumentParser::DocumentParser(Document* document)
 
 DocumentParser::~DocumentParser() = default;
 
-void DocumentParser::Trace(Visitor* visitor) {
+void DocumentParser::Trace(Visitor* visitor) const {
   visitor->Trace(document_);
   visitor->Trace(clients_);
 }
@@ -79,10 +79,6 @@ void DocumentParser::Detach() {
   state_ = kDetachedState;
   document_ = nullptr;
 }
-
-void DocumentParser::PauseScheduledTasks() {}
-
-void DocumentParser::UnpauseScheduledTasks() {}
 
 void DocumentParser::AddClient(DocumentParserClient* client) {
   clients_.insert(client);

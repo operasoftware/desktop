@@ -23,7 +23,7 @@ class TestResourceFetcherProperties final : public ResourceFetcherProperties {
   explicit TestResourceFetcherProperties(const FetchClientSettingsObject&);
   ~TestResourceFetcherProperties() override = default;
 
-  void Trace(Visitor* visitor) override;
+  void Trace(Visitor* visitor) const override;
 
   DetachableResourceFetcherProperties& MakeDetachable() const {
     return *MakeGarbageCollected<DetachableResourceFetcherProperties>(*this);
@@ -54,6 +54,10 @@ class TestResourceFetcherProperties final : public ResourceFetcherProperties {
   }
   scheduler::FrameStatus GetFrameStatus() const override {
     return frame_status_;
+  }
+  const KURL& WebBundlePhysicalUrl() const override;
+  int GetOutstandingThrottledLimit() const override {
+    return IsMainFrame() ? 3 : 2;
   }
 
   void SetIsMainFrame(bool value) { is_main_frame_ = value; }

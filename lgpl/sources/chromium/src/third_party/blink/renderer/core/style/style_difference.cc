@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/core/style/style_difference.h"
 
+#include "base/notreached.h"
+
 namespace blink {
 
 std::ostream& operator<<(std::ostream& out, const StyleDifference& diff) {
@@ -26,24 +28,8 @@ std::ostream& operator<<(std::ostream& out, const StyleDifference& diff) {
 
   out << ", collectInlines=" << diff.needs_collect_inlines_;
   out << ", reshape=" << diff.needs_reshape_;
-
-  out << ", paintInvalidationType=";
-  switch (diff.paint_invalidation_type_) {
-    case StyleDifference::kNoPaintInvalidation:
-      out << "NoPaintInvalidation";
-      break;
-    case StyleDifference::kPaintInvalidationObject:
-      out << "PaintInvalidationObject";
-      break;
-    case StyleDifference::kPaintInvalidationSubtree:
-      out << "PaintInvalidationSubtree";
-      break;
-    default:
-      NOTREACHED();
-      break;
-  }
-
-  out << ", recomputeOverflow=" << diff.recompute_overflow_;
+  out << ", paintInvalidation=" << diff.needs_paint_invalidation_;
+  out << ", recomputeVisualOverflow=" << diff.recompute_visual_overflow_;
   out << ", visualRectUpdate=" << diff.visual_rect_update_;
 
   out << ", propertySpecificDifferences=";

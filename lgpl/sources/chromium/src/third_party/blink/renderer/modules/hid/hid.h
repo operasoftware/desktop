@@ -5,14 +5,17 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_HID_HID_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_HID_HID_H_
 
-#include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "services/device/public/mojom/hid.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/hid/hid.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
-#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
+#include "third_party/blink/renderer/platform/scheduler/public/frame_or_worker_scheduler.h"
 
 namespace blink {
 
@@ -22,7 +25,9 @@ class HIDDeviceRequestOptions;
 class ScriptPromiseResolver;
 class ScriptState;
 
-class HID : public EventTargetWithInlineData, public ContextLifecycleObserver {
+class HID : public EventTargetWithInlineData,
+            public ExecutionContextClient,
+            public device::mojom::blink::HidManagerClient {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(HID);
 
@@ -33,6 +38,11 @@ class HID : public EventTargetWithInlineData, public ContextLifecycleObserver {
   // EventTarget:
   ExecutionContext* GetExecutionContext() const override;
   const AtomicString& InterfaceName() const override;
+
+  // device::mojom::HidManagerClient:
+  void DeviceAdded(device::mojom::blink::HidDeviceInfoPtr device_info) override;
+  void DeviceRemoved(
+      device::mojom::blink::HidDeviceInfoPtr device_info) override;
 
   // Web-exposed interfaces:
   DEFINE_ATTRIBUTE_EVENT_LISTENER(connect, kConnect)
@@ -47,7 +57,7 @@ class HID : public EventTargetWithInlineData, public ContextLifecycleObserver {
                    connection_client,
                device::mojom::blink::HidManager::ConnectCallback callback);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  protected:
   // EventTarget:
@@ -66,12 +76,18 @@ class HID : public EventTargetWithInlineData, public ContextLifecycleObserver {
   void FinishGetDevices(ScriptPromiseResolver*,
                         Vector<device::mojom::blink::HidDeviceInfoPtr>);
   void FinishRequestDevice(ScriptPromiseResolver*,
-                           device::mojom::blink::HidDeviceInfoPtr);
+                           Vector<device::mojom::blink::HidDeviceInfoPtr>);
 
-  mojo::Remote<mojom::blink::HidService> service_;
+  HeapMojoRemote<mojom::blink::HidService,
+                 HeapMojoWrapperMode::kWithoutContextObserver>
+      service_;
+  mojo::AssociatedReceiver<device::mojom::blink::HidManagerClient> receiver_{
+      this};
   HeapHashSet<Member<ScriptPromiseResolver>> get_devices_promises_;
   HeapHashSet<Member<ScriptPromiseResolver>> request_device_promises_;
   HeapHashMap<String, WeakMember<HIDDevice>> device_cache_;
+  FrameOrWorkerScheduler::SchedulingAffectingFeatureHandle
+      feature_handle_for_scheduler_;
 };
 
 }  // namespace blink

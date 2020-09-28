@@ -57,7 +57,7 @@ class ContentEditablesState final
   void SetContentEditablesContent(const Vector<String>&);
   bool IsRegistered(Element*);
 
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
 
  private:
 
@@ -78,7 +78,7 @@ class ContentEditablesController final
   void SetContentEditablesContent(const Vector<String>&);
   bool IsRegistered(Element*);
 
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   Member<ContentEditablesState> state_;

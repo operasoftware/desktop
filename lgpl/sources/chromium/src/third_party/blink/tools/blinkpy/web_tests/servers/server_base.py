@@ -25,14 +25,12 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 """Base class used to start servers used by the web tests."""
 
 import errno
 import logging
 import socket
 import tempfile
-
 
 _log = logging.getLogger(__name__)
 
@@ -59,6 +57,7 @@ class ServerBase(object):
 
         self._runtime_path = self._filesystem.join(tmpdir, 'WebKit')
         self._filesystem.maybe_make_directory(self._runtime_path)
+        self._filesystem.maybe_make_directory(self._output_dir)
 
         # Subclasses must override these fields.
         self._name = '<virtual>'
@@ -76,7 +75,11 @@ class ServerBase(object):
         # redirect them to files.
         self._stdout = self._executive.PIPE
         self._stderr = self._executive.PIPE
+        # The entrypoint process of the server, which may not be the daemon,
+        # e.g. apachectl.
         self._process = None
+        # The PID of the server daemon, which may be different from
+        # self._process.pid.
         self._pid = None
         self._error_log_path = None
 
@@ -90,7 +93,8 @@ class ServerBase(object):
         # Stop any stale servers left over from previous instances.
         if self._filesystem.exists(self._pid_file):
             try:
-                self._pid = int(self._filesystem.read_text_file(self._pid_file))
+                self._pid = int(
+                    self._filesystem.read_text_file(self._pid_file))
                 _log.debug('stale %s pid file, pid %d', self._name, self._pid)
                 self._stop_running_server()
             except (ValueError, UnicodeDecodeError):
@@ -105,7 +109,8 @@ class ServerBase(object):
         self._pid = self._spawn_process()
 
         if self._wait_for_action(self._is_server_running_on_all_ports):
-            _log.debug('%s successfully started (pid = %d)', self._name, self._pid)
+            _log.debug('%s successfully started (pid = %d)', self._name,
+                       self._pid)
         else:
             self._log_errors_from_subprocess()
             self._stop_running_server()
@@ -117,7 +122,8 @@ class ServerBase(object):
         try:
             if self._filesystem.exists(self._pid_file):
                 try:
-                    actual_pid = int(self._filesystem.read_text_file(self._pid_file))
+                    actual_pid = int(
+                        self._filesystem.read_text_file(self._pid_file))
                 except (ValueError, UnicodeDecodeError):
                     # These could be raised if the pid file is corrupt.
                     pass
@@ -128,7 +134,8 @@ class ServerBase(object):
                 return
 
             if not actual_pid:
-                _log.warning('Failed to stop %s: pid file is missing', self._name)
+                _log.warning('Failed to stop %s: pid file is missing',
+                             self._name)
                 return
             if self._pid != actual_pid:
                 _log.warning('Failed to stop %s: pid file contains %d, not %d',
@@ -138,13 +145,22 @@ class ServerBase(object):
                 self._pid = None
                 return
 
-            _log.debug('Attempting to shut down %s server at pid %d', self._name, self._pid)
+            _log.debug('Attempting to shut down %s server at pid %d',
+                       self._name, self._pid)
             self._stop_running_server()
             _log.debug('%s server at pid %d stopped', self._name, self._pid)
             self._pid = None
         finally:
             # Make sure we delete the pid file no matter what happens.
             self._remove_pid_file()
+
+    def alive(self):
+        """Checks whether the server is alive."""
+        # This by default checks both the process and ports.
+        # At this point, we think the server has started up, so successes are
+        # normal while failures are not.
+        return self._is_server_running_on_all_ports(
+            success_log_level=logging.DEBUG, failure_log_level=logging.INFO)
 
     def _prepare_config(self):
         """This routine can be overridden by subclasses to do any sort
@@ -162,15 +178,17 @@ class ServerBase(object):
             try:
                 self._remove_log_files(self._output_dir, log_prefix)
             except OSError:
-                _log.warning('Failed to remove old %s %s files', self._name, log_prefix)
+                _log.warning('Failed to remove old %s %s files', self._name,
+                             log_prefix)
 
     def _spawn_process(self):
         _log.debug('Starting %s server, cmd="%s"', self._name, self._start_cmd)
-        self._process = self._executive.popen(self._start_cmd,
-                                              env=self._env,
-                                              cwd=self._cwd,
-                                              stdout=self._stdout,
-                                              stderr=self._stderr)
+        self._process = self._executive.popen(
+            self._start_cmd,
+            env=self._env,
+            cwd=self._cwd,
+            stdout=self._stdout,
+            stderr=self._stderr)
         pid = self._process.pid
         self._filesystem.write_text_file(self._pid_file, str(pid))
         return pid
@@ -204,7 +222,8 @@ class ServerBase(object):
     def _log_errors_from_subprocess(self):
         _log.error('logging %s errors, if any', self._name)
         if self._process:
-            _log.error('%s returncode %s', self._name, str(self._process.returncode))
+            _log.error('%s returncode %s', self._name,
+                       str(self._process.returncode))
             if self._process.stderr:
                 stderr_text = self._process.stderr.read()
                 if stderr_text:
@@ -217,10 +236,13 @@ class ServerBase(object):
                 _log.error('%s no stderr handle', self._name)
         else:
             _log.error('%s no process', self._name)
-        if self._error_log_path and self._filesystem.exists(self._error_log_path):
-            error_log_text = self._filesystem.read_text_file(self._error_log_path)
+        if self._error_log_path and self._filesystem.exists(
+                self._error_log_path):
+            error_log_text = self._filesystem.read_text_file(
+                self._error_log_path)
             if error_log_text:
-                _log.error('%s error log (%s) contents:', self._name, self._error_log_path)
+                _log.error('%s error log (%s) contents:', self._name,
+                           self._error_log_path)
                 for line in error_log_text.splitlines():
                     _log.error('  %s', line)
             else:
@@ -242,11 +264,20 @@ class ServerBase(object):
 
         return False
 
-    def _is_server_running_on_all_ports(self):
-        """Returns whether the server is running on all the desired ports."""
+    def _is_server_running_on_all_ports(self,
+                                        success_log_level=logging.INFO,
+                                        failure_log_level=logging.DEBUG):
+        """Returns whether the server is running on all the desired ports.
 
+        Args:
+            success_log_level: Logging level for success (default: INFO)
+            failure_log_level: Logging level for failure (default: DEBUG)
+        """
+        # Check self._pid instead of self._process because the latter might be a
+        # control process that exits after spawning up the daemon.
         # TODO(dpranke): crbug/378444 maybe pid is unreliable on win?
-        if not self._platform.is_win() and not self._executive.check_running_pid(self._pid):
+        if (not self._platform.is_win()
+                and not self._executive.check_running_pid(self._pid)):
             _log.debug("Server isn't running at all")
             self._log_errors_from_subprocess()
             raise ServerError('Server exited')
@@ -257,11 +288,14 @@ class ServerBase(object):
             scheme = mapping['scheme']
             try:
                 s.connect(('localhost', port))
-                _log.info('Server running on %s://localhost:%d', scheme, port)
+                _log.log(success_log_level,
+                         'Server running on %s://localhost:%d', scheme, port)
             except IOError as error:
                 if error.errno not in (errno.ECONNREFUSED, errno.ECONNRESET):
                     raise
-                _log.debug('Server NOT running on %s://localhost:%d : %s', scheme, port, error)
+                _log.log(failure_log_level,
+                         'Server NOT running on %s://localhost:%d : %s',
+                         scheme, port, error)
                 return False
             finally:
                 s.close()
@@ -278,7 +312,8 @@ class ServerBase(object):
             except IOError as error:
                 if error.errno in (errno.EALREADY, errno.EADDRINUSE):
                     raise ServerError('Port %d is already in use.' % port)
-                elif self._platform.is_win() and error.errno in (errno.WSAEACCES,):  # pylint: disable=no-member
+                elif self._platform.is_win() and error.errno in (
+                        errno.WSAEACCES, ):  # pylint: disable=no-member
                     raise ServerError('Port %d is already in use.' % port)
                 else:
                     raise

@@ -22,12 +22,13 @@ LayoutTheme& LayoutTheme::NativeTheme() {
 
 Color LayoutThemeWin::SystemColor(CSSValueID css_value_id,
                                   WebColorScheme color_scheme) const {
-  if (!RuntimeEnabledFeatures::UseWindowsSystemColorsEnabled()) {
-    return LayoutThemeDefault::SystemColor(css_value_id, color_scheme);
-  }
-
   blink::WebThemeEngine::SystemThemeColor theme_color;
   switch (css_value_id) {
+    case CSSValueID::kActivetext:
+    case CSSValueID::kLinktext:
+    case CSSValueID::kVisitedtext:
+      theme_color = blink::WebThemeEngine::SystemThemeColor::kHotlight;
+      break;
     case CSSValueID::kButtonface:
       theme_color = blink::WebThemeEngine::SystemThemeColor::kButtonFace;
       break;
@@ -43,14 +44,14 @@ Color LayoutThemeWin::SystemColor(CSSValueID css_value_id,
     case CSSValueID::kHighlighttext:
       theme_color = blink::WebThemeEngine::SystemThemeColor::kHighlightText;
       break;
-    case CSSValueID::kLinktext:
-    case CSSValueID::kVisitedtext:
-      theme_color = blink::WebThemeEngine::SystemThemeColor::kHotlight;
-      break;
     case CSSValueID::kWindow:
+    case CSSValueID::kCanvas:
+    case CSSValueID::kField:
       theme_color = blink::WebThemeEngine::SystemThemeColor::kWindow;
       break;
     case CSSValueID::kWindowtext:
+    case CSSValueID::kCanvastext:
+    case CSSValueID::kFieldtext:
       theme_color = blink::WebThemeEngine::SystemThemeColor::kWindowText;
       break;
     default:

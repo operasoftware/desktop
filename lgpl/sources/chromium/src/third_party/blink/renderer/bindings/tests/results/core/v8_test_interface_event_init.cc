@@ -18,12 +18,12 @@
 
 namespace blink {
 
-static const v8::Eternal<v8::Name>* eternalV8TestInterfaceEventInitKeys(v8::Isolate* isolate) {
+static const base::span<const v8::Eternal<v8::Name>>
+eternalV8TestInterfaceEventInitKeys(v8::Isolate* isolate) {
   static const char* const kKeys[] = {
     "stringMember",
   };
-  return V8PerIsolateData::From(isolate)->FindOrCreateEternalNameCache(
-      kKeys, kKeys, base::size(kKeys));
+  return V8PerIsolateData::From(isolate)->FindOrCreateEternalNameCache(kKeys, kKeys);
 }
 
 void V8TestInterfaceEventInit::ToImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8_value, TestInterfaceEventInit* impl, ExceptionState& exception_state) {
@@ -41,7 +41,7 @@ void V8TestInterfaceEventInit::ToImpl(v8::Isolate* isolate, v8::Local<v8::Value>
   if (exception_state.HadException())
     return;
 
-  const v8::Eternal<v8::Name>* keys = eternalV8TestInterfaceEventInitKeys(isolate);
+  const auto* keys = eternalV8TestInterfaceEventInitKeys(isolate).data();
   v8::TryCatch block(isolate);
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
   v8::Local<v8::Value> string_member_value;
@@ -52,7 +52,7 @@ void V8TestInterfaceEventInit::ToImpl(v8::Isolate* isolate, v8::Local<v8::Value>
   if (string_member_value.IsEmpty() || string_member_value->IsUndefined()) {
     // Do nothing.
   } else {
-    V8StringResource<> string_member_cpp_value = string_member_value;
+    V8StringResource<> string_member_cpp_value{ string_member_value };
     if (!string_member_cpp_value.Prepare(exception_state))
       return;
     impl->setStringMember(string_member_cpp_value);
@@ -70,7 +70,7 @@ bool toV8TestInterfaceEventInit(const TestInterfaceEventInit* impl, v8::Local<v8
   if (!toV8EventInit(impl, dictionary, creationContext, isolate))
     return false;
 
-  const v8::Eternal<v8::Name>* keys = eternalV8TestInterfaceEventInitKeys(isolate);
+  const auto* keys = eternalV8TestInterfaceEventInitKeys(isolate).data();
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
 
   auto create_property = [dictionary, context, keys, isolate](
@@ -99,7 +99,7 @@ bool toV8TestInterfaceEventInit(const TestInterfaceEventInit* impl, v8::Local<v8
 }
 
 TestInterfaceEventInit* NativeValueTraits<TestInterfaceEventInit>::NativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exception_state) {
-  TestInterfaceEventInit* impl = TestInterfaceEventInit::Create();
+  TestInterfaceEventInit* impl = MakeGarbageCollected<TestInterfaceEventInit>();
   V8TestInterfaceEventInit::ToImpl(isolate, value, impl, exception_state);
   return impl;
 }

@@ -34,6 +34,7 @@
 
 #include <memory>
 
+#include "base/compiler_specific.h"
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/image-encoders/image_encoder.h"
@@ -53,6 +54,13 @@ ImageDataBuffer::ImageDataBuffer(scoped_refptr<StaticBitmapImage> image) {
   retained_image_ = image->PaintImageForCurrentFrame().GetSkImage();
   if (!retained_image_)
     return;
+#if defined(MEMORY_SANITIZER)
+  // Test if retained_image has an initialized pixmap.
+  SkPixmap pixmap;
+  if (retained_image_->peekPixels(&pixmap))
+    MSAN_CHECK_MEM_IS_INITIALIZED(pixmap.addr(), pixmap.computeByteSize());
+#endif
+
   if (retained_image_->isTextureBacked() ||
       retained_image_->isLazyGenerated() ||
       retained_image_->alphaType() != kUnpremul_SkAlphaType) {
@@ -78,10 +86,12 @@ ImageDataBuffer::ImageDataBuffer(scoped_refptr<StaticBitmapImage> image) {
       pixmap_.reset();
       return;
     }
+    MSAN_CHECK_MEM_IS_INITIALIZED(pixmap_.addr(), pixmap_.computeByteSize());
     retained_image_ = SkImage::MakeRasterData(info, std::move(data), rowBytes);
   } else {
     if (!retained_image_->peekPixels(&pixmap_))
       return;
+    MSAN_CHECK_MEM_IS_INITIALIZED(pixmap_.addr(), pixmap_.computeByteSize());
   }
   is_valid_ = true;
   size_ = IntSize(image->width(), image->height());
@@ -161,7 +171,9 @@ String ImageDataBuffer::ToDataURL(const ImageEncodingMimeType mime_type,
     if (!pixmap.colorSpace()->isSRGB()) {
       skia_image = SkImage::MakeFromRaster(pixmap, nullptr, nullptr);
       skia_image = skia_image->makeColorSpace(SkColorSpace::MakeSRGB());
-      skia_image->peekPixels(&pixmap);
+      if (!skia_image->peekPixels(&pixmap))
+        return "data:,";
+      MSAN_CHECK_MEM_IS_INITIALIZED(pixmap.addr(), pixmap.computeByteSize());
     }
     pixmap.setColorSpace(nullptr);
   }

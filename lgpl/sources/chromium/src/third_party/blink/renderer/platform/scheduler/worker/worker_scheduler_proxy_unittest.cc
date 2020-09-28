@@ -28,7 +28,7 @@ class WorkerThreadSchedulerForTest : public WorkerThreadScheduler {
   WorkerThreadSchedulerForTest(base::sequence_manager::SequenceManager* manager,
                                WorkerSchedulerProxy* proxy,
                                base::WaitableEvent* throtting_state_changed)
-      : WorkerThreadScheduler(WebThreadType::kTestThread, manager, proxy),
+      : WorkerThreadScheduler(ThreadType::kTestThread, manager, proxy),
         throtting_state_changed_(throtting_state_changed) {}
 
   void OnLifecycleStateChanged(
@@ -48,7 +48,7 @@ class WorkerThreadForTest : public WorkerThread {
  public:
   WorkerThreadForTest(FrameScheduler* frame_scheduler,
                       base::WaitableEvent* throtting_state_changed)
-      : WorkerThread(ThreadCreationParams(WebThreadType::kTestThread)
+      : WorkerThread(ThreadCreationParams(ThreadType::kTestThread)
                          .SetFrameOrWorkerScheduler(frame_scheduler)),
         throtting_state_changed_(throtting_state_changed) {}
 
@@ -112,11 +112,8 @@ class WorkerSchedulerProxyTest : public testing::Test {
                 task_environment_.GetMainThreadTaskRunner(),
                 task_environment_.GetMockTickClock()),
             base::nullopt)),
-        page_scheduler_(
-            std::make_unique<PageSchedulerImpl>(nullptr,
-                                                main_thread_scheduler_.get())),
-        frame_scheduler_(FrameSchedulerImpl::Create(
-            page_scheduler_.get(),
+        page_scheduler_(main_thread_scheduler_->CreatePageScheduler(nullptr)),
+        frame_scheduler_(page_scheduler_->CreateFrameScheduler(
             nullptr,
             nullptr,
             FrameScheduler::FrameType::kMainFrame)) {}
@@ -130,8 +127,8 @@ class WorkerSchedulerProxyTest : public testing::Test {
  protected:
   base::test::TaskEnvironment task_environment_;
   std::unique_ptr<MainThreadSchedulerImpl> main_thread_scheduler_;
-  std::unique_ptr<PageSchedulerImpl> page_scheduler_;
-  std::unique_ptr<FrameSchedulerImpl> frame_scheduler_;
+  std::unique_ptr<PageScheduler> page_scheduler_;
+  std::unique_ptr<FrameScheduler> frame_scheduler_;
 };
 
 TEST_F(WorkerSchedulerProxyTest, VisibilitySignalReceived) {

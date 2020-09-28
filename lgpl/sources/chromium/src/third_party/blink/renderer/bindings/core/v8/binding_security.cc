@@ -44,9 +44,24 @@
 #include "third_party/blink/renderer/core/html/html_frame_element_base.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/web_test_support.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
+
+namespace {
+
+// Documents that have the same WindowAgentFactory should be able to
+// share data with each other if they have the same Agent and are
+// SameOriginDomain.
+bool IsSameWindowAgentFactory(const LocalDOMWindow* window1,
+                              const LocalDOMWindow* window2) {
+  return window1->GetFrame() && window2->GetFrame() &&
+         &window1->GetFrame()->window_agent_factory() ==
+             &window2->GetFrame()->window_agent_factory();
+}
+
+}  // namespace
 
 void BindingSecurity::Init() {
   BindingSecurityForPlatform::SetShouldAllowAccessToV8ContextWithExceptionState(
@@ -65,7 +80,7 @@ namespace {
 void ReportOrThrowSecurityError(
     const LocalDOMWindow* accessing_window,
     const DOMWindow* target_window,
-    DOMWindow::CrossDocumentAccessFeaturePolicy cross_document_access,
+    DOMWindow::CrossDocumentAccessPolicy cross_document_access,
     ExceptionState& exception_state) {
   if (target_window) {
     exception_state.ThrowSecurityError(
@@ -81,7 +96,7 @@ void ReportOrThrowSecurityError(
 void ReportOrThrowSecurityError(
     const LocalDOMWindow* accessing_window,
     const DOMWindow* target_window,
-    DOMWindow::CrossDocumentAccessFeaturePolicy cross_document_access,
+    DOMWindow::CrossDocumentAccessPolicy cross_document_access,
     BindingSecurity::ErrorReportOption reporting_option) {
   if (reporting_option == BindingSecurity::ErrorReportOption::kDoNotReport)
     return;
@@ -100,10 +115,10 @@ void ReportOrThrowSecurityError(
 bool CanAccessWindowInternal(
     const LocalDOMWindow* accessing_window,
     const DOMWindow* target_window,
-    DOMWindow::CrossDocumentAccessFeaturePolicy* cross_document_access) {
+    DOMWindow::CrossDocumentAccessPolicy* cross_document_access) {
   SECURITY_CHECK(!(target_window && target_window->GetFrame()) ||
                  target_window == target_window->GetFrame()->DomWindow());
-  DCHECK_EQ(DOMWindow::CrossDocumentAccessFeaturePolicy::kAllowed,
+  DCHECK_EQ(DOMWindow::CrossDocumentAccessPolicy::kAllowed,
             *cross_document_access);
 
   // It's important to check that target_window is a LocalDOMWindow: it's
@@ -135,12 +150,15 @@ bool CanAccessWindowInternal(
     // policy being enabled and not a logic bug.
     if (detail == SecurityOrigin::AccessResultDomainDetail::
                       kDomainNotRelevantAgentClusterMismatch) {
-      SECURITY_CHECK(!accessing_window->document()->IsFeatureEnabled(
-                         mojom::FeaturePolicyFeature::kDocumentAccess) ||
-                     !local_target_window->document()->IsFeatureEnabled(
-                         mojom::FeaturePolicyFeature::kDocumentAccess));
+      // Assert that because the agent clusters are different than the
+      // WindowAgentFactories must also be different.
+      SECURITY_CHECK(
+          !IsSameWindowAgentFactory(accessing_window, local_target_window) ||
+          (WebTestSupport::IsRunningWebTest() &&
+           local_target_window->GetFrame()->PagePopupOwner()));
+
       *cross_document_access =
-          DOMWindow::CrossDocumentAccessFeaturePolicy::kDisallowed;
+          DOMWindow::CrossDocumentAccessPolicy::kDisallowed;
     }
     return false;
   }
@@ -158,8 +176,8 @@ template <typename ExceptionStateOrErrorReportOption>
 bool CanAccessWindow(const LocalDOMWindow* accessing_window,
                      const DOMWindow* target_window,
                      ExceptionStateOrErrorReportOption& error_report) {
-  DOMWindow::CrossDocumentAccessFeaturePolicy cross_document_access =
-      DOMWindow::CrossDocumentAccessFeaturePolicy::kAllowed;
+  DOMWindow::CrossDocumentAccessPolicy cross_document_access =
+      DOMWindow::CrossDocumentAccessPolicy::kAllowed;
   if (CanAccessWindowInternal(accessing_window, target_window,
                               &cross_document_access))
     return true;
@@ -355,9 +373,9 @@ bool ShouldAllowAccessToV8ContextInternal(
   // remote_object->CreationContext() returns the empty handle. Remote contexts
   // are unconditionally treated as cross origin.
   if (target_context.IsEmpty()) {
-    ReportOrThrowSecurityError(
-        ToLocalDOMWindow(accessing_context), nullptr,
-        DOMWindow::CrossDocumentAccessFeaturePolicy::kAllowed, error_report);
+    ReportOrThrowSecurityError(ToLocalDOMWindow(accessing_context), nullptr,
+                               DOMWindow::CrossDocumentAccessPolicy::kAllowed,
+                               error_report);
     return false;
   }
 
@@ -462,13 +480,16 @@ void BindingSecurity::FailedAccessCheckFor(v8::Isolate* isolate,
     return;
 
   auto* local_dom_window = CurrentDOMWindow(isolate);
-  DOMWindow::CrossDocumentAccessFeaturePolicy cross_document_access =
-      (local_dom_window->document()->IsFeatureEnabled(
-           mojom::FeaturePolicyFeature::kDocumentAccess) &&
-       (target->GetFrame()->GetSecurityContext()->IsFeatureEnabled(
-           mojom::FeaturePolicyFeature::kDocumentAccess)))
-          ? DOMWindow::CrossDocumentAccessFeaturePolicy::kAllowed
-          : DOMWindow::CrossDocumentAccessFeaturePolicy::kDisallowed;
+  // Determine if the access check failure was because of cross-origin or if the
+  // WindowAgentFactory is different. If the WindowAgentFactories are different
+  // it indicates that the "disallowdocumentaccess" attribute was used on an
+  // iframe somewhere in the ancestor chain so report the error as "restricted"
+  // instead of "cross-origin".
+  DOMWindow::CrossDocumentAccessPolicy cross_document_access =
+      (!target->ToLocalDOMWindow() ||
+       IsSameWindowAgentFactory(local_dom_window, target->ToLocalDOMWindow()))
+          ? DOMWindow::CrossDocumentAccessPolicy::kAllowed
+          : DOMWindow::CrossDocumentAccessPolicy::kDisallowed;
 
   // TODO(dcheng): Add ContextType, interface name, and property name as
   // arguments, so the generated exception can be more descriptive.

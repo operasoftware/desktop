@@ -9,9 +9,9 @@
 #include "media/base/video_types.h"
 #include "media/base/video_util.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/blink/public/platform/web_media_stream_source.h"
-#include "third_party/blink/public/platform/web_media_stream_track.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
@@ -96,8 +96,9 @@ void ImageCaptureFrameGrabber::SingleShotFrameHandler::OnVideoFrameOnIOThread(
   sk_sp<SkSurface> surface = SkSurface::MakeRaster(info);
   DCHECK(surface);
 
-  auto wrapper_callback = media::BindToLoop(
-      std::move(task_runner), ConvertToBaseCallback(std::move(callback)));
+  auto wrapper_callback =
+      media::BindToLoop(std::move(task_runner),
+                        ConvertToBaseRepeatingCallback(std::move(callback)));
 
   SkPixmap pixmap;
   if (!skia::GetWritablePixels(surface->getCanvas(), &pixmap)) {
@@ -106,9 +107,11 @@ void ImageCaptureFrameGrabber::SingleShotFrameHandler::OnVideoFrameOnIOThread(
     return;
   }
 
-  const uint32_t destination_pixel_format =
-      (kN32_SkColorType == kRGBA_8888_SkColorType) ? libyuv::FOURCC_ABGR
-                                                   : libyuv::FOURCC_ARGB;
+#if SK_PMCOLOR_BYTE_ORDER(R, G, B, A)
+  const uint32_t destination_pixel_format = libyuv::FOURCC_ABGR;
+#else
+  const uint32_t destination_pixel_format = libyuv::FOURCC_ARGB;
+#endif
   uint8_t* destination_plane = static_cast<uint8_t*>(pixmap.writable_addr());
   int destination_stride = pixmap.width() * 4;
   int destination_width = pixmap.width();
@@ -184,14 +187,14 @@ ImageCaptureFrameGrabber::~ImageCaptureFrameGrabber() {
 }
 
 void ImageCaptureFrameGrabber::GrabFrame(
-    WebMediaStreamTrack* track,
+    MediaStreamComponent* component,
     std::unique_ptr<ImageCaptureGrabFrameCallbacks> callbacks,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(!!callbacks);
 
-  DCHECK(track && !track->IsNull() && track->GetPlatformTrack());
-  DCHECK_EQ(WebMediaStreamSource::kTypeVideo, track->Source().GetType());
+  DCHECK(component && component->GetPlatformTrack());
+  DCHECK_EQ(MediaStreamSource::kTypeVideo, component->Source()->GetType());
 
   if (frame_grab_in_progress_) {
     // Reject grabFrame()s too close back to back.
@@ -209,8 +212,8 @@ void ImageCaptureFrameGrabber::GrabFrame(
   // https://crbug.com/623042.
   frame_grab_in_progress_ = true;
   MediaStreamVideoSink::ConnectToTrack(
-      *track,
-      ConvertToBaseCallback(CrossThreadBindRepeating(
+      component,
+      ConvertToBaseRepeatingCallback(CrossThreadBindRepeating(
           &SingleShotFrameHandler::OnVideoFrameOnIOThread,
           base::MakeRefCounted<SingleShotFrameHandler>(),
           WTF::Passed(CrossThreadBindRepeating(

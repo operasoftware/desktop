@@ -31,11 +31,14 @@
 #include "third_party/blink/renderer/platform/graphics/bitmap_image.h"
 
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "cc/paint/image_provider.h"
 #include "cc/paint/skia_paint_canvas.h"
 #include "cc/tiles/mipmap_util.h"
+#include "media/media_buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/graphics/bitmap_image_metrics.h"
 #include "third_party/blink/renderer/platform/graphics/deferred_image_decoder.h"
@@ -606,7 +609,7 @@ class BitmapImageTestWithMockDecoder : public BitmapImageTest,
     BitmapImageTest::SetUp();
 
     auto decoder = std::make_unique<MockImageDecoder>(this);
-    decoder->SetSize(10, 10);
+    decoder->SetSize(10u, 10u);
     image_->SetDecoderForTesting(
         DeferredImageDecoder::CreateForTesting(std::move(decoder)));
   }
@@ -828,6 +831,12 @@ using DecodedImageTypeHistogramTest =
     BitmapHistogramTest<BitmapImageMetrics::DecodedImageType>;
 
 TEST_P(DecodedImageTypeHistogramTest, ImageType) {
+#if BUILDFLAG(ENABLE_AV1_DECODER)
+  if (GetParam().type == BitmapImageMetrics::kImageAVIF &&
+      !base::FeatureList::IsEnabled(features::kAVIF)) {
+    return;
+  }
+#endif
   RunTest("Blink.DecodedImageType");
 }
 
@@ -839,7 +848,11 @@ const DecodedImageTypeHistogramTest::ParamType
         {"animated-10color.gif", BitmapImageMetrics::kImageGIF},
         {"webp-color-profile-lossy.webp", BitmapImageMetrics::kImageWebP},
         {"wrong-frame-dimensions.ico", BitmapImageMetrics::kImageICO},
-        {"lenna.bmp", BitmapImageMetrics::kImageBMP}};
+        {"lenna.bmp", BitmapImageMetrics::kImageBMP},
+#if BUILDFLAG(ENABLE_AV1_DECODER)
+        {"red-full-ranged-8bpc.avif", BitmapImageMetrics::kImageAVIF},
+#endif
+};
 
 INSTANTIATE_TEST_SUITE_P(
     DecodedImageTypeHistogramTest,
@@ -869,50 +882,28 @@ INSTANTIATE_TEST_SUITE_P(
     DecodedImageOrientationHistogramTest,
     testing::ValuesIn(kDecodedImageOrientationHistogramTestParams));
 
-using DecodedImageDensityHistogramTest100px = BitmapHistogramTest<int>;
+using DecodedImageDensitySizeCorrectionDetectedHistogramTest =
+    BitmapHistogramTest<bool>;
 
-TEST_P(DecodedImageDensityHistogramTest100px, JpegDensity) {
-  RunTest("Blink.DecodedImage.JpegDensity.100px");
+TEST_P(DecodedImageDensitySizeCorrectionDetectedHistogramTest, bool) {
+  RunTest("Blink.DecodedImage.DensitySizeCorrectionDetected");
 }
 
-const DecodedImageDensityHistogramTest100px::ParamType
-    kDecodedImageDensityHistogramTest100pxParams[] = {
-        // 64x64 too small to report any metric
-        {"rgb-jpeg-red.jpg",
-         DecodedImageDensityHistogramTest100px::kNoSamplesReported},
-        // 439x154, 23220 bytes --> 2.74 bpp
-        {"cropped_mandrill.jpg", 274},
-        // 320x320, 74017 bytes --> 5.78
-        {"blue-wheel-srgb-color-profile.jpg", 578},
-        // 632x475 too big for the 100-399px range.
-        {"cat.jpg", DecodedImageDensityHistogramTest100px::kNoSamplesReported}};
+const DecodedImageDensitySizeCorrectionDetectedHistogramTest::ParamType
+    kDecodedImageDensitySizeCorrectionHistogramTestParams[] = {
+        {"exif-resolution-none.jpg", false},
+        {"exif-resolution-invalid-cm.jpg", false},
+        {"exif-resolution-invalid-no-match.jpg", false},
+        {"exif-resolution-invalid-partial.jpg", false},
+        {"exif-resolution-no-change.jpg", false},
+        {"exif-resolution-valid-hires.jpg", true},
+        {"exif-resolution-valid-lores.jpg", true},
+        {"exif-resolution-valid-non-uniform.jpg", true}};
 
 INSTANTIATE_TEST_SUITE_P(
-    DecodedImageDensityHistogramTest100px,
-    DecodedImageDensityHistogramTest100px,
-    testing::ValuesIn(kDecodedImageDensityHistogramTest100pxParams));
-
-using DecodedImageDensityHistogramTest400px = BitmapHistogramTest<int>;
-
-TEST_P(DecodedImageDensityHistogramTest400px, JpegDensity) {
-  RunTest("Blink.DecodedImage.JpegDensity.400px");
-}
-
-const DecodedImageDensityHistogramTest400px::ParamType
-    kDecodedImageDensityHistogramTest400pxParams[] = {
-        // 439x154, only one dimension is big enough.
-        {"cropped_mandrill.jpg",
-         DecodedImageDensityHistogramTest400px::kNoSamplesReported},
-        // 320x320, not big enough.
-        {"blue-wheel-srgb-color-profile.jpg",
-         DecodedImageDensityHistogramTest400px::kNoSamplesReported},
-        // 632x475, 68826 bytes --> 1.83
-        {"cat.jpg", 183}};
-
-INSTANTIATE_TEST_SUITE_P(
-    DecodedImageDensityHistogramTest400px,
-    DecodedImageDensityHistogramTest400px,
-    testing::ValuesIn(kDecodedImageDensityHistogramTest400pxParams));
+    DecodedImageDensitySizeCorrectionDetectedHistogramTest,
+    DecodedImageDensitySizeCorrectionDetectedHistogramTest,
+    testing::ValuesIn(kDecodedImageDensitySizeCorrectionHistogramTestParams));
 
 using DecodedImageDensityHistogramTestKiBWeighted = BitmapHistogramTest<int>;
 
@@ -924,7 +915,7 @@ const DecodedImageDensityHistogramTestKiBWeighted::ParamType
     kDecodedImageDensityHistogramTestKiBWeightedParams[] = {
         // 64x64 too small to report any metric
         {"rgb-jpeg-red.jpg",
-         DecodedImageDensityHistogramTest100px::kNoSamplesReported},
+         DecodedImageDensityHistogramTestKiBWeighted::kNoSamplesReported},
         // 439x154, 23220 bytes --> 2.74 bpp, 23 KiB (rounded up)
         {"cropped_mandrill.jpg", 274, 23},
         // 320x320, 74017 bytes --> 5.78, 72 KiB (rounded down)

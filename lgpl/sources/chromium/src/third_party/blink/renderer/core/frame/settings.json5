@@ -65,12 +65,17 @@
       type: "int",
     },
 
+    // Sets the minimum font-size in CSS px. That means the minimum font-size is
+    // applied before applying the device scale factor or page zoom.
     {
       name: "minimumFontSize",
       initial: 0,
       invalidate: "Style",
       type: "int",
     },
+
+    // Sets the minimum font-size in CSS px, but only applies to relative font
+    // units like 'small', em, and percentage sizes.
     {
       name: "minimumLogicalFontSize",
       initial: 0,
@@ -229,6 +234,7 @@
       invalidate: "MediaControls",
     },
 
+    // Only affects main thread scrolling
     {
       name: "scrollAnimatorEnabled",
       initial: true,
@@ -247,11 +253,6 @@
     // (rather than rounded) to make it possible to reftest the results.
     {
       name: "mockGestureTapHighlightsEnabled",
-      initial: false,
-    },
-
-    {
-      name: "shouldRespectImageOrientation",
       initial: false,
     },
 
@@ -454,14 +455,6 @@
       initial: false,
     },
 
-    // If true, scrollers will use overlay scrollbars.  These do not take up any
-    // layout width, are drawn using solid color quads by the compositor, and fade away
-    // after a timeout.
-    {
-      name: "useSolidColorScrollbars",
-      initial: false,
-    },
-
     // The rubber-band overscroll effect is implemented in Blink and is being moved
     // to the compositor thread. This will be set to true and eventually removed.
     // crbug.com/133097
@@ -561,6 +554,12 @@
     {
       name: "scriptEnabled",
       initial: false,
+    },
+
+    {
+      name: "parserScriptingFlagPolicy",
+      initial: "ParserScriptingFlagPolicy::kOnlyIfScriptIsEnabled",
+      type: "ParserScriptingFlagPolicy"
     },
 
     // Forces Android Overlay Scrollbar for mobile emulator.
@@ -893,62 +892,56 @@
     // Dark mode
     //
     {
-      name: "darkModeEnabled",
+      name: "forceDarkModeEnabled",
       initial: false,
-      invalidate: "Paint",
+      invalidate: "ForceDark",
     },
     {
-      name: "darkModeInversionAlgorithm",
+      name: "forceDarkModeInversionAlgorithm",
       initial: "DarkModeInversionAlgorithm::kInvertLightnessLAB",
       type: "DarkModeInversionAlgorithm",
-      invalidate: "Paint",
+      invalidate: "ForceDark",
     },
     {
-      name: "darkModeGrayscale",
+      name: "forceDarkModeGrayscale",
       initial: false,
-      invalidate: "Paint",
+      invalidate: "ForceDark",
     },
     {
-      name: "darkModeContrast",
+      name: "forceDarkModeContrast",
       initial: 0,
       type: "double",
-      invalidate: "Paint",
+      invalidate: "ForceDark",
     },
     {
-      name: "darkModeClassifierType",
-      initial: "DarkModeClassifierType::kGeneric",
-      type: "DarkModeClassifierType",
-      invalidate: "Paint",
-    },
-    {
-      name: "darkModeImagePolicy",
+      name: "forceDarkModeImagePolicy",
       initial: "DarkModeImagePolicy::kFilterNone",
       type: "DarkModeImagePolicy",
-      invalidate: "Paint",
+      invalidate: "ForceDark",
     },
     {
-      name: "darkModePagePolicy",
+      name: "forceDarkModePagePolicy",
       initial: "DarkModePagePolicy::kFilterByBackground",
       type: "DarkModePagePolicy",
-      invalidate: "Paint",
+      invalidate: "ForceDark",
     },
     {
-      name: "darkModeTextBrightnessThreshold",
+      name: "forceDarkModeTextBrightnessThreshold",
       initial: "150",
       type: "int",
-      invalidate: "Paint",
+      invalidate: "ForceDark",
     },
     {
-      name: "darkModeBackgroundBrightnessThreshold",
+      name: "forceDarkModeBackgroundBrightnessThreshold",
       initial: "205",
       type: "int",
-      invalidate: "Paint",
+      invalidate: "ForceDark",
     },
     {
-      name: "darkModeImageGrayscale",
+      name: "forceDarkModeImageGrayscale",
       initial: "0.0",
       type: "float",
-      invalidate: "Paint",
+      invalidate: "ForceDark",
     },
     {
       name: "navigatorPlatformOverride",
@@ -1045,22 +1038,22 @@
     },
     {
       name: "lazyImageFirstKFullyLoadSlow2G",
-      initial: 12,
+      initial: 0,
       type: "int",
     },
     {
       name: "lazyImageFirstKFullyLoad2G",
-      initial: 10,
+      initial: 0,
       type: "int",
     },
     {
       name: "lazyImageFirstKFullyLoad3G",
-      initial: 8,
+      initial: 0,
       type: "int",
     },
     {
       name: "lazyImageFirstKFullyLoad4G",
-      initial: 6,
+      initial: 0,
       type: "int",
     },
 
@@ -1068,7 +1061,7 @@
     // evaluating the prefers-color-scheme media query.
     {
       name: "preferredColorScheme",
-      initial: "PreferredColorScheme::kNoPreference",
+      initial: "PreferredColorScheme::kLight",
       invalidate: "ColorScheme",
       type: "PreferredColorScheme",
     },
@@ -1091,6 +1084,21 @@
       initial: "NavigationControls::kNone",
       invalidate: "MediaQuery",
       type: "NavigationControls",
+    },
+    {
+      name: "accessibilityAlwaysShowFocus",
+      initial: false,
+      invalidate: "Style",
+      type: "bool"
+    },
+    // aria-modal="true" on some platforms requires the accessibility tree to
+    // be pruned so no other background content is exposed to assistive
+    // technology.
+    // https://www.w3.org/TR/core-aam-1.1/#ariaModalTrue
+    {
+      name: "ariaModalPrunesAXTree",
+      initial: false,
+      type: "bool",
     },
   ],
 }

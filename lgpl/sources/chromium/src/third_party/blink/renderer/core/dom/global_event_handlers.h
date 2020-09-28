@@ -44,10 +44,8 @@ class GlobalEventHandlers {
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(animationiteration,
                                          kAnimationiteration)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(animationstart, kAnimationstart)
-  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(activateinvisible, kActivateinvisible)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(auxclick, kAuxclick)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(blur, kBlur)
-  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(beforeactivate, kBeforeactivate)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(cancel, kCancel)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(canplay, kCanplay)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(canplaythrough, kCanplaythrough)
@@ -90,8 +88,6 @@ class GlobalEventHandlers {
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(mouseover, kMouseover)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(mouseup, kMouseup)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(mousewheel, kMousewheel)
-  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(operadetachedviewchange, kOperadetachedviewchange)
-  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(operadetachedviewcontrol, kOperadetachedviewcontrol)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(overscroll, kOverscroll)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(pause, kPause)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(play, kPlay)
@@ -128,6 +124,14 @@ class GlobalEventHandlers {
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(touchstart, kTouchstart)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(volumechange, kVolumechange)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(waiting, kWaiting)
+  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(webkitanimationend,
+                                         kWebkitAnimationEnd)
+  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(webkitanimationiteration,
+                                         kWebkitAnimationIteration)
+  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(webkitanimationstart,
+                                         kWebkitAnimationStart)
+  DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(webkittransitionend,
+                                         kWebkitTransitionEnd)
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(wheel, kWheel)
 };
 

@@ -40,6 +40,7 @@ class PLATFORM_EXPORT CullRect {
 
   void MoveBy(const IntPoint& offset);
   void Move(const IntSize& offset);
+  void Move(const FloatSize& offset);
 
   // Applies one transform to the cull rect. Before this function is called,
   // the cull rect is in the space of the parent the transform node.

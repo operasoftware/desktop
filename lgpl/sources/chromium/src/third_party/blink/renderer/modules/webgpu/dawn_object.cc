@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/webgpu/dawn_object.h"
 
+#include "gpu/command_buffer/client/webgpu_interface.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_device.h"
 
 namespace blink {
@@ -29,12 +30,45 @@ const DawnProcTable& DawnObjectBase::GetProcs() const {
   return dawn_control_client_->GetProcs();
 }
 
+DawnDeviceClientSerializerHolder::DawnDeviceClientSerializerHolder(
+    scoped_refptr<DawnControlClientHolder> dawn_control_client,
+    uint64_t device_client_id)
+    : dawn_control_client_(std::move(dawn_control_client)),
+      device_client_id_(device_client_id) {}
+
+DawnDeviceClientSerializerHolder::~DawnDeviceClientSerializerHolder() {
+  if (dawn_control_client_->IsDestroyed()) {
+    return;
+  }
+  dawn_control_client_->GetInterface()->RemoveDevice(device_client_id_);
+}
+
+const scoped_refptr<DawnControlClientHolder>&
+DeviceTreeObject::GetDawnControlClient() const {
+  return device_client_serializer_holder_->dawn_control_client_;
+}
+
+bool DeviceTreeObject::IsDawnControlClientDestroyed() const {
+  return GetDawnControlClient()->IsDestroyed();
+}
+gpu::webgpu::WebGPUInterface* DeviceTreeObject::GetInterface() const {
+  return GetDawnControlClient()->GetInterface();
+}
+const DawnProcTable& DeviceTreeObject::GetProcs() const {
+  return GetDawnControlClient()->GetProcs();
+}
+
+uint64_t DeviceTreeObject::GetDeviceClientID() const {
+  return device_client_serializer_holder_->device_client_id_;
+}
+
 DawnObjectImpl::DawnObjectImpl(GPUDevice* device)
-    : DawnObjectBase(device->GetDawnControlClient()), device_(device) {}
+    : DeviceTreeObject(device->GetDeviceClientSerializerHolder()),
+      device_(device) {}
 
 DawnObjectImpl::~DawnObjectImpl() = default;
 
-void DawnObjectImpl::Trace(blink::Visitor* visitor) {
+void DawnObjectImpl::Trace(Visitor* visitor) const {
   visitor->Trace(device_);
   ScriptWrappable::Trace(visitor);
 }

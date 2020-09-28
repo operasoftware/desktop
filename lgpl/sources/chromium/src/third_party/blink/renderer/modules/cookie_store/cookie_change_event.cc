@@ -4,10 +4,14 @@
 
 #include "third_party/blink/renderer/modules/cookie_store/cookie_change_event.h"
 
+#include <utility>
+
+#include "services/network/public/mojom/cookie_manager.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_cookie_change_event_init.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_cookie_list_item.h"
 #include "third_party/blink/renderer/core/dom/dom_time_stamp.h"
-#include "third_party/blink/renderer/modules/cookie_store/cookie_change_event_init.h"
-#include "third_party/blink/renderer/modules/cookie_store/cookie_list_item.h"
 #include "third_party/blink/renderer/modules/event_modules.h"
+#include "third_party/blink/renderer/platform/cookie/canonical_cookie.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -19,7 +23,7 @@ const AtomicString& CookieChangeEvent::InterfaceName() const {
   return event_interface_names::kCookieChangeEvent;
 }
 
-void CookieChangeEvent::Trace(blink::Visitor* visitor) {
+void CookieChangeEvent::Trace(Visitor* visitor) const {
   Event::Trace(visitor);
   visitor->Trace(changed_);
   visitor->Trace(deleted_);
@@ -50,12 +54,11 @@ String ToCookieListItemSameSite(network::mojom::CookieSameSite same_site) {
     case network::mojom::CookieSameSite::STRICT_MODE:
       return "strict";
     case network::mojom::CookieSameSite::LAX_MODE:
-    case network::mojom::CookieSameSite::EXTENDED_MODE:
       return "lax";
     case network::mojom::CookieSameSite::NO_RESTRICTION:
-      return "unrestricted";
+      return "none";
     case network::mojom::CookieSameSite::UNSPECIFIED:
-      return "unspecified";
+      return String();
   }
 
   NOTREACHED();
@@ -64,15 +67,19 @@ String ToCookieListItemSameSite(network::mojom::CookieSameSite same_site) {
 }  // namespace
 
 // static
+// TODO(crbug.com/1092695): Update to take in CookieWithAccessResult so
+// CookieListItem can use EffectiveSameSite for SameSite.
 CookieListItem* CookieChangeEvent::ToCookieListItem(
-    const WebCanonicalCookie& canonical_cookie,
+    const CanonicalCookie& canonical_cookie,
     bool is_deleted) {
   CookieListItem* list_item = CookieListItem::Create();
 
   list_item->setName(canonical_cookie.Name());
   list_item->setPath(canonical_cookie.Path());
   list_item->setSecure(canonical_cookie.IsSecure());
-  list_item->setSameSite(ToCookieListItemSameSite(canonical_cookie.SameSite()));
+  auto&& same_site = ToCookieListItemSameSite(canonical_cookie.SameSite());
+  if (!same_site.IsNull())
+    list_item->setSameSite(same_site);
 
   // The domain of host-only cookies is the host name, without a dot (.) prefix.
   String cookie_domain = canonical_cookie.Domain();
@@ -91,7 +98,7 @@ CookieListItem* CookieChangeEvent::ToCookieListItem(
 
 // static
 void CookieChangeEvent::ToEventInfo(
-    const WebCanonicalCookie& backend_cookie,
+    const CanonicalCookie& backend_cookie,
     ::network::mojom::CookieChangeCause change_cause,
     HeapVector<Member<CookieListItem>>& changed,
     HeapVector<Member<CookieListItem>>& deleted) {

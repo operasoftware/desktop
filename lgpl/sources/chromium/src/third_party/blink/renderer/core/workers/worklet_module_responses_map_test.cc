@@ -3,13 +3,15 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/workers/worklet_module_responses_map.h"
+
 #include "base/optional.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_creation_params.h"
+#include "third_party/blink/renderer/core/loader/modulescript/module_script_loader.h"
 #include "third_party/blink/renderer/core/loader/modulescript/worklet_module_script_fetcher.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
-#include "third_party/blink/renderer/core/workers/worker_fetch_test_helper.h"
+#include "third_party/blink/renderer/core/testing/dummy_modulator.h"
 #include "third_party/blink/renderer/platform/loader/testing/fetch_testing_platform_support.h"
 #include "third_party/blink/renderer/platform/loader/testing/mock_fetch_context.h"
 #include "third_party/blink/renderer/platform/loader/testing/test_loader_factory.h"
@@ -35,16 +37,45 @@ class WorkletModuleResponsesMapTest : public testing::Test {
     map_ = MakeGarbageCollected<WorkletModuleResponsesMap>();
   }
 
+  class ClientImpl final : public GarbageCollected<ClientImpl>,
+                           public ModuleScriptFetcher::Client {
+    USING_GARBAGE_COLLECTED_MIXIN(ClientImpl);
+
+   public:
+    enum class Result { kInitial, kOK, kFailed };
+
+    void NotifyFetchFinished(
+        const base::Optional<ModuleScriptCreationParams>& params,
+        const HeapVector<Member<ConsoleMessage>>&) override {
+      ASSERT_EQ(Result::kInitial, result_);
+      if (params) {
+        result_ = Result::kOK;
+        params_.emplace(*params);
+      } else {
+        result_ = Result::kFailed;
+      }
+    }
+
+    Result GetResult() const { return result_; }
+    base::Optional<ModuleScriptCreationParams> GetParams() const {
+      return params_;
+    }
+
+   private:
+    Result result_ = Result::kInitial;
+    base::Optional<ModuleScriptCreationParams> params_;
+  };
+
   void Fetch(const KURL& url, ClientImpl* client) {
     ResourceRequest resource_request(url);
     // TODO(nhiroki): Specify worklet-specific request context (e.g.,
     // "paintworklet").
     resource_request.SetRequestContext(mojom::RequestContextType::SCRIPT);
-    FetchParameters fetch_params(resource_request);
+    FetchParameters fetch_params(std::move(resource_request));
     WorkletModuleScriptFetcher* module_fetcher =
-        MakeGarbageCollected<WorkletModuleScriptFetcher>(map_.Get());
+        MakeGarbageCollected<WorkletModuleScriptFetcher>(
+            map_.Get(), ModuleScriptLoader::CreatePassKeyForTests());
     module_fetcher->Fetch(fetch_params, fetcher_.Get(),
-                          nullptr /* modulator_for_built_in_modules */,
                           ModuleGraphLevel::kTopLevelModuleFetch, client);
   }
 
@@ -63,7 +94,8 @@ class WorkletModuleResponsesMapTest : public testing::Test {
 TEST_F(WorkletModuleResponsesMapTest, Basic) {
   const KURL kUrl("https://example.com/module.js");
   url_test_helpers::RegisterMockedURLLoad(
-      kUrl, test::CoreTestDataPath("module.js"), "text/javascript");
+      kUrl, test::CoreTestDataPath("module.js"), "text/javascript",
+      platform_->GetURLLoaderMockFactory());
   HeapVector<Member<ClientImpl>> clients;
 
   // An initial read call initiates a fetch request.
@@ -93,7 +125,8 @@ TEST_F(WorkletModuleResponsesMapTest, Basic) {
 
 TEST_F(WorkletModuleResponsesMapTest, Failure) {
   const KURL kUrl("https://example.com/module.js");
-  url_test_helpers::RegisterMockedErrorURLLoad(kUrl);
+  url_test_helpers::RegisterMockedErrorURLLoad(
+      kUrl, platform_->GetURLLoaderMockFactory());
   HeapVector<Member<ClientImpl>> clients;
 
   // An initial read call initiates a fetch request.
@@ -124,9 +157,11 @@ TEST_F(WorkletModuleResponsesMapTest, Failure) {
 TEST_F(WorkletModuleResponsesMapTest, Isolation) {
   const KURL kUrl1("https://example.com/module?1.js");
   const KURL kUrl2("https://example.com/module?2.js");
-  url_test_helpers::RegisterMockedErrorURLLoad(kUrl1);
+  url_test_helpers::RegisterMockedErrorURLLoad(
+      kUrl1, platform_->GetURLLoaderMockFactory());
   url_test_helpers::RegisterMockedURLLoad(
-      kUrl2, test::CoreTestDataPath("module.js"), "text/javascript");
+      kUrl2, test::CoreTestDataPath("module.js"), "text/javascript",
+      platform_->GetURLLoaderMockFactory());
   HeapVector<Member<ClientImpl>> clients;
 
   // An initial read call for |kUrl1| initiates a fetch request.
@@ -199,9 +234,11 @@ TEST_F(WorkletModuleResponsesMapTest, Dispose) {
   const KURL kUrl1("https://example.com/module?1.js");
   const KURL kUrl2("https://example.com/module?2.js");
   url_test_helpers::RegisterMockedURLLoad(
-      kUrl1, test::CoreTestDataPath("module.js"), "text/javascript");
+      kUrl1, test::CoreTestDataPath("module.js"), "text/javascript",
+      platform_->GetURLLoaderMockFactory());
   url_test_helpers::RegisterMockedURLLoad(
-      kUrl2, test::CoreTestDataPath("module.js"), "text/javascript");
+      kUrl2, test::CoreTestDataPath("module.js"), "text/javascript",
+      platform_->GetURLLoaderMockFactory());
   HeapVector<Member<ClientImpl>> clients;
 
   // An initial read call for |kUrl1| creates a placeholder entry and asks the

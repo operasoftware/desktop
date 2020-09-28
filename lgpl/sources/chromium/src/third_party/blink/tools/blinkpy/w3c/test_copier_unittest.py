@@ -32,13 +32,13 @@ from blinkpy.common.system.filesystem_mock import MockFileSystem
 from blinkpy.common.system.log_testing import LoggingTestCase
 from blinkpy.w3c.test_copier import TestCopier
 
-
 MOCK_WEB_TESTS = '/mock-checkout/' + RELATIVE_WEB_TESTS
 
 FAKE_SOURCE_REPO_DIR = '/blink'
 
 FAKE_FILES = {
     MOCK_WEB_TESTS + 'external/OWNERS': '',
+    '/blink/w3c/dir/run.bat': '',
     '/blink/w3c/dir/has_shebang.txt': '#!',
     '/blink/w3c/dir/README.txt': '',
     '/blink/w3c/dir/OWNERS': '',
@@ -49,7 +49,6 @@ FAKE_FILES = {
 
 
 class TestCopierTest(LoggingTestCase):
-
     def test_import_dir_with_no_tests(self):
         host = MockHost()
         host.executive = MockExecutive(exception=ScriptError('error'))
@@ -62,61 +61,75 @@ class TestCopierTest(LoggingTestCase):
         host.filesystem = MockFileSystem(files=FAKE_FILES)
         copier = TestCopier(host, FAKE_SOURCE_REPO_DIR)
         copier.find_importable_tests()
-        self.assertEqual(
-            copier.import_list,
-            [
-                {
-                    'copy_list': [
-                        {'dest': 'has_shebang.txt', 'src': '/blink/w3c/dir/has_shebang.txt'},
-                        {'dest': 'README.txt', 'src': '/blink/w3c/dir/README.txt'}
-                    ],
-                    'dirname': '/blink/w3c/dir',
-                }
-            ])
+        self.assertEqual(copier.import_list, [{
+            'copy_list': [{
+                'dest': 'run.bat',
+                'src': '/blink/w3c/dir/run.bat'
+            }, {
+                'dest': 'has_shebang.txt',
+                'src': '/blink/w3c/dir/has_shebang.txt'
+            }, {
+                'dest': 'README.txt',
+                'src': '/blink/w3c/dir/README.txt'
+            }],
+            'dirname':
+            '/blink/w3c/dir',
+        }])
 
     def test_does_not_import_reftestlist_file(self):
         host = MockHost()
         host.filesystem = MockFileSystem(files=FAKE_FILES)
         copier = TestCopier(host, FAKE_SOURCE_REPO_DIR)
         copier.find_importable_tests()
-        self.assertEqual(
-            copier.import_list,
-            [
-                {
-                    'copy_list': [
-                        {'dest': 'has_shebang.txt', 'src': '/blink/w3c/dir/has_shebang.txt'},
-                        {'dest': 'README.txt', 'src': '/blink/w3c/dir/README.txt'}
-                    ],
-                    'dirname': '/blink/w3c/dir',
-                }
-            ])
+        self.assertEqual(copier.import_list, [{
+            'copy_list': [{
+                'dest': 'run.bat',
+                'src': '/blink/w3c/dir/run.bat'
+            }, {
+                'dest': 'has_shebang.txt',
+                'src': '/blink/w3c/dir/has_shebang.txt'
+            }, {
+                'dest': 'README.txt',
+                'src': '/blink/w3c/dir/README.txt'
+            }],
+            'dirname':
+            '/blink/w3c/dir',
+        }])
 
-    def test_files_with_shebang_are_made_executable(self):
+    def test_executable_files(self):
+        # Files with shebangs or .bat files need to be made executable.
         host = MockHost()
         host.filesystem = MockFileSystem(files=FAKE_FILES)
         copier = TestCopier(host, FAKE_SOURCE_REPO_DIR)
         copier.do_import()
         self.assertEqual(
-            host.filesystem.executable_files,
-            set([MOCK_WEB_TESTS + 'external/blink/w3c/dir/has_shebang.txt']))
+            host.filesystem.executable_files, {
+                MOCK_WEB_TESTS + 'external/blink/w3c/dir/run.bat',
+                MOCK_WEB_TESTS + 'external/blink/w3c/dir/has_shebang.txt'
+            })
 
     def test_ref_test_with_ref_is_copied(self):
         host = MockHost()
-        host.filesystem = MockFileSystem(files={
-            '/blink/w3c/dir1/my-ref-test.html': '<html><head><link rel="match" href="ref-file.html" />test</head></html>',
-            '/blink/w3c/dir1/ref-file.html': '<html><head>test</head></html>',
-            MOCK_WEB_TESTS + 'W3CImportExpectations': '',
-        })
+        host.filesystem = MockFileSystem(
+            files={
+                '/blink/w3c/dir1/my-ref-test.html':
+                '<html><head><link rel="match" href="ref-file.html" />test</head></html>',
+                '/blink/w3c/dir1/ref-file.html':
+                '<html><head>test</head></html>',
+                MOCK_WEB_TESTS + 'W3CImportExpectations':
+                '',
+            })
         copier = TestCopier(host, FAKE_SOURCE_REPO_DIR)
         copier.find_importable_tests()
-        self.assertEqual(
-            copier.import_list,
-            [
-                {
-                    'copy_list': [
-                        {'src': '/blink/w3c/dir1/ref-file.html', 'dest': 'ref-file.html'},
-                        {'src': '/blink/w3c/dir1/my-ref-test.html', 'dest': 'my-ref-test.html'}
-                    ],
-                    'dirname': '/blink/w3c/dir1',
-                }
-            ])
+        self.assertEqual(copier.import_list, [{
+            'copy_list': [{
+                'src': '/blink/w3c/dir1/ref-file.html',
+                'dest': 'ref-file.html'
+            },
+                          {
+                              'src': '/blink/w3c/dir1/my-ref-test.html',
+                              'dest': 'my-ref-test.html'
+                          }],
+            'dirname':
+            '/blink/w3c/dir1',
+        }])

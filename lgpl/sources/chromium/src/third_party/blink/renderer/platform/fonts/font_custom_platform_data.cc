@@ -45,16 +45,6 @@
 
 namespace blink {
 
-namespace {
-sk_sp<SkFontMgr> FontManagerForSubType(
-    FontFormatCheck::VariableFontSubType font_sub_type) {
-  CHECK_NE(font_sub_type, FontFormatCheck::VariableFontSubType::kNotVariable);
-  if (font_sub_type == FontFormatCheck::VariableFontSubType::kVariableCFF2)
-    return WebFontTypefaceFactory::FreeTypeFontManager();
-  return WebFontTypefaceFactory::FontManagerForVariations();
-}
-}  // namespace
-
 FontCustomPlatformData::FontCustomPlatformData(sk_sp<SkTypeface> typeface,
                                                size_t data_size)
     : base_typeface_(std::move(typeface)), data_size_(data_size) {}
@@ -97,9 +87,14 @@ FontPlatformData FontCustomPlatformData::GetFontPlatformData(
         SkSetFourByteTag('w', 'd', 't', 'h'),
         SkFloatToScalar(selection_capabilities.width.clampToRange(
             selection_request.width))};
+    // CSS and OpenType have opposite definitions of direction of slant
+    // angle. In OpenType positive values turn counter-clockwise, negative
+    // values clockwise - in CSS positive values are clockwise rotations /
+    // skew. See note in https://drafts.csswg.org/css-fonts/#font-style-prop -
+    // map value from CSS to OpenType here.
     SkFontArguments::Axis slant_axis = {
         SkSetFourByteTag('s', 'l', 'n', 't'),
-        SkFloatToScalar(selection_capabilities.slope.clampToRange(
+        SkFloatToScalar(-selection_capabilities.slope.clampToRange(
             selection_request.slope))};
 
     axes.push_back(weight_axis);
@@ -124,12 +119,8 @@ FontPlatformData FontCustomPlatformData::GetFontPlatformData(
       axes.push_back(opsz_axis);
     }
 
-    int index;
-    std::unique_ptr<SkStreamAsset> stream(base_typeface_->openStream(&index));
-    sk_sp<SkTypeface> sk_variation_font(FontManagerForSubType(font_sub_type)
-        ->makeFromStream(std::move(stream),
-                         SkFontArguments().setCollectionIndex(index)
-                                          .setAxes(axes.data(), axes.size())));
+    sk_sp<SkTypeface> sk_variation_font(base_typeface_->makeClone(
+        SkFontArguments().setAxes(axes.data(), axes.size())));
 
     if (sk_variation_font) {
       return_typeface = sk_variation_font;
@@ -189,6 +180,39 @@ bool FontCustomPlatformData::SupportsFormat(const String& format) {
          EqualIgnoringASCIICase(format, "truetype-variations") ||
          EqualIgnoringASCIICase(format, "opentype-variations") ||
          EqualIgnoringASCIICase(format, "woff2-variations");
+}
+
+bool FontCustomPlatformData::MayBeIconFont() const {
+  if (!may_be_icon_font_computed_) {
+    // We observed that many icon fonts define almost all of their glyphs in the
+    // Unicode Private Use Area, while non-icon fonts rarely use PUA. We use
+    // this as a heuristic to determine if a font is an icon font.
+
+    // We first obtain the list of glyphs mapped from PUA codepoint range:
+    // https://unicode.org/charts/PDF/UE000.pdf
+    const SkUnichar pua_start = 0xE000;
+    const SkUnichar pua_end = 0xF900;
+    Vector<SkUnichar> pua_codepoints(pua_end - pua_start);
+    for (wtf_size_t i = 0; i < pua_codepoints.size(); ++i)
+      pua_codepoints[i] = pua_start + i;
+
+    Vector<SkGlyphID> glyphs(pua_codepoints.size());
+    base_typeface_->unicharsToGlyphs(pua_codepoints.data(),
+                                     pua_codepoints.size(), glyphs.data());
+
+    // Deduplicate and exclude glyph ID 0 (which means undefined glyph)
+    std::sort(glyphs.begin(), glyphs.end());
+    glyphs.erase(std::unique(glyphs.begin(), glyphs.end()), glyphs.end());
+    if (!glyphs[0])
+      glyphs.EraseAt(0);
+
+    // We use the heuristic that if most of the define glyphs are in PUA, then
+    // the font may be an icon font.
+    wtf_size_t pua_glyph_count = glyphs.size();
+    wtf_size_t total_glyphs = base_typeface_->countGlyphs();
+    may_be_icon_font_ = pua_glyph_count * 2 > total_glyphs;
+  }
+  return may_be_icon_font_;
 }
 
 }  // namespace blink

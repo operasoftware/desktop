@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+GEN('#include "content/public/test/browser_test.h"');
+
 /**
  * @constructor
  * @extends testing.Test
@@ -23,11 +25,9 @@ TEST_F('LoadTimeDataTest', 'sanitizeInnerHtml', function() {
       '<a href="chrome://foo"></a>',
       loadTimeData.sanitizeInnerHtml('<a href="chrome://foo"></a>'));
   assertThrows(() => {
-    loadTimeData.sanitizeInnerHtml('<div></div>');
-  }, 'DIV is not supported');
-  assertEquals(
-      '<div></div>',
-      loadTimeData.sanitizeInnerHtml('<div></div>', {tags: ['div']}));
+    loadTimeData.sanitizeInnerHtml('<iframe></iframe>');
+  }, 'IFRAME is not supported');
+  assertEquals('<div></div>', loadTimeData.sanitizeInnerHtml('<div></div>'));
 });
 
 TEST_F('LoadTimeDataTest', 'getStringPieces', function() {

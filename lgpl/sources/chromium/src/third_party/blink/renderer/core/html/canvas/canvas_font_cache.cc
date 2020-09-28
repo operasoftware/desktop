@@ -37,8 +37,6 @@ CanvasFontCache::CanvasFontCache(Document& document)
   default_font_description.SetComputedSize(defaultFontSize);
   default_font_style_ = ComputedStyle::Create();
   default_font_style_->SetFontDescription(default_font_description);
-  default_font_style_->GetFont().Update(
-      default_font_style_->GetFont().GetFontSelector());
 }
 
 CanvasFontCache::~CanvasFontCache() {
@@ -155,7 +153,7 @@ void CanvasFontCache::PruneAll() {
   fonts_resolved_using_default_style_.clear();
 }
 
-void CanvasFontCache::Trace(Visitor* visitor) {
+void CanvasFontCache::Trace(Visitor* visitor) const {
   visitor->Trace(fetched_fonts_);
   visitor->Trace(document_);
 }

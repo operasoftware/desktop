@@ -73,7 +73,7 @@ bool Path::Contains(const FloatPoint& point, WindRule rule) const {
     return false;
   SkScalar x = point.X();
   SkScalar y = point.Y();
-  SkPath::FillType fill_type = WebCoreWindRuleToSkFillType(rule);
+  SkPathFillType fill_type = WebCoreWindRuleToSkFillType(rule);
   if (path_.getFillType() != fill_type) {
     SkPath tmp(path_);
     tmp.setFillType(fill_type);
@@ -82,27 +82,30 @@ bool Path::Contains(const FloatPoint& point, WindRule rule) const {
   return path_.contains(x, y);
 }
 
-// FIXME: this method ignores the CTM and may yield inaccurate results for large
-// scales.
-SkPath Path::StrokePath(const StrokeData& stroke_data) const {
+SkPath Path::StrokePath(const StrokeData& stroke_data,
+                        const AffineTransform& transform) const {
+  float stroke_precision = clampTo<float>(
+      sqrt(std::max(transform.XScaleSquared(), transform.YScaleSquared())));
+  return StrokePath(stroke_data, stroke_precision);
+}
+
+SkPath Path::StrokePath(const StrokeData& stroke_data,
+                        float stroke_precision) const {
   PaintFlags flags;
   stroke_data.SetupPaint(&flags);
 
-  // Skia stroke resolution scale. This is multiplied by 4 internally
-  // (i.e. 1.0 corresponds to 1/4 pixel res).
-  static const SkScalar kResScale = 0.3f;
-
   SkPath stroke_path;
-  flags.getFillPath(path_, &stroke_path, nullptr, kResScale);
+  flags.getFillPath(path_, &stroke_path, nullptr, stroke_precision);
 
   return stroke_path;
 }
 
 bool Path::StrokeContains(const FloatPoint& point,
-                          const StrokeData& stroke_data) const {
+                          const StrokeData& stroke_data,
+                          const AffineTransform& transform) const {
   if (!std::isfinite(point.X()) || !std::isfinite(point.Y()))
     return false;
-  return StrokePath(stroke_data)
+  return StrokePath(stroke_data, transform)
       .contains(SkScalar(point.X()), SkScalar(point.Y()));
 }
 
@@ -111,7 +114,9 @@ FloatRect Path::BoundingRect() const {
 }
 
 FloatRect Path::StrokeBoundingRect(const StrokeData& stroke_data) const {
-  return StrokePath(stroke_data).computeTightBounds();
+  // Skia stroke resolution scale for reduced-precision requirements.
+  constexpr float kStrokePrecision = 0.3f;
+  return StrokePath(stroke_data, kStrokePrecision).computeTightBounds();
 }
 
 static FloatPoint* ConvertPathPoints(FloatPoint dst[],
@@ -337,7 +342,7 @@ void Path::AddArcTo(const FloatPoint& p,
               WebCoreFloatToSkScalar(r.Height()),
               WebCoreFloatToSkScalar(x_rotate),
               large_arc ? SkPath::kLarge_ArcSize : SkPath::kSmall_ArcSize,
-              sweep ? SkPath::kCW_Direction : SkPath::kCCW_Direction,
+              sweep ? SkPathDirection::kCW : SkPathDirection::kCCW,
               WebCoreFloatToSkScalar(p.X()), WebCoreFloatToSkScalar(p.Y()));
 }
 
@@ -399,7 +404,7 @@ void Path::AddArc(const FloatPoint& p,
 
 void Path::AddRect(const FloatRect& rect) {
   // Start at upper-left, add clock-wise.
-  path_.addRect(rect, SkPath::kCW_Direction, 0);
+  path_.addRect(rect, SkPathDirection::kCW, 0);
 }
 
 void Path::AddEllipse(const FloatPoint& p,
@@ -430,7 +435,7 @@ void Path::AddEllipse(const FloatPoint& p,
 
 void Path::AddEllipse(const FloatRect& rect) {
   // Start at 3 o'clock, add clock-wise.
-  path_.addOval(rect, SkPath::kCW_Direction, 1);
+  path_.addOval(rect, SkPathDirection::kCW, 1);
 }
 
 void Path::AddRoundedRect(const FloatRoundedRect& r) {
@@ -502,7 +507,7 @@ void Path::AddPathForRoundedRect(const FloatRect& rect,
   // Start at upper-left (after corner radii), add clock-wise.
   path_.addRRect(FloatRoundedRect(rect, top_left_radius, top_right_radius,
                                   bottom_left_radius, bottom_right_radius),
-                 SkPath::kCW_Direction, 0);
+                 SkPathDirection::kCW, 0);
 }
 
 void Path::AddPath(const Path& src, const AffineTransform& transform) {

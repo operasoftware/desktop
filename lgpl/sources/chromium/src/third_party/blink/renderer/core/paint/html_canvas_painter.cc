@@ -38,13 +38,17 @@ void HTMLCanvasPainter::PaintReplaced(const PaintInfo& paint_info,
 
   auto* canvas = To<HTMLCanvasElement>(layout_html_canvas_.GetNode());
 
-  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
+  bool flatten_composited_layers =
+      paint_info.GetGlobalPaintFlags() & kGlobalPaintFlattenCompositingLayers;
+  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled() &&
+      !flatten_composited_layers) {
     if (auto* layer = canvas->ContentsCcLayer()) {
       IntRect pixel_snapped_rect = PixelSnappedIntRect(paint_rect);
       layer->SetBounds(gfx::Size(pixel_snapped_rect.Size()));
       layer->SetIsDrawable(true);
       layer->SetHitTestable(true);
-      RecordForeignLayer(context, DisplayItem::kForeignLayerCanvas, layer,
+      RecordForeignLayer(context, layout_html_canvas_,
+                         DisplayItem::kForeignLayerCanvas, layer,
                          FloatPoint(pixel_snapped_rect.Location()));
       return;
     }
@@ -57,9 +61,7 @@ void HTMLCanvasPainter::PaintReplaced(const PaintInfo& paint_info,
   DrawingRecorder recorder(context, layout_html_canvas_, paint_info.phase);
   ScopedInterpolationQuality interpolation_quality_scope(
       context, InterpolationQualityForCanvas(layout_html_canvas_.StyleRef()));
-  canvas->Paint(
-      context, paint_rect,
-      paint_info.GetGlobalPaintFlags() == kGlobalPaintFlattenCompositingLayers);
+  canvas->Paint(context, paint_rect, flatten_composited_layers);
 }
 
 }  // namespace blink

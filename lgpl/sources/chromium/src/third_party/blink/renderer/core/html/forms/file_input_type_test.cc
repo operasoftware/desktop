@@ -63,7 +63,7 @@ TEST(FileInputTypeTest, createFileList) {
 }
 
 TEST(FileInputTypeTest, ignoreDroppedNonNativeFiles) {
-  auto* document = MakeGarbageCollected<Document>();
+  auto* document = Document::CreateForTest();
   auto* input =
       MakeGarbageCollected<HTMLInputElement>(*document, CreateElementFlags());
   InputType* file_input = MakeGarbageCollected<FileInputType>(*input);
@@ -71,7 +71,8 @@ TEST(FileInputTypeTest, ignoreDroppedNonNativeFiles) {
   DataObject* native_file_raw_drag_data = DataObject::Create();
   const DragData native_file_drag_data(native_file_raw_drag_data, FloatPoint(),
                                        FloatPoint(), kDragOperationCopy);
-  native_file_drag_data.PlatformData()->Add(File::Create("/native/path"));
+  native_file_drag_data.PlatformData()->Add(
+      MakeGarbageCollected<File>("/native/path"));
   native_file_drag_data.PlatformData()->SetFilesystemId("fileSystemId");
   file_input->ReceiveDroppedFiles(&native_file_drag_data);
   EXPECT_EQ("fileSystemId", file_input->DroppedFileSystemId());
@@ -96,7 +97,7 @@ TEST(FileInputTypeTest, ignoreDroppedNonNativeFiles) {
 }
 
 TEST(FileInputTypeTest, setFilesFromPaths) {
-  auto* document = MakeGarbageCollected<Document>();
+  auto* document = Document::CreateForTest();
   auto* input =
       MakeGarbageCollected<HTMLInputElement>(*document, CreateElementFlags());
   InputType* file_input = MakeGarbageCollected<FileInputType>(*input);
@@ -137,15 +138,15 @@ TEST(FileInputTypeTest, DropTouchesNoPopupOpeningObserver) {
       std::make_unique<DummyPageHolder>(IntSize(), &page_clients);
   Document& doc = page_holder->GetDocument();
 
-  doc.body()->SetInnerHTMLFromString("<input type=file webkitdirectory>");
-  auto& input = *ToHTMLInputElement(doc.body()->firstChild());
+  doc.body()->setInnerHTML("<input type=file webkitdirectory>");
+  auto& input = *To<HTMLInputElement>(doc.body()->firstChild());
 
   base::RunLoop run_loop;
   MockFileChooser chooser(doc.GetFrame()->GetBrowserInterfaceBroker(),
                           run_loop.QuitClosure());
   DragData drag_data(DataObject::Create(), FloatPoint(), FloatPoint(),
                      kDragOperationCopy);
-  drag_data.PlatformData()->Add(File::Create("/foo/bar"));
+  drag_data.PlatformData()->Add(MakeGarbageCollected<File>("/foo/bar"));
   input.ReceiveDroppedFiles(&drag_data);
   run_loop.Run();
 
@@ -153,6 +154,46 @@ TEST(FileInputTypeTest, DropTouchesNoPopupOpeningObserver) {
 
   // The test passes if WebKitDirectoryChromeClient::
   // UnregisterPopupOpeningObserver() was not called.
+}
+
+TEST(FileInputTypeTest, BeforePseudoCrash) {
+  std::unique_ptr<DummyPageHolder> page_holder =
+      std::make_unique<DummyPageHolder>(IntSize(800, 600));
+  Document& doc = page_holder->GetDocument();
+  doc.documentElement()->setInnerHTML(R"HTML(
+<style>
+.c6 {
+  zoom: 0.01;
+}
+
+.c6::first-letter {
+  position: fixed;
+  border-style: groove;
+}
+
+.c6::before {
+  content: 'c6';
+}
+
+.c7 {
+  zoom: 0.1;
+}
+
+.c7::first-letter {
+  position: fixed;
+  border-style: groove;
+}
+
+.c7::before {
+  content: 'c7';
+}
+
+</style>
+<input type=file class=c6>
+<input type=file class=c7>
+)HTML");
+  doc.View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  // The test passes if no CHECK failures and no null pointer dereferences.
 }
 
 }  // namespace blink

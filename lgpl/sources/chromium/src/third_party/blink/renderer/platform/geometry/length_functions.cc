@@ -48,11 +48,12 @@ float FloatValueForLength(const Length& length, float maximum_value) {
       return length.NonNanCalculatedValue(LayoutUnit(maximum_value));
     case Length::kMinContent:
     case Length::kMaxContent:
+    case Length::kMinIntrinsic:
     case Length::kFitContent:
     case Length::kExtendToZoom:
     case Length::kDeviceWidth:
     case Length::kDeviceHeight:
-    case Length::kMaxSizeNone:
+    case Length::kNone:
       NOTREACHED();
       return 0;
   }
@@ -76,11 +77,12 @@ LayoutUnit MinimumValueForLengthInternal(const Length& length,
     case Length::kFixed:
     case Length::kMinContent:
     case Length::kMaxContent:
+    case Length::kMinIntrinsic:
     case Length::kFitContent:
     case Length::kExtendToZoom:
     case Length::kDeviceWidth:
     case Length::kDeviceHeight:
-    case Length::kMaxSizeNone:
+    case Length::kNone:
       NOTREACHED();
       return LayoutUnit();
   }
@@ -99,11 +101,12 @@ LayoutUnit ValueForLength(const Length& length, LayoutUnit maximum_value) {
       return maximum_value;
     case Length::kMinContent:
     case Length::kMaxContent:
+    case Length::kMinIntrinsic:
     case Length::kFitContent:
     case Length::kExtendToZoom:
     case Length::kDeviceWidth:
     case Length::kDeviceHeight:
-    case Length::kMaxSizeNone:
+    case Length::kNone:
       NOTREACHED();
       return LayoutUnit();
   }

@@ -7,8 +7,8 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_box_strut.h"
-#include "third_party/blink/renderer/core/layout/ng/inline/ng_baseline.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_fragment_items.h"
+#include "third_party/blink/renderer/core/layout/ng/mathml/ng_mathml_paint_info.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_container_fragment.h"
 #include "third_party/blink/renderer/platform/graphics/scroll_types.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
@@ -25,11 +25,21 @@ class CORE_EXPORT NGPhysicalBoxFragment final
       NGBoxFragmentBuilder* builder,
       WritingMode block_or_line_writing_mode);
 
+  using PassKey = util::PassKey<NGPhysicalBoxFragment>;
+  NGPhysicalBoxFragment(PassKey,
+                        NGBoxFragmentBuilder* builder,
+                        const NGPhysicalBoxStrut& borders,
+                        const NGPhysicalBoxStrut& padding,
+                        std::unique_ptr<NGMathMLPaintInfo>& mathml_paint_info,
+                        WritingMode block_or_line_writing_mode);
+
   scoped_refptr<const NGLayoutResult> CloneAsHiddenForPaint() const;
 
   ~NGPhysicalBoxFragment() {
     if (has_fragment_items_)
       ComputeItemsAddress()->~NGFragmentItems();
+    if (ink_overflow_computed_or_mathml_paint_info_)
+      ComputeMathMLPaintInfoAddress()->~NGMathMLPaintInfo();
     for (const NGLink& child : Children())
       child.fragment->Release();
   }
@@ -40,8 +50,16 @@ class CORE_EXPORT NGPhysicalBoxFragment final
     return has_fragment_items_ ? ComputeItemsAddress() : nullptr;
   }
 
-  base::Optional<LayoutUnit> Baseline(const NGBaselineRequest& request) const {
-    return baselines_.Offset(request);
+  base::Optional<LayoutUnit> Baseline() const {
+    if (has_baseline_)
+      return baseline_;
+    return base::nullopt;
+  }
+
+  base::Optional<LayoutUnit> LastBaseline() const {
+    if (has_last_baseline_)
+      return last_baseline_;
+    return base::nullopt;
   }
 
   const NGPhysicalBoxStrut Borders() const {
@@ -56,6 +74,20 @@ class CORE_EXPORT NGPhysicalBoxFragment final
     return *ComputePaddingAddress();
   }
 
+  bool HasOutOfFlowPositionedFragmentainerDescendants() const {
+    return has_oof_positioned_fragmentainer_descendants_;
+  }
+
+  base::span<NGPhysicalOutOfFlowPositionedNode>
+  OutOfFlowPositionedFragmentainerDescendants() const {
+    if (!HasOutOfFlowPositionedFragmentainerDescendants())
+      return base::span<NGPhysicalOutOfFlowPositionedNode>();
+    Vector<NGPhysicalOutOfFlowPositionedNode>* descendants =
+        const_cast<Vector<NGPhysicalOutOfFlowPositionedNode>*>(
+            ComputeOutOfFlowPositionedFragmentainerDescendantsAddress());
+    return {descendants->data(), descendants->size()};
+  }
+
   NGPixelSnappedPhysicalBoxStrut PixelSnappedPadding() const {
     if (!has_padding_)
       return NGPixelSnappedPhysicalBoxStrut();
@@ -63,9 +95,40 @@ class CORE_EXPORT NGPhysicalBoxFragment final
   }
 
   bool HasSelfPaintingLayer() const;
-  bool ChildrenInline() const { return children_inline_; }
+
+  // Return true if this is either a container that establishes an inline
+  // formatting context, or if it's non-atomic inline content participating in
+  // one. Empty blocks don't establish an inline formatting context.
+  //
+  // The return value from this method is undefined and irrelevant if the object
+  // establishes a different type of formatting context than block/inline, such
+  // as table or flexbox.
+  //
+  // Example:
+  // <div>                                       <!-- false -->
+  //   <div>                                     <!-- true -->
+  //     <div style="float:left;"></div>         <!-- false -->
+  //     <div style="float:left;">               <!-- true -->
+  //       xxx                                   <!-- true -->
+  //     </div>
+  //     <div style="float:left;">               <!-- false -->
+  //       <div style="float:left;"></div>       <!-- false -->
+  //     </div>
+  //     <span>                                  <!-- true -->
+  //       xxx                                   <!-- true -->
+  //       <span style="display:inline-block;">  <!-- false -->
+  //         <div></div>                         <!-- false -->
+  //       </span>
+  //       <span style="display:inline-block;">  <!-- true -->
+  //         xxx                                 <!-- true -->
+  //       </span>
+  //       <span style="display:inline-flex;">   <!-- N/A -->
+  bool IsInlineFormattingContext() const {
+    return is_inline_formatting_context_;
+  }
 
   PhysicalRect ScrollableOverflow() const;
+  PhysicalRect ScrollableOverflowFromChildren() const;
 
   // TODO(layout-dev): These three methods delegate to legacy layout for now,
   // update them to use LayoutNG based overflow information from the fragment
@@ -73,11 +136,19 @@ class CORE_EXPORT NGPhysicalBoxFragment final
   PhysicalRect OverflowClipRect(
       const PhysicalOffset& location,
       OverlayScrollbarClipBehavior = kIgnorePlatformOverlayScrollbarSize) const;
-  LayoutSize ScrolledContentOffset() const;
+  LayoutSize PixelSnappedScrolledContentOffset() const;
   PhysicalSize ScrollSize() const;
 
   // Compute visual overflow of this box in the local coordinate.
   PhysicalRect ComputeSelfInkOverflow() const;
+
+  // Contents ink overflow includes anything that would bleed out of the box and
+  // would be clipped by the overflow clip ('overflow' != visible). This
+  // corresponds to children that overflows their parent.
+  PhysicalRect ContentsInkOverflow() const {
+    // TODO(layout-dev): Implement box fragment overflow.
+    return LocalRect();
+  }
 
   // Fragment offset is this fragment's offset from parent.
   // Needed to compensate for LayoutInline Legacy code offsets.
@@ -99,42 +170,71 @@ class CORE_EXPORT NGPhysicalBoxFragment final
                                     bool check_same_block_size) const;
 #endif
 
- private:
-  NGPhysicalBoxFragment(NGBoxFragmentBuilder* builder,
-                        const NGPhysicalBoxStrut& borders,
-                        const NGPhysicalBoxStrut& padding,
-                        WritingMode block_or_line_writing_mode);
+  bool HasExtraMathMLPainting() const {
+    return IsMathMLFraction() || ink_overflow_computed_or_mathml_paint_info_;
+  }
 
+ private:
   const NGFragmentItems* ComputeItemsAddress() const {
-    DCHECK(has_fragment_items_ || has_borders_ || has_padding_);
+    DCHECK(has_fragment_items_ || has_borders_ || has_padding_ ||
+           ink_overflow_computed_or_mathml_paint_info_ ||
+           has_oof_positioned_fragmentainer_descendants_);
     const NGLink* children_end = children_ + Children().size();
     return reinterpret_cast<const NGFragmentItems*>(children_end);
   }
 
   const NGPhysicalBoxStrut* ComputeBordersAddress() const {
-    DCHECK(has_borders_ || has_padding_);
+    DCHECK(has_borders_ || has_padding_ ||
+           ink_overflow_computed_or_mathml_paint_info_ ||
+           has_oof_positioned_fragmentainer_descendants_);
     const NGFragmentItems* items = ComputeItemsAddress();
-    if (has_fragment_items_)
-      ++items;
-    return reinterpret_cast<const NGPhysicalBoxStrut*>(items);
+    if (!has_fragment_items_)
+      return reinterpret_cast<const NGPhysicalBoxStrut*>(items);
+    return reinterpret_cast<const NGPhysicalBoxStrut*>(
+        reinterpret_cast<const uint8_t*>(items) + items->ByteSize());
   }
 
   const NGPhysicalBoxStrut* ComputePaddingAddress() const {
-    DCHECK(has_padding_);
+    DCHECK(has_padding_ || ink_overflow_computed_or_mathml_paint_info_ ||
+           has_oof_positioned_fragmentainer_descendants_);
     const NGPhysicalBoxStrut* address = ComputeBordersAddress();
     return has_borders_ ? address + 1 : address;
   }
 
-  NGBaselineList baselines_;
+  NGMathMLPaintInfo* ComputeMathMLPaintInfoAddress() const {
+    DCHECK(ink_overflow_computed_or_mathml_paint_info_ ||
+           has_oof_positioned_fragmentainer_descendants_);
+    NGPhysicalBoxStrut* address =
+        const_cast<NGPhysicalBoxStrut*>(ComputePaddingAddress());
+    return has_padding_ ? reinterpret_cast<NGMathMLPaintInfo*>(address + 1)
+                        : reinterpret_cast<NGMathMLPaintInfo*>(address);
+  }
+
+  const Vector<NGPhysicalOutOfFlowPositionedNode>*
+  ComputeOutOfFlowPositionedFragmentainerDescendantsAddress() const {
+    DCHECK(has_oof_positioned_fragmentainer_descendants_);
+    NGMathMLPaintInfo* address = ComputeMathMLPaintInfoAddress();
+    address =
+        ink_overflow_computed_or_mathml_paint_info_ ? address + 1 : address;
+    return reinterpret_cast<const Vector<NGPhysicalOutOfFlowPositionedNode>*>(
+        address);
+  }
+
+#if DCHECK_IS_ON()
+  void CheckIntegrity() const;
+#endif
+
+  LayoutUnit baseline_;
+  LayoutUnit last_baseline_;
   NGLink children_[];
-  // borders and padding come from after |children_| if they are not zero.
+  // borders, padding, and oof_positioned_fragmentainer_descendants come after
+  // |children_| if they are not zero.
 };
 
 template <>
 struct DowncastTraits<NGPhysicalBoxFragment> {
   static bool AllowFrom(const NGPhysicalFragment& fragment) {
-    return fragment.Type() == NGPhysicalFragment::kFragmentBox ||
-           fragment.Type() == NGPhysicalFragment::kFragmentRenderedLegend;
+    return fragment.Type() == NGPhysicalFragment::kFragmentBox;
   }
 };
 

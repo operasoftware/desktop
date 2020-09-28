@@ -46,7 +46,10 @@ class MarkupAccumulator {
   STACK_ALLOCATED();
 
  public:
-  MarkupAccumulator(AbsoluteURLs, SerializationType);
+  MarkupAccumulator(AbsoluteURLs,
+                    SerializationType,
+                    IncludeShadowRoots,
+                    ClosedRootsSet = ClosedRootsSet());
   virtual ~MarkupAccumulator();
 
   template <typename Strategy>
@@ -59,6 +62,8 @@ class MarkupAccumulator {
 
   MarkupFormatter formatter_;
   StringBuilder markup_;
+  IncludeShadowRoots include_shadow_roots_;
+  ClosedRootsSet include_closed_roots_;
 
  private:
   bool SerializeAsHTML() const;

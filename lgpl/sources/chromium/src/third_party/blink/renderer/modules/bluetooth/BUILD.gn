@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/jumbo.gni")
 import("//third_party/blink/renderer/modules/modules.gni")
 
 blink_modules_sources("bluetooth") {
@@ -40,7 +41,9 @@ blink_modules_sources("bluetooth") {
     "navigator_bluetooth.h",
   ]
 
-  deps = [
-    "//device/bluetooth/public/mojom:mojom_blink",
+  jumbo_excluded_sources = [
+    "bluetooth_device.cc",
   ]
+
+  deps = [ "//device/bluetooth/public/mojom:mojom_blink" ]
 }

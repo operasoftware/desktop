@@ -6,18 +6,18 @@
 // #import 'chrome://resources/cr_elements/cr_toggle/cr_toggle.m.js';
 // #import {keyEventOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
 // #import {eventToPromise} from '../test_util.m.js';
+// #import {assertEquals, assertFalse, assertTrue} from '../chai_assert.js';
 // clang-format on
 
 suite('cr-toggle', function() {
+  /** @type {!CrToggleElement} */
   let toggle;
 
   setup(function() {
-    PolymerTest.clearBody();
-    document.body.innerHTML = `
-      <cr-toggle id="toggle"></cr-toggle>
-    `;
-
-    toggle = document.getElementById('toggle');
+    document.body.innerHTML = '';
+    toggle =
+        /** @type {!CrToggleElement} */ (document.createElement('cr-toggle'));
+    document.body.appendChild(toggle);
     assertNotChecked();
   });
 
@@ -26,7 +26,8 @@ suite('cr-toggle', function() {
     assertTrue(toggle.hasAttribute('checked'));
     assertEquals('true', toggle.getAttribute('aria-pressed'));
     // Asserting that the toggle button has actually moved.
-    assertTrue(getComputedStyle(toggle.$.knob).transform.includes('matrix'));
+    assertTrue(
+        getComputedStyle(toggle.$$('#knob')).transform.includes('matrix'));
   }
 
   function assertNotChecked() {
@@ -34,7 +35,7 @@ suite('cr-toggle', function() {
     assertEquals(null, toggle.getAttribute('checked'));
     assertEquals('false', toggle.getAttribute('aria-pressed'));
     // Asserting that the toggle button has not moved.
-    assertEquals('none', getComputedStyle(toggle.$.knob).transform);
+    assertEquals('none', getComputedStyle(toggle.$$('#knob')).transform);
   }
 
   function assertDisabled() {
@@ -49,18 +50,6 @@ suite('cr-toggle', function() {
     assertEquals('0', toggle.getAttribute('tabindex'));
     assertFalse(toggle.hasAttribute('disabled'));
     assertEquals('false', toggle.getAttribute('aria-disabled'));
-  }
-
-  /**
-   * @param {string} keyName The name of the key to trigger.
-   * @param {string} keyCode The event keyCode and code to trigger.
-   */
-  function triggerKeyPressEvent(keyName, keyCode) {
-    // Note: MockInteractions incorrectly populates |keyCode| and |code| with
-    // the same value. The intention of passing a string here is only to set
-    // |code|, since |keyCode| is not used its value doesn't matter.
-    MockInteractions.keyEventOn(
-        toggle, 'keypress', keyCode, undefined, keyName);
   }
 
   /**
@@ -173,25 +162,20 @@ suite('cr-toggle', function() {
 
   // Test that the control is toggled when the user presses the 'Enter' or
   // 'Space' key.
-  test('ToggleByKey', function() {
-    let whenChanged = test_util.eventToPromise('change', toggle);
-    triggerKeyPressEvent('Enter', 'Enter');
-    return whenChanged
-        .then(function() {
-          assertChecked();
-          whenChanged = test_util.eventToPromise('change', toggle);
-          triggerKeyPressEvent(' ', 'Space');
-          return whenChanged;
-        })
-        .then(function() {
-          assertNotChecked();
-          whenChanged = test_util.eventToPromise('change', toggle);
-          triggerKeyPressEvent('Enter', 'NumpadEnter');
-          return whenChanged;
-        })
-        .then(function() {
-          assertChecked();
-        });
+  test('ToggleByKey', () => {
+    assertNotChecked();
+    toggle.dispatchEvent(
+        new KeyboardEvent('keydown', {key: 'Enter', repeat: true}));
+    assertNotChecked();
+    toggle.dispatchEvent(new KeyboardEvent('keydown', {key: ' '}));
+    assertNotChecked();
+    toggle.dispatchEvent(
+        new KeyboardEvent('keydown', {key: ' ', repeat: true}));
+    assertNotChecked();
+    toggle.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
+    assertChecked();
+    toggle.dispatchEvent(new KeyboardEvent('keyup', {key: ' '}));
+    assertNotChecked();
   });
 
   // Test that the control is not affected by user interaction when disabled.

@@ -9,8 +9,8 @@
 #include "base/logging.h"
 #include "media/base/audio_fifo.h"
 #include "media/base/audio_parameters.h"
-#include "third_party/blink/public/platform/web_audio_source_provider_client.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/renderer/platform/media/web_audio_source_provider_client.h"
 
 namespace {
 static const size_t kMaxNumberOfAudioFifoBuffers = 10;
@@ -24,9 +24,9 @@ namespace blink {
 const size_t WebAudioMediaStreamAudioSink::kWebAudioRenderBufferSize = 128;
 
 WebAudioMediaStreamAudioSink::WebAudioMediaStreamAudioSink(
-    const WebMediaStreamTrack& track,
+    MediaStreamComponent* component,
     int context_sample_rate)
-    : is_enabled_(false), track_(track), track_stopped_(false) {
+    : is_enabled_(false), component_(component), track_stopped_(false) {
   // Get the native audio output hardware sample-rate for the sink.
   // We need to check if there is a valid frame since the unittests
   // do not have one and they will inject their own |sink_params_| for testing.
@@ -37,7 +37,8 @@ WebAudioMediaStreamAudioSink::WebAudioMediaStreamAudioSink(
                        kWebAudioRenderBufferSize);
   }
   // Connect the source provider to the track as a sink.
-  WebMediaStreamAudioSink::AddToAudioTrack(this, track_);
+  WebMediaStreamAudioSink::AddToAudioTrack(
+      this, WebMediaStreamTrack(component_.Get()));
 }
 
 WebAudioMediaStreamAudioSink::~WebAudioMediaStreamAudioSink() {
@@ -46,8 +47,10 @@ WebAudioMediaStreamAudioSink::~WebAudioMediaStreamAudioSink() {
 
   // If the track is still active, it is necessary to notify the track before
   // the source provider goes away.
-  if (!track_stopped_)
-    WebMediaStreamAudioSink::RemoveFromAudioTrack(this, track_);
+  if (!track_stopped_) {
+    WebMediaStreamAudioSink::RemoveFromAudioTrack(
+        this, WebMediaStreamTrack(component_.Get()));
+  }
 }
 
 void WebAudioMediaStreamAudioSink::OnSetFormat(
@@ -82,10 +85,15 @@ void WebAudioMediaStreamAudioSink::OnData(
     base::TimeTicks estimated_capture_time) {
   NON_REENTRANT_SCOPE(capture_reentrancy_checker_);
   DCHECK(!estimated_capture_time.is_null());
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("mediastream"),
+               "WebAudioMediaStreamAudioSink::OnData");
 
   base::AutoLock auto_lock(lock_);
   if (!is_enabled_)
     return;
+
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("mediastream"),
+               "WebAudioMediaStreamAudioSink::OnData under lock");
 
   DCHECK(fifo_.get());
   DCHECK_EQ(audio_bus.channels(), source_params_.channels());
@@ -97,6 +105,8 @@ void WebAudioMediaStreamAudioSink::OnData(
     // This can happen if the data in FIFO is too slowly consumed or
     // WebAudio stops consuming data.
     DVLOG(3) << "Local source provicer FIFO is full" << fifo_->frames();
+    TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("mediastream"),
+                 "WebAudioMediaStreamAudioSink::OnData FIFO full");
   }
 }
 
@@ -111,6 +121,9 @@ void WebAudioMediaStreamAudioSink::ProvideInput(
   NON_REENTRANT_SCOPE(provide_input_reentrancy_checker_);
   DCHECK_EQ(number_of_frames, kWebAudioRenderBufferSize);
 
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("mediastream"),
+               "WebAudioMediaStreamAudioSink::ProvideInput");
+
   if (!output_wrapper_ ||
       static_cast<size_t>(output_wrapper_->channels()) != audio_data.size()) {
     output_wrapper_ =
@@ -122,6 +135,9 @@ void WebAudioMediaStreamAudioSink::ProvideInput(
     output_wrapper_->SetChannelData(static_cast<int>(i), audio_data[i]);
 
   base::AutoLock auto_lock(lock_);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("mediastream"),
+               "WebAudioMediaStreamAudioSink::ProvideInput under lock");
+
   if (!audio_converter_)
     return;
 
@@ -136,11 +152,17 @@ void WebAudioMediaStreamAudioSink::ProvideInput(
 double WebAudioMediaStreamAudioSink::ProvideInput(media::AudioBus* audio_bus,
                                                   uint32_t frames_delayed)
     NO_THREAD_SAFETY_ANALYSIS {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("mediastream"),
+               "WebAudioMediaStreamAudioSink::ProvideInput 2");
+
   lock_.AssertAcquired();
   if (fifo_->frames() >= audio_bus->frames()) {
     fifo_->Consume(audio_bus, 0, audio_bus->frames());
   } else {
     audio_bus->Zero();
+    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("mediastream"),
+                 "WebAudioMediaStreamAudioSink::ProvideInput underrun",
+                 "frames missing", audio_bus->frames() - fifo_->frames());
     DVLOG(1) << "WARNING: Underrun, FIFO has data " << fifo_->frames()
              << " samples but " << audio_bus->frames() << " samples are needed";
   }

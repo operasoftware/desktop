@@ -28,12 +28,12 @@
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
-namespace test {
-
 namespace {
 
 constexpr char kSelectionTestsRelativePath[] = "selection/";
 constexpr char kTestFileSuffix[] = ".html";
+constexpr char kLayoutNGSuffix[] = "-ax-layout-ng.txt";
+constexpr char kLayoutNGDisabledSuffix[] = "-ax-layout-ng-disabled.txt";
 constexpr char kAXTestExpectationSuffix[] = "-ax.txt";
 
 // Serialize accessibility subtree to selection text.
@@ -148,7 +148,7 @@ class AXSelectionSerializer final {
   }
 
   void SerializeSubtree(const AXObject& subtree) {
-    if (subtree.ChildCount() == 0) {
+    if (!subtree.ChildCountIncludingIgnored()) {
       // Though they are in this particular case both equivalent to an "after
       // object" position, "Before children" and "after children" positions are
       // still valid within empty subtrees.
@@ -157,7 +157,7 @@ class AXSelectionSerializer final {
       return;
     }
 
-    for (const AXObject* child : subtree.Children()) {
+    for (const AXObject* child : subtree.ChildrenIncludingIgnored()) {
       DCHECK(child);
       const auto position = AXPosition::CreatePositionBeforeObject(*child);
       HandleSelection(position);
@@ -205,9 +205,9 @@ class AXSelectionDeserializer final {
   // parts of the tree indicated by the selection markers in the snippet.
   const Vector<AXSelection> Deserialize(const std::string& html_snippet,
                                         HTMLElement& element) {
-    element.SetInnerHTMLFromString(String::FromUTF8(html_snippet));
+    element.setInnerHTML(String::FromUTF8(html_snippet));
     element.GetDocument().View()->UpdateAllLifecyclePhases(
-        DocumentLifecycle::LifecycleUpdateReason::kTest);
+        DocumentUpdateReason::kTest);
     AXObject* root = ax_object_cache_->GetOrCreate(&element);
     if (!root || root->IsDetached())
       return {};
@@ -281,7 +281,7 @@ class AXSelectionDeserializer final {
     // is re-serialized.
     node->setData(builder.ToString());
     node->GetDocument().View()->UpdateAllLifecyclePhases(
-        DocumentLifecycle::LifecycleUpdateReason::kTest);
+        DocumentUpdateReason::kTest);
 
     //
     // Non-text selection.
@@ -313,7 +313,7 @@ class AXSelectionDeserializer final {
   }
 
   void HandleObject(const AXObject& object) {
-    for (const AXObject* child : object.Children()) {
+    for (const AXObject* child : object.ChildrenIncludingIgnored()) {
       DCHECK(child);
       FindSelectionMarkers(*child);
     }
@@ -343,6 +343,11 @@ class AXSelectionDeserializer final {
 AccessibilitySelectionTest::AccessibilitySelectionTest(
     LocalFrameClient* local_frame_client)
     : AccessibilityTest(local_frame_client) {}
+
+void AccessibilitySelectionTest::SetUp() {
+  AccessibilityTest::SetUp();
+  RuntimeEnabledFeatures::SetAccessibilityExposeHTMLElementEnabled(false);
+}
 
 std::string AccessibilitySelectionTest::GetCurrentSelectionText() const {
   const SelectionInDOMTree selection =
@@ -390,14 +395,15 @@ AXSelection AccessibilitySelectionTest::SetSelectionText(
 }
 
 void AccessibilitySelectionTest::RunSelectionTest(
-    const std::string& test_name) const {
+    const std::string& test_name,
+    const std::string& suffix) const {
   static const std::string separator_line = '\n' + std::string(80, '=') + '\n';
   const String relative_path = String::FromUTF8(kSelectionTestsRelativePath) +
                                String::FromUTF8(test_name);
-  const String test_path = AccessibilityTestDataPath(relative_path);
+  const String test_path = test::AccessibilityTestDataPath(relative_path);
 
   const String test_file = test_path + String::FromUTF8(kTestFileSuffix);
-  scoped_refptr<SharedBuffer> test_file_buffer = ReadFromFile(test_file);
+  scoped_refptr<SharedBuffer> test_file_buffer = test::ReadFromFile(test_file);
   auto test_file_chars = test_file_buffer->CopyAs<Vector<char>>();
   std::string test_file_contents;
   std::copy(test_file_chars.begin(), test_file_chars.end(),
@@ -407,8 +413,10 @@ void AccessibilitySelectionTest::RunSelectionTest(
       << test_file.Utf8()
       << "\nDid you forget to add a data dependency to the BUILD file?";
 
-  const String ax_file = test_path + String::FromUTF8(kAXTestExpectationSuffix);
-  scoped_refptr<SharedBuffer> ax_file_buffer = ReadFromFile(ax_file);
+  const String ax_file =
+      test_path +
+      String::FromUTF8(suffix.empty() ? kAXTestExpectationSuffix : suffix);
+  scoped_refptr<SharedBuffer> ax_file_buffer = test::ReadFromFile(ax_file);
   auto ax_file_chars = ax_file_buffer->CopyAs<Vector<char>>();
   std::string ax_file_contents;
   std::copy(ax_file_chars.begin(), ax_file_chars.end(),
@@ -436,5 +444,17 @@ void AccessibilitySelectionTest::RunSelectionTest(
   EXPECT_EQ(ax_file_contents, actual_ax_file_contents);
 }
 
-}  // namespace test
+ParameterizedAccessibilitySelectionTest::
+    ParameterizedAccessibilitySelectionTest(
+        LocalFrameClient* local_frame_client)
+    : ScopedLayoutNGForTest(GetParam()),
+      AccessibilitySelectionTest(local_frame_client) {}
+
+void ParameterizedAccessibilitySelectionTest::RunSelectionTest(
+    const std::string& test_name) const {
+  std::string suffix =
+      LayoutNGEnabled() ? kLayoutNGSuffix : kLayoutNGDisabledSuffix;
+  AccessibilitySelectionTest::RunSelectionTest(test_name, suffix);
+}
+
 }  // namespace blink

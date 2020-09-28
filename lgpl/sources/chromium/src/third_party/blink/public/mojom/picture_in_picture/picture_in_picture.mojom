@@ -4,7 +4,6 @@
 
 module blink.mojom;
 
-import "mojo/public/mojom/base/time.mojom";
 import "services/viz/public/mojom/compositing/surface_id.mojom";
 import "ui/gfx/geometry/mojom/geometry.mojom";
 
@@ -31,10 +30,6 @@ interface PictureInPictureSession {
       gfx.mojom.Size natural_size,
       bool show_play_pause_button);
 
-  // Inform the session about the current and total media times.
-  UpdateTime(mojo_base.mojom.TimeDelta current_time,
-             mojo_base.mojom.TimeDelta duration);
-
   // Request to stop the current session. It will close the Picture-in-Picture
   // window and make other calls related to the session no-ops.
   Stop() => ();
@@ -55,12 +50,14 @@ interface PictureInPictureService {
   // natural_size: Size of the video frames.
   // show_play_pause_button: Whether a play/pause control should be offered in
   //                         the Picture-in-Picture window.
+  // effective_media_volume: The media volume, 0.0 if muted.
   // observer: Observer to be associated with the session.
   StartSession(
       uint32 player_id,
       viz.mojom.SurfaceId? surface_id,
       gfx.mojom.Size natural_size,
       bool show_play_pause_button,
+      double effective_media_volume,
       pending_remote<PictureInPictureSessionObserver> observer)
           => (pending_remote<PictureInPictureSession>? session, gfx.mojom.Size size);
 };

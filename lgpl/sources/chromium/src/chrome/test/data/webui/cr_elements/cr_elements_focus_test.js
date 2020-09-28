@@ -7,6 +7,8 @@
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_interactive_ui_test.js']);
 
+GEN('#include "content/public/test/browser_test.h"');
+
 function CrElementsFocusTest() {}
 
 CrElementsFocusTest.prototype = {
@@ -32,9 +34,9 @@ TEST_F('CrElementsActionMenuTest', 'All', function() {
   mocha.run();
 });
 
-function CrElementsProfileAvatarSelectorFocusTest() {}
+function CrElementsProfileAvatarSelectorTest() {}
 
-CrElementsProfileAvatarSelectorFocusTest.prototype = {
+CrElementsProfileAvatarSelectorTest.prototype = {
   __proto__: CrElementsFocusTest.prototype,
 
   /** @override */
@@ -46,9 +48,8 @@ CrElementsProfileAvatarSelectorFocusTest.prototype = {
   ]),
 };
 
-TEST_F('CrElementsProfileAvatarSelectorFocusTest', 'All', function() {
-  cr_profile_avatar_selector.registerTests();
-  mocha.grep(cr_profile_avatar_selector.TestNames.Focus).run();
+TEST_F('CrElementsProfileAvatarSelectorTest', 'All', function() {
+  mocha.run();
 });
 
 /**
@@ -118,13 +119,7 @@ CrElementsInputTest.prototype = {
   ]),
 };
 
-// https://crbug.com/997943: Flaky on Mac
-GEN('#if defined(OS_MACOSX)');
-GEN('#define MAYBE_All DISABLED_All');
-GEN('#else');
-GEN('#define MAYBE_All All');
-GEN('#endif');
-TEST_F('CrElementsInputTest', 'MAYBE_All', function() {
+TEST_F('CrElementsInputTest', 'All', function() {
   mocha.run();
 });
 
@@ -199,5 +194,26 @@ CrElementsTabsTest.prototype = {
 };
 
 TEST_F('CrElementsTabsTest', 'All', function() {
+  mocha.run();
+});
+
+// eslint-disable-next-line no-var
+var IronListFocusTest = class extends CrElementsFocusTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://resources/polymer/v1_0/iron-list/iron-list.html';
+  }
+
+  /** @override */
+  get extraLibraries() {
+    return [
+      ...PolymerTest.prototype.extraLibraries,
+      '../test_util.js',
+      'iron_list_focus_test.js',
+    ];
+  }
+};
+
+TEST_F('IronListFocusTest', 'All', function() {
   mocha.run();
 });

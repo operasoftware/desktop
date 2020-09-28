@@ -25,6 +25,7 @@ bool AdjustToClearance(LayoutUnit clearance_offset, NGBfcOffset* offset) {
 
 NGConstraintSpace CreateIndefiniteConstraintSpaceForChild(
     const ComputedStyle& container_style,
+    const MinMaxSizesInput& input,
     NGLayoutInputNode child) {
   WritingMode parent_writing_mode = container_style.GetWritingMode();
   WritingMode child_writing_mode = child.Style().GetWritingMode();
@@ -35,10 +36,12 @@ NGConstraintSpace CreateIndefiniteConstraintSpaceForChild(
                                    child.CreatesNewFormattingContext());
   SetOrthogonalFallbackInlineSizeIfNeeded(container_style, child, &builder);
 
+  builder.SetCacheSlot(NGCacheSlot::kMeasure);
   builder.SetAvailableSize(indefinite_size);
-  builder.SetPercentageResolutionSize(indefinite_size);
+  builder.SetPercentageResolutionSize(
+      {kIndefiniteSize, input.percentage_resolution_block_size});
   builder.SetReplacedPercentageResolutionSize(indefinite_size);
-  builder.SetIsIntermediateLayout(true);
+  builder.SetIsShrinkToFit(child.Style().LogicalWidth().IsAuto());
   return builder.ToConstraintSpace();
 }
 

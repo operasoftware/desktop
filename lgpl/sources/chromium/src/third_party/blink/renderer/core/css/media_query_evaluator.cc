@@ -32,9 +32,9 @@
 #include "third_party/blink/public/common/css/forced_colors.h"
 #include "third_party/blink/public/common/css/navigation_controls.h"
 #include "third_party/blink/public/common/css/preferred_color_scheme.h"
+#include "third_party/blink/public/common/css/screen_spanning.h"
 #include "third_party/blink/public/mojom/manifest/display_mode.mojom-shared.h"
 #include "third_party/blink/public/platform/pointer_properties.h"
-#include "third_party/blink/public/platform/shape_properties.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_resolution_units.h"
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
@@ -58,8 +58,6 @@
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace blink {
-
-using namespace media_feature_names;
 
 enum MediaFeaturePrefix { kMinPrefix, kMaxPrefix, kNoPrefix };
 
@@ -86,7 +84,7 @@ MediaQueryEvaluator::MediaQueryEvaluator(
 
 MediaQueryEvaluator::~MediaQueryEvaluator() = default;
 
-void MediaQueryEvaluator::Trace(blink::Visitor* visitor) {
+void MediaQueryEvaluator::Trace(Visitor* visitor) const {
   visitor->Trace(media_values_);
 }
 
@@ -103,9 +101,8 @@ const String MediaQueryEvaluator::MediaType() const {
 bool MediaQueryEvaluator::MediaTypeMatch(
     const String& media_type_to_match) const {
   return media_type_to_match.IsEmpty() ||
-         DeprecatedEqualIgnoringCase(media_type_to_match,
-                                     media_type_names::kAll) ||
-         DeprecatedEqualIgnoringCase(media_type_to_match, MediaType());
+         EqualIgnoringASCIICase(media_type_to_match, media_type_names::kAll) ||
+         EqualIgnoringASCIICase(media_type_to_match, MediaType());
 }
 
 static bool ApplyRestrictor(MediaQuery::RestrictorType r, bool value) {
@@ -158,6 +155,15 @@ bool MediaQueryEvaluator::Eval(
                   device_dependent_media_query_results);
 
   return result;
+}
+
+bool MediaQueryEvaluator::DidResultsChange(
+    const MediaQueryResultList& results) const {
+  for (auto& result : results) {
+    if (Eval(result.Expression()) != result.Result())
+      return true;
+  }
+  return false;
 }
 
 template <typename T>
@@ -325,11 +331,11 @@ static bool EvalResolution(const MediaQueryExpValue& value,
   // this method only got called if this media type matches the one defined
   // in the query. Thus, if if the document's media type is "print", the
   // media type of the query will either be "print" or "all".
-  if (DeprecatedEqualIgnoringCase(media_values.MediaType(),
-                                  media_type_names::kScreen)) {
+  if (EqualIgnoringASCIICase(media_values.MediaType(),
+                             media_type_names::kScreen)) {
     actual_resolution = clampTo<float>(media_values.DevicePixelRatio());
-  } else if (DeprecatedEqualIgnoringCase(media_values.MediaType(),
-                                         media_type_names::kPrint)) {
+  } else if (EqualIgnoringASCIICase(media_values.MediaType(),
+                                    media_type_names::kPrint)) {
     // The resolution of images while printing should not depend on the DPI
     // of the screen. Until we support proper ways of querying this info
     // we use 300px which is considered minimum for current printers.
@@ -689,6 +695,15 @@ static bool AnyHoverMediaFeatureEval(const MediaQueryExpValue& value,
   }
 }
 
+static bool OriginTrialTestMediaFeatureEval(const MediaQueryExpValue& value,
+                                            MediaFeaturePrefix,
+                                            const MediaValues& media_values) {
+  // The test feature only supports a 'no-value' parsing. So if we've gotten
+  // to this point it will always match.
+  DCHECK(!value.IsValid());
+  return true;
+}
+
 static bool PointerMediaFeatureEval(const MediaQueryExpValue& value,
                                     MediaFeaturePrefix,
                                     const MediaValues& media_values) {
@@ -721,26 +736,18 @@ static bool PrefersReducedMotionMediaFeatureEval(
          media_values.PrefersReducedMotion();
 }
 
-static bool ShapeMediaFeatureEval(const MediaQueryExpValue& value,
-                                  MediaFeaturePrefix,
-                                  const MediaValues& media_values) {
+static bool PrefersReducedDataMediaFeatureEval(
+    const MediaQueryExpValue& value,
+    MediaFeaturePrefix,
+    const MediaValues& media_values) {
   if (!value.IsValid())
-    return true;
+    return media_values.PrefersReducedData();
 
   if (!value.is_id)
     return false;
 
-  DisplayShape shape = media_values.GetDisplayShape();
-
-  switch (value.id) {
-    case CSSValueID::kRect:
-      return shape == kDisplayShapeRect;
-    case CSSValueID::kRound:
-      return shape == kDisplayShapeRound;
-    default:
-      NOTREACHED();
-      return false;
-  }
+  return (value.id == CSSValueID::kNoPreference) ^
+         media_values.PrefersReducedData();
 }
 
 static bool AnyPointerMediaFeatureEval(const MediaQueryExpValue& value,
@@ -771,8 +778,7 @@ static bool ScanMediaFeatureEval(const MediaQueryExpValue& value,
                                  MediaFeaturePrefix,
                                  const MediaValues& media_values) {
   // Scan only applies to 'tv' media.
-  if (!DeprecatedEqualIgnoringCase(media_values.MediaType(),
-                                   media_type_names::kTv))
+  if (!EqualIgnoringASCIICase(media_values.MediaType(), media_type_names::kTv))
     return false;
 
   if (!value.IsValid())
@@ -837,14 +843,12 @@ static bool PrefersColorSchemeMediaFeatureEval(
       media_values.GetPreferredColorScheme();
 
   if (!value.IsValid())
-    return preferred_scheme != PreferredColorScheme::kNoPreference;
+    return true;
 
   if (!value.is_id)
     return false;
 
-  return (preferred_scheme == PreferredColorScheme::kNoPreference &&
-          value.id == CSSValueID::kNoPreference) ||
-         (preferred_scheme == PreferredColorScheme::kDark &&
+  return (preferred_scheme == PreferredColorScheme::kDark &&
           value.id == CSSValueID::kDark) ||
          (preferred_scheme == PreferredColorScheme::kLight &&
           value.id == CSSValueID::kLight);
@@ -887,6 +891,26 @@ static bool NavigationControlsMediaFeatureEval(
           value.id == CSSValueID::kBackButton);
 }
 
+static bool ScreenSpanningMediaFeatureEval(const MediaQueryExpValue& value,
+                                           MediaFeaturePrefix,
+                                           const MediaValues& media_values) {
+  ScreenSpanning screen_spanning_mode = media_values.GetScreenSpanning();
+
+  if (!value.IsValid())
+    return screen_spanning_mode != ScreenSpanning::kNone;
+
+  // We should not have parsed a valid MediaQueryExpValue if the value is not
+  // an identifier.
+  DCHECK(value.is_id);
+
+  return (screen_spanning_mode == ScreenSpanning::kNone &&
+          value.id == CSSValueID::kNone) ||
+         (screen_spanning_mode == ScreenSpanning::kSingleFoldVertical &&
+          value.id == CSSValueID::kSingleFoldVertical) ||
+         (screen_spanning_mode == ScreenSpanning::kSingleFoldHorizontal &&
+          value.id == CSSValueID::kSingleFoldHorizontal);
+}
+
 void MediaQueryEvaluator::Init() {
   // Create the table.
   g_function_map = new FunctionMap;
@@ -898,8 +922,13 @@ void MediaQueryEvaluator::Init() {
 }
 
 bool MediaQueryEvaluator::Eval(const MediaQueryExp& expr) const {
-  if (!media_values_ || !media_values_->HasValues())
-    return true;
+  if (!media_values_ || !media_values_->HasValues()) {
+    // media_values_ should only be nullptr when parsing UA stylesheets. The
+    // only media queries we support in UA stylesheets are media type queries.
+    // If HasValues() return false, it means the document frame is nullptr.
+    NOTREACHED();
+    return false;
+  }
 
   DCHECK(g_function_map);
 

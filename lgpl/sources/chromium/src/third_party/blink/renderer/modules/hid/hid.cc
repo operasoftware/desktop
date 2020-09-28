@@ -4,10 +4,14 @@
 
 #include "third_party/blink/renderer/modules/hid/hid.h"
 
+#include <utility>
+
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_hid_device_filter.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_hid_device_request_options.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -15,7 +19,6 @@
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/hid/hid_connection_event.h"
 #include "third_party/blink/renderer/modules/hid/hid_device.h"
-#include "third_party/blink/renderer/modules/hid/hid_device_request_options.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 
 namespace blink {
@@ -25,7 +28,6 @@ namespace {
 const char kContextGone[] = "Script context has shut down.";
 const char kFeaturePolicyBlocked[] =
     "Access to the feature \"hid\" is disallowed by feature policy.";
-const char kNoDeviceSelected[] = "No device selected.";
 
 void RejectWithTypeError(const String& message,
                          ScriptPromiseResolver* resolver) {
@@ -80,7 +82,12 @@ mojom::blink::HidDeviceFilterPtr ConvertDeviceFilter(
 
 }  // namespace
 
-HID::HID(ExecutionContext& context) : ContextLifecycleObserver(&context) {}
+HID::HID(ExecutionContext& context)
+    : ExecutionContextClient(&context),
+      service_(&context),
+      feature_handle_for_scheduler_(context.GetScheduler()->RegisterFeature(
+          SchedulingPolicy::Feature::kWebHID,
+          {SchedulingPolicy::RecordMetricsForBackForwardCache()})) {}
 
 HID::~HID() {
   DCHECK(get_devices_promises_.IsEmpty());
@@ -88,7 +95,7 @@ HID::~HID() {
 }
 
 ExecutionContext* HID::GetExecutionContext() const {
-  return ContextLifecycleObserver::GetExecutionContext();
+  return ExecutionContextClient::GetExecutionContext();
 }
 
 const AtomicString& HID::InterfaceName() const {
@@ -98,8 +105,36 @@ const AtomicString& HID::InterfaceName() const {
 void HID::AddedEventListener(const AtomicString& event_type,
                              RegisteredEventListener& listener) {
   EventTargetWithInlineData::AddedEventListener(event_type, listener);
-  // TODO(mattreynolds): Connect to the HID service and register for connect
-  // and disconnect events.
+
+  if (event_type != event_type_names::kConnect &&
+      event_type != event_type_names::kDisconnect) {
+    return;
+  }
+
+  auto* context = GetExecutionContext();
+  if (!context ||
+      !context->IsFeatureEnabled(mojom::blink::FeaturePolicyFeature::kHid,
+                                 ReportOptions::kDoNotReport)) {
+    return;
+  }
+
+  EnsureServiceConnection();
+  if (!receiver_.is_bound())
+    service_->RegisterClient(receiver_.BindNewEndpointAndPassRemote());
+}
+
+void HID::DeviceAdded(device::mojom::blink::HidDeviceInfoPtr device_info) {
+  auto* device = GetOrCreateDevice(std::move(device_info));
+
+  DispatchEvent(*MakeGarbageCollected<HIDConnectionEvent>(
+      event_type_names::kConnect, device));
+}
+
+void HID::DeviceRemoved(device::mojom::blink::HidDeviceInfoPtr device_info) {
+  auto* device = GetOrCreateDevice(std::move(device_info));
+
+  DispatchEvent(*MakeGarbageCollected<HIDConnectionEvent>(
+      event_type_names::kDisconnect, device));
 }
 
 ScriptPromise HID::getDevices(ScriptState* script_state,
@@ -111,8 +146,8 @@ ScriptPromise HID::getDevices(ScriptState* script_state,
     return ScriptPromise();
   }
 
-  if (!context->GetSecurityContext().IsFeatureEnabled(
-          mojom::FeaturePolicyFeature::kHid, ReportOptions::kReportOnFailure)) {
+  if (!context->IsFeatureEnabled(mojom::blink::FeaturePolicyFeature::kHid,
+                                 ReportOptions::kReportOnFailure)) {
     exception_state.ThrowSecurityError(kFeaturePolicyBlocked);
     return ScriptPromise();
   }
@@ -136,8 +171,9 @@ ScriptPromise HID::requestDevice(ScriptState* script_state,
     return ScriptPromise();
   }
 
-  if (!frame->GetDocument()->IsFeatureEnabled(
-          mojom::FeaturePolicyFeature::kHid, ReportOptions::kReportOnFailure)) {
+  if (!GetExecutionContext()->IsFeatureEnabled(
+          mojom::blink::FeaturePolicyFeature::kHid,
+          ReportOptions::kReportOnFailure)) {
     exception_state.ThrowSecurityError(kFeaturePolicyBlocked);
     return ScriptPromise();
   }
@@ -206,23 +242,21 @@ void HID::FinishGetDevices(
 
 void HID::FinishRequestDevice(
     ScriptPromiseResolver* resolver,
-    device::mojom::blink::HidDeviceInfoPtr device_info) {
+    Vector<device::mojom::blink::HidDeviceInfoPtr> device_infos) {
   DCHECK(request_device_promises_.Contains(resolver));
   request_device_promises_.erase(resolver);
 
-  if (device_info) {
-    resolver->Resolve(GetOrCreateDevice(std::move(device_info)));
-  } else {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
-        DOMExceptionCode::kNotFoundError, kNoDeviceSelected));
-  }
-  request_device_promises_.erase(resolver);
+  HeapVector<Member<HIDDevice>> devices;
+  for (auto& device_info : device_infos)
+    devices.push_back(GetOrCreateDevice(std::move(device_info)));
+
+  resolver->Resolve(devices);
 }
 
 void HID::EnsureServiceConnection() {
   DCHECK(GetExecutionContext());
 
-  if (service_)
+  if (service_.is_bound())
     return;
 
   auto task_runner =
@@ -245,18 +279,17 @@ void HID::OnServiceConnectionError() {
 
   HeapHashSet<Member<ScriptPromiseResolver>> request_device_promises;
   request_device_promises_.swap(request_device_promises);
-  for (ScriptPromiseResolver* resolver : request_device_promises) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
-        DOMExceptionCode::kNotFoundError, kNoDeviceSelected));
-  }
+  for (ScriptPromiseResolver* resolver : request_device_promises)
+    resolver->Resolve(HeapVector<Member<HIDDevice>>());
 }
 
-void HID::Trace(blink::Visitor* visitor) {
+void HID::Trace(Visitor* visitor) const {
+  visitor->Trace(service_);
   visitor->Trace(get_devices_promises_);
   visitor->Trace(request_device_promises_);
   visitor->Trace(device_cache_);
   EventTargetWithInlineData::Trace(visitor);
-  ContextLifecycleObserver::Trace(visitor);
+  ExecutionContextClient::Trace(visitor);
 }
 
 }  // namespace blink

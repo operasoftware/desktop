@@ -5,13 +5,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_COMMON_THROTTLING_TASK_QUEUE_THROTTLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_COMMON_THROTTLING_TASK_QUEUE_THROTTLER_H_
 
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
 #include "base/task/sequence_manager/task_queue.h"
 #include "base/task/sequence_manager/time_domain.h"
 #include "base/threading/thread_checker.h"
+#include "base/time/time.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/scheduler/common/cancelable_closure_holder.h"
 #include "third_party/blink/renderer/platform/scheduler/common/throttling/budget_pool.h"
@@ -143,7 +143,6 @@ class PLATFORM_EXPORT TaskQueueThrottler : public BudgetPoolController {
     bool DecrementRefCount();
 
     // TaskQueue::Observer implementation:
-    void OnPostTask(base::Location from_here, base::TimeDelta delay) override;
     void OnQueueNextWakeUpChanged(base::TimeTicks wake_up) override;
 
     size_t throttling_ref_count() const { return throttling_ref_count_; }
@@ -152,11 +151,28 @@ class PLATFORM_EXPORT TaskQueueThrottler : public BudgetPoolController {
 
     HashSet<BudgetPool*>& budget_pools() { return budget_pools_; }
 
+    base::TimeTicks next_granted_run_time() const {
+      return next_granted_run_time_;
+    }
+    void set_next_granted_run_time(base::TimeTicks next_granted_run_time) {
+      next_granted_run_time_ = next_granted_run_time;
+    }
+
    private:
     base::sequence_manager::TaskQueue* const queue_;
     TaskQueueThrottler* const throttler_;
     size_t throttling_ref_count_ = 0;
     HashSet<BudgetPool*> budget_pools_;
+
+    // The next granted run time for |queue_|. Is TimeTicks::Max() when there is
+    // no next granted run time, for example when:
+    // - The queue didn't request a wake up.
+    // - The queue only has immediate tasks which are currently allowed to run.
+    // - A wake up just happened and the next granted run time is about to be
+    //   re-evaluated.
+    base::TimeTicks next_granted_run_time_ = base::TimeTicks::Max();
+
+    DISALLOW_COPY_AND_ASSIGN(Metadata);
   };
 
   using TaskQueueMap =
@@ -171,9 +187,10 @@ class PLATFORM_EXPORT TaskQueueThrottler : public BudgetPoolController {
                                        base::TimeTicks now,
                                        base::TimeTicks runtime);
 
-  // Return next possible time when queue is allowed to run in accordance
-  // with throttling policy.
-  base::TimeTicks GetNextAllowedRunTime(
+  // Evaluate the next possible time when |queue| is allowed to run in
+  // accordance with throttling policy. Returns it and stores it in |queue|'s
+  // metadata.
+  base::TimeTicks UpdateNextAllowedRunTime(
       base::sequence_manager::TaskQueue* queue,
       base::TimeTicks desired_run_time);
 
@@ -181,7 +198,9 @@ class PLATFORM_EXPORT TaskQueueThrottler : public BudgetPoolController {
                      base::TimeTicks moment,
                      bool is_wake_up);
 
-  base::Optional<base::TimeTicks> GetTimeTasksCanRunUntil(
+  // Returns the time until which tasks in |queue| can run. TimeTicks::Max()
+  // means that there are no known limits.
+  base::TimeTicks GetTimeTasksCanRunUntil(
       base::sequence_manager::TaskQueue* queue,
       base::TimeTicks now,
       bool is_wake_up) const;
@@ -210,8 +229,6 @@ class PLATFORM_EXPORT TaskQueueThrottler : public BudgetPoolController {
   CancelableClosureHolder pump_throttled_tasks_closure_;
   base::Optional<base::TimeTicks> pending_pump_throttled_tasks_runtime_;
   bool allow_throttling_;
-
-  base::TimeTicks delayed_throttle_runtime_;
 
   HashMap<BudgetPool*, std::unique_ptr<BudgetPool>> budget_pools_;
 

@@ -4,10 +4,12 @@
 
 #include "third_party/blink/renderer/core/trustedtypes/trusted_type_policy.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_create_html_callback.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_create_script_callback.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_create_url_callback.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_html.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_script.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_script_url.h"
-#include "third_party/blink/renderer/core/trustedtypes/trusted_url.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/to_v8.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -20,34 +22,33 @@ TrustedTypePolicy::TrustedTypePolicy(const String& policy_name,
 
 TrustedHTML* TrustedTypePolicy::createHTML(ScriptState* script_state,
                                            const String& input,
+                                           const HeapVector<ScriptValue>& args,
                                            ExceptionState& exception_state) {
-  return CreateHTML(script_state->GetIsolate(), input, exception_state);
+  return CreateHTML(script_state->GetIsolate(), input, args, exception_state);
 }
 
 TrustedScript* TrustedTypePolicy::createScript(
     ScriptState* script_state,
     const String& input,
+    const HeapVector<ScriptValue>& args,
     ExceptionState& exception_state) {
-  return CreateScript(script_state->GetIsolate(), input, exception_state);
+  return CreateScript(script_state->GetIsolate(), input, args, exception_state);
 }
 
 TrustedScriptURL* TrustedTypePolicy::createScriptURL(
     ScriptState* script_state,
     const String& input,
+    const HeapVector<ScriptValue>& args,
     ExceptionState& exception_state) {
-  return CreateScriptURL(script_state->GetIsolate(), input, exception_state);
-}
-
-TrustedURL* TrustedTypePolicy::createURL(ScriptState* script_state,
-                                         const String& input,
-                                         ExceptionState& exception_state) {
-  return CreateURL(script_state->GetIsolate(), input, exception_state);
+  return CreateScriptURL(script_state->GetIsolate(), input, args,
+                         exception_state);
 }
 
 TrustedHTML* TrustedTypePolicy::CreateHTML(v8::Isolate* isolate,
                                            const String& input,
+                                           const HeapVector<ScriptValue>& args,
                                            ExceptionState& exception_state) {
-  if (!policy_options_->createHTML()) {
+  if (!policy_options_->hasCreateHTML()) {
     exception_state.ThrowTypeError(
         "Policy " + name_ +
         "'s TrustedTypePolicyOptions did not specify a 'createHTML' member.");
@@ -55,7 +56,7 @@ TrustedHTML* TrustedTypePolicy::CreateHTML(v8::Isolate* isolate,
   }
   v8::TryCatch try_catch(isolate);
   String html;
-  if (!policy_options_->createHTML()->Invoke(nullptr, input).To(&html)) {
+  if (!policy_options_->createHTML()->Invoke(nullptr, input, args).To(&html)) {
     DCHECK(try_catch.HasCaught());
     exception_state.RethrowV8Exception(try_catch.Exception());
     return nullptr;
@@ -66,8 +67,9 @@ TrustedHTML* TrustedTypePolicy::CreateHTML(v8::Isolate* isolate,
 TrustedScript* TrustedTypePolicy::CreateScript(
     v8::Isolate* isolate,
     const String& input,
+    const HeapVector<ScriptValue>& args,
     ExceptionState& exception_state) {
-  if (!policy_options_->createScript()) {
+  if (!policy_options_->hasCreateScript()) {
     exception_state.ThrowTypeError(
         "Policy " + name_ +
         "'s TrustedTypePolicyOptions did not specify a 'createScript' member.");
@@ -75,7 +77,9 @@ TrustedScript* TrustedTypePolicy::CreateScript(
   }
   v8::TryCatch try_catch(isolate);
   String script;
-  if (!policy_options_->createScript()->Invoke(nullptr, input).To(&script)) {
+  if (!policy_options_->createScript()
+           ->Invoke(nullptr, input, args)
+           .To(&script)) {
     DCHECK(try_catch.HasCaught());
     exception_state.RethrowV8Exception(try_catch.Exception());
     return nullptr;
@@ -86,8 +90,9 @@ TrustedScript* TrustedTypePolicy::CreateScript(
 TrustedScriptURL* TrustedTypePolicy::CreateScriptURL(
     v8::Isolate* isolate,
     const String& input,
+    const HeapVector<ScriptValue>& args,
     ExceptionState& exception_state) {
-  if (!policy_options_->createScriptURL()) {
+  if (!policy_options_->hasCreateScriptURL()) {
     exception_state.ThrowTypeError("Policy " + name_ +
                                    "'s TrustedTypePolicyOptions did not "
                                    "specify a 'createScriptURL' member.");
@@ -96,7 +101,7 @@ TrustedScriptURL* TrustedTypePolicy::CreateScriptURL(
   v8::TryCatch try_catch(isolate);
   String script_url;
   if (!policy_options_->createScriptURL()
-           ->Invoke(nullptr, input)
+           ->Invoke(nullptr, input, args)
            .To(&script_url)) {
     DCHECK(try_catch.HasCaught());
     exception_state.RethrowV8Exception(try_catch.Exception());
@@ -105,30 +110,23 @@ TrustedScriptURL* TrustedTypePolicy::CreateScriptURL(
   return MakeGarbageCollected<TrustedScriptURL>(script_url);
 }
 
-TrustedURL* TrustedTypePolicy::CreateURL(v8::Isolate* isolate,
-                                         const String& input,
-                                         ExceptionState& exception_state) {
-  if (!policy_options_->createURL()) {
-    exception_state.ThrowTypeError(
-        "Policy " + name_ +
-        "'s TrustedTypePolicyOptions did not specify a 'createURL' member.");
-    return nullptr;
-  }
-  v8::TryCatch try_catch(isolate);
-  String url;
-  if (!policy_options_->createURL()->Invoke(nullptr, input).To(&url)) {
-    DCHECK(try_catch.HasCaught());
-    exception_state.RethrowV8Exception(try_catch.Exception());
-    return nullptr;
-  }
-  return MakeGarbageCollected<TrustedURL>(url);
+bool TrustedTypePolicy::HasCreateHTML() {
+  return policy_options_->hasCreateHTML();
+}
+
+bool TrustedTypePolicy::HasCreateScript() {
+  return policy_options_->hasCreateScript();
+}
+
+bool TrustedTypePolicy::HasCreateScriptURL() {
+  return policy_options_->hasCreateScriptURL();
 }
 
 String TrustedTypePolicy::name() const {
   return name_;
 }
 
-void TrustedTypePolicy::Trace(blink::Visitor* visitor) {
+void TrustedTypePolicy::Trace(Visitor* visitor) const {
   visitor->Trace(policy_options_);
   ScriptWrappable::Trace(visitor);
 }

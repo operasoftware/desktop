@@ -9,6 +9,7 @@
 #include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/optional.h"
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -45,10 +46,17 @@ const size_t kPayloadLengthOffset = kSignatureOffset + kSignatureSize;
 const size_t kPayloadLengthSize = 4;
 const size_t kPayloadOffset = kPayloadLengthOffset + kPayloadLengthSize;
 
-// Version 2 is the only token version currently supported. Version 1 was
+// Version 3 introduced support to match tokens against third party origins (see
+// design doc
+// https://docs.google.com/document/d/1xALH9W7rWmX0FpjudhDeS2TNTEOXuPn4Tlc9VmuPdHA
+// for more details).
+const uint8_t kVersion3 = 3;
+// Version 2 is also currently supported. Version 1 was
 // introduced in Chrome M50, and removed in M51. There were no experiments
 // enabled in the stable M50 release which would have used those tokens.
 const uint8_t kVersion2 = 2;
+
+const char* kUsageSubset = "subset";
 
 }  // namespace
 
@@ -62,12 +70,13 @@ std::unique_ptr<TrialToken> TrialToken::From(
   DCHECK(out_status);
   std::string token_payload;
   std::string token_signature;
-  *out_status =
-      Extract(token_text, public_key, &token_payload, &token_signature);
+  uint8_t token_version;
+  *out_status = Extract(token_text, public_key, &token_payload,
+                        &token_signature, &token_version);
   if (*out_status != OriginTrialTokenStatus::kSuccess) {
     return nullptr;
   }
-  std::unique_ptr<TrialToken> token = Parse(token_payload);
+  std::unique_ptr<TrialToken> token = Parse(token_payload, token_version);
   if (token) {
     token->signature_ = token_signature;
     *out_status = OriginTrialTokenStatus::kSuccess;
@@ -94,7 +103,8 @@ OriginTrialTokenStatus TrialToken::IsValid(const url::Origin& origin,
 OriginTrialTokenStatus TrialToken::Extract(base::StringPiece token_text,
                                            base::StringPiece public_key,
                                            std::string* out_token_payload,
-                                           std::string* out_token_signature) {
+                                           std::string* out_token_signature,
+                                           uint8_t* out_token_version) {
   if (token_text.empty()) {
     return OriginTrialTokenStatus::kMalformed;
   }
@@ -111,12 +121,12 @@ OriginTrialTokenStatus TrialToken::Extract(base::StringPiece token_text,
     return OriginTrialTokenStatus::kMalformed;
   }
 
-  // Only version 2 currently supported.
+  // Only version 2 and 3 currently supported.
   if (token_contents.length() < (kVersionOffset + kVersionSize)) {
     return OriginTrialTokenStatus::kMalformed;
   }
   uint8_t version = token_contents[kVersionOffset];
-  if (version != kVersion2) {
+  if (version != kVersion2 && version != kVersion3) {
     return OriginTrialTokenStatus::kWrongVersion;
   }
 
@@ -152,14 +162,15 @@ OriginTrialTokenStatus TrialToken::Extract(base::StringPiece token_text,
   }
 
   // Return the payload and signature, as new strings.
+  *out_token_version = version;
   *out_token_payload = token_contents.substr(kPayloadOffset, payload_length);
   *out_token_signature = signature.as_string();
   return OriginTrialTokenStatus::kSuccess;
 }
 
 // static
-std::unique_ptr<TrialToken> TrialToken::Parse(
-    const std::string& token_payload) {
+std::unique_ptr<TrialToken> TrialToken::Parse(const std::string& token_payload,
+                                              const uint8_t version) {
   // Protect against attempting to parse arbitrarily large tokens. This check is
   // required here because the fuzzer calls Parse() directly, bypassing the size
   // check in Extract().
@@ -168,45 +179,78 @@ std::unique_ptr<TrialToken> TrialToken::Parse(
     return nullptr;
   }
 
-  std::unique_ptr<base::DictionaryValue> datadict = base::DictionaryValue::From(
-      base::JSONReader::ReadDeprecated(token_payload));
-  if (!datadict) {
+  base::Optional<base::Value> datadict = base::JSONReader::Read(token_payload);
+  if (!datadict || !datadict->is_dict()) {
     return nullptr;
   }
 
-  std::string origin_string;
-  std::string feature_name;
-  int expiry_timestamp = 0;
-  datadict->GetString("origin", &origin_string);
-  datadict->GetString("feature", &feature_name);
-  datadict->GetInteger("expiry", &expiry_timestamp);
-
   // Ensure that the origin is a valid (non-opaque) origin URL.
-  url::Origin origin = url::Origin::Create(GURL(origin_string));
+  std::string* origin_string = datadict->FindStringKey("origin");
+  if (!origin_string) {
+    return nullptr;
+  }
+  url::Origin origin = url::Origin::Create(GURL(*origin_string));
   if (origin.opaque()) {
     return nullptr;
   }
 
   // The |isSubdomain| flag is optional. If found, ensure it is a valid boolean.
   bool is_subdomain = false;
-  if (datadict->HasKey("isSubdomain")) {
-    if (!datadict->GetBoolean("isSubdomain", &is_subdomain)) {
+  base::Value* is_subdomain_value = datadict->FindKey("isSubdomain");
+  if (is_subdomain_value) {
+    if (!is_subdomain_value->is_bool()) {
       return nullptr;
     }
+    is_subdomain = is_subdomain_value->GetBool();
   }
 
   // Ensure that the feature name is a valid string.
-  if (feature_name.empty()) {
+  std::string* feature_name = datadict->FindStringKey("feature");
+  if (!feature_name || feature_name->empty()) {
     return nullptr;
   }
 
   // Ensure that the expiry timestamp is a valid (positive) integer.
+  int expiry_timestamp = datadict->FindIntKey("expiry").value_or(0);
   if (expiry_timestamp <= 0) {
     return nullptr;
   }
 
-  return base::WrapUnique(
-      new TrialToken(origin, is_subdomain, feature_name, expiry_timestamp));
+  // Initialize optional version 3 fields to default values.
+  bool is_third_party = false;
+  UsageRestriction usage = UsageRestriction::kNone;
+
+  if (version == kVersion3) {
+    // The |isThirdParty| flag is optional. If found, ensure it is a valid
+    // boolean.
+    base::Value* is_third_party_value = datadict->FindKey("isThirdParty");
+    if (is_third_party_value) {
+      if (!is_third_party_value->is_bool()) {
+        return nullptr;
+      }
+      is_third_party = is_third_party_value->GetBool();
+    }
+
+    // The |usage| field is optional and can only be set if |isThirdParty| flag
+    // is true. If found, ensure its value is either empty or "subset".
+    std::string* usage_value = datadict->FindStringKey("usage");
+    if (usage_value) {
+      if (!is_third_party) {
+        return nullptr;
+      }
+      if (usage_value->empty()) {
+        usage = UsageRestriction::kNone;
+      } else if (*usage_value == kUsageSubset) {
+        usage = UsageRestriction::kSubset;
+      } else {
+        return nullptr;
+      }
+    }
+  }
+
+  return base::WrapUnique(new TrialToken(origin, is_subdomain, *feature_name,
+                                         expiry_timestamp, is_third_party,
+                                         usage));
 }
 
 bool TrialToken::ValidateOrigin(const url::Origin& origin) const {
@@ -247,10 +291,14 @@ bool TrialToken::ValidateSignature(base::StringPiece signature,
 TrialToken::TrialToken(const url::Origin& origin,
                        bool match_subdomains,
                        const std::string& feature_name,
-                       uint64_t expiry_timestamp)
+                       uint64_t expiry_timestamp,
+                       bool is_third_party,
+                       UsageRestriction usage_restriction)
     : origin_(origin),
       match_subdomains_(match_subdomains),
       feature_name_(feature_name),
-      expiry_time_(base::Time::FromDoubleT(expiry_timestamp)) {}
+      expiry_time_(base::Time::FromDoubleT(expiry_timestamp)),
+      is_third_party_(is_third_party),
+      usage_restriction_(usage_restriction) {}
 
 }  // namespace blink

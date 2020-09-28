@@ -23,10 +23,10 @@ class CompressionStream final : public ScriptWrappable {
   ReadableStream* readable() const;
   WritableStream* writable() const;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
-  const Member<TransformStream> transform_;
+  Member<TransformStream> transform_;
 
   DISALLOW_COPY_AND_ASSIGN(CompressionStream);
 };

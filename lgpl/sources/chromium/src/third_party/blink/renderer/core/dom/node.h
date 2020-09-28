@@ -27,7 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_NODE_H_
 
 #include "base/macros.h"
-#include "third_party/blink/public/platform/web_focus_type.h"
+#include "third_party/blink/public/mojom/input/focus_type.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
@@ -58,6 +58,7 @@ class KURL;
 class LayoutBox;
 class LayoutBoxModelObject;
 class LayoutObject;
+class MathMLQualifiedName;
 class MutationObserver;
 class MutationObserverRegistration;
 class NodeList;
@@ -66,6 +67,7 @@ class NodeOrStringOrTrustedScript;
 class NodeRareData;
 class QualifiedName;
 class RegisteredEventListener;
+class ScrollTimeline;
 class SVGQualifiedName;
 class ScrollState;
 class ScrollStateCallback;
@@ -79,12 +81,14 @@ class V8ScrollStateCallback;
 class WebPluginContainerImpl;
 struct PhysicalRect;
 
-const int kNodeStyleChangeShift = 18;
-const int kNodeCustomElementShift = 20;
+const int kDOMNodeTypeShift = 2;
+const int kElementNamespaceTypeShift = 4;
+const int kNodeStyleChangeShift = 17;
+const int kNodeCustomElementShift = 19;
 
 // Values for kChildNeedsStyleRecalcFlag, controlling whether a node gets its
 // style recalculated.
-enum StyleChangeType {
+enum StyleChangeType : uint32_t {
   // This node does not need style recalculation.
   kNoStyleChange = 0,
   // This node needs style recalculation.
@@ -93,14 +97,12 @@ enum StyleChangeType {
   kSubtreeStyleChange = 2 << kNodeStyleChangeShift,
 };
 
-enum class CustomElementState {
+enum class CustomElementState : uint32_t {
   // https://dom.spec.whatwg.org/#concept-element-custom-element-state
   kUncustomized = 0,
   kCustom = 1 << kNodeCustomElementShift,
   kUndefined = 2 << kNodeCustomElementShift,
   kFailed = 3 << kNodeCustomElementShift,
-
-  kNotDefinedFlag = 2 << kNodeCustomElementShift,
 };
 
 enum class SelectionStartPolicy {
@@ -116,7 +118,7 @@ enum class SlotChangeType {
   kSuppressSlotChangeEvent,
 };
 
-enum class CloneChildrenFlag { kClone, kSkip };
+enum class CloneChildrenFlag { kSkip, kClone, kCloneWithShadows };
 
 // Whether or not to force creation of a legacy layout object (i.e. disallow
 // LayoutNG).
@@ -171,15 +173,14 @@ class CORE_EXPORT Node : public EventTarget {
     kDocumentPositionImplementationSpecific = 0x20,
   };
 
-  // Override operator new to allocate Node subtype objects onto
-  // a dedicated heap.
+  template <typename T>
   static void* AllocateObject(size_t size) {
     ThreadState* state =
         ThreadStateFor<ThreadingTrait<Node>::kAffinity>::GetState();
     const char* type_name = "blink::Node";
     return state->Heap().AllocateOnArenaIndex(
         state, size, BlinkGC::kNodeArenaIndex,
-        GCInfoTrait<EventTarget>::Index(), type_name);
+        GCInfoTrait<GCInfoFoldedType<T>>::Index(), type_name);
   }
 
   static void DumpStatistics();
@@ -189,6 +190,7 @@ class CORE_EXPORT Node : public EventTarget {
   // DOM methods & attributes for Node
 
   bool HasTagName(const HTMLQualifiedName&) const;
+  bool HasTagName(const MathMLQualifiedName&) const;
   bool HasTagName(const SVGQualifiedName&) const;
   virtual String nodeName() const = 0;
   virtual String nodeValue() const;
@@ -267,7 +269,7 @@ class CORE_EXPORT Node : public EventTarget {
   const AtomicString& lookupNamespaceURI(const String& prefix) const;
 
   String textContent(bool convert_brs_to_newlines = false) const;
-  void setTextContent(const String&);
+  virtual void setTextContent(const String&);
   void textContent(StringOrTrustedScript& result);
   virtual void setTextContent(const StringOrTrustedScript&, ExceptionState&);
 
@@ -276,12 +278,28 @@ class CORE_EXPORT Node : public EventTarget {
   void SetComputedStyle(scoped_refptr<const ComputedStyle> computed_style);
 
   // Other methods (not part of DOM)
+  ALWAYS_INLINE bool IsTextNode() const {
+    return GetDOMNodeType() == DOMNodeType::kText;
+  }
+  ALWAYS_INLINE bool IsContainerNode() const {
+    return GetFlag(kIsContainerFlag);
+  }
+  ALWAYS_INLINE bool IsElementNode() const {
+    return GetDOMNodeType() == DOMNodeType::kElement;
+  }
+  ALWAYS_INLINE bool IsDocumentFragment() const {
+    return GetDOMNodeType() == DOMNodeType::kDocumentFragment;
+  }
 
-  bool IsElementNode() const { return GetFlag(kIsElementFlag); }
-  bool IsContainerNode() const { return GetFlag(kIsContainerFlag); }
-  bool IsTextNode() const { return GetFlag(kIsTextFlag); }
-  bool IsHTMLElement() const { return GetFlag(kIsHTMLFlag); }
-  bool IsSVGElement() const { return GetFlag(kIsSVGFlag); }
+  ALWAYS_INLINE bool IsHTMLElement() const {
+    return GetElementNamespaceType() == ElementNamespaceType::kHTML;
+  }
+  ALWAYS_INLINE bool IsMathMLElement() const {
+    return GetElementNamespaceType() == ElementNamespaceType::kMathML;
+  }
+  ALWAYS_INLINE bool IsSVGElement() const {
+    return GetElementNamespaceType() == ElementNamespaceType::kSVG;
+  }
 
   DISABLE_CFI_PERF bool IsPseudoElement() const {
     return GetPseudoId() != kPseudoIdNone;
@@ -291,6 +309,9 @@ class CORE_EXPORT Node : public EventTarget {
   }
   DISABLE_CFI_PERF bool IsAfterPseudoElement() const {
     return GetPseudoId() == kPseudoIdAfter;
+  }
+  DISABLE_CFI_PERF bool IsMarkerPseudoElement() const {
+    return GetPseudoId() == kPseudoIdMarker;
   }
   DISABLE_CFI_PERF bool IsFirstLetterPseudoElement() const {
     return GetPseudoId() == kPseudoIdFirstLetter;
@@ -338,7 +359,6 @@ class CORE_EXPORT Node : public EventTarget {
 
   bool IsDocumentNode() const;
   bool IsTreeScope() const;
-  bool IsDocumentFragment() const { return GetFlag(kIsDocumentFragmentFlag); }
   bool IsShadowRoot() const { return IsDocumentFragment() && IsTreeScope(); }
   bool IsV0InsertionPoint() const { return GetFlag(kIsV0InsertionPointFlag); }
 
@@ -466,12 +486,18 @@ class CORE_EXPORT Node : public EventTarget {
   // Propagates a dirty bit breadcrumb for this element up the ancestor chain.
   void MarkAncestorsWithChildNeedsStyleRecalc();
 
+  // Traverses subtree (include pseudo elements and shadow trees) and
+  // invalidates nodes whose styles depend on font metrics (e.g., 'ex' unit).
+  void MarkSubtreeNeedsStyleRecalcForFontUpdates();
+
   // Nodes which are not connected are style clean. Mark them for style recalc
   // when inserting them into a document. This method was added as a light-
   // weight alternative to SetNeedsStyleRecalc because using that method caused
   // a micro-benchmark regression (https://crbug.com/926343).
   void SetStyleChangeOnInsertion() {
     DCHECK(isConnected());
+    if (ShouldSkipMarkingStyleDirty())
+      return;
     if (!NeedsStyleRecalc())
       SetStyleChange(kLocalStyleChange);
     MarkAncestorsWithChildNeedsStyleRecalc();
@@ -575,11 +601,9 @@ class CORE_EXPORT Node : public EventTarget {
     SetFlag(flag, kHasEventTargetDataFlag);
   }
 
-  virtual void SetFocused(bool flag, WebFocusType);
+  virtual void SetFocused(bool flag, mojom::blink::FocusType);
   void SetHasFocusWithin(bool flag);
   virtual void SetDragged(bool flag);
-
-  virtual int tabIndex() const;
 
   virtual const Node* FocusDelegate() const;
   // This is called only when the node is focused.
@@ -620,6 +644,11 @@ class CORE_EXPORT Node : public EventTarget {
     return *tree_scope_;
   }
 
+  // Returns the tree scope where this element originated.
+  // Use this when resolving element references for (CSS url(...)s and #id).
+  // This differs from GetTreeScope for shadow clones inside <svg:use/>.
+  TreeScope& OriginatingTreeScope() const;
+
   bool InActiveDocument() const;
 
   // Returns true if this node is connected to a document, false otherwise.
@@ -640,7 +669,9 @@ class CORE_EXPORT Node : public EventTarget {
   bool IsChildOfV0ShadowHost() const;
   ShadowRoot* V1ShadowRootOfParent() const;
   Element* FlatTreeParentForChildDirty() const;
-  ContainerNode* GetStyleRecalcParent() const;
+  Element* GetStyleRecalcParent() const {
+    return FlatTreeParentForChildDirty();
+  }
   Element* GetReattachParent() const { return FlatTreeParentForChildDirty(); }
 
   bool IsDocumentTypeNode() const { return getNodeType() == kDocumentTypeNode; }
@@ -660,6 +691,8 @@ class CORE_EXPORT Node : public EventTarget {
   // Whether or not a selection can be started in this object
   virtual bool CanStartSelection(SelectionStartPolicy) const;
 
+  void NotifyPriorityScrollAnchorStatusChanged();
+
   // ---------------------------------------------------------------------------
   // Integration with layout tree
 
@@ -669,8 +702,8 @@ class CORE_EXPORT Node : public EventTarget {
   // have one as well.
   LayoutObject* GetLayoutObject() const {
     return HasRareData()
-               ? data_.rare_data_->GetNodeRenderingData()->GetLayoutObject()
-               : data_.node_layout_data_->GetLayoutObject();
+               ? DataAsNodeRareData()->GetNodeRenderingData()->GetLayoutObject()
+               : DataAsNodeRenderingData()->GetLayoutObject();
   }
   void SetLayoutObject(LayoutObject*);
   // Use these two methods with caution.
@@ -727,6 +760,7 @@ class CORE_EXPORT Node : public EventTarget {
   const ComputedStyle* GetComputedStyle() const;
   const ComputedStyle* ParentComputedStyle() const;
   const ComputedStyle& ComputedStyleRef() const;
+  bool ShouldSkipMarkingStyleDirty() const;
 
   const ComputedStyle* EnsureComputedStyle(
       PseudoId pseudo_element_specifier = kPseudoIdNone) {
@@ -746,16 +780,20 @@ class CORE_EXPORT Node : public EventTarget {
   //
   // Blink notifies this callback regardless if the subtree of the node is a
   // document tree or a floating subtree.  Implementation can determine the type
-  // of subtree by seeing insertionPoint->isConnected().  For a performance
+  // of subtree by seeing insertion_point->isConnected().  For a performance
   // reason, notifications are delivered only to ContainerNode subclasses if the
-  // insertionPoint is out of document.
+  // insertion_point is out of document.
   //
-  // There are another callback named didNotifySubtreeInsertionsToDocument(),
+  // There are another callback named DidNotifySubtreeInsertionsToDocument(),
   // which is called after all the descendant is notified, if this node was
   // inserted into the document tree. Only a few subclasses actually need
   // this. To utilize this, the node should return
-  // InsertionShouldCallDidNotifySubtreeInsertions from insertedInto().
+  // kInsertionShouldCallDidNotifySubtreeInsertions from InsertedInto().
   //
+  // InsertedInto() implementations must not modify the DOM tree, and must not
+  // dispatch synchronous events. On the other hand,
+  // DidNotifySubtreeInsertionsToDocument() may modify the DOM tree, and may
+  // dispatch synchronous events.
   enum InsertionNotificationRequest {
     kInsertionDone,
     kInsertionShouldCallDidNotifySubtreeInsertions
@@ -767,10 +805,12 @@ class CORE_EXPORT Node : public EventTarget {
 
   // Notifies the node that it is no longer part of the tree.
   //
-  // This is a dual of insertedInto(), and is similar to the
+  // This is a dual of InsertedInto(), and is similar to the
   // DOMNodeRemovedFromDocument DOM event, but does not require the overhead of
   // event dispatching, and is called _after_ the node is removed from the tree.
   //
+  // RemovedFrom() implementations must not modify the DOM tree, and must not
+  // dispatch synchronous events.
   virtual void RemovedFrom(ContainerNode& insertion_point);
 
   // FIXME(dominicc): This method is not debug-only--it is used by
@@ -802,6 +842,7 @@ class CORE_EXPORT Node : public EventTarget {
   FlatTreeNodeData* GetFlatTreeNodeData() const;
   FlatTreeNodeData& EnsureFlatTreeNodeData();
   void ClearFlatTreeNodeData();
+  void ClearFlatTreeNodeDataIfHostChanged(const ContainerNode& parent);
 
   virtual bool WillRespondToMouseMoveEvents();
   virtual bool WillRespondToMouseClickEvents();
@@ -816,7 +857,7 @@ class CORE_EXPORT Node : public EventTarget {
       ShadowTreesTreatment = kTreatShadowTreesAsDisconnected) const;
 
   const AtomicString& InterfaceName() const override;
-  ExecutionContext* GetExecutionContext() const final;
+  ExecutionContext* GetExecutionContext() const override;
 
   void RemoveAllEventListeners() override;
   void RemoveAllEventListenersRecursively();
@@ -829,10 +870,6 @@ class CORE_EXPORT Node : public EventTarget {
   }
   virtual void PostDispatchEventHandler(Event&, EventDispatchHandlingState*) {}
 
-  // TODO(crbug.com/1013385): Remove DidPreventDefault. It is here as a
-  //   temporary fix for form double-submit.
-  virtual void DidPreventDefault(const Event&) {}
-
   void DispatchScopedEvent(Event&);
 
   virtual void HandleLocalEvents(Event&);
@@ -841,16 +878,14 @@ class CORE_EXPORT Node : public EventTarget {
   DispatchEventResult DispatchDOMActivateEvent(int detail,
                                                Event& underlying_event);
 
-  void DispatchSimulatedClick(Event* underlying_event,
+  void DispatchSimulatedClick(const Event* underlying_event,
                               SimulatedClickMouseEventOptions = kSendNoEvents,
                               SimulatedClickCreationScope =
                                   SimulatedClickCreationScope::kFromUserAgent);
 
-  void DispatchInputEvent();
-
   // Perform the default action for an event.
   virtual void DefaultEventHandler(Event&);
-  void WillCallDefaultEventHandler(const Event&);
+  void UpdateHadKeyboardEvent(const Event&);
   // Should return true if this Node has activation behavior.
   // https://dom.spec.whatwg.org/#eventtarget-activation-behavior
   virtual bool HasActivationBehavior() const;
@@ -891,109 +926,138 @@ class CORE_EXPORT Node : public EventTarget {
   }
 
   void FlatTreeParentChanged();
-  void RemovedFromFlatTree() {
-    // This node was previously part of the flat tree, but due to slot re-
-    // assignment it no longer is. We need to detach the layout tree.
-    DetachLayoutTree();
-  }
+  void RemovedFromFlatTree();
 
   void SetHasDuplicateAttributes() { SetFlag(kHasDuplicateAttributes); }
   bool HasDuplicateAttribute() const {
     return GetFlag(kHasDuplicateAttributes);
   }
 
-  void SetInDOMNodeRemovedHandler(bool flag) {
-    SetFlag(flag, kInDOMNodeRemovedHandler);
-  }
-  bool InDOMNodeRemovedHandler() const {
-    return GetFlag(kInDOMNodeRemovedHandler);
-  }
-
   bool IsEffectiveRootScroller() const;
+
+  virtual LayoutBox* AutoscrollBox();
+  virtual void StopAutoscroll();
 
   // If the node is a plugin, then this returns its WebPluginContainer.
   WebPluginContainerImpl* GetWebPluginContainer() const;
 
-  void Trace(Visitor*) override;
+  void RegisterScrollTimeline(ScrollTimeline*);
+  void UnregisterScrollTimeline(ScrollTimeline*);
+
+  void Trace(Visitor*) const override;
 
  private:
-  enum NodeFlags {
+  enum NodeFlags : uint32_t {
     kHasRareDataFlag = 1,
 
     // Node type flags. These never change once created.
-    kIsTextFlag = 1 << 1,
-    kIsContainerFlag = 1 << 2,
-    kIsElementFlag = 1 << 3,
-    kIsHTMLFlag = 1 << 4,
-    kIsSVGFlag = 1 << 5,
-    kIsDocumentFragmentFlag = 1 << 6,
-    kIsV0InsertionPointFlag = 1 << 7,
+    kIsContainerFlag = 1 << 1,
+    kDOMNodeTypeMask = 0x3 << kDOMNodeTypeShift,
+    kElementNamespaceTypeMask = 0x3 << kElementNamespaceTypeShift,
+    kIsV0InsertionPointFlag = 1 << 6,
 
     // Changes based on if the element should be treated like a link,
     // ex. When setting the href attribute on an <a>.
-    kIsLinkFlag = 1 << 8,
+    kIsLinkFlag = 1 << 7,
 
     // Changes based on :hover, :active and :focus state.
-    kIsUserActionElementFlag = 1 << 9,
+    kIsUserActionElementFlag = 1 << 8,
 
     // Tree state flags. These change when the element is added/removed
     // from a DOM tree.
-    kIsConnectedFlag = 1 << 10,
-    kIsInShadowTreeFlag = 1 << 11,
+    kIsConnectedFlag = 1 << 9,
+    kIsInShadowTreeFlag = 1 << 10,
 
     // Set by the parser when the children are done parsing.
-    kIsFinishedParsingChildrenFlag = 1 << 12,
+    kIsFinishedParsingChildrenFlag = 1 << 11,
 
     // Flags related to recalcStyle.
-    kHasCustomStyleCallbacksFlag = 1 << 13,
-    kChildNeedsStyleInvalidationFlag = 1 << 14,
-    kNeedsStyleInvalidationFlag = 1 << 15,
-    kChildNeedsDistributionRecalcFlag = 1 << 16,
-    kChildNeedsStyleRecalcFlag = 1 << 17,
-    kStyleChangeMask =
-        1 << kNodeStyleChangeShift | 1 << (kNodeStyleChangeShift + 1),
+    kHasCustomStyleCallbacksFlag = 1 << 12,
+    kChildNeedsStyleInvalidationFlag = 1 << 13,
+    kNeedsStyleInvalidationFlag = 1 << 14,
+    kChildNeedsDistributionRecalcFlag = 1 << 15,
+    kChildNeedsStyleRecalcFlag = 1 << 16,
+    kStyleChangeMask = 0x3 << kNodeStyleChangeShift,
 
     kCustomElementStateMask = 0x3 << kNodeCustomElementShift,
 
-    kHasNameOrIsEditingTextFlag = 1 << 22,
-    kHasEventTargetDataFlag = 1 << 23,
+    kHasNameOrIsEditingTextFlag = 1 << 21,
+    kHasEventTargetDataFlag = 1 << 22,
 
-    kV0CustomElementFlag = 1 << 24,
-    kV0CustomElementUpgradedFlag = 1 << 25,
+    kV0CustomElementFlag = 1 << 23,
+    kV0CustomElementUpgradedFlag = 1 << 24,
 
-    kNeedsReattachLayoutTree = 1 << 26,
-    kChildNeedsReattachLayoutTree = 1 << 27,
+    kNeedsReattachLayoutTree = 1 << 25,
+    kChildNeedsReattachLayoutTree = 1 << 26,
 
-    kHasDuplicateAttributes = 1 << 28,
+    kHasDuplicateAttributes = 1 << 27,
 
-    // Temporary flag for some UseCounter items. crbug.com/859391.
-    kInDOMNodeRemovedHandler = 1 << 29,
-
-    kForceReattachLayoutTree = 1 << 30,
+    kForceReattachLayoutTree = 1 << 28,
 
     kDefaultNodeFlags = kIsFinishedParsingChildrenFlag,
+
+    // 4 bits remaining.
   };
 
-  // 1 bit remaining.
-
-  bool GetFlag(NodeFlags mask) const { return node_flags_ & mask; }
+  ALWAYS_INLINE bool GetFlag(NodeFlags mask) const {
+    return node_flags_ & mask;
+  }
   void SetFlag(bool f, NodeFlags mask) {
     node_flags_ = (node_flags_ & ~mask) | (-(int32_t)f & mask);
   }
   void SetFlag(NodeFlags mask) { node_flags_ |= mask; }
   void ClearFlag(NodeFlags mask) { node_flags_ &= ~mask; }
 
+  enum class DOMNodeType : uint32_t {
+    kElement = 0,
+    kText = 1 << kDOMNodeTypeShift,
+    kDocumentFragment = 2 << kDOMNodeTypeShift,
+    kOther = 3 << kDOMNodeTypeShift,
+  };
+  ALWAYS_INLINE DOMNodeType GetDOMNodeType() const {
+    return static_cast<DOMNodeType>(node_flags_ & kDOMNodeTypeMask);
+  }
+
+  enum class ElementNamespaceType : uint32_t {
+    kHTML = 0,
+    kMathML = 1 << kElementNamespaceTypeShift,
+    kSVG = 2 << kElementNamespaceTypeShift,
+    kOther = 3 << kElementNamespaceTypeShift,
+  };
+  ALWAYS_INLINE ElementNamespaceType GetElementNamespaceType() const {
+    return static_cast<ElementNamespaceType>(node_flags_ &
+                                             kElementNamespaceTypeMask);
+  }
+
  protected:
   enum ConstructionType {
-    kCreateOther = kIsFinishedParsingChildrenFlag,
-    kCreateText = kDefaultNodeFlags | kIsTextFlag,
-    kCreateContainer = kDefaultNodeFlags | kIsContainerFlag,
-    kCreateElement = kCreateContainer | kIsElementFlag,
-    kCreateShadowRoot =
-        kCreateContainer | kIsDocumentFragmentFlag | kIsInShadowTreeFlag,
-    kCreateDocumentFragment = kCreateContainer | kIsDocumentFragmentFlag,
-    kCreateHTMLElement = kCreateElement | kIsHTMLFlag,
-    kCreateSVGElement = kCreateElement | kIsSVGFlag,
+    kCreateOther = kDefaultNodeFlags |
+                   static_cast<NodeFlags>(DOMNodeType::kOther) |
+                   static_cast<NodeFlags>(ElementNamespaceType::kOther),
+    kCreateText = kDefaultNodeFlags |
+                  static_cast<NodeFlags>(DOMNodeType::kText) |
+                  static_cast<NodeFlags>(ElementNamespaceType::kOther),
+    kCreateContainer = kDefaultNodeFlags | kIsContainerFlag |
+                       static_cast<NodeFlags>(DOMNodeType::kOther) |
+                       static_cast<NodeFlags>(ElementNamespaceType::kOther),
+    kCreateElement = kDefaultNodeFlags | kIsContainerFlag |
+                     static_cast<NodeFlags>(DOMNodeType::kElement) |
+                     static_cast<NodeFlags>(ElementNamespaceType::kOther),
+    kCreateDocumentFragment =
+        kDefaultNodeFlags | kIsContainerFlag |
+        static_cast<NodeFlags>(DOMNodeType::kDocumentFragment) |
+        static_cast<NodeFlags>(ElementNamespaceType::kOther),
+    kCreateShadowRoot = kCreateDocumentFragment | kIsInShadowTreeFlag,
+    kCreateHTMLElement = kDefaultNodeFlags | kIsContainerFlag |
+                         static_cast<NodeFlags>(DOMNodeType::kElement) |
+                         static_cast<NodeFlags>(ElementNamespaceType::kHTML),
+    kCreateMathMLElement =
+        kDefaultNodeFlags | kIsContainerFlag |
+        static_cast<NodeFlags>(DOMNodeType::kElement) |
+        static_cast<NodeFlags>(ElementNamespaceType::kMathML),
+    kCreateSVGElement = kDefaultNodeFlags | kIsContainerFlag |
+                        static_cast<NodeFlags>(DOMNodeType::kElement) |
+                        static_cast<NodeFlags>(ElementNamespaceType::kSVG),
     kCreateDocument = kCreateContainer | kIsConnectedFlag,
     kCreateV0InsertionPoint = kCreateHTMLElement | kIsV0InsertionPointFlag,
     kCreateEditingText = kCreateText | kHasNameOrIsEditingTextFlag,
@@ -1014,7 +1078,7 @@ class CORE_EXPORT Node : public EventTarget {
 
   NodeRareData* RareData() const {
     SECURITY_DCHECK(HasRareData());
-    return static_cast<NodeRareData*>(data_.rare_data_);
+    return DataAsNodeRareData();
   }
   NodeRareData& EnsureRareData() {
     if (HasRareData())
@@ -1068,8 +1132,14 @@ class CORE_EXPORT Node : public EventTarget {
   const HeapHashSet<Member<MutationObserverRegistration>>*
   TransientMutationObserverRegistry();
 
-  inline Node* TrustedTypesCheckForScriptNode(Node* child,
-                                              ExceptionState&) const;
+  NodeRareData* DataAsNodeRareData() const {
+    DCHECK(HasRareData());
+    return reinterpret_cast<NodeRareData*>(data_.Get());
+  }
+  NodeRenderingData* DataAsNodeRenderingData() const {
+    DCHECK(!HasRareData());
+    return reinterpret_cast<NodeRenderingData*>(data_.Get());
+  }
 
   uint32_t node_flags_;
   Member<Node> parent_or_shadow_host_node_;
@@ -1077,13 +1147,7 @@ class CORE_EXPORT Node : public EventTarget {
   Member<Node> previous_;
   Member<Node> next_;
   // When a node has rare data we move the layoutObject into the rare data.
-  union DataUnion {
-    DataUnion() : node_layout_data_(&NodeRenderingData::SharedEmptyData()) {}
-    // LayoutObjects are fully owned by their DOM node. See LayoutObject's
-    // LIFETIME documentation section.
-    NodeRenderingData* node_layout_data_;
-    NodeRareDataBase* rare_data_;
-  } data_;
+  Member<NodeData> data_;
 };
 
 inline void Node::SetParentOrShadowHostNode(ContainerNode* parent) {
@@ -1098,14 +1162,6 @@ inline ContainerNode* Node::ParentOrShadowHostNode() const {
 
 // Allow equality comparisons of Nodes by reference or pointer, interchangeably.
 DEFINE_COMPARISON_OPERATORS_WITH_REFERENCES(Node)
-
-#define DEFINE_NODE_TYPE_CASTS(thisType, predicate) \
-  DEFINE_TYPE_CASTS(thisType, Node, node, node->predicate, node.predicate)
-
-// This requires isClassName(const Node&).
-#define DEFINE_NODE_TYPE_CASTS_WITH_FUNCTION(thisType)         \
-  DEFINE_TYPE_CASTS(thisType, Node, node, Is##thisType(*node), \
-                    Is##thisType(node))
 
 CORE_EXPORT std::ostream& operator<<(std::ostream&, const Node&);
 CORE_EXPORT std::ostream& operator<<(std::ostream&, const Node*);

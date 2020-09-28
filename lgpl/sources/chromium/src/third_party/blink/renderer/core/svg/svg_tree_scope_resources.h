@@ -22,15 +22,14 @@ class SVGTreeScopeResources final
     : public GarbageCollected<SVGTreeScopeResources> {
  public:
   explicit SVGTreeScopeResources(TreeScope*);
-  ~SVGTreeScopeResources();
 
   LocalSVGResource* ResourceForId(const AtomicString& id);
   LocalSVGResource* ExistingResourceForId(const AtomicString& id) const;
 
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
 
  private:
-  void ClearWeakMembers(Visitor*);
+  void ProcessCustomWeakness(const LivenessBroker&);
 
   HeapHashMap<AtomicString, WeakMember<LocalSVGResource>> resources_;
   Member<TreeScope> tree_scope_;
