@@ -25,8 +25,10 @@
  * ISO/IEC 14496-3 Part 3 Subpart 10: Technical description of lossless coding of oversampled audio
  */
 
-#include "libavutil/avassert.h"
 #include "libavutil/intreadwrite.h"
+#include "libavutil/mem_internal.h"
+#include "libavutil/reverse.h"
+#include "codec_internal.h"
 #include "internal.h"
 #include "get_bits.h"
 #include "avcodec.h"
@@ -56,7 +58,6 @@ static const int8_t probs_code_pred_coeff[3][3] = {
 typedef struct ArithCoder {
     unsigned int a;
     unsigned int c;
-    int overread;
 } ArithCoder;
 
 typedef struct Table {
@@ -81,14 +82,24 @@ static av_cold int decode_init(AVCodecContext *avctx)
     DSTContext *s = avctx->priv_data;
     int i;
 
-    if (avctx->channels > DST_MAX_CHANNELS) {
-        avpriv_request_sample(avctx, "Channel count %d", avctx->channels);
+    if (avctx->ch_layout.nb_channels > DST_MAX_CHANNELS) {
+        avpriv_request_sample(avctx, "Channel count %d", avctx->ch_layout.nb_channels);
+        return AVERROR_PATCHWELCOME;
+    }
+
+    // the sample rate is only allowed to be 64,128,256 * 44100 by ISO/IEC 14496-3:2005(E)
+    // We are a bit more tolerant here, but this check is needed to bound the size and duration
+    if (avctx->sample_rate > 512 * 44100)
+        return AVERROR_INVALIDDATA;
+
+
+    if (DST_SAMPLES_PER_FRAME(avctx->sample_rate) & 7) {
         return AVERROR_PATCHWELCOME;
     }
 
     avctx->sample_fmt = AV_SAMPLE_FMT_FLT;
 
-    for (i = 0; i < avctx->channels; i++)
+    for (i = 0; i < avctx->ch_layout.nb_channels; i++)
         memset(s->dsdctx[i].buf, 0x69, sizeof(s->dsdctx[i].buf));
 
     ff_init_dsd_data();
@@ -156,7 +167,7 @@ static int read_table(GetBitContext *gb, Table *t, const int8_t code_pred_coeff[
             for (j = method + 1; j < t->length[i]; j++) {
                 int c, x = 0;
                 for (k = 0; k < method + 1; k++)
-                    x += code_pred_coeff[method][k] * t->coeff[i][j - k - 1];
+                    x += code_pred_coeff[method][k] * (unsigned)t->coeff[i][j - k - 1];
                 c = get_sr_golomb_dst(gb, lsb_size);
                 if (x >= 0)
                     c -= (x + 4) / 8;
@@ -177,7 +188,6 @@ static void ac_init(ArithCoder *ac, GetBitContext *gb)
 {
     ac->a = 4095;
     ac->c = get_bits(gb, 12);
-    ac->overread = 0;
 }
 
 static av_always_inline void ac_get(ArithCoder *ac, GetBitContext *gb, int p, int *e)
@@ -197,8 +207,6 @@ static av_always_inline void ac_get(ArithCoder *ac, GetBitContext *gb, int p, in
     if (ac->a < 2048) {
         int n = 11 - av_log2(ac->a);
         ac->a <<= n;
-        if (get_bits_left(gb) < n)
-            ac->overread ++;
         ac->c = (ac->c << n) | get_bits(gb, n);
     }
 }
@@ -229,7 +237,7 @@ static void build_filter(int16_t table[DST_MAX_ELEMENTS][16][256], const Table *
     }
 }
 
-static int decode_frame(AVCodecContext *avctx, void *data,
+static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
                         int *got_frame_ptr, AVPacket *avpkt)
 {
     unsigned samples_per_frame = DST_SAMPLES_PER_FRAME(avctx->sample_rate);
@@ -237,11 +245,10 @@ static int decode_frame(AVCodecContext *avctx, void *data,
     unsigned map_ch_to_pelem[DST_MAX_CHANNELS];
     unsigned i, ch, same_map, dst_x_bit;
     unsigned half_prob[DST_MAX_CHANNELS];
-    const int channels = avctx->channels;
+    const int channels = avctx->ch_layout.nb_channels;
     DSTContext *s = avctx->priv_data;
     GetBitContext *gb = &s->gb;
     ArithCoder *ac = &s->ac;
-    AVFrame *frame = data;
     uint8_t *dsd;
     float *pcm;
     int ret;
@@ -351,9 +358,6 @@ static int decode_frame(AVCodecContext *avctx, void *data,
                 prob = 128;
             }
 
-            if (ac->overread > 16)
-                return AVERROR_INVALIDDATA;
-
             ac_get(ac, gb, prob, &residual);
             v = ((predict >> 15) ^ residual) & 1;
             dsd[((i >> 3) * channels + ch) << 2] |= v << (7 - (i & 0x7 ));
@@ -375,15 +379,15 @@ dsd:
     return avpkt->size;
 }
 
-AVCodec ff_dst_decoder = {
-    .name           = "dst",
-    .long_name      = NULL_IF_CONFIG_SMALL("DST (Digital Stream Transfer)"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_DST,
+const FFCodec ff_dst_decoder = {
+    .p.name         = "dst",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("DST (Digital Stream Transfer)"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_DST,
     .priv_data_size = sizeof(DSTContext),
     .init           = decode_init,
-    .decode         = decode_frame,
-    .capabilities   = AV_CODEC_CAP_DR1,
-    .sample_fmts    = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLT,
+    FF_CODEC_DECODE_CB(decode_frame),
+    .p.capabilities = AV_CODEC_CAP_DR1,
+    .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLT,
                                                       AV_SAMPLE_FMT_NONE },
 };

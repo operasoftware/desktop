@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PARSER_CSS_PARSER_TOKEN_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PARSER_CSS_PARSER_TOKEN_H_
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/parser/at_rule_descriptors.h"
@@ -158,6 +159,21 @@ class CORE_EXPORT CSSParserToken {
 
   CSSParserToken CopyWithUpdatedString(const StringView&) const;
 
+  static CSSParserTokenType ClosingTokenType(CSSParserTokenType opening_type) {
+    switch (opening_type) {
+      case kFunctionToken:
+      case kLeftParenthesisToken:
+        return kRightParenthesisToken;
+      case kLeftBracketToken:
+        return kRightBracketToken;
+      case kLeftBraceToken:
+        return kRightBraceToken;
+      default:
+        NOTREACHED();
+        return kEOFToken;
+    }
+  }
+
  private:
   void InitValueFromStringView(StringView string) {
     value_length_ = string.length();
@@ -192,4 +208,4 @@ class CORE_EXPORT CSSParserToken {
 
 }  // namespace blink
 
-#endif  // CSSSParserToken_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PARSER_CSS_PARSER_TOKEN_H_

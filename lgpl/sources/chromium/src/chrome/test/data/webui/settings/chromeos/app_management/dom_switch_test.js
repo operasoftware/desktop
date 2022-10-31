@@ -4,6 +4,8 @@
 
 'use strict';
 
+import 'chrome://os-settings/chromeos/os_settings.js';
+
 suite('<app-management-dom-switch>', function() {
   let domSwitch;
   let domBind;

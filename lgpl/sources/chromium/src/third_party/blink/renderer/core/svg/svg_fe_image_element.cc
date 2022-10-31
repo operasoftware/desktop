@@ -23,12 +23,14 @@
 
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/id_target_observer.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_fe_image.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_preserve_aspect_ratio.h"
 #include "third_party/blink/renderer/core/svg/svg_preserve_aspect_ratio.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
@@ -47,16 +49,13 @@ SVGFEImageElement::SVGFEImageElement(Document& document)
 
 SVGFEImageElement::~SVGFEImageElement() = default;
 
-void SVGFEImageElement::Dispose() {
-  ClearImageResource();
-}
-
 void SVGFEImageElement::Trace(Visitor* visitor) const {
   visitor->Trace(preserve_aspect_ratio_);
   visitor->Trace(cached_image_);
   visitor->Trace(target_id_observer_);
   SVGFilterPrimitiveStandardAttributes::Trace(visitor);
   SVGURIReference::Trace(visitor);
+  ImageResourceObserver::Trace(visitor);
 }
 
 bool SVGFEImageElement::CurrentFrameHasSingleSecurityOrigin() const {
@@ -74,7 +73,10 @@ void SVGFEImageElement::ClearResourceReferences() {
 }
 
 void SVGFEImageElement::FetchImageResource() {
-  ResourceLoaderOptions options;
+  if (!GetExecutionContext())
+    return;
+
+  ResourceLoaderOptions options(GetExecutionContext()->GetCurrentWorld());
   options.initiator_info.name = localName();
   FetchParameters params(
       ResourceRequest(GetDocument().CompleteURL(HrefString())), options);
@@ -87,6 +89,13 @@ void SVGFEImageElement::ClearImageResource() {
   if (!cached_image_)
     return;
   cached_image_->RemoveObserver(this);
+  cached_image_ = nullptr;
+}
+
+void SVGFEImageElement::Dispose() {
+  if (!cached_image_)
+    return;
+  cached_image_->DidRemoveObserver();
   cached_image_ = nullptr;
 }
 
@@ -109,7 +118,9 @@ void SVGFEImageElement::BuildPendingResource() {
   Invalidate();
 }
 
-void SVGFEImageElement::SvgAttributeChanged(const QualifiedName& attr_name) {
+void SVGFEImageElement::SvgAttributeChanged(
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kPreserveAspectRatioAttr) {
     SVGElement::InvalidationGuard invalidation_guard(this);
     Invalidate();
@@ -122,7 +133,7 @@ void SVGFEImageElement::SvgAttributeChanged(const QualifiedName& attr_name) {
     return;
   }
 
-  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(attr_name);
+  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(params);
 }
 
 Node::InsertionNotificationRequest SVGFEImageElement::InsertedInto(

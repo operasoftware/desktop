@@ -2,11 +2,16 @@
 #-index-name: English, U.S., contracted
 #-display-name: English contracted braille as used in the U.S.
 
-#+locale:en-US
+#+language:en
+#+region:en-US
 #+type:literary
 #+contraction:full
 #+grade:2
 #+system:ebae
+# Marked as "direction:both" by Bue Vester-Andersen
+# as tests run both forward and backward
+# Note: Limited tests backward.
+#+direction:both
 
 # TODO: Please correct the metadata above. It is not meant to be
 # accurate nor complete. It hasn't been verified by the table

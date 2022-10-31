@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var LineChartTest = LineChartTest || {};
+import {DataSeries} from 'chrome://sys-internals/line_chart/data_series.js';
+import {Menu} from 'chrome://sys-internals/line_chart/menu.js';
 
-LineChartTest.Menu = function() {
+suite('LineChart_Menu', function() {
   test('Menu integration test', function() {
-    const menu = new LineChart.Menu(function() {});
-    const data1 = new LineChart.DataSeries('test1', '#aabbcc');
-    const data2 = new LineChart.DataSeries('test2', '#aabbcc');
-    const data3 = new LineChart.DataSeries('test3', '#aabbcc');
+    const menu = new Menu(function() {});
+    const data1 = new DataSeries('test1', '#aabbcc');
+    const data2 = new DataSeries('test2', '#aabbcc');
+    const data3 = new DataSeries('test3', '#aabbcc');
 
     menu.addDataSeries(data1);
     menu.addDataSeries(data2);
@@ -20,17 +21,17 @@ LineChartTest.Menu = function() {
     assertEquals(menu.buttons_.length, 3);
 
     const buttons = menu.buttons_;
-    MockInteractions.tap(buttons[0]);
+    buttons[0].click();
     assertFalse(data1.isVisible());
-    MockInteractions.tap(buttons[2]);
+    buttons[2].click();
     assertFalse(data3.isVisible());
-    MockInteractions.tap(buttons[0]);
+    buttons[0].click();
     assertTrue(data1.isVisible());
 
     assertFalse(menu.buttonOuterDiv_.hasAttribute('hidden'));
-    MockInteractions.tap(menu.handleDiv_);
+    menu.handleDiv_.click();
     assertTrue(menu.buttonOuterDiv_.hasAttribute('hidden'));
-    MockInteractions.tap(menu.handleDiv_);
+    menu.handleDiv_.click();
     assertFalse(menu.buttonOuterDiv_.hasAttribute('hidden'));
 
     menu.removeDataSeries(data1);
@@ -41,6 +42,4 @@ LineChartTest.Menu = function() {
     assertEquals(menu.dataSeries_.length, 0);
     assertEquals(menu.buttons_.length, 0);
   });
-
-  mocha.run();
-};
+});

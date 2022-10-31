@@ -4,11 +4,14 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/use_counter_callback.h"
 
+#include "third_party/blink/public/common/scheme_registry.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
 
@@ -161,13 +164,6 @@ void UseCounterCallback(v8::Isolate* isolate,
     case v8::Isolate::kWasmSimdOpcodes:
       blink_feature = WebFeature::kV8WasmSimdOpcodes;
       break;
-    case v8::Isolate::kAtomicsNotify:
-      blink_feature = WebFeature::kV8AtomicsNotify;
-      break;
-    case v8::Isolate::kAtomicsWake:
-      blink_feature = WebFeature::kV8AtomicsWake;
-      deprecated = true;
-      break;
     case v8::Isolate::kCollator:
       blink_feature = WebFeature::kCollator;
       break;
@@ -243,9 +239,48 @@ void UseCounterCallback(v8::Isolate* isolate,
     case v8::Isolate::kRegExpReplaceCalledOnSlowRegExp:
       blink_feature = WebFeature::kV8RegExpReplaceCalledOnSlowRegExp;
       break;
-    case v8::Isolate::kSharedArrayBufferConstructed:
-      blink_feature = WebFeature::kV8SharedArrayBufferConstructed;
+    case v8::Isolate::kSharedArrayBufferConstructed: {
+      ExecutionContext* current_execution_context =
+          CurrentExecutionContext(isolate);
+      if (!current_execution_context) {
+        // This callback can be called in a setup where it is not possible to
+        // retrieve the current ExecutionContext, e.g. when a shared WebAssembly
+        // memory grew on a concurrent worker, and the interrupt that should
+        // take care of growing the WebAssembly memory on the current memory was
+        // triggered within the execution of a regular expression.
+        blink_feature = WebFeature::kV8SharedArrayBufferConstructed;
+        break;
+      }
+      bool is_cross_origin_isolated =
+          current_execution_context->CrossOriginIsolatedCapability();
+      String protocol =
+          current_execution_context->GetSecurityOrigin()->Protocol();
+      bool scheme_allows_sab =
+          SchemeRegistry::ShouldTreatURLSchemeAsAllowingSharedArrayBuffers(
+              protocol);
+      bool is_extension_scheme =
+          CommonSchemeRegistry::IsExtensionScheme(protocol.Ascii());
+
+      if (!is_cross_origin_isolated && is_extension_scheme) {
+        DCHECK(scheme_allows_sab);
+        blink_feature = WebFeature::
+            kV8SharedArrayBufferConstructedInExtensionWithoutIsolation;
+        deprecated = true;
+      } else if (is_cross_origin_isolated || scheme_allows_sab) {
+        blink_feature = WebFeature::kV8SharedArrayBufferConstructed;
+      } else {
+        // File an issue. It is performance critical to only file the issue once
+        // per context.
+        if (!current_execution_context
+                 ->has_filed_shared_array_buffer_creation_issue()) {
+          current_execution_context->FileSharedArrayBufferCreationIssue();
+        }
+        blink_feature =
+            WebFeature::kV8SharedArrayBufferConstructedWithoutIsolation;
+        deprecated = true;
+      }
       break;
+    }
     case v8::Isolate::kArrayPrototypeHasElements:
       blink_feature = WebFeature::kV8ArrayPrototypeHasElements;
       break;
@@ -338,6 +373,15 @@ void UseCounterCallback(v8::Isolate* isolate,
       break;
     case v8::Isolate::kWasmMultiValue:
       blink_feature = WebFeature::kV8WasmMultiValue;
+      break;
+    case v8::Isolate::kWasmExceptionHandling:
+      blink_feature = WebFeature::kV8WasmExceptionHandling;
+      break;
+    case v8::Isolate::kFunctionPrototypeArguments:
+      blink_feature = WebFeature::kV8FunctionPrototypeArguments;
+      break;
+    case v8::Isolate::kFunctionPrototypeCaller:
+      blink_feature = WebFeature::kV8FunctionPrototypeCaller;
       break;
 
     default:

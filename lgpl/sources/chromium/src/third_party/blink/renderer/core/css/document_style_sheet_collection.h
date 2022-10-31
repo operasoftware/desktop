@@ -30,7 +30,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_DOCUMENT_STYLE_SHEET_COLLECTION_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_DOCUMENT_STYLE_SHEET_COLLECTION_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/css/tree_scope_style_sheet_collection.h"
 
 namespace blink {
@@ -38,16 +37,17 @@ namespace blink {
 class DocumentStyleSheetCollector;
 class StyleEngine;
 class TreeScope;
-class ViewportStyleResolver;
 
 class DocumentStyleSheetCollection final
     : public TreeScopeStyleSheetCollection {
  public:
   explicit DocumentStyleSheetCollection(TreeScope&);
+  DocumentStyleSheetCollection(const DocumentStyleSheetCollection&) = delete;
+  DocumentStyleSheetCollection& operator=(const DocumentStyleSheetCollection&) =
+      delete;
 
   void UpdateActiveStyleSheets(StyleEngine&);
   void CollectStyleSheets(StyleEngine&, DocumentStyleSheetCollector&);
-  void CollectViewportRules(ViewportStyleResolver&);
 
   void Trace(Visitor* visitor) const override {
     TreeScopeStyleSheetCollection::Trace(visitor);
@@ -56,9 +56,8 @@ class DocumentStyleSheetCollection final
  private:
   void CollectStyleSheetsFromCandidates(StyleEngine&,
                                         DocumentStyleSheetCollector&);
-  DISALLOW_COPY_AND_ASSIGN(DocumentStyleSheetCollection);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_DOCUMENT_STYLE_SHEET_COLLECTION_H_

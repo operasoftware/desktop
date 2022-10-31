@@ -27,45 +27,46 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_HISTORY_H_
 
 #include "base/gtest_prod_util.h"
+#include "third_party/blink/public/mojom/page_state/page_state.mojom-blink.h"
 #include "third_party/blink/public/web/web_frame_load_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/loader/frame_loader_types.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
 
-class LocalFrame;
+class LocalDOMWindow;
 class KURL;
 class ExceptionState;
-class SecurityOrigin;
+class HistoryItem;
 class ScriptState;
 
 // This class corresponds to the History interface.
 class CORE_EXPORT History final : public ScriptWrappable,
                                   public ExecutionContextClient {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(History);
 
  public:
-  explicit History(LocalFrame*);
+  explicit History(LocalDOMWindow*);
 
   unsigned length(ExceptionState&) const;
   ScriptValue state(ScriptState*, ExceptionState&);
 
-  void back(ScriptState*, ExceptionState&);
-  void forward(ScriptState*, ExceptionState&);
-  void go(ScriptState*, int delta, ExceptionState&);
+  void back(ExceptionState&);
+  void forward(ExceptionState&);
+  void go(int delta, ExceptionState&);
 
-  void pushState(v8::Isolate* isolate,
+  void pushState(ScriptState*,
                  const ScriptValue& data,
                  const String& title,
                  const String& url,
                  ExceptionState&);
 
-  void replaceState(v8::Isolate* isolate,
+  void replaceState(ScriptState*,
                     const ScriptValue& data,
                     const String& title,
                     const String& url,
@@ -79,24 +80,16 @@ class CORE_EXPORT History final : public ScriptWrappable,
   void Trace(Visitor*) const override;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(HistoryTest, CanChangeToURL);
-  FRIEND_TEST_ALL_PREFIXES(HistoryTest, CanChangeToURLInFileOrigin);
-  FRIEND_TEST_ALL_PREFIXES(HistoryTest, CanChangeToURLInUniqueOrigin);
-
-  static bool CanChangeToUrl(const KURL&,
-                             const SecurityOrigin*,
-                             const KURL& document_url);
-
   KURL UrlForState(const String& url);
 
   void StateObjectAdded(scoped_refptr<SerializedScriptValue>,
                         const String& title,
                         const String& url,
-                        HistoryScrollRestorationType,
                         WebFrameLoadType,
                         ExceptionState&);
   SerializedScriptValue* StateInternal() const;
-  HistoryScrollRestorationType ScrollRestorationInternal() const;
+  mojom::blink::ScrollRestorationType ScrollRestorationInternal() const;
+  HistoryItem* GetHistoryItem() const;
 
   scoped_refptr<SerializedScriptValue> last_state_object_requested_;
 };

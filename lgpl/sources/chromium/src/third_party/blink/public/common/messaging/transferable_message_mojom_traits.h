@@ -47,12 +47,9 @@ struct BLINK_COMMON_EXPORT
     return input.user_activation;
   }
 
-  static bool transfer_user_activation(blink::TransferableMessage& input) {
-    return input.transfer_user_activation;
-  }
-
-  static bool allow_autoplay(blink::TransferableMessage& input) {
-    return input.allow_autoplay;
+  static blink::mojom::DelegatedCapability delegated_capability(
+      blink::TransferableMessage& input) {
+    return input.delegated_capability;
   }
 
   static bool Read(blink::mojom::TransferableMessage::DataView data,

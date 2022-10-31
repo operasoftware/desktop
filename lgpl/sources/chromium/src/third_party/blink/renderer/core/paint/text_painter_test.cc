@@ -30,12 +30,13 @@ class TextPainterTest : public RenderingTest {
  protected:
   LineLayoutText GetLineLayoutText() { return LineLayoutText(layout_text_); }
 
-  PaintInfo CreatePaintInfo(bool uses_text_as_clip, bool is_printing) {
-    return PaintInfo(
-        context_, IntRect(),
-        uses_text_as_clip ? PaintPhase::kTextClip
-                          : PaintPhase::kSelfBlockBackgroundOnly,
-        is_printing ? kGlobalPaintPrinting : kGlobalPaintNormalPhase, 0);
+  PaintInfo CreatePaintInfoForBackground() {
+    return PaintInfo(context_, CullRect(),
+                     PaintPhase::kSelfBlockBackgroundOnly);
+  }
+
+  PaintInfo CreatePaintInfoForTextClip() {
+    return PaintInfo(context_, CullRect(), PaintPhase::kTextClip);
   }
 
  protected:
@@ -46,12 +47,12 @@ class TextPainterTest : public RenderingTest {
   }
   void UpdateLayoutText() {
     layout_text_ =
-        ToLayoutText(GetDocument().body()->firstChild()->GetLayoutObject());
+        To<LayoutText>(GetDocument().body()->firstChild()->GetLayoutObject());
     ASSERT_TRUE(layout_text_);
     ASSERT_EQ("Hello world", layout_text_->GetText());
   }
 
-  LayoutText* layout_text_;
+  Persistent<LayoutText> layout_text_;
   std::unique_ptr<PaintController> paint_controller_;
   GraphicsContext context_;
 };
@@ -63,7 +64,7 @@ TEST_F(TextPainterTest, TextPaintingStyle_Simple) {
 
   TextPaintStyle text_style = TextPainter::TextPaintingStyle(
       GetLineLayoutText().GetDocument(), GetLineLayoutText().StyleRef(),
-      CreatePaintInfo(false /* usesTextAsClip */, false /* isPrinting */));
+      CreatePaintInfoForBackground());
   EXPECT_EQ(Color(0, 0, 255), text_style.fill_color);
   EXPECT_EQ(Color(0, 0, 255), text_style.stroke_color);
   EXPECT_EQ(Color(0, 0, 255), text_style.emphasis_mark_color);
@@ -77,7 +78,7 @@ TEST_F(TextPainterTest, TextPaintingStyle_AllProperties) {
   GetDocument().body()->SetInlineStyleProperty(
       CSSPropertyID::kWebkitTextStrokeColor, CSSValueID::kLime);
   GetDocument().body()->SetInlineStyleProperty(
-      CSSPropertyID::kWebkitTextEmphasisColor, CSSValueID::kBlue);
+      CSSPropertyID::kTextEmphasisColor, CSSValueID::kBlue);
   GetDocument().body()->SetInlineStyleProperty(
       CSSPropertyID::kWebkitTextStrokeWidth, 4,
       CSSPrimitiveValue::UnitType::kPixels);
@@ -87,7 +88,7 @@ TEST_F(TextPainterTest, TextPaintingStyle_AllProperties) {
 
   TextPaintStyle text_style = TextPainter::TextPaintingStyle(
       GetLineLayoutText().GetDocument(), GetLineLayoutText().StyleRef(),
-      CreatePaintInfo(false /* usesTextAsClip */, false /* isPrinting */));
+      CreatePaintInfoForBackground());
   EXPECT_EQ(Color(255, 0, 0), text_style.fill_color);
   EXPECT_EQ(Color(0, 255, 0), text_style.stroke_color);
   EXPECT_EQ(Color(0, 0, 255), text_style.emphasis_mark_color);
@@ -107,7 +108,7 @@ TEST_F(TextPainterTest, TextPaintingStyle_UsesTextAsClip) {
   GetDocument().body()->SetInlineStyleProperty(
       CSSPropertyID::kWebkitTextStrokeColor, CSSValueID::kLime);
   GetDocument().body()->SetInlineStyleProperty(
-      CSSPropertyID::kWebkitTextEmphasisColor, CSSValueID::kBlue);
+      CSSPropertyID::kTextEmphasisColor, CSSValueID::kBlue);
   GetDocument().body()->SetInlineStyleProperty(
       CSSPropertyID::kWebkitTextStrokeWidth, 4,
       CSSPrimitiveValue::UnitType::kPixels);
@@ -117,7 +118,7 @@ TEST_F(TextPainterTest, TextPaintingStyle_UsesTextAsClip) {
 
   TextPaintStyle text_style = TextPainter::TextPaintingStyle(
       GetLineLayoutText().GetDocument(), GetLineLayoutText().StyleRef(),
-      CreatePaintInfo(true /* usesTextAsClip */, false /* isPrinting */));
+      CreatePaintInfoForTextClip());
   EXPECT_EQ(Color::kBlack, text_style.fill_color);
   EXPECT_EQ(Color::kBlack, text_style.stroke_color);
   EXPECT_EQ(Color::kBlack, text_style.emphasis_mark_color);
@@ -132,11 +133,11 @@ TEST_F(TextPainterTest,
   GetDocument().body()->SetInlineStyleProperty(
       CSSPropertyID::kWebkitTextStrokeColor, CSSValueID::kLime);
   GetDocument().body()->SetInlineStyleProperty(
-      CSSPropertyID::kWebkitTextEmphasisColor, CSSValueID::kBlue);
+      CSSPropertyID::kTextEmphasisColor, CSSValueID::kBlue);
   GetDocument().body()->SetInlineStyleProperty(
       CSSPropertyID::kWebkitPrintColorAdjust, CSSValueID::kEconomy);
   GetDocument().GetSettings()->SetShouldPrintBackgrounds(false);
-  FloatSize page_size(500, 800);
+  gfx::SizeF page_size(500, 800);
   GetFrame().StartPrinting(page_size, page_size, 1);
   UpdateAllLifecyclePhasesForTest();
   // In LayoutNG, printing currently forces layout tree reattachment,
@@ -145,7 +146,7 @@ TEST_F(TextPainterTest,
 
   TextPaintStyle text_style = TextPainter::TextPaintingStyle(
       GetLineLayoutText().GetDocument(), GetLineLayoutText().StyleRef(),
-      CreatePaintInfo(false /* usesTextAsClip */, true /* isPrinting */));
+      CreatePaintInfoForBackground());
   EXPECT_EQ(Color(255, 0, 0), text_style.fill_color);
   EXPECT_EQ(Color(0, 255, 0), text_style.stroke_color);
   EXPECT_EQ(Color(0, 0, 255), text_style.emphasis_mark_color);
@@ -157,11 +158,11 @@ TEST_F(TextPainterTest, TextPaintingStyle_ForceBackgroundToWhite_Darkened) {
   GetDocument().body()->SetInlineStyleProperty(
       CSSPropertyID::kWebkitTextStrokeColor, "rgb(220, 255, 220)");
   GetDocument().body()->SetInlineStyleProperty(
-      CSSPropertyID::kWebkitTextEmphasisColor, "rgb(220, 220, 255)");
+      CSSPropertyID::kTextEmphasisColor, "rgb(220, 220, 255)");
   GetDocument().body()->SetInlineStyleProperty(
       CSSPropertyID::kWebkitPrintColorAdjust, CSSValueID::kEconomy);
   GetDocument().GetSettings()->SetShouldPrintBackgrounds(false);
-  FloatSize page_size(500, 800);
+  gfx::SizeF page_size(500, 800);
   GetFrame().StartPrinting(page_size, page_size, 1);
   GetDocument().View()->UpdateLifecyclePhasesForPrinting();
   // In LayoutNG, printing currently forces layout tree reattachment,
@@ -170,7 +171,7 @@ TEST_F(TextPainterTest, TextPaintingStyle_ForceBackgroundToWhite_Darkened) {
 
   TextPaintStyle text_style = TextPainter::TextPaintingStyle(
       GetLineLayoutText().GetDocument(), GetLineLayoutText().StyleRef(),
-      CreatePaintInfo(false /* usesTextAsClip */, true /* isPrinting */));
+      CreatePaintInfoForBackground());
   EXPECT_EQ(Color(255, 220, 220).Dark(), text_style.fill_color);
   EXPECT_EQ(Color(220, 255, 220).Dark(), text_style.stroke_color);
   EXPECT_EQ(Color(220, 220, 255).Dark(), text_style.emphasis_mark_color);

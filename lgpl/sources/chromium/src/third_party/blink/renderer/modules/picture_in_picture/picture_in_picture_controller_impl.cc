@@ -7,23 +7,32 @@
 #include <limits>
 #include <utility>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "media/mojo/mojom/media_player.mojom-blink.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
+#include "third_party/blink/public/common/media/display_type.h"
+#include "third_party/blink/public/common/scheme_registry.h"
 #include "third_party/blink/public/mojom/manifest/display_mode.mojom-shared.h"
-#include "third_party/blink/renderer/bindings/modules/v8/v8_picture_in_picture_options.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
+#include "third_party/blink/public/web/web_picture_in_picture_window_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
+#include "third_party/blink/renderer/core/layout/layout_video.h"
 #include "third_party/blink/renderer/modules/picture_in_picture/picture_in_picture_event.h"
-#include "third_party/blink/renderer/modules/picture_in_picture/picture_in_picture_window.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/widget/frame_widget.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -34,13 +43,6 @@ namespace {
 bool ShouldShowPlayPauseButton(const HTMLVideoElement& element) {
   return element.GetLoadType() != WebMediaPlayer::kLoadTypeMediaStream &&
          element.duration() != std::numeric_limits<double>::infinity();
-}
-
-bool IsVideoElement(const Element& element) {
-  if (!element.IsMediaElement())
-    return false;
-
-  return IsA<HTMLVideoElement>(static_cast<const HTMLMediaElement&>(element));
 }
 
 }  // namespace
@@ -72,84 +74,60 @@ PictureInPictureControllerImpl::IsDocumentAllowed(bool report_failure) const {
     return Status::kDisabledBySystem;
 
   // If document is not allowed to use the policy-controlled feature named
-  // "picture-in-picture", return kDisabledByFeaturePolicy status.
+  // "picture-in-picture", return kDisabledByPermissionsPolicy status.
   if (RuntimeEnabledFeatures::PictureInPictureAPIEnabled() &&
       !GetSupplementable()->GetExecutionContext()->IsFeatureEnabled(
-          blink::mojom::blink::FeaturePolicyFeature::kPictureInPicture,
+          blink::mojom::blink::PermissionsPolicyFeature::kPictureInPicture,
           report_failure ? ReportOptions::kReportOnFailure
                          : ReportOptions::kDoNotReport)) {
-    return Status::kDisabledByFeaturePolicy;
+    return Status::kDisabledByPermissionsPolicy;
   }
 
   return Status::kEnabled;
 }
 
 PictureInPictureController::Status
-PictureInPictureControllerImpl::VerifyElementAndOptions(
-    const HTMLElement& element,
-    const PictureInPictureOptions* options) const {
-  if (!IsVideoElement(element) && options) {
-    // If either the width or height is present then we should make sure they
-    // are both present and valid.
-    if (options->hasWidth() || options->hasHeight()) {
-      if (!options->hasWidth() || options->width() <= 0)
-        return Status::kInvalidWidthOrHeightOption;
-
-      if (!options->hasHeight() || options->height() <= 0)
-        return Status::kInvalidWidthOrHeightOption;
-    }
-  }
-
-  return IsElementAllowed(element, /*report_failure=*/true);
-}
-
-PictureInPictureController::Status
 PictureInPictureControllerImpl::IsElementAllowed(
-    const HTMLElement& element) const {
+    const HTMLVideoElement& element) const {
   return IsElementAllowed(element, /*report_failure=*/false);
 }
 
 PictureInPictureController::Status
-PictureInPictureControllerImpl::IsElementAllowed(const HTMLElement& element,
-                                                 bool report_failure) const {
+PictureInPictureControllerImpl::IsElementAllowed(
+    const HTMLVideoElement& video_element,
+    bool report_failure) const {
   PictureInPictureController::Status status = IsDocumentAllowed(report_failure);
   if (status != Status::kEnabled)
     return status;
 
-  if (!IsVideoElement(element))
-    return Status::kEnabled;
-
-  const HTMLVideoElement* video_element =
-      static_cast<const HTMLVideoElement*>(&element);
-
-  if (video_element->getReadyState() == HTMLMediaElement::kHaveNothing)
+  if (video_element.getReadyState() == HTMLMediaElement::kHaveNothing)
     return Status::kMetadataNotLoaded;
 
-  if (!video_element->HasVideo())
+  if (!video_element.HasVideo())
     return Status::kVideoTrackNotAvailable;
 
-  if (video_element->FastHasAttribute(html_names::kDisablepictureinpictureAttr))
+  if (video_element.FastHasAttribute(html_names::kDisablepictureinpictureAttr))
     return Status::kDisabledByAttribute;
+
+  if (video_element.IsInAutoPIP())
+    return Status::kAutoPipAndroid;
 
   return Status::kEnabled;
 }
 
 void PictureInPictureControllerImpl::EnterPictureInPicture(
-    HTMLElement* element,
-    PictureInPictureOptions* options,
+    HTMLVideoElement* video_element,
     ScriptPromiseResolver* resolver) {
-  if (!IsVideoElement(*element)) {
-    // TODO(https://crbug.com/953957): Support element level pip.
-    if (resolver)
-      resolver->Resolve();
+  if (!video_element->GetWebMediaPlayer()) {
+    if (resolver) {
+      // TODO(crbug.com/1293949): Add an error message.
+      resolver->Reject(V8ThrowDOMException::CreateOrDie(
+          resolver->GetScriptState()->GetIsolate(),
+          DOMExceptionCode::kInvalidStateError, ""));
+    }
 
     return;
   }
-
-  HTMLVideoElement* video_element = static_cast<HTMLVideoElement*>(element);
-
-  DCHECK(video_element->GetWebMediaPlayer());
-  DCHECK(!options);
 
   if (picture_in_picture_element_ == video_element) {
     if (resolver)
@@ -161,26 +139,46 @@ void PictureInPictureControllerImpl::EnterPictureInPicture(
   if (!EnsureService())
     return;
 
-  if (video_element->DisplayType() == WebMediaPlayer::DisplayType::kFullscreen)
+  if (video_element->GetDisplayType() == DisplayType::kFullscreen)
     Fullscreen::ExitFullscreen(*GetSupplementable());
 
   video_element->GetWebMediaPlayer()->OnRequestPictureInPicture();
+  DCHECK(video_element->GetWebMediaPlayer()->GetSurfaceId().has_value());
 
   session_observer_receiver_.reset();
 
   mojo::PendingRemote<mojom::blink::PictureInPictureSessionObserver>
       session_observer;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-      element->GetDocument().GetTaskRunner(TaskType::kMediaElementEvent);
+      video_element->GetDocument().GetTaskRunner(TaskType::kMediaElementEvent);
   session_observer_receiver_.Bind(
       session_observer.InitWithNewPipeAndPassReceiver(), task_runner);
 
+  mojo::PendingAssociatedRemote<media::mojom::blink::MediaPlayer>
+      media_player_remote;
+  video_element->BindMediaPlayerReceiver(
+      media_player_remote.InitWithNewEndpointAndPassReceiver());
+
+  gfx::Rect video_bounds;
+  if (auto* layout_video =
+          DynamicTo<LayoutVideo>(video_element->GetLayoutObject())) {
+    PhysicalRect content_rect = layout_video->ReplacedContentRect();
+    video_bounds = video_element->GetDocument().View()->FrameToViewport(
+        ToEnclosingRect(layout_video->LocalToAbsoluteRect(content_rect)));
+  } else {
+    video_bounds = video_element->BoundsInViewport();
+  }
+
   picture_in_picture_service_->StartSession(
       video_element->GetWebMediaPlayer()->GetDelegateId(),
-      video_element->GetWebMediaPlayer()->GetSurfaceId(),
+      std::move(media_player_remote),
+      video_element->GetWebMediaPlayer()->GetSurfaceId().value(),
       video_element->GetWebMediaPlayer()->NaturalSize(),
       ShouldShowPlayPauseButton(*video_element),
-      video_element->EffectiveMediaVolume(), std::move(session_observer),
+      video_element->HasAudio() ? video_element->EffectiveMediaVolume()
+                                : std::numeric_limits<double>::quiet_NaN(),
+      std::move(session_observer),
+      video_bounds,
       WTF::Bind(&PictureInPictureControllerImpl::OnEnteredPictureInPicture,
                 WrapPersistent(this), WrapPersistent(video_element),
                 WrapPersistent(resolver)));
@@ -195,8 +193,12 @@ void PictureInPictureControllerImpl::OnEnteredPictureInPicture(
   // browser. We should rarely see this because we should have already rejected
   // with |kDisabledBySystem|.
   if (!session_remote) {
-    if (resolver) {
-      resolver->Reject(MakeGarbageCollected<DOMException>(
+    if (resolver &&
+        IsInParallelAlgorithmRunnable(resolver->GetExecutionContext(),
+                                      resolver->GetScriptState())) {
+      ScriptState::Scope script_state_scope(resolver->GetScriptState());
+      resolver->Reject(V8ThrowDOMException::CreateOrDie(
+          resolver->GetScriptState()->GetIsolate(),
           DOMExceptionCode::kNotSupportedError,
           "Picture-in-Picture is not available."));
     }
@@ -208,10 +210,14 @@ void PictureInPictureControllerImpl::OnEnteredPictureInPicture(
   picture_in_picture_session_.Bind(
       std::move(session_remote),
       element->GetDocument().GetTaskRunner(TaskType::kMediaElementEvent));
-
   if (IsElementAllowed(*element, /*report_failure=*/true) != Status::kEnabled) {
-    if (resolver) {
-      resolver->Reject(MakeGarbageCollected<DOMException>(
+    if (resolver &&
+        IsInParallelAlgorithmRunnable(resolver->GetExecutionContext(),
+                                      resolver->GetScriptState())) {
+      ScriptState::Scope script_state_scope(resolver->GetScriptState());
+      // TODO(crbug.com/1293949): Add an error message.
+      resolver->Reject(V8ThrowDOMException::CreateOrDie(
+          resolver->GetScriptState()->GetIsolate(),
           DOMExceptionCode::kInvalidStateError, ""));
     }
 
@@ -225,6 +231,12 @@ void PictureInPictureControllerImpl::OnEnteredPictureInPicture(
   picture_in_picture_element_ = element;
   picture_in_picture_element_->OnEnteredPictureInPicture();
 
+  // Request that viz does not throttle our LayerTree's BeginFrame messages, in
+  // case this page generates them as a side-effect of driving picture-in-
+  // picture content.  See the header file for more details, or
+  // https://crbug.com/1232173
+  SetMayThrottleIfUndrawnFrames(false);
+
   picture_in_picture_window_ = MakeGarbageCollected<PictureInPictureWindow>(
       GetExecutionContext(), picture_in_picture_window_size);
 
@@ -234,12 +246,22 @@ void PictureInPictureControllerImpl::OnEnteredPictureInPicture(
 
   if (resolver)
     resolver->Resolve(picture_in_picture_window_);
+
+  // Unregister the video frame sink from the element since it will be moved
+  // to be the child of the PiP window frame sink.
+  if (picture_in_picture_element_->GetWebMediaPlayer()) {
+    picture_in_picture_element_->GetWebMediaPlayer()
+        ->UnregisterFrameSinkHierarchy();
+  }
 }
 
 void PictureInPictureControllerImpl::ExitPictureInPicture(
     HTMLVideoElement* element,
     ScriptPromiseResolver* resolver) {
   if (!EnsureService())
+    return;
+
+  if (!picture_in_picture_session_.is_bound())
     return;
 
   picture_in_picture_session_->Stop(
@@ -256,6 +278,12 @@ void PictureInPictureControllerImpl::OnExitedPictureInPicture(
   if (!GetSupplementable()->IsActive())
     return;
 
+  // Now that this widget is not responsible for providing the content for a
+  // Picture in Picture window, we should not be producing CompositorFrames
+  // while the widget is hidden.  Let viz know that throttling us is okay if we
+  // do that.
+  SetMayThrottleIfUndrawnFrames(true);
+
   // The Picture-in-Picture window and the Picture-in-Picture element
   // should be either both set or both null.
   DCHECK(!picture_in_picture_element_ == !picture_in_picture_window_);
@@ -269,10 +297,21 @@ void PictureInPictureControllerImpl::OnExitedPictureInPicture(
     element->DispatchEvent(*PictureInPictureEvent::Create(
         event_type_names::kLeavepictureinpicture,
         WrapPersistent(picture_in_picture_window_.Get())));
+
+    // Register the video frame sink back to the element when the PiP window
+    // is closed and if the video is not unset.
+    if (element->GetWebMediaPlayer()) {
+      element->GetWebMediaPlayer()->RegisterFrameSinkHierarchy();
+    }
   }
 
   if (resolver)
     resolver->Resolve();
+}
+
+PictureInPictureWindow* PictureInPictureControllerImpl::pictureInPictureWindow()
+    const {
+  return picture_in_picture_window_;
 }
 
 Element* PictureInPictureControllerImpl::PictureInPictureElement() const {
@@ -328,7 +367,8 @@ bool PictureInPictureControllerImpl::IsEnterAutoPictureInPictureAllowed()
         GetSupplementable()->GetFrame()->GetWidgetForLocalRoot()->DisplayMode();
     is_in_pwa_window = display_mode != mojom::blink::DisplayMode::kBrowser;
   }
-  if (!(GetSupplementable()->Url().ProtocolIs("chrome-extension") ||
+  if (!(CommonSchemeRegistry::IsExtensionScheme(
+            GetSupplementable()->Url().Protocol().Ascii()) ||
         Fullscreen::FullscreenElementFrom(*GetSupplementable()) ||
         (is_in_pwa_window && GetSupplementable()->IsInWebAppScope()))) {
     return false;
@@ -363,6 +403,55 @@ bool PictureInPictureControllerImpl::IsExitAutoPictureInPictureAllowed() const {
   return (picture_in_picture_element_ == AutoPictureInPictureElement());
 }
 
+// While this API returns a Promise to the calling website, it is actually
+// currently synchronous since it uses the |window.open()| API to open the PiP
+// window. We still want the document PiP API to be asynchronous though,
+// because:
+// 1) We may eventually make this an asynchronous call to the browsser
+// 2) Other UAs may want to implement the API in an asynchronous way
+void PictureInPictureControllerImpl::CreateDocumentPictureInPictureWindow(
+    ScriptState* script_state,
+    LocalDOMWindow& opener,
+    PictureInPictureWindowOptions* options,
+    ScriptPromiseResolver* resolver,
+    ExceptionState& exception_state) {
+  WebPictureInPictureWindowOptions web_options;
+  web_options.initial_aspect_ratio = options->initialAspectRatio();
+  web_options.lock_aspect_ratio = options->lockAspectRatio();
+
+  auto* dom_window = opener.openPictureInPictureWindow(
+      script_state->GetIsolate(), web_options, exception_state);
+
+  // If we can't create a window then reject the promise with the exception
+  // state.
+  if (!dom_window || exception_state.HadException()) {
+    resolver->Reject();
+    return;
+  }
+
+  auto* local_dom_window = dom_window->ToLocalDOMWindow();
+  DCHECK(local_dom_window);
+
+  // Instantiate WindowProxy, so that a script state can be created for it
+  // successfully later.
+  // TODO(https://crbug.com/1336142): This should not be necessary.
+  local_dom_window->GetScriptController().WindowProxy(script_state->World());
+
+  // Set the Picture-in-Picture window's base URL to be the same as the opener
+  // window's so that relative URLs will be resolved in the same way.
+  DCHECK(local_dom_window->document());
+  local_dom_window->document()->SetBaseURLOverride(
+      opener.document()->BaseURL());
+
+  // TODO(https://crbug.com/1329638): Return a type specific to document pip
+  // instead of a shared interface between the two APIs.
+  picture_in_picture_window_ = MakeGarbageCollected<PictureInPictureWindow>(
+      GetExecutionContext(), gfx::Size(), local_dom_window->document());
+
+  // TODO(https://crbug.com/1329698): Resolve this in a posted task instead.
+  resolver->Resolve(picture_in_picture_window_);
+}
+
 void PictureInPictureControllerImpl::PageVisibilityChanged() {
   DCHECK(GetSupplementable());
 
@@ -377,18 +466,30 @@ void PictureInPictureControllerImpl::PageVisibilityChanged() {
   // If page becomes hidden and entering Auto Picture-in-Picture is allowed,
   // enter Picture-in-Picture.
   if (GetSupplementable()->hidden() && IsEnterAutoPictureInPictureAllowed()) {
-    EnterPictureInPicture(AutoPictureInPictureElement(), nullptr /* options */,
-                          nullptr /* promise */);
+    EnterPictureInPicture(AutoPictureInPictureElement(), /*promise=*/nullptr);
   }
 }
 
 void PictureInPictureControllerImpl::OnPictureInPictureStateChange() {
   DCHECK(picture_in_picture_element_);
   DCHECK(picture_in_picture_element_->GetWebMediaPlayer());
+  DCHECK(picture_in_picture_element_->GetWebMediaPlayer()
+             ->GetSurfaceId()
+             .has_value());
+
+  // The lifetime of the MediaPlayer mojo endpoint in the renderer is tied to
+  // WebMediaPlayer, which is recreated by |picture_in_picture_element_| on
+  // src= change. Since src= change is one of the reasons we get here, we need
+  // to give the browser a newly bound remote.
+  mojo::PendingAssociatedRemote<media::mojom::blink::MediaPlayer>
+      media_player_remote;
+  picture_in_picture_element_->BindMediaPlayerReceiver(
+      media_player_remote.InitWithNewEndpointAndPassReceiver());
 
   picture_in_picture_session_->Update(
       picture_in_picture_element_->GetWebMediaPlayer()->GetDelegateId(),
-      picture_in_picture_element_->GetWebMediaPlayer()->GetSurfaceId(),
+      std::move(media_player_remote),
+      picture_in_picture_element_->GetWebMediaPlayer()->GetSurfaceId().value(),
       picture_in_picture_element_->GetWebMediaPlayer()->NaturalSize(),
       ShouldShowPlayPauseButton(*picture_in_picture_element_));
 }
@@ -401,6 +502,14 @@ void PictureInPictureControllerImpl::OnWindowSizeChanged(
 
 void PictureInPictureControllerImpl::OnStopped() {
   OnExitedPictureInPicture(nullptr);
+}
+
+void PictureInPictureControllerImpl::SetMayThrottleIfUndrawnFrames(
+    bool may_throttle) {
+  GetSupplementable()
+      ->GetFrame()
+      ->GetWidgetForLocalRoot()
+      ->SetMayThrottleIfUndrawnFrames(may_throttle);
 }
 
 void PictureInPictureControllerImpl::Trace(Visitor* visitor) const {

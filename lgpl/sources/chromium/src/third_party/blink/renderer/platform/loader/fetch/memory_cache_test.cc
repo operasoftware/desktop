@@ -30,9 +30,11 @@
 
 #include "third_party/blink/renderer/platform/loader/fetch/memory_cache.h"
 
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/loader/fetch/raw_resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
@@ -41,6 +43,7 @@
 #include "third_party/blink/renderer/platform/loader/testing/mock_resource_client.h"
 #include "third_party/blink/renderer/platform/loader/testing/test_loader_factory.h"
 #include "third_party/blink/renderer/platform/loader/testing/test_resource_fetcher_properties.h"
+#include "third_party/blink/renderer/platform/testing/mock_context_lifecycle_notifier.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support_with_mock_scheduler.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -88,7 +91,9 @@ class MemoryCacheTest : public testing::Test {
     FakeResource(const char* url, ResourceType type)
         : FakeResource(KURL(url), type) {}
     FakeResource(const KURL& url, ResourceType type)
-        : FakeResource(ResourceRequest(url), type, ResourceLoaderOptions()) {}
+        : FakeResource(ResourceRequest(url),
+                       type,
+                       ResourceLoaderOptions(nullptr /* world */)) {}
     FakeResource(const ResourceRequest& request,
                  ResourceType type,
                  const ResourceLoaderOptions& options)
@@ -101,10 +106,13 @@ class MemoryCacheTest : public testing::Test {
     global_memory_cache_ = ReplaceMemoryCacheForTesting(
         MakeGarbageCollected<MemoryCache>(platform_->test_task_runner()));
     auto* properties = MakeGarbageCollected<TestResourceFetcherProperties>();
+    lifecycle_notifier_ = MakeGarbageCollected<MockContextLifecycleNotifier>();
     fetcher_ = MakeGarbageCollected<ResourceFetcher>(ResourceFetcherInit(
         properties->MakeDetachable(), MakeGarbageCollected<MockFetchContext>(),
         base::MakeRefCounted<scheduler::FakeTaskRunner>(),
-        MakeGarbageCollected<TestLoaderFactory>()));
+        base::MakeRefCounted<scheduler::FakeTaskRunner>(),
+        MakeGarbageCollected<TestLoaderFactory>(), lifecycle_notifier_,
+        nullptr /* back_forward_cache_loader_helper */));
   }
 
   void TearDown() override {
@@ -113,8 +121,12 @@ class MemoryCacheTest : public testing::Test {
 
   Persistent<MemoryCache> global_memory_cache_;
   Persistent<ResourceFetcher> fetcher_;
+  Persistent<MockContextLifecycleNotifier> lifecycle_notifier_;
   ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
       platform_;
+
+ private:
+  base::test::TaskEnvironment task_environment_;
 };
 
 // Verifies that setters and getters for cache capacities work correcty.
@@ -138,7 +150,8 @@ TEST_F(MemoryCacheTest, VeryLargeResourceAccounting) {
   // are supported. This fails in tests. The solution is either to use an image
   // type, or disable the tests on Android.
   // crbug.com/850788.
-  FetchParameters params(ResourceRequest("data:image/jpeg,"));
+  FetchParameters params =
+      FetchParameters::CreateForTest(ResourceRequest("data:image/jpeg,"));
   FakeDecodedResource* cached_resource =
       FakeDecodedResource::Fetch(params, fetcher_, client);
   cached_resource->FakeEncodedSize(kResourceSize1);
@@ -198,14 +211,16 @@ static void TestResourcePruningLater(ResourceFetcher* fetcher,
   EXPECT_EQ(0u, GetMemoryCache()->size());
 
   const char kData[6] = "abcde";
-  FetchParameters params1(ResourceRequest("data:image/jpeg,resource1"));
+  FetchParameters params1 = FetchParameters::CreateForTest(
+      ResourceRequest("data:image/jpeg,resource1"));
   Resource* resource1 = FakeDecodedResource::Fetch(params1, fetcher, nullptr);
   GetMemoryCache()->Remove(resource1);
   if (!identifier1.IsEmpty())
     resource1->SetCacheIdentifier(identifier1);
   resource1->AppendData(kData, 3u);
   resource1->FinishForTest();
-  FetchParameters params2(ResourceRequest("data:image/jpeg,resource2"));
+  FetchParameters params2 = FetchParameters::CreateForTest(
+      ResourceRequest("data:image/jpeg,resource2"));
   Persistent<MockResourceClient> client =
       MakeGarbageCollected<MockResourceClient>();
   Resource* resource2 = FakeDecodedResource::Fetch(params2, fetcher, client);
@@ -221,7 +236,7 @@ static void TestResourcePruningLater(ResourceFetcher* fetcher,
   platform->RunUntilIdle();
 
   // Now, the resources was pruned.
-  unsigned size_without_decode =
+  size_t size_without_decode =
       resource1->EncodedSize() + resource1->OverheadSize() +
       resource2->EncodedSize() + resource2->OverheadSize();
   EXPECT_EQ(size_without_decode, GetMemoryCache()->size());
@@ -256,9 +271,11 @@ static void TestClientRemoval(ResourceFetcher* fetcher,
       MakeGarbageCollected<MockResourceClient>();
   Persistent<MockResourceClient> client2 =
       MakeGarbageCollected<MockResourceClient>();
-  FetchParameters params1(ResourceRequest("data:image/jpeg,foo"));
+  FetchParameters params1 =
+      FetchParameters::CreateForTest(ResourceRequest("data:image/jpeg,foo"));
   Resource* resource1 = FakeDecodedResource::Fetch(params1, fetcher, client1);
-  FetchParameters params2(ResourceRequest("data:image/jpeg,bar"));
+  FetchParameters params2 =
+      FetchParameters::CreateForTest(ResourceRequest("data:image/jpeg,bar"));
   Resource* resource2 = FakeDecodedResource::Fetch(params2, fetcher, client2);
   resource1->AppendData(kData, 4u);
   resource2->AppendData(kData, 4u);
@@ -303,7 +320,7 @@ static void TestClientRemoval(ResourceFetcher* fetcher,
   WeakPersistent<Resource> resource2_weak = resource2;
 
   ThreadState::Current()->CollectAllGarbageForTesting(
-      BlinkGC::kNoHeapPointersOnStack);
+      ThreadState::StackState::kNoHeapPointers);
   // Resources are garbage-collected (WeakMemoryCache) and thus removed
   // from MemoryCache.
   EXPECT_FALSE(resource1_weak);

@@ -28,6 +28,9 @@
 
 import re
 import sys
+from six.moves import map
+
+from blinkpy.common.system.executive import ScriptError
 
 
 class PlatformInfo(object):
@@ -55,10 +58,10 @@ class PlatformInfo(object):
             self.os_version = platform_module.release()
         if self.os_name.startswith('mac'):
             self.os_version = self._determine_mac_version(
-                platform_module.mac_ver()[0])
+                self._raw_mac_version(platform_module))
         if self.os_name.startswith('win'):
             self.os_version = self._determine_win_version(
-                self._win_version_tuple(sys_module))
+                self._win_version_tuple())
         assert sys.platform != 'cygwin', 'Cygwin is not supported.'
 
     def is_mac(self):
@@ -83,6 +86,20 @@ class PlatformInfo(object):
                 return True
         return False
 
+    def is_running_rosetta(self):
+        if self.is_mac():
+            # If we are running under Rosetta, platform.machine() is
+            # 'x86_64'; we need to use a sysctl to see if we're being
+            # translated.
+            import ctypes
+            libSystem = ctypes.CDLL("libSystem.dylib")
+            ret = ctypes.c_int(0)
+            size = ctypes.c_size_t(4)
+            e = libSystem.sysctlbyname(ctypes.c_char_p(b'sysctl.proc_translated'),
+                                       ctypes.byref(ret), ctypes.byref(size), None, 0)
+            return e == 0 and ret.value == 1
+        return False
+
     def display_name(self):
         # platform.platform() returns Darwin information for Mac, which is just confusing.
         if self.is_mac():
@@ -95,7 +112,7 @@ class PlatformInfo(object):
 
     def total_bytes_memory(self):
         if self.is_mac():
-            return long(
+            return int(
                 self._executive.run_command(['sysctl', '-n', 'hw.memsize']))
         return None
 
@@ -128,6 +145,9 @@ class PlatformInfo(object):
         except Exception:  # pylint: disable=broad-except
             return sys.maxsize
 
+    def get_machine(self):
+        return self._platform_module.machine()
+
     def linux_distribution(self):
         if not self.is_linux():
             return None
@@ -144,6 +164,18 @@ class PlatformInfo(object):
 
         return 'unknown'
 
+    def _raw_mac_version(self, platform_module):
+        """Read this Mac's version string (starts with "<major>.<minor>")."""
+        try:
+            # crbug/1294954: Python's `platform.mac_ver()` can be unreliable.
+            command = ['sw_vers', '-productVersion']
+            output = self._executive.run_command(command).strip()
+            if re.match(r'\d+\.\d+', output):
+                return output
+        except (OSError, SystemError, ScriptError):
+            pass
+        return platform_module.mac_ver()[0]
+
     def _determine_os_name(self, sys_platform):
         if sys_platform == 'darwin':
             return 'mac'
@@ -157,16 +189,29 @@ class PlatformInfo(object):
             'unrecognized platform string "%s"' % sys_platform)
 
     def _determine_mac_version(self, mac_version_string):
+        major_release = int(mac_version_string.split('.')[0])
         minor_release = int(mac_version_string.split('.')[1])
-        assert 10 <= minor_release <= 15, 'Unsupported mac OS version: %s' % mac_version_string
-        return 'mac10.%d' % minor_release
+        if major_release == 10:
+            assert 13 <= minor_release <= 15, 'Unsupported mac OS version: %s' % mac_version_string
+            return 'mac{major_release}.{minor_release}'.format(
+                major_release=major_release,
+                minor_release=minor_release,
+            )
+        else:
+            assert 11 <= major_release, 'Unsupported mac OS version: %s' % mac_version_string
+            return 'mac{major_release}'.format(major_release=min(
+                12, major_release), )
 
     def _determine_linux_version(self, _):
         return 'trusty'
 
     def _determine_win_version(self, win_version_tuple):
         if win_version_tuple[:2] == (10, 0):
-            return '10'
+            # For win11 platform.win32_ver() returns (10, 0, 22000)
+            if win_version_tuple[2] >= 22000:
+                return '11'
+            else:
+                return '10.20h2'
         if win_version_tuple[:2] == (6, 3):
             return '8.1'
         if win_version_tuple[:2] == (6, 2):
@@ -185,9 +230,11 @@ class PlatformInfo(object):
                     (win_version_tuple, ))
         return 'future'
 
-    def _win_version_tuple(self, sys_module):
-        if hasattr(sys_module, 'getwindowsversion'):
-            return sys_module.getwindowsversion()
+    def _win_version_tuple(self):
+        version_str = self._platform_module.win32_ver()[1]
+        if version_str:
+            return tuple(map(int, version_str.split('.')))
+
         return self._win_version_tuple_from_cmd()
 
     def _win_version_tuple_from_cmd(self):

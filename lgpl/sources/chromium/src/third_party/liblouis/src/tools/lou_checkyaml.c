@@ -46,15 +46,13 @@ const char version_etc_copyright[] =
 
 #define AUTHORS "Christian Egli"
 
-#define DIRECTION_FORWARD 0
-#define DIRECTION_BACKWARD 1
-#define DIRECTION_BOTH 2
-#define DIRECTION_DEFAULT DIRECTION_FORWARD
-
-#define HYPHENATION_OFF 0
-#define HYPHENATION_ON 1
-#define HYPHENATION_BRAILLE 2
-#define HYPHENATION_DEFAULT HYPHENATION_OFF
+#define MODE_TRANSLATION_FORWARD 0
+#define MODE_TRANSLATION_BACKWARD 1
+#define MODE_TRANSLATION_BOTH_DIRECTIONS 2
+#define MODE_HYPHENATION 3
+#define MODE_HYPHENATION_BRAILLE 4
+#define MODE_DISPLAY 5
+#define MODE_DEFAULT MODE_TRANSLATION_FORWARD
 
 static void
 print_help(void) {
@@ -254,6 +252,7 @@ read_table_value(yaml_parser_t *parser, int start_line, int is_display) {
 		const char *table_file_name_check = NULL;
 		yaml_event_delete(&event);
 		query = read_table_query(parser, &table_file_name_check);
+		free(table_name);
 		table_name = lou_findTable(query);
 		free(query);
 		if (!table_name)
@@ -272,6 +271,7 @@ read_table_value(yaml_parser_t *parser, int start_line, int is_display) {
 						"Table query did not match expected table: expected '%s' but got "
 						"'%s'",
 						table_file_name_check, table_file_name + 1);
+			free(table_file_name_check);
 		}
 	}
 	table = malloc(sizeof(table_value));
@@ -299,32 +299,32 @@ read_table(yaml_event_t *start_event, yaml_parser_t *parser, const char *display
 			strcmp((const char *)start_event->data.scalar.value, "table"))
 		return 0;
 	v = read_table_value(parser, start_event->start_mark.line + 1, 0);
-	if (!_lou_getTranslationTable(v->name))
+	if (v->content)
+		compile_inline_table(v);
+	else if (!_lou_getTranslationTable(v->name))
 		error_at_line(EXIT_FAILURE, 0, file_name, start_event->start_mark.line + 1,
 				"Table %s not valid", v->name);
-	if (v->content) compile_inline_table(v);
-	emph_classes = lou_getEmphClasses(v->name);  // get declared emphasis classes
+	free(emph_classes);
+	emph_classes = lou_getEmphClasses(v->name);	 // get declared emphasis classes
 	table_name = strdup((char *)v->name);
 	if (!display_table) {
-		if (!_lou_getDisplayTable(v->name))
-			error_at_line(EXIT_FAILURE, 0, file_name, start_event->start_mark.line + 1,
-					"Table %s not valid", v->name);
 		if (v->content) {
 			v->is_display = 1;
 			compile_inline_table(v);
-		}
+		} else if (!_lou_getDisplayTable(v->name))
+			error_at_line(EXIT_FAILURE, 0, file_name, start_event->start_mark.line + 1,
+					"Table %s not valid", v->name);
 	}
 	free_table_value(v);
 	return table_name;
 }
 
 static void
-read_flags(yaml_parser_t *parser, int *direction, int *hyphenation) {
+read_flags(yaml_parser_t *parser, int *testmode) {
 	yaml_event_t event;
 	int parse_error = 1;
 
-	*direction = DIRECTION_DEFAULT;
-	*hyphenation = HYPHENATION_DEFAULT;
+	*testmode = MODE_DEFAULT;
 
 	if (!yaml_parser_parse(parser, &event) || (event.type != YAML_MAPPING_START_EVENT))
 		yaml_error(YAML_MAPPING_START_EVENT, &event);
@@ -338,16 +338,18 @@ read_flags(yaml_parser_t *parser, int *direction, int *hyphenation) {
 			if (!yaml_parser_parse(parser, &event) || (event.type != YAML_SCALAR_EVENT))
 				yaml_error(YAML_SCALAR_EVENT, &event);
 			if (!strcmp((const char *)event.data.scalar.value, "forward")) {
-				*direction = DIRECTION_FORWARD;
+				*testmode = MODE_TRANSLATION_FORWARD;
 			} else if (!strcmp((const char *)event.data.scalar.value, "backward")) {
-				*direction = DIRECTION_BACKWARD;
+				*testmode = MODE_TRANSLATION_BACKWARD;
 			} else if (!strcmp((const char *)event.data.scalar.value, "bothDirections")) {
-				*direction = DIRECTION_BOTH;
+				*testmode = MODE_TRANSLATION_BOTH_DIRECTIONS;
 			} else if (!strcmp((const char *)event.data.scalar.value, "hyphenate")) {
-				*hyphenation = HYPHENATION_ON;
+				*testmode = MODE_HYPHENATION;
 			} else if (!strcmp((const char *)event.data.scalar.value,
 							   "hyphenateBraille")) {
-				*hyphenation = HYPHENATION_BRAILLE;
+				*testmode = MODE_HYPHENATION_BRAILLE;
+			} else if (!strcmp((const char *)event.data.scalar.value, "display")) {
+				*testmode = MODE_DISPLAY;
 			} else {
 				error_at_line(EXIT_FAILURE, 0, file_name, event.start_mark.line + 1,
 						"Testmode '%s' not supported\n", event.data.scalar.value);
@@ -356,6 +358,7 @@ read_flags(yaml_parser_t *parser, int *direction, int *hyphenation) {
 			error_at_line(EXIT_FAILURE, 0, file_name, event.start_mark.line + 1,
 					"Flag '%s' not supported\n", event.data.scalar.value);
 		}
+		yaml_event_delete(&event);
 	}
 	if (!parse_error) yaml_parse_error(parser);
 	if (event.type != YAML_MAPPING_END_EVENT) yaml_error(YAML_MAPPING_END_EVENT, &event);
@@ -556,8 +559,8 @@ read_typeform_string(yaml_parser_t *parser, formtype *typeform, typeforms kind, 
 	typeform_len = strlen((const char *)event.data.scalar.value);
 	if (typeform_len != len)
 		error_at_line(EXIT_FAILURE, 0, file_name, event.start_mark.line + 1,
-				"Too many or too typeforms (%i) for word of length %i\n", typeform_len,
-				len);
+				"Too many or too few typeforms (%i) for word of length %i\n",
+				typeform_len, len);
 	update_typeform((const char *)event.data.scalar.value, typeform, kind);
 	yaml_event_delete(&event);
 }
@@ -600,6 +603,7 @@ read_typeforms(yaml_parser_t *parser, int len) {
 				}
 			}
 		}
+		yaml_event_delete(&event);
 	}
 	if (!parse_error) yaml_parse_error(parser);
 
@@ -609,7 +613,7 @@ read_typeforms(yaml_parser_t *parser, int len) {
 }
 
 static void
-read_options(yaml_parser_t *parser, int direction, int wordLen, int translationLen,
+read_options(yaml_parser_t *parser, int testmode, int wordLen, int translationLen,
 		int *xfail, translationModes *mode, formtype **typeform, int **inPos,
 		int **outPos, int *cursorPos, int *cursorOutPos, int *maxOutputLen,
 		int *realInputLen) {
@@ -635,7 +639,7 @@ read_options(yaml_parser_t *parser, int direction, int wordLen, int translationL
 			yaml_event_delete(&event);
 			*mode = read_mode(parser);
 		} else if (!strcmp(option_name, "typeform")) {
-			if (direction != 0) {
+			if (testmode != MODE_TRANSLATION_FORWARD) {
 				error_at_line(EXIT_FAILURE, 0, file_name, event.start_mark.line + 1,
 						"typeforms only supported with testmode 'forward'\n");
 			}
@@ -648,14 +652,14 @@ read_options(yaml_parser_t *parser, int direction, int wordLen, int translationL
 			yaml_event_delete(&event);
 			*outPos = read_outPos(parser, wordLen, translationLen);
 		} else if (!strcmp(option_name, "cursorPos")) {
-			if (direction == 2) {
+			if (testmode == MODE_TRANSLATION_BOTH_DIRECTIONS) {
 				error_at_line(EXIT_FAILURE, 0, file_name, event.start_mark.line + 1,
 						"cursorPos not supported with testmode 'bothDirections'\n");
 			}
 			yaml_event_delete(&event);
 			read_cursorPos(parser, cursorPos, cursorOutPos, wordLen, translationLen);
 		} else if (!strcmp(option_name, "maxOutputLength")) {
-			if (direction == 2) {
+			if (testmode == MODE_TRANSLATION_BOTH_DIRECTIONS) {
 				error_at_line(EXIT_FAILURE, 0, file_name, event.start_mark.line + 1,
 						"maxOutputLength not supported with testmode 'bothDirections'\n");
 			}
@@ -701,36 +705,8 @@ read_options(yaml_parser_t *parser, int direction, int wordLen, int translationL
 	yaml_event_delete(&event);
 }
 
-/* see http://stackoverflow.com/questions/5117393/utf-8-strings-length-in-linux-c */
-static int
-my_strlen_utf8_c(char *s) {
-	int i = 0, j = 0;
-	while (s[i]) {
-		if ((s[i] & 0xc0) != 0x80) j++;
-		i++;
-	}
-	return j;
-}
-
-/*
- * String parsing is also done later in check_base. At this point we
- * only need it to compute the actual string length in order to be
- * able to provide error messages when parsing typeform and position arrays.
- */
-static int
-parsed_strlen(char *s) {
-	widechar *buf;
-	int len, maxlen;
-	maxlen = my_strlen_utf8_c(s);
-	buf = malloc(sizeof(widechar) * maxlen);
-	len = _lou_extParseChars(s, buf);
-	free(buf);
-	return len;
-}
-
 static void
-read_test(yaml_parser_t *parser, char **tables, const char *display_table, int direction,
-		int hyphenation) {
+read_test(yaml_parser_t *parser, char **tables, const char *display_table, int testmode) {
 	yaml_event_t event;
 	char *description = NULL;
 	char *word;
@@ -773,7 +749,7 @@ read_test(yaml_parser_t *parser, char **tables, const char *display_table, int d
 
 	if (event.type == YAML_MAPPING_START_EVENT) {
 		yaml_event_delete(&event);
-		read_options(parser, direction, parsed_strlen(word), parsed_strlen(translation),
+		read_options(parser, testmode, parsed_strlen(word), parsed_strlen(translation),
 				&xfail, &mode, &typeform, &inPos, &outPos, &cursorPos, &cursorOutPos,
 				&maxOutputLen, &realInputLen);
 
@@ -789,10 +765,18 @@ read_test(yaml_parser_t *parser, char **tables, const char *display_table, int d
 	char **table = tables;
 	while (*table) {
 		int r;
-		if (hyphenation == HYPHENATION_ON || hyphenation == HYPHENATION_BRAILLE) {
+		if (testmode == MODE_HYPHENATION || testmode == MODE_HYPHENATION_BRAILLE) {
 			r = check_hyphenation(
-					*table, word, translation, hyphenation == HYPHENATION_BRAILLE);
+					*table, word, translation, testmode == MODE_HYPHENATION_BRAILLE);
+
+		} else if (testmode == MODE_DISPLAY) {
+			r = check_display(*table, word, translation);
 		} else {
+			int direction = DIRECTION_FORWARD;
+			if (testmode == MODE_TRANSLATION_BACKWARD)
+				direction = DIRECTION_BACKWARD;
+			else if (testmode == MODE_TRANSLATION_BOTH_DIRECTIONS)
+				direction = DIRECTION_BOTH;
 			// FIXME: Note that the typeform array was constructed using the
 			// emphasis classes mapping of the last compiled table. This
 			// means that if we are testing multiple tables at the same time
@@ -842,8 +826,8 @@ read_test(yaml_parser_t *parser, char **tables, const char *display_table, int d
 }
 
 static void
-read_tests(yaml_parser_t *parser, char **tables, const char *display_table, int direction,
-		int hyphenation) {
+read_tests(
+		yaml_parser_t *parser, char **tables, const char *display_table, int testmode) {
 	yaml_event_t event;
 	if (!yaml_parser_parse(parser, &event) || (event.type != YAML_SEQUENCE_START_EVENT))
 		yaml_error(YAML_SEQUENCE_START_EVENT, &event);
@@ -860,7 +844,7 @@ read_tests(yaml_parser_t *parser, char **tables, const char *display_table, int 
 			yaml_event_delete(&event);
 		} else if (event.type == YAML_SEQUENCE_START_EVENT) {
 			yaml_event_delete(&event);
-			read_test(parser, tables, display_table, direction, hyphenation);
+			read_test(parser, tables, display_table, testmode);
 		} else {
 			error_at_line(EXIT_FAILURE, 0, file_name, event.start_mark.line + 1,
 					"Expected %s or %s (actual %s)", event_names[YAML_SEQUENCE_END_EVENT],
@@ -876,6 +860,7 @@ read_tests(yaml_parser_t *parser, char **tables, const char *display_table, int 
 static char **
 customTableResolver(const char *tableList, const char *base) {
 	static char *dummy_table[1];
+	static char **ret;
 	char *p = (char *)tableList;
 	while (*p != '\0') {
 		if (strncmp(p, inline_table_prefix, strlen(inline_table_prefix)) == 0)
@@ -883,10 +868,15 @@ customTableResolver(const char *tableList, const char *base) {
 		while (*p != '\0' && *p != ',') p++;
 		if (*p == ',') p++;
 	}
-	return _lou_defaultTableResolver(tableList, base);
+	if (ret) {
+		for (int i = 0; ret[i]; i++) free(ret[i]);
+		free(ret);
+	}
+	ret = _lou_defaultTableResolver(tableList, base);
+	return ret;
 }
 
-#endif  // HAVE_LIBYAML
+#endif	// HAVE_LIBYAML
 
 int
 main(int argc, char *argv[]) {
@@ -932,8 +922,8 @@ main(int argc, char *argv[]) {
 #ifndef HAVE_LIBYAML
 	fprintf(stderr, "Skipping tests for %s as libyaml was not found\n", argv[1]);
 	return EXIT_SKIPPED;
-#endif  // not HAVE_LIBYAML
-#endif  // WITHOUT_YAML
+#endif	// not HAVE_LIBYAML
+#endif	// WITHOUT_YAML
 
 #ifndef WITHOUT_YAML
 #ifdef HAVE_LIBYAML
@@ -965,6 +955,7 @@ main(int argc, char *argv[]) {
 	if (i > 0)
 		if (chdir(dir_name))
 			error(EXIT_FAILURE, EIO, "Cannot change directory to %s", dir_name);
+	free(dir_name);
 
 	// register custom table resolver
 	lou_registerTableResolver(&customTableResolver);
@@ -1007,10 +998,11 @@ main(int argc, char *argv[]) {
 			free(display_table);
 			v = read_table_value(&parser, event.start_mark.line + 1, 1);
 			display_table = strdup((char *)v->name);
-			if (!_lou_getDisplayTable(display_table))
+			if (v->content)
+				compile_inline_table(v);
+			else if (!_lou_getDisplayTable(display_table))
 				error_at_line(EXIT_FAILURE, 0, file_name, event.start_mark.line + 1,
 						"Display table %s not valid", display_table);
-			if (v->content) compile_inline_table(v);
 			free_table_value(v);
 			yaml_event_delete(&event);
 			if (!yaml_parser_parse(&parser, &event))
@@ -1037,11 +1029,10 @@ main(int argc, char *argv[]) {
 
 		int haveRunTests = 0;
 		while (1) {
-			int direction = DIRECTION_DEFAULT;
-			int hyphenation = HYPHENATION_DEFAULT;
+			int testmode = MODE_DEFAULT;
 			if (!strcmp((const char *)event.data.scalar.value, "flags")) {
 				yaml_event_delete(&event);
-				read_flags(&parser, &direction, &hyphenation);
+				read_flags(&parser, &testmode);
 
 				if (!yaml_parser_parse(&parser, &event) ||
 						(event.type != YAML_SCALAR_EVENT) ||
@@ -1049,12 +1040,12 @@ main(int argc, char *argv[]) {
 					simple_error("tests expected", &parser, &event);
 				}
 				yaml_event_delete(&event);
-				read_tests(&parser, tables, display_table, direction, hyphenation);
+				read_tests(&parser, tables, display_table, testmode);
 				haveRunTests = 1;
 
 			} else if (!strcmp((const char *)event.data.scalar.value, "tests")) {
 				yaml_event_delete(&event);
-				read_tests(&parser, tables, display_table, direction, hyphenation);
+				read_tests(&parser, tables, display_table, testmode);
 				haveRunTests = 1;
 			} else {
 				if (haveRunTests) {
@@ -1099,6 +1090,6 @@ main(int argc, char *argv[]) {
 
 	return errors ? 1 : 0;
 
-#endif  // HAVE_LIBYAML
-#endif  // not WITHOUT_YAML
+#endif	// HAVE_LIBYAML
+#endif	// not WITHOUT_YAML
 }

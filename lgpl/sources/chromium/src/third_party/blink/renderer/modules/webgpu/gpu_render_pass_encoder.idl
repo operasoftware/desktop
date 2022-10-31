@@ -5,7 +5,8 @@
 // https://gpuweb.github.io/gpuweb/
 
 [
-    Exposed(Window WebGPU, Worker WebGPU)
+    Exposed(Window WebGPU, DedicatedWorker WebGPU),
+    SecureContext
 ] interface GPURenderPassEncoder {
     void setViewport(float x, float y,
                      float width, float height,
@@ -14,11 +15,17 @@
     void setScissorRect(GPUIntegerCoordinate x, GPUIntegerCoordinate y,
                         GPUIntegerCoordinate width, GPUIntegerCoordinate height);
 
-    [RaisesException] void setBlendColor(GPUColor color);
+    [RaisesException] void setBlendConstant(GPUColor color);
     void setStencilReference(GPUStencilValue reference);
 
     void executeBundles(sequence<GPURenderBundle> bundles);
-    void endPass();
+    void beginOcclusionQuery(GPUSize32 queryIndex);
+    void endOcclusionQuery();
+    void writeTimestamp(GPUQuerySet querySet, GPUSize32 queryIndex);
+
+    void end();
+    void endPass(); // TODO(dawn:1286): Remove after deprecation period.
 };
+GPURenderPassEncoder includes GPUObjectBase;
 GPURenderPassEncoder includes GPUProgrammablePassEncoder;
 GPURenderPassEncoder includes GPURenderEncoderBase;

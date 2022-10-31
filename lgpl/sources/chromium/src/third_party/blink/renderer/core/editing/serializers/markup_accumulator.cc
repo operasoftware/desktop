@@ -1,7 +1,6 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2012 Apple Inc. All rights
- * reserved.
- * Copyright (C) 2009, 2010 Google Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2012 Apple Inc. All
+ * rights reserved. Copyright (C) 2009, 2010 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,9 +23,9 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
 #include "third_party/blink/renderer/core/editing/serializers/markup_accumulator.h"
 
+#include "base/containers/adapters.h"
 #include "third_party/blink/renderer/core/dom/attr.h"
 #include "third_party/blink/renderer/core/dom/cdata_section.h"
 #include "third_party/blink/renderer/core/dom/comment.h"
@@ -36,6 +35,7 @@
 #include "third_party/blink/renderer/core/dom/processing_instruction.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_template_element.h"
 #include "third_party/blink/renderer/core/xml_names.h"
@@ -44,10 +44,6 @@
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 
 namespace blink {
-
-namespace {
-const char kShadowRootAttributeName[] = "shadowroot";
-}
 
 class MarkupAccumulator::NamespaceContext final {
   USING_FAST_MALLOC(MarkupAccumulator::NamespaceContext);
@@ -93,7 +89,8 @@ class MarkupAccumulator::NamespaceContext final {
   }
 
   AtomicString LookupNamespaceURI(const AtomicString& prefix) const {
-    return prefix_ns_map_.at(prefix ? prefix : g_empty_atom);
+    auto it = prefix_ns_map_.find(prefix ? prefix : g_empty_atom);
+    return it != prefix_ns_map_.end() ? it->value : g_null_atom;
   }
 
   const AtomicString& ContextNamespace() const { return context_namespace_; }
@@ -111,7 +108,8 @@ class MarkupAccumulator::NamespaceContext final {
   }
 
   const Vector<AtomicString> PrefixList(const AtomicString& ns) const {
-    return ns_prefixes_map_.at(ns ? ns : g_empty_atom);
+    auto it = ns_prefixes_map_.find(ns ? ns : g_empty_atom);
+    return it != ns_prefixes_map_.end() ? it->value : Vector<AtomicString>();
   }
 
  private:
@@ -304,7 +302,8 @@ MarkupAccumulator::AppendStartTagOpen(const Element& element) {
     // 12.5.1. If the local prefixes map contains a key matching prefix, then
     // let prefix be the result of generating a prefix providing as input map,
     // ns, and prefix index
-    if (element.hasAttribute(WTF::g_xmlns_with_colon + prefix)) {
+    if (element.hasAttribute(
+            AtomicString(String(WTF::g_xmlns_with_colon + prefix)))) {
       prefix = GeneratePrefix(ns);
     } else {
       // 12.5.2. Add prefix to map given namespace ns.
@@ -497,11 +496,10 @@ AtomicString MarkupAccumulator::RetrievePreferredPrefixString(
   // <el1 xmlns="U1">
   //  el1.setAttributeNS(U1, 'n', 'v');
   // We should not get '' for attributes.
-  for (auto it = candidate_list.rbegin(); it != candidate_list.rend(); ++it) {
-    AtomicString candidate_prefix = *it;
+  for (const auto& candidate_prefix : base::Reversed(candidate_list)) {
     DCHECK(!candidate_prefix.IsEmpty());
-    AtomicString ns_for_candaite = LookupNamespaceURI(candidate_prefix);
-    if (EqualIgnoringNullity(ns_for_candaite, ns))
+    AtomicString ns_for_candidate = LookupNamespaceURI(candidate_prefix);
+    if (EqualIgnoringNullity(ns_for_candidate, ns))
       return candidate_prefix;
   }
 
@@ -549,11 +547,8 @@ std::pair<Node*, Element*> MarkupAccumulator::GetAuxiliaryDOMTree(
   ShadowRoot* shadow_root = element.GetShadowRoot();
   if (!shadow_root || include_shadow_roots_ != kIncludeShadowRoots)
     return std::pair<Node*, Element*>();
-  DCHECK(RuntimeEnabledFeatures::DeclarativeShadowDOMEnabled(
-      element.GetExecutionContext()));
   AtomicString shadowroot_type;
   switch (shadow_root->GetType()) {
-    case ShadowRootType::V0:
     case ShadowRootType::kUserAgent:
       // Don't serialize user agent shadow roots, only explicit shadow roots.
       return std::pair<Node*, Element*>();
@@ -573,9 +568,11 @@ std::pair<Node*, Element*> MarkupAccumulator::GetAuxiliaryDOMTree(
   // element.
   auto* template_element = MakeGarbageCollected<Element>(
       html_names::kTemplateTag, &(element.GetDocument()));
-  template_element->setAttribute(
-      QualifiedName(g_null_atom, kShadowRootAttributeName, g_null_atom),
-      shadowroot_type);
+  template_element->setAttribute(html_names::kShadowrootAttr, shadowroot_type);
+  if (shadow_root->delegatesFocus()) {
+    template_element->SetBooleanAttribute(
+        html_names::kShadowrootdelegatesfocusAttr, true);
+  }
   return std::pair<Node*, Element*>(shadow_root, template_element);
 }
 

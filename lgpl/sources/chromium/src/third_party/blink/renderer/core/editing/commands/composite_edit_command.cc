@@ -26,6 +26,9 @@
 #include "third_party/blink/renderer/core/editing/commands/composite_edit_command.h"
 
 #include <algorithm>
+
+#include "third_party/blink/renderer/core/accessibility/blink_ax_event_intent.h"
+#include "third_party/blink/renderer/core/accessibility/scoped_blink_ax_event_intent.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
@@ -81,7 +84,7 @@
 #include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/core/layout/line/inline_text_box.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -153,6 +156,11 @@ bool CompositeEditCommand::Apply() {
   SetSelectionIsDirectional(frame->Selection().IsDirectional());
   GetUndoStep()->SetSelectionIsDirectional(SelectionIsDirectional());
 
+  // Provides details to accessibility about any text change caused by applying
+  // this command, throughout the current call stack.
+  ScopedBlinkAXEventIntent scoped_blink_ax_event_intent(
+      BlinkAXEventIntent::FromEditCommand(*this), &GetDocument());
+
   EditingState editing_state;
   EventQueueScope event_queue_scope;
   DoApply(&editing_state);
@@ -170,7 +178,7 @@ UndoStep* CompositeEditCommand::EnsureUndoStep() {
     command = command->Parent();
   if (!command->undo_step_) {
     command->undo_step_ = MakeGarbageCollected<UndoStep>(
-        &GetDocument(), StartingSelection(), EndingSelection(), GetInputType());
+        &GetDocument(), StartingSelection(), EndingSelection());
   }
   return command->undo_step_.Get();
 }
@@ -290,7 +298,7 @@ void CompositeEditCommand::InsertNodeBefore(
   // TODO(editing-dev): Use of UpdateStyleAndLayout
   // needs to be audited.  See http://crbug.com/590369 for more details.
   GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kEditing);
-  ABORT_EDITING_COMMAND_IF(!HasEditableStyle(*ref_child->parentNode()) &&
+  ABORT_EDITING_COMMAND_IF(!IsEditable(*ref_child->parentNode()) &&
                            ref_child->parentNode()->InActiveDocument());
   ApplyCommandToComposite(
       MakeGarbageCollected<InsertNodeBeforeCommand>(
@@ -304,7 +312,7 @@ void CompositeEditCommand::InsertNodeAfter(Node* insert_child,
   ABORT_EDITING_COMMAND_IF(!ref_child->parentNode());
   DCHECK(insert_child);
   DCHECK(ref_child);
-  DCHECK_NE(GetDocument().body(), ref_child);
+  ABORT_EDITING_COMMAND_IF(GetDocument().body() == ref_child);
   ContainerNode* parent = ref_child->parentNode();
   DCHECK(parent);
   DCHECK(!parent->IsShadowRoot()) << parent;
@@ -367,8 +375,7 @@ void CompositeEditCommand::AppendNode(Node* node,
   ABORT_EDITING_COMMAND_IF(!CanHaveChildrenForEditing(parent) &&
                            !(parent_element && parent_element->TagQName() ==
                                                    html_names::kObjectTag));
-  ABORT_EDITING_COMMAND_IF(!HasEditableStyle(*parent) &&
-                           parent->InActiveDocument());
+  ABORT_EDITING_COMMAND_IF(!IsEditable(*parent) && parent->InActiveDocument());
   ApplyCommandToComposite(MakeGarbageCollected<AppendNodeCommand>(parent, node),
                           editing_state);
 }
@@ -598,7 +605,6 @@ Position CompositeEditCommand::PositionOutsideTabSpan(const Position& pos) {
     return pos;
 
   switch (pos.AnchorType()) {
-    case PositionAnchorType::kBeforeChildren:
     case PositionAnchorType::kAfterChildren:
       NOTREACHED();
       return pos;
@@ -685,8 +691,9 @@ bool CompositeEditCommand::CanRebalance(const Position& position) const {
 
   auto* text_node = DynamicTo<Text>(position.ComputeContainerNode());
   if (!position.IsOffsetInAnchor() || !text_node ||
-      !HasRichlyEditableStyle(*text_node))
+      !IsRichlyEditable(*text_node)) {
     return false;
+  }
 
   if (text_node->length() == 0)
     return false;
@@ -786,10 +793,11 @@ void CompositeEditCommand::PrepareWhitespaceAtPositionForSplit(
 
   // Delete collapsed whitespace so that inserting nbsps doesn't uncollapse it.
   Position upstream_pos = MostBackwardCaretPosition(position);
+  RelocatablePosition relocatable_upstream_pos(upstream_pos);
   DeleteInsignificantText(upstream_pos, MostForwardCaretPosition(position));
 
   GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kEditing);
-  position = MostForwardCaretPosition(upstream_pos);
+  position = MostForwardCaretPosition(relocatable_upstream_pos.GetPosition());
   VisiblePosition visible_pos = CreateVisiblePosition(position);
   VisiblePosition previous_visible_pos = PreviousPositionOf(visible_pos);
   ReplaceCollapsibleWhitespaceWithNonBreakingSpaceIfNeeded(
@@ -823,6 +831,14 @@ void CompositeEditCommand::RebalanceWhitespace() {
     RebalanceWhitespaceAt(selection.End());
 }
 
+static bool IsInsignificantText(const LayoutText& layout_text) {
+  if (layout_text.HasInlineFragments())
+    return false;
+  // Spaces causing line break don't have `NGFragmentItem` but it has
+  // non-zero length. See http://crbug.com/1322746
+  return !layout_text.ResolvedTextLength();
+}
+
 void CompositeEditCommand::DeleteInsignificantText(Text* text_node,
                                                    unsigned start,
                                                    unsigned end) {
@@ -835,7 +851,7 @@ void CompositeEditCommand::DeleteInsignificantText(Text* text_node,
   if (!text_layout_object)
     return;
 
-  if (!text_layout_object->HasInlineFragments()) {
+  if (IsInsignificantText(*text_layout_object)) {
     // whole text node is empty
     // Removing a Text node won't dispatch synchronous events.
     RemoveNode(text_node, ASSERT_NO_EDITING_ABORT);
@@ -854,7 +870,9 @@ void CompositeEditCommand::DeleteInsignificantText(Text* text_node,
     return ReplaceTextInNode(text_node, start, end - start, string);
   }
 
-  Vector<InlineTextBox*> sorted_text_boxes;
+  HeapVector<Member<InlineTextBox>> sorted_text_boxes;
+  ClearCollectionScope<HeapVector<Member<InlineTextBox>>> scope(
+      &sorted_text_boxes);
   wtf_size_t sorted_text_boxes_position = 0;
 
   for (InlineTextBox* text_box : text_layout_object->TextBoxes())
@@ -866,7 +884,7 @@ void CompositeEditCommand::DeleteInsignificantText(Text* text_node,
     std::sort(sorted_text_boxes.begin(), sorted_text_boxes.end(),
               InlineTextBox::CompareByStart);
   InlineTextBox* box = sorted_text_boxes.IsEmpty()
-                           ? 0
+                           ? nullptr
                            : sorted_text_boxes[sorted_text_boxes_position];
 
   unsigned removed = 0;
@@ -993,7 +1011,7 @@ static bool IsEmptyListItem(const LayoutBlockFlow& block_flow) {
   if (block_flow.IsLayoutNGListItem())
     return !block_flow.FirstChild();
   if (block_flow.IsListItem())
-    return ToLayoutListItem(block_flow).IsEmpty();
+    return To<LayoutListItem>(block_flow).IsEmpty();
   return false;
 }
 
@@ -1057,6 +1075,10 @@ HTMLElement* CompositeEditCommand::MoveParagraphContentsToNewBlockIfNecessary(
   // not been invalidated by an earlier call to this function.  The caller,
   // applyBlockStyle, should do this.
   VisiblePosition visible_pos = CreateVisiblePosition(pos);
+  if (visible_pos.IsNull()) {
+    editing_state->Abort();
+    return nullptr;
+  }
   VisiblePosition visible_paragraph_start = StartOfParagraph(visible_pos);
   VisiblePosition visible_paragraph_end = EndOfParagraph(visible_pos);
   VisiblePosition next = NextPositionOf(visible_paragraph_end);
@@ -1128,8 +1150,14 @@ HTMLElement* CompositeEditCommand::MoveParagraphContentsToNewBlockIfNecessary(
   }
 
   visible_pos = CreateVisiblePosition(pos);
+  if (visible_pos.IsNull()) {
+    editing_state->Abort();
+    return nullptr;
+  }
   visible_paragraph_start = StartOfParagraph(visible_pos);
   visible_paragraph_end = EndOfParagraph(visible_pos);
+  DCHECK_LE(visible_paragraph_start.DeepEquivalent(),
+            visible_paragraph_end.DeepEquivalent());
   MoveParagraphs(visible_paragraph_start, visible_paragraph_end, destination,
                  editing_state);
   if (editing_state->IsAborted())
@@ -1496,30 +1524,33 @@ void CompositeEditCommand::MoveParagraphs(
       NextPositionOf(end_of_paragraph_to_move, kCannotCrossEditingBoundary)
           .DeepEquivalent());
 
+  const Position& start_candidate = start_of_paragraph_to_move.DeepEquivalent();
+  const Position& end_candidate = end_of_paragraph_to_move.DeepEquivalent();
+  DCHECK_LE(start_candidate, end_candidate);
+
   // We upstream() the end and downstream() the start so that we don't include
   // collapsed whitespace in the move. When we paste a fragment, spaces after
   // the end and before the start are treated as though they were rendered.
-  Position start =
-      MostForwardCaretPosition(start_of_paragraph_to_move.DeepEquivalent());
-  Position end =
-      MostBackwardCaretPosition(end_of_paragraph_to_move.DeepEquivalent());
+  Position start = MostForwardCaretPosition(start_candidate);
+  Position end = MostBackwardCaretPosition(end_candidate);
+  if (end < start)
+    end = start;
 
   // FIXME: This is an inefficient way to preserve style on nodes in the
   // paragraph to move. It shouldn't matter though, since moved paragraphs will
   // usually be quite small.
-  DocumentFragment* fragment =
-      start_of_paragraph_to_move.DeepEquivalent() !=
-              end_of_paragraph_to_move.DeepEquivalent()
-          ? CreateFragmentFromMarkup(
-                GetDocument(),
-                CreateMarkup(start.ParentAnchoredEquivalent(),
-                             end.ParentAnchoredEquivalent(),
-                             CreateMarkupOptions::Builder()
-                                 .SetShouldConvertBlocksToInlines(true)
-                                 .SetConstrainingAncestor(constraining_ancestor)
-                                 .Build()),
-                "", kDisallowScriptingAndPluginContent)
-          : nullptr;
+  DocumentFragment* fragment = nullptr;
+  if (start_of_paragraph_to_move.DeepEquivalent() !=
+      end_of_paragraph_to_move.DeepEquivalent()) {
+    const String paragraphs_markup = CreateMarkup(
+        start.ParentAnchoredEquivalent(), end.ParentAnchoredEquivalent(),
+        CreateMarkupOptions::Builder()
+            .SetShouldConvertBlocksToInlines(true)
+            .SetConstrainingAncestor(constraining_ancestor)
+            .Build());
+    fragment = CreateSanitizedFragmentFromMarkupWithContext(
+        GetDocument(), paragraphs_markup, 0, paragraphs_markup.length(), "");
+  }
 
   // A non-empty paragraph's style is moved when we copy and move it.  We don't
   // move anything if we're given an empty paragraph, but an empty paragraph can
@@ -1679,14 +1710,14 @@ bool CompositeEditCommand::BreakOutOfEmptyListItem(
   if (!list_node ||
       (!IsA<HTMLUListElement>(*list_node) &&
        !IsA<HTMLOListElement>(*list_node)) ||
-      !HasEditableStyle(*list_node) ||
+      !IsEditable(*list_node) ||
       list_node == RootEditableElement(*empty_list_item))
     return false;
 
   HTMLElement* new_block = nullptr;
   if (ContainerNode* block_enclosing_list = list_node->parentNode()) {
-    if (IsA<HTMLLIElement>(
-            *block_enclosing_list)) {  // listNode is inside another list item
+    if (block_enclosing_list->HasTagName(
+            html_names::kLiTag)) {  // listNode is inside another list item
       if (CreateVisiblePosition(PositionAfterNode(*block_enclosing_list))
               .DeepEquivalent() ==
           CreateVisiblePosition(PositionAfterNode(*list_node))
@@ -1712,8 +1743,8 @@ bool CompositeEditCommand::BreakOutOfEmptyListItem(
       }
       // If listNode does NOT appear at the end of the outer list item, then
       // behave as if in a regular paragraph.
-    } else if (IsA<HTMLOListElement>(*block_enclosing_list) ||
-               IsA<HTMLUListElement>(*block_enclosing_list)) {
+    } else if (block_enclosing_list->HasTagName(html_names::kOlTag) ||
+               block_enclosing_list->HasTagName(html_names::kUlTag)) {
       new_block = MakeGarbageCollected<HTMLLIElement>(GetDocument());
     }
   }
@@ -1727,14 +1758,16 @@ bool CompositeEditCommand::BreakOutOfEmptyListItem(
   Node* next_list_node = empty_list_item->IsElementNode()
                              ? ElementTraversal::NextSibling(*empty_list_item)
                              : empty_list_item->nextSibling();
-  if (IsListItem(next_list_node) || IsHTMLListElement(next_list_node)) {
+  if (next_list_node && IsListElementTag(list_node)) {
     // If emptyListItem follows another list item or nested list, split the list
     // node.
-    if (IsListItem(previous_list_node) || IsHTMLListElement(previous_list_node))
+    if (IsListItemTag(previous_list_node) ||
+        IsHTMLListElement(previous_list_node)) {
       SplitElement(To<Element>(list_node), empty_list_item);
+    }
 
     // If emptyListItem is followed by other list item or nested list, then
-    // insert newBlock before the list node. Because we have splitted the
+    // insert newBlock before the list node. Because we have split the
     // element, emptyListItem is the first element in the list node.
     // i.e. insert newBlock before ul or ol whose first element is emptyListItem
     InsertNodeBefore(new_block, list_node, editing_state);
@@ -1747,14 +1780,20 @@ bool CompositeEditCommand::BreakOutOfEmptyListItem(
     // When emptyListItem does not follow any list item or nested list, insert
     // newBlock after the enclosing list node. Remove the enclosing node if
     // emptyListItem is the only child; otherwise just remove emptyListItem.
+    //   <ul>                             <ul>
+    //     <li>                             <li>
+    //       abc                              abc
+    //       <ul>                             <ul>
+    //         <li>def</li>                     <li>def</li>
+    //         <li>{}<br></li>    ->          </ul>
+    //       </ul>                            <div>{}<br></div>
+    //       ghi                              ghi
+    //     </li>                            </li>
+    //   </ul>                            </ul>
     InsertNodeAfter(new_block, list_node, editing_state);
     if (editing_state->IsAborted())
       return false;
-    RemoveNode(
-        IsListItem(previous_list_node) || IsHTMLListElement(previous_list_node)
-            ? empty_list_item
-            : list_node,
-        editing_state);
+    RemoveNode(previous_list_node ? empty_list_item : list_node, editing_state);
     if (editing_state->IsAborted())
       return false;
   }
@@ -1891,8 +1930,10 @@ Position CompositeEditCommand::PositionAvoidingSpecialElementBoundary(
     if (visible_pos.DeepEquivalent() == last_in_anchor.DeepEquivalent()) {
       // Make sure anchors are pushed down before avoiding them so that we don't
       // also avoid structural elements like lists and blocks (5142012).
-      if (original.AnchorNode() != enclosing_anchor &&
-          original.AnchorNode()->parentNode() != enclosing_anchor) {
+      Element* enclosing_block = EnclosingBlock(original.AnchorNode());
+      if (enclosing_block &&
+          enclosing_block->IsDescendantOf(enclosing_anchor)) {
+        // Only push down anchor element if there are block elements inside it.
         PushAnchorElementDown(enclosing_anchor, editing_state);
         if (editing_state->IsAborted())
           return original;
@@ -1920,8 +1961,10 @@ Position CompositeEditCommand::PositionAvoidingSpecialElementBoundary(
     if (visible_pos.DeepEquivalent() == first_in_anchor.DeepEquivalent()) {
       // Make sure anchors are pushed down before avoiding them so that we don't
       // also avoid structural elements like lists and blocks (5142012).
-      if (original.AnchorNode() != enclosing_anchor &&
-          original.AnchorNode()->parentNode() != enclosing_anchor) {
+      Element* enclosing_block = EnclosingBlock(original.AnchorNode());
+      if (enclosing_block &&
+          enclosing_block->IsDescendantOf(enclosing_anchor)) {
+        // Only push down anchor element if there are block elements inside it.
         PushAnchorElementDown(enclosing_anchor, editing_state);
         if (editing_state->IsAborted())
           return original;
@@ -1966,13 +2009,15 @@ Node* CompositeEditCommand::SplitTreeToNode(Node* start,
     GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kEditing);
 
     // Do not split a node when doing so introduces an empty node.
-    VisiblePosition position_in_parent =
-        VisiblePosition::FirstPositionInNode(*parent_element);
-    VisiblePosition position_in_node =
-        CreateVisiblePosition(FirstPositionInOrBeforeNode(*node));
-    if (position_in_parent.DeepEquivalent() !=
-        position_in_node.DeepEquivalent())
-      SplitElement(parent_element, node);
+    if (node->previousSibling()) {
+      const Position& first_in_parent =
+          Position::FirstPositionInNode(*parent_element);
+      const Position& before_node =
+          Position::BeforeNode(*node).ToOffsetInAnchor();
+      if (MostBackwardCaretPosition(first_in_parent) !=
+          MostBackwardCaretPosition(before_node))
+        SplitElement(parent_element, node);
+    }
   }
 
   return node;
@@ -2095,6 +2140,8 @@ void CompositeEditCommand::AppliedEditing() {
         EnsureUndoStep()->EndingSelection());
     last_edit_command->GetUndoStep()->SetSelectionIsDirectional(
         GetUndoStep()->SelectionIsDirectional());
+    editor.GetUndoStack().DidSetEndingSelection(
+        last_edit_command->GetUndoStep());
     last_edit_command->AppendCommandToUndoStep(this);
   } else {
     // Only register a new undo command if the command passed in is

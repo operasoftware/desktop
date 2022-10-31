@@ -6,6 +6,7 @@
 
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_string_stringsequence.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_gather_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_parameters.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_server.h"
@@ -22,9 +23,7 @@
 #include "third_party/blink/renderer/modules/peerconnection/rtc_ice_candidate.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_ice_event.h"
-#include "third_party/blink/renderer/modules/peerconnection/rtc_quic_transport.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/webrtc/api/ice_transport_factory.h"
 #include "third_party/webrtc/api/ice_transport_interface.h"
@@ -41,14 +40,14 @@ namespace {
 const char* kIceRoleControllingStr = "controlling";
 const char* kIceRoleControlledStr = "controlled";
 
-base::Optional<cricket::Candidate> ConvertToCricketIceCandidate(
+absl::optional<cricket::Candidate> ConvertToCricketIceCandidate(
     const RTCIceCandidate& candidate) {
   webrtc::JsepIceCandidate jsep_candidate("", 0);
   webrtc::SdpParseError error;
   if (!webrtc::SdpDeserializeCandidate(candidate.candidate().Utf8(),
                                        &jsep_candidate, &error)) {
     LOG(WARNING) << "Failed to deserialize candidate: " << error.description;
-    return base::nullopt;
+    return absl::nullopt;
   }
   return jsep_candidate.candidate();
 }
@@ -78,49 +77,7 @@ class DtlsIceTransportAdapterCrossThreadFactory
   rtc::scoped_refptr<webrtc::IceTransportInterface> ice_transport_;
 };
 
-class DefaultIceTransportAdapterCrossThreadFactory
-    : public IceTransportAdapterCrossThreadFactory {
- public:
-  void InitializeOnMainThread(LocalFrame& frame) override {
-    DCHECK(!port_allocator_);
-    DCHECK(!async_resolver_factory_);
-
-    auto* rtc_dependency_factory =
-        blink::PeerConnectionDependencyFactory::GetInstance();
-    port_allocator_ = rtc_dependency_factory->CreatePortAllocator(
-        frame.Client()->GetWebFrame());
-    async_resolver_factory_ =
-        rtc_dependency_factory->CreateAsyncResolverFactory();
-  }
-
-  std::unique_ptr<IceTransportAdapter> ConstructOnWorkerThread(
-      IceTransportAdapter::Delegate* delegate) override {
-    DCHECK(port_allocator_);
-    DCHECK(async_resolver_factory_);
-    return std::make_unique<IceTransportAdapterImpl>(
-        delegate, std::move(port_allocator_),
-        std::move(async_resolver_factory_));
-  }
-
- private:
-  std::unique_ptr<cricket::PortAllocator> port_allocator_;
-  std::unique_ptr<webrtc::AsyncResolverFactory> async_resolver_factory_;
-};
-
 }  // namespace
-
-RTCIceTransport* RTCIceTransport::Create(ExecutionContext* context) {
-  scoped_refptr<base::SingleThreadTaskRunner> proxy_thread =
-      context->GetTaskRunner(TaskType::kNetworking);
-
-  PeerConnectionDependencyFactory::GetInstance()->EnsureInitialized();
-  scoped_refptr<base::SingleThreadTaskRunner> host_thread =
-      PeerConnectionDependencyFactory::GetInstance()
-          ->GetWebRtcNetworkTaskRunner();
-  return MakeGarbageCollected<RTCIceTransport>(
-      context, std::move(proxy_thread), std::move(host_thread),
-      std::make_unique<DefaultIceTransportAdapterCrossThreadFactory>());
-}
 
 RTCIceTransport* RTCIceTransport::Create(
     ExecutionContext* context,
@@ -129,10 +86,10 @@ RTCIceTransport* RTCIceTransport::Create(
   scoped_refptr<base::SingleThreadTaskRunner> proxy_thread =
       context->GetTaskRunner(TaskType::kNetworking);
 
-  PeerConnectionDependencyFactory::GetInstance()->EnsureInitialized();
+  PeerConnectionDependencyFactory::From(*context).EnsureInitialized();
   scoped_refptr<base::SingleThreadTaskRunner> host_thread =
-      PeerConnectionDependencyFactory::GetInstance()
-          ->GetWebRtcNetworkTaskRunner();
+      PeerConnectionDependencyFactory::From(*context)
+          .GetWebRtcNetworkTaskRunner();
   return MakeGarbageCollected<RTCIceTransport>(
       context, std::move(proxy_thread), std::move(host_thread),
       std::make_unique<DtlsIceTransportAdapterCrossThreadFactory>(
@@ -188,32 +145,8 @@ RTCIceTransport::~RTCIceTransport() {
   DCHECK(!proxy_);
 }
 
-bool RTCIceTransport::HasConsumer() const {
-  return consumer_;
-}
-
 bool RTCIceTransport::IsFromPeerConnection() const {
   return peer_connection_;
-}
-
-IceTransportProxy* RTCIceTransport::ConnectConsumer(
-    RTCQuicTransport* consumer) {
-  DCHECK(consumer);
-  DCHECK(proxy_);
-  DCHECK(!peer_connection_);
-  if (!consumer_) {
-    consumer_ = consumer;
-  } else {
-    DCHECK_EQ(consumer_, consumer);
-  }
-  return proxy_.get();
-}
-
-void RTCIceTransport::DisconnectConsumer(RTCQuicTransport* consumer) {
-  DCHECK(consumer);
-  DCHECK(proxy_);
-  DCHECK_EQ(consumer, consumer_);
-  consumer_ = nullptr;
 }
 
 String RTCIceTransport::role() const {
@@ -292,10 +225,13 @@ static webrtc::PeerConnectionInterface::IceServer ConvertIceServer(
   // Prefer standardized 'urls' field over deprecated 'url' field.
   Vector<String> url_strings;
   if (ice_server->hasUrls()) {
-    if (ice_server->urls().IsString()) {
-      url_strings.push_back(ice_server->urls().GetAsString());
-    } else if (ice_server->urls().IsStringSequence()) {
-      url_strings = ice_server->urls().GetAsStringSequence();
+    switch (ice_server->urls()->GetContentType()) {
+      case V8UnionStringOrStringSequence::ContentType::kString:
+        url_strings.push_back(ice_server->urls()->GetAsString());
+        break;
+      case V8UnionStringOrStringSequence::ContentType::kStringSequence:
+        url_strings = ice_server->urls()->GetAsStringSequence();
+        break;
     }
   } else if (ice_server->hasUrl()) {
     url_strings.push_back(ice_server->url());
@@ -435,9 +371,6 @@ void RTCIceTransport::start(RTCIceParameters* raw_remote_parameters,
           *ConvertToCricketIceCandidate(*remote_candidate));
     }
     proxy_->Start(remote_parameters, role, initial_remote_candidates);
-    if (consumer_) {
-      consumer_->OnIceTransportStarted();
-    }
   } else {
     remote_candidates_.clear();
     state_ = webrtc::IceTransportState::kNew;
@@ -456,7 +389,7 @@ void RTCIceTransport::addRemoteCandidate(RTCIceCandidate* remote_candidate,
   if (RaiseExceptionIfClosed(exception_state)) {
     return;
   }
-  base::Optional<cricket::Candidate> converted_remote_candidate =
+  absl::optional<cricket::Candidate> converted_remote_candidate =
       ConvertToCricketIceCandidate(*remote_candidate);
   if (!converted_remote_candidate) {
     exception_state.ThrowDOMException(DOMExceptionCode::kOperationError,
@@ -545,11 +478,6 @@ void RTCIceTransport::Close(CloseReason reason) {
   if (IsClosed()) {
     return;
   }
-  if (HasConsumer()) {
-    consumer_->OnIceTransportClosed(reason);
-  }
-  // Notifying the consumer that we're closing should cause it to disconnect.
-  DCHECK(!HasConsumer());
   state_ = webrtc::IceTransportState::kClosed;
   selected_candidate_pair_ = nullptr;
   proxy_.reset();
@@ -590,7 +518,6 @@ void RTCIceTransport::Trace(Visitor* visitor) const {
   visitor->Trace(local_parameters_);
   visitor->Trace(remote_parameters_);
   visitor->Trace(selected_candidate_pair_);
-  visitor->Trace(consumer_);
   visitor->Trace(peer_connection_);
   EventTargetWithInlineData::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);

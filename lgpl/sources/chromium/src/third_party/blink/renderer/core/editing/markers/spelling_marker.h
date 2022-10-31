@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_SPELLING_MARKER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_SPELLING_MARKER_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/markers/spell_check_marker.h"
 
 namespace blink {
@@ -18,14 +19,14 @@ class CORE_EXPORT SpellingMarker final : public SpellCheckMarker {
   SpellingMarker(unsigned start_offset,
                  unsigned end_offset,
                  const String& description);
+  SpellingMarker(const SpellingMarker&) = delete;
+  SpellingMarker& operator=(const SpellingMarker&) = delete;
 
  private:
   // DocumentMarker implementations
   MarkerType GetType() const final;
-
-  DISALLOW_COPY_AND_ASSIGN(SpellingMarker);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_SPELLING_MARKER_H_

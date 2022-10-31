@@ -5,7 +5,11 @@
 #include "third_party/blink/renderer/platform/fonts/script_run_iterator.h"
 
 #include <algorithm>
+
+#include "base/logging.h"
+#include "base/notreached.h"
 #include "third_party/blink/renderer/platform/text/icu_error.h"
+#include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 
 namespace blink {
@@ -26,6 +30,83 @@ inline UScriptCode getScriptForOpenType(UChar32 ch, UErrorCode* status) {
     return USCRIPT_HIRAGANA;
   }
   return script;
+}
+
+inline bool IsHanScript(UScriptCode script) {
+  return script == USCRIPT_HAN || script == USCRIPT_HIRAGANA ||
+         script == USCRIPT_BOPOMOFO;
+}
+
+inline UScriptCode FirstHanScript(
+    const ScriptRunIterator::UScriptCodeList& list) {
+  const auto* const result =
+      std::find_if(list.begin(), list.end(), IsHanScript);
+  if (result != list.end())
+    return *result;
+  return USCRIPT_INVALID_CODE;
+}
+
+ScriptRunIterator::UScriptCodeList GetHanScriptExtensions() {
+  ICUError status;
+  ScriptRunIterator::UScriptCodeList list;
+  list.resize(ScriptRunIterator::kMaxScriptCount - 1);
+  // Get the list from one of the CJK punctuation in the CJK Symbols and
+  // Punctuation block.
+  int count = uscript_getScriptExtensions(kLeftCornerBracket, &list[0],
+                                          list.size(), &status);
+  if (U_SUCCESS(status)) {
+    DCHECK_GT(count, 0);
+    list.resize(count);
+    return list;
+  }
+  NOTREACHED();
+  return ScriptRunIterator::UScriptCodeList();
+}
+
+// This function updates the script list to the Han ideographic-based scripts if
+// the East Asian Width property[1] indicates it is an East Asian character.
+//
+// Most East Asian punctuation characters have East Asian scripts in the script
+// extensions. However, not all of them are so. For example, when they are
+// halfwidth/fullwidth forms, they must have the same properties as their
+// canonical equivalent[2] code points that are not East Asian. Such code points
+// can split runs in the middle of consecutive CJK punctuation characters when
+// they are preceded by non-CJK characters, and prevent applying font features
+// to consecutive CJK punctuation characters.
+//
+// TODO(crbug.com/1273998): This function is not needed if Unicode changes the
+// script extension for these code points.
+//
+// [1]: https://www.unicode.org/reports/tr11/
+// [2]: https://unicode.org/reports/tr15/#Canon_Compat_Equivalence
+void FixScriptsByEastAsianWidth(UChar32 ch,
+                                ScriptRunIterator::UScriptCodeList* set) {
+  // Replace the list only if it is the `COMMON` script. If `COMMON`, there
+  // should be only one entry.
+  DCHECK(!set->IsEmpty());
+  if (set->size() > 1 || set->front() != USCRIPT_COMMON) {
+    DCHECK(!set->Contains(USCRIPT_COMMON));
+    return;
+  }
+
+  // It's an East Asian character when the EAW property is W, F, or H.
+  // https://www.unicode.org/reports/tr11/#Set_Relations
+  const auto eaw = static_cast<UEastAsianWidth>(
+      u_getIntPropertyValue(ch, UCHAR_EAST_ASIAN_WIDTH));
+  if (eaw == U_EA_WIDE || eaw == U_EA_FULLWIDTH || eaw == U_EA_HALFWIDTH) {
+    // Replace the list with the list of Han ideographic scripts, as seen for
+    // U+300C in https://www.unicode.org/Public/UNIDATA/ScriptExtensions.txt.
+    DEFINE_STATIC_LOCAL(ScriptRunIterator::UScriptCodeList, han_scripts,
+                        (GetHanScriptExtensions()));
+    if (UNLIKELY(han_scripts.IsEmpty())) {
+      // When |GetHanScriptExtensions| returns an empty list, replacing with it
+      // will crash later, which makes the analysis complicated.
+      NOTREACHED();
+      return;
+    }
+    set->Shrink(0);
+    set->AppendVector(han_scripts);
+  }
 }
 
 }  // namespace
@@ -190,7 +271,11 @@ bool ScriptRunIterator::Consume(unsigned* limit, UScriptCode* script) {
     if (!MergeSets()) {
       *limit = pos;
       *script = ResolveCurrentScript();
-      FixupStack(*script);
+      // If the current character is an open bracket, do not assign the resolved
+      // script to it yet because it will belong to the next run.
+      const bool exclude_last =
+          paired_type == PairedBracketType::kBracketTypeOpen;
+      FixupStack(*script, exclude_last);
       current_set_ = *next_set_;
       return true;
     }
@@ -209,6 +294,7 @@ void ScriptRunIterator::OpenBracket(UChar32 ch) {
       --brackets_fixup_depth_;
     }
   }
+  FixScriptsByEastAsianWidth(ch, next_set_.get());
   brackets_.push_back(BracketRec({ch, USCRIPT_COMMON}));
   ++brackets_fixup_depth_;
 }
@@ -220,8 +306,21 @@ void ScriptRunIterator::CloseBracket(UChar32 ch) {
       if (it->ch == target) {
         // Have a match, use open paren's resolved script.
         UScriptCode script = it->script;
-        next_set_->clear();
-        next_set_->push_back(script);
+        // Han languages are multi-scripts, and there are font features that
+        // apply to consecutive punctuation characters.
+        // When encountering a closing bracket do not insist on the closing
+        // bracket getting assigned the same script as the opening bracket if
+        // current_set_ provides an option to resolve to any other possible Han
+        // script as well, which avoids breaking the run.
+        if (IsHanScript(script)) {
+          const UScriptCode current_han_script = FirstHanScript(current_set_);
+          if (current_han_script != USCRIPT_INVALID_CODE)
+            script = current_han_script;
+        }
+        if (script != USCRIPT_COMMON) {
+          next_set_->clear();
+          next_set_->push_back(script);
+        }
 
         // And pop stack to this point.
         int num_popped =
@@ -332,20 +431,27 @@ bool ScriptRunIterator::MergeSets() {
 // adjust it if the stack got overfull and open brackets were pushed off
 // the bottom. This sets the script of the fixup_depth topmost entries of the
 // stack to the resolved script.
-void ScriptRunIterator::FixupStack(UScriptCode resolved_script) {
-  if (brackets_fixup_depth_ > 0) {
-    if (brackets_fixup_depth_ > brackets_.size()) {
-      // Should never happen unless someone breaks the code.
-      DLOG(ERROR) << "Brackets fixup depth exceeds size of bracket vector.";
-      brackets_fixup_depth_ = brackets_.size();
-    }
-    auto it = brackets_.rbegin();
-    for (wtf_size_t i = 0; i < brackets_fixup_depth_; ++i) {
-      it->script = resolved_script;
-      ++it;
-    }
+void ScriptRunIterator::FixupStack(UScriptCode resolved_script,
+                                   bool exclude_last) {
+  wtf_size_t count = brackets_fixup_depth_;
+  if (count <= 0)
+    return;
+  if (count > brackets_.size()) {
+    // Should never happen unless someone breaks the code.
+    DLOG(ERROR) << "Brackets fixup depth exceeds size of bracket vector.";
+    count = brackets_.size();
+  }
+  auto it = brackets_.rbegin();
+  // Do not assign the script to the last one if |exclude_last|.
+  if (exclude_last) {
+    ++it;
+    --count;
+    brackets_fixup_depth_ = 1;
+  } else {
     brackets_fixup_depth_ = 0;
   }
+  for (; count; ++it, --count)
+    it->script = resolved_script;
 }
 
 bool ScriptRunIterator::Fetch(wtf_size_t* pos, UChar32* ch) {

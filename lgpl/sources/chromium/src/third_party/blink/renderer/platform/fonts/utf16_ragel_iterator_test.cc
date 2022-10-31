@@ -6,7 +6,6 @@
 
 #include <unicode/unistr.h>
 
-#include "base/stl_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/text/character.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
@@ -31,7 +30,7 @@ TEST(UTF16RagelIteratorTest, CharacterClasses) {
       0x00A9};
   icu::UnicodeString class_examples_unicode_string =
       icu::UnicodeString::fromUTF32(class_examples_codepoints,
-                                    base::size(class_examples_codepoints));
+                                    std::size(class_examples_codepoints));
   char categories[] = {UTF16RagelIterator::COMBINING_ENCLOSING_KEYCAP,
                        UTF16RagelIterator::COMBINING_ENCLOSING_CIRCLE_BACKSLASH,
                        UTF16RagelIterator::ZWJ,
@@ -58,7 +57,7 @@ TEST(UTF16RagelIteratorTest, CharacterClasses) {
       reinterpret_cast<const UChar*>(class_examples_unicode_string.getBuffer()),
       class_examples_unicode_string.length(),
       class_examples_unicode_string.length() - 1);
-  size_t i = base::size(categories) - 1;
+  size_t i = std::size(categories) - 1;
   while (reverse_ragel_iterator.Cursor() > 0) {
     CHECK_EQ(categories[i], *reverse_ragel_iterator);
     i--;
@@ -74,7 +73,7 @@ TEST(UTF16RagelIteratorTest, ArithmeticOperators) {
   };
   icu::UnicodeString class_examples_unicode_string =
       icu::UnicodeString::fromUTF32(class_examples_codepoints,
-                                    base::size(class_examples_codepoints));
+                                    std::size(class_examples_codepoints));
 
   UTF16RagelIterator ragel_iterator(
       reinterpret_cast<const UChar*>(class_examples_unicode_string.getBuffer()),
@@ -105,9 +104,11 @@ TEST(UTF16RagelIteratorTest, ArithmeticOperators) {
 TEST(UTF16RagelIteratorTest, InvalidOperationOnEmpty) {
   UTF16RagelIterator ragel_iterator;
   CHECK_EQ(ragel_iterator.Cursor(), 0u);
+#if DCHECK_IS_ON()
   EXPECT_DEATH_IF_SUPPORTED(ragel_iterator++, "");
   EXPECT_DEATH_IF_SUPPORTED(ragel_iterator--, "");
   EXPECT_DEATH_IF_SUPPORTED(*ragel_iterator, "");
+#endif
 }
 
 TEST(UTF16RagelIteratorTest, CursorPositioning) {
@@ -115,7 +116,7 @@ TEST(UTF16RagelIteratorTest, CursorPositioning) {
                                 kLeftSpeechBubbleCharacter};
 
   icu::UnicodeString flags_unicode_string = icu::UnicodeString::fromUTF32(
-      flags_codepoints, base::size(flags_codepoints));
+      flags_codepoints, std::size(flags_codepoints));
   UTF16RagelIterator ragel_iterator(
       reinterpret_cast<const UChar*>(flags_unicode_string.getBuffer()),
       flags_unicode_string.length());
@@ -128,9 +129,11 @@ TEST(UTF16RagelIteratorTest, CursorPositioning) {
   CHECK_EQ(*(ragel_iterator.SetCursor(6)),
            UTF16RagelIterator::EMOJI_TEXT_PRESENTATION);
 
+#if DCHECK_IS_ON()
   EXPECT_DEATH_IF_SUPPORTED(ragel_iterator.SetCursor(-1), "");
   EXPECT_DEATH_IF_SUPPORTED(
       ragel_iterator.SetCursor(ragel_iterator.end().Cursor()), "");
+#endif
 }
 
 }  // namespace blink

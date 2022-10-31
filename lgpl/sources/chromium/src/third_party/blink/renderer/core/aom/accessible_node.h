@@ -5,12 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_AOM_ACCESSIBLE_NODE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_AOM_ACCESSIBLE_NODE_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
 
@@ -40,7 +39,8 @@ enum class AOMStringProperty {
   kRole,
   kRoleDescription,
   kSort,
-  kValueText
+  kValueText,
+  kVirtualContent
 };
 
 // All of the properties of AccessibleNode that have type "boolean".
@@ -95,8 +95,6 @@ class CORE_EXPORT AOMPropertyClient {
  public:
   virtual void AddStringProperty(AOMStringProperty, const String&) = 0;
   virtual void AddBooleanProperty(AOMBooleanProperty, bool) = 0;
-  virtual void AddIntProperty(AOMIntProperty, int32_t) = 0;
-  virtual void AddUIntProperty(AOMUIntProperty, uint32_t) = 0;
   virtual void AddFloatProperty(AOMFloatProperty, float) = 0;
   virtual void AddRelationProperty(AOMRelationProperty,
                                    const AccessibleNode&) = 0;
@@ -105,7 +103,7 @@ class CORE_EXPORT AOMPropertyClient {
 };
 
 // Accessibility Object Model node
-// Explainer: https://github.com/WICG/aom/blob/master/explainer.md
+// Explainer: https://github.com/WICG/aom/blob/gh-pages/explainer.md
 // Spec: https://wicg.github.io/aom/spec/
 class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
   DEFINE_WRAPPERTYPEINFO();
@@ -122,6 +120,9 @@ class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
 
   // Gets the associated document.
   Document* GetDocument() const;
+
+  // Returns the parent of this node.
+  AccessibleNode* GetParent() { return parent_; }
 
   // Children. These are only virtual AccessibleNodes that were added
   // explicitly, never AccessibleNodes from DOM Elements.
@@ -141,14 +142,14 @@ class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
                           HeapVector<Member<Element>>&);
 
   // Returns the given boolean property.
-  base::Optional<bool> GetProperty(AOMBooleanProperty) const;
+  absl::optional<bool> GetProperty(AOMBooleanProperty) const;
 
   // Returns the value of the given property if the
   // Element has an AccessibleNode. Sets |isNull| if the property and
   // attribute are not present.
-  static base::Optional<int32_t> GetProperty(Element*, AOMIntProperty);
-  static base::Optional<uint32_t> GetProperty(Element*, AOMUIntProperty);
-  static base::Optional<float> GetProperty(Element*, AOMFloatProperty);
+  static absl::optional<int32_t> GetProperty(Element*, AOMIntProperty);
+  static absl::optional<uint32_t> GetProperty(Element*, AOMUIntProperty);
+  static absl::optional<float> GetProperty(Element*, AOMFloatProperty);
 
   // Does the attribute value match one of the ARIA undefined patterns for
   // boolean and token properties?
@@ -192,35 +193,32 @@ class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
                                              bool& is_null);
 
   // Iterates over all AOM properties. For each one, calls AOMPropertyClient
-  // with the value of the AOM property if set. Updates
-  // |shadowed_aria_attributes| to contain a list of the ARIA attributes that
-  // would be shadowed by these AOM properties.
-  void GetAllAOMProperties(AOMPropertyClient*,
-                           HashSet<QualifiedName>& shadowed_aria_attributes);
+  // with the value of the AOM property if set.
+  void GetAllAOMProperties(AOMPropertyClient*);
 
   AccessibleNode* activeDescendant() const;
   void setActiveDescendant(AccessibleNode*);
 
-  base::Optional<bool> atomic() const;
-  void setAtomic(base::Optional<bool>);
+  absl::optional<bool> atomic() const;
+  void setAtomic(absl::optional<bool>);
 
   AtomicString autocomplete() const;
   void setAutocomplete(const AtomicString&);
 
-  base::Optional<bool> busy() const;
-  void setBusy(base::Optional<bool>);
+  absl::optional<bool> busy() const;
+  void setBusy(absl::optional<bool>);
 
   AtomicString checked() const;
   void setChecked(const AtomicString&);
 
-  base::Optional<int32_t> colCount() const;
-  void setColCount(base::Optional<int32_t>);
+  absl::optional<int32_t> colCount() const;
+  void setColCount(absl::optional<int32_t>);
 
-  base::Optional<uint32_t> colIndex() const;
-  void setColIndex(base::Optional<uint32_t>);
+  absl::optional<uint32_t> colIndex() const;
+  void setColIndex(absl::optional<uint32_t>);
 
-  base::Optional<uint32_t> colSpan() const;
-  void setColSpan(base::Optional<uint32_t>);
+  absl::optional<uint32_t> colSpan() const;
+  void setColSpan(absl::optional<uint32_t>);
 
   AccessibleNodeList* controls() const;
   void setControls(AccessibleNodeList*);
@@ -237,14 +235,14 @@ class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
   AccessibleNodeList* details() const;
   void setDetails(AccessibleNodeList*);
 
-  base::Optional<bool> disabled() const;
-  void setDisabled(base::Optional<bool>);
+  absl::optional<bool> disabled() const;
+  void setDisabled(absl::optional<bool>);
 
   AccessibleNode* errorMessage() const;
   void setErrorMessage(AccessibleNode*);
 
-  base::Optional<bool> expanded() const;
-  void setExpanded(base::Optional<bool>);
+  absl::optional<bool> expanded() const;
+  void setExpanded(absl::optional<bool>);
 
   AccessibleNodeList* flowTo() const;
   void setFlowTo(AccessibleNodeList*);
@@ -252,8 +250,8 @@ class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
   AtomicString hasPopUp() const;
   void setHasPopUp(const AtomicString&);
 
-  base::Optional<bool> hidden() const;
-  void setHidden(base::Optional<bool>);
+  absl::optional<bool> hidden() const;
+  void setHidden(absl::optional<bool>);
 
   AtomicString invalid() const;
   void setInvalid(const AtomicString&);
@@ -267,20 +265,20 @@ class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
   AccessibleNodeList* labeledBy();
   void setLabeledBy(AccessibleNodeList*);
 
-  base::Optional<uint32_t> level() const;
-  void setLevel(base::Optional<uint32_t>);
+  absl::optional<uint32_t> level() const;
+  void setLevel(absl::optional<uint32_t>);
 
   AtomicString live() const;
   void setLive(const AtomicString&);
 
-  base::Optional<bool> modal() const;
-  void setModal(base::Optional<bool>);
+  absl::optional<bool> modal() const;
+  void setModal(absl::optional<bool>);
 
-  base::Optional<bool> multiline() const;
-  void setMultiline(base::Optional<bool>);
+  absl::optional<bool> multiline() const;
+  void setMultiline(absl::optional<bool>);
 
-  base::Optional<bool> multiselectable() const;
-  void setMultiselectable(base::Optional<bool>);
+  absl::optional<bool> multiselectable() const;
+  void setMultiselectable(absl::optional<bool>);
 
   AtomicString orientation() const;
   void setOrientation(const AtomicString&);
@@ -291,20 +289,20 @@ class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
   AtomicString placeholder() const;
   void setPlaceholder(const AtomicString&);
 
-  base::Optional<uint32_t> posInSet() const;
-  void setPosInSet(base::Optional<uint32_t>);
+  absl::optional<uint32_t> posInSet() const;
+  void setPosInSet(absl::optional<uint32_t>);
 
   AtomicString pressed() const;
   void setPressed(const AtomicString&);
 
-  base::Optional<bool> readOnly() const;
-  void setReadOnly(base::Optional<bool>);
+  absl::optional<bool> readOnly() const;
+  void setReadOnly(absl::optional<bool>);
 
   AtomicString relevant() const;
   void setRelevant(const AtomicString&);
 
-  base::Optional<bool> required() const;
-  void setRequired(base::Optional<bool>);
+  absl::optional<bool> required() const;
+  void setRequired(absl::optional<bool>);
 
   AtomicString role() const;
   void setRole(const AtomicString&);
@@ -312,40 +310,47 @@ class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
   AtomicString roleDescription() const;
   void setRoleDescription(const AtomicString&);
 
-  base::Optional<int32_t> rowCount() const;
-  void setRowCount(base::Optional<int32_t>);
+  absl::optional<int32_t> rowCount() const;
+  void setRowCount(absl::optional<int32_t>);
 
-  base::Optional<uint32_t> rowIndex() const;
-  void setRowIndex(base::Optional<uint32_t>);
+  absl::optional<uint32_t> rowIndex() const;
+  void setRowIndex(absl::optional<uint32_t>);
 
-  base::Optional<uint32_t> rowSpan() const;
-  void setRowSpan(base::Optional<uint32_t>);
+  absl::optional<uint32_t> rowSpan() const;
+  void setRowSpan(absl::optional<uint32_t>);
 
-  base::Optional<bool> selected() const;
-  void setSelected(base::Optional<bool>);
+  absl::optional<bool> selected() const;
+  void setSelected(absl::optional<bool>);
 
-  base::Optional<int32_t> setSize() const;
-  void setSetSize(base::Optional<int32_t>);
+  absl::optional<int32_t> setSize() const;
+  void setSetSize(absl::optional<int32_t>);
 
   AtomicString sort() const;
   void setSort(const AtomicString&);
 
-  base::Optional<float> valueMax() const;
-  void setValueMax(base::Optional<float>);
+  absl::optional<float> valueMax() const;
+  void setValueMax(absl::optional<float>);
 
-  base::Optional<float> valueMin() const;
-  void setValueMin(base::Optional<float>);
+  absl::optional<float> valueMin() const;
+  void setValueMin(absl::optional<float>);
 
-  base::Optional<float> valueNow() const;
-  void setValueNow(base::Optional<float>);
+  absl::optional<float> valueNow() const;
+  void setValueNow(absl::optional<float>);
 
   AtomicString valueText() const;
   void setValueText(const AtomicString&);
+
+  AtomicString virtualContent() const;
+  void setVirtualContent(const AtomicString&);
 
   AccessibleNodeList* childNodes();
 
   void appendChild(AccessibleNode*, ExceptionState&);
   void removeChild(AccessibleNode*, ExceptionState&);
+
+  // Called when an accessible node is removed from document.
+  void DetachedFromDocument();
+  Document* GetAncestorDocument();
 
   // EventTarget
   const AtomicString& InterfaceName() const override;
@@ -374,10 +379,10 @@ class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
   void SetStringProperty(AOMStringProperty, const AtomicString&);
   void SetRelationProperty(AOMRelationProperty, AccessibleNode*);
   void SetRelationListProperty(AOMRelationListProperty, AccessibleNodeList*);
-  void SetBooleanProperty(AOMBooleanProperty, base::Optional<bool> value);
-  void SetIntProperty(AOMIntProperty, base::Optional<int32_t> value);
-  void SetUIntProperty(AOMUIntProperty, base::Optional<uint32_t> value);
-  void SetFloatProperty(AOMFloatProperty, base::Optional<float> value);
+  void SetBooleanProperty(AOMBooleanProperty, absl::optional<bool> value);
+  void SetIntProperty(AOMIntProperty, absl::optional<int32_t> value);
+  void SetUIntProperty(AOMUIntProperty, absl::optional<uint32_t> value);
+  void SetFloatProperty(AOMFloatProperty, absl::optional<float> value);
   void NotifyAttributeChanged(const blink::QualifiedName&);
   AXObjectCache* GetAXObjectCache();
 
@@ -392,7 +397,7 @@ class CORE_EXPORT AccessibleNode : public EventTargetWithInlineData {
       relation_list_properties_;
 
   // This object's owner Element, if it corresponds to an Element.
-  Member<Element> element_;
+  const Member<Element> element_;
 
   // The object's owner Document. Only set if |element_| is nullptr.
   Member<Document> document_;

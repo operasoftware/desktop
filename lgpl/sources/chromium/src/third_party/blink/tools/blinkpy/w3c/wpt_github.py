@@ -7,8 +7,12 @@ import datetime
 import json
 import logging
 import re
-import urllib2
+import six
+
 from collections import namedtuple
+from six.moves.urllib.error import HTTPError
+from six.moves.urllib.error import URLError
+from six.moves.urllib.parse import quote
 
 from blinkpy.common.memoized import memoized
 from blinkpy.w3c.common import WPT_GH_ORG, WPT_GH_REPO_NAME, EXPORT_PR_LABEL
@@ -46,15 +50,17 @@ class WPTGitHub(object):
 
     def auth_token(self):
         assert self.has_credentials()
-        return base64.b64encode('{}:{}'.format(self.user, self.token))
+        data = '{}:{}'.format(self.user, self.token).encode('utf-8')
+        return base64.b64encode(data).decode('utf-8')
 
-    def request(self, path, method, body=None):
+    def request(self, path, method, body=None, accept_header=None):
         """Sends a request to GitHub API and deserializes the response.
 
         Args:
             path: API endpoint without base URL (starting with '/').
             method: HTTP method to be used for this request.
             body: Optional payload in the request body (default=None).
+            accept_header: Custom media type in the Accept header (default=None).
 
         Returns:
             A JSONResponse instance.
@@ -62,9 +68,15 @@ class WPTGitHub(object):
         assert path.startswith('/')
 
         if body:
-            body = json.dumps(body)
+            if six.PY3:
+                body = json.dumps(body).encode("utf-8")
+            else:
+                body = json.dumps(body)
 
-        headers = {'Accept': 'application/vnd.github.v3+json'}
+        if accept_header:
+            headers = {'Accept': accept_header}
+        else:
+            headers = {'Accept': 'application/vnd.github.v3+json'}
 
         if self.has_credentials():
             headers['Authorization'] = 'Basic {}'.format(self.auth_token())
@@ -124,7 +136,7 @@ class WPTGitHub(object):
         }
         try:
             response = self.request(path, method='POST', body=body)
-        except urllib2.HTTPError as e:
+        except HTTPError as e:
             _log.error(e.reason)
             if e.code == 422:
                 _log.error('Please check if branch already exists; If so, '
@@ -181,7 +193,7 @@ class WPTGitHub(object):
             WPT_GH_ORG,
             WPT_GH_REPO_NAME,
             number,
-            urllib2.quote(label),
+            quote(label),
         )
         response = self.request(path, method='DELETE')
 
@@ -307,24 +319,6 @@ class WPTGitHub(object):
         _log.info('Fetched %d PRs from GitHub.', len(all_prs))
         return all_prs
 
-    def get_branch_statuses(self, branch_name):
-        """Gets the status of a PR.
-
-        API doc: https://developer.github.com/v3/repos/statuses/#get-the-combined-status-for-a-specific-ref
-
-        Returns:
-            The list of check statuses of the PR.
-        """
-        path = '/repos/{}/{}/commits/{}/status'.format(
-            WPT_GH_ORG, WPT_GH_REPO_NAME, branch_name)
-        response = self.request(path, method='GET')
-
-        if response.status_code != 200:
-            raise GitHubError(200, response.status_code,
-                              'get the statuses of PR %d' % branch_name)
-
-        return response.data['statuses']
-
     def get_pr_branch(self, pr_number):
         """Gets the remote branch name of a PR.
 
@@ -343,6 +337,33 @@ class WPTGitHub(object):
 
         return response.data['head']['ref']
 
+    def get_branch_check_runs(self, remote_branch_name):
+        """Returns the check runs of a remote branch.
+
+        API doc: https://developer.github.com/v3/checks/runs/#list-check-runs-for-a-git-reference
+
+        Returns:
+            The list of check runs from the HEAD of the branch.
+        """
+        path = '/repos/%s/%s/commits/%s/check-runs?page=1&per_page=%d' % (
+            WPT_GH_ORG, WPT_GH_REPO_NAME, remote_branch_name, MAX_PER_PAGE)
+        accept_header = 'application/vnd.github.antiope-preview+json'
+
+        check_runs = []
+        while path is not None:
+            response = self.request(path,
+                                    method='GET',
+                                    accept_header=accept_header)
+            if response.status_code != 200:
+                raise GitHubError(
+                    200, response.status_code,
+                    'get branch check runs %s' % remote_branch_name)
+
+            check_runs += response.data['check_runs']
+            path = self.extract_link_next(response.getheader('Link'))
+
+        return check_runs
+
     def is_pr_merged(self, pr_number):
         """Checks if a PR has been merged.
 
@@ -353,18 +374,27 @@ class WPTGitHub(object):
         """
         path = '/repos/%s/%s/pulls/%d/merge' % (WPT_GH_ORG, WPT_GH_REPO_NAME,
                                                 pr_number)
-        try:
-            response = self.request(path, method='GET')
-            if response.status_code == 204:
-                return True
-            else:
-                raise GitHubError(204, response.status_code,
-                                  'check if PR %d is merged' % pr_number)
-        except urllib2.HTTPError as e:
-            if e.code == 404:
-                return False
-            else:
-                raise
+        cached_error = None
+        for i in range(5):
+            try:
+                response = self.request(path, method='GET')
+                if response.status_code == 204:
+                    return True
+                else:
+                    raise GitHubError(204, response.status_code,
+                                      'check if PR %d is merged' % pr_number)
+            except HTTPError as e:
+                if e.code == 404:
+                    return False
+                else:
+                    raise
+            except URLError as e:
+                # After migrate to py3 we met random timeout issue here,
+                # Retry this request in this case
+                _log.warning("Meet URLError...")
+                cached_error = e
+        else:
+            raise cached_error
 
     def merge_pr(self, pr_number):
         """Merges a PR.
@@ -382,7 +412,7 @@ class WPTGitHub(object):
 
         try:
             response = self.request(path, method='PUT', body=body)
-        except urllib2.HTTPError as e:
+        except HTTPError as e:
             if e.code == 405:
                 raise MergeError(pr_number)
             else:
@@ -455,7 +485,10 @@ class JSONResponse(object):
         """Gets the value of the header with the given name.
 
         Delegates to HTTPMessage.getheader(), which is case-insensitive."""
-        return self._raw_response.info().getheader(header)
+        if six.PY3:
+            return self._raw_response.getheader(header)
+        else:
+            return self._raw_response.info().getheader(header)
 
 
 class GitHubError(Exception):

@@ -31,7 +31,8 @@
 #include "third_party/blink/renderer/platform/loader/fetch/memory_cache.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_context.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/raw_resource.h"
@@ -42,6 +43,7 @@
 #include "third_party/blink/renderer/platform/loader/testing/mock_resource.h"
 #include "third_party/blink/renderer/platform/loader/testing/test_loader_factory.h"
 #include "third_party/blink/renderer/platform/loader/testing/test_resource_fetcher_properties.h"
+#include "third_party/blink/renderer/platform/testing/mock_context_lifecycle_notifier.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support_with_mock_scheduler.h"
 
 namespace blink {
@@ -56,7 +58,7 @@ constexpr char kOriginalRequestDateAsString[] = "Thu, 25 May 1977 18:30:00 GMT";
 constexpr char kOneDayBeforeOriginalRequest[] = "Wed, 24 May 1977 18:30:00 GMT";
 constexpr char kOneDayAfterOriginalRequest[] = "Fri, 26 May 1977 18:30:00 GMT";
 
-constexpr base::TimeDelta kOneDay = base::TimeDelta::FromDays(1);
+constexpr base::TimeDelta kOneDay = base::Days(1);
 
 }  // namespace
 
@@ -93,15 +95,18 @@ class MemoryCacheCorrectnessTest : public testing::Test {
   // RawResource.
   RawResource* FetchRawResource() {
     ResourceRequest resource_request{KURL(kResourceURL)};
-    resource_request.SetRequestContext(mojom::RequestContextType::INTERNAL);
+    resource_request.SetRequestContext(
+        mojom::blink::RequestContextType::INTERNAL);
     resource_request.SetRequestorOrigin(GetSecurityOrigin());
-    FetchParameters fetch_params(std::move(resource_request));
+    FetchParameters fetch_params =
+        FetchParameters::CreateForTest(std::move(resource_request));
     return RawResource::Fetch(fetch_params, Fetcher(), nullptr);
   }
   MockResource* FetchMockResource() {
     ResourceRequest resource_request{KURL(kResourceURL)};
     resource_request.SetRequestorOrigin(GetSecurityOrigin());
-    FetchParameters fetch_params(std::move(resource_request));
+    FetchParameters fetch_params =
+        FetchParameters::CreateForTest(std::move(resource_request));
     return MockResource::Fetch(fetch_params, Fetcher(), nullptr);
   }
   ResourceFetcher* Fetcher() const { return fetcher_.Get(); }
@@ -122,10 +127,13 @@ class MemoryCacheCorrectnessTest : public testing::Test {
     auto* properties =
         MakeGarbageCollected<TestResourceFetcherProperties>(security_origin_);
     properties->SetShouldBlockLoadingSubResource(true);
-    fetcher_ = MakeGarbageCollected<ResourceFetcher>(
-        ResourceFetcherInit(properties->MakeDetachable(), context,
-                            base::MakeRefCounted<scheduler::FakeTaskRunner>(),
-                            MakeGarbageCollected<TestLoaderFactory>()));
+    fetcher_ = MakeGarbageCollected<ResourceFetcher>(ResourceFetcherInit(
+        properties->MakeDetachable(), context,
+        base::MakeRefCounted<scheduler::FakeTaskRunner>(),
+        base::MakeRefCounted<scheduler::FakeTaskRunner>(),
+        MakeGarbageCollected<TestLoaderFactory>(),
+        MakeGarbageCollected<MockContextLifecycleNotifier>(),
+        nullptr /* back_forward_cache_loader_helper */));
     Resource::SetClockForTesting(platform_->test_task_runner()->GetMockClock());
   }
   void TearDown() override {
@@ -137,6 +145,7 @@ class MemoryCacheCorrectnessTest : public testing::Test {
     ReplaceMemoryCacheForTesting(global_memory_cache_.Release());
   }
 
+  base::test::SingleThreadTaskEnvironment task_environment_;
   Persistent<MemoryCache> global_memory_cache_;
   scoped_refptr<const SecurityOrigin> security_origin_;
   Persistent<ResourceFetcher> fetcher_;
@@ -155,7 +164,7 @@ TEST_F(MemoryCacheCorrectnessTest, FreshFromLastModified) {
 
   // Advance the clock within the implicit freshness period of this resource
   // before we make a request.
-  AdvanceClock(base::TimeDelta::FromSecondsD(600.));
+  AdvanceClock(base::Seconds(600.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_EQ(fresh200, fetched);
@@ -171,7 +180,7 @@ TEST_F(MemoryCacheCorrectnessTest, FreshFromExpires) {
 
   // Advance the clock within the freshness period of this resource before we
   // make a request.
-  AdvanceClock(kOneDay - base::TimeDelta::FromSecondsD(15.));
+  AdvanceClock(kOneDay - base::Seconds(15.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_EQ(fresh200, fetched);
@@ -187,7 +196,7 @@ TEST_F(MemoryCacheCorrectnessTest, FreshFromMaxAge) {
 
   // Advance the clock within the freshness period of this resource before we
   // make a request.
-  AdvanceClock(base::TimeDelta::FromSecondsD(500.));
+  AdvanceClock(base::Seconds(500.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_EQ(fresh200, fetched);
@@ -225,7 +234,7 @@ TEST_F(MemoryCacheCorrectnessTest, ExpiredFromExpires) {
 
   // Advance the clock within the expiredness period of this resource before we
   // make a request.
-  AdvanceClock(kOneDay + base::TimeDelta::FromSecondsD(15.));
+  AdvanceClock(kOneDay + base::Seconds(15.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_NE(expired200, fetched);
@@ -244,7 +253,7 @@ TEST_F(MemoryCacheCorrectnessTest, NewMockResourceExpiredFromExpires) {
 
   // Advance the clock within the expiredness period of this resource before we
   // make a request.
-  AdvanceClock(kOneDay + base::TimeDelta::FromSecondsD(15.));
+  AdvanceClock(kOneDay + base::Seconds(15.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_NE(expired200, fetched);
@@ -264,13 +273,13 @@ TEST_F(MemoryCacheCorrectnessTest, ReuseMockResourceExpiredFromExpires) {
 
   // Advance the clock within the freshness period, and make a request to add
   // this resource to the document resources.
-  AdvanceClock(base::TimeDelta::FromSecondsD(15.));
+  AdvanceClock(base::Seconds(15.));
   MockResource* first_fetched = FetchMockResource();
   EXPECT_EQ(expired200, first_fetched);
 
   // Advance the clock within the expiredness period of this resource before we
   // make a request.
-  AdvanceClock(kOneDay + base::TimeDelta::FromSecondsD(15.));
+  AdvanceClock(kOneDay + base::Seconds(15.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_EQ(expired200, fetched);
@@ -286,7 +295,7 @@ TEST_F(MemoryCacheCorrectnessTest, ExpiredFromMaxAge) {
 
   // Advance the clock within the expiredness period of this resource before we
   // make a request.
-  AdvanceClock(base::TimeDelta::FromSecondsD(700.));
+  AdvanceClock(base::Seconds(700.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_NE(expired200, fetched);
@@ -307,7 +316,7 @@ TEST_F(MemoryCacheCorrectnessTest, FreshButNoCache) {
 
   // Advance the clock within the freshness period of this resource before we
   // make a request.
-  AdvanceClock(kOneDay - base::TimeDelta::FromSecondsD(15.));
+  AdvanceClock(kOneDay - base::Seconds(15.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_NE(fresh200_nocache, fetched);
@@ -338,7 +347,7 @@ TEST_F(MemoryCacheCorrectnessTest, FreshButNoStore) {
 
   // Advance the clock within the freshness period of this resource before we
   // make a request.
-  AdvanceClock(kOneDay - base::TimeDelta::FromSecondsD(15.));
+  AdvanceClock(kOneDay - base::Seconds(15.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_NE(fresh200_nostore, fetched);
@@ -371,7 +380,7 @@ TEST_F(MemoryCacheCorrectnessTest, DISABLED_FreshButMustRevalidate) {
 
   // Advance the clock within the freshness period of this resource before we
   // make a request.
-  AdvanceClock(kOneDay - base::TimeDelta::FromSecondsD(15.));
+  AdvanceClock(kOneDay - base::Seconds(15.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_NE(fresh200_must_revalidate, fetched);
@@ -412,7 +421,7 @@ TEST_F(MemoryCacheCorrectnessTest, FreshWithFreshRedirect) {
   first_resource->FinishForTest();
   AddResourceToMemoryCache(first_resource);
 
-  AdvanceClock(base::TimeDelta::FromSecondsD(500.));
+  AdvanceClock(base::Seconds(500.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_EQ(first_resource, fetched);
@@ -451,7 +460,7 @@ TEST_F(MemoryCacheCorrectnessTest, FreshWithStaleRedirect) {
   first_resource->FinishForTest();
   AddResourceToMemoryCache(first_resource);
 
-  AdvanceClock(base::TimeDelta::FromSecondsD(500.));
+  AdvanceClock(base::Seconds(500.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_NE(first_resource, fetched);
@@ -469,7 +478,7 @@ TEST_F(MemoryCacheCorrectnessTest, PostToSameURLTwice) {
   ResourceRequest request2{KURL(kResourceURL)};
   request2.SetHttpMethod(http_names::kPOST);
   request2.SetRequestorOrigin(GetSecurityOrigin());
-  FetchParameters fetch2(std::move(request2));
+  FetchParameters fetch2 = FetchParameters::CreateForTest(std::move(request2));
   RawResource* resource2 = RawResource::FetchSynchronously(fetch2, Fetcher());
   EXPECT_NE(resource1, resource2);
 }
@@ -508,7 +517,7 @@ TEST_F(MemoryCacheCorrectnessTest, 302RedirectNotImplicitlyFresh) {
   first_resource->FinishForTest();
   AddResourceToMemoryCache(first_resource);
 
-  AdvanceClock(base::TimeDelta::FromSecondsD(500.));
+  AdvanceClock(base::Seconds(500.));
 
   RawResource* fetched = FetchRawResource();
   EXPECT_NE(first_resource, fetched);
@@ -549,7 +558,7 @@ TEST_F(MemoryCacheCorrectnessTest, 302RedirectExplicitlyFreshMaxAge) {
   first_resource->FinishForTest();
   AddResourceToMemoryCache(first_resource);
 
-  AdvanceClock(base::TimeDelta::FromSecondsD(500.));
+  AdvanceClock(base::Seconds(500.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_EQ(first_resource, fetched);
@@ -589,7 +598,7 @@ TEST_F(MemoryCacheCorrectnessTest, 302RedirectExplicitlyFreshExpires) {
   first_resource->FinishForTest();
   AddResourceToMemoryCache(first_resource);
 
-  AdvanceClock(base::TimeDelta::FromSecondsD(500.));
+  AdvanceClock(base::Seconds(500.));
 
   MockResource* fetched = FetchMockResource();
   EXPECT_EQ(first_resource, fetched);

@@ -17,8 +17,6 @@ class SecurityContext;
 class ExecutionContextCSPDelegate final
     : public GarbageCollected<ExecutionContextCSPDelegate>,
       public ContentSecurityPolicyDelegate {
-  USING_GARBAGE_COLLECTED_MIXIN(ExecutionContextCSPDelegate);
-
  public:
   explicit ExecutionContextCSPDelegate(ExecutionContext&);
 
@@ -31,7 +29,7 @@ class ExecutionContextCSPDelegate final
   void SetRequireTrustedTypes() override;
   void AddInsecureRequestPolicy(mojom::blink::InsecureRequestPolicy) override;
   std::unique_ptr<SourceLocation> GetSourceLocation() override;
-  base::Optional<uint16_t> GetStatusCode() override;
+  absl::optional<uint16_t> GetStatusCode() override;
   String GetDocumentReferrer() override;
   void DispatchViolationEvent(const SecurityPolicyViolationEventInit&,
                               Element*) override;
@@ -42,7 +40,9 @@ class ExecutionContextCSPDelegate final
                            bool use_reporting_api) override;
   void Count(WebFeature) override;
   void AddConsoleMessage(ConsoleMessage*) override;
+  void AddInspectorIssue(AuditsIssue) override;
   void DisableEval(const String& error_message) override;
+  void SetWasmEvalErrorMessage(const String& error_message) override;
   void ReportBlockedScriptExecutionToInspector(
       const String& directive_text) override;
   void DidAddContentSecurityPolicies(

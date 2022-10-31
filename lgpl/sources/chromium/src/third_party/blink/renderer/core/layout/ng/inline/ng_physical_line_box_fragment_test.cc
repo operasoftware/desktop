@@ -4,8 +4,7 @@
 
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_physical_line_box_fragment.h"
 
-#include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_fragment_traversal.h"
-#include "third_party/blink/renderer/core/layout/ng/inline/ng_physical_text_fragment.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_cursor.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_test.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
 
@@ -16,37 +15,26 @@ class NGPhysicalLineBoxFragmentTest : public NGLayoutTest {
   NGPhysicalLineBoxFragmentTest() : NGLayoutTest() {}
 
  protected:
-  Vector<const NGPhysicalLineBoxFragment*> GetLineBoxes() const {
+  HeapVector<Member<const NGPhysicalLineBoxFragment>> GetLineBoxes() const {
     const Element* container = GetElementById("root");
     DCHECK(container);
     const LayoutObject* layout_object = container->GetLayoutObject();
     DCHECK(layout_object) << container;
     DCHECK(layout_object->IsLayoutBlockFlow()) << container;
-    const NGPhysicalBoxFragment* root_fragment =
-        To<LayoutBlockFlow>(layout_object)->CurrentFragment();
-    DCHECK(root_fragment) << container;
-
-    Vector<const NGPhysicalLineBoxFragment*> lines;
-    for (const auto& child :
-         NGInlineFragmentTraversal::DescendantsOf(*root_fragment)) {
-      if (const NGPhysicalLineBoxFragment* line =
-              DynamicTo<NGPhysicalLineBoxFragment>(child.fragment.get())) {
-        lines.push_back(line);
-      }
-    }
+    NGInlineCursor cursor(*To<LayoutBlockFlow>(layout_object));
+    HeapVector<Member<const NGPhysicalLineBoxFragment>> lines;
+    for (cursor.MoveToFirstLine(); cursor; cursor.MoveToNextLine())
+      lines.push_back(cursor.Current()->LineBoxFragment());
     return lines;
   }
 
   const NGPhysicalLineBoxFragment* GetLineBox() const {
-    Vector<const NGPhysicalLineBoxFragment*> lines = GetLineBoxes();
+    HeapVector<Member<const NGPhysicalLineBoxFragment>> lines = GetLineBoxes();
     if (!lines.IsEmpty())
       return lines.front();
     return nullptr;
   }
 };
-
-#define EXPECT_TEXT_FRAGMENT(text, fragment) \
-  { EXPECT_EQ(text, To<NGPhysicalTextFragment>(fragment)->Text().ToString()); }
 
 #define EXPECT_BOX_FRAGMENT(id, fragment)               \
   {                                                     \
@@ -68,7 +56,7 @@ TEST_F(NGPhysicalLineBoxFragmentTest, HasPropagatedDescendantsFloat) {
     </style>
     <div id=root>12345678 12345<div class=float>float</div></div>
   )HTML");
-  Vector<const NGPhysicalLineBoxFragment*> lines = GetLineBoxes();
+  HeapVector<Member<const NGPhysicalLineBoxFragment>> lines = GetLineBoxes();
   EXPECT_EQ(lines.size(), 2u);
   EXPECT_FALSE(lines[0]->HasPropagatedDescendants());
   EXPECT_TRUE(lines[1]->HasPropagatedDescendants());
@@ -86,7 +74,7 @@ TEST_F(NGPhysicalLineBoxFragmentTest, HasPropagatedDescendantsOOF) {
     </style>
     <div id=root>12345678 12345<div class=abspos>abspos</div></div>
   )HTML");
-  Vector<const NGPhysicalLineBoxFragment*> lines = GetLineBoxes();
+  HeapVector<Member<const NGPhysicalLineBoxFragment>> lines = GetLineBoxes();
   EXPECT_EQ(lines.size(), 2u);
   EXPECT_FALSE(lines[0]->HasPropagatedDescendants());
   EXPECT_TRUE(lines[1]->HasPropagatedDescendants());

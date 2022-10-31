@@ -5,14 +5,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_IMAGEBITMAP_IMAGE_BITMAP_SOURCE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_IMAGEBITMAP_IMAGE_BITMAP_SOURCE_H_
 
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/geometry/int_rect.h"
-#include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace blink {
 
@@ -23,9 +22,9 @@ class CORE_EXPORT ImageBitmapSource {
   DISALLOW_NEW();
 
  public:
-  virtual IntSize BitmapSourceSize() const { return IntSize(); }
+  virtual gfx::Size BitmapSourceSize() const { return gfx::Size(); }
   virtual ScriptPromise CreateImageBitmap(ScriptState*,
-                                          base::Optional<IntRect>,
+                                          absl::optional<gfx::Rect>,
                                           const ImageBitmapOptions*,
                                           ExceptionState&);
 
@@ -41,4 +40,4 @@ class CORE_EXPORT ImageBitmapSource {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_IMAGEBITMAP_IMAGE_BITMAP_SOURCE_H_

@@ -24,7 +24,7 @@ callback DecodeSuccessCallback = void (AudioBuffer decodedData);
     readonly attribute double currentTime;
 
     // All AudioNodes in the context run at this sample-rate (sample-frames per second).
-    readonly attribute float sampleRate;
+    [HighEntropy=Direct, Measure] readonly attribute float sampleRate;
 
     // All panning is relative to this listener.
     readonly attribute AudioListener listener;
@@ -35,7 +35,7 @@ callback DecodeSuccessCallback = void (AudioBuffer decodedData);
     [RaisesException] AudioBuffer createBuffer(unsigned long numberOfChannels, unsigned long numberOfFrames, float sampleRate);
 
     // Asynchronous audio file data decoding.
-    // TODO(crbug.com/841185): |successCallback| and |errorCallback| are not
+    // TODO(crbug.com/841185): `successCallback` and `errorCallback` are not
     // nullable in the spec.
     [RaisesException, MeasureAs=AudioContextDecodeAudioData, CallWith=ScriptState] Promise<AudioBuffer> decodeAudioData(ArrayBuffer audioData, optional DecodeSuccessCallback? successCallback, optional DecodeErrorCallback? errorCallback);
 

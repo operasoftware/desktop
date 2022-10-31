@@ -69,7 +69,7 @@ class InheritedShadowListChecker
     : public CSSInterpolationType::CSSConversionChecker {
  public:
   InheritedShadowListChecker(const CSSProperty& property,
-                             scoped_refptr<ShadowList> shadow_list)
+                             scoped_refptr<const ShadowList> shadow_list)
       : property_(property), shadow_list_(std::move(shadow_list)) {}
 
  private:
@@ -85,7 +85,7 @@ class InheritedShadowListChecker
   }
 
   const CSSProperty& property_;
-  scoped_refptr<ShadowList> shadow_list_;
+  scoped_refptr<const ShadowList> shadow_list_;
 };
 
 InterpolationValue CSSShadowListInterpolationType::MaybeConvertInherit(
@@ -96,8 +96,7 @@ InterpolationValue CSSShadowListInterpolationType::MaybeConvertInherit(
   const ShadowList* inherited_shadow_list =
       GetShadowList(CssProperty(), *state.ParentStyle());
   conversion_checkers.push_back(std::make_unique<InheritedShadowListChecker>(
-      CssProperty(),
-      const_cast<ShadowList*>(inherited_shadow_list)));  // Take ref.
+      CssProperty(), inherited_shadow_list));  // Take ref.
   return ConvertShadowList(inherited_shadow_list,
                            state.ParentStyle()->EffectiveZoom());
 }
@@ -223,7 +222,7 @@ InterpolationValue CSSShadowListInterpolationType::PerformAdditiveComposition(
     std::unique_ptr<InterpolableList> interpolable_list,
     const InterpolationValue& underlying) const {
   // Per the spec, addition of shadow lists is defined as concatenation.
-  // https://drafts.csswg.org/web-animations/#combining-shadow-lists
+  // https://w3.org/TR/web-animations-1/#combining-shadow-lists
   const InterpolableList& underlying_list =
       To<InterpolableList>(*underlying.interpolable_value);
   auto composited_list = std::make_unique<InterpolableList>(
@@ -246,7 +245,7 @@ CSSShadowListInterpolationType::PerformAccumulativeComposition(
     const InterpolationValue& underlying) const {
   // Per the spec, accumulation of shadow lists operates on pairwise addition of
   // the underlying components.
-  // https://drafts.csswg.org/web-animations/#combining-shadow-lists
+  // https://w3.org/TR/web-animations-1/#combining-shadow-lists
   const InterpolableList& underlying_list =
       To<InterpolableList>(*underlying.interpolable_value);
   wtf_size_t length = interpolable_list->length();

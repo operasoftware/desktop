@@ -18,13 +18,23 @@ class CORE_EXPORT LayoutInsideListMarker final : public LayoutInline {
   explicit LayoutInsideListMarker(Element*);
   ~LayoutInsideListMarker() override;
 
-  const char* GetName() const override { return "LayoutInsideListMarker"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutInsideListMarker";
+  }
 
-  const ListMarker& Marker() const { return list_marker_; }
-  ListMarker& Marker() { return list_marker_; }
+  const ListMarker& Marker() const {
+    NOT_DESTROYED();
+    return list_marker_;
+  }
+  ListMarker& Marker() {
+    NOT_DESTROYED();
+    return list_marker_;
+  }
 
  private:
   bool IsOfType(LayoutObjectType type) const override {
+    NOT_DESTROYED();
     return type == kLayoutObjectInsideListMarker ||
            LayoutInline::IsOfType(type);
   }
@@ -32,8 +42,12 @@ class CORE_EXPORT LayoutInsideListMarker final : public LayoutInline {
   ListMarker list_marker_;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutInsideListMarker,
-                                IsInsideListMarkerForCustomContent());
+template <>
+struct DowncastTraits<LayoutInsideListMarker> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsInsideListMarkerForCustomContent();
+  }
+};
 
 }  // namespace blink
 

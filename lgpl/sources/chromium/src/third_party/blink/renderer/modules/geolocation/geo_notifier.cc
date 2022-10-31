@@ -10,7 +10,6 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/modules/geolocation/geolocation.h"
 #include "third_party/blink/renderer/modules/geolocation/geolocation_position_error.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
 
@@ -23,18 +22,17 @@ GeoNotifier::GeoNotifier(Geolocation* geolocation,
       error_callback_(error_callback),
       options_(options),
       timer_(MakeGarbageCollected<Timer>(
-          geolocation->GetWindow()->GetTaskRunner(TaskType::kMiscPlatformAPI),
+          geolocation->DomWindow()->GetTaskRunner(TaskType::kMiscPlatformAPI),
           this,
           &GeoNotifier::TimerFired)),
       use_cached_position_(false) {
   DCHECK(geolocation_);
   DCHECK(success_callback_);
 
-  base::UmaHistogramCustomTimes(
-      "Geolocation.Timeout",
-      base::TimeDelta::FromMilliseconds(options_->timeout()),
-      base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(10),
-      /* buckets = */ 20);
+  base::UmaHistogramCustomTimes("Geolocation.Timeout",
+                                base::Milliseconds(options_->timeout()),
+                                base::Milliseconds(1), base::Minutes(10),
+                                /* buckets = */ 20);
 }
 
 void GeoNotifier::Trace(Visitor* visitor) const {
@@ -74,8 +72,7 @@ void GeoNotifier::RunErrorCallback(GeolocationPositionError* error) {
 }
 
 void GeoNotifier::StartTimer() {
-  timer_->StartOneShot(base::TimeDelta::FromMilliseconds(options_->timeout()),
-                       FROM_HERE);
+  timer_->StartOneShot(base::Milliseconds(options_->timeout()), FROM_HERE);
 }
 
 void GeoNotifier::StopTimer() {
@@ -87,6 +84,7 @@ bool GeoNotifier::IsTimerActive() const {
 }
 
 void GeoNotifier::Timer::Trace(Visitor* visitor) const {
+  visitor->Trace(timer_);
   visitor->Trace(notifier_);
 }
 
@@ -137,11 +135,10 @@ void GeoNotifier::TimerFired(TimerBase*) {
                      GeolocationPositionError::kTimeout, "Timeout expired"));
   }
 
-  base::UmaHistogramCustomTimes(
-      "Geolocation.TimeoutExpired",
-      base::TimeDelta::FromMilliseconds(options_->timeout()),
-      base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(10),
-      /* buckets = */ 20);
+  base::UmaHistogramCustomTimes("Geolocation.TimeoutExpired",
+                                base::Milliseconds(options_->timeout()),
+                                base::Milliseconds(1), base::Minutes(10),
+                                /* buckets = */ 20);
 
   geolocation_->RequestTimedOut(this);
 }

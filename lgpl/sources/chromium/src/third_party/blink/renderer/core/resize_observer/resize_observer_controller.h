@@ -6,7 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_RESIZE_OBSERVER_RESIZE_OBSERVER_CONTROLLER_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
@@ -24,8 +25,6 @@ class ResizeObserver;
 class CORE_EXPORT ResizeObserverController final
     : public GarbageCollected<ResizeObserverController>,
       public Supplement<LocalDOMWindow> {
-  USING_GARBAGE_COLLECTED_MIXIN(ResizeObserverController);
-
  public:
   static const size_t kDepthBottom = 4096;
 
@@ -74,4 +73,4 @@ class CORE_EXPORT ResizeObserverController final
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_RESIZE_OBSERVER_RESIZE_OBSERVER_CONTROLLER_H_

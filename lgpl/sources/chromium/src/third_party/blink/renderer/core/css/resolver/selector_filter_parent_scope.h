@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_SELECTOR_FILTER_PARENT_SCOPE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_SELECTOR_FILTER_PARENT_SCOPE_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/selector_filter.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -79,7 +80,7 @@ inline SelectorFilterParentScope::SelectorFilterParentScope(
          &parent_->GetDocument() != &previous_->parent_->GetDocument());
   if (parent) {
     DCHECK(parent->GetDocument().InStyleRecalc());
-    resolver_ = parent->GetDocument().GetStyleResolver();
+    resolver_ = &parent->GetDocument().GetStyleResolver();
   }
   current_scope_ = this;
 }

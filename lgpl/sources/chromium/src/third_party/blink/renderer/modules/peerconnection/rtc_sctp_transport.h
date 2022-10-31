@@ -27,7 +27,6 @@ class MODULES_EXPORT RTCSctpTransport final
       public ExecutionContextClient,
       public SctpTransportProxy::Delegate {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(RTCSctpTransport);
 
  public:
   RTCSctpTransport(
@@ -45,7 +44,7 @@ class MODULES_EXPORT RTCSctpTransport final
   RTCDtlsTransport* transport() const;
   String state() const;
   double maxMessageSize() const;
-  base::Optional<int16_t> maxChannels() const;
+  absl::optional<int16_t> maxChannels() const;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(statechange, kStatechange)
 

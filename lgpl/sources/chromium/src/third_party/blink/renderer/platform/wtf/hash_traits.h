@@ -22,11 +22,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_HASH_TRAITS_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_HASH_TRAITS_H_
 
+#include <string.h>
+
 #include <limits>
 #include <memory>
 #include <type_traits>
 #include <utility>
+
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/atomic_operations.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/hash_functions.h"
 #include "third_party/blink/renderer/platform/wtf/hash_table_deleted_value_type.h"
@@ -49,7 +53,7 @@ struct ClearMemoryAtomicallyIfNeeded {
 };
 template <typename T>
 struct ClearMemoryAtomicallyIfNeeded<T, true> {
-  static void Clear(T* slot) { AtomicMemzero<sizeof(T)>(slot); }
+  static void Clear(T* slot) { AtomicMemzero<sizeof(T), alignof(T)>(slot); }
 };
 }  // namespace
 
@@ -59,7 +63,7 @@ struct GenericHashTraitsBase<false, T> {
   // tables with zeroed memory.
   static const bool kEmptyValueIsZero = false;
 
-  // The hasIsEmptyValueFunction flag allows the hash table to automatically
+  // The kHasIsEmptyValueFunction flag allows the hash table to automatically
   // generate code to check for the empty value when it can be done with the
   // equality operator, but allows custom functions for cases like String that
   // need them.
@@ -97,12 +101,6 @@ struct GenericHashTraitsBase<false, T> {
   };
 
   static constexpr bool kCanHaveDeletedValue = true;
-
-  // The kHasMovingCallback value is only used for HashTable backing stores.
-  // Currently it is needed for LinkedHashSet to register moving callback on
-  // write barrier. Users of this value have to provide RegisterMovingCallback
-  // function.
-  static constexpr bool kHasMovingCallback = false;
 
   // The kCanTraceConcurrently value is used by Oilpan concurrent marking. Only
   // type for which HashTraits<T>::kCanTraceConcurrently is true can be traced
@@ -224,7 +222,7 @@ struct SimpleClassHashTraits : GenericHashTraits<T> {
     static const bool value = false;
   };
   static void ConstructDeletedValue(T& slot, bool) {
-    new (NotNull, &slot) T(kHashTableDeletedValue);
+    new (NotNullTag::kNotNull, &slot) T(kHashTableDeletedValue);
   }
   static bool IsDeletedValue(const T& value) {
     return value.IsHashTableDeletedValue();
@@ -316,7 +314,8 @@ struct HashTraits<std::unique_ptr<T>>
   static void ConstructDeletedValue(std::unique_ptr<T>& slot, bool) {
     // Dirty trick: implant an invalid pointer to unique_ptr. Destructor isn't
     // called for deleted buckets, so this is okay.
-    new (NotNull, &slot) std::unique_ptr<T>(reinterpret_cast<T*>(1u));
+    new (NotNullTag::kNotNull, &slot)
+        std::unique_ptr<T>(reinterpret_cast<T*>(1u));
   }
   static bool IsDeletedValue(const std::unique_ptr<T>& value) {
     return value.get() == reinterpret_cast<T*>(1u);
@@ -477,15 +476,16 @@ struct KeyValuePairHashTraits
   static bool IsDeletedValue(const TraitType& value) {
     return KeyTraits::IsDeletedValue(value.key);
   }
+
+  static constexpr bool kCanTraceConcurrently =
+      KeyTraitsArg::kCanTraceConcurrently &&
+      (ValueTraitsArg::kCanTraceConcurrently ||
+       !IsTraceable<typename ValueTraitsArg::TraitType>::value);
 };
 
 template <typename Key, typename Value>
 struct HashTraits<KeyValuePair<Key, Value>>
-    : public KeyValuePairHashTraits<HashTraits<Key>, HashTraits<Value>> {
-  static constexpr bool kCanTraceConcurrently =
-      HashTraits<Key>::kCanTraceConcurrently &&
-      (HashTraits<Value>::kCanTraceConcurrently || !IsTraceable<Value>::value);
-};
+    : public KeyValuePairHashTraits<HashTraits<Key>, HashTraits<Value>> {};
 
 template <typename T>
 struct NullableHashTraits : public HashTraits<T> {

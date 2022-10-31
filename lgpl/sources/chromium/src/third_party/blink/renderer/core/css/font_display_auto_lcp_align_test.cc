@@ -60,7 +60,8 @@ class FontDisplayAutoLCPAlignFailureModeTest
 
 TEST_F(FontDisplayAutoLCPAlignFailureModeTest, FontFinishesBeforeLCPLimit) {
   SimRequest main_resource("https://example.com", "text/html");
-  SimRequest font_resource("https://example.com/Ahem.woff2", "font/woff2");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
 
   LoadURL("https://example.com");
   main_resource.Complete(R"HTML(
@@ -93,7 +94,8 @@ TEST_F(FontDisplayAutoLCPAlignFailureModeTest, FontFinishesBeforeLCPLimit) {
 
 TEST_F(FontDisplayAutoLCPAlignFailureModeTest, FontFinishesAfterLCPLimit) {
   SimRequest main_resource("https://example.com", "text/html");
-  SimRequest font_resource("https://example.com/Ahem.woff2", "font/woff2");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
 
   LoadURL("https://example.com");
   main_resource.Complete(R"HTML(
@@ -117,7 +119,7 @@ TEST_F(FontDisplayAutoLCPAlignFailureModeTest, FontFinishesAfterLCPLimit) {
   EXPECT_TRUE(GetTargetFont().ShouldSkipDrawing());
 
   // Wait until we reach the LCP limit, and the relevant timeout fires.
-  test::RunDelayedTasks(base::TimeDelta::FromMilliseconds(
+  test::RunDelayedTasks(base::Milliseconds(
       features::kAlignFontDisplayAutoTimeoutWithLCPGoalTimeoutParam.Get()));
 
   // After reaching the LCP limit, the web font should enter the failure
@@ -137,13 +139,14 @@ TEST_F(FontDisplayAutoLCPAlignFailureModeTest, FontFinishesAfterLCPLimit) {
 
 TEST_F(FontDisplayAutoLCPAlignFailureModeTest, FontFaceAddedAfterLCPLimit) {
   SimRequest main_resource("https://example.com", "text/html");
-  SimRequest font_resource("https://example.com/Ahem.woff2", "font/woff2");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
 
   LoadURL("https://example.com");
   main_resource.Write("<!doctype html>");
 
   // Wait until we reach the LCP limit, and the relevant timeout fires.
-  test::RunDelayedTasks(base::TimeDelta::FromMilliseconds(
+  test::RunDelayedTasks(base::Milliseconds(
       features::kAlignFontDisplayAutoTimeoutWithLCPGoalTimeoutParam.Get()));
 
   main_resource.Complete(R"HTML(
@@ -172,7 +175,8 @@ TEST_F(FontDisplayAutoLCPAlignFailureModeTest, FontFaceAddedAfterLCPLimit) {
 TEST_F(FontDisplayAutoLCPAlignFailureModeTest,
        FontFaceInMemoryCacheAddedAfterLCPLimit) {
   SimRequest main_resource("https://example.com", "text/html");
-  SimRequest font_resource("https://example.com/Ahem.woff2", "font/woff2");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
 
   LoadURL("https://example.com");
   main_resource.Write(R"HTML(
@@ -184,7 +188,7 @@ TEST_F(FontDisplayAutoLCPAlignFailureModeTest,
   font_resource.Complete(ReadAhemWoff2());
 
   // Wait until we reach the LCP limit, and the relevant timeout fires.
-  test::RunDelayedTasks(base::TimeDelta::FromMilliseconds(
+  test::RunDelayedTasks(base::Milliseconds(
       features::kAlignFontDisplayAutoTimeoutWithLCPGoalTimeoutParam.Get()));
 
   main_resource.Complete(R"HTML(
@@ -212,7 +216,8 @@ TEST_F(FontDisplayAutoLCPAlignFailureModeTest,
 TEST_F(FontDisplayAutoLCPAlignFailureModeTest,
        TimeoutFiredAfterDocumentShutdown) {
   SimRequest main_resource("https://example.com/", "text/html");
-  SimRequest font_resource("https://example.com/Ahem.woff2", "font/woff2");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
 
   LoadURL("https://example.com");
   main_resource.Complete(R"HTML(
@@ -229,14 +234,14 @@ TEST_F(FontDisplayAutoLCPAlignFailureModeTest,
     <span id=target style="position:relative">0123456789</span>
   )HTML");
 
-  font_resource.Finish();
+  font_resource.Complete();
 
   SimRequest next_page_resource("https://example2.com/", "text/html");
   LoadURL("https://example2.com/");
 
   // Wait until we reach the LCP limit, and the timeout for the previous
   // document fires. Shouldn't crash here.
-  test::RunDelayedTasks(base::TimeDelta::FromMilliseconds(
+  test::RunDelayedTasks(base::Milliseconds(
       features::kAlignFontDisplayAutoTimeoutWithLCPGoalTimeoutParam.Get()));
 
   next_page_resource.Finish();
@@ -244,10 +249,10 @@ TEST_F(FontDisplayAutoLCPAlignFailureModeTest,
 
 TEST_F(FontDisplayAutoLCPAlignFailureModeTest, IconAndNonIconFonts) {
   SimRequest main_resource("https://example.com", "text/html");
-  SimRequest icon_font_resource(
+  SimSubresourceRequest icon_font_resource(
       "https://example.com/MaterialIcons-Regular.woff2", "font/woff2");
-  SimRequest non_icon_font_resource("https://example.com/Ahem.woff2",
-                                    "font/woff2");
+  SimSubresourceRequest non_icon_font_resource("https://example.com/Ahem.woff2",
+                                               "font/woff2");
 
   LoadURL("https://example.com");
   main_resource.Complete(R"HTML(
@@ -291,7 +296,7 @@ TEST_F(FontDisplayAutoLCPAlignFailureModeTest, IconAndNonIconFonts) {
   EXPECT_TRUE(GetFont(non_icon_text).ShouldSkipDrawing());
 
   // Wait until we reach the LCP limit, and the relevant timeout fires.
-  test::RunDelayedTasks(base::TimeDelta::FromMilliseconds(
+  test::RunDelayedTasks(base::Milliseconds(
       features::kAlignFontDisplayAutoTimeoutWithLCPGoalTimeoutParam.Get()));
 
   icon_font_resource.Complete(ReadMaterialIconsWoff2());
@@ -317,7 +322,8 @@ class FontDisplayAutoLCPAlignSwapModeTest
 
 TEST_F(FontDisplayAutoLCPAlignSwapModeTest, FontFinishesBeforeLCPLimit) {
   SimRequest main_resource("https://example.com", "text/html");
-  SimRequest font_resource("https://example.com/Ahem.woff2", "font/woff2");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
 
   LoadURL("https://example.com");
   main_resource.Complete(R"HTML(
@@ -350,7 +356,8 @@ TEST_F(FontDisplayAutoLCPAlignSwapModeTest, FontFinishesBeforeLCPLimit) {
 
 TEST_F(FontDisplayAutoLCPAlignSwapModeTest, FontFinishesAfterLCPLimit) {
   SimRequest main_resource("https://example.com", "text/html");
-  SimRequest font_resource("https://example.com/Ahem.woff2", "font/woff2");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
 
   LoadURL("https://example.com");
   main_resource.Complete(R"HTML(
@@ -374,7 +381,7 @@ TEST_F(FontDisplayAutoLCPAlignSwapModeTest, FontFinishesAfterLCPLimit) {
   EXPECT_TRUE(GetTargetFont().ShouldSkipDrawing());
 
   // Wait until we reach the LCP limit, and the relevant timeout fires.
-  test::RunDelayedTasks(base::TimeDelta::FromMilliseconds(
+  test::RunDelayedTasks(base::Milliseconds(
       features::kAlignFontDisplayAutoTimeoutWithLCPGoalTimeoutParam.Get()));
 
   // After reaching the LCP limit, the web font should enter the swap
@@ -393,13 +400,14 @@ TEST_F(FontDisplayAutoLCPAlignSwapModeTest, FontFinishesAfterLCPLimit) {
 
 TEST_F(FontDisplayAutoLCPAlignSwapModeTest, FontFaceAddedAfterLCPLimit) {
   SimRequest main_resource("https://example.com", "text/html");
-  SimRequest font_resource("https://example.com/Ahem.woff2", "font/woff2");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
 
   LoadURL("https://example.com");
   main_resource.Write("<!doctype html>");
 
   // Wait until we reach the LCP limit, and the relevant timeout fires.
-  test::RunDelayedTasks(base::TimeDelta::FromMilliseconds(
+  test::RunDelayedTasks(base::Milliseconds(
       features::kAlignFontDisplayAutoTimeoutWithLCPGoalTimeoutParam.Get()));
 
   main_resource.Complete(R"HTML(
@@ -426,7 +434,8 @@ TEST_F(FontDisplayAutoLCPAlignSwapModeTest, FontFaceAddedAfterLCPLimit) {
 TEST_F(FontDisplayAutoLCPAlignSwapModeTest,
        FontFaceInMemoryCacheAddedAfterLCPLimit) {
   SimRequest main_resource("https://example.com", "text/html");
-  SimRequest font_resource("https://example.com/Ahem.woff2", "font/woff2");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
 
   LoadURL("https://example.com");
   main_resource.Write(R"HTML(
@@ -438,7 +447,7 @@ TEST_F(FontDisplayAutoLCPAlignSwapModeTest,
   font_resource.Complete(ReadAhemWoff2());
 
   // Wait until we reach the LCP limit, and the relevant timeout fires.
-  test::RunDelayedTasks(base::TimeDelta::FromMilliseconds(
+  test::RunDelayedTasks(base::Milliseconds(
       features::kAlignFontDisplayAutoTimeoutWithLCPGoalTimeoutParam.Get()));
 
   main_resource.Complete(R"HTML(

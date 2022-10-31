@@ -48,7 +48,7 @@ bool HtmlAudioElementCapturerSource::EnsureSourceIsStarted() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (audio_source_ && !is_started_) {
     // TODO(crbug.com/964463): Use per-frame task runner.
-    Thread::Current()->GetTaskRunner()->PostTask(
+    Thread::Current()->GetDeprecatedTaskRunner()->PostTask(
         FROM_HERE, WTF::Bind(&HtmlAudioElementCapturerSource::SetAudioCallback,
                              weak_factory_.GetWeakPtr()));
     is_started_ = true;
@@ -85,8 +85,8 @@ void HtmlAudioElementCapturerSource::OnAudioBus(
     int sample_rate) {
   const base::TimeTicks capture_time =
       base::TimeTicks::Now() -
-      base::TimeDelta::FromMicroseconds(base::Time::kMicrosecondsPerSecond *
-                                        frames_delayed / sample_rate);
+      base::Microseconds(base::Time::kMicrosecondsPerSecond * frames_delayed /
+                         sample_rate);
 
   if (sample_rate != last_sample_rate_ ||
       audio_bus->channels() != last_num_channels_ ||

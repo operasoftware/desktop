@@ -38,29 +38,35 @@ class LayoutSVGResourceFilter final : public LayoutSVGResourceContainer {
 
   bool IsChildAllowed(LayoutObject*, const ComputedStyle&) const override;
 
-  const char* GetName() const override { return "LayoutSVGResourceFilter"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutSVGResourceFilter";
+  }
 
   void RemoveAllClientsFromCache() override;
 
-  FloatRect ResourceBoundingBox(const FloatRect& reference_box) const;
+  gfx::RectF ResourceBoundingBox(const gfx::RectF& reference_box) const;
 
   SVGUnitTypes::SVGUnitType FilterUnits() const;
   SVGUnitTypes::SVGUnitType PrimitiveUnits() const;
 
   static const LayoutSVGResourceType kResourceType = kFilterResourceType;
-  LayoutSVGResourceType ResourceType() const override { return kResourceType; }
+  LayoutSVGResourceType ResourceType() const override {
+    NOT_DESTROYED();
+    return kResourceType;
+  }
 
  private:
-  bool FindCycleFromSelf(SVGResourcesCycleSolver&) const override;
+  bool FindCycleFromSelf() const override;
 };
 
-// Get the LayoutSVGResourceFilter from the 'filter' property iff the 'filter'
-// is a single url(...) reference.
-LayoutSVGResourceFilter* GetFilterResourceForSVG(const ComputedStyle&);
-
-DEFINE_LAYOUT_SVG_RESOURCE_TYPE_CASTS(LayoutSVGResourceFilter,
-                                      kFilterResourceType);
+template <>
+struct DowncastTraits<LayoutSVGResourceFilter> {
+  static bool AllowFrom(const LayoutSVGResourceContainer& container) {
+    return container.ResourceType() == kFilterResourceType;
+  }
+};
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_SVG_LAYOUT_SVG_RESOURCE_FILTER_H_

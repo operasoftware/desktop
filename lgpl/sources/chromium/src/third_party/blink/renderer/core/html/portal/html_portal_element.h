@@ -5,10 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_PORTAL_HTML_PORTAL_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_PORTAL_HTML_PORTAL_ELEMENT_H_
 
-#include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/portal/portal.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -22,6 +22,7 @@ namespace blink {
 class Document;
 class PortalActivateOptions;
 class PortalContents;
+class PostMessageOptions;
 class ScriptState;
 
 // The HTMLPortalElement implements the <portal> HTML element. The portal
@@ -33,9 +34,12 @@ class CORE_EXPORT HTMLPortalElement : public HTMLFrameOwnerElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
+  // |portal_token|, |remote_portal| and |portal_client_receiver| are all empty
+  // when an empty HTMLPortalElement is constructed, (it hasn't yet been
+  // attached to an actual contents).
   explicit HTMLPortalElement(
       Document& document,
-      const base::UnguessableToken& portal_token = base::UnguessableToken(),
+      const PortalToken* portal_token = nullptr,
       mojo::PendingAssociatedRemote<mojom::blink::Portal> remote_portal = {},
       mojo::PendingAssociatedReceiver<mojom::blink::PortalClient>
           portal_client_receiver = {});
@@ -50,22 +54,17 @@ class CORE_EXPORT HTMLPortalElement : public HTMLFrameOwnerElement {
   ScriptPromise activate(ScriptState*, PortalActivateOptions*, ExceptionState&);
   void postMessage(ScriptState* script_state,
                    const ScriptValue& message,
-                   const String& target_origin,
-                   const HeapVector<ScriptValue>& transfer,
-                   ExceptionState& exception_state);
-  void postMessage(ScriptState* script_state,
-                   const ScriptValue& message,
-                   const WindowPostMessageOptions* options,
+                   const PostMessageOptions* options,
                    ExceptionState& exception_state);
   EventListener* onmessage();
   void setOnmessage(EventListener* listener);
   EventListener* onmessageerror();
   void setOnmessageerror(EventListener* listener);
 
-  const base::UnguessableToken& GetToken() const;
+  const PortalToken& GetToken() const;
 
-  mojom::blink::FrameOwnerElementType OwnerType() const override {
-    return mojom::blink::FrameOwnerElementType::kPortal;
+  FrameOwnerElementType OwnerType() const override {
+    return FrameOwnerElementType::kPortal;
   }
 
   // Consumes the portal interface. When a Portal is activated, or if the
@@ -81,6 +80,13 @@ class CORE_EXPORT HTMLPortalElement : public HTMLFrameOwnerElement {
   void PortalContentsWillBeDestroyed(PortalContents*);
 
  private:
+  // Returns a null string if the checks passed, and a suitable error otherwise.
+  String PreActivateChecksCommon();
+
+  // Performs a default activation (e.g. due to an unprevented click), as
+  // opposed to one requested by invoking HTMLPortalElement::activate.
+  void ActivateDefault();
+
   // Checks whether the Portals feature is enabled for this document, and logs a
   // warning to the developer if not. Doing basically anything with an
   // HTMLPortalElement in a document which doesn't support portals is forbidden.
@@ -91,10 +97,6 @@ class CORE_EXPORT HTMLPortalElement : public HTMLFrameOwnerElement {
   // disable navigating the portal and insertion (and will display a warning in
   // the console).
   bool CheckWithinFrameLimitOrWarn() const;
-
-  // Checks that the number of frames and portals on the page are within the
-  // limit.
-  bool IsCurrentlyWithinFrameLimit() const;
 
   enum class GuestContentsEligibility {
     // Can have a guest contents.
@@ -133,11 +135,16 @@ class CORE_EXPORT HTMLPortalElement : public HTMLFrameOwnerElement {
 
   // HTMLFrameOwnerElement overrides
   void DisconnectContentFrame() override;
-  ParsedFeaturePolicy ConstructContainerPolicy() const override {
-    return ParsedFeaturePolicy();
+  ParsedPermissionsPolicy ConstructContainerPolicy() const override {
+    return ParsedPermissionsPolicy();
   }
   void AttachLayoutTree(AttachContext& context) override;
   network::mojom::ReferrerPolicy ReferrerPolicyAttribute() override;
+
+  bool IsPortalCreationOrAdoptionAllowed(const ContainerNode* node);
+
+  // Defers the portal creation if the current document is being prerendered.
+  void CreatePortalAndNavigate(const ContainerNode* node);
 
   Member<PortalContents> portal_;
 
@@ -162,6 +169,11 @@ struct DowncastTraits<HTMLPortalElement> {
   }
   static bool AllowFrom(const Node& node) {
     if (const HTMLElement* html_element = DynamicTo<HTMLElement>(node))
+      return html_element->IsHTMLPortalElement();
+    return false;
+  }
+  static bool AllowFrom(const Element& element) {
+    if (const HTMLElement* html_element = DynamicTo<HTMLElement>(element))
       return html_element->IsHTMLPortalElement();
     return false;
   }

@@ -7,38 +7,16 @@
 
 namespace blink {
 
-class FragmentDataTest : public RenderingTest {
- protected:
-  bool HasRareData(const FragmentData& data) { return !!data.rare_data_; }
-};
+class FragmentDataTest : public RenderingTest {};
 
-TEST_F(FragmentDataTest, SelectionVisualRect) {
-  FragmentData fragment;
-
-  // Default SelectionVisualRect should not create RareData.
-  fragment.SetVisualRect(IntRect(10, 20, 30, 400));
-  fragment.SetSelectionVisualRect(IntRect());
-  EXPECT_FALSE(HasRareData(fragment));
-  EXPECT_EQ(IntRect(), fragment.SelectionVisualRect());
-
-  // Non-Default SelectionVisualRect creates RareData.
-  fragment.SetSelectionVisualRect(IntRect(1, 2, 3, 4));
-  EXPECT_TRUE(HasRareData(fragment));
-  EXPECT_EQ(IntRect(1, 2, 3, 4), fragment.SelectionVisualRect());
-
-  // PaintProperties should store default SelectionVisualRect once it's created.
-  fragment.SetSelectionVisualRect(IntRect());
-  EXPECT_TRUE(HasRareData(fragment));
-  EXPECT_EQ(IntRect(), fragment.SelectionVisualRect());
-}
-
-TEST_F(FragmentDataTest, PreEffectClipProperties) {
+TEST_F(FragmentDataTest, PreClip) {
   SetBodyInnerHTML(R"HTML(
     <style>
       #target {
         width: 400px; height: 400px; position: absolute;
         clip: rect(0, 50px, 100px, 0);
         clip-path: inset(0%);
+        filter: blur(10px);
       }
     </style>
     <div id='target'></div>
@@ -49,9 +27,12 @@ TEST_F(FragmentDataTest, PreEffectClipProperties) {
       target->FirstFragment().PaintProperties();
   EXPECT_TRUE(properties->ClipPathClip());
   EXPECT_TRUE(properties->CssClip());
+  EXPECT_TRUE(properties->PixelMovingFilterClipExpander());
+  EXPECT_EQ(properties->CssClip(),
+            properties->PixelMovingFilterClipExpander()->Parent());
   EXPECT_EQ(properties->ClipPathClip(), properties->CssClip()->Parent());
   EXPECT_EQ(properties->ClipPathClip()->Parent(),
-            &target->FirstFragment().PreEffectProperties().Clip());
+            &target->FirstFragment().PreClip());
 }
 
 }  // namespace blink

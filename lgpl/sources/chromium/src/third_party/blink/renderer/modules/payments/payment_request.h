@@ -5,7 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_PAYMENTS_PAYMENT_REQUEST_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_PAYMENTS_PAYMENT_REQUEST_H_
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "components/payments/mojom/payment_request_data.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/payments/payment_request.mojom-blink.h"
@@ -20,7 +19,8 @@
 #include "third_party/blink/renderer/modules/payments/payment_request_delegate.h"
 #include "third_party/blink/renderer/modules/payments/payment_state_resolver.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/timer.h"
@@ -46,7 +46,6 @@ class MODULES_EXPORT PaymentRequest final
       public ExecutionContextLifecycleObserver,
       public ActiveScriptWrappable<PaymentRequest> {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(PaymentRequest);
   // TODO(chikamune): remove this line after code freeze.
   USING_PRE_FINALIZER(PaymentRequest, ClearResolversAndCloseMojoConnection);
 
@@ -68,6 +67,10 @@ class MODULES_EXPORT PaymentRequest final
                  mojo::PendingRemote<payments::mojom::blink::PaymentRequest>
                      mock_payment_provider,
                  ExceptionState&);
+
+  PaymentRequest(const PaymentRequest&) = delete;
+  PaymentRequest& operator=(const PaymentRequest&) = delete;
+
   ~PaymentRequest() override;
 
   ScriptPromise show(ScriptState*, ExceptionState&);
@@ -169,21 +172,25 @@ class MODULES_EXPORT PaymentRequest final
   String shipping_option_;
   String shipping_type_;
   HashSet<String> method_names_;
-  Member<ScriptPromiseResolver> accept_resolver_;
+  Member<ScriptPromiseResolver>
+      accept_resolver_;  // the resolver for the show() promise.
   Member<ScriptPromiseResolver> complete_resolver_;
   Member<ScriptPromiseResolver> retry_resolver_;
   Member<ScriptPromiseResolver> abort_resolver_;
   Member<ScriptPromiseResolver> can_make_payment_resolver_;
   Member<ScriptPromiseResolver> has_enrolled_instrument_resolver_;
+
+  // When not null, reject show(), resolve canMakePayment() and
+  // hasEnrolledInstrument() with false.
+  String not_supported_for_invalid_origin_or_ssl_error_;
+
   HeapMojoRemote<payments::mojom::blink::PaymentRequest> payment_provider_;
   HeapMojoReceiver<payments::mojom::blink::PaymentRequestClient, PaymentRequest>
       client_receiver_;
-  TaskRunnerTimer<PaymentRequest> complete_timer_;
-  TaskRunnerTimer<PaymentRequest> update_payment_details_timer_;
+  HeapTaskRunnerTimer<PaymentRequest> complete_timer_;
+  HeapTaskRunnerTimer<PaymentRequest> update_payment_details_timer_;
   bool is_waiting_for_show_promise_to_resolve_;
   bool ignore_total_;
-
-  DISALLOW_COPY_AND_ASSIGN(PaymentRequest);
 };
 
 }  // namespace blink

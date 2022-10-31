@@ -2,8 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/** @implements {settings.AndroidAppsBrowserProxy} */
-class TestAndroidAppsBrowserProxy extends TestBrowserProxy {
+import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
+
+import {TestBrowserProxy} from '../../test_browser_proxy.js';
+
+/** @implements {AndroidAppsBrowserProxy} */
+export class TestAndroidAppsBrowserProxy extends TestBrowserProxy {
   constructor() {
     super([
       'requestAndroidAppsInfo',
@@ -29,6 +33,6 @@ class TestAndroidAppsBrowserProxy extends TestBrowserProxy {
       playStoreEnabled: playStoreEnabled,
       settingsAppAvailable: settingsAppAvailable,
     };
-    cr.webUIListenerCallback('android-apps-info-update', appsInfo);
+    webUIListenerCallback('android-apps-info-update', appsInfo);
   }
 }

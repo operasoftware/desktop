@@ -67,13 +67,13 @@ double BaseTemporalInputType::ValueAsDate() const {
 }
 
 void BaseTemporalInputType::SetValueAsDate(
-    const base::Optional<base::Time>& value,
+    const absl::optional<base::Time>& value,
     ExceptionState&) const {
-  GetElement().setValue(SerializeWithDate(value));
+  GetElement().SetValue(SerializeWithDate(value));
 }
 
 double BaseTemporalInputType::ValueAsDouble() const {
-  const Decimal value = ParseToNumber(GetElement().value(), Decimal::Nan());
+  const Decimal value = ParseToNumber(GetElement().Value(), Decimal::Nan());
   return value.IsFinite() ? value.ToDouble()
                           : DateComponents::InvalidMilliseconds();
 }
@@ -91,7 +91,12 @@ bool BaseTemporalInputType::TypeMismatchFor(const String& value) const {
 }
 
 bool BaseTemporalInputType::TypeMismatch() const {
-  return TypeMismatchFor(GetElement().value());
+  return TypeMismatchFor(GetElement().Value());
+}
+
+String BaseTemporalInputType::ValueNotEqualText(const Decimal& value) const {
+  return GetLocale().QueryString(IDS_FORM_VALIDATION_VALUE_NOT_EQUAL_DATETIME,
+                                 LocalizeValue(Serialize(value)));
 }
 
 String BaseTemporalInputType::RangeOverflowText(const Decimal& maximum) const {
@@ -117,10 +122,6 @@ String BaseTemporalInputType::RangeInvalidText(const Decimal& minimum,
 Decimal BaseTemporalInputType::DefaultValueForStepUp() const {
   return Decimal::FromDouble(
       ConvertToLocalTime(base::Time::Now()).InMillisecondsF());
-}
-
-bool BaseTemporalInputType::IsSteppable() const {
-  return true;
 }
 
 Decimal BaseTemporalInputType::ParseToNumber(
@@ -159,14 +160,14 @@ String BaseTemporalInputType::SerializeWithComponents(
   if (!GetElement().GetAllowedValueStep(&step))
     return date.ToString();
   if (step.Remainder(kMsecPerMinute).IsZero())
-    return date.ToString(DateComponents::kNone);
+    return date.ToString(DateComponents::SecondFormat::kNone);
   if (step.Remainder(kMsecPerSecond).IsZero())
-    return date.ToString(DateComponents::kSecond);
-  return date.ToString(DateComponents::kMillisecond);
+    return date.ToString(DateComponents::SecondFormat::kSecond);
+  return date.ToString(DateComponents::SecondFormat::kMillisecond);
 }
 
 String BaseTemporalInputType::SerializeWithDate(
-    const base::Optional<base::Time>& value) const {
+    const absl::optional<base::Time>& value) const {
   if (!value)
     return g_empty_string;
   return Serialize(Decimal::FromDouble(value->ToJsTimeIgnoringNull()));
@@ -183,7 +184,7 @@ String BaseTemporalInputType::LocalizeValue(
 }
 
 String BaseTemporalInputType::VisibleValue() const {
-  return LocalizeValue(GetElement().value());
+  return LocalizeValue(GetElement().Value());
 }
 
 String BaseTemporalInputType::SanitizeValue(

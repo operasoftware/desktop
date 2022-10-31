@@ -30,6 +30,7 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
+#include "third_party/blink/public/common/loader/referrer_utils.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
@@ -47,10 +48,8 @@
 #include "third_party/blink/renderer/platform/loader/fetch/unique_identifier.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
 #include "third_party/blink/renderer/platform/network/network_utils.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/reporting_disposition.h"
-#include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
@@ -64,15 +63,13 @@ namespace {
 // The amount of time to wait before informing the clients that the image has
 // been updated (in seconds). This effectively throttles invalidations that
 // result from new data arriving for this image.
-constexpr auto kFlushDelay = base::TimeDelta::FromSeconds(1);
+constexpr auto kFlushDelay = base::Seconds(1);
 
 }  // namespace
 
 class ImageResource::ImageResourceInfoImpl final
     : public GarbageCollected<ImageResourceInfoImpl>,
       public ImageResourceInfo {
-  USING_GARBAGE_COLLECTED_MIXIN(ImageResourceInfoImpl);
-
  public:
   explicit ImageResourceInfoImpl(ImageResource* resource)
       : resource_(resource) {
@@ -103,10 +100,10 @@ class ImageResource::ImageResourceInfoImpl final
   bool HasCacheControlNoStoreHeader() const override {
     return resource_->HasCacheControlNoStoreHeader();
   }
-  base::Optional<ResourceError> GetResourceError() const override {
+  absl::optional<ResourceError> GetResourceError() const override {
     if (resource_->LoadFailedOrCanceled())
       return resource_->GetResourceError();
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   void SetDecodedSize(size_t size) override { resource_->SetDecodedSize(size); }
@@ -121,7 +118,7 @@ class ImageResource::ImageResourceInfoImpl final
       const KURL& url,
       const AtomicString& initiator_name) override {
     fetcher->EmulateLoadStartedForInspector(
-        resource_.Get(), url, mojom::RequestContextType::IMAGE,
+        resource_.Get(), url, mojom::blink::RequestContextType::IMAGE,
         network::mojom::RequestDestination::kImage, initiator_name);
   }
 
@@ -135,6 +132,12 @@ class ImageResource::ImageResourceInfoImpl final
 
   bool IsAdResource() const override {
     return resource_->GetResourceRequest().IsAdResource();
+  }
+
+  const HashSet<String>* GetUnsupportedImageMimeTypes() const override {
+    if (!resource_->Options().unsupported_image_mime_types)
+      return nullptr;
+    return &resource_->Options().unsupported_image_mime_types->data;
   }
 
   const Member<ImageResource> resource_;
@@ -157,19 +160,28 @@ class ImageResource::ImageResourceFactory : public NonTextResourceFactory {
 ImageResource* ImageResource::Fetch(FetchParameters& params,
                                     ResourceFetcher* fetcher) {
   if (params.GetResourceRequest().GetRequestContext() ==
-      mojom::RequestContextType::UNSPECIFIED) {
-    params.SetRequestContext(mojom::RequestContextType::IMAGE);
+      mojom::blink::RequestContextType::UNSPECIFIED) {
+    params.SetRequestContext(mojom::blink::RequestContextType::IMAGE);
     params.SetRequestDestination(network::mojom::RequestDestination::kImage);
   }
 
-  ImageResource* resource = ToImageResource(
+  // If the fetch originated from user agent CSS we do not need to check CSP.
+  bool is_user_agent_resource = params.Options().initiator_info.name ==
+                                fetch_initiator_type_names::kUacss;
+  if (is_user_agent_resource) {
+    params.SetContentSecurityCheck(
+        network::mojom::CSPDisposition::DO_NOT_CHECK);
+  }
+
+  auto* resource = To<ImageResource>(
       fetcher->RequestResource(params, ImageResourceFactory(), nullptr));
 
   // If the fetch originated from user agent CSS we should mark it as a user
   // agent resource.
-  if (params.Options().initiator_info.name ==
-      fetch_initiator_type_names::kUacss)
+  if (is_user_agent_resource) {
     resource->FlagAsUserAgentResource();
+  }
+
   return resource;
 }
 
@@ -183,8 +195,10 @@ bool ImageResource::CanUseCacheValidator() const {
   return Resource::CanUseCacheValidator();
 }
 
-ImageResource* ImageResource::Create(const ResourceRequest& request) {
-  ResourceLoaderOptions options;
+ImageResource* ImageResource::Create(
+    const ResourceRequest& request,
+    scoped_refptr<const DOMWrapperWorld> world) {
+  ResourceLoaderOptions options(std::move(world));
   return MakeGarbageCollected<ImageResource>(
       request, options, ImageResourceContent::CreateNotStarted());
 }
@@ -195,11 +209,11 @@ ImageResource* ImageResource::CreateForTest(const KURL& url) {
   // These are needed because some unittests don't go through the usual
   // request setting path in ResourceFetcher.
   request.SetRequestorOrigin(SecurityOrigin::CreateUniqueOpaque());
-  request.SetReferrerPolicy(
-      ReferrerPolicyResolveDefault(request.GetReferrerPolicy()));
+  request.SetReferrerPolicy(ReferrerUtils::MojoReferrerPolicyResolveDefault(
+      request.GetReferrerPolicy()));
   request.SetPriority(WebURLRequest::Priority::kLow);
 
-  return Create(request);
+  return Create(request, nullptr);
 }
 
 ImageResource::ImageResource(const ResourceRequest& resource_request,
@@ -226,8 +240,8 @@ void ImageResource::OnMemoryDump(WebMemoryDumpLevelOfDetail level_of_detail,
   Resource::OnMemoryDump(level_of_detail, memory_dump);
   const String name = GetMemoryDumpName() + "/image_content";
   auto* dump = memory_dump->CreateMemoryAllocatorDump(name);
-  if (content_->HasImage() && content_->GetImage()->Data())
-    dump->AddScalar("size", "bytes", content_->GetImage()->Data()->size());
+  if (content_->HasImage() && content_->GetImage()->HasData())
+    dump->AddScalar("size", "bytes", content_->GetImage()->DataSize());
 }
 
 void ImageResource::Trace(Visitor* visitor) const {
@@ -289,7 +303,7 @@ scoped_refptr<const SharedBuffer> ImageResource::ResourceBuffer() const {
 void ImageResource::AppendData(const char* data, size_t length) {
   v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(length);
   if (multipart_parser_) {
-    multipart_parser_->AppendData(data, SafeCast<wtf_size_t>(length));
+    multipart_parser_->AppendData(data, base::checked_cast<wtf_size_t>(length));
   } else {
     Resource::AppendData(data, length);
 

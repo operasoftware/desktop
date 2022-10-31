@@ -26,13 +26,20 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import urllib2
+import gzip
+
+import six
+from six.moves import urllib
+import time
+import logging
 
 from blinkpy.common.net.network_transaction import NetworkTransaction
 
+_log = logging.getLogger(__name__)
+
 
 class Web(object):
-    class _HTTPRedirectHandler2(urllib2.HTTPRedirectHandler):  # pylint:disable=no-init
+    class _HTTPRedirectHandler2(urllib.request.HTTPRedirectHandler):  # pylint:disable=no-init
         """A subclass of HTTPRedirectHandler to support 308 Permanent Redirect."""
 
         def http_error_308(self, req, fp, code, msg, headers):  # pylint:disable=unused-argument
@@ -40,13 +47,38 @@ class Web(object):
             # otherwise, HTTPRedirectHandler will throw a HTTPError.
             return self.http_error_301(req, fp, 301, msg, headers)
 
-    def get_binary(self, url, return_none_on_404=False):
-        return NetworkTransaction(return_none_on_404=return_none_on_404).run(
-            lambda: self.request('GET', url).read())
+    def get_binary(self, url, return_none_on_404=False, retries=0):
+        def make_request():
+            response = self.request('GET',
+                                    url,
+                                    headers={'Accept-Encoding': 'gzip'})
+            if response.headers.get('Content-Encoding') == 'gzip':
+                # Wrap the HTTP response, which is not fully file-like.
+                # Unfortunately, `six` does not provide `io.BufferedRandom`, so
+                # we need to read the entire payload up-front (may pose a
+                # performance issue).
+                buf = six.BytesIO(response.read())
+                gzip_decoder = gzip.GzipFile(fileobj=buf)
+                return gzip_decoder.read()
+            return response.read()
+
+        if retries > 0:
+            for i in range(retries):
+                try:
+                    return NetworkTransaction(
+                        return_none_on_404=return_none_on_404).run(
+                            make_request)
+                except six.moves.urllib.error.URLError as error:
+                    _log.error(
+                        "Received URLError: %s. Retrying in 10"
+                        " seconds for the %s time...", error, i + 1)
+                    time.sleep(10)
+        return NetworkTransaction(
+            return_none_on_404=return_none_on_404).run(make_request)
 
     def request(self, method, url, data=None, headers=None):
-        opener = urllib2.build_opener(Web._HTTPRedirectHandler2)
-        request = urllib2.Request(url=url, data=data)
+        opener = urllib.request.build_opener(Web._HTTPRedirectHandler2)
+        request = urllib.request.Request(url=url, data=data)
 
         request.get_method = lambda: method
 

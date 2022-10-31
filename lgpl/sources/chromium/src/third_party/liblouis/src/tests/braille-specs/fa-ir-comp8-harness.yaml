@@ -1,9 +1,10 @@
 display: unicode-without-blank.dis
 table:
-  locale: fa
+  language: fa
   type: computer
   dots: 8
   __assert-match: fa-ir-comp8.ctb
+flags: {testmode: bothDirections}
 tests:
   - ['=', ⠶]
   - [===, ⠶⠶⠶]

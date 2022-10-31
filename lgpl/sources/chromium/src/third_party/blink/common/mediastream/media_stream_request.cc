@@ -6,6 +6,7 @@
 
 #include "base/check.h"
 #include "build/build_config.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
 
 namespace blink {
 
@@ -20,7 +21,9 @@ bool IsVideoInputMediaType(mojom::MediaStreamType type) {
   return (type == mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE ||
           type == mojom::MediaStreamType::GUM_TAB_VIDEO_CAPTURE ||
           type == mojom::MediaStreamType::GUM_DESKTOP_VIDEO_CAPTURE ||
-          type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE);
+          type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE ||
+          type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE_THIS_TAB ||
+          type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE_SET);
 }
 
 bool IsScreenCaptureMediaType(mojom::MediaStreamType type) {
@@ -39,12 +42,15 @@ bool IsDesktopCaptureMediaType(mojom::MediaStreamType type) {
 
 bool IsVideoDesktopCaptureMediaType(mojom::MediaStreamType type) {
   return (type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE ||
-          type == mojom::MediaStreamType::GUM_DESKTOP_VIDEO_CAPTURE);
+          type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE_THIS_TAB ||
+          type == mojom::MediaStreamType::GUM_DESKTOP_VIDEO_CAPTURE ||
+          type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE_SET);
 }
 
 bool IsTabCaptureMediaType(mojom::MediaStreamType type) {
   return (type == mojom::MediaStreamType::GUM_TAB_AUDIO_CAPTURE ||
-          type == mojom::MediaStreamType::GUM_TAB_VIDEO_CAPTURE);
+          type == mojom::MediaStreamType::GUM_TAB_VIDEO_CAPTURE ||
+          type == mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE_THIS_TAB);
 }
 
 bool IsDeviceMediaType(mojom::MediaStreamType type) {
@@ -68,14 +74,14 @@ MediaStreamDevice::MediaStreamDevice(
     mojom::MediaStreamType type,
     const std::string& id,
     const std::string& name,
+    const media::VideoCaptureControlSupport& control_support,
     media::VideoFacingMode facing,
-    const base::Optional<std::string>& group_id,
-    const base::Optional<bool>& pan_tilt_zoom_supported)
+    const absl::optional<std::string>& group_id)
     : type(type),
       id(id),
+      video_control_support(control_support),
       video_facing(facing),
       group_id(group_id),
-      pan_tilt_zoom_supported(pan_tilt_zoom_supported),
       name(name) {}
 
 MediaStreamDevice::MediaStreamDevice(mojom::MediaStreamType type,
@@ -98,15 +104,15 @@ MediaStreamDevice::MediaStreamDevice(mojom::MediaStreamType type,
 MediaStreamDevice::MediaStreamDevice(const MediaStreamDevice& other)
     : type(other.type),
       id(other.id),
+      video_control_support(other.video_control_support),
       video_facing(other.video_facing),
       group_id(other.group_id),
-      pan_tilt_zoom_supported(other.pan_tilt_zoom_supported),
       matched_output_device_id(other.matched_output_device_id),
       name(other.name),
       input(other.input),
       session_id_(other.session_id_) {
   DCHECK(!session_id_.has_value() || !session_id_->is_empty());
-  if (other.display_media_info.has_value())
+  if (other.display_media_info)
     display_media_info = other.display_media_info->Clone();
 }
 
@@ -118,6 +124,7 @@ MediaStreamDevice& MediaStreamDevice::operator=(
     return *this;
   type = other.type;
   id = other.id;
+  video_control_support = other.video_control_support;
   video_facing = other.video_facing;
   group_id = other.group_id;
   matched_output_device_id = other.matched_output_device_id;
@@ -125,7 +132,7 @@ MediaStreamDevice& MediaStreamDevice::operator=(
   input = other.input;
   session_id_ = other.session_id_;
   DCHECK(!session_id_.has_value() || !session_id_->is_empty());
-  if (other.display_media_info.has_value())
+  if (other.display_media_info)
     display_media_info = other.display_media_info->Clone();
   return *this;
 }
@@ -137,6 +144,26 @@ bool MediaStreamDevice::IsSameDevice(
          input.sample_rate() == other_device.input.sample_rate() &&
          input.channel_layout() == other_device.input.channel_layout() &&
          session_id_ == other_device.session_id_;
+}
+
+blink::MediaStreamDevices ToMediaStreamDevicesList(
+    const blink::mojom::StreamDevicesSet& stream_devices_set) {
+  blink::MediaStreamDevices devices;
+  for (const blink::mojom::StreamDevicesPtr& devices_to_insert :
+       stream_devices_set.stream_devices) {
+    if (devices_to_insert->audio_device.has_value()) {
+      devices.push_back(devices_to_insert->audio_device.value());
+    }
+    if (devices_to_insert->video_device.has_value()) {
+      devices.push_back(devices_to_insert->video_device.value());
+    }
+  }
+  return devices;
+}
+
+size_t CountDevices(const blink::mojom::StreamDevices& devices) {
+  return (devices.audio_device.has_value() ? 1u : 0u) +
+         (devices.video_device.has_value() ? 1u : 0u);
 }
 
 }  // namespace blink

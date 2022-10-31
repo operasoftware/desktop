@@ -12,9 +12,10 @@
 #include "build/build_config.h"
 #include "media/media_buildflags.h"
 #include "net/base/mime_util.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/public/common/features.h"
 
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
 // iOS doesn't use and must not depend on //media
 #include "media/base/mime_util.h"
 #endif
@@ -25,18 +26,23 @@ namespace {
 
 // From WebKit's WebCore/platform/MIMETypeRegistry.cpp:
 
-const char* const kSupportedImageTypes[] = {"image/jpeg",
-                                            "image/pjpeg",
-                                            "image/jpg",
-                                            "image/webp",
-                                            "image/png",
-                                            "image/apng",
-                                            "image/gif",
-                                            "image/bmp",
-                                            "image/vnd.microsoft.icon",  // ico
-                                            "image/x-icon",              // ico
-                                            "image/x-xbitmap",           // xbm
-                                            "image/x-png"};
+const char* const kSupportedImageTypes[] = {
+    "image/jpeg",
+    "image/pjpeg",
+    "image/jpg",
+    "image/webp",
+    "image/png",
+    "image/apng",
+    "image/gif",
+    "image/bmp",
+    "image/vnd.microsoft.icon",  // ico
+    "image/x-icon",              // ico
+    "image/x-xbitmap",           // xbm
+    "image/x-png",
+#if BUILDFLAG(ENABLE_AV1_DECODER)
+    "image/avif",
+#endif
+};
 
 //  Support every script type mentioned in the spec, as it notes that "User
 //  agents must recognize all JavaScript MIME types." See
@@ -112,6 +118,9 @@ static const char* const kSupportedNonImageTypes[] = {
 // Singleton utility class for mime types
 class MimeUtil {
  public:
+  MimeUtil(const MimeUtil&) = delete;
+  MimeUtil& operator=(const MimeUtil&) = delete;
+
   bool IsSupportedImageMimeType(const std::string& mime_type) const;
   bool IsSupportedNonImageMimeType(const std::string& mime_type) const;
   bool IsUnsupportedTextMimeType(const std::string& mime_type) const;
@@ -131,8 +140,6 @@ class MimeUtil {
   MimeTypes non_image_types_;
   MimeTypes unsupported_text_types_;
   MimeTypes javascript_types_;
-
-  DISALLOW_COPY_AND_ASSIGN(MimeUtil);
 };
 
 MimeUtil::MimeUtil() {
@@ -140,11 +147,11 @@ MimeUtil::MimeUtil() {
     non_image_types_.insert(type);
   for (const char* type : kSupportedImageTypes)
     image_types_.insert(type);
-#if BUILDFLAG(ENABLE_AV1_DECODER)
-  // TODO(wtc): Add "image/avif" to the kSupportedImageTypes array when the AVIF
-  // feature is shipped.
-  if (base::FeatureList::IsEnabled(features::kAVIF))
-    image_types_.insert("image/avif");
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+  // TODO(firsching): Add "image/jxl" to the kSupportedImageTypes array when the
+  // JXL feature is shipped.
+  if (base::FeatureList::IsEnabled(features::kJXL))
+    image_types_.insert("image/jxl");
 #endif
   for (const char* type : kUnsupportedTextTypes)
     unsupported_text_types_.insert(type);
@@ -161,7 +168,7 @@ bool MimeUtil::IsSupportedImageMimeType(const std::string& mime_type) const {
 bool MimeUtil::IsSupportedNonImageMimeType(const std::string& mime_type) const {
   return non_image_types_.find(base::ToLowerASCII(mime_type)) !=
              non_image_types_.end() ||
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
          media::IsSupportedMediaMimeType(mime_type) ||
 #endif
          (base::StartsWith(mime_type, "text/",

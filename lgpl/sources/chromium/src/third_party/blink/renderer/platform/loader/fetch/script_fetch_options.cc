@@ -4,6 +4,10 @@
 
 #include "third_party/blink/renderer/platform/loader/fetch/script_fetch_options.h"
 
+#include <utility>
+
+#include "third_party/blink/renderer/platform/loader/attribution_header_constants.h"
+#include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
@@ -13,6 +17,7 @@ namespace blink {
 FetchParameters ScriptFetchOptions::CreateFetchParameters(
     const KURL& url,
     const SecurityOrigin* security_origin,
+    scoped_refptr<const DOMWrapperWorld> world_for_csp,
     CrossOriginAttributeValue cross_origin,
     const WTF::TextEncoding& encoding,
     FetchParameters::DeferOption defer) const {
@@ -21,12 +26,13 @@ FetchParameters ScriptFetchOptions::CreateFetchParameters(
   ResourceRequest resource_request(url);
 
   // Step 1. ... "script", ... [spec text]
-  ResourceLoaderOptions resource_loader_options;
+  ResourceLoaderOptions resource_loader_options(std::move(world_for_csp));
   resource_loader_options.initiator_info.name = "script";
   resource_loader_options.reject_coep_unsafe_none = reject_coep_unsafe_none_;
   FetchParameters params(std::move(resource_request), resource_loader_options);
-  params.SetRequestContext(mojom::RequestContextType::SCRIPT);
+  params.SetRequestContext(mojom::blink::RequestContextType::SCRIPT);
   params.SetRequestDestination(network::mojom::RequestDestination::kScript);
+  params.SetRenderBlockingBehavior(render_blocking_behavior_);
 
   // Step 1. ... and CORS setting. [spec text]
   if (cross_origin != kCrossOriginAttributeNotSet)
@@ -51,10 +57,9 @@ FetchParameters ScriptFetchOptions::CreateFetchParameters(
   // its parser metadata to options's parser metadata, [spec text]
   params.SetParserDisposition(ParserState());
 
-  // Priority Hints is currently non-standard, but we can assume the following
-  // (see https://crbug.com/821464):
-  // its importance to options's importance, [spec text]
-  params.MutableResourceRequest().SetFetchImportanceMode(importance_);
+  // https://wicg.github.io/priority-hints/#script
+  // set request’s priority to option’s fetchpriority
+  params.MutableResourceRequest().SetFetchPriorityHint(fetch_priority_hint_);
 
   // its referrer policy to options's referrer policy. [spec text]
   params.MutableResourceRequest().SetReferrerPolicy(referrer_policy_);
@@ -66,6 +71,14 @@ FetchParameters ScriptFetchOptions::CreateFetchParameters(
   params.SetDefer(defer);
 
   // Steps 4- are Implemented at ClassicPendingScript::Fetch().
+
+  // TODO(crbug.com/1338976): Add correct spec comments here.
+  if (attribution_reporting_eligibility_ ==
+      AttributionReportingEligibility::kEligible) {
+    params.MutableResourceRequest().SetHttpHeaderField(
+        http_names::kAttributionReportingEligible,
+        kAttributionEligibleEventSourceAndTrigger);
+  }
 
   return params;
 }

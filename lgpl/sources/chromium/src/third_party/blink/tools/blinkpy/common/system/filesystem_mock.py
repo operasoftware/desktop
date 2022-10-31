@@ -28,12 +28,24 @@
 
 import errno
 import hashlib
+import io
 import os
 import re
-import StringIO
 import unittest
 
 from blinkpy.common.system.filesystem import _remove_contents, _sanitize_filename
+
+from six import ensure_binary
+
+_TEXT_ENCODING = 'utf-8'
+
+
+def _ensure_binary_contents(file_contents):
+    # Iterate over a copy while the underlying mapping is mutated.
+    for path, contents in list(file_contents.items()):
+        if contents is not None:
+            contents = ensure_binary(contents, _TEXT_ENCODING)
+        file_contents[path] = contents
 
 
 class MockFileSystem(object):
@@ -58,6 +70,7 @@ class MockFileSystem(object):
         self.cwd = cwd
         self.dirs = set(dirs or [])
         self.dirs.add(cwd)
+        _ensure_binary_contents(self.files)
         for file_path in self.files:
             directory = self.dirname(file_path)
             while directory not in self.dirs:
@@ -69,7 +82,7 @@ class MockFileSystem(object):
         self.written_files = {}
 
     def _raise_not_found(self, path):
-        raise IOError(errno.ENOENT, path, os.strerror(errno.ENOENT))
+        raise FileNotFoundError('%s: %s' % (os.strerror(errno.ENOENT), path))
 
     def _split(self, path):
         # This is not quite a full implementation of os.path.split; see:
@@ -181,8 +194,8 @@ class MockFileSystem(object):
             path for path, contents in self.files.items()
             if contents is not None
         ]
-        return filter(path_filter, existing_files) + filter(
-            path_filter, self.dirs)
+        return list(filter(path_filter, existing_files)) + list(
+            filter(path_filter, self.dirs))
 
     def isabs(self, path):
         return path.startswith(self.sep)
@@ -322,15 +335,16 @@ class MockFileSystem(object):
 
     def open_binary_tempfile(self, suffix=''):
         path = self.mktemp(suffix)
-        return (WritableBinaryFileObject(self, path), path)
+        return self.open_binary_file_for_writing(path), path
 
     def open_binary_file_for_reading(self, path):
         if self.files[path] is None:
             self._raise_not_found(path)
-        return ReadableBinaryFileObject(self, path, self.files[path])
+        return BufferedReader(WriteThroughBinaryFile(self, path))
 
     def open_binary_file_for_writing(self, path):
-        return WritableBinaryFileObject(self, path)
+        self.files[path] = b''
+        return WriteThroughBinaryFile(self, path)
 
     def read_binary_file(self, path):
         # Intentionally raises KeyError if we don't recognize the path.
@@ -346,21 +360,27 @@ class MockFileSystem(object):
 
     def open_text_tempfile(self, suffix=''):
         path = self.mktemp(suffix)
-        return (WritableTextFileObject(self, path), path)
+        return self.open_text_file_for_writing(path), path
 
     def open_text_file_for_reading(self, path):
         if self.files[path] is None:
             self._raise_not_found(path)
-        return ReadableTextFileObject(self, path, self.files[path])
+        return TextIOWrapper(self.open_binary_file_for_reading(path))
 
     def open_text_file_for_writing(self, path):
-        return WritableTextFileObject(self, path)
+        return TextIOWrapper(self.open_binary_file_for_writing(path))
+
+    def open_text_file_for_appending(self, path):
+        self.files.setdefault(path, b'')
+        file_handle = TextIOWrapper(WriteThroughBinaryFile(self, path))
+        file_handle.seek(0, io.SEEK_END)
+        return file_handle
 
     def read_text_file(self, path):
-        return self.read_binary_file(path).decode('utf-8')
+        return self.read_binary_file(path).decode(_TEXT_ENCODING)
 
     def write_text_file(self, path, contents):
-        return self.write_binary_file(path, contents.encode('utf-8'))
+        return self.write_binary_file(path, contents.encode(_TEXT_ENCODING))
 
     def sha1(self, path):
         contents = self.read_binary_file(path)
@@ -456,97 +476,51 @@ class MockFileSystem(object):
         return _sanitize_filename(filename, replacement)
 
 
-class WritableBinaryFileObject(object):
+class BufferedReader(io.BufferedReader):
+    def __init__(self, raw, **options):
+        super().__init__(raw, **options)
+        self.fs = raw.fs
+        self.path = raw.path
+
+
+class TextIOWrapper(io.TextIOWrapper):
+    def __init__(self,
+                 raw,
+                 encoding=_TEXT_ENCODING,
+                 errors='replace',
+                 newline='\n',
+                 **options):
+        super().__init__(raw,
+                         encoding=encoding,
+                         errors=errors,
+                         newline=newline,
+                         **options)
+        self.fs = raw.fs
+        self.path = raw.path
+
+
+class WriteThroughBinaryFile(io.BytesIO):
     def __init__(self, fs, path):
         self.fs = fs
         self.path = path
-        self.closed = False
-        self.fs.files[path] = ''
+        super().__init__(self.fs.files[self.path])
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exception_type, exception_value, traceback):
-        self.close()
-
-    def close(self):
-        self.closed = True
-
-    def write(self, string):
-        self.fs.files[self.path] += string
+    def write(self, buf):
+        amount_written = super().write(buf)
+        self.fs.files[self.path] += buf
         self.fs.written_files[self.path] = self.fs.files[self.path]
-
-
-class WritableTextFileObject(WritableBinaryFileObject):
-    def write(self, string):
-        WritableBinaryFileObject.write(self, string.encode('utf-8'))
+        return amount_written
 
     def writelines(self, lines):
-        self.fs.files[self.path] = "".join(lines).encode('utf-8')
-        self.fs.written_files[self.path] = self.fs.files[self.path]
+        super().writelines(lines)
+        contents = b''.join(lines)
+        self.fs.files[self.path] = contents
+        self.fs.written_files[self.path] = contents
 
-
-class ReadableBinaryFileObject(object):
-    def __init__(self, fs, path, data):
-        self.fs = fs
-        self.path = path
-        self.closed = False
-        self.data = data
-        self.offset = 0
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exception_type, exception_value, traceback):
-        self.close()
-
-    def close(self):
-        self.closed = True
-
-    def read(self, num_bytes=None):
-        if not num_bytes:
-            return self.data[self.offset:]
-        start = self.offset
-        self.offset += num_bytes
-        return self.data[start:self.offset]
-
-    def seek(self, offset, whence=os.SEEK_SET):
-        if whence == os.SEEK_SET:
-            self.offset = offset
-        elif whence == os.SEEK_CUR:
-            self.offset += offset
-        elif whence == os.SEEK_END:
-            self.offset = len(self.data) + offset
-        else:
-            assert False, "Unknown seek mode %s" % whence
-
-
-class ReadableTextFileObject(ReadableBinaryFileObject):
-    def __init__(self, fs, path, data):
-        super(ReadableTextFileObject, self).__init__(
-            fs, path, StringIO.StringIO(data.decode('utf-8')))
-
-    def close(self):
-        self.data.close()
-        super(ReadableTextFileObject, self).close()
-
-    def read(self, num_bytes=-1):
-        return self.data.read(num_bytes)
-
-    def readline(self, length=None):
-        return self.data.readline(length)
-
-    def readlines(self):
-        return self.data.readlines()
-
-    def __iter__(self):
-        return self.data.__iter__()
-
-    def next(self):
-        return self.data.next()
-
-    def seek(self, offset, whence=os.SEEK_SET):
-        self.data.seek(offset, whence)
+    def truncate(self, size=None):
+        new_size = super().truncate(size)
+        self.fs.files[self.path] = self.getvalue()
+        return new_size
 
 
 class FileSystemTestCase(unittest.TestCase):
@@ -560,6 +534,7 @@ class FileSystemTestCase(unittest.TestCase):
             self.test_case = test_case
             self.mock_filesystem = mock_filesystem
             self.expected_files = expected_files
+            _ensure_binary_contents(self.expected_files)
 
         def __enter__(self):
             # Make sure that the expected_files aren't already in the mock

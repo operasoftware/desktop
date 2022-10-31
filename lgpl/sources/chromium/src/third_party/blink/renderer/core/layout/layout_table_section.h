@@ -26,12 +26,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_TABLE_SECTION_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_TABLE_SECTION_H_
 
-#include "base/macros.h"
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/layout_table.h"
 #include "third_party/blink/renderer/core/layout/layout_table_box_component.h"
 #include "third_party/blink/renderer/core/layout/ng/table/layout_ng_table_section_interface.h"
 #include "third_party/blink/renderer/core/layout/table_grid_cell.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -109,6 +110,7 @@ class CORE_EXPORT LayoutTableSection final
  public:
   explicit LayoutTableSection(Element*);
   ~LayoutTableSection() override;
+  void Trace(Visitor*) const override;
 
   LayoutTableRow* FirstRow() const;
   LayoutTableRow* LastRow() const;
@@ -123,14 +125,17 @@ class CORE_EXPORT LayoutTableSection final
   int16_t VBorderSpacingBeforeFirstRow() const;
   int CalcRowLogicalHeight();
   void LayoutRows();
-  bool RecalcLayoutOverflow() final;
+  RecalcLayoutOverflowResult RecalcLayoutOverflow() final;
   void RecalcVisualOverflow() final;
 
   void MarkAllCellsWidthsDirtyAndOrNeedsLayout(LayoutTable::WhatToMarkAllCells);
 
-  LayoutTable* Table() const final { return To<LayoutTable>(Parent()); }
+  LayoutTable* Table() const final {
+    NOT_DESTROYED();
+    return To<LayoutTable>(Parent());
+  }
 
-  typedef Vector<LayoutTableCell*, 2> SpanningLayoutTableCells;
+  typedef HeapVector<Member<LayoutTableCell>, 2> SpanningLayoutTableCells;
 
   struct SpanningRowsHeight {
     STACK_ALLOCATED();
@@ -140,24 +145,27 @@ class CORE_EXPORT LayoutTableSection final
         : total_rows_height(0),
           spanning_cell_height_ignoring_border_spacing(0),
           is_any_row_with_only_spanning_cells(false) {}
-
+    SpanningRowsHeight(const SpanningRowsHeight&) = delete;
+    SpanningRowsHeight& operator=(const SpanningRowsHeight&) = delete;
     Vector<int> row_height;
     int total_rows_height;
     int spanning_cell_height_ignoring_border_spacing;
     bool is_any_row_with_only_spanning_cells;
-    DISALLOW_COPY_AND_ASSIGN(SpanningRowsHeight);
   };
 
   TableGridCell& GridCellAt(unsigned row, unsigned effective_column) {
+    NOT_DESTROYED();
     SECURITY_DCHECK(!needs_cell_recalc_);
     return grid_[row].grid_cells[effective_column];
   }
   const TableGridCell& GridCellAt(unsigned row,
                                   unsigned effective_column) const {
+    NOT_DESTROYED();
     SECURITY_DCHECK(!needs_cell_recalc_);
     return grid_[row].grid_cells[effective_column];
   }
   LayoutTableCell* PrimaryCellAt(unsigned row, unsigned effective_column) {
+    NOT_DESTROYED();
     SECURITY_DCHECK(!needs_cell_recalc_);
     auto& grid_cells = grid_[row].grid_cells;
     if (effective_column >= grid_cells.size())
@@ -166,6 +174,7 @@ class CORE_EXPORT LayoutTableSection final
   }
   const LayoutTableCell* PrimaryCellAt(unsigned row,
                                        unsigned effective_column) const {
+    NOT_DESTROYED();
     return const_cast<LayoutTableSection*>(this)->PrimaryCellAt(
         row, effective_column);
   }
@@ -175,11 +184,13 @@ class CORE_EXPORT LayoutTableSection final
   LayoutTableCell* OriginatingCellAt(unsigned row, unsigned effective_column);
   const LayoutTableCell* OriginatingCellAt(unsigned row,
                                            unsigned effective_column) const {
+    NOT_DESTROYED();
     return const_cast<LayoutTableSection*>(this)->OriginatingCellAt(
         row, effective_column);
   }
 
   unsigned NumCols(unsigned row) const final {
+    NOT_DESTROYED();
     DCHECK(!NeedsCellRecalc());
     return grid_[row].grid_cells.size();
   }
@@ -187,10 +198,12 @@ class CORE_EXPORT LayoutTableSection final
   // Returns null for cells with a rowspan that exceed the last row. Possibly
   // others.
   LayoutTableRow* RowLayoutObjectAt(unsigned row) {
+    NOT_DESTROYED();
     SECURITY_DCHECK(!needs_cell_recalc_);
     return grid_[row].row;
   }
   const LayoutTableRow* RowLayoutObjectAt(unsigned row) const {
+    NOT_DESTROYED();
     SECURITY_DCHECK(!needs_cell_recalc_);
     return grid_[row].row;
   }
@@ -199,6 +212,7 @@ class CORE_EXPORT LayoutTableSection final
   void SplitEffectiveColumn(unsigned pos, unsigned first);
 
   unsigned NumRows() const final {
+    NOT_DESTROYED();
     DCHECK(!NeedsCellRecalc());
     return grid_.size();
   }
@@ -215,14 +229,21 @@ class CORE_EXPORT LayoutTableSection final
   // m_needsCellRecalc before accessing m_grid.
   void RecalcCells();
   void RecalcCellsIfNeeded() {
+    NOT_DESTROYED();
     if (needs_cell_recalc_)
       RecalcCells();
   }
 
-  bool NeedsCellRecalc() const { return needs_cell_recalc_; }
+  bool NeedsCellRecalc() const {
+    NOT_DESTROYED();
+    return needs_cell_recalc_;
+  }
   void SetNeedsCellRecalc() final;
 
-  LayoutUnit RowBaseline(unsigned row) { return grid_[row].baseline; }
+  LayoutUnit RowBaseline(unsigned row) {
+    NOT_DESTROYED();
+    return grid_[row].baseline;
+  }
 
   void RowLogicalHeightChanged(LayoutTableRow*);
 
@@ -247,24 +268,35 @@ class CORE_EXPORT LayoutTableSection final
                                       CellSpan& rows,
                                       CellSpan& columns) const;
 
-  const HashSet<const LayoutTableCell*>& VisuallyOverflowingCells() const {
+  const HeapHashSet<Member<const LayoutTableCell>>& VisuallyOverflowingCells()
+      const {
+    NOT_DESTROYED();
     return visually_overflowing_cells_;
   }
   bool HasVisuallyOverflowingCell() const {
+    NOT_DESTROYED();
     return visually_overflowing_cells_.size() || force_full_paint_;
   }
-  bool HasMultipleCellLevels() const { return has_multiple_cell_levels_; }
+  bool HasMultipleCellLevels() const {
+    NOT_DESTROYED();
+    return has_multiple_cell_levels_;
+  }
 
-  const char* GetName() const override { return "LayoutTableSection"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutTableSection";
+  }
 
   // Whether a section has opaque background depends on many factors, e.g.
   // border spacing, border collapsing, missing cells, etc. For simplicity,
   // just conservatively assume all table sections are not opaque.
   bool ForegroundIsKnownToBeOpaqueInRect(const PhysicalRect&,
                                          unsigned) const override {
+    NOT_DESTROYED();
     return false;
   }
   bool BackgroundIsKnownToBeOpaqueInRect(const PhysicalRect&) const override {
+    NOT_DESTROYED();
     return false;
   }
 
@@ -276,20 +308,27 @@ class CORE_EXPORT LayoutTableSection final
       VisualRectFlags = kDefaultVisualRectFlags) const override;
 
   bool IsRepeatingHeaderGroup() const final {
+    NOT_DESTROYED();
     return is_repeating_header_group_;
   }
   bool IsRepeatingFooterGroup() const final {
+    NOT_DESTROYED();
     return is_repeating_footer_group_;
   }
 
   void UpdateLayout() override;
 
-  CellSpan FullSectionRowSpan() const { return CellSpan(0, grid_.size()); }
+  CellSpan FullSectionRowSpan() const {
+    NOT_DESTROYED();
+    return CellSpan(0, grid_.size());
+  }
   CellSpan FullTableEffectiveColumnSpan() const {
+    NOT_DESTROYED();
     return CellSpan(0, Table()->NumEffectiveColumns());
   }
 
   void DetermineIfHeaderGroupShouldRepeat() {
+    NOT_DESTROYED();
     is_repeating_header_group_ = HeaderGroupShouldRepeat();
   }
 
@@ -297,6 +336,7 @@ class CORE_EXPORT LayoutTableSection final
   bool RowHasVisibilityCollapse(unsigned row) const;
 
   void DetermineIfFooterGroupShouldRepeat() {
+    NOT_DESTROYED();
     is_repeating_footer_group_ = FooterGroupShouldRepeat();
   }
 
@@ -311,29 +351,50 @@ class CORE_EXPORT LayoutTableSection final
 
   const LayoutNGTableSectionInterface* ToLayoutNGTableSectionInterface()
       const final {
+    NOT_DESTROYED();
     return this;
   }
-  const LayoutTableSection* ToLayoutTableSection() const final { return this; }
-  const LayoutObject* ToLayoutObject() const final { return this; }
-  LayoutObject* ToMutableLayoutObject() final { return this; }
+  const LayoutObject* ToLayoutObject() const final {
+    NOT_DESTROYED();
+    return this;
+  }
 
-  LayoutNGTableInterface* TableInterface() const final { return Table(); }
+  LayoutNGTableInterface* TableInterface() const final {
+    NOT_DESTROYED();
+    return Table();
+  }
   LayoutNGTableRowInterface* FirstRowInterface() const final;
   LayoutNGTableRowInterface* LastRowInterface() const final;
-  const LayoutNGTableCellInterface* PrimaryCellInterfaceAt(
-      unsigned row,
-      unsigned effective_column) const final;
 
   // LayoutNGTableSectionInterface methods end.
+
+  // This is made public just to set VectorTraits.
+  struct TableGridRow {
+    DISALLOW_NEW();
+
+   public:
+    void Trace(Visitor*) const;
+
+    inline void SetRowLogicalHeightToRowStyleLogicalHeight();
+    inline void UpdateLogicalHeightForCell(const LayoutTableCell*);
+
+    // The index is effective column index.
+    HeapVector<TableGridCell> grid_cells;
+    Member<LayoutTableRow> row;
+    LayoutUnit baseline = LayoutUnit(-1);
+    Length logical_height;
+  };
+
  protected:
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
   bool NodeAtPoint(HitTestResult&,
                    const HitTestLocation&,
                    const PhysicalOffset& accumulated_offset,
-                   HitTestAction) override;
+                   HitTestPhase) override;
 
  private:
   MinMaxSizes ComputeIntrinsicLogicalWidths() const final {
+    NOT_DESTROYED();
     NOTREACHED();
     return MinMaxSizes();
   }
@@ -341,24 +402,24 @@ class CORE_EXPORT LayoutTableSection final
   void ComputeVisualOverflowFromDescendants();
 
   bool IsOfType(LayoutObjectType type) const override {
+    NOT_DESTROYED();
     return type == kLayoutObjectTableSection || LayoutBox::IsOfType(type);
   }
 
   void WillBeRemovedFromTree() override;
 
   int BorderSpacingForRow(unsigned row) const {
+    NOT_DESTROYED();
     return grid_[row].row ? Table()->VBorderSpacing() : 0;
   }
 
   void EnsureRows(unsigned num_rows) {
+    NOT_DESTROYED();
     if (num_rows > grid_.size())
       grid_.Grow(num_rows);
   }
 
-  void EnsureCols(unsigned row_index, unsigned num_cols) {
-    if (num_cols > NumCols(row_index))
-      grid_[row_index].grid_cells.Grow(num_cols);
-  }
+  void EnsureCols(unsigned row_index, unsigned num_cols);
 
   bool RowHasOnlySpanningCells(unsigned);
   unsigned CalcRowHeightHavingOnlySpanningCells(unsigned,
@@ -424,31 +485,19 @@ class CORE_EXPORT LayoutTableSection final
   int OffsetForRepeatedHeader() const;
 
   bool HeaderGroupShouldRepeat() const {
+    NOT_DESTROYED();
     return Table()->Header() == this && GroupShouldRepeat();
   }
 
   bool FooterGroupShouldRepeat() const {
+    NOT_DESTROYED();
     return Table()->Footer() == this && GroupShouldRepeat();
   }
 
   bool GroupShouldRepeat() const;
 
-  struct TableGridRow {
-    DISALLOW_NEW();
-
-   public:
-    inline void SetRowLogicalHeightToRowStyleLogicalHeight();
-    inline void UpdateLogicalHeightForCell(const LayoutTableCell*);
-
-    // The index is effective column index.
-    Vector<TableGridCell> grid_cells;
-    LayoutTableRow* row = nullptr;
-    LayoutUnit baseline = LayoutUnit(-1);
-    Length logical_height;
-  };
-
   // The representation of the rows and their grid cells.
-  Vector<TableGridRow> grid_;
+  HeapVector<TableGridRow> grid_;
 
   // The logical offset of each row from the top of the section.
   //
@@ -487,7 +536,7 @@ class CORE_EXPORT LayoutTableSection final
   // This HashSet holds the overflowing cells for the partial paint path. If we
   // have too many overflowing cells, it will be empty and force_full_paint_
   // will be set to save memory. See ComputeVisualOverflowFromDescendants().
-  HashSet<const LayoutTableCell*> visually_overflowing_cells_;
+  HeapHashSet<Member<const LayoutTableCell>> visually_overflowing_cells_;
   bool force_full_paint_;
 
   // This boolean tracks if we have cells overlapping due to rowspan / colspan
@@ -511,10 +560,21 @@ class CORE_EXPORT LayoutTableSection final
 template <>
 struct DowncastTraits<LayoutTableSection> {
   static bool AllowFrom(const LayoutObject& object) {
-    return object.IsTableSection();
+    return object.IsTableSection() && !object.IsLayoutNGObject();
   }
 };
 
 }  // namespace blink
+
+namespace WTF {
+
+template <>
+struct VectorTraits<blink::LayoutTableSection::TableGridRow>
+    : VectorTraitsBase<blink::LayoutTableSection::TableGridRow> {
+  STATIC_ONLY(VectorTraits);
+  static constexpr bool kCanClearUnusedSlotsWithMemset = true;
+};
+
+}  // namespace WTF
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_TABLE_SECTION_H_

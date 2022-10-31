@@ -8,15 +8,14 @@
 #include <ostream>
 
 #include "base/memory/scoped_refptr.h"
+#include "base/notreached.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
-
-class ExecutionContext;
 
 // BytesConsumer represents the "consumer" side of a data pipe. A user
 // can read data from it.
@@ -93,15 +92,15 @@ class PLATFORM_EXPORT BytesConsumer : public GarbageCollected<BytesConsumer> {
   //
   // |*buffer| will be set to null and |*available| will be set to 0 if not
   // readable.
-  virtual Result BeginRead(const char** buffer,
-                           size_t* available) WARN_UNUSED_RESULT = 0;
+  [[nodiscard]] virtual Result BeginRead(const char** buffer,
+                                         size_t* available) = 0;
 
   // Ends a two-phase read.
   // This function can modify this BytesConsumer's state.
   // Returns Ok when the consumer stays readable or waiting.
   // Returns Done when it's closed.
   // Returns Error when it's errored.
-  virtual Result EndRead(size_t read_size) WARN_UNUSED_RESULT = 0;
+  [[nodiscard]] virtual Result EndRead(size_t read_size) = 0;
 
   // Drains the data as a BlobDataHandle.
   // When this function returns a non-null value, the returned blob handle
@@ -164,14 +163,6 @@ class PLATFORM_EXPORT BytesConsumer : public GarbageCollected<BytesConsumer> {
   // Each implementation should return a string that represents the
   // implementation for debug purpose.
   virtual String DebugName() const = 0;
-
-  // Creates two BytesConsumer both of which represent the data sequence that
-  // would be read from |src| and store them to |*dest1| and |*dest2|.
-  // |src| must not have a client when called.
-  static void Tee(ExecutionContext*,
-                  BytesConsumer* src,
-                  BytesConsumer** dest1,
-                  BytesConsumer** dest2);
 
   // Returns a BytesConsumer whose state is Closed.
   static BytesConsumer* CreateClosed();

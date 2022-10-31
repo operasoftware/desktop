@@ -10,9 +10,37 @@
 #include "third_party/blink/renderer/platform/bindings/dom_data_store.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
-#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
+
+// Construction of WrapperTypeInfo may require non-trivial initialization due
+// to cross-component address resolution in order to load the pointer to the
+// parent interface's WrapperTypeInfo.  We ignore this issue because the issue
+// happens only on component builds and the official release builds
+// (statically-linked builds) are never affected by this issue.
+#if defined(COMPONENT_BUILD) && defined(WIN32) && defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wglobal-constructors"
+#endif
+
+const WrapperTypeInfo DOMArrayBuffer::wrapper_type_info_body_{
+    gin::kEmbedderBlink,
+    nullptr,
+    nullptr,
+    "ArrayBuffer",
+    nullptr,
+    WrapperTypeInfo::kWrapperTypeObjectPrototype,
+    WrapperTypeInfo::kObjectClassId,
+    WrapperTypeInfo::kNotInheritFromActiveScriptWrappable,
+    WrapperTypeInfo::kIdlBufferSourceType,
+};
+
+const WrapperTypeInfo& DOMArrayBuffer::wrapper_type_info_ =
+    DOMArrayBuffer::wrapper_type_info_body_;
+
+#if defined(COMPONENT_BUILD) && defined(WIN32) && defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 static void AccumulateArrayBuffersForAllWorlds(
     v8::Isolate* isolate,
@@ -43,9 +71,15 @@ bool DOMArrayBuffer::Transfer(v8::Isolate* isolate,
                               ArrayBufferContents& result) {
   DOMArrayBuffer* to_transfer = this;
   if (!IsDetachable(isolate)) {
-    to_transfer =
-        DOMArrayBuffer::Create(Content()->Data(), ByteLengthAsSizeT());
+    to_transfer = DOMArrayBuffer::Create(Content()->Data(), ByteLength());
   }
+
+  return to_transfer->TransferDetachable(isolate, result);
+}
+
+bool DOMArrayBuffer::TransferDetachable(v8::Isolate* isolate,
+                                        ArrayBufferContents& result) {
+  DCHECK(IsDetachable(isolate));
 
   if (IsDetached()) {
     result.Detach();
@@ -57,12 +91,13 @@ bool DOMArrayBuffer::Transfer(v8::Isolate* isolate,
     result = ArrayBufferContents(Content()->BackingStore());
   } else {
     Content()->Transfer(result);
-    Detach();
   }
+  // For consistency, the source is detached even if it was empty.
+  Detach();
 
   Vector<v8::Local<v8::ArrayBuffer>, 4> buffer_handles;
   v8::HandleScope handle_scope(isolate);
-  AccumulateArrayBuffersForAllWorlds(isolate, to_transfer, buffer_handles);
+  AccumulateArrayBuffersForAllWorlds(isolate, this, buffer_handles);
 
   for (const auto& buffer_handle : buffer_handles)
     buffer_handle->Detach();
@@ -81,6 +116,17 @@ DOMArrayBuffer* DOMArrayBuffer::CreateOrNull(size_t num_elements,
   return Create(std::move(contents));
 }
 
+DOMArrayBuffer* DOMArrayBuffer::CreateOrNull(const void* source,
+                                             size_t byte_length) {
+  DOMArrayBuffer* buffer = CreateUninitializedOrNull(byte_length, 1);
+  if (!buffer) {
+    return nullptr;
+  }
+
+  memcpy(buffer->Data(), source, byte_length);
+  return buffer;
+}
+
 DOMArrayBuffer* DOMArrayBuffer::CreateUninitializedOrNull(
     size_t num_elements,
     size_t element_byte_size) {
@@ -93,22 +139,20 @@ DOMArrayBuffer* DOMArrayBuffer::CreateUninitializedOrNull(
   return Create(std::move(contents));
 }
 
-v8::Local<v8::Value> DOMArrayBuffer::Wrap(
-    v8::Isolate* isolate,
-    v8::Local<v8::Object> creation_context) {
-  DCHECK(!DOMDataStore::ContainsWrapper(this, isolate));
+v8::MaybeLocal<v8::Value> DOMArrayBuffer::Wrap(ScriptState* script_state) {
+  DCHECK(!DOMDataStore::ContainsWrapper(this, script_state->GetIsolate()));
 
-  const WrapperTypeInfo* wrapper_type_info = this->GetWrapperTypeInfo();
+  const WrapperTypeInfo* wrapper_type_info = GetWrapperTypeInfo();
 
   v8::Local<v8::ArrayBuffer> wrapper;
   {
-    v8::Context::Scope context_scope(creation_context->CreationContext());
-    wrapper = v8::ArrayBuffer::New(isolate, Content()->BackingStore());
-
-    wrapper->Externalize(Content()->BackingStore());
+    v8::Context::Scope context_scope(script_state->GetContext());
+    wrapper = v8::ArrayBuffer::New(script_state->GetIsolate(),
+                                   Content()->BackingStore());
   }
 
-  return AssociateWithWrapper(isolate, wrapper_type_info, wrapper);
+  return AssociateWithWrapper(script_state->GetIsolate(), wrapper_type_info,
+                              wrapper);
 }
 
 DOMArrayBuffer* DOMArrayBuffer::Create(
@@ -149,9 +193,10 @@ DOMArrayBuffer* DOMArrayBuffer::Create(
 }
 
 DOMArrayBuffer* DOMArrayBuffer::Slice(size_t begin, size_t end) const {
-  begin = std::min(begin, ByteLengthAsSizeT());
-  end = std::min(end, ByteLengthAsSizeT());
+  begin = std::min(begin, ByteLength());
+  end = std::min(end, ByteLength());
   size_t size = begin <= end ? end - begin : 0;
   return Create(static_cast<const char*>(Data()) + begin, size);
 }
+
 }  // namespace blink

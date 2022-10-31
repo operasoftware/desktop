@@ -5,9 +5,13 @@
 #include "third_party/blink/renderer/modules/indexeddb/idb_factory.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/memory/ptr_util.h"
 #include "base/memory/scoped_refptr.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-blink.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
@@ -20,56 +24,122 @@
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_database_error.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_name_and_version.h"
-#include "third_party/blink/renderer/modules/indexeddb/mock_web_idb_factory.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 
 namespace blink {
 namespace {
 
-class TestHelperFunction : public ScriptFunction {
+class TestHelperFunction : public ScriptFunction::Callable {
  public:
-  static v8::Local<v8::Function> CreateFunction(ScriptState* script_state,
-                                                bool* called_flag) {
-    auto* self =
-        MakeGarbageCollected<TestHelperFunction>(script_state, called_flag);
-    return self->BindToV8Function();
-  }
+  explicit TestHelperFunction(bool* called_flag) : called_flag_(called_flag) {}
 
-  TestHelperFunction(ScriptState* script_state, bool* called_flag)
-      : ScriptFunction(script_state), called_flag_(called_flag) {}
-
- private:
-  ScriptValue Call(ScriptValue value) override {
+  ScriptValue Call(ScriptState* script_state, ScriptValue value) override {
     *called_flag_ = true;
     return value;
   }
 
+ private:
   bool* called_flag_;
 };
 
-class IDBFactoryTest : public testing::Test {
- protected:
-  IDBFactoryTest() {}
+class BackendFactoryWithMockedDatabaseInfo : public mojom::blink::IDBFactory {
+ public:
+  explicit BackendFactoryWithMockedDatabaseInfo(
+      mojo::PendingReceiver<mojom::blink::IDBFactory> pending_receiver)
+      : receiver_(this, std::move(pending_receiver)) {}
 
-  ~IDBFactoryTest() override {}
+  BackendFactoryWithMockedDatabaseInfo(
+      const BackendFactoryWithMockedDatabaseInfo&) = delete;
+  BackendFactoryWithMockedDatabaseInfo& operator=(
+      const BackendFactoryWithMockedDatabaseInfo&) = delete;
+
+  void Open(mojo::PendingAssociatedRemote<mojom::blink::IDBCallbacks>
+                pending_callbacks,
+            mojo::PendingAssociatedRemote<mojom::blink::IDBDatabaseCallbacks>
+                database_callbacks,
+            const WTF::String& name,
+            int64_t version,
+            mojo::PendingAssociatedReceiver<mojom::blink::IDBTransaction>
+                version_change_transaction_receiver,
+            int64_t transaction_id) override {
+    NOTREACHED();
+  }
+
+  void DeleteDatabase(mojo::PendingAssociatedRemote<mojom::blink::IDBCallbacks>
+                          pending_callbacks,
+                      const WTF::String& name,
+                      bool force_close) override {
+    NOTREACHED();
+  }
+
+  void AbortTransactionsAndCompactDatabase(
+      AbortTransactionsAndCompactDatabaseCallback callback) override {
+    NOTREACHED();
+  }
+
+  void AbortTransactionsForDatabase(
+      AbortTransactionsForDatabaseCallback callback) override {
+    NOTREACHED();
+  }
+
+  void GetDatabaseInfo(mojo::PendingAssociatedRemote<mojom::blink::IDBCallbacks>
+                           pending_callbacks) override {
+    callbacks_ptr_->Bind(std::move(pending_callbacks));
+  }
+
+  void SetCallbacksPointer(
+      mojo::AssociatedRemote<mojom::blink::IDBCallbacks>* callbacks_ptr) {
+    callbacks_ptr_ = callbacks_ptr;
+  }
+
+ private:
+  mojo::Receiver<mojom::blink::IDBFactory> receiver_;
+  mojo::AssociatedRemote<mojom::blink::IDBCallbacks>* callbacks_ptr_;
+};
+
+class IDBFactoryTest : public testing::Test {
+ public:
+  IDBFactoryTest(const IDBFactoryTest&) = delete;
+  IDBFactoryTest& operator=(const IDBFactoryTest&) = delete;
+
+ protected:
+  IDBFactoryTest() = default;
+  ~IDBFactoryTest() override = default;
+
+  ScopedTestingPlatformSupport<TestingPlatformSupport> platform_;
 };
 
 TEST_F(IDBFactoryTest, WebIDBGetDBInfoCallbacksResolvesPromise) {
   V8TestingScope scope(KURL("https://example.com"));
-  auto web_factory = std::make_unique<MockWebIDBFactory>();
-  std::unique_ptr<WebIDBCallbacks> callbacks;
-  web_factory->SetCallbacksPointer(&callbacks);
-  auto* factory = MakeGarbageCollected<IDBFactory>(std::move(web_factory));
+
+  mojo::Remote<mojom::blink::IDBFactory> remote;
+  auto mock_factory = std::make_unique<BackendFactoryWithMockedDatabaseInfo>(
+      remote.BindNewPipeAndPassReceiver(
+          scope.GetExecutionContext()->GetTaskRunner(
+              TaskType::kDatabaseAccess)));
+
+  mojo::AssociatedRemote<mojom::blink::IDBCallbacks> callbacks;
+  mock_factory->SetCallbacksPointer(&callbacks);
+  auto* factory = MakeGarbageCollected<IDBFactory>();
+  factory->SetFactoryForTesting(std::move(remote));
 
   DummyExceptionStateForTesting exception_state;
   ScriptPromise promise =
       factory->GetDatabaseInfo(scope.GetScriptState(), exception_state);
+
+  // Allow the GetDatabaseInfo message to propagate across mojo pipes.
+  platform_->RunUntilIdle();
+
   bool on_fulfilled = false;
   bool on_rejected = false;
-  promise.Then(
-      TestHelperFunction::CreateFunction(scope.GetScriptState(), &on_fulfilled),
-      TestHelperFunction::CreateFunction(scope.GetScriptState(), &on_rejected));
+  promise.Then(MakeGarbageCollected<ScriptFunction>(
+                   scope.GetScriptState(),
+                   MakeGarbageCollected<TestHelperFunction>(&on_fulfilled)),
+               MakeGarbageCollected<ScriptFunction>(
+                   scope.GetScriptState(),
+                   MakeGarbageCollected<TestHelperFunction>(&on_rejected)));
 
   EXPECT_FALSE(on_fulfilled);
   EXPECT_FALSE(on_rejected);
@@ -80,7 +150,10 @@ TEST_F(IDBFactoryTest, WebIDBGetDBInfoCallbacksResolvesPromise) {
   EXPECT_FALSE(on_fulfilled);
   EXPECT_FALSE(on_rejected);
 
-  v8::MicrotasksScope::PerformCheckpoint(scope.GetIsolate());
+  // Allow the Success message to propagate across mojo pipes. This will also
+  // perform a microtask checkpoint, so an explicit call to do that is not
+  // needed.
+  platform_->RunUntilIdle();
 
   EXPECT_TRUE(on_fulfilled);
   EXPECT_FALSE(on_rejected);
@@ -88,29 +161,46 @@ TEST_F(IDBFactoryTest, WebIDBGetDBInfoCallbacksResolvesPromise) {
 
 TEST_F(IDBFactoryTest, WebIDBGetDBNamesCallbacksRejectsPromise) {
   V8TestingScope scope(KURL("https://example.com"));
-  auto web_factory = std::make_unique<MockWebIDBFactory>();
-  std::unique_ptr<WebIDBCallbacks> callbacks;
-  web_factory->SetCallbacksPointer(&callbacks);
-  auto* factory = MakeGarbageCollected<IDBFactory>(std::move(web_factory));
+
+  mojo::Remote<mojom::blink::IDBFactory> remote;
+  auto mock_factory = std::make_unique<BackendFactoryWithMockedDatabaseInfo>(
+      remote.BindNewPipeAndPassReceiver(
+          scope.GetExecutionContext()->GetTaskRunner(
+              TaskType::kDatabaseAccess)));
+
+  mojo::AssociatedRemote<mojom::blink::IDBCallbacks> callbacks;
+  mock_factory->SetCallbacksPointer(&callbacks);
+  auto* factory = MakeGarbageCollected<IDBFactory>();
+  factory->SetFactoryForTesting(std::move(remote));
 
   DummyExceptionStateForTesting exception_state;
   ScriptPromise promise =
       factory->GetDatabaseInfo(scope.GetScriptState(), exception_state);
+
+  // Allow the GetDatabaseInfo message to propagate across mojo pipes.
+  platform_->RunUntilIdle();
+
   bool on_fulfilled = false;
   bool on_rejected = false;
-  promise.Then(
-      TestHelperFunction::CreateFunction(scope.GetScriptState(), &on_fulfilled),
-      TestHelperFunction::CreateFunction(scope.GetScriptState(), &on_rejected));
+  promise.Then(MakeGarbageCollected<ScriptFunction>(
+                   scope.GetScriptState(),
+                   MakeGarbageCollected<TestHelperFunction>(&on_fulfilled)),
+               MakeGarbageCollected<ScriptFunction>(
+                   scope.GetScriptState(),
+                   MakeGarbageCollected<TestHelperFunction>(&on_rejected)));
 
   EXPECT_FALSE(on_fulfilled);
   EXPECT_FALSE(on_rejected);
 
-  callbacks->Error(mojom::blink::IDBException::kNoError, String());
+  callbacks->Error(mojom::blink::IDBException::kNoError, "message");
 
   EXPECT_FALSE(on_fulfilled);
   EXPECT_FALSE(on_rejected);
 
-  v8::MicrotasksScope::PerformCheckpoint(scope.GetIsolate());
+  // Allow the Error message to propagate across mojo pipes. This will also
+  // perform a microtask checkpoint, so an explicit call to do that is not
+  // needed.
+  platform_->RunUntilIdle();
 
   EXPECT_FALSE(on_fulfilled);
   EXPECT_TRUE(on_rejected);

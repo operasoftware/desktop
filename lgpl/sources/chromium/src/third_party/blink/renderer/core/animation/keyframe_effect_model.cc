@@ -35,14 +35,13 @@
 
 #include "third_party/blink/renderer/core/animation/animation_effect.h"
 #include "third_party/blink/renderer/core/animation/compositor_animations.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_equality.h"
 #include "third_party/blink/renderer/core/css/property_registry.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
-#include "third_party/blink/renderer/platform/animation/animation_utilities.h"
-#include "third_party/blink/renderer/platform/geometry/float_box.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
@@ -96,15 +95,16 @@ bool KeyframeEffectModelBase::Sample(
 
 namespace {
 
-static const size_t num_compositable_properties = 7;
+static const size_t num_compositable_properties = 9;
 
 const CSSProperty** CompositableProperties() {
   static const CSSProperty*
       kCompositableProperties[num_compositable_properties] = {
-          &GetCSSPropertyOpacity(),       &GetCSSPropertyRotate(),
-          &GetCSSPropertyScale(),         &GetCSSPropertyTransform(),
-          &GetCSSPropertyTranslate(),     &GetCSSPropertyFilter(),
-          &GetCSSPropertyBackdropFilter()};
+          &GetCSSPropertyOpacity(),        &GetCSSPropertyRotate(),
+          &GetCSSPropertyScale(),          &GetCSSPropertyTransform(),
+          &GetCSSPropertyTranslate(),      &GetCSSPropertyFilter(),
+          &GetCSSPropertyBackdropFilter(), &GetCSSPropertyBackgroundColor(),
+          &GetCSSPropertyClipPath()};
   return kCompositableProperties;
 }
 
@@ -211,10 +211,11 @@ bool KeyframeEffectModelBase::SnapshotCompositorKeyFrames(
   if (!should_snapshot_property_callback(property))
     return false;
 
-  PropertySpecificKeyframeGroup* keyframe_group =
-      keyframe_groups_->at(property);
-  if (!keyframe_group)
+  auto it = keyframe_groups_->find(property);
+  if (it == keyframe_groups_->end())
     return false;
+
+  PropertySpecificKeyframeGroup* keyframe_group = it->value;
 
   bool updated = false;
   for (auto& keyframe : keyframe_group->keyframes_) {
@@ -238,7 +239,7 @@ Vector<double> KeyframeEffectModelBase::GetComputedOffsets(
   result.ReserveCapacity(keyframes.size());
 
   for (const auto& keyframe : keyframes) {
-    base::Optional<double> offset = keyframe->Offset();
+    absl::optional<double> offset = keyframe->Offset();
     if (offset) {
       DCHECK_GE(offset.value(), 0);
       DCHECK_LE(offset.value(), 1);
@@ -287,6 +288,24 @@ bool KeyframeEffectModelBase::IsTransformRelatedEffect() const {
          Affects(PropertyHandle(GetCSSPropertyTranslate()));
 }
 
+bool KeyframeEffectModelBase::SetLogicalPropertyResolutionContext(
+    TextDirection text_direction,
+    WritingMode writing_mode) {
+  bool changed = false;
+  for (wtf_size_t i = 0; i < keyframes_.size(); i++) {
+    if (auto* string_keyframe = DynamicTo<StringKeyframe>(*keyframes_[i])) {
+      if (string_keyframe->HasLogicalProperty()) {
+        string_keyframe->SetLogicalPropertyResolutionContext(text_direction,
+                                                             writing_mode);
+        changed = true;
+      }
+    }
+  }
+  if (changed)
+    ClearCachedData();
+  return changed;
+}
+
 void KeyframeEffectModelBase::Trace(Visitor* visitor) const {
   visitor->Trace(keyframes_);
   visitor->Trace(keyframe_groups_);
@@ -310,22 +329,16 @@ void KeyframeEffectModelBase::EnsureKeyframeGroups() const {
       zero_offset_easing = &keyframe->Easing();
 
     for (const PropertyHandle& property : keyframe->Properties()) {
-      KeyframeGroupMap::iterator group_iter = keyframe_groups_->find(property);
-      PropertySpecificKeyframeGroup* group;
-      if (group_iter == keyframe_groups_->end()) {
-        group =
-            keyframe_groups_
-                ->insert(property,
-                         MakeGarbageCollected<PropertySpecificKeyframeGroup>())
-                .stored_value->value.Get();
-      } else {
-        group = group_iter->value.Get();
-      }
+      Member<PropertySpecificKeyframeGroup>& group =
+          keyframe_groups_->insert(property, nullptr).stored_value->value;
+      if (!group)
+        group = MakeGarbageCollected<PropertySpecificKeyframeGroup>();
 
       Keyframe::PropertySpecificKeyframe* property_specific_keyframe =
           keyframe->CreatePropertySpecificKeyframe(property, composite_,
                                                    computed_offset);
       has_revert_ |= property_specific_keyframe->IsRevert();
+      has_revert_ |= property_specific_keyframe->IsRevertLayer();
       group->AppendKeyframe(property_specific_keyframe);
     }
   }
@@ -338,6 +351,20 @@ void KeyframeEffectModelBase::EnsureKeyframeGroups() const {
 
     entry.value->RemoveRedundantKeyframes();
   }
+}
+
+bool KeyframeEffectModelBase::RequiresPropertyNode() const {
+  for (const auto& keyframe : keyframes_) {
+    for (const auto& property : keyframe->Properties()) {
+      if (!property.IsCSSProperty() ||
+          (property.GetCSSProperty().PropertyID() != CSSPropertyID::kVariable &&
+           property.GetCSSProperty().PropertyID() !=
+               CSSPropertyID::kBackgroundColor &&
+           property.GetCSSProperty().PropertyID() != CSSPropertyID::kClipPath))
+        return true;
+    }
+  }
+  return false;
 }
 
 void KeyframeEffectModelBase::EnsureInterpolationEffectPopulated() const {

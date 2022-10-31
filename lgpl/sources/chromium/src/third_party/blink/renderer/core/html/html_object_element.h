@@ -23,7 +23,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_OBJECT_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_OBJECT_ELEMENT_H_
 
-#include "third_party/blink/public/mojom/frame/frame_owner_element_type.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/forms/form_associated.h"
 #include "third_party/blink/renderer/core/html/forms/listed_element.h"
@@ -41,11 +40,10 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
                                             public ListedElement,
                                             public FormAssociated {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(HTMLObjectElement);
 
  public:
   HTMLObjectElement(Document&, const CreateElementFlags);
-  ~HTMLObjectElement() override;
+  ~HTMLObjectElement() override = default;
   void Trace(Visitor*) const override;
 
   // Returns attributes that should be checked against Trusted Types
@@ -59,18 +57,15 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
 
   bool HasFallbackContent() const override;
   bool UseFallbackContent() const override;
-  bool CanRenderFallbackContent() const override { return true; }
-  void RenderFallbackContent(Frame*) override;
 
   bool IsFormControlElement() const override { return false; }
 
   bool IsEnumeratable() const override { return true; }
-  bool IsInteractiveContent() const override;
 
   bool ChildrenCanHaveStyle() const override { return UseFallbackContent(); }
 
-  mojom::blink::FrameOwnerElementType OwnerType() const final {
-    return mojom::blink::FrameOwnerElementType::kObject;
+  FrameOwnerElementType OwnerType() const final {
+    return FrameOwnerElementType::kObject;
   }
 
   // Implementations of constraint validation API.
@@ -92,6 +87,18 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
   // Returns true if this object started to load something, and finished
   // the loading regardless of success or failure.
   bool DidFinishLoading() const;
+
+  enum class ErrorEventPolicy {
+    kDoNotDispatch,
+    kDispatch,
+  };
+  void RenderFallbackContent(ErrorEventPolicy should_dispatch_error_event);
+
+  static bool IsClassOf(const FrameOwner& owner);
+
+  // TODO(crbug.com/1286950) Remove this once a decision is made on deprecation
+  // of the <param> URL functionality.
+  void UseCountParamUrlUsageIfNeeded(bool is_pdf) const;
 
  private:
   void ParseAttribute(const AttributeModificationParams&) override;
@@ -136,6 +143,10 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
 
   String class_id_;
   bool use_fallback_content_ : 1;
+
+  // TODO(crbug.com/1286950) Remove this once a decision is made on deprecation
+  // of the <param> URL functionality.
+  bool should_use_count_param_url_ : 1;
 };
 
 // Like To<HTMLObjectElement>() but accepts a ListedElement as input

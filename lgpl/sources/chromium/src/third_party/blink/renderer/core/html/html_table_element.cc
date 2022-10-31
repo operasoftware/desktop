@@ -36,6 +36,7 @@
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/node_lists_node_data.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/html_table_caption_element.h"
 #include "third_party/blink/renderer/core/html/html_table_cell_element.h"
@@ -45,7 +46,7 @@
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
@@ -309,7 +310,8 @@ void HTMLTableElement::CollectStyleForPresentationAttribute(
     const AtomicString& value,
     MutableCSSPropertyValueSet* style) {
   if (name == html_names::kWidthAttr) {
-    AddHTMLLengthToStyle(style, CSSPropertyID::kWidth, value);
+    AddHTMLLengthToStyle(style, CSSPropertyID::kWidth, value,
+                         kAllowPercentageValues, kDontAllowZeroValues);
   } else if (name == html_names::kHeightAttr) {
     AddHTMLLengthToStyle(style, CSSPropertyID::kHeight, value);
   } else if (name == html_names::kBorderAttr) {
@@ -324,16 +326,13 @@ void HTMLTableElement::CollectStyleForPresentationAttribute(
   } else if (name == html_names::kBackgroundAttr) {
     String url = StripLeadingAndTrailingHTMLSpaces(value);
     if (!url.IsEmpty()) {
-      UseCounter::Count(
-          GetDocument(),
-          WebFeature::kHTMLTableElementPresentationAttributeBackground);
       CSSImageValue* image_value = MakeGarbageCollected<CSSImageValue>(
           AtomicString(url), GetDocument().CompleteURL(url),
           Referrer(GetExecutionContext()->OutgoingReferrer(),
                    GetExecutionContext()->GetReferrerPolicy()),
           OriginClean::kTrue, false /* is_ad_related */);
-      style->SetProperty(
-          CSSPropertyValue(GetCSSPropertyBackgroundImage(), *image_value));
+      style->SetProperty(CSSPropertyValue(
+          CSSPropertyName(CSSPropertyID::kBackgroundImage), *image_value));
     }
   } else if (name == html_names::kValignAttr) {
     if (!value.IsEmpty()) {

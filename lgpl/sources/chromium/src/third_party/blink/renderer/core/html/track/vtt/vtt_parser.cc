@@ -42,7 +42,7 @@
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_element.h"
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_region.h"
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_scanner.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/text_resource_decoder_options.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -73,7 +73,7 @@ bool VTTParser::ParsePercentageValue(VTTScanner& value_scanner,
 
 bool VTTParser::ParsePercentageValuePair(VTTScanner& value_scanner,
                                          char delimiter,
-                                         DoublePoint& value_pair) {
+                                         gfx::PointF& value_pair) {
   double first_coord;
   if (!ParsePercentageValue(value_scanner, first_coord))
     return false;
@@ -85,7 +85,7 @@ bool VTTParser::ParsePercentageValuePair(VTTScanner& value_scanner,
   if (!ParsePercentageValue(value_scanner, second_coord))
     return false;
 
-  value_pair = DoublePoint(first_coord, second_coord);
+  value_pair = gfx::PointF(first_coord, second_coord);
   return true;
 }
 
@@ -244,9 +244,8 @@ VTTParser::ParseState VTTParser::CollectRegionSettings(const String& line) {
 VTTParser::ParseState VTTParser::CollectStyleSheet(const String& line) {
   if (line.IsEmpty() || line.Contains("-->")) {
     auto* parser_context = MakeGarbageCollected<CSSParserContext>(
-        *document_, NullURL(), true /* origin_clean */,
-        document_->GetReferrerPolicy(), UTF8Encoding(),
-        CSSParserContext::kLiveProfile,
+        *document_, NullURL(), true /* origin_clean */, Referrer(),
+        UTF8Encoding(), CSSParserContext::kLiveProfile,
         ResourceFetchRestriction::kOnlyDataUrls);
     auto* style_sheet_contents =
         MakeGarbageCollected<StyleSheetContents>(parser_context);
@@ -255,8 +254,7 @@ VTTParser::ParseState VTTParser::CollectStyleSheet(const String& line) {
         CSSDeferPropertyParsing::kNo, false /* allow_import_rules */);
     auto* style_sheet =
         MakeGarbageCollected<CSSStyleSheet>(style_sheet_contents);
-    style_sheet->SetAssociatedDocument(document_);
-    style_sheet->SetIsConstructed(true);
+    style_sheet->SetConstructorDocument(*document_);
     style_sheet->SetTitle("");
     style_sheets_.push_back(style_sheet);
 
@@ -497,7 +495,7 @@ bool VTTParser::CollectTimeStamp(const String& line, double& time_stamp) {
 }
 
 static String SerializeTimeStamp(double time_stamp) {
-  uint64_t value = clampTo<uint64_t>(time_stamp * 1000);
+  uint64_t value = ClampTo<uint64_t>(time_stamp * 1000);
   unsigned milliseconds = value % 1000;
   value /= 1000;
   unsigned seconds = value % 60;

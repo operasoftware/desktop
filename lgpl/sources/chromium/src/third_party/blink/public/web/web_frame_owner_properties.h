@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_FRAME_OWNER_PROPERTIES_H_
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_FRAME_OWNER_PROPERTIES_H_
 
+#include "third_party/blink/public/mojom/frame/color_scheme.mojom-shared.h"
 #include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-shared.h"
 #include "third_party/blink/public/platform/web_string.h"
 
@@ -12,22 +13,16 @@ namespace blink {
 
 struct WebFrameOwnerProperties {
   WebString name;  // browsing context container's name
-  mojom::ScrollbarMode scrollbar_mode;
-  int margin_width;
-  int margin_height;
-  bool allow_fullscreen;
-  bool allow_payment_request;
-  bool is_display_none;
-  WebString required_csp;
+  mojom::ScrollbarMode scrollbar_mode{mojom::ScrollbarMode::kAuto};
+  int margin_width{-1};
+  int margin_height{-1};
+  bool allow_fullscreen{false};
+  bool allow_payment_request{false};
+  bool is_display_none{false};
+  mojom::ColorScheme color_scheme{mojom::ColorScheme::kLight};
 
  public:
-  WebFrameOwnerProperties()
-      : scrollbar_mode(mojom::ScrollbarMode::kAuto),
-        margin_width(-1),
-        margin_height(-1),
-        allow_fullscreen(false),
-        allow_payment_request(false),
-        is_display_none(false) {}
+  WebFrameOwnerProperties() = default;
 
 #if INSIDE_BLINK
   WebFrameOwnerProperties(const WebString& name,
@@ -37,7 +32,7 @@ struct WebFrameOwnerProperties {
                           bool allow_fullscreen,
                           bool allow_payment_request,
                           bool is_display_none,
-                          const WebString& required_csp)
+                          mojom::ColorScheme color_scheme)
       : name(name),
         scrollbar_mode(scrollbar_mode),
         margin_width(margin_width),
@@ -45,10 +40,10 @@ struct WebFrameOwnerProperties {
         allow_fullscreen(allow_fullscreen),
         allow_payment_request(allow_payment_request),
         is_display_none(is_display_none),
-        required_csp(required_csp) {}
+        color_scheme(color_scheme) {}
 #endif
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_FRAME_OWNER_PROPERTIES_H_

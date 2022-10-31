@@ -7,9 +7,11 @@
 #include "third_party/blink/renderer/core/clipboard/system_clipboard.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/editing/commands/editor_command.h"
+#include "third_party/blink/renderer/core/editing/commands/undo_stack.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/editing/testing/editing_test_base.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
@@ -23,10 +25,22 @@ class EditorTest : public EditingTestBase {
     EditingTestBase::TearDown();
   }
 
+  Editor& GetEditor() const { return GetDocument().GetFrame()->GetEditor(); }
+
   void ExecuteCopy() {
     Editor& editor = GetDocument().GetFrame()->GetEditor();
     editor.CreateCommand("Copy").Execute();
     test::RunPendingTasks();
+  }
+
+  ptrdiff_t SizeOfRedoStack() const {
+    return std::distance(GetEditor().GetUndoStack().RedoSteps().begin(),
+                         GetEditor().GetUndoStack().RedoSteps().end());
+  }
+
+  ptrdiff_t SizeOfUndoStack() const {
+    return std::distance(GetEditor().GetUndoStack().UndoSteps().begin(),
+                         GetEditor().GetUndoStack().UndoSteps().end());
   }
 };
 
@@ -48,8 +62,8 @@ TEST_F(EditorTest, copyGeneratedPassword) {
       To<HTMLInputElement>(*GetDocument().getElementById("password"));
 
   const String kPasswordValue = "secret";
-  element.focus();
-  element.setValue(kPasswordValue);
+  element.Focus();
+  element.SetValue(kPasswordValue);
   element.SetSelectionRange(0, kPasswordValue.length());
 
   Editor& editor = GetDocument().GetFrame()->GetEditor();
@@ -86,7 +100,7 @@ TEST_F(EditorTest, DontCopyHiddenSelections) {
 
   auto& checkbox =
       To<HTMLInputElement>(*GetDocument().getElementById("checkbox"));
-  checkbox.focus();
+  checkbox.Focus();
 
   ExecuteCopy();
 
@@ -107,7 +121,82 @@ TEST_F(EditorTest, ReplaceSelection) {
   Editor& editor = GetDocument().GetFrame()->GetEditor();
   editor.ReplaceSelection("NEW");
 
-  EXPECT_EQ("HENEWLLO", text_control.value());
+  EXPECT_EQ("HENEWLLO", text_control.Value());
+}
+
+// http://crbug.com/263819
+TEST_F(EditorTest, RedoWithDisconnectedEditable) {
+  SetBodyContent("<p contenteditable id=target></p>");
+  auto& target = *GetElementById("target");
+  target.Focus();
+  GetDocument().execCommand("insertHtml", false, "<b>xyz</b>",
+                            ASSERT_NO_EXCEPTION);
+  ASSERT_EQ("<b>xyz</b>", target.innerHTML());
+  ASSERT_EQ(0, SizeOfRedoStack());
+  ASSERT_EQ(1, SizeOfUndoStack());
+
+  GetEditor().Undo();
+  ASSERT_EQ(1, SizeOfRedoStack());
+  ASSERT_EQ(0, SizeOfUndoStack());
+
+  target.remove();
+  EXPECT_EQ(0, SizeOfRedoStack())
+      << "We don't need to have redo steps for removed <input>";
+  EXPECT_EQ(0, SizeOfUndoStack());
+}
+
+// http://crbug.com/263819
+TEST_F(EditorTest, RedoWithDisconnectedInput) {
+  SetBodyContent("<input id=target>");
+  auto& input = *To<HTMLInputElement>(GetElementById("target"));
+  input.Focus();
+  GetDocument().execCommand("insertText", false, "xyz", ASSERT_NO_EXCEPTION);
+  ASSERT_EQ("xyz", input.Value());
+  ASSERT_EQ(0, SizeOfRedoStack());
+  ASSERT_EQ(1, SizeOfUndoStack());
+
+  GetEditor().Undo();
+  ASSERT_EQ(1, SizeOfRedoStack());
+  ASSERT_EQ(0, SizeOfUndoStack());
+
+  input.remove();
+  EXPECT_EQ(0, SizeOfRedoStack())
+      << "We don't need to have redo steps for removed <input>";
+  EXPECT_EQ(0, SizeOfUndoStack());
+}
+
+// http://crbug.com/263819
+TEST_F(EditorTest, UndoWithDisconnectedEditable) {
+  SetBodyContent("<p contenteditable id=target></p>");
+  auto& target = *GetElementById("target");
+  target.Focus();
+  GetDocument().execCommand("insertHtml", false, "<b>xyz</b>",
+                            ASSERT_NO_EXCEPTION);
+  ASSERT_EQ("<b>xyz</b>", target.innerHTML());
+  ASSERT_EQ(0, SizeOfRedoStack());
+  ASSERT_EQ(1, SizeOfUndoStack());
+
+  target.remove();
+  EXPECT_EQ(0, SizeOfRedoStack());
+  EXPECT_EQ(0, SizeOfUndoStack())
+      << "We don't need to have undo steps for removed editable";
+}
+
+// http://crbug.com/263819
+TEST_F(EditorTest, UndoWithDisconnectedInput) {
+  SetBodyContent("<input id=target>");
+  auto& input = *To<HTMLInputElement>(GetElementById("target"));
+  input.Focus();
+  GetDocument().execCommand("insertText", false, "xyz", ASSERT_NO_EXCEPTION);
+  ASSERT_EQ("xyz", input.Value());
+  ASSERT_EQ(0, SizeOfRedoStack());
+  ASSERT_EQ(1, SizeOfUndoStack());
+
+
+  input.remove();
+  EXPECT_EQ(0, SizeOfRedoStack());
+  EXPECT_EQ(0, SizeOfUndoStack())
+      << "We don't need to have undo steps for removed <input>";
 }
 
 // http://crbug.com/873037

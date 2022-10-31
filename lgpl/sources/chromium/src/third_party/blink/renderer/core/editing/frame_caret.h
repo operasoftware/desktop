@@ -26,12 +26,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_FRAME_CARET_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_FRAME_CARET_H_
 
-#include <memory>
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
+#include "third_party/blink/renderer/platform/graphics/paint/effect_paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/paint_invalidation_reason.h"
+#include "third_party/blink/renderer/platform/heap/disallow_new_wrapper.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/timer.h"
@@ -39,23 +40,23 @@
 namespace blink {
 
 class CaretDisplayItemClient;
-class DisplayItemClient;
+class EffectPaintPropertyNode;
 class FrameCaret;
 class GraphicsContext;
 class LayoutBlock;
 class LocalFrame;
-class SelectionEditor;
+class NGPhysicalBoxFragment;
 struct PaintInvalidatorContext;
 struct PhysicalOffset;
-
-enum class CaretVisibility { kVisible, kHidden };
+class SelectionEditor;
 
 class CORE_EXPORT FrameCaret final : public GarbageCollected<FrameCaret> {
  public:
   FrameCaret(LocalFrame&, const SelectionEditor&);
+  FrameCaret(const FrameCaret&) = delete;
+  FrameCaret& operator=(const FrameCaret&) = delete;
   ~FrameCaret();
 
-  const DisplayItemClient& GetDisplayItemClient() const;
   bool IsActive() const;
 
   void ScheduleVisualUpdateForPaintInvalidationIfNeeded();
@@ -67,51 +68,55 @@ class CORE_EXPORT FrameCaret final : public GarbageCollected<FrameCaret> {
   bool IsCaretBlinkingSuspended() const { return is_caret_blinking_suspended_; }
   void StopCaretBlinkTimer();
   void StartBlinkCaret();
-  void SetCaretVisibility(CaretVisibility);
-  IntRect AbsoluteCaretBounds() const;
-
-  bool ShouldShowBlockCursor() const { return should_show_block_cursor_; }
-  void SetShouldShowBlockCursor(bool);
+  void SetCaretEnabled(bool);
+  gfx::Rect AbsoluteCaretBounds() const;
 
   // Paint invalidation methods delegating to DisplayItemClient.
-  void ClearPreviousVisualRect(const LayoutBlock&);
   void LayoutBlockWillBeDestroyed(const LayoutBlock&);
   void UpdateStyleAndLayoutIfNeeded();
   void InvalidatePaint(const LayoutBlock&, const PaintInvalidatorContext&);
 
   bool ShouldPaintCaret(const LayoutBlock&) const;
+  bool ShouldPaintCaret(const NGPhysicalBoxFragment&) const;
   void PaintCaret(GraphicsContext&, const PhysicalOffset&) const;
 
+  const EffectPaintPropertyNode& CaretEffectNode() const { return *effect_; }
+
   // For unit tests.
-  const DisplayItemClient& CaretDisplayItemClientForTesting() const;
-  const LayoutBlock* CaretLayoutBlockForTesting() const;
-  bool ShouldPaintCaretForTesting() const { return should_paint_caret_; }
   void RecreateCaretBlinkTimerForTesting(
-      scoped_refptr<base::SingleThreadTaskRunner>);
+      scoped_refptr<base::SingleThreadTaskRunner>,
+      const base::TickClock* tick_clock);
 
   void Trace(Visitor*) const;
 
  private:
   friend class FrameCaretTest;
   friend class FrameSelectionTest;
+  friend class CaretDisplayItemClientTest;
+
+  EffectPaintPropertyNode::State CaretEffectNodeState(
+      bool visible,
+      const TransformPaintPropertyNodeOrAlias& local_transform_space) const;
 
   const PositionWithAffinity CaretPosition() const;
 
-  bool ShouldBlinkCaret() const;
+  bool ShouldShowCaret() const;
   void CaretBlinkTimerFired(TimerBase*);
   void UpdateAppearance();
+  void SetVisibleIfActive(bool visible);
+  bool IsVisibleIfActive() const { return effect_->Opacity() == 1.f; }
 
   const Member<const SelectionEditor> selection_editor_;
   const Member<LocalFrame> frame_;
-  const std::unique_ptr<CaretDisplayItemClient> display_item_client_;
-  CaretVisibility caret_visibility_;
-  // TODO(https://crbug.com/668758): Consider using BeginFrame update for this.
-  std::unique_ptr<TaskRunnerTimer<FrameCaret>> caret_blink_timer_;
-  bool should_paint_caret_ : 1;
-  bool is_caret_blinking_suspended_ : 1;
-  bool should_show_block_cursor_ : 1;
-
-  DISALLOW_COPY_AND_ASSIGN(FrameCaret);
+  const Member<CaretDisplayItemClient> display_item_client_;
+  // TODO(https://crbug.com/1123630): Consider moving the timer into the
+  // compositor thread.
+  HeapTaskRunnerTimer<FrameCaret> caret_blink_timer_;
+  bool is_caret_enabled_ = false;
+  bool should_show_caret_ = false;
+  bool is_caret_blinking_suspended_ = false;
+  // Controls visibility of caret with opacity when the caret is blinking.
+  scoped_refptr<EffectPaintPropertyNode> effect_;
 };
 
 }  // namespace blink

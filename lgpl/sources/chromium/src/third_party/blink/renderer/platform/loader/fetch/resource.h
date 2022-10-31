@@ -27,12 +27,16 @@
 #include <memory>
 #include "base/auto_reset.h"
 #include "base/callback.h"
-#include "base/optional.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/base/big_buffer.h"
+#include "net/base/schemeful_site.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/loader/code_cache.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/scheduler/web_scoped_virtual_time_pauser.h"
+#include "third_party/blink/renderer/platform/bindings/parkable_string.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_counted_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/instrumentation/memory_pressure_listener.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/web_process_memory_dump.h"
 #include "third_party/blink/renderer/platform/loader/fetch/integrity_metadata.h"
@@ -50,7 +54,6 @@
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_counted_set.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
@@ -63,8 +66,6 @@ class Clock;
 namespace blink {
 
 class BlobDataHandle;
-class CachedMetadataHandler;
-class CachedMetadataSender;
 class FetchParameters;
 class ResourceClient;
 class ResourceFinishObserver;
@@ -85,7 +86,6 @@ enum class ResourceType : uint8_t {
   kXSLStyleSheet,
   kLinkPrefetch,
   kTextTrack,
-  kImportResource,
   kAudio,
   kVideo,
   kManifest,
@@ -99,8 +99,6 @@ enum class ResourceType : uint8_t {
 // with the loader to obtain the resource from the network.
 class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
                                  public MemoryPressureListener {
-  USING_GARBAGE_COLLECTED_MIXIN(Resource);
-
  public:
   // An enum representing whether a resource match with another resource.
   // There are three kinds of status.
@@ -142,10 +140,12 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
     // Match fails due to different request methods.
     kRequestMethodDoesNotMatch,
 
-    // Match fails due to different request headers.
-    kRequestHeadersDoNotMatch,
+    // Match fails due to different script types.
+    kScriptTypeDoesNotMatch,
   };
 
+  Resource(const Resource&) = delete;
+  Resource& operator=(const Resource&) = delete;
   ~Resource() override;
 
   void Trace(Visitor*) const override;
@@ -171,7 +171,9 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
     return resource_request_;
   }
   const ResourceRequestHead& LastResourceRequest() const;
-  const ResourceResponse* LastResourceResponse() const;
+  const ResourceResponse& LastResourceResponse() const;
+  // Returns zero if there are no redirects.
+  size_t RedirectChainSize() const;
 
   virtual void SetRevalidatingRequest(const ResourceRequestHead&);
 
@@ -228,7 +230,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
 
   size_t DecodedSize() const { return decoded_size_; }
   size_t OverheadSize() const { return overhead_size_; }
-  size_t CodeCacheSize() const;
+  virtual size_t CodeCacheSize() const { return 0; }
 
   bool IsLoaded() const { return status_ > ResourceStatus::kPending; }
 
@@ -262,13 +264,29 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   virtual void ResponseBodyReceived(
       ResponseBodyLoaderDrainableInterface& body_loader,
       scoped_refptr<base::SingleThreadTaskRunner> loader_task_runner) {}
+
+  // A class Resource subclasses can use to hold ResourceType specific info
+  // related to DidReceiveDecodedData().
+  class DecodedDataInfo {
+   public:
+    virtual ~DecodedDataInfo() = default;
+
+    virtual ResourceType GetType() const = 0;
+  };
+  virtual void DidReceiveDecodedData(const String& data,
+                                     std::unique_ptr<DecodedDataInfo> info) {}
+
   void SetResponse(const ResourceResponse&);
   const ResourceResponse& GetResponse() const { return response_; }
 
   // Sets the serialized metadata retrieved from the platform's cache.
-  // Subclasses of Resource that support cached metadata should override this
-  // method with one that fills the current CachedMetadataHandler.
+  // The default implementation does nothing. Subclasses interested in the data
+  // should implement the resource-specific behavior.
   virtual void SetSerializedCachedMetadata(mojo_base::BigBuffer data);
+
+  // Gets whether the serialized cached metadata must contain a hash of the
+  // source text. For resources other than ScriptResource, this is always false.
+  virtual bool CodeCacheHashRequired() const;
 
   AtomicString HttpContentType() const;
 
@@ -351,7 +369,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   }
 
   // Returns |kOk| when |this| can be resused for the given arguments.
-  virtual MatchStatus CanReuse(const FetchParameters& params) const;
+  MatchStatus CanReuse(const FetchParameters& params) const;
 
   // TODO(yhirano): Remove this once out-of-blink CORS is fully enabled.
   void SetResponseType(network::mojom::FetchResponseType response_type) {
@@ -382,8 +400,6 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
       ResourceType,
       const AtomicString& fetch_initiator_name);
 
-  static blink::mojom::CodeCacheType ResourceTypeToCodeCacheType(ResourceType);
-
   class ProhibitAddRemoveClientInScope : public base::AutoReset<bool> {
    public:
     ProhibitAddRemoveClientInScope(Resource* resource)
@@ -406,6 +422,16 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   size_t CalculateOverheadSizeForTest() const {
     return CalculateOverheadSize();
   }
+
+  // Appends the top-frame site derived from |origin| to
+  // |existing_top_frame_sites_in_cache_| and returns true if the same site
+  // already exists.
+  bool AppendTopFrameSiteForMetrics(const SecurityOrigin& origin);
+
+  // Sets the ResourceRequest to be tagged as an ad.
+  void SetIsAdResource();
+
+  void DidRemoveClientOrObserver();
 
  protected:
   Resource(const ResourceRequestHead&,
@@ -431,13 +457,17 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   virtual void DidAddClient(ResourceClient*);
   void WillAddClientOrObserver();
 
-  void DidRemoveClientOrObserver();
   virtual void AllClientsAndObserversRemoved();
 
   bool HasClient(ResourceClient* client) const {
     return clients_.Contains(client) ||
            clients_awaiting_callback_.Contains(client) ||
            finished_clients_.Contains(client);
+  }
+
+  bool IsSuccessfulRevalidationResponse(
+      const ResourceResponse& response) const {
+    return IsCacheValidator() && response.HttpStatusCode() == 304;
   }
 
   struct RedirectPair {
@@ -463,23 +493,12 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   }
 
   void SetCachePolicyBypassingCache();
-  void SetPreviewsState(WebURLRequest::PreviewsState);
   void ClearRangeRequestHeader();
 
   SharedBuffer* Data() const { return data_.get(); }
   void ClearData();
 
   virtual void SetEncoding(const String&) {}
-
-  // Create a handler for the cached metadata of this resource. Subclasses of
-  // Resource that support cached metadata should override this method with one
-  // that creates an appropriate CachedMetadataHandler implementation, and
-  // override SetSerializedCachedMetadata with an implementation that fills the
-  // cache handler.
-  virtual CachedMetadataHandler* CreateCachedMetadataHandler(
-      std::unique_ptr<CachedMetadataSender> send_callback);
-
-  CachedMetadataHandler* CacheHandler() { return cache_handler_.Get(); }
 
  private:
   friend class ResourceLoader;
@@ -500,9 +519,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   ResourceType type_;
   ResourceStatus status_;
 
-  Member<CachedMetadataHandler> cache_handler_;
-
-  base::Optional<ResourceError> error_;
+  absl::optional<ResourceError> error_;
 
   base::TimeTicks load_response_end_;
 
@@ -552,7 +569,12 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
 
   WebScopedVirtualTimePauser virtual_time_pauser_;
 
-  DISALLOW_COPY_AND_ASSIGN(Resource);
+  // To compute metrics for measuring the efficacy of the
+  // memory cache if it was partitioned by top-frame site (in addition to the
+  // current origin which it is already partitioned by).
+  // TODO(crbug.com/1127971): Remove this once the decision is made to partition
+  // the cache using either Network Isolation Key or scoped to per-document.
+  std::set<net::SchemefulSite> existing_top_frame_sites_in_cache_;
 };
 
 class ResourceFactory {
@@ -592,11 +614,6 @@ class NonTextResourceFactory : public ResourceFactory {
   }
 };
 
-#define DEFINE_RESOURCE_TYPE_CASTS(typeName)                          \
-  DEFINE_TYPE_CASTS(typeName##Resource, Resource, resource,           \
-                    resource->GetType() == ResourceType::k##typeName, \
-                    resource.GetType() == ResourceType::k##typeName)
-
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_FETCH_RESOURCE_H_

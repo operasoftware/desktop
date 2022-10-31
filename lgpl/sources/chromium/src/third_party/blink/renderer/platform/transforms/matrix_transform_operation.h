@@ -52,28 +52,23 @@ class PLATFORM_EXPORT MatrixTransformOperation final
     return TransformationMatrix(a_, b_, c_, d_, e_, f_);
   }
 
-  bool CanBlendWith(const TransformOperation& other) const override {
-    return false;
-  }
-
   static bool IsMatchingOperationType(OperationType type) {
     return type == kMatrix;
   }
 
- private:
-  OperationType GetType() const override { return kMatrix; }
-
-  bool operator==(const TransformOperation& o) const override {
-    if (!IsSameType(o))
-      return false;
-
+ protected:
+  bool IsEqualAssumingSameType(const TransformOperation& o) const override {
     const MatrixTransformOperation* m =
         static_cast<const MatrixTransformOperation*>(&o);
     return a_ == m->a_ && b_ == m->b_ && c_ == m->c_ && d_ == m->d_ &&
            e_ == m->e_ && f_ == m->f_;
   }
 
-  void Apply(TransformationMatrix& transform, const FloatSize&) const override {
+ private:
+  OperationType GetType() const override { return kMatrix; }
+
+  void Apply(TransformationMatrix& transform,
+             const gfx::SizeF&) const override {
     TransformationMatrix matrix(a_, b_, c_, d_, e_, f_);
     transform.Multiply(matrix);
   }
@@ -90,6 +85,9 @@ class PLATFORM_EXPORT MatrixTransformOperation final
   bool PreservesAxisAlignment() const final {
     return Matrix().Preserves2dAxisAlignment();
   }
+  bool IsIdentityOrTranslation() const final {
+    return Matrix().IsIdentityOr2DTranslation();
+  }
 
   MatrixTransformOperation(double a,
                            double b,
@@ -99,7 +97,7 @@ class PLATFORM_EXPORT MatrixTransformOperation final
                            double f)
       : a_(a), b_(b), c_(c), d_(d), e_(e), f_(f) {}
 
-  MatrixTransformOperation(const TransformationMatrix& t)
+  explicit MatrixTransformOperation(const TransformationMatrix& t)
       : a_(t.A()), b_(t.B()), c_(t.C()), d_(t.D()), e_(t.E()), f_(t.F()) {}
 
   double a_;

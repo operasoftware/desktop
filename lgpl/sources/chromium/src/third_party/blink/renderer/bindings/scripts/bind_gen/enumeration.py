@@ -24,6 +24,7 @@ from .codegen_utils import make_forward_declarations
 from .codegen_utils import make_header_include_directives
 from .codegen_utils import write_code_node_to_file
 from .mako_renderer import MakoRenderer
+from .package_initializer import package_initializer
 from .path_manager import PathManager
 from .task_queue import TaskQueue
 
@@ -34,18 +35,27 @@ def make_factory_methods(cg_context):
     T = TextNode
 
     decls = ListNode()
+    defs = ListNode()
 
-    func_def = CxxFuncDefNode(
-        name="Create",
-        arg_decls=[
-            "v8::Isolate* isolate",
-            "v8::Local<v8::Value> value",
-            "ExceptionState& exception_state",
-        ],
-        return_type="${class_name}",
-        static=True)
+    func_decl = CxxFuncDeclNode(name="Create",
+                                arg_decls=[
+                                    "v8::Isolate* isolate",
+                                    "v8::Local<v8::Value> value",
+                                    "ExceptionState& exception_state",
+                                ],
+                                return_type="${class_name}",
+                                static=True)
+    func_def = CxxFuncDefNode(name="Create",
+                              arg_decls=[
+                                  "v8::Isolate* isolate",
+                                  "v8::Local<v8::Value> value",
+                                  "ExceptionState& exception_state",
+                              ],
+                              return_type="${class_name}",
+                              class_name=cg_context.class_name)
     func_def.set_base_template_vars(cg_context.template_bindings())
-    decls.append(func_def)
+    decls.append(func_decl)
+    defs.append(func_def)
 
     func_def.body.extend([
         T("const auto& result = bindings::FindIndexInEnumStringTable("
@@ -56,23 +66,40 @@ def make_factory_methods(cg_context):
           "${class_name}();"),
     ])
 
-    func_def = CxxFuncDefNode(
-        name="Create",
-        arg_decls=["const String& value"],
-        return_type="base::Optional<${class_name}>",
-        static=True)
+    func_decl = CxxFuncDeclNode(name="Create",
+                                arg_decls=["const String& value"],
+                                return_type="absl::optional<${class_name}>",
+                                static=True)
+    func_def = CxxFuncDefNode(name="Create",
+                              arg_decls=["const String& value"],
+                              return_type="absl::optional<${class_name}>",
+                              class_name=cg_context.class_name)
     func_def.set_base_template_vars(cg_context.template_bindings())
-    decls.append(func_def)
+    decls.append(func_decl)
+    defs.append(EmptyNode())
+    defs.append(func_def)
 
     func_def.body.extend([
         T("const auto& result = bindings::FindIndexInEnumStringTable"
           "(value, string_table_);"),
         T("if (!result)\n"
-          "  return base::nullopt;"),
+          "  return absl::nullopt;"),
         T("return ${class_name}(static_cast<Enum>(result.value()));"),
     ])
 
-    return decls, None
+    return decls, defs
+
+
+def make_default_constructor(cg_context):
+    assert isinstance(cg_context, CodeGenContext)
+
+    func_decl = CxxFuncDeclNode(name=cg_context.class_name,
+                                arg_decls=[],
+                                return_type="",
+                                constexpr=True,
+                                default=True)
+
+    return func_decl, None
 
 
 def make_constructors(cg_context):
@@ -83,12 +110,6 @@ def make_constructors(cg_context):
     class_name = cg_context.class_name
 
     decls = ListNode([
-        CxxFuncDeclNode(
-            name=class_name,
-            arg_decls=[],
-            return_type="",
-            constexpr=True,
-            default=True),
         CxxFuncDefNode(
             name=class_name,
             arg_decls=["Enum value"],
@@ -213,31 +234,41 @@ def make_nested_enum_class_def(cg_context):
         TextNode("enum class Enum : enum_int_t {"),
         ListNode(enum_values, separator=", "),
         TextNode("};"),
+        TextNode("static constexpr size_t kEnumSize = {};".format(
+            len(enum_values))),
     ])
 
 
 def make_enum_string_table(cg_context):
     assert isinstance(cg_context, CodeGenContext)
 
+    decls = TextNode("static const char* const string_table_[];")
+
     str_values = [
         TextNode("\"{}\"".format(value))
         for value in cg_context.enumeration.values
     ]
 
-    decls = ListNode([
-        TextNode("static constexpr const char* const string_table_[] = {"),
+    # Define the string table in *.cc so that there never exists a copy of
+    # the table (i.e. the strings in the table are interned strings in the
+    # scope of this IDL enumeration).  This trick makes it possible to compare
+    # the strings by their address.
+    defs = ListNode([
+        TextNode("constexpr const char* const "
+                 "${class_name}::string_table_[] = {"),
         ListNode(str_values, separator=", "),
         TextNode("};"),
     ])
-
-    defs = TextNode("const char* const ${class_name}::string_table_[];")
     defs.set_base_template_vars(cg_context.template_bindings())
 
     return decls, defs
 
 
-def generate_enumeration(enumeration):
-    assert isinstance(enumeration, web_idl.Enumeration)
+def generate_enumeration(enumeration_identifier):
+    assert isinstance(enumeration_identifier, web_idl.Identifier)
+
+    web_idl_database = package_initializer().web_idl_database()
+    enumeration = web_idl_database.find(enumeration_identifier)
 
     path_manager = PathManager(enumeration)
     assert path_manager.api_component == path_manager.impl_component
@@ -278,6 +309,8 @@ def generate_enumeration(enumeration):
 
     # Implementation parts
     factory_decls, factory_defs = make_factory_methods(cg_context)
+    default_ctor_decls, default_ctor_defs = make_default_constructor(
+        cg_context)
     ctor_decls, ctor_defs = make_constructors(cg_context)
     assign_decls, assign_defs = make_assignment_operators(cg_context)
     equal_decls, equal_defs = make_equality_operators(cg_context)
@@ -313,27 +346,39 @@ def generate_enumeration(enumeration):
         make_forward_declarations(source_node.accumulator),
         EmptyNode(),
     ])
-    header_node.accumulator.add_include_headers([
-        component_export_header(api_component, for_testing),
-        "third_party/blink/renderer/bindings/core/v8/generated_code_helper.h",
-        "third_party/blink/renderer/platform/bindings/enumeration_base.h",
-    ])
 
     # Assemble the parts.
+    header_node.accumulator.add_class_decls([
+        "ExceptionState",
+    ])
+    header_node.accumulator.add_include_headers([
+        component_export_header(api_component, for_testing),
+        "third_party/abseil-cpp/absl/types/optional.h",
+        "third_party/blink/renderer/platform/bindings/enumeration_base.h",
+    ])
+    source_node.accumulator.add_include_headers([
+        "third_party/blink/renderer/bindings/core/v8/generated_code_helper.h",
+    ])
+
     header_blink_ns.body.append(class_def)
     header_blink_ns.body.append(EmptyNode())
 
     class_def.public_section.append(nested_enum_class_def)
     class_def.public_section.append(EmptyNode())
 
+    class_def.private_section.append(table_decls)
+    class_def.private_section.append(EmptyNode())
+    source_blink_ns.body.append(table_defs)
+    source_blink_ns.body.append(EmptyNode())
+
     class_def.public_section.append(factory_decls)
     class_def.public_section.append(EmptyNode())
     source_blink_ns.body.append(factory_defs)
     source_blink_ns.body.append(EmptyNode())
 
-    class_def.private_section.append(table_decls)
+    class_def.private_section.append(default_ctor_decls)
     class_def.private_section.append(EmptyNode())
-    source_blink_ns.body.append(table_defs)
+    source_blink_ns.body.append(default_ctor_defs)
     source_blink_ns.body.append(EmptyNode())
 
     class_def.public_section.append(ctor_decls)
@@ -361,9 +406,10 @@ def generate_enumeration(enumeration):
     write_code_node_to_file(source_node, path_manager.gen_path_to(source_path))
 
 
-def generate_enumerations(task_queue, web_idl_database):
+def generate_enumerations(task_queue):
     assert isinstance(task_queue, TaskQueue)
-    assert isinstance(web_idl_database, web_idl.Database)
+
+    web_idl_database = package_initializer().web_idl_database()
 
     for enumeration in web_idl_database.enumerations:
-        task_queue.post_task(generate_enumeration, enumeration)
+        task_queue.post_task(generate_enumeration, enumeration.identifier)

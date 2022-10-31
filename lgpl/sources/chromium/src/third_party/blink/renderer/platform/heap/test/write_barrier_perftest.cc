@@ -5,6 +5,7 @@
 #include "base/callback.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/perf/perf_result_reporter.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/heap/heap_test_utilities.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 
@@ -63,9 +64,9 @@ TEST_F(WriteBarrierPerfTest, MemberWritePerformance) {
 
   // During GC.
   IncrementalMarkingTestDriver driver(ThreadState::Current());
-  driver.Start();
+  driver.StartGC();
   base::TimeDelta during_gc_duration = TimedRun(benchmark);
-  driver.FinishSteps();
+  driver.TriggerMarkingSteps();
   PreciselyCollectGarbage();
 
   // Outside GC.
@@ -77,15 +78,12 @@ TEST_F(WriteBarrierPerfTest, MemberWritePerformance) {
 
   // Reporting.
   auto reporter = SetUpReporter("member_write_performance");
-  reporter.AddResult(
-      kMetricWritesDuringGcRunsPerS,
-      static_cast<double>(kNumElements) / during_gc_duration.InSecondsF());
-  reporter.AddResult(
-      kMetricWritesOutsideGcRunsPerS,
-      static_cast<double>(kNumElements) / outside_gc_duration.InSecondsF());
-  reporter.AddResult(
-      kMetricRelativeSpeedDifferenceUnitless,
-      during_gc_duration.InSecondsF() / outside_gc_duration.InSecondsF());
+  reporter.AddResult(kMetricWritesDuringGcRunsPerS,
+                     kNumElements / during_gc_duration.InSecondsF());
+  reporter.AddResult(kMetricWritesOutsideGcRunsPerS,
+                     kNumElements / outside_gc_duration.InSecondsF());
+  reporter.AddResult(kMetricRelativeSpeedDifferenceUnitless,
+                     during_gc_duration / outside_gc_duration);
 }
 
 }  // namespace blink

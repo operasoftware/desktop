@@ -46,18 +46,31 @@ void SVGDocumentExtensions::AddWebAnimationsPendingSVGElement(
   web_animations_pending_svg_elements_.insert(&element);
 }
 
-void SVGDocumentExtensions::ServiceOnAnimationFrame(Document& document) {
+bool SVGDocumentExtensions::ServiceSmilOnAnimationFrame(Document& document) {
   if (!document.SvgExtensions())
-    return;
-  document.AccessSVGExtensions().ServiceAnimations();
+    return false;
+  return document.AccessSVGExtensions().ServiceSmilAnimations();
 }
 
-void SVGDocumentExtensions::ServiceAnimations() {
+void SVGDocumentExtensions::ServiceWebAnimationsOnAnimationFrame(
+    Document& document) {
+  if (!document.SvgExtensions())
+    return;
+  document.AccessSVGExtensions().ServiceWebAnimations();
+}
+
+bool SVGDocumentExtensions::ServiceSmilAnimations() {
+  bool did_schedule_animation_frame = false;
   HeapVector<Member<SVGSVGElement>> time_containers;
   CopyToVector(time_containers_, time_containers);
-  for (const auto& container : time_containers)
-    container->TimeContainer()->ServiceAnimations();
+  for (const auto& container : time_containers) {
+    did_schedule_animation_frame |=
+        container->TimeContainer()->ServiceAnimations();
+  }
+  return did_schedule_animation_frame;
+}
 
+void SVGDocumentExtensions::ServiceWebAnimations() {
   SVGElementSet web_animations_pending_svg_elements;
   web_animations_pending_svg_elements.swap(
       web_animations_pending_svg_elements_);
@@ -90,6 +103,14 @@ void SVGDocumentExtensions::StartAnimations() {
 void SVGDocumentExtensions::PauseAnimations() {
   for (SVGSVGElement* element : time_containers_)
     element->pauseAnimations();
+}
+
+bool SVGDocumentExtensions::HasSmilAnimations() const {
+  for (SVGSVGElement* element : time_containers_) {
+    if (element->TimeContainer()->HasAnimations())
+      return true;
+  }
+  return false;
 }
 
 void SVGDocumentExtensions::DispatchSVGLoadEventToOutermostSVGElements() {
@@ -141,25 +162,22 @@ bool SVGDocumentExtensions::ZoomAndPanEnabled() const {
   return !svg || svg->ZoomAndPanEnabled();
 }
 
-void SVGDocumentExtensions::StartPan(const FloatPoint& start) {
-  if (SVGSVGElement* svg = rootElement(*document_))
-    translate_ = FloatPoint(start.X() - svg->CurrentTranslate().X(),
-                            start.Y() - svg->CurrentTranslate().Y());
+void SVGDocumentExtensions::StartPan(const gfx::PointF& start) {
+  if (SVGSVGElement* svg = rootElement(*document_)) {
+    translate_ = gfx::Vector2dF(start.x() - svg->CurrentTranslate().x(),
+                                start.y() - svg->CurrentTranslate().y());
+  }
 }
 
-void SVGDocumentExtensions::UpdatePan(const FloatPoint& pos) const {
-  if (SVGSVGElement* svg = rootElement(*document_))
+void SVGDocumentExtensions::UpdatePan(const gfx::PointF& pos) const {
+  if (SVGSVGElement* svg = rootElement(*document_)) {
     svg->SetCurrentTranslate(
-        FloatPoint(pos.X() - translate_.X(), pos.Y() - translate_.Y()));
+        gfx::Vector2dF(pos.x() - translate_.x(), pos.y() - translate_.y()));
+  }
 }
 
 SVGSVGElement* SVGDocumentExtensions::rootElement(const Document& document) {
   return DynamicTo<SVGSVGElement>(document.documentElement());
-}
-
-SVGSVGElement* SVGDocumentExtensions::rootElement() const {
-  DCHECK(document_);
-  return rootElement(*document_);
 }
 
 void SVGDocumentExtensions::Trace(Visitor* visitor) const {

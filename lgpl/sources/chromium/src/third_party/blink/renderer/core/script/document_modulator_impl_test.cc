@@ -13,10 +13,12 @@
 namespace blink {
 
 class DocumentModulatorImplTest : public PageTestBase {
-  DISALLOW_COPY_AND_ASSIGN(DocumentModulatorImplTest);
 
  public:
   DocumentModulatorImplTest() = default;
+  DocumentModulatorImplTest(const DocumentModulatorImplTest&) = delete;
+  DocumentModulatorImplTest& operator=(const DocumentModulatorImplTest&) =
+      delete;
   void SetUp() override;
 
  protected:
@@ -24,7 +26,7 @@ class DocumentModulatorImplTest : public PageTestBase {
 };
 
 void DocumentModulatorImplTest::SetUp() {
-  PageTestBase::SetUp(IntSize(500, 500));
+  PageTestBase::SetUp(gfx::Size(500, 500));
   ScriptState* script_state = ToScriptStateForMainWorld(&GetFrame());
   modulator_ = Modulator::From(script_state);
 }

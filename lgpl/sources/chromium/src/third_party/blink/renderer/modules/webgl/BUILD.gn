@@ -143,6 +143,8 @@ blink_modules_sources("webgl") {
     "webgl_transform_feedback.h",
     "webgl_uniform_location.cc",
     "webgl_uniform_location.h",
+    "webgl_unowned_texture.cc",
+    "webgl_unowned_texture.h",
     "webgl_vertex_array_object.cc",
     "webgl_vertex_array_object.h",
     "webgl_vertex_array_object_base.cc",
@@ -152,19 +154,20 @@ blink_modules_sources("webgl") {
     "webgl_video_texture.cc",
     "webgl_video_texture.h",
     "webgl_video_texture_enum.h",
+    "webgl_webcodecs_video_frame.cc",
+    "webgl_webcodecs_video_frame.h",
   ]
-
-  if (support_webgl2_compute_context) {
-    sources += [
-      "webgl2_compute_rendering_context.cc",
-      "webgl2_compute_rendering_context.h",
-      "webgl2_compute_rendering_context_base.cc",
-      "webgl2_compute_rendering_context_base.h",
-    ]
-  }
 
   # The modules/webgl/ directly is a larger module, and
   # the implementation depends on a fair chunk of core/ --
   # include the core pch for faster Windows compilation times.
   configs += [ "//third_party/blink/renderer/core:blink_core_pch" ]
+
+  public_deps = [ "//device/vr/public/mojom:vr_service_blink" ]
+  deps = [
+    "//build:chromeos_buildflags",
+    "//third_party/blink/renderer/modules/xr:xr",
+  ]
+  deps += [ "//third_party/blink/renderer/modules/webcodecs:webcodecs" ]
+  allow_circular_includes_from = deps
 }

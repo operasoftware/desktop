@@ -23,14 +23,14 @@ String CSSCounterValue::CustomCSSText() const {
     result.Append(", ");
     result.Append(separator_->CssText());
   }
-  bool is_default_list_style = ListStyle() == CSSValueID::kDecimal;
+  bool is_default_list_style = ListStyle() == "decimal";
   if (!is_default_list_style) {
     result.Append(", ");
     result.Append(list_style_->CssText());
   }
   result.Append(')');
 
-  return result.ToString();
+  return result.ReleaseString();
 }
 
 void CSSCounterValue::TraceAfterDispatch(blink::Visitor* visitor) const {

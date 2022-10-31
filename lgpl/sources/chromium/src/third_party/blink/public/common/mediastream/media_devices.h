@@ -8,22 +8,12 @@
 #include <string>
 #include <vector>
 
-#include "base/optional.h"
 #include "media/base/video_facing.h"
+#include "media/capture/video/video_capture_device_descriptor.h"
 #include "third_party/blink/public/common/common_export.h"
-
-namespace media {
-struct VideoCaptureDeviceDescriptor;
-}  // namespace media
+#include "third_party/blink/public/mojom/mediastream/media_devices.mojom-shared.h"
 
 namespace blink {
-
-enum MediaDeviceType {
-  MEDIA_DEVICE_TYPE_AUDIO_INPUT,
-  MEDIA_DEVICE_TYPE_VIDEO_INPUT,
-  MEDIA_DEVICE_TYPE_AUDIO_OUTPUT,
-  NUM_MEDIA_DEVICE_TYPES,
-};
 
 struct BLINK_COMMON_EXPORT WebMediaDeviceInfo {
   WebMediaDeviceInfo();
@@ -33,8 +23,9 @@ struct BLINK_COMMON_EXPORT WebMediaDeviceInfo {
       const std::string& device_id,
       const std::string& label,
       const std::string& group_id,
-      media::VideoFacingMode video_facing = media::MEDIA_VIDEO_FACING_NONE,
-      const base::Optional<bool>& pan_tilt_zoom_supported = base::nullopt);
+      const media::VideoCaptureControlSupport& video_control_support =
+          media::VideoCaptureControlSupport(),
+      blink::mojom::FacingMode video_facing = blink::mojom::FacingMode::NONE);
   explicit WebMediaDeviceInfo(
       const media::VideoCaptureDeviceDescriptor& descriptor);
   ~WebMediaDeviceInfo();
@@ -44,9 +35,8 @@ struct BLINK_COMMON_EXPORT WebMediaDeviceInfo {
   std::string device_id;
   std::string label;
   std::string group_id;
-  media::VideoFacingMode video_facing =
-      media::VideoFacingMode::MEDIA_VIDEO_FACING_NONE;
-  base::Optional<bool> pan_tilt_zoom_supported;
+  media::VideoCaptureControlSupport video_control_support;
+  blink::mojom::FacingMode video_facing = blink::mojom::FacingMode::NONE;
 };
 
 using WebMediaDeviceInfoArray = std::vector<WebMediaDeviceInfo>;
@@ -54,8 +44,11 @@ using WebMediaDeviceInfoArray = std::vector<WebMediaDeviceInfo>;
 BLINK_COMMON_EXPORT bool operator==(const WebMediaDeviceInfo& first,
                                     const WebMediaDeviceInfo& second);
 
-inline bool IsValidMediaDeviceType(MediaDeviceType type) {
-  return type >= 0 && type < NUM_MEDIA_DEVICE_TYPES;
+inline bool IsValidMediaDeviceType(mojom::MediaDeviceType type) {
+  return static_cast<size_t>(type) >= 0 &&
+         static_cast<size_t>(type) <
+             static_cast<size_t>(
+                 mojom::MediaDeviceType::NUM_MEDIA_DEVICE_TYPES);
 }
 
 }  // namespace blink

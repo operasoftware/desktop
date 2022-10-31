@@ -7,9 +7,12 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/core/html/forms/popup_menu.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
+
+class AXObject;
 
 // SelectType class is an abstraction of the MenuList behavior and the ListBox
 // behavior of HTMLSelectElement.
@@ -60,11 +63,12 @@ class SelectType : public GarbageCollected<SelectType> {
 
   virtual void CreateShadowSubtree(ShadowRoot& root);
   virtual Element& InnerElement() const;
-  virtual void ShowPopup();
+  virtual void ShowPopup(PopupMenu::ShowEventType type);
   virtual void HidePopup();
   virtual void PopupDidHide();
   virtual bool PopupIsVisible() const;
   virtual PopupMenu* PopupForTesting() const;
+  virtual AXObject* PopupRootAXObject() const;
 
   enum SkipDirection { kSkipBackwards = -1, kSkipForwards = 1 };
   CORE_EXPORT HTMLOptionElement* NextSelectableOption(HTMLOptionElement*) const;

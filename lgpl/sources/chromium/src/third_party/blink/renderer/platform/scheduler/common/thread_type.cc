@@ -25,8 +25,6 @@ const char* GetNameForThreadType(ThreadType thread_type) {
       return "AnimationWorklet thread";
     case ThreadType::kServiceWorkerThread:
       return "ServiceWorker thread";
-    case ThreadType::kAudioWorkletThread:
-      return "AudioWorklet thread";
     case ThreadType::kFileThread:
       return "File thread";
     case ThreadType::kDatabaseThread:
@@ -43,9 +41,16 @@ const char* GetNameForThreadType(ThreadType thread_type) {
       return "Audio encoder thread";
     case ThreadType::kVideoEncoderThread:
       return "Video encoder thread";
-    case ThreadType::kCount:
-      NOTREACHED();
-      return nullptr;
+    case ThreadType::kOfflineAudioWorkletThread:
+      return "Offline AudioWorklet thread";
+    case ThreadType::kRealtimeAudioWorkletThread:
+      return "Realtime AudioWorklet thread";
+    case ThreadType::kSemiRealtimeAudioWorkletThread:
+      return "Semi-Realtime AudioWorklet thread";
+    case ThreadType::kFontThread:
+      return "Font thread";
+    case ThreadType::kPreloadScannerThread:
+      return "Preload scanner";
   }
   return nullptr;
 }

@@ -35,15 +35,17 @@
 #include "third_party/blink/renderer/core/dom/xml_document.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_transformable_container.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
 #include "third_party/blink/renderer/core/svg/svg_g_element.h"
 #include "third_party/blink/renderer/core/svg/svg_length_context.h"
+#include "third_party/blink/renderer/core/svg/svg_resource_document_content.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_symbol_element.h"
 #include "third_party/blink/renderer/core/svg/svg_title_element.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/core/xlink_names.h"
 #include "third_party/blink/renderer/core/xml/parser/xml_document_parser.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
@@ -86,13 +88,13 @@ SVGUseElement::SVGUseElement(Document& document)
   AddToPropertyMap(width_);
   AddToPropertyMap(height_);
 
-  AttachShadowRootInternal(ShadowRootType::kClosed);
+  CreateUserAgentShadowRoot();
 }
 
 SVGUseElement::~SVGUseElement() = default;
 
 void SVGUseElement::Trace(Visitor* visitor) const {
-  visitor->Trace(cache_entry_);
+  visitor->Trace(document_content_);
   visitor->Trace(x_);
   visitor->Trace(y_);
   visitor->Trace(width_);
@@ -100,7 +102,7 @@ void SVGUseElement::Trace(Visitor* visitor) const {
   visitor->Trace(target_id_observer_);
   SVGGraphicsElement::Trace(visitor);
   SVGURIReference::Trace(visitor);
-  SVGExternalDocumentCache::Client::Trace(visitor);
+  ResourceClient::Trace(visitor);
 }
 
 #if DCHECK_IS_ON()
@@ -194,29 +196,28 @@ void SVGUseElement::UpdateTargetReference() {
   element_url_ = GetDocument().CompleteURL(url_string);
   element_url_is_local_ = url_string.StartsWith('#');
   if (!IsStructurallyExternal() || !GetDocument().IsActive()) {
-    cache_entry_ = nullptr;
+    ClearResource();
+    document_content_ = nullptr;
     return;
   }
   if (!element_url_.HasFragmentIdentifier() ||
-      (cache_entry_ &&
-       EqualIgnoringFragmentIdentifier(element_url_, cache_entry_->Url()))) {
+      (document_content_ && EqualIgnoringFragmentIdentifier(
+                                element_url_, document_content_->Url()))) {
     return;
   }
 
   auto* context_document = &GetDocument();
-  if (GetDocument().ImportsController()) {
-    // For @imports from HTML imported Documents, we use the
-    // context document for getting origin and ResourceFetcher to use the
-    // main Document's origin, while using the element document for
-    // CompleteURL() to use imported Documents' base URLs.
-    context_document =
-        To<LocalDOMWindow>(GetDocument().GetExecutionContext())->document();
-  }
-  cache_entry_ = SVGExternalDocumentCache::From(*context_document)
-                     ->Get(this, element_url_, localName());
+  ExecutionContext* execution_context = context_document->GetExecutionContext();
+  ResourceLoaderOptions options(execution_context->GetCurrentWorld());
+  options.initiator_info.name = localName();
+  FetchParameters params(ResourceRequest(element_url_), options);
+  document_content_ =
+      SVGResourceDocumentContent::Fetch(params, *context_document, this);
 }
 
-void SVGUseElement::SvgAttributeChanged(const QualifiedName& attr_name) {
+void SVGUseElement::SvgAttributeChanged(
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kXAttr || attr_name == svg_names::kYAttr ||
       attr_name == svg_names::kWidthAttr ||
       attr_name == svg_names::kHeightAttr) {
@@ -248,7 +249,7 @@ void SVGUseElement::SvgAttributeChanged(const QualifiedName& attr_name) {
     return;
   }
 
-  SVGGraphicsElement::SvgAttributeChanged(attr_name);
+  SVGGraphicsElement::SvgAttributeChanged(params);
 }
 
 static bool IsDisallowedElement(const Element& element) {
@@ -311,9 +312,9 @@ Element* SVGUseElement::ResolveTargetElement() {
                              WrapWeakPersistent(this)));
     }
   }
-  if (!cache_entry_ || !cache_entry_->GetDocument())
+  if (!document_content_ || !document_content_->GetDocument())
     return nullptr;
-  return cache_entry_->GetDocument()->getElementById(element_identifier);
+  return document_content_->GetDocument()->getElementById(element_identifier);
 }
 
 SVGElement* SVGUseElement::InstanceRoot() const {
@@ -410,7 +411,8 @@ static void MoveChildrenToReplacementElement(ContainerNode& source_root,
 }
 
 SVGElement* SVGUseElement::CreateInstanceTree(SVGElement& target_root) const {
-  SVGElement* instance_root = &To<SVGElement>(target_root.CloneWithChildren());
+  SVGElement* instance_root =
+      &To<SVGElement>(target_root.CloneWithChildren(CloneChildrenFlag::kClone));
   if (IsA<SVGSymbolElement>(target_root)) {
     // Spec: The referenced 'symbol' and its contents are deep-cloned into
     // the generated tree, with the exception that the 'symbol' is replaced
@@ -463,7 +465,7 @@ void SVGUseElement::AttachShadowTree(SVGElement& target) {
     }
     // Setup the mapping from the corresponding (original) element back to the
     // instance.
-    corresponding_element->MapInstanceToElement(&instance);
+    corresponding_element->AddInstance(&instance);
   }
 }
 
@@ -475,7 +477,7 @@ void SVGUseElement::DetachShadowTree() {
 
 LayoutObject* SVGUseElement::CreateLayoutObject(const ComputedStyle& style,
                                                 LegacyLayout) {
-  return new LayoutSVGTransformableContainer(this);
+  return MakeGarbageCollected<LayoutSVGTransformableContainer>(this);
 }
 
 static bool IsDirectReference(const SVGElement& element) {
@@ -559,13 +561,13 @@ bool SVGUseElement::SelfHasRelativeLengths() const {
          height_->CurrentValue()->IsRelative();
 }
 
-FloatRect SVGUseElement::GetBBox() {
+gfx::RectF SVGUseElement::GetBBox() {
   DCHECK(GetLayoutObject());
-  LayoutSVGTransformableContainer& transformable_container =
-      ToLayoutSVGTransformableContainer(*GetLayoutObject());
+  auto& transformable_container =
+      To<LayoutSVGTransformableContainer>(*GetLayoutObject());
   // Don't apply the additional translation if the oBB is invalid.
   if (!transformable_container.IsObjectBoundingBoxValid())
-    return FloatRect();
+    return gfx::RectF();
 
   // TODO(fs): Preferably this would just use objectBoundingBox() (and hence
   // don't need to override SVGGraphicsElement::getBBox at all) and be
@@ -573,8 +575,8 @@ FloatRect SVGUseElement::GetBBox() {
   // additional quirks. The problem stems from including the additional
   // translation directly on the LayoutObject corresponding to the
   // SVGUseElement.
-  FloatRect bbox = transformable_container.ObjectBoundingBox();
-  bbox.Move(transformable_container.AdditionalTranslation());
+  gfx::RectF bbox = transformable_container.ObjectBoundingBox();
+  bbox.Offset(transformable_container.AdditionalTranslation());
   return bbox;
 }
 
@@ -584,12 +586,12 @@ void SVGUseElement::DispatchPendingEvent() {
   DispatchEvent(*Event::Create(event_type_names::kLoad));
 }
 
-void SVGUseElement::NotifyFinished(Document* external_document) {
+void SVGUseElement::NotifyFinished(Resource* resource) {
   if (!isConnected())
     return;
 
   InvalidateShadowTree();
-  if (!external_document) {
+  if (resource->ErrorOccurred() || !document_content_->GetDocument()) {
     DispatchEvent(*Event::Create(event_type_names::kError));
   } else {
     if (have_fired_load_event_)
@@ -603,6 +605,10 @@ void SVGUseElement::NotifyFinished(Document* external_document) {
         ->PostTask(FROM_HERE, WTF::Bind(&SVGUseElement::DispatchPendingEvent,
                                         WrapPersistent(this)));
   }
+}
+
+String SVGUseElement::DebugName() const {
+  return "SVGUseElement";
 }
 
 }  // namespace blink

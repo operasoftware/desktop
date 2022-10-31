@@ -5,10 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_BLOB_BYTES_CONSUMER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_BLOB_BYTES_CONSUMER_H_
 
-#include <memory>
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/loader/fetch/bytes_consumer.h"
 
 namespace blink {
@@ -40,8 +40,10 @@ class CORE_EXPORT BlobBytesConsumer final : public BytesConsumer {
   void Trace(Visitor*) const override;
 
  private:
+  class BlobClient;
   Member<ExecutionContext> execution_context_;
   scoped_refptr<BlobDataHandle> blob_data_handle_;
+  Member<BlobBytesConsumer::BlobClient> blob_client_;
   Member<BytesConsumer> nested_consumer_;
   Member<BytesConsumer::Client> client_;
 };

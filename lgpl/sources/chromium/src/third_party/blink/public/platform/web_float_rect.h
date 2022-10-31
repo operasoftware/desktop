@@ -56,20 +56,6 @@ struct WebFloatRect {
   WebFloatRect(float x, float y, float width, float height)
       : x(x), y(y), width(width), height(height) {}
 
-#if INSIDE_BLINK
-  WebFloatRect(const FloatRect& r)
-      : x(r.X()), y(r.Y()), width(r.Width()), height(r.Height()) {}
-
-  WebFloatRect& operator=(const FloatRect& r) {
-    x = r.X();
-    y = r.Y();
-    width = r.Width();
-    height = r.Height();
-    return *this;
-  }
-
-  operator FloatRect() const { return FloatRect(x, y, width, height); }
-#else
   WebFloatRect(const gfx::RectF& r)
       : x(r.x()), y(r.y()), width(r.width()), height(r.height()) {}
 
@@ -84,7 +70,6 @@ struct WebFloatRect {
   operator gfx::RectF() const {
     return gfx::RectF(x, y, std::max(0.0f, width), std::max(0.0f, height));
   }
-#endif
 };
 
 inline bool operator==(const WebFloatRect& a, const WebFloatRect& b) {

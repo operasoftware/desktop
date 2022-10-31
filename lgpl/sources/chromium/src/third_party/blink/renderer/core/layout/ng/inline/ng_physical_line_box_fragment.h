@@ -6,9 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_INLINE_NG_PHYSICAL_LINE_BOX_FRAGMENT_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/layout/ng/inline/ng_line_height_metrics.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_physical_container_fragment.h"
-#include "third_party/blink/renderer/platform/fonts/font_baseline.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_physical_fragment.h"
+#include "third_party/blink/renderer/platform/fonts/font_height.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
@@ -16,8 +15,7 @@ namespace blink {
 class NGFragmentItem;
 class NGLineBoxFragmentBuilder;
 
-class CORE_EXPORT NGPhysicalLineBoxFragment final
-    : public NGPhysicalContainerFragment {
+class CORE_EXPORT NGPhysicalLineBoxFragment final : public NGPhysicalFragment {
  public:
   enum NGLineBoxType {
     kNormalLineBox,
@@ -29,16 +27,18 @@ class CORE_EXPORT NGPhysicalLineBoxFragment final
     kEmptyLineBox
   };
 
-  static scoped_refptr<const NGPhysicalLineBoxFragment> Create(
+  static const NGPhysicalLineBoxFragment* Create(
       NGLineBoxFragmentBuilder* builder);
 
-  using PassKey = util::PassKey<NGPhysicalLineBoxFragment>;
-  NGPhysicalLineBoxFragment(PassKey, NGLineBoxFragmentBuilder* builder);
+  static const NGPhysicalLineBoxFragment* Clone(
+      const NGPhysicalLineBoxFragment&);
 
-  ~NGPhysicalLineBoxFragment() {
-    for (const NGLink& child : Children())
-      child.fragment->Release();
-  }
+  using PassKey = base::PassKey<NGPhysicalLineBoxFragment>;
+  NGPhysicalLineBoxFragment(PassKey, NGLineBoxFragmentBuilder* builder);
+  NGPhysicalLineBoxFragment(PassKey, const NGPhysicalLineBoxFragment&);
+  ~NGPhysicalLineBoxFragment();
+
+  void TraceAfterDispatch(Visitor*) const;
 
   NGLineBoxType LineBoxType() const {
     return static_cast<NGLineBoxType>(sub_type_);
@@ -48,28 +48,33 @@ class CORE_EXPORT NGPhysicalLineBoxFragment final
   // True if descendants were propagated to outside of this fragment.
   bool HasPropagatedDescendants() const { return has_propagated_descendants_; }
 
-  const NGLineHeightMetrics& Metrics() const { return metrics_; }
+  // True if there is any hanging white-space or similar.
+  bool HasHanging() const { return has_hanging_; }
+
+  const FontHeight& Metrics() const { return metrics_; }
 
   // The base direction of this line. Also known as the paragraph direction.
   // This may be different from the direction of the container box when
   // first-line style is used, or when 'unicode-bidi: plaintext' is used.
   TextDirection BaseDirection() const {
-    return static_cast<TextDirection>(base_or_resolved_direction_);
+    return static_cast<TextDirection>(base_direction_);
   }
 
   // Compute the baseline metrics for this linebox.
-  NGLineHeightMetrics BaselineMetrics() const;
+  FontHeight BaselineMetrics() const;
 
   // Scrollable overflow. including contents, in the local coordinate.
   // |ScrollableOverflow| is not precomputed/cached because it cannot be
   // computed when LineBox is generated because it needs container dimensions
   // to resolve relative position of its children.
   PhysicalRect ScrollableOverflow(const NGPhysicalBoxFragment& container,
-                                  const ComputedStyle& container_style) const;
+                                  const ComputedStyle& container_style,
+                                  TextHeightType height_type) const;
   PhysicalRect ScrollableOverflowForLine(const NGPhysicalBoxFragment& container,
                                          const ComputedStyle& container_style,
                                          const NGFragmentItem& line,
-                                         const NGInlineCursor& cursor) const;
+                                         const NGInlineCursor& cursor,
+                                         TextHeightType height_type) const;
 
   // Whether the content soft-wraps to the next line.
   bool HasSoftWrapToNextLine() const;
@@ -78,9 +83,12 @@ class CORE_EXPORT NGPhysicalLineBoxFragment final
   // |nullptr| because line boxes do not have corresponding |LayoutObject|.
   const LayoutObject* ContainerLayoutObject() const { return layout_object_; }
 
+ protected:
+  friend class NGPhysicalFragment;
+  void Dispose();
+
  private:
-  NGLineHeightMetrics metrics_;
-  NGLink children_[];
+  FontHeight metrics_;
 };
 
 template <>

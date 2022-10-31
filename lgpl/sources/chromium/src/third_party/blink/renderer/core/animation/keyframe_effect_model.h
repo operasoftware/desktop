@@ -32,6 +32,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_KEYFRAME_EFFECT_MODEL_H_
 
 #include <memory>
+
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/animation/animation_effect.h"
 #include "third_party/blink/renderer/core/animation/effect_model.h"
@@ -41,10 +42,8 @@
 #include "third_party/blink/renderer/core/animation/transition_keyframe.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/animation/timing_function.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -157,7 +156,14 @@ class CORE_EXPORT KeyframeEffectModelBase : public EffectModel {
     return has_revert_;
   }
 
+  bool RequiresPropertyNode() const;
+
   bool IsTransformRelatedEffect() const override;
+
+  // Update properties used in resolving logical properties. Returns true if
+  // one or more keyframes changed as a result of the update.
+  bool SetLogicalPropertyResolutionContext(TextDirection text_direction,
+                                           WritingMode writing_mode);
 
   virtual KeyframeEffectModelBase* Clone() = 0;
 

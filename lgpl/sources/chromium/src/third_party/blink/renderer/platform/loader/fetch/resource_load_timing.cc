@@ -5,7 +5,6 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_timing.h"
 
 #include "services/network/public/mojom/load_timing_info.mojom-blink.h"
-#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 
 namespace blink {
 
@@ -83,6 +82,7 @@ network::mojom::blink::LoadTimingInfoPtr ResourceLoadTiming::ToMojo() const {
               dns_start_, dns_end_, connect_start_, connect_end_, ssl_start_,
               ssl_end_),
           send_start_, send_end_, receive_headers_start_, receive_headers_end_,
+          /*receive_non_informational_headers_start=*/base::TimeTicks::Now(),
           /*first_early_hints_time=*/base::TimeTicks::Now(), push_start_,
           push_end_, worker_start_, worker_ready_, worker_fetch_start_,
           worker_respond_with_settled_);
@@ -157,8 +157,6 @@ void ResourceLoadTiming::SetWorkerRespondWithSettled(
 }
 
 void ResourceLoadTiming::SetSendStart(base::TimeTicks send_start) {
-  TRACE_EVENT_MARK_WITH_TIMESTAMP0("blink.user_timing", "requestStart",
-                                   send_start);
   send_start_ = send_start;
 }
 

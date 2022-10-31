@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/memory/weak_ptr.h"
 #include "media/base/demuxer_stream.h"
 #include "media/base/media_util.h"
 #include "media/filters/decoder_selector.h"
@@ -24,6 +25,8 @@ class DecoderSelector {
   typedef media::DecoderStreamTraits<StreamType> StreamTraits;
   typedef typename StreamTraits::DecoderType Decoder;
   typedef typename StreamTraits::DecoderConfigType DecoderConfig;
+  using DecoderOrError =
+      typename media::DecoderSelector<StreamType>::DecoderOrError;
 
   // Callback to create a list of decoders to select from.
   using CreateDecodersCB =
@@ -38,7 +41,7 @@ class DecoderSelector {
   // including destruction must use |task_runner| thread.
   // Provided callbacks will be called on |task_runner|. |output_cb| will always
   // be Post()'ed.
-  DecoderSelector(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+  DecoderSelector(scoped_refptr<base::SequencedTaskRunner> task_runner,
                   CreateDecodersCB create_decoders_cb,
                   typename Decoder::OutputCB output_cb);
 
@@ -53,6 +56,7 @@ class DecoderSelector {
   // be returned via |select_decoder_cb| posted to |task_runner_|. Subsequent
   // calls will again select from the full list of decoders.
   void SelectDecoder(const DecoderConfig& config,
+                     bool low_delay,
                      SelectDecoderCB select_decoder_cb);
 
  private:
@@ -61,7 +65,7 @@ class DecoderSelector {
 
   // Proxy SelectDecoderCB from impl_ to our |select_decoder_cb|.
   void OnDecoderSelected(SelectDecoderCB select_decoder_cb,
-                         std::unique_ptr<Decoder> decoder,
+                         DecoderOrError decoder_or_error,
                          std::unique_ptr<media::DecryptingDemuxerStream>);
 
   // Implements heavy lifting for decoder selection.
@@ -78,6 +82,8 @@ class DecoderSelector {
 
   // TODO(chcunningham): Route MEDIA_LOG for WebCodecs.
   media::NullMediaLog null_media_log_;
+
+  base::WeakPtrFactory<DecoderSelector<StreamType>> weak_factory_{this};
 };
 
 typedef DecoderSelector<media::DemuxerStream::VIDEO>

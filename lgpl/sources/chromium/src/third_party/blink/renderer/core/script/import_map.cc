@@ -8,12 +8,12 @@
 #include <utility>
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/core/script/import_map_error.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
 #include "third_party/blink/renderer/core/script/parsed_specifier.h"
 #include "third_party/blink/renderer/platform/json/json_parser.h"
 #include "third_party/blink/renderer/platform/json/json_values.h"
 #include "third_party/blink/renderer/platform/loader/fetch/console_logger.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -132,11 +132,10 @@ KURL NormalizeValue(const String& key,
 // Parse |text| as an import map. Errors (e.g. json parsing error, invalid
 // keys/values, etc.) are basically ignored, except that they are reported to
 // the console |logger|.
-ImportMap* ImportMap::Parse(const Modulator& modulator,
-                            const String& input,
+ImportMap* ImportMap::Parse(const String& input,
                             const KURL& base_url,
                             ConsoleLogger& logger,
-                            ScriptValue* error_to_rethrow) {
+                            absl::optional<ImportMapError>* error_to_rethrow) {
   DCHECK(error_to_rethrow);
 
   // <spec step="1">Let parsed be the result of parsing JSON into Infra values
@@ -145,7 +144,8 @@ ImportMap* ImportMap::Parse(const Modulator& modulator,
 
   if (!parsed) {
     *error_to_rethrow =
-        modulator.CreateSyntaxError("Failed to parse import map: invalid JSON");
+        ImportMapError(ImportMapError::Type::kSyntaxError,
+                       "Failed to parse import map: invalid JSON");
     return MakeGarbageCollected<ImportMap>();
   }
 
@@ -154,7 +154,8 @@ ImportMap* ImportMap::Parse(const Modulator& modulator,
   std::unique_ptr<JSONObject> parsed_map = JSONObject::From(std::move(parsed));
   if (!parsed_map) {
     *error_to_rethrow =
-        modulator.CreateTypeError("Failed to parse import map: not an object");
+        ImportMapError(ImportMapError::Type::kTypeError,
+                       "Failed to parse import map: not an object");
     return MakeGarbageCollected<ImportMap>();
   }
 
@@ -168,9 +169,10 @@ ImportMap* ImportMap::Parse(const Modulator& modulator,
     // object.</spec>
     JSONObject* imports = parsed_map->GetJSONObject("imports");
     if (!imports) {
-      *error_to_rethrow = modulator.CreateTypeError(
-          "Failed to parse import map: \"imports\" "
-          "top-level key must be a JSON object.");
+      *error_to_rethrow =
+          ImportMapError(ImportMapError::Type::kTypeError,
+                         "Failed to parse import map: \"imports\" "
+                         "top-level key must be a JSON object.");
       return MakeGarbageCollected<ImportMap>();
     }
 
@@ -190,9 +192,10 @@ ImportMap* ImportMap::Parse(const Modulator& modulator,
     // indicating that the "scopes" top-level key must be a JSON object.</spec>
     JSONObject* scopes = parsed_map->GetJSONObject("scopes");
     if (!scopes) {
-      *error_to_rethrow = modulator.CreateTypeError(
-          "Failed to parse import map: \"scopes\" "
-          "top-level key must be a JSON object.");
+      *error_to_rethrow =
+          ImportMapError(ImportMapError::Type::kTypeError,
+                         "Failed to parse import map: \"scopes\" "
+                         "top-level key must be a JSON object.");
       return MakeGarbageCollected<ImportMap>();
     }
 
@@ -217,10 +220,11 @@ ImportMap* ImportMap::Parse(const Modulator& modulator,
         // potentialSpecifierMap is not a map, then throw a TypeError indicating
         // that the value of the scope with prefix scopePrefix must be a JSON
         // object.</spec>
-        *error_to_rethrow = modulator.CreateTypeError(
+        *error_to_rethrow = ImportMapError(
+            ImportMapError::Type::kTypeError,
             "Failed to parse import map: the value of the scope with prefix "
             "\"" +
-            entry.first + "\" must be a JSON object.");
+                entry.first + "\" must be a JSON object.");
         return MakeGarbageCollected<ImportMap>();
       }
 
@@ -338,7 +342,7 @@ ImportMap::SpecifierMap ImportMap::SortAndNormalizeSpecifierMap(
 }
 
 // <specdef href="https://wicg.github.io/import-maps/#resolve-an-imports-match">
-base::Optional<ImportMap::MatchResult> ImportMap::MatchPrefix(
+absl::optional<ImportMap::MatchResult> ImportMap::MatchPrefix(
     const ParsedSpecifier& parsed_specifier,
     const SpecifierMap& specifier_map) const {
   const String key = parsed_specifier.GetImportMapKeyString();
@@ -353,7 +357,7 @@ base::Optional<ImportMap::MatchResult> ImportMap::MatchPrefix(
   // "most-specific wins", i.e. when there are multiple matching keys,
   // choose the longest.
   // https://github.com/WICG/import-maps/issues/102
-  base::Optional<MatchResult> best_match;
+  absl::optional<MatchResult> best_match;
 
   // <spec step="1">For each specifierKey → resolutionResult of
   // specifierMap,</spec>
@@ -384,7 +388,7 @@ ImportMap::ImportMap(SpecifierMap&& imports, ScopeType&& scopes)
 
 // <specdef
 // href="https://wicg.github.io/import-maps/#resolve-a-module-specifier">
-base::Optional<KURL> ImportMap::Resolve(const ParsedSpecifier& parsed_specifier,
+absl::optional<KURL> ImportMap::Resolve(const ParsedSpecifier& parsed_specifier,
                                         const KURL& base_url,
                                         String* debug_message) const {
   DCHECK(debug_message);
@@ -399,7 +403,7 @@ base::Optional<KURL> ImportMap::Resolve(const ParsedSpecifier& parsed_specifier,
          base_url.GetString().StartsWith(entry.first))) {
       // <spec step="8.1.1">Let scopeImportsMatch be the result of resolving an
       // imports match given normalizedSpecifier and scopeImports.</spec>
-      base::Optional<KURL> scope_match =
+      absl::optional<KURL> scope_match =
           ResolveImportsMatch(parsed_specifier, entry.second, debug_message);
 
       // <spec step="8.1.2">If scopeImportsMatch is not null, then return
@@ -418,7 +422,7 @@ base::Optional<KURL> ImportMap::Resolve(const ParsedSpecifier& parsed_specifier,
 }
 
 // <specdef href="https://wicg.github.io/import-maps/#resolve-an-imports-match">
-base::Optional<KURL> ImportMap::ResolveImportsMatch(
+absl::optional<KURL> ImportMap::ResolveImportsMatch(
     const ParsedSpecifier& parsed_specifier,
     const SpecifierMap& specifier_map,
     String* debug_message) const {
@@ -431,6 +435,15 @@ base::Optional<KURL> ImportMap::ResolveImportsMatch(
     return ResolveImportsMatchInternal(key, exact, debug_message);
   }
 
+  // <spec step="1.2">... either asURL is null, or asURL is special</spec>
+  if (parsed_specifier.GetType() == ParsedSpecifier::Type::kURL &&
+      !SchemeRegistry::IsSpecialScheme(parsed_specifier.GetUrl().Protocol())) {
+    *debug_message = "Import Map: \"" + key +
+                     "\" skips prefix match because of non-special URL scheme";
+
+    return absl::nullopt;
+  }
+
   // Step 1.2.
   if (auto prefix_match = MatchPrefix(parsed_specifier, specifier_map)) {
     return ResolveImportsMatchInternal(key, *prefix_match, debug_message);
@@ -439,7 +452,7 @@ base::Optional<KURL> ImportMap::ResolveImportsMatch(
   // <spec step="2">Return null.</spec>
   *debug_message = "Import Map: \"" + key +
                    "\" matches with no entries and thus is not mapped.";
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 // <specdef href="https://wicg.github.io/import-maps/#resolve-an-imports-match">
@@ -483,7 +496,17 @@ KURL ImportMap::ResolveImportsMatchInternal(const String& key,
     return NullURL();
   }
 
-  // <spec step="1.2.8">Return url.</spec>
+  // <spec step="1.2.8">If the serialization of url does not start with the
+  // serialization of resolutionResult, then throw a TypeError indicating that
+  // resolution of normalizedSpecifier was blocked due to it backtracking above
+  // its prefix specifierKey.</spec>
+  if (!url.GetString().StartsWith(matched->value.GetString())) {
+    *debug_message = "Import Map: \"" + key + "\" matches with \"" +
+                     matched->key + "\" but is blocked due to backtracking";
+    return NullURL();
+  }
+
+  // <spec step="1.2.9">Return url.</spec>
   *debug_message = "Import Map: \"" + key + "\" matches with \"" +
                    matched->key + "\" and is mapped to " + url.ElidedString();
   return url;

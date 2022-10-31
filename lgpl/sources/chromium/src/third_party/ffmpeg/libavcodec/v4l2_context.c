@@ -153,6 +153,21 @@ static inline void v4l2_save_to_context(V4L2Context* ctx, struct v4l2_format_upd
     }
 }
 
+static int v4l2_start_decode(V4L2Context *ctx)
+{
+    struct v4l2_decoder_cmd cmd = {
+        .cmd = V4L2_DEC_CMD_START,
+        .flags = 0,
+    };
+    int ret;
+
+    ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_DECODER_CMD, &cmd);
+    if (ret)
+        return AVERROR(errno);
+
+    return 0;
+}
+
 /**
  * handle resolution change event and end of stream event
  * returns 1 if reinit was successful, negative if it failed
@@ -162,9 +177,8 @@ static int v4l2_handle_event(V4L2Context *ctx)
 {
     V4L2m2mContext *s = ctx_to_m2mctx(ctx);
     struct v4l2_format cap_fmt = s->capture.format;
-    struct v4l2_format out_fmt = s->output.format;
     struct v4l2_event evt = { 0 };
-    int full_reinit, reinit, ret;
+    int ret;
 
     ret = ioctl(s->fd, VIDIOC_DQEVENT, &evt);
     if (ret < 0) {
@@ -180,63 +194,35 @@ static int v4l2_handle_event(V4L2Context *ctx)
     if (evt.type != V4L2_EVENT_SOURCE_CHANGE)
         return 0;
 
-    ret = ioctl(s->fd, VIDIOC_G_FMT, &out_fmt);
-    if (ret) {
-        av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_G_FMT\n", s->output.name);
-        return 0;
-    }
-
     ret = ioctl(s->fd, VIDIOC_G_FMT, &cap_fmt);
     if (ret) {
         av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_G_FMT\n", s->capture.name);
         return 0;
     }
 
-    full_reinit = v4l2_resolution_changed(&s->output, &out_fmt);
-    if (full_reinit) {
-        s->output.height = v4l2_get_height(&out_fmt);
-        s->output.width = v4l2_get_width(&out_fmt);
-        s->output.sample_aspect_ratio = v4l2_get_sar(&s->output);
-    }
-
-    reinit = v4l2_resolution_changed(&s->capture, &cap_fmt);
-    if (reinit) {
+    if (v4l2_resolution_changed(&s->capture, &cap_fmt)) {
         s->capture.height = v4l2_get_height(&cap_fmt);
         s->capture.width = v4l2_get_width(&cap_fmt);
         s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
+    } else {
+        v4l2_start_decode(ctx);
+        return 0;
     }
 
-    if (full_reinit || reinit)
-        s->reinit = 1;
+    s->reinit = 1;
 
-    if (full_reinit) {
-        ret = ff_v4l2_m2m_codec_full_reinit(s);
-        if (ret) {
-            av_log(logger(ctx), AV_LOG_ERROR, "v4l2_m2m_codec_full_reinit\n");
-            return AVERROR(EINVAL);
-        }
-        goto reinit_run;
+    if (s->avctx)
+        ret = ff_set_dimensions(s->avctx, s->capture.width, s->capture.height);
+    if (ret < 0)
+        av_log(logger(ctx), AV_LOG_WARNING, "update avcodec height and width\n");
+
+    ret = ff_v4l2_m2m_codec_reinit(s);
+    if (ret) {
+        av_log(logger(ctx), AV_LOG_ERROR, "v4l2_m2m_codec_reinit\n");
+        return AVERROR(EINVAL);
     }
-
-    if (reinit) {
-        if (s->avctx)
-            ret = ff_set_dimensions(s->avctx, s->capture.width, s->capture.height);
-        if (ret < 0)
-            av_log(logger(ctx), AV_LOG_WARNING, "update avcodec height and width\n");
-
-        ret = ff_v4l2_m2m_codec_reinit(s);
-        if (ret) {
-            av_log(logger(ctx), AV_LOG_ERROR, "v4l2_m2m_codec_reinit\n");
-            return AVERROR(EINVAL);
-        }
-        goto reinit_run;
-    }
-
-    /* dummy event received */
-    return 0;
 
     /* reinit executed */
-reinit_run:
     return 1;
 }
 
@@ -290,6 +276,18 @@ static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
         .fd = ctx_to_m2mctx(ctx)->fd,
     };
     int i, ret;
+
+    if (!V4L2_TYPE_IS_OUTPUT(ctx->type) && ctx->buffers) {
+        for (i = 0; i < ctx->num_buffers; i++) {
+            if (ctx->buffers[i].status == V4L2BUF_IN_DRIVER)
+                break;
+        }
+        if (i == ctx->num_buffers)
+            av_log(logger(ctx), AV_LOG_WARNING, "All capture buffers returned to "
+                                                "userspace. Increase num_capture_buffers "
+                                                "to prevent device deadlock or dropped "
+                                                "packets/frames.\n");
+    }
 
     /* if we are draining and there are no more capture buffers queued in the driver we are done */
     if (!V4L2_TYPE_IS_OUTPUT(ctx->type) && ctx_to_m2mctx(ctx)->draining) {
@@ -391,6 +389,19 @@ dequeue:
                         ctx->name, av_err2str(AVERROR(errno)));
             }
             return NULL;
+        }
+
+        if (ctx_to_m2mctx(ctx)->draining && !V4L2_TYPE_IS_OUTPUT(ctx->type)) {
+            int bytesused = V4L2_TYPE_IS_MULTIPLANAR(buf.type) ?
+                            buf.m.planes[0].bytesused : buf.bytesused;
+            if (bytesused == 0) {
+                ctx->done = 1;
+                return NULL;
+            }
+#ifdef V4L2_BUF_FLAG_LAST
+            if (buf.flags & V4L2_BUF_FLAG_LAST)
+                ctx->done = 1;
+#endif
         }
 
         avbuf = &ctx->buffers[buf.index];
@@ -574,7 +585,7 @@ int ff_v4l2_context_enqueue_frame(V4L2Context* ctx, const AVFrame* frame)
 
     avbuf = v4l2_getfree_v4l2buf(ctx);
     if (!avbuf)
-        return AVERROR(ENOMEM);
+        return AVERROR(EAGAIN);
 
     ret = ff_v4l2_buffer_avframe_to_buf(frame, avbuf);
     if (ret)

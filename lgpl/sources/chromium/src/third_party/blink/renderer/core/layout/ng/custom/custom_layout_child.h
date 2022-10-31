@@ -9,7 +9,7 @@
 #include "third_party/blink/renderer/core/css/cssom/prepopulated_computed_style_property_map.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_input_node.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -29,6 +29,8 @@ class CustomLayoutChild : public ScriptWrappable {
 
  public:
   CustomLayoutChild(const CSSLayoutDefinition&, NGLayoutInputNode);
+  CustomLayoutChild(const CustomLayoutChild&) = delete;
+  CustomLayoutChild& operator=(const CustomLayoutChild&) = delete;
   ~CustomLayoutChild() override = default;
 
   // LayoutChild.idl
@@ -52,8 +54,6 @@ class CustomLayoutChild : public ScriptWrappable {
   NGLayoutInputNode node_;
   Member<PrepopulatedComputedStylePropertyMap> style_map_;
   Member<CustomLayoutToken> token_;
-
-  DISALLOW_COPY_AND_ASSIGN(CustomLayoutChild);
 };
 
 }  // namespace blink

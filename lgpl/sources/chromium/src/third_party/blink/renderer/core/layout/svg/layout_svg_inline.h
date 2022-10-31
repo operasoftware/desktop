@@ -25,33 +25,43 @@
 
 namespace blink {
 
+class NGInlineCursor;
+
 class LayoutSVGInline : public LayoutInline {
  public:
   explicit LayoutSVGInline(Element*);
 
-  const char* GetName() const override { return "LayoutSVGInline"; }
-  PaintLayerType LayerTypeRequired() const final { return kNoPaintLayer; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutSVGInline";
+  }
+  PaintLayerType LayerTypeRequired() const final {
+    NOT_DESTROYED();
+    return kNoPaintLayer;
+  }
   bool IsOfType(LayoutObjectType type) const override {
+    NOT_DESTROYED();
     return type == kLayoutObjectSVG || type == kLayoutObjectSVGInline ||
            LayoutInline::IsOfType(type);
   }
 
   bool IsChildAllowed(LayoutObject*, const ComputedStyle&) const override;
 
-  FloatRect ObjectBoundingBox() const final;
-  FloatRect StrokeBoundingBox() const final;
-  FloatRect VisualRectInLocalSVGCoordinates() const final;
+  gfx::RectF ObjectBoundingBox() const final;
+  gfx::RectF StrokeBoundingBox() const final;
+  gfx::RectF VisualRectInLocalSVGCoordinates() const final;
 
   PhysicalRect VisualRectInDocument(
       VisualRectFlags = kDefaultVisualRectFlags) const final;
   void MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
                           TransformState&,
                           MapCoordinatesFlags) const final;
-  const LayoutObject* PushMappingToContainer(
-      const LayoutBoxModelObject* ancestor_to_stop_at,
-      LayoutGeometryMap&) const final;
-  void AbsoluteQuads(Vector<FloatQuad>&,
+  void AbsoluteQuads(Vector<gfx::QuadF>&,
                      MapCoordinatesFlags mode = 0) const final;
+  void AddOutlineRects(Vector<PhysicalRect>&,
+                       OutlineInfo*,
+                       const PhysicalOffset& additional_offset,
+                       NGOutlineType) const final;
 
  private:
   InlineFlowBox* CreateInlineFlowBox() final;
@@ -62,10 +72,23 @@ class LayoutSVGInline : public LayoutInline {
   void AddChild(LayoutObject* child,
                 LayoutObject* before_child = nullptr) final;
   void RemoveChild(LayoutObject*) final;
+
+  void InsertedIntoTree() override;
+  void WillBeRemovedFromTree() override;
+
+  bool IsObjectBoundingBoxValid() const;
+
+  static void ObjectBoundingBoxForCursor(NGInlineCursor& cursor,
+                                         gfx::RectF& bounds);
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutSVGInline, IsSVGInline());
+template <>
+struct DowncastTraits<LayoutSVGInline> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsSVGInline();
+  }
+};
 
 }  // namespace blink
 
-#endif  // LayoutSVGInline_H
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_SVG_LAYOUT_SVG_INLINE_H_

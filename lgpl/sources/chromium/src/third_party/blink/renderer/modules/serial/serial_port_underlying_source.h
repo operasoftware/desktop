@@ -7,45 +7,51 @@
 
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
-#include "third_party/blink/renderer/core/streams/underlying_source_base.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/streams/underlying_byte_source_base.h"
 
 namespace blink {
 
 class DOMException;
+class ExceptionState;
+class ScriptPromiseResolver;
 class SerialPort;
 
-class SerialPortUnderlyingSource : public UnderlyingSourceBase {
+class SerialPortUnderlyingSource : public UnderlyingByteSourceBase,
+                                   ExecutionContextLifecycleObserver {
  public:
   SerialPortUnderlyingSource(ScriptState*,
                              SerialPort*,
                              mojo::ScopedDataPipeConsumerHandle);
 
-  // UnderlyingSourceBase
-  ScriptPromise pull(ScriptState*) override;
-  ScriptPromise Cancel(ScriptState*, ScriptValue reason) override;
+  // UnderlyingByteSourceBase
+  ScriptPromise Pull(ReadableByteStreamController* controller,
+                     ExceptionState&) override;
+  ScriptPromise Cancel(ExceptionState&) override;
+  ScriptPromise Cancel(v8::Local<v8::Value> reason, ExceptionState&) override;
+  ScriptState* GetScriptState() override;
+
   void ContextDestroyed() override;
 
-  void SignalErrorImmediately(DOMException*);
   void SignalErrorOnClose(DOMException*);
 
   void Trace(Visitor*) const override;
 
  private:
-  // Reads data from |data_pipe_|. Returns true if data was enqueued to
-  // |Controller()| or the pipe was closed, and false otherwise.
-  bool ReadData();
+  // Reads data from |data_pipe_|. Arms |watcher_| if it needs to wait.
+  void ReadDataOrArmWatcher();
 
-  void ArmWatcher();
   void OnHandleReady(MojoResult, const mojo::HandleSignalsState&);
-  void ExpectPipeClose();
+  void OnFlush(ScriptPromiseResolver*);
   void PipeClosed();
   void Close();
 
   mojo::ScopedDataPipeConsumerHandle data_pipe_;
   mojo::SimpleWatcher watcher_;
-  Member<SerialPort> serial_port_;
+  const Member<ScriptState> script_state_;
+  const Member<SerialPort> serial_port_;
+  Member<ReadableByteStreamController> controller_;
   Member<DOMException> pending_exception_;
-  bool expect_close_ = false;
 };
 
 }  // namespace blink

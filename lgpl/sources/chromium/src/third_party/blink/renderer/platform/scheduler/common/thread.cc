@@ -5,23 +5,23 @@
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 
 #include "base/feature_list.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/threading/platform_thread.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/worker/compositor_thread.h"
-#include "third_party/blink/renderer/platform/scheduler/worker/compositor_thread_scheduler.h"
-#include "third_party/blink/renderer/platform/scheduler/worker/worker_thread.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
+#include "third_party/blink/renderer/platform/scheduler/worker/compositor_thread_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/thread_specific.h"
+#include "third_party/blink/renderer/platform/wtf/threading.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
-#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 #include <unistd.h>
 #endif
 
@@ -41,8 +41,8 @@ std::unique_ptr<Thread>& GetMainThread() {
   return main_thread;
 }
 
-std::unique_ptr<Thread>& GetCompositorThread() {
-  DEFINE_STATIC_LOCAL(std::unique_ptr<Thread>, compositor_thread, ());
+std::unique_ptr<NonMainThread>& GetCompositorThread() {
+  DEFINE_STATIC_LOCAL(std::unique_ptr<NonMainThread>, compositor_thread, ());
   return compositor_thread;
 }
 
@@ -76,34 +76,29 @@ ThreadCreationParams& ThreadCreationParams::SetSupportsGC(bool gc_enabled) {
   return *this;
 }
 
-std::unique_ptr<Thread> Thread::CreateThread(
-    const ThreadCreationParams& params) {
-  auto thread = std::make_unique<scheduler::WorkerThread>(params);
-  thread->Init();
-  return std::move(thread);
-}
-
 void Thread::CreateAndSetCompositorThread() {
   DCHECK(!GetCompositorThread());
 
   ThreadCreationParams params(ThreadType::kCompositorThread);
-  if (base::FeatureList::IsEnabled(
-          features::kBlinkCompositorUseDisplayThreadPriority))
-    params.thread_priority = base::ThreadPriority::DISPLAY;
+  params.base_thread_type = base::ThreadType::kCompositing;
 
   auto compositor_thread =
       std::make_unique<scheduler::CompositorThread>(params);
   compositor_thread->Init();
-  GetCompositorThread() = std::move(compositor_thread);
 
-  if (base::FeatureList::IsEnabled(
-          features::kBlinkCompositorUseDisplayThreadPriority)) {
-    // Chrome OS moves tasks between control groups on thread priority changes.
-    // This is not possible inside the sandbox, so ask the browser to do it.
-    // TODO(spang): Check if we can remove this on non-Chrome OS builds.
-    Platform::Current()->SetDisplayThreadPriority(
-        GetCompositorThread()->ThreadId());
-  }
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+  compositor_thread->GetTaskRunner()->PostTaskAndReplyWithResult(
+      FROM_HERE, base::BindOnce(&base::PlatformThread::CurrentId),
+      base::BindOnce([](base::PlatformThreadId compositor_thread_id) {
+        // Chrome OS moves tasks between control groups on thread priority
+        // changes. This is not possible inside the sandbox, so ask the
+        // browser to do it.
+        Platform::Current()->SetThreadType(compositor_thread_id,
+                                           base::ThreadType::kCompositing);
+      }));
+#endif
+
+  GetCompositorThread() = std::move(compositor_thread);
 }
 
 Thread* Thread::Current() {
@@ -114,7 +109,7 @@ Thread* Thread::MainThread() {
   return GetMainThread().get();
 }
 
-Thread* Thread::CompositorThread() {
+NonMainThread* Thread::CompositorThread() {
   return GetCompositorThread().get();
 }
 
@@ -143,10 +138,10 @@ void Thread::RemoveTaskObserver(TaskObserver* task_observer) {
   Scheduler()->RemoveTaskObserver(task_observer);
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 static_assert(sizeof(blink::PlatformThreadId) >= sizeof(DWORD),
               "size of platform thread id is too small");
-#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 static_assert(sizeof(blink::PlatformThreadId) >= sizeof(pid_t),
               "size of platform thread id is too small");
 #else

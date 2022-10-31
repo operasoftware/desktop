@@ -5,9 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_FETCH_HEADER_LIST_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_FETCH_HEADER_LIST_H_
 
+#include <map>
 #include <utility>
+
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -19,7 +21,7 @@ class CORE_EXPORT FetchHeaderList final
  public:
   struct ByteCaseInsensitiveCompare {
     bool operator()(const String& lhs, const String& rhs) const {
-      return CodeUnitCompareLessThan(lhs.LowerASCII(), rhs.LowerASCII());
+      return CodeUnitCompareIgnoringASCIICaseLessThan(lhs, rhs);
     }
   };
 

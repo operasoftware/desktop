@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_PORTAL_DOCUMENT_PORTALS_H_
 
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
@@ -24,11 +24,17 @@ class PortalContents;
 // a contents, it is also tracked by this object.
 class DocumentPortals final : public GarbageCollected<DocumentPortals>,
                               public Supplement<Document> {
-  USING_GARBAGE_COLLECTED_MIXIN(DocumentPortals);
-
  public:
   static const char kSupplementName[];
-  static DocumentPortals& From(Document&);
+
+  // Returns the supplement that stores the portal elements
+  // that are associated with the document. Returns nullptr if
+  // `GetOrCreate` has yet been called yet.
+  static DocumentPortals* Get(Document&);
+
+  // Like `Get` but if the supplement has not been created yet it
+  // will be created.
+  static DocumentPortals& GetOrCreate(Document&);
 
   void RegisterPortalContents(PortalContents*);
   void DeregisterPortalContents(PortalContents*);

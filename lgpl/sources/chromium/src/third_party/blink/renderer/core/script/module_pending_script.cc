@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/core/script/module_pending_script.h"
 
-#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/script/script_loader.h"
 
 namespace blink {
@@ -40,7 +39,7 @@ void ModulePendingScriptTreeClient::Trace(Visitor* visitor) const {
 ModulePendingScript::ModulePendingScript(ScriptElementBase* element,
                                          ModulePendingScriptTreeClient* client,
                                          bool is_external)
-    : PendingScript(element, TextPosition()),
+    : PendingScript(element, TextPosition::MinimumPosition()),
       module_tree_client_(client),
       is_external_(is_external) {
   CHECK(GetElement());
@@ -65,7 +64,7 @@ void ModulePendingScript::NotifyModuleTreeLoadFinished() {
   PendingScriptFinished();
 }
 
-Script* ModulePendingScript::GetSource(const KURL& document_url) const {
+Script* ModulePendingScript::GetSource() const {
   CHECK(IsReady());
   return GetModuleScript();
 }

@@ -78,22 +78,24 @@ function runTests() {
     // Tests if fileManagerPrivate.removeMount() for provided file systems emits
     // the onMountRequested() event with correct arguments.
     function requestUnmountSuccess() {
-      var onUnmountRequested = chrome.test.callbackPass(
-          function(options, onSuccess, onError) {
+      var onUnmountRequested = function(options, onSuccess, onError) {
         chrome.test.assertEq(SECOND_FILE_SYSTEM_ID, options.fileSystemId);
         // Not calling fileSystemProvider.unmount(), so the onMountCompleted
         // event will not be raised.
         chrome.fileSystemProvider.onUnmountRequested.removeListener(
             onUnmountRequested);
         onSuccess();
-      });
+        chrome.test.succeed();
+      };
 
       chrome.fileSystemProvider.onUnmountRequested.addListener(
           onUnmountRequested);
 
       test_util.getVolumeInfo(SECOND_FILE_SYSTEM_ID, function(volumeInfo) {
         chrome.test.assertTrue(!!volumeInfo);
-        chrome.fileManagerPrivate.removeMount(volumeInfo.volumeId);
+        chrome.fileManagerPrivate.removeMount(volumeInfo.volumeId, () => {
+          chrome.test.assertNoLastError();
+        });
       });
     },
 
@@ -125,7 +127,7 @@ function runTests() {
         chrome.test.assertTrue(unmountRequested);
 
         // Remove the handlers and mark the test as succeeded.
-        chrome.fileManagerPrivate.removeMount(SECOND_FILE_SYSTEM_ID);
+        chrome.fileManagerPrivate.removeMount(SECOND_FILE_SYSTEM_ID, () => {});
         chrome.fileManagerPrivate.onMountCompleted.removeListener(
             onMountCompleted);
       });
@@ -136,7 +138,9 @@ function runTests() {
 
       test_util.getVolumeInfo(SECOND_FILE_SYSTEM_ID, function(volumeInfo) {
         chrome.test.assertTrue(!!volumeInfo);
-        chrome.fileManagerPrivate.removeMount(volumeInfo.volumeId);
+        chrome.fileManagerPrivate.removeMount(volumeInfo.volumeId, () => {
+          chrome.test.assertNoLastError();
+        });
       });
     }
   ]);

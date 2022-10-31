@@ -41,11 +41,12 @@ std::unique_ptr<SourceLocation> SourceLocation::Capture(
     unsigned column_number) {
   std::unique_ptr<v8_inspector::V8StackTrace> stack_trace =
       CaptureStackTrace(false);
-  if (stack_trace && !stack_trace->isEmpty())
+  if (stack_trace && !stack_trace->isEmpty()) {
     return SourceLocation::CreateFromNonEmptyV8StackTrace(
-        std::move(stack_trace), 0);
-  return std::make_unique<SourceLocation>(url, line_number, column_number,
-                                          std::move(stack_trace));
+        std::move(stack_trace));
+  }
+  return std::make_unique<SourceLocation>(
+      url, String(), line_number, column_number, std::move(stack_trace));
 }
 
 // static
@@ -53,9 +54,10 @@ std::unique_ptr<SourceLocation> SourceLocation::Capture(
     ExecutionContext* execution_context) {
   std::unique_ptr<v8_inspector::V8StackTrace> stack_trace =
       CaptureStackTrace(false);
-  if (stack_trace && !stack_trace->isEmpty())
+  if (stack_trace && !stack_trace->isEmpty()) {
     return SourceLocation::CreateFromNonEmptyV8StackTrace(
-        std::move(stack_trace), 0);
+        std::move(stack_trace));
+  }
 
   if (LocalDOMWindow* window = DynamicTo<LocalDOMWindow>(execution_context)) {
     Document* document = window->document();
@@ -66,13 +68,14 @@ std::unique_ptr<SourceLocation> SourceLocation::Capture(
         line_number =
             document->GetScriptableDocumentParser()->LineNumber().OneBasedInt();
     }
-    return std::make_unique<SourceLocation>(
-        document->Url().GetString(), line_number, 0, std::move(stack_trace));
+    return std::make_unique<SourceLocation>(document->Url().GetString(),
+                                            String(), line_number, 0,
+                                            std::move(stack_trace));
   }
 
   return std::make_unique<SourceLocation>(
-      execution_context ? execution_context->Url().GetString() : String(), 0, 0,
-      std::move(stack_trace));
+      execution_context ? execution_context->Url().GetString() : String(),
+      String(), 0, 0, std::move(stack_trace));
 }
 
 // static
@@ -81,13 +84,12 @@ std::unique_ptr<SourceLocation> SourceLocation::FromMessage(
     v8::Local<v8::Message> message,
     ExecutionContext* execution_context) {
   v8::Local<v8::StackTrace> stack = message->GetStackTrace();
-  std::unique_ptr<v8_inspector::V8StackTrace> stack_trace = nullptr;
+  std::unique_ptr<v8_inspector::V8StackTrace> stack_trace;
   ThreadDebugger* debugger = ThreadDebugger::From(isolate);
   if (debugger)
     stack_trace = debugger->GetV8Inspector()->createStackTrace(stack);
 
-  int script_id =
-      static_cast<int>(message->GetScriptOrigin().ScriptID()->Value());
+  int script_id = message->GetScriptOrigin().ScriptId();
   if (!stack.IsEmpty() && stack->GetFrameCount() > 0) {
     int top_script_id = stack->GetFrame(isolate, 0)->GetScriptId();
     if (top_script_id == script_id)
@@ -100,28 +102,32 @@ std::unique_ptr<SourceLocation> SourceLocation::FromMessage(
       message->GetStartColumn(isolate->GetCurrentContext()).To(&column_number))
     ++column_number;
 
-  if ((!script_id || !line_number) && stack_trace && !stack_trace->isEmpty())
+  if ((!script_id || !line_number) && stack_trace && !stack_trace->isEmpty()) {
     return SourceLocation::CreateFromNonEmptyV8StackTrace(
-        std::move(stack_trace), 0);
+        std::move(stack_trace));
+  }
 
   String url = ToCoreStringWithUndefinedOrNullCheck(
       message->GetScriptOrigin().ResourceName());
   if (url.IsEmpty())
     url = execution_context->Url();
-  return std::make_unique<SourceLocation>(url, line_number, column_number,
-                                          std::move(stack_trace), script_id);
+  return std::make_unique<SourceLocation>(url, String(), line_number,
+                                          column_number, std::move(stack_trace),
+                                          script_id);
 }
 
 // static
 std::unique_ptr<SourceLocation> SourceLocation::CreateFromNonEmptyV8StackTrace(
-    std::unique_ptr<v8_inspector::V8StackTrace> stack_trace,
-    int script_id) {
+    std::unique_ptr<v8_inspector::V8StackTrace> stack_trace) {
   // Retrieve the data before passing the ownership to SourceLocation.
   String url = ToCoreString(stack_trace->topSourceURL());
+  String function = ToCoreString(stack_trace->topFunctionName());
   unsigned line_number = stack_trace->topLineNumber();
   unsigned column_number = stack_trace->topColumnNumber();
-  return base::WrapUnique(new SourceLocation(
-      url, line_number, column_number, std::move(stack_trace), script_id));
+  int script_id = stack_trace->topScriptId();
+  return base::WrapUnique(
+      new SourceLocation(url, function, line_number, column_number,
+                         std::move(stack_trace), script_id));
 }
 
 // static
@@ -131,28 +137,32 @@ std::unique_ptr<SourceLocation> SourceLocation::FromFunction(
     return std::make_unique<SourceLocation>(
         ToCoreStringWithUndefinedOrNullCheck(
             function->GetScriptOrigin().ResourceName()),
+        ToCoreStringWithUndefinedOrNullCheck(function->GetName()),
         function->GetScriptLineNumber() + 1,
         function->GetScriptColumnNumber() + 1, nullptr, function->ScriptId());
-  return std::make_unique<SourceLocation>(String(), 0, 0, nullptr, 0);
+  return std::make_unique<SourceLocation>(String(), String(), 0, 0, nullptr, 0);
 }
 
 // static
 std::unique_ptr<SourceLocation> SourceLocation::CaptureWithFullStackTrace() {
   std::unique_ptr<v8_inspector::V8StackTrace> stack_trace =
       CaptureStackTrace(true);
-  if (stack_trace && !stack_trace->isEmpty())
+  if (stack_trace && !stack_trace->isEmpty()) {
     return SourceLocation::CreateFromNonEmptyV8StackTrace(
-        std::move(stack_trace), 0);
-  return std::make_unique<SourceLocation>(String(), 0, 0, nullptr, 0);
+        std::move(stack_trace));
+  }
+  return std::make_unique<SourceLocation>(String(), String(), 0, 0, nullptr, 0);
 }
 
 SourceLocation::SourceLocation(
     const String& url,
+    const String& function,
     unsigned line_number,
     unsigned column_number,
     std::unique_ptr<v8_inspector::V8StackTrace> stack_trace,
     int script_id)
     : url_(url),
+      function_(function),
       line_number_(line_number),
       column_number_(column_number),
       stack_trace_(std::move(stack_trace)),
@@ -167,7 +177,7 @@ void SourceLocation::ToTracedValue(TracedValue* value, const char* name) const {
   value->BeginDictionary();
   value->SetString("functionName",
                    ToCoreString(stack_trace_->topFunctionName()));
-  value->SetString("scriptId", ToCoreString(stack_trace_->topScriptId()));
+  value->SetInteger("scriptId", stack_trace_->topScriptId());
   value->SetString("url", ToCoreString(stack_trace_->topSourceURL()));
   value->SetInteger("lineNumber", stack_trace_->topLineNumber());
   value->SetInteger("columnNumber", stack_trace_->topColumnNumber());
@@ -175,9 +185,23 @@ void SourceLocation::ToTracedValue(TracedValue* value, const char* name) const {
   value->EndArray();
 }
 
+void SourceLocation::WriteIntoTrace(perfetto::TracedValue context) const {
+  // TODO(altimin): Consider replacing nested dict-inside-array with just an
+  // array here.
+  auto array = std::move(context).WriteArray();
+  auto dict = array.AppendDictionary();
+  // TODO(altimin): Add TracedValue support to v8::StringView and remove
+  // ToCoreString calls.
+  dict.Add("functionName", ToCoreString(stack_trace_->topFunctionName()));
+  dict.Add("scriptId", String::Number(stack_trace_->topScriptId()));
+  dict.Add("url", ToCoreString(stack_trace_->topSourceURL()));
+  dict.Add("lineNumber", stack_trace_->topLineNumber());
+  dict.Add("columnNumber", stack_trace_->topColumnNumber());
+}
+
 std::unique_ptr<SourceLocation> SourceLocation::Clone() const {
   return base::WrapUnique(new SourceLocation(
-      url_.IsolatedCopy(), line_number_, column_number_,
+      url_, function_, line_number_, column_number_,
       stack_trace_ ? stack_trace_->clone() : nullptr, script_id_));
 }
 

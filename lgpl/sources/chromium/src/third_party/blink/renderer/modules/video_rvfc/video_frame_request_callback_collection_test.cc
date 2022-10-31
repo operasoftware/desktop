@@ -29,6 +29,9 @@ class VideoFrameRequestCallbackCollectionTest : public PageTestBase {
       : execution_context_(MakeGarbageCollected<NullExecutionContext>()),
         collection_(MakeGarbageCollected<VideoFrameRequestCallbackCollection>(
             execution_context_.Get())) {}
+  ~VideoFrameRequestCallbackCollectionTest() override {
+    execution_context_->NotifyContextDestroyed();
+  }
 
   VideoFrameRequestCallbackCollection* collection() {
     return collection_.Get();
@@ -128,8 +131,7 @@ TEST_F(VideoFrameRequestCallbackCollectionTest, CreateCallbackDuringExecution) {
   EXPECT_TRUE(collection()->IsEmpty());
 }
 
-TEST_F(VideoFrameRequestCallbackCollectionTest,
-       CancelCallbgitackDuringExecution) {
+TEST_F(VideoFrameRequestCallbackCollectionTest, CancelCallbackDuringExecution) {
   auto dummy_callback = CreateCallback();
   CallbackId dummy_callback_id =
       collection()->RegisterFrameCallback(dummy_callback.Get());

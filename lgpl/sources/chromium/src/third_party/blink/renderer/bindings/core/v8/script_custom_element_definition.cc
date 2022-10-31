@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_custom_element_form_state_restore_callback.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_custom_element_registry.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_element.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_form_state_restore_mode.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
@@ -22,11 +23,13 @@
 #include "third_party/blink/renderer/core/events/error_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element.h"
+#include "third_party/blink/renderer/core/html/custom/custom_element_registry.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding_macros.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_context_data.h"
 #include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
+#include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "v8/include/v8.h"
 
@@ -155,22 +158,7 @@ HTMLElement* ScriptCustomElementDefinition::CreateAutonomousCustomElementSync(
   Element* element = nullptr;
   {
     v8::TryCatch try_catch(script_state_->GetIsolate());
-
-    if (document.IsHTMLImport()) {
-      // V8HTMLElement::constructorCustom() can only refer to
-      // window.document() which is not the import document. Create
-      // elements in import documents ahead of time so they end up in
-      // the right document. This subtly violates recursive
-      // construction semantics, but only in import documents.
-      element = CreateElementForConstructor(document);
-      DCHECK(!try_catch.HasCaught());
-
-      ConstructionStackScope construction_stack_scope(*this, *element);
-      element = CallConstructor();
-    } else {
-      element = CallConstructor();
-    }
-
+    element = CallConstructor();
     if (try_catch.HasCaught()) {
       exception_state.RethrowV8Exception(try_catch.Exception());
       return HandleCreateElementSyncException(document, tag_name, isolate,
@@ -213,6 +201,9 @@ bool ScriptCustomElementDefinition::RunConstructor(Element& element) {
       V8ScriptRunner::ReportException(isolate, exception);
     return false;
   }
+
+  // 8.1.new: set custom element state to kPreCustomized.
+  element.SetCustomElementState(CustomElementState::kPreCustomized);
 
   Element* result = CallConstructor();
 
@@ -340,11 +331,12 @@ void ScriptCustomElementDefinition::RunFormDisabledCallback(Element& element,
 
 void ScriptCustomElementDefinition::RunFormStateRestoreCallback(
     Element& element,
-    const FileOrUSVStringOrFormData& value,
+    const V8ControlValue* value,
     const String& mode) {
   if (!form_state_restore_callback_)
     return;
-  form_state_restore_callback_->InvokeAndReportException(&element, value, mode);
+  form_state_restore_callback_->InvokeAndReportException(
+      &element, value, V8FormStateRestoreMode::Create(mode).value());
 }
 
 }  // namespace blink

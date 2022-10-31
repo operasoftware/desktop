@@ -9,12 +9,13 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/module_record.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/script/js_module_script.h"
 #include "third_party/blink/renderer/core/script/script.h"
+#include "third_party/blink/renderer/core/testing/module_test_base.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/workers/parent_execution_context_task_runners.h"
 #include "third_party/blink/renderer/core/workers/worker_backing_thread.h"
@@ -41,12 +42,19 @@ class TestAnimationWorkletProxyClient : public AnimationWorkletProxyClient {
 
 }  // namespace
 
-class AnimationAndPaintWorkletThreadTest : public PageTestBase {
+class AnimationAndPaintWorkletThreadTest : public PageTestBase,
+                                           public ModuleTestBase {
  public:
   void SetUp() override {
-    PageTestBase::SetUp(IntSize());
+    ModuleTestBase::SetUp();
+    PageTestBase::SetUp(gfx::Size());
     NavigateTo(KURL("https://example.com/"));
     reporting_proxy_ = std::make_unique<WorkerReportingProxy>();
+  }
+
+  void TearDown() override {
+    PageTestBase::TearDown();
+    ModuleTestBase::TearDown();
   }
 
   // Attempts to run some simple script for |thread|.
@@ -73,16 +81,17 @@ class AnimationAndPaintWorkletThreadTest : public PageTestBase {
     EXPECT_TRUE(script_state);
     ScriptState::Scope scope(script_state);
     const KURL js_url("https://example.com/foo.js");
-    v8::Local<v8::Module> module = ModuleRecord::Compile(
-        script_state->GetIsolate(), "var counter = 0; ++counter;", js_url,
-        js_url, ScriptFetchOptions(), TextPosition::MinimumPosition(),
-        ASSERT_NO_EXCEPTION);
+    v8::Local<v8::Module> module = ModuleTestBase::CompileModule(
+        script_state, "var counter = 0; ++counter;", js_url);
     EXPECT_FALSE(module.IsEmpty());
     ScriptValue exception =
         ModuleRecord::Instantiate(script_state, module, js_url);
     EXPECT_TRUE(exception.IsEmpty());
-    EXPECT_TRUE(
-        ModuleRecord::Evaluate(script_state, module, js_url).IsSuccess());
+    ScriptEvaluationResult result =
+        JSModuleScript::CreateForTest(Modulator::From(script_state), module,
+                                      js_url)
+            ->RunScriptOnScriptStateAndReturnValue(script_state);
+    EXPECT_FALSE(GetResult(script_state, std::move(result)).IsEmpty());
     wait_event->Signal();
   }
 };

@@ -24,13 +24,13 @@
 
 #include "third_party/blink/public/platform/file_path_conversion.h"
 #include "third_party/blink/public/strings/grit/blink_strings.h"
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/fileapi/file.h"
 #include "third_party/blink/renderer/core/fileapi/file_list.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
-#include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/html/forms/form_controller.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
@@ -45,7 +45,7 @@
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/file_metadata.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
@@ -69,14 +69,10 @@ Vector<String> CollectAcceptTypes(const HTMLInputElement& input) {
   return accept_types;
 }
 
-gfx::Rect ToGfxRect(const DOMRect& rect) {
-  return {rect.x(), rect.y(), rect.width(), rect.height()};
-}
-
 }  // namespace
 
 FileInputType::FileInputType(HTMLInputElement& element)
-    : InputType(element),
+    : InputType(Type::kFile, element),
       KeyboardClickableInputTypeView(element),
       file_list_(MakeGarbageCollected<FileList>()) {}
 
@@ -113,7 +109,8 @@ const AtomicString& FileInputType::FormControlType() const {
 }
 
 FormControlState FileInputType::SaveFormControlState() const {
-  if (file_list_->IsEmpty())
+  if (file_list_->IsEmpty() ||
+      GetElement().GetDocument().GetFormController().DropReferencedFilePaths())
     return FormControlState();
   FormControlState state;
   unsigned num_files = file_list_->length();
@@ -131,7 +128,7 @@ void FileInputType::RestoreFormControlState(const FormControlState& state) {
   auto* file_list = MakeGarbageCollected<FileList>();
   for (const auto& file : file_vector)
     file_list->Append(file);
-  SetFilesAndDispatchEvents(file_list);
+  SetFiles(file_list);
 }
 
 void FileInputType::AppendToFormData(FormData& form_data) const {
@@ -175,11 +172,20 @@ void FileInputType::HandleDOMActivateEvent(Event& event) {
   }
 
   bool intercepted = false;
-  probe::FileChooserOpened(document.GetFrame(), &input, &intercepted);
+  probe::FileChooserOpened(document.GetFrame(), &input, input.Multiple(),
+                           &intercepted);
   if (intercepted) {
     event.SetDefaultHandled();
     return;
   }
+
+  OpenPopupView();
+  event.SetDefaultHandled();
+}
+
+void FileInputType::OpenPopupView() {
+  HTMLInputElement& input = GetElement();
+  Document& document = input.GetDocument();
 
   if (ChromeClient* chrome_client = GetChromeClient()) {
     FileChooserParams params;
@@ -199,13 +205,18 @@ void FileInputType::HandleDOMActivateEvent(Event& event) {
                                input.FastHasAttribute(html_names::kCaptureAttr);
     params.requestor = document.Url();
     HTMLInputElement* button = input.UploadButton();
-    HTMLInputElement* triggering_element = button ? button : &input;
-    gfx::Rect rect = ToGfxRect(*triggering_element->getBoundingClientRect());
-    if (rect.IsEmpty()) {
-      if (auto* active_element = document.ActiveElement())
-        rect = ToGfxRect(*active_element->getBoundingClientRect());
+    Element* body = document.body();
+    std::vector<Element*> elements{button ? button : &input,
+                                   document.HoverElement(),
+                                   document.ActiveElement()};
+    auto iter = std::find_if(
+        elements.begin(), elements.end(), [&body](Element* element) {
+          return element && element != body &&
+                 !element->VisibleBoundsInVisualViewport().IsEmpty();
+        });
+    if (iter != elements.end()) {
+      params.triggering_rect = (*iter)->VisibleBoundsInVisualViewport();
     }
-    params.triggering_rect = rect;
 
     UseCounter::Count(
         document, GetElement().GetExecutionContext()->IsSecureContext()
@@ -213,19 +224,10 @@ void FileInputType::HandleDOMActivateEvent(Event& event) {
                       : WebFeature::kInputTypeFileInsecureOriginOpenChooser);
     chrome_client->OpenFileChooser(document.GetFrame(), NewFileChooser(params));
   }
-  event.SetDefaultHandled();
 }
 
 void FileInputType::CustomStyleForLayoutObject(ComputedStyle& style) {
   style.SetShouldIgnoreOverflowPropertyForInlineBlockBaseline();
-}
-
-bool FileInputType::TypeShouldForceLegacyLayout() const {
-  if (RuntimeEnabledFeatures::LayoutNGForControlsEnabled())
-    return false;
-  UseCounter::Count(GetElement().GetDocument(),
-                    WebFeature::kLegacyLayoutByFileUploadControl);
-  return true;
 }
 
 LayoutObject* FileInputType::CreateLayoutObject(const ComputedStyle& style,
@@ -280,7 +282,8 @@ void FileInputType::SetValue(const String&,
   UpdateView();
 }
 
-FileList* FileInputType::CreateFileList(const FileChooserFileInfoList& files,
+FileList* FileInputType::CreateFileList(ExecutionContext& context,
+                                        const FileChooserFileInfoList& files,
                                         const base::FilePath& base_dir) {
   auto* file_list(MakeGarbageCollected<FileList>());
   wtf_size_t size = files.size();
@@ -325,8 +328,8 @@ FileList* FileInputType::CreateFileList(const FileChooserFileInfoList& files,
           NullableTimeToOptionalTime(fs_info->modification_time);
       metadata.length = fs_info->length;
       metadata.type = FileMetadata::kTypeFile;
-      file_list->Append(File::CreateForFileSystemFile(fs_info->url, metadata,
-                                                      File::kIsUserVisible));
+      file_list->Append(File::CreateForFileSystemFile(
+          context, fs_info->url, metadata, File::kIsUserVisible));
     }
   }
   return file_list;
@@ -335,9 +338,9 @@ FileList* FileInputType::CreateFileList(const FileChooserFileInfoList& files,
 void FileInputType::CountUsage() {
   ExecutionContext* context = GetElement().GetExecutionContext();
   if (context->IsSecureContext())
-    UseCounter::Count(context, WebFeature::kInputTypeFileInsecureOrigin);
-  else
     UseCounter::Count(context, WebFeature::kInputTypeFileSecureOrigin);
+  else
+    UseCounter::Count(context, WebFeature::kInputTypeFileInsecureOrigin);
 }
 
 void FileInputType::CreateShadowSubtree() {
@@ -354,7 +357,7 @@ void FileInputType::CreateShadowSubtree() {
                                   : IDS_FORM_FILE_BUTTON_LABEL)));
   button->SetShadowPseudoId(AtomicString("-webkit-file-upload-button"));
   button->setAttribute(html_names::kIdAttr,
-                       shadow_element_names::FileUploadButton());
+                       shadow_element_names::kIdFileUploadButton);
   button->SetActive(GetElement().CanReceiveDroppedFiles());
   GetElement().UserAgentShadowRoot()->AppendChild(button);
 
@@ -370,7 +373,7 @@ void FileInputType::CreateShadowSubtree() {
 
 HTMLInputElement* FileInputType::UploadButton() const {
   Element* element = GetElement().UserAgentShadowRoot()->getElementById(
-      shadow_element_names::FileUploadButton());
+      shadow_element_names::kIdFileUploadButton);
   CHECK(!element || IsA<HTMLInputElement>(element));
   return To<HTMLInputElement>(element);
 }
@@ -447,7 +450,10 @@ void FileInputType::FilesChosen(FileChooserFileInfoList files,
     }
     ++i;
   }
-  SetFilesAndDispatchEvents(CreateFileList(files, base_dir));
+  if (!will_be_destroyed_) {
+    SetFilesAndDispatchEvents(
+        CreateFileList(*GetElement().GetExecutionContext(), files, base_dir));
+  }
   if (HasConnectedFileChooser())
     DisconnectFileChooser();
 }

@@ -4,7 +4,9 @@
 
 #include "third_party/blink/renderer/core/css/css_scroll_timeline_rule.h"
 
+#include "third_party/blink/renderer/core/css/css_markup.h"
 #include "third_party/blink/renderer/core/css/style_rule.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
@@ -16,8 +18,32 @@ CSSScrollTimelineRule::CSSScrollTimelineRule(
 CSSScrollTimelineRule::~CSSScrollTimelineRule() = default;
 
 String CSSScrollTimelineRule::cssText() const {
-  // TODO(crbug.com/1096420): Implement
-  return "";
+  StringBuilder builder;
+  builder.Append("@scroll-timeline ");
+  SerializeIdentifier(name(), builder);
+  builder.Append(" { ");
+  if (const CSSValue* source = scroll_timeline_rule_->GetSource()) {
+    builder.Append("source: ");
+    builder.Append(source->CssText());
+    builder.Append("; ");
+  }
+  if (const CSSValue* orientation = scroll_timeline_rule_->GetOrientation()) {
+    builder.Append("orientation: ");
+    builder.Append(orientation->CssText());
+    builder.Append("; ");
+  }
+  if (const CSSValue* start = scroll_timeline_rule_->GetStart()) {
+    builder.Append("start: ");
+    builder.Append(start->CssText());
+    builder.Append("; ");
+  }
+  if (const CSSValue* end = scroll_timeline_rule_->GetEnd()) {
+    builder.Append("end: ");
+    builder.Append(end->CssText());
+    builder.Append("; ");
+  }
+  builder.Append("}");
+  return builder.ReleaseString();
 }
 
 void CSSScrollTimelineRule::Reattach(StyleRuleBase* rule) {
@@ -50,12 +76,6 @@ String CSSScrollTimelineRule::start() const {
 String CSSScrollTimelineRule::end() const {
   if (const CSSValue* end = scroll_timeline_rule_->GetEnd())
     return end->CssText();
-  return "auto";
-}
-
-String CSSScrollTimelineRule::timeRange() const {
-  if (const CSSValue* range = scroll_timeline_rule_->GetTimeRange())
-    return range->CssText();
   return "auto";
 }
 

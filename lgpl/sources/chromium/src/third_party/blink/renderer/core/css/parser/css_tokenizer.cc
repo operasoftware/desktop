@@ -14,6 +14,41 @@ namespace blink {
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 
 namespace blink {
+namespace {
+
+// To avoid resizing we err on the side of reserving too much space.
+// Most strings we tokenize have about 3.5 to 5 characters per token.
+constexpr wtf_size_t kEstimatedCharactersPerToken = 3;
+
+}  // namespace
+
+// static
+std::unique_ptr<CachedCSSTokenizer> CSSTokenizer::CreateCachedTokenizer(
+    const String& input) {
+  CSSTokenizer tokenizer(input);
+
+  Vector<CSSParserToken> tokens;
+
+  // This holds offsets into the source text for each token.
+  Vector<wtf_size_t> offsets;
+
+  wtf_size_t reserved_size = (tokenizer.input_.length() - tokenizer.Offset()) /
+                             kEstimatedCharactersPerToken;
+  tokens.ReserveInitialCapacity(reserved_size);
+  offsets.ReserveInitialCapacity(reserved_size);
+
+  offsets.push_back(0);
+  while (true) {
+    const CSSParserToken token = tokenizer.NextToken();
+    tokens.push_back(token);
+    offsets.push_back(tokenizer.Offset());
+    if (token.GetType() == kEOFToken)
+      break;
+  }
+  return std::make_unique<CachedCSSTokenizer>(
+      input, std::move(tokens), std::move(offsets),
+      std::move(tokenizer.string_pool_));
+}
 
 CSSTokenizer::CSSTokenizer(const String& string, wtf_size_t offset)
     : input_(string) {
@@ -29,10 +64,9 @@ CSSTokenizer::CSSTokenizer(const String& string, wtf_size_t offset)
 }
 
 Vector<CSSParserToken, 32> CSSTokenizer::TokenizeToEOF() {
-  // To avoid resizing we err on the side of reserving too much space.
-  // Most strings we tokenize have about 3.5 to 5 characters per token.
   Vector<CSSParserToken, 32> tokens;
-  tokens.ReserveInitialCapacity((input_.length() - Offset()) / 3);
+  tokens.ReserveInitialCapacity((input_.length() - Offset()) /
+                                kEstimatedCharactersPerToken);
 
   while (true) {
     const CSSParserToken token = NextToken();
@@ -46,6 +80,11 @@ Vector<CSSParserToken, 32> CSSTokenizer::TokenizeToEOF() {
         break;
     }
   }
+}
+
+StringView CSSTokenizer::StringRangeAt(wtf_size_t start,
+                                       wtf_size_t length) const {
+  return input_.RangeAt(start, length);
 }
 
 CSSParserToken CSSTokenizer::TokenizeSingle() {
@@ -398,8 +437,10 @@ CSSParserToken CSSTokenizer::ConsumeStringTokenUntil(UChar ending_code_point) {
   StringBuilder output;
   while (true) {
     UChar cc = Consume();
-    if (cc == ending_code_point || cc == kEndOfFileMarker)
-      return CSSParserToken(kStringToken, RegisterString(output.ToString()));
+    if (cc == ending_code_point || cc == kEndOfFileMarker) {
+      return CSSParserToken(kStringToken,
+                            RegisterString(output.ReleaseString()));
+    }
     if (IsCSSNewLine(cc)) {
       Reconsume(cc);
       return CSSParserToken(kBadStringToken);
@@ -478,12 +519,14 @@ CSSParserToken CSSTokenizer::ConsumeUrlToken() {
   while (true) {
     UChar cc = Consume();
     if (cc == ')' || cc == kEndOfFileMarker)
-      return CSSParserToken(kUrlToken, RegisterString(result.ToString()));
+      return CSSParserToken(kUrlToken, RegisterString(result.ReleaseString()));
 
     if (IsHTMLSpace(cc)) {
       input_.AdvanceUntilNonWhitespace();
-      if (ConsumeIfNext(')') || input_.NextInputChar() == kEndOfFileMarker)
-        return CSSParserToken(kUrlToken, RegisterString(result.ToString()));
+      if (ConsumeIfNext(')') || input_.NextInputChar() == kEndOfFileMarker) {
+        return CSSParserToken(kUrlToken,
+                              RegisterString(result.ReleaseString()));
+      }
       break;
     }
 

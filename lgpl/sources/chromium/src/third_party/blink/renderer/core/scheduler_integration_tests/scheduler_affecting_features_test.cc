@@ -3,7 +3,9 @@
 // found in LICENSE file.
 
 #include "base/run_loop.h"
+#include "base/test/scoped_feature_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/web/web_script_source.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -20,7 +22,7 @@ namespace blink {
 
 class SchedulingAffectingFeaturesTest : public SimTest {
  public:
-  PageScheduler* PageScheduler() {
+  PageScheduler* GetPageScheduler() {
     return MainFrameScheduler()->GetPageScheduler();
   }
 
@@ -47,14 +49,16 @@ class SchedulingAffectingFeaturesTest : public SimTest {
     }
     return result;
   }
+
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-TEST_F(SchedulingAffectingFeaturesTest, WebSocketStopsThrottling) {
+TEST_F(SchedulingAffectingFeaturesTest, WebSocketIsTracked) {
   SimRequest main_resource("https://example.com/", "text/html");
 
   LoadURL("https://example.com/");
 
-  EXPECT_FALSE(PageScheduler()->OptedOutFromAggressiveThrottlingForTest());
+  EXPECT_FALSE(GetPageScheduler()->OptedOutFromAggressiveThrottlingForTest());
   EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
               testing::UnorderedElementsAre());
 
@@ -63,14 +67,14 @@ TEST_F(SchedulingAffectingFeaturesTest, WebSocketStopsThrottling) {
       "  var socket = new WebSocket(\"ws://www.example.com/websocket\");"
       "</script>");
 
-  EXPECT_TRUE(PageScheduler()->OptedOutFromAggressiveThrottlingForTest());
+  EXPECT_FALSE(GetPageScheduler()->OptedOutFromAggressiveThrottlingForTest());
   EXPECT_THAT(
       GetNonTrivialMainFrameFeatures(),
       testing::UnorderedElementsAre(SchedulingPolicy::Feature::kWebSocket));
 
-  MainFrame().ExecuteScript(WebString("socket.close();"));
+  MainFrame().ExecuteScript(WebScriptSource(WebString("socket.close();")));
 
-  EXPECT_FALSE(PageScheduler()->OptedOutFromAggressiveThrottlingForTest());
+  EXPECT_FALSE(GetPageScheduler()->OptedOutFromAggressiveThrottlingForTest());
   EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
               testing::UnorderedElementsAre());
 }
@@ -145,105 +149,76 @@ TEST_F(SchedulingAffectingFeaturesTest, CacheControl_Navigation) {
               testing::UnorderedElementsAre());
 }
 
-TEST_F(SchedulingAffectingFeaturesTest, EventListener_PageShow) {
-  SimRequest main_resource("https://foo.com/", "text/html");
-  LoadURL("https://foo.com/");
-  main_resource.Complete(
-      "<script>"
-      " window.addEventListener(\"pageshow\", () => {}); "
-      "</script>");
-
-  EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
-              testing::UnorderedElementsAre(
-                  SchedulingPolicy::Feature::kPageShowEventListener));
-}
-
-TEST_F(SchedulingAffectingFeaturesTest, EventListener_PageHide) {
-  SimRequest main_resource("https://foo.com/", "text/html");
-  LoadURL("https://foo.com/");
-  main_resource.Complete(
-      "<script>"
-      " window.addEventListener(\"pagehide\", () => {}); "
-      "</script>");
-
-  EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
-              testing::UnorderedElementsAre(
-                  SchedulingPolicy::Feature::kPageHideEventListener));
-}
-
-TEST_F(SchedulingAffectingFeaturesTest, EventListener_BeforeUnload) {
-  SimRequest main_resource("https://foo.com/", "text/html");
-  LoadURL("https://foo.com/");
-  main_resource.Complete(
-      "<script>"
-      " window.addEventListener(\"beforeunload\", () => {}); "
-      "</script>");
-
-  EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
-              testing::UnorderedElementsAre(
-                  SchedulingPolicy::Feature::kBeforeUnloadEventListener));
-}
-
-TEST_F(SchedulingAffectingFeaturesTest, EventListener_Unload) {
-  SimRequest main_resource("https://foo.com/", "text/html");
-  LoadURL("https://foo.com/");
-  main_resource.Complete(
-      "<script>"
-      " window.addEventListener(\"unload\", () => {}); "
-      "</script>");
-
-  EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
-              testing::UnorderedElementsAre(
-                  SchedulingPolicy::Feature::kUnloadEventListener));
-}
-
-TEST_F(SchedulingAffectingFeaturesTest, EventListener_Freeze) {
-  SimRequest main_resource("https://foo.com/", "text/html");
-  LoadURL("https://foo.com/");
-  main_resource.Complete(
-      "<script>"
-      " window.addEventListener(\"freeze\", () => {}); "
-      "</script>");
-
-  EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
-              testing::UnorderedElementsAre(
-                  SchedulingPolicy::Feature::kFreezeEventListener));
-}
-
-TEST_F(SchedulingAffectingFeaturesTest, EventListener_Resume) {
-  SimRequest main_resource("https://foo.com/", "text/html");
-  LoadURL("https://foo.com/");
-  main_resource.Complete(
-      "<script>"
-      " window.addEventListener(\"resume\", () => {}); "
-      "</script>");
-
-  EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
-              testing::UnorderedElementsAre(
-                  SchedulingPolicy::Feature::kResumeEventListener));
-}
-
 TEST_F(SchedulingAffectingFeaturesTest, Plugins) {
-  class PluginCreatingWebFrameClient
-      : public frame_test_helpers::TestWebFrameClient {
-   public:
-    // WebLocalFrameClient overrides:
-    WebPlugin* CreatePlugin(const WebPluginParams& params) override {
-      return new FakeWebPlugin(params);
-    }
-  };
+  scoped_feature_list_.InitAndEnableFeature(
+      features::kBackForwardCacheEnabledForNonPluginEmbed);
+  {
+    SimRequest main_resource("https://example.com/", "text/html");
+    LoadURL("https://example.com/");
+    main_resource.Complete(
+        "<object type='application/x-webkit-test-plugin'></object>");
 
-  ScopedFakePluginRegistry fake_plugins;
-  SimRequest main_resource("https://example.com/", "text/html");
-  LoadURL("https://example.com/");
-  main_resource.Complete(
-      "<object type='application/x-webkit-test-plugin'></object>");
+    // |RunUntilIdle| is required as |Complete| doesn't wait for loading plugin.
+    base::RunLoop().RunUntilIdle();
 
-  base::RunLoop().RunUntilIdle();
+    EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
+                testing::UnorderedElementsAre(
+                    SchedulingPolicy::Feature::kContainsPlugins));
+  }
+  {
+    SimRequest main_resource("https://example.com/", "text/html");
+    LoadURL("https://example.com/");
+    main_resource.Complete(
+        "<embed type='application/x-webkit-test-plugin'></embed>");
 
-  EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
-              testing::UnorderedElementsAre(
-                  SchedulingPolicy::Feature::kContainsPlugins));
+    // |RunUntilIdle| is required as |Complete| doesn't wait for loading plugin.
+    base::RunLoop().RunUntilIdle();
+
+    EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
+                testing::UnorderedElementsAre(
+                    SchedulingPolicy::Feature::kContainsPlugins));
+  }
+}
+
+TEST_F(SchedulingAffectingFeaturesTest, NonPlugins) {
+  scoped_feature_list_.InitAndEnableFeature(
+      features::kBackForwardCacheEnabledForNonPluginEmbed);
+  {
+    SimRequest main_resource("https://example.com/", "text/html");
+    LoadURL("https://example.com/");
+    main_resource.Complete("<object type='text/html'></object>");
+
+    EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
+                testing::Not(testing::Contains(
+                    SchedulingPolicy::Feature::kContainsPlugins)));
+  }
+  {
+    SimRequest main_resource("https://example.com/", "text/html");
+    LoadURL("https://example.com/");
+    main_resource.Complete("<embed type='text/html'></embed>");
+
+    EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
+                testing::Not(testing::Contains(
+                    SchedulingPolicy::Feature::kContainsPlugins)));
+  }
+  {
+    SimRequest main_resource("https://example.com/", "text/html");
+    LoadURL("https://example.com/");
+    main_resource.Complete("<object type='image/png'></object>");
+
+    EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
+                testing::Not(testing::Contains(
+                    SchedulingPolicy::Feature::kContainsPlugins)));
+  }
+  {
+    SimRequest main_resource("https://example.com/", "text/html");
+    LoadURL("https://example.com/");
+    main_resource.Complete("<embed type='image/png'></embed>");
+
+    EXPECT_THAT(GetNonTrivialMainFrameFeatures(),
+                testing::Not(testing::Contains(
+                    SchedulingPolicy::Feature::kContainsPlugins)));
+  }
 }
 
 TEST_F(SchedulingAffectingFeaturesTest, WebLocks) {

@@ -4,11 +4,12 @@
 
 #include "third_party/blink/renderer/core/layout/layout_theme_default.h"
 
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
+
 namespace blink {
 namespace {
 
-// Fuchsia is headless-only for now, so no native themes are applied.
-// TODO(fuchsia): Implement this when we enable the UI. (crbug.com/750946)
+// There are no special themes on Fuchsia.
 class LayoutThemeFuchsia : public LayoutThemeDefault {
  public:
   static scoped_refptr<LayoutTheme> Create() {

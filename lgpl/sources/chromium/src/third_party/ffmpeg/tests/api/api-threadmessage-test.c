@@ -101,7 +101,7 @@ static void *sender_thread(void *arg)
             msg.frame->format = AV_PIX_FMT_RGBA;
             msg.frame->width  = 320;
             msg.frame->height = 240;
-            ret = av_frame_get_buffer(msg.frame, 32);
+            ret = av_frame_get_buffer(msg.frame, 0);
             if (ret < 0) {
                 av_frame_free(&msg.frame);
                 break;
@@ -198,8 +198,8 @@ int main(int ac, char **av)
            nb_senders, sender_min_load, sender_max_load,
            nb_receivers, receiver_min_load, receiver_max_load);
 
-    senders = av_mallocz_array(nb_senders, sizeof(*senders));
-    receivers = av_mallocz_array(nb_receivers, sizeof(*receivers));
+    senders   = av_calloc(nb_senders,   sizeof(*senders));
+    receivers = av_calloc(nb_receivers, sizeof(*receivers));
     if (!senders || !receivers) {
         ret = AVERROR(ENOMEM);
         goto end;

@@ -4,8 +4,6 @@
 
 #include "third_party/blink/renderer/core/layout/geometry/logical_size.h"
 
-#include "third_party/blink/renderer/core/layout/geometry/physical_size.h"
-
 namespace blink {
 
 std::ostream& operator<<(std::ostream& stream, const LogicalSize& value) {

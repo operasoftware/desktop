@@ -24,7 +24,7 @@
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_fit_to_view_box.h"
 #include "third_party/blink/renderer/core/svg/svg_zoom_and_pan.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -32,7 +32,6 @@ class SVGViewElement final : public SVGElement,
                              public SVGFitToViewBox,
                              public SVGZoomAndPan {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(SVGViewElement);
 
  public:
   explicit SVGViewElement(Document&);

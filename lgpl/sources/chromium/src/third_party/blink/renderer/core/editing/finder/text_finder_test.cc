@@ -4,32 +4,37 @@
 
 #include "third_party/blink/renderer/core/editing/finder/text_finder.h"
 
+#include "components/ukm/test_ukm_recorder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/frame/find_in_page.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_float_rect.h"
 #include "third_party/blink/public/web/web_document.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_evaluation_result.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
+#include "third_party/blink/renderer/core/dom/comment.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/node_list.h"
 #include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/finder/find_in_page_coordinates.h"
+#include "third_party/blink/renderer/core/editing/markers/document_marker.h"
+#include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/layout/text_autosizer.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/script/classic_script.h"
+#include "third_party/blink/renderer/core/testing/sim/sim_request.h"
+#include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
-
-using blink::test::RunPendingTasks;
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
@@ -38,7 +43,7 @@ class TextFinderTest : public testing::Test {
   TextFinderTest() {
     web_view_helper_.Initialize();
     WebLocalFrameImpl& frame_impl = *web_view_helper_.LocalMainFrame();
-    frame_impl.ViewImpl()->MainFrameWidget()->Resize(WebSize(640, 480));
+    frame_impl.ViewImpl()->MainFrameViewWidget()->Resize(gfx::Size(640, 480));
     frame_impl.ViewImpl()->MainFrameWidget()->UpdateAllLifecyclePhases(
         DocumentUpdateReason::kTest);
     document_ = static_cast<Document*>(frame_impl.GetDocument());
@@ -61,13 +66,18 @@ class TextFinderTest : public testing::Test {
   Persistent<TextFinder> text_finder_;
 };
 
+class TextFinderSimTest : public SimTest {
+ protected:
+  TextFinder& GetTextFinder() {
+    return WebLocalFrameImpl::FromFrame(GetDocument().GetFrame())
+        ->EnsureTextFinder();
+  }
+};
+
 v8::Local<v8::Value> TextFinderTest::EvalJs(const std::string& script) {
-  return GetDocument()
-      .GetFrame()
-      ->GetScriptController()
-      .ExecuteScriptInMainWorldAndReturnValue(ScriptSourceCode(script.c_str()),
-                                              KURL(),
-                                              SanitizeScriptErrors::kSanitize);
+  return ClassicScript::CreateUnspecifiedScript(script.c_str())
+      ->RunScriptAndReturnValue(GetDocument().domWindow())
+      .GetSuccessValueOrEmpty();
 }
 
 Document& TextFinderTest::GetDocument() const {
@@ -85,7 +95,7 @@ gfx::RectF TextFinderTest::FindInPageRect(Node* start_container,
   const Position start_position(start_container, start_offset);
   const Position end_position(end_container, end_offset);
   const EphemeralRange range(start_position, end_position);
-  return gfx::RectF(FindInPageRectFromRange(range));
+  return FindInPageRectFromRange(range);
 }
 
 TEST_F(TextFinderTest, FindTextSimple) {
@@ -171,6 +181,7 @@ TEST_F(TextFinderTest, FindTextAutosizing) {
   WebString search_text(String("FindMe"));
   auto find_options =
       mojom::blink::FindOptions::New();  // Default + add testing flag.
+  find_options->run_synchronously_for_testing = true;
   bool wrap_within_frame = true;
 
   // Set viewport scale to 20 in order to simulate zoom-in
@@ -182,7 +193,7 @@ TEST_F(TextFinderTest, FindTextAutosizing) {
   // Enforce autosizing
   GetDocument().GetSettings()->SetTextAutosizingEnabled(true);
   GetDocument().GetSettings()->SetTextAutosizingWindowSizeOverride(
-      IntSize(20, 20));
+      gfx::Size(20, 20));
   GetDocument().GetTextAutosizer()->UpdatePageInfo();
   GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kTest);
 
@@ -220,11 +231,10 @@ TEST_F(TextFinderTest, FindTextNotFound) {
 }
 
 TEST_F(TextFinderTest, FindTextInShadowDOM) {
-  GetDocument().body()->setInnerHTML("<b>FOO</b><i>foo</i>");
+  GetDocument().body()->setInnerHTML("<b>FOO</b><i slot='bar'>foo</i>");
   ShadowRoot& shadow_root =
-      GetDocument().body()->CreateV0ShadowRootForTesting();
-  shadow_root.setInnerHTML(
-      "<content select=\"i\"></content><u>Foo</u><content></content>");
+      GetDocument().body()->AttachShadowRootInternal(ShadowRootType::kOpen);
+  shadow_root.setInnerHTML("<slot name='bar'></slot><u>Foo</u><slot></slot>");
   Node* text_in_b_element = GetDocument().body()->firstChild()->firstChild();
   Node* text_in_i_element = GetDocument().body()->lastChild()->firstChild();
   Node* text_in_u_element = shadow_root.childNodes()->item(1)->firstChild();
@@ -321,6 +331,7 @@ TEST_F(TextFinderTest, FindTextInShadowDOM) {
   EXPECT_EQ(3u, active_match->endOffset());
 }
 
+#if BUILDFLAG(IS_ANDROID)
 TEST_F(TextFinderTest, ScopeTextMatchesSimple) {
   GetDocument().body()->setInnerHTML("XXXXFindMeYYYYfindmeZZZZ");
   GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kTest);
@@ -382,11 +393,10 @@ TEST_F(TextFinderTest, ScopeTextMatchesRepeated) {
 }
 
 TEST_F(TextFinderTest, ScopeTextMatchesWithShadowDOM) {
-  GetDocument().body()->setInnerHTML("<b>FOO</b><i>foo</i>");
+  GetDocument().body()->setInnerHTML("<b>FOO</b><i slot='bar'>foo</i>");
   ShadowRoot& shadow_root =
-      GetDocument().body()->CreateV0ShadowRootForTesting();
-  shadow_root.setInnerHTML(
-      "<content select=\"i\"></content><u>Foo</u><content></content>");
+      GetDocument().body()->AttachShadowRootInternal(ShadowRootType::kOpen);
+  shadow_root.setInnerHTML("<slot name='bar'></slot><u>Foo</u><slot></slot>");
   Node* text_in_b_element = GetDocument().body()->firstChild()->firstChild();
   Node* text_in_i_element = GetDocument().body()->lastChild()->firstChild();
   Node* text_in_u_element = shadow_root.childNodes()->item(1)->firstChild();
@@ -593,6 +603,7 @@ TEST_F(TextFinderTest, FindTextJavaScriptUpdatesDOMAfterNoMatches) {
   EXPECT_EQ(FindInPageRect(text_in_i_element, 2, text_in_i_element, 8),
             match_rects[0]);
 }
+#endif  // BUILDFLAG(IS_ANDROID)
 
 TEST_F(TextFinderTest, ScopeWithTimeouts) {
   // Make a long string.
@@ -635,6 +646,7 @@ TEST_F(TextFinderTest, BeforeMatchEvent) {
 
       const foo = document.createElement('div');
       foo.textContent = 'foo';
+      foo.setAttribute('hidden', 'until-found');
       document.body.appendChild(foo);
       window.beforematchFiredOnFoo = false;
       foo.addEventListener('beforematch', () => {
@@ -643,6 +655,7 @@ TEST_F(TextFinderTest, BeforeMatchEvent) {
 
       const bar = document.createElement('div');
       bar.textContent = 'bar';
+      bar.setAttribute('hidden', 'until-found');
       document.body.appendChild(bar);
       window.beforematchFiredOnBar = false;
       bar.addEventListener('beforematch', () => {
@@ -688,6 +701,7 @@ TEST_F(TextFinderTest, BeforeMatchEventRemoveElement) {
       document.body.appendChild(spacer);
 
       const foo = document.createElement('div');
+      foo.setAttribute('hidden', 'until-found');
       foo.textContent = 'foo';
       document.body.appendChild(foo);
       window.beforematchFiredOnFoo = false;
@@ -717,6 +731,100 @@ TEST_F(TextFinderTest, BeforeMatchEventRemoveElement) {
 // TODO(jarhar): Write more tests here once we decide on a behavior here:
 // https://github.com/WICG/display-locking/issues/150
 
+TEST_F(TextFinderSimTest, BeforeMatchEventAsyncExpandHighlight) {
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(R"HTML(
+    <!DOCTYPE html>
+    <div id=hiddenid hidden=until-found>hidden</div>
+  )HTML");
+  Compositor().BeginFrame();
+
+  GetTextFinder().Find(/*identifier=*/0, WebString(String("hidden")),
+                       *mojom::blink::FindOptions::New(),
+                       /*wrap_within_frame=*/false);
+
+  Compositor().BeginFrame();
+
+  HeapVector<Member<DocumentMarker>> markers =
+      GetDocument().Markers().Markers();
+  ASSERT_EQ(markers.size(), 1u);
+  DocumentMarker* marker = markers[0];
+  EXPECT_TRUE(marker->GetType() == DocumentMarker::kTextMatch);
+}
+
+TEST_F(TextFinderSimTest, BeforeMatchExpandedHiddenMatchableUkm) {
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(R"HTML(
+    <!DOCTYPE html>
+    <div id=hiddenid hidden=until-found>hidden</div>
+  )HTML");
+  Compositor().BeginFrame();
+
+  GetDocument().ukm_recorder_ = std::make_unique<ukm::TestUkmRecorder>();
+  auto* recorder =
+      static_cast<ukm::TestUkmRecorder*>(GetDocument().UkmRecorder());
+  EXPECT_EQ(recorder->entries_count(), 0u);
+
+  GetTextFinder().Find(/*identifier=*/0, WebString(String("hidden")),
+                       *mojom::blink::FindOptions::New(),
+                       /*wrap_within_frame=*/false);
+
+  Compositor().BeginFrame();
+
+  auto entries = recorder->GetEntriesByName("Blink.FindInPage");
+  // There are two entries because
+  // DisplayLockUtilities::ActivateFindInPageMatchRangeIfNeeded followed by
+  // DisplayLockContext::CommitForActivationWithSignal sets a
+  // "HasFindInPageContentVisibilityActiveMatch" UKM.
+  ASSERT_EQ(entries.size(), 2u);
+
+  EXPECT_FALSE(ukm::TestUkmRecorder::EntryHasMetric(
+      entries[0], "BeforematchExpandedHiddenMatchable"));
+  EXPECT_TRUE(ukm::TestUkmRecorder::EntryHasMetric(
+      entries[1], "BeforematchExpandedHiddenMatchable"));
+}
+
+TEST_F(TextFinderSimTest, BeforeMatchExpandedHiddenMatchableUseCounter) {
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(R"HTML(
+    <!DOCTYPE html>
+    <div id=hiddenid hidden=until-found>hidden</div>
+  )HTML");
+  Compositor().BeginFrame();
+
+  GetTextFinder().Find(/*identifier=*/0, WebString(String("hidden")),
+                       *mojom::blink::FindOptions::New(),
+                       /*wrap_within_frame=*/false);
+
+  Compositor().BeginFrame();
+
+  EXPECT_TRUE(GetDocument().IsUseCounted(
+      WebFeature::kBeforematchRevealedHiddenMatchable));
+}
+
+TEST_F(TextFinderSimTest,
+       BeforeMatchExpandedHiddenMatchableUseCounterNoHandler) {
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(R"HTML(
+    <!DOCTYPE html>
+    <div id=hiddenid>hidden</div>
+  )HTML");
+  Compositor().BeginFrame();
+
+  GetTextFinder().Find(/*identifier=*/0, WebString(String("hidden")),
+                       *mojom::blink::FindOptions::New(),
+                       /*wrap_within_frame=*/false);
+
+  Compositor().BeginFrame();
+
+  EXPECT_FALSE(GetDocument().IsUseCounted(
+      WebFeature::kBeforematchRevealedHiddenMatchable));
+}
+
 TEST_F(TextFinderTest, FindTextAcrossCommentNode) {
   GetDocument().body()->setInnerHTML(
       "<span>abc</span><!--comment--><span>def</span>");
@@ -731,6 +839,22 @@ TEST_F(TextFinderTest, FindTextAcrossCommentNode) {
   EXPECT_TRUE(GetTextFinder().Find(identifier, search_text, *find_options,
                                    wrap_within_frame));
   EXPECT_TRUE(GetTextFinder().ActiveMatch());
+}
+
+// http://crbug.com/1192487
+TEST_F(TextFinderTest, CommentAfterDoucmentElement) {
+  GetDocument().body()->setInnerHTML("abc");
+  GetDocument().appendChild(Comment::Create(GetDocument(), "xyz"));
+  GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kTest);
+
+  int identifier = 0;
+  auto find_options = mojom::blink::FindOptions::New();
+  find_options->run_synchronously_for_testing = true;
+
+  GetTextFinder().ResetMatchCount();
+  GetTextFinder().StartScopingStringMatches(identifier, "a", *find_options);
+  EXPECT_EQ(1, GetTextFinder().TotalMatchCount());
+  EXPECT_FALSE(GetTextFinder().ScopingInProgress());
 }
 
 }  // namespace blink

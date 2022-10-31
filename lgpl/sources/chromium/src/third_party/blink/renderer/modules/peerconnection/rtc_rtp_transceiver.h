@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_PEERCONNECTION_RTC_RTP_TRANSCEIVER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_PEERCONNECTION_RTC_RTP_TRANSCEIVER_H_
 
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec_capability.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver_init.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -22,6 +22,7 @@
 namespace blink {
 
 class RTCPeerConnection;
+class RTCRtpHeaderExtensionCapability;
 class RTCRtpReceiver;
 class RTCRtpSender;
 
@@ -46,6 +47,7 @@ class RTCRtpTransceiver final : public ScriptWrappable {
   String direction() const;
   void setDirection(String direction, ExceptionState&);
   String currentDirection() const;
+  void stop(ExceptionState&);
   void setCodecPreferences(
       const HeapVector<Member<RTCRtpCodecCapability>>& codecs,
       ExceptionState& exception_state);
@@ -59,13 +61,25 @@ class RTCRtpTransceiver final : public ScriptWrappable {
   // of remote tracks:
   // https://w3c.github.io/webrtc-pc/#set-the-rtcsessiondescription.
   void UpdateMembers();
-  void OnPeerConnectionClosed();
+  // Stopped transceivers are removed, but we don't have access to removed
+  // transceivers' internal states. This method updates the states to reflect
+  // being stopped.
+  void OnTransceiverStopped();
 
   RTCRtpTransceiverPlatform* platform_transceiver() const;
-  base::Optional<webrtc::RtpTransceiverDirection> fired_direction() const;
+  absl::optional<webrtc::RtpTransceiverDirection> fired_direction() const;
   bool DirectionHasSend() const;
   bool DirectionHasRecv() const;
   bool FiredDirectionHasRecv() const;
+
+  void setOfferedRtpHeaderExtensions(
+      const HeapVector<Member<RTCRtpHeaderExtensionCapability>>&
+          header_extensions_to_offer,
+      ExceptionState& exception_state);
+  HeapVector<Member<RTCRtpHeaderExtensionCapability>> headerExtensionsToOffer()
+      const;
+  HeapVector<Member<RTCRtpHeaderExtensionCapability>>
+  headerExtensionsNegotiated() const;
 
   void Trace(Visitor*) const override;
 
@@ -74,10 +88,10 @@ class RTCRtpTransceiver final : public ScriptWrappable {
   std::unique_ptr<RTCRtpTransceiverPlatform> platform_transceiver_;
   Member<RTCRtpSender> sender_;
   Member<RTCRtpReceiver> receiver_;
-  bool stopped_;
+  String mid_;
   String direction_;
   String current_direction_;
-  base::Optional<webrtc::RtpTransceiverDirection> fired_direction_;
+  absl::optional<webrtc::RtpTransceiverDirection> fired_direction_;
 };
 
 }  // namespace blink

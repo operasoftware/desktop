@@ -6,6 +6,7 @@
 
 #include <memory>
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 
 namespace blink {
@@ -13,7 +14,7 @@ namespace blink {
 static const WTF::TextEncoding DefaultEncodingForUrlAndContentType(
     const char* url,
     const char* content_type) {
-  auto page_holder = std::make_unique<DummyPageHolder>(IntSize(0, 0));
+  auto page_holder = std::make_unique<DummyPageHolder>(gfx::Size(0, 0));
   Document& document = page_holder->GetDocument();
   document.SetURL(KURL(NullURL(), url));
   return BuildTextResourceDecoderFor(&document, content_type, g_null_atom)

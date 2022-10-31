@@ -6,12 +6,13 @@
 
 #include <memory>
 
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/public/platform/web_screen_info.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/screen.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
@@ -24,11 +25,12 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
+#include "ui/display/screen_info.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/mojo/mojo_helper.h"
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 #undef atan2  // to use std::atan2 instead of wtf_atan2
 #undef fmod   // to use std::fmod instead of wtf_fmod
@@ -98,7 +100,8 @@ void MediaControlsOrientationLockDelegate::MaybeLockOrientation() {
     return;
 
   locked_orientation_ = ComputeOrientationLock();
-  DCHECK_NE(locked_orientation_, kWebScreenOrientationLockDefault);
+  DCHECK_NE(locked_orientation_,
+            device::mojom::blink::ScreenOrientationLockType::DEFAULT);
   controller->lock(locked_orientation_,
                    std::make_unique<DummyScreenOrientationCallback>());
 
@@ -108,9 +111,10 @@ void MediaControlsOrientationLockDelegate::MaybeLockOrientation() {
 void MediaControlsOrientationLockDelegate::ChangeLockToAnyOrientation() {
   // Must already be locked.
   DCHECK_EQ(state_, State::kMaybeLockedFullscreen);
-  DCHECK_NE(locked_orientation_, kWebScreenOrientationLockDefault);
+  DCHECK_NE(locked_orientation_,
+            device::mojom::blink::ScreenOrientationLockType::DEFAULT);
 
-  locked_orientation_ = kWebScreenOrientationLockAny;
+  locked_orientation_ = device::mojom::blink::ScreenOrientationLockType::ANY;
 
   // The document could have been detached from the frame.
   if (LocalDOMWindow* window = GetDocument().domWindow()) {
@@ -125,7 +129,8 @@ void MediaControlsOrientationLockDelegate::MaybeUnlockOrientation() {
 
   state_ = State::kPendingFullscreen;
 
-  if (locked_orientation_ == kWebScreenOrientationLockDefault /* unlocked */)
+  if (locked_orientation_ ==
+      device::mojom::blink::ScreenOrientationLockType::DEFAULT /* unlocked */)
     return;
 
   monitor_.reset();  // Cancel any GotIsAutoRotateEnabledByUser Mojo callback.
@@ -133,14 +138,16 @@ void MediaControlsOrientationLockDelegate::MaybeUnlockOrientation() {
   dom_window->removeEventListener(event_type_names::kDeviceorientation, this,
                                   false);
   ScreenOrientationController::From(*dom_window)->unlock();
-  locked_orientation_ = kWebScreenOrientationLockDefault /* unlocked */;
+  locked_orientation_ =
+      device::mojom::blink::ScreenOrientationLockType::DEFAULT /* unlocked */;
 
   lock_to_any_task_.Cancel();
 }
 
 void MediaControlsOrientationLockDelegate::MaybeListenToDeviceOrientation() {
   DCHECK_EQ(state_, State::kMaybeLockedFullscreen);
-  DCHECK_NE(locked_orientation_, kWebScreenOrientationLockDefault);
+  DCHECK_NE(locked_orientation_,
+            device::mojom::blink::ScreenOrientationLockType::DEFAULT);
 
   // If the rotate-to-fullscreen feature is also enabled, then start listening
   // to deviceorientation events so the orientation can be unlocked once the
@@ -152,14 +159,14 @@ void MediaControlsOrientationLockDelegate::MaybeListenToDeviceOrientation() {
   if (!RuntimeEnabledFeatures::VideoRotateToFullscreenEnabled())
     return;
 
-  if (is_auto_rotate_enabled_by_user_override_for_testing_ != base::nullopt) {
+  if (is_auto_rotate_enabled_by_user_override_for_testing_ != absl::nullopt) {
     GotIsAutoRotateEnabledByUser(
         is_auto_rotate_enabled_by_user_override_for_testing_.value());
     return;
   }
 
 // Check whether the user locked screen orientation at the OS level.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   DCHECK(!monitor_.is_bound());
   Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
       monitor_.BindNewPipeAndPassReceiver(
@@ -169,7 +176,7 @@ void MediaControlsOrientationLockDelegate::MaybeListenToDeviceOrientation() {
       WrapPersistent(this)));
 #else
   GotIsAutoRotateEnabledByUser(true);  // Assume always enabled on other OSes.
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 }
 
 void MediaControlsOrientationLockDelegate::GotIsAutoRotateEnabledByUser(
@@ -241,7 +248,7 @@ void MediaControlsOrientationLockDelegate::Invoke(
   NOTREACHED();
 }
 
-WebScreenOrientationLockType
+device::mojom::blink::ScreenOrientationLockType
 MediaControlsOrientationLockDelegate::ComputeOrientationLock() const {
   DCHECK(VideoElement().getReadyState() != HTMLMediaElement::kHaveNothing);
 
@@ -249,33 +256,34 @@ MediaControlsOrientationLockDelegate::ComputeOrientationLock() const {
   const unsigned height = VideoElement().videoHeight();
 
   if (width > height)
-    return kWebScreenOrientationLockLandscape;
+    return device::mojom::blink::ScreenOrientationLockType::LANDSCAPE;
 
   if (height > width)
-    return kWebScreenOrientationLockPortrait;
+    return device::mojom::blink::ScreenOrientationLockType::PORTRAIT;
 
   // For square videos, try to lock to the current screen orientation for
-  // consistency. Use WebScreenOrientationLockLandscape as a fallback value.
+  // consistency. Use device::mojom::blink::ScreenOrientationLockType::LANDSCAPE
+  // as a fallback value.
   // TODO(mlamouri): we could improve this by having direct access to
   // `window.screen.orientation.type`.
   LocalFrame* frame = GetDocument().GetFrame();
   if (!frame)
-    return kWebScreenOrientationLockLandscape;
+    return device::mojom::blink::ScreenOrientationLockType::LANDSCAPE;
 
   ChromeClient& chrome_client = frame->GetChromeClient();
   switch (chrome_client.GetScreenInfo(*frame).orientation_type) {
-    case kWebScreenOrientationPortraitPrimary:
-    case kWebScreenOrientationPortraitSecondary:
-      return kWebScreenOrientationLockPortrait;
-    case kWebScreenOrientationLandscapePrimary:
-    case kWebScreenOrientationLandscapeSecondary:
-      return kWebScreenOrientationLockLandscape;
-    case kWebScreenOrientationUndefined:
-      return kWebScreenOrientationLockLandscape;
+    case display::mojom::blink::ScreenOrientation::kPortraitPrimary:
+    case display::mojom::blink::ScreenOrientation::kPortraitSecondary:
+      return device::mojom::blink::ScreenOrientationLockType::PORTRAIT;
+    case display::mojom::blink::ScreenOrientation::kLandscapePrimary:
+    case display::mojom::blink::ScreenOrientation::kLandscapeSecondary:
+      return device::mojom::blink::ScreenOrientationLockType::LANDSCAPE;
+    case display::mojom::blink::ScreenOrientation::kUndefined:
+      return device::mojom::blink::ScreenOrientationLockType::LANDSCAPE;
   }
 
   NOTREACHED();
-  return kWebScreenOrientationLockLandscape;
+  return device::mojom::blink::ScreenOrientationLockType::LANDSCAPE;
 }
 
 MediaControlsOrientationLockDelegate::DeviceOrientationType
@@ -294,8 +302,8 @@ MediaControlsOrientationLockDelegate::ComputeDeviceOrientation(
   // onto the device's screen in its natural orientation. (x,y) will lie within
   // the unit circle centered on (0,0), e.g. if the top of the device is
   // pointing upwards (x,y) will be (0,-1).
-  double x = -std::sin(deg2rad(gamma)) * std::cos(deg2rad(beta));
-  double y = -std::sin(deg2rad(beta));
+  double x = -std::sin(Deg2rad(gamma)) * std::cos(Deg2rad(beta));
+  double y = -std::sin(Deg2rad(beta));
 
   // Convert (x,y) to polar coordinates: 0 <= device_orientation_angle < 360 and
   // 0 <= r <= 1, such that device_orientation_angle is the clockwise angle in
@@ -309,13 +317,13 @@ MediaControlsOrientationLockDelegate::ComputeDeviceOrientation(
   // so we pass y=x and x=-y to atan2 to rotate by 90 degrees.
   double r = std::sqrt(x * x + y * y);
   double device_orientation_angle =
-      std::fmod(rad2deg(std::atan2(/* y= */ x, /* x= */ -y)) + 360, 360);
+      std::fmod(Rad2deg(std::atan2(/* y= */ x, /* x= */ -y)) + 360, 360);
 
   // If angle between device's screen and the horizontal plane is less than
   // kMinElevationAngle (chosen to approximately match Android's behavior), then
   // device is too flat to reliably determine orientation.
   constexpr double kMinElevationAngle = 24;  // degrees from horizontal plane
-  if (r < std::sin(deg2rad(kMinElevationAngle)))
+  if (r < std::sin(Deg2rad(kMinElevationAngle)))
     return DeviceOrientationType::kFlat;
 
   // device_orientation_angle snapped to nearest multiple of 90.
@@ -362,14 +370,17 @@ void MediaControlsOrientationLockDelegate::
     MaybeLockToAnyIfDeviceOrientationMatchesVideo(
         DeviceOrientationEvent* event) {
   DCHECK_EQ(state_, State::kMaybeLockedFullscreen);
-  DCHECK(locked_orientation_ == kWebScreenOrientationLockPortrait ||
-         locked_orientation_ == kWebScreenOrientationLockLandscape);
+  DCHECK(locked_orientation_ ==
+             device::mojom::blink::ScreenOrientationLockType::PORTRAIT ||
+         locked_orientation_ ==
+             device::mojom::blink::ScreenOrientationLockType::LANDSCAPE);
 
   DeviceOrientationType device_orientation =
       ComputeDeviceOrientation(event->Orientation());
 
   DeviceOrientationType video_orientation =
-      locked_orientation_ == kWebScreenOrientationLockPortrait
+      locked_orientation_ ==
+              device::mojom::blink::ScreenOrientationLockType::PORTRAIT
           ? DeviceOrientationType::kPortrait
           : DeviceOrientationType::kLandscape;
 
@@ -396,16 +407,19 @@ void MediaControlsOrientationLockDelegate::
       // Conceptually, this callback will unlock the screen orientation,
       // so that the user can now rotate their device to the opposite
       // orientation in order to exit fullscreen. But unlocking
-      // corresponds to kWebScreenOrientationLockDefault, which is
-      // sometimes a specific orientation. For example in a webapp added
-      // to homescreen that has set its orientation to portrait using
-      // the manifest, unlocking actually locks to portrait, which would
-      // immediately exit fullscreen if we're watching a landscape video
-      // in landscape orientation! So instead, this locks to
-      // kWebScreenOrientationLockAny which will auto-rotate according
-      // to the accelerometer, and only exit fullscreen once the user
-      // actually rotates their device. We only fully unlock to
-      // kWebScreenOrientationLockDefault once fullscreen is exited.
+      // corresponds to
+      // device::mojom::blink::ScreenOrientationLockType::DEFAULT, which is
+      // sometimes a specific orientation. For example in a webapp added to
+      // homescreen that has set its orientation to portrait using the manifest,
+      // unlocking actually locks to portrait, which would immediately exit
+      // fullscreen if we're watching a landscape video in landscape
+      // orientation! So instead, this locks to
+      // device::mojom::blink::ScreenOrientationLockType::ANY which will
+      // auto-rotate according to the accelerometer, and only exit
+      // fullscreen once the user actually rotates their device. We only
+      // fully unlock to
+      // device::mojom::blink::ScreenOrientationLockType::DEFAULT once
+      // fullscreen is exited.
       WTF::Bind(
           &MediaControlsOrientationLockDelegate::ChangeLockToAnyOrientation,
           WrapPersistent(this)),

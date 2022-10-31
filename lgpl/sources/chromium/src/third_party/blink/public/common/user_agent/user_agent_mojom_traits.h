@@ -11,7 +11,7 @@
 
 #include "mojo/public/cpp/bindings/struct_traits.h"
 #include "third_party/blink/public/common/common_export.h"
-#include "third_party/blink/public/mojom/user_agent/user_agent_metadata.mojom.h"
+#include "third_party/blink/public/mojom/user_agent/user_agent_metadata.mojom-shared.h"
 
 namespace mojo {
 
@@ -23,9 +23,9 @@ struct BLINK_COMMON_EXPORT
     return data.brand;
   }
 
-  static const std::string& major_version(
+  static const std::string& version(
       const ::blink::UserAgentBrandVersion& data) {
-    return data.major_version;
+    return data.version;
   }
 
   static bool Read(blink::mojom::UserAgentBrandVersionDataView data,
@@ -38,6 +38,11 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::UserAgentMetadataDataView,
   static const blink::UserAgentBrandList& brand_version_list(
       const ::blink::UserAgentMetadata& data) {
     return data.brand_version_list;
+  }
+
+  static const blink::UserAgentBrandList& brand_full_version_list(
+      const ::blink::UserAgentMetadata& data) {
+    return data.brand_full_version_list;
   }
 
   static const std::string& full_version(
@@ -63,6 +68,14 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::UserAgentMetadataDataView,
     return data.mobile;
   }
 
+  static const std::string& bitness(const ::blink::UserAgentMetadata& data) {
+    return data.bitness;
+  }
+
+  static bool wow64(const ::blink::UserAgentMetadata& data) {
+    return data.wow64;
+  }
+
   static bool Read(blink::mojom::UserAgentMetadataDataView data,
                    ::blink::UserAgentMetadata* out);
 };
@@ -75,7 +88,7 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::UserAgentOverrideDataView,
     return data.ua_string_override;
   }
 
-  static const base::Optional<::blink::UserAgentMetadata> ua_metadata_override(
+  static const absl::optional<::blink::UserAgentMetadata>& ua_metadata_override(
       const ::blink::UserAgentOverride& data) {
     return data.ua_metadata_override;
   }

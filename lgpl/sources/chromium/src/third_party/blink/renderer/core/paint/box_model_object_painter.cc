@@ -20,11 +20,11 @@ namespace blink {
 
 namespace {
 
-Node* GeneratingNodeForObject(const LayoutBoxModelObject& box_model) {
+Node* GetNode(const LayoutBoxModelObject& box_model) {
   Node* node = nullptr;
   const LayoutObject* layout_object = &box_model;
   for (; layout_object && !node; layout_object = layout_object->Parent()) {
-    node = layout_object->GeneratingNode();
+    node = layout_object->GetNode();
   }
   return node;
 }
@@ -51,19 +51,18 @@ LayoutSize LogicalOffsetOnLine(const InlineFlowBox& flow_box) {
 
 BoxModelObjectPainter::BoxModelObjectPainter(const LayoutBoxModelObject& box,
                                              const InlineFlowBox* flow_box)
-    : BoxPainterBase(&box.GetDocument(),
-                     box.StyleRef(),
-                     GeneratingNodeForObject(box)),
+    : BoxPainterBase(&box.GetDocument(), box.StyleRef(), GetNode(box)),
       box_model_(box),
       flow_box_(flow_box) {}
 
 void BoxModelObjectPainter::PaintTextClipMask(
-    GraphicsContext& context,
-    const IntRect& mask_rect,
+    const PaintInfo& paint_info,
+    const gfx::Rect& mask_rect,
     const PhysicalOffset& paint_offset,
     bool object_has_multiple_boxes) {
-  PaintInfo paint_info(context, mask_rect, PaintPhase::kTextClip,
-                       kGlobalPaintNormalPhase, 0);
+  PaintInfo mask_paint_info(paint_info.context, CullRect(mask_rect),
+                            PaintPhase::kTextClip);
+  mask_paint_info.SetFragmentID(paint_info.FragmentID());
   if (flow_box_) {
     LayoutSize local_offset = ToLayoutSize(flow_box_->Location());
     if (object_has_multiple_boxes &&
@@ -71,11 +70,14 @@ void BoxModelObjectPainter::PaintTextClipMask(
             EBoxDecorationBreak::kSlice) {
       local_offset -= LogicalOffsetOnLine(*flow_box_);
     }
+    // TODO(layout-ng): This looks incorrect in flipped writing mode.
+    PhysicalOffset physical_local_offset(local_offset.Width(),
+                                         local_offset.Height());
     const RootInlineBox& root = flow_box_->Root();
-    flow_box_->Paint(paint_info, paint_offset.ToLayoutPoint() - local_offset,
+    flow_box_->Paint(mask_paint_info, paint_offset - physical_local_offset,
                      root.LineTop(), root.LineBottom());
   } else if (auto* layout_block = DynamicTo<LayoutBlock>(box_model_)) {
-    layout_block->PaintObject(paint_info, paint_offset);
+    layout_block->PaintObject(mask_paint_info, paint_offset);
   } else {
     // We should go through the above path for LayoutInlines.
     DCHECK(!box_model_.IsLayoutInline());
@@ -90,21 +92,20 @@ PhysicalRect BoxModelObjectPainter::AdjustRectForScrolledContent(
     const PhysicalRect& rect) {
   if (!info.is_clipped_with_local_scrolling)
     return rect;
-
-  const auto& this_box = ToLayoutBox(box_model_);
-  if (BoxDecorationData::IsPaintingScrollingBackground(paint_info, this_box))
+  if (paint_info.IsPaintingBackgroundInContentsSpace())
     return rect;
 
-  PhysicalRect scrolled_paint_rect = rect;
   GraphicsContext& context = paint_info.context;
   // Clip to the overflow area.
   // TODO(chrishtr): this should be pixel-snapped.
-  context.Clip(FloatRect(this_box.OverflowClipRect(rect.offset)));
+  const auto& this_box = To<LayoutBox>(box_model_);
+  context.Clip(gfx::RectF(this_box.OverflowClipRect(rect.offset)));
 
   // Adjust the paint rect to reflect a scrolled content box with borders at
   // the ends.
-  PhysicalOffset offset(this_box.PixelSnappedScrolledContentOffset());
-  scrolled_paint_rect.Move(-offset);
+  PhysicalRect scrolled_paint_rect = rect;
+  scrolled_paint_rect.offset -=
+      PhysicalOffset(this_box.PixelSnappedScrolledContentOffset());
   LayoutRectOutsets border = AdjustedBorderOutsets(info);
   scrolled_paint_rect.SetWidth(border.Left() + this_box.ScrollWidth() +
                                border.Right());
@@ -125,23 +126,21 @@ BoxPainterBase::FillLayerInfo BoxModelObjectPainter::GetFillLayerInfo(
     const Color& color,
     const FillLayer& bg_layer,
     BackgroundBleedAvoidance bleed_avoidance,
-    bool is_painting_scrolling_background) const {
+    bool is_painting_background_in_contents_space) const {
+  PhysicalBoxSides sides_to_include;
+  if (flow_box_)
+    sides_to_include = flow_box_->SidesToInclude();
+  RespectImageOrientationEnum respect_orientation =
+      LayoutObject::ShouldRespectImageOrientation(&box_model_);
+  if (auto* style_image = bg_layer.GetImage()) {
+    respect_orientation =
+        style_image->ForceOrientationIfNecessary(respect_orientation);
+  }
   return BoxPainterBase::FillLayerInfo(
       box_model_.GetDocument(), box_model_.StyleRef(),
-      box_model_.HasOverflowClip(), color, bg_layer, bleed_avoidance,
-      LayoutObject::ShouldRespectImageOrientation(&box_model_),
-      (flow_box_ ? flow_box_->IncludeLogicalLeftEdge() : true),
-      (flow_box_ ? flow_box_->IncludeLogicalRightEdge() : true),
-      box_model_.IsLayoutInline(), is_painting_scrolling_background);
-}
-
-bool BoxModelObjectPainter::IsPaintingScrollingBackground(
-    const PaintInfo& paint_info) const {
-  if (!box_model_.IsBox())
-    return false;
-
-  const auto& this_box = ToLayoutBox(box_model_);
-  return BoxDecorationData::IsPaintingScrollingBackground(paint_info, this_box);
+      box_model_.IsScrollContainer(), color, bg_layer, bleed_avoidance,
+      respect_orientation, sides_to_include, box_model_.IsLayoutInline(),
+      is_painting_background_in_contents_space);
 }
 
 }  // namespace blink

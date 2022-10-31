@@ -1,10 +1,14 @@
 #-index-name: Mandarin, mainland China, without tones
 #-display-name: Chinese braille without tones, for simplified Chinese characters
 
-#+locale:cmn-Hans-CN
+#+language:cmn-Hans
+#+region:cmn-CN
 #+type:literary
 #+system:cmn-traditional
 #+variant:no-tone
+# Marked as "direction:forward" by Bue Vester-Andersen
+# as tests only run forward.
+#+direction:forward
 
 # We corresponded to Braille and the simplify Chinese characters
 # referring to the rules of a book named the website linking

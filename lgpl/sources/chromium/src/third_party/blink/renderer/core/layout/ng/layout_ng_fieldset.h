@@ -14,15 +14,43 @@ class CORE_EXPORT LayoutNGFieldset final : public LayoutNGBlockFlow {
  public:
   explicit LayoutNGFieldset(Element*);
 
-  const char* GetName() const override { return "LayoutNGFieldset"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutNGFieldset";
+  }
 
   void AddChild(LayoutObject* new_child,
                 LayoutObject* before_child = nullptr) override;
 
-  bool CreatesNewFormattingContext() const final { return true; }
+  bool CreatesNewFormattingContext() const final {
+    NOT_DESTROYED();
+    return true;
+  }
+
+  LayoutBlock* FindAnonymousFieldsetContentBox() const;
 
  protected:
   bool IsOfType(LayoutObjectType) const override;
+  void InsertedIntoTree() override;
+  void UpdateAnonymousChildStyle(const LayoutObject* child,
+                                 ComputedStyle& child_style) const override;
+  void InvalidatePaint(const PaintInvalidatorContext& context) const final;
+  bool BackgroundIsKnownToBeOpaqueInRect(const PhysicalRect&) const override;
+
+  bool RespectsCSSOverflow() const override {
+    NOT_DESTROYED();
+    return false;
+  }
+  // Override to forward to the anonymous fieldset content box.
+  LayoutUnit ScrollWidth() const override;
+  LayoutUnit ScrollHeight() const override;
+};
+
+template <>
+struct DowncastTraits<LayoutNGFieldset> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsLayoutNGFieldset();
+  }
 };
 
 }  // namespace blink

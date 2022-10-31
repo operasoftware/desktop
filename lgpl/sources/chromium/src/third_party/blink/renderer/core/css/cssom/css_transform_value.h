@@ -5,13 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_CSS_TRANSFORM_VALUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_CSS_TRANSFORM_VALUE_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/cssom/css_style_value.h"
 #include "third_party/blink/renderer/core/css/cssom/css_transform_component.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 
 namespace blink {
 
@@ -34,6 +33,8 @@ class CORE_EXPORT CSSTransformValue final : public CSSStyleValue {
   CSSTransformValue(
       const HeapVector<Member<CSSTransformComponent>>& transform_components)
       : CSSStyleValue(), transform_components_(transform_components) {}
+  CSSTransformValue(const CSSTransformValue&) = delete;
+  CSSTransformValue& operator=(const CSSTransformValue&) = delete;
 
   bool is2D() const;
 
@@ -60,7 +61,6 @@ class CORE_EXPORT CSSTransformValue final : public CSSStyleValue {
 
  private:
   HeapVector<Member<CSSTransformComponent>> transform_components_;
-  DISALLOW_COPY_AND_ASSIGN(CSSTransformValue);
 };
 
 }  // namespace blink

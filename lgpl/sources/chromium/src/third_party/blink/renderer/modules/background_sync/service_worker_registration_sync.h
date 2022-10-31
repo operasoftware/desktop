@@ -5,9 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_BACKGROUND_SYNC_SERVICE_WORKER_REGISTRATION_SYNC_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_BACKGROUND_SYNC_SERVICE_WORKER_REGISTRATION_SYNC_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker_registration.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
@@ -19,8 +18,6 @@ class ServiceWorkerRegistration;
 class ServiceWorkerRegistrationSync final
     : public GarbageCollected<ServiceWorkerRegistrationSync>,
       public Supplement<ServiceWorkerRegistration> {
-  USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerRegistrationSync);
-
  public:
   static const char kSupplementName[];
 
@@ -33,6 +30,11 @@ class ServiceWorkerRegistrationSync final
 
   explicit ServiceWorkerRegistrationSync(
       ServiceWorkerRegistration* registration);
+
+  ServiceWorkerRegistrationSync(const ServiceWorkerRegistrationSync&) = delete;
+  ServiceWorkerRegistrationSync& operator=(
+      const ServiceWorkerRegistrationSync&) = delete;
+
   virtual ~ServiceWorkerRegistrationSync();
 
   PeriodicSyncManager* periodicSync();
@@ -41,11 +43,8 @@ class ServiceWorkerRegistrationSync final
   void Trace(Visitor*) const override;
 
  private:
-  Member<ServiceWorkerRegistration> registration_;
   Member<SyncManager> sync_manager_;
   Member<PeriodicSyncManager> periodic_sync_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerRegistrationSync);
 };
 
 }  // namespace blink

@@ -8,7 +8,6 @@
 #include <stdint.h>
 #include <memory>
 
-#include "base/macros.h"
 #include "third_party/blink/public/mojom/manifest/manifest.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/push_messaging/push_messaging.mojom-blink.h"
 #include "third_party/blink/renderer/modules/push_messaging/push_subscription_callbacks.h"
@@ -29,12 +28,14 @@ class ServiceWorkerRegistration;
 
 class PushMessagingClient final : public GarbageCollected<PushMessagingClient>,
                                   public Supplement<LocalDOMWindow> {
-  USING_GARBAGE_COLLECTED_MIXIN(PushMessagingClient);
-
  public:
   static const char kSupplementName[];
 
   explicit PushMessagingClient(LocalDOMWindow&);
+
+  PushMessagingClient(const PushMessagingClient&) = delete;
+  PushMessagingClient& operator=(const PushMessagingClient&) = delete;
+
   ~PushMessagingClient() = default;
 
   static PushMessagingClient* From(LocalDOMWindow&);
@@ -67,11 +68,7 @@ class PushMessagingClient final : public GarbageCollected<PushMessagingClient>,
                     mojom::blink::PushRegistrationStatus status,
                     mojom::blink::PushSubscriptionPtr subscription);
 
-  HeapMojoRemote<mojom::blink::PushMessaging,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      push_messaging_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(PushMessagingClient);
+  HeapMojoRemote<mojom::blink::PushMessaging> push_messaging_manager_;
 };
 
 }  // namespace blink

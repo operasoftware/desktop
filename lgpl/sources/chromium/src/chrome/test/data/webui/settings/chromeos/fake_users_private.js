@@ -6,28 +6,31 @@
  * @fileoverview Fake implementation of chrome.usersPrivate
  * for testing.
  */
-cr.define('settings', function() {
-  /**
-   * Fake of the chrome.usersPrivate API. Only methods that are called
-   * during testing have been implemented.
-   *
-   * @constructor
-   * @implements {UsersPrivate}
-   */
-  function FakeUsersPrivate() {
-  }
+/**
+ * Fake of the chrome.usersPrivate API. Only methods that are called
+ * during testing have been implemented.
+ *
+ * @constructor
+ * @implements {UsersPrivate}
+ */
+export function FakeUsersPrivate() {}
 
-  FakeUsersPrivate.prototype = {
-    users: [],
+FakeUsersPrivate.prototype = {
+  users: [],
 
-    addWhitelistedUser: function(user) {
-      this.users.push(user);
-    },
+  addUser: function(user) {
+    this.users.push(user);
+  },
 
-    isWhitelistedUser: function(user, callback) {
-      callback(this.users.includes(user));
-    },
-  };
+  getUsers: function(callback) {
+    return callback(this.users);
+  },
 
-  return {FakeUsersPrivate: FakeUsersPrivate};
-});
+  removeUser: function(email, callback) {
+    this.users = this.users.filter(user => user.email !== email);
+  },
+
+  isUserInList: function(user, callback) {
+    callback(this.users.includes(user));
+  },
+};

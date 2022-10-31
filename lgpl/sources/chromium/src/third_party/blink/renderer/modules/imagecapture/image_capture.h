@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_IMAGECAPTURE_IMAGE_CAPTURE_H_
 
 #include <memory>
+
 #include "media/capture/mojom/image_capture.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
@@ -18,6 +19,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
@@ -37,7 +39,6 @@ class MODULES_EXPORT ImageCapture final
       public ActiveScriptWrappable<ImageCapture>,
       public ExecutionContextLifecycleObserver,
       public mojom::blink::PermissionObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(ImageCapture);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -45,9 +46,12 @@ class MODULES_EXPORT ImageCapture final
                               MediaStreamTrack*,
                               ExceptionState&);
 
+  // |initialized_callback| is called when settings and capabilities are
+  // retrieved.
   ImageCapture(ExecutionContext*,
                MediaStreamTrack*,
-               bool pan_tilt_zoom_allowed);
+               bool pan_tilt_zoom_allowed,
+               base::OnceClosure initialized_callback);
   ~ImageCapture() override;
 
   // EventTarget implementation.
@@ -83,6 +87,10 @@ class MODULES_EXPORT ImageCapture final
 
   bool HasPanTiltZoomPermissionGranted() const;
 
+  // Called by MediaStreamTrack::clone() to get a clone with same capabilities,
+  // settings, and constraints.
+  ImageCapture* Clone() const;
+
   void Trace(Visitor*) const override;
 
  private:
@@ -102,18 +110,35 @@ class MODULES_EXPORT ImageCapture final
                         bool result);
   void OnMojoTakePhoto(ScriptPromiseResolver*, media::mojom::blink::BlobPtr);
 
-  void UpdateMediaTrackCapabilities(media::mojom::blink::PhotoStatePtr);
+  // If getUserMedia contains either pan, tilt, or zoom constraints, the
+  // corresponding settings will be set when image capture is created.
+  void SetPanTiltZoomSettingsFromTrack(
+      base::OnceClosure callback,
+      media::mojom::blink::PhotoStatePtr photo_state);
+  // Update local track settings and capabilities once pan, tilt, and zoom
+  // settings have been set. |done_callback| will be called when settings and
+  // capabilities are retrieved.
+  void OnSetPanTiltZoomSettingsFromTrack(base::OnceClosure done_callback,
+                                         bool result);
+  // Update local track settings and capabilities and call
+  // |initialized_callback| to indicate settings and capabilities have been
+  // retrieved.
+  void UpdateMediaTrackCapabilities(
+      base::OnceClosure initialized_callback,
+      media::mojom::blink::PhotoStatePtr photo_state);
+
   void OnServiceConnectionError();
 
   void ResolveWithNothing(ScriptPromiseResolver*);
   void ResolveWithPhotoSettings(ScriptPromiseResolver*);
   void ResolveWithPhotoCapabilities(ScriptPromiseResolver*);
 
+  // Returns true if page is visible. Otherwise returns false.
+  bool IsPageVisible();
+
   Member<MediaStreamTrack> stream_track_;
   std::unique_ptr<ImageCaptureFrameGrabber> frame_grabber_;
-  HeapMojoRemote<media::mojom::blink::ImageCapture,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      service_;
+  HeapMojoRemote<media::mojom::blink::ImageCapture> service_;
 
   // Whether the user has granted permission for the user to control camera PTZ.
   mojom::blink::PermissionStatus pan_tilt_zoom_permission_;

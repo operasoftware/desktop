@@ -9,6 +9,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_fullscreen_options.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
 #include "third_party/blink/renderer/core/html/html_div_element.h"
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
@@ -24,7 +25,7 @@ class FullscreenMockChromeClient : public EmptyChromeClient {
   MOCK_METHOD3(EnterFullscreen,
                void(LocalFrame&,
                     const FullscreenOptions*,
-                    bool for_cross_process_descendant));
+                    FullscreenRequestType));
   MOCK_METHOD1(ExitFullscreen, void(LocalFrame&));
 };
 
@@ -37,12 +38,7 @@ class HTMLVideoElementPersistentTest : public PageTestBase {
  protected:
   void SetUp() override {
     chrome_client_ = MakeGarbageCollected<FullscreenMockChromeClient>();
-
-    Page::PageClients clients;
-    FillWithEmptyClients(clients);
-    clients.chrome_client = chrome_client_.Get();
-
-    PageTestBase::SetupPageWithClients(&clients);
+    PageTestBase::SetupPageWithClients(chrome_client_);
     GetDocument().body()->setInnerHTML(
         "<body><div><video></video></div></body>");
   }
@@ -71,7 +67,7 @@ class HTMLVideoElementPersistentTest : public PageTestBase {
   }
 
   void SimulateBecamePersistentVideo(bool value) {
-    VideoElement()->OnBecamePersistentVideo(value);
+    VideoElement()->SetPersistentState(value);
   }
 
  private:
@@ -104,7 +100,8 @@ TEST_F(HTMLVideoElementPersistentTest, videoIsFullscreen) {
   EXPECT_CALL(GetMockChromeClient(), EnterFullscreen(_, _, _)).Times(1);
   EXPECT_CALL(GetMockChromeClient(), ExitFullscreen(_)).Times(0);
 
-  LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
+  LocalFrame::NotifyUserActivation(
+      GetDocument().GetFrame(), mojom::UserActivationNotificationType::kTest);
   Fullscreen::RequestFullscreen(*VideoElement());
   SimulateDidEnterFullscreen();
   EXPECT_EQ(FullscreenElement(), VideoElement());
@@ -130,7 +127,8 @@ TEST_F(HTMLVideoElementPersistentTest, divIsFullscreen) {
   EXPECT_CALL(GetMockChromeClient(), EnterFullscreen(_, _, _)).Times(1);
   EXPECT_CALL(GetMockChromeClient(), ExitFullscreen(_)).Times(0);
 
-  LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
+  LocalFrame::NotifyUserActivation(
+      GetDocument().GetFrame(), mojom::UserActivationNotificationType::kTest);
   Fullscreen::RequestFullscreen(*DivElement());
   SimulateDidEnterFullscreen();
   EXPECT_EQ(FullscreenElement(), DivElement());
@@ -163,7 +161,8 @@ TEST_F(HTMLVideoElementPersistentTest, exitFullscreenBeforePersistence) {
   EXPECT_CALL(GetMockChromeClient(), EnterFullscreen(_, _, _)).Times(1);
   EXPECT_CALL(GetMockChromeClient(), ExitFullscreen(_)).Times(1);
 
-  LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
+  LocalFrame::NotifyUserActivation(
+      GetDocument().GetFrame(), mojom::UserActivationNotificationType::kTest);
   Fullscreen::RequestFullscreen(*DivElement());
   SimulateDidEnterFullscreen();
   EXPECT_EQ(FullscreenElement(), DivElement());
@@ -208,7 +207,8 @@ TEST_F(HTMLVideoElementPersistentTest, internalPseudoClassOnlyUAStyleSheet) {
   EXPECT_TRUE(exception_state.HadException());
   exception_state.ClearException();
 
-  LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
+  LocalFrame::NotifyUserActivation(
+      GetDocument().GetFrame(), mojom::UserActivationNotificationType::kTest);
   Fullscreen::RequestFullscreen(*DivElement());
   SimulateDidEnterFullscreen();
   SimulateBecamePersistentVideo(true);
@@ -240,7 +240,8 @@ TEST_F(HTMLVideoElementPersistentTest, removeContainerWhilePersisting) {
   EXPECT_CALL(GetMockChromeClient(), EnterFullscreen(_, _, _)).Times(1);
   EXPECT_CALL(GetMockChromeClient(), ExitFullscreen(_)).Times(1);
 
-  LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
+  LocalFrame::NotifyUserActivation(
+      GetDocument().GetFrame(), mojom::UserActivationNotificationType::kTest);
   Fullscreen::RequestFullscreen(*DivElement());
   SimulateDidEnterFullscreen();
   EXPECT_EQ(FullscreenElement(), DivElement());
@@ -261,7 +262,8 @@ TEST_F(HTMLVideoElementPersistentTest, removeVideoWhilePersisting) {
   EXPECT_CALL(GetMockChromeClient(), EnterFullscreen(_, _, _)).Times(1);
   EXPECT_CALL(GetMockChromeClient(), ExitFullscreen(_)).Times(0);
 
-  LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
+  LocalFrame::NotifyUserActivation(
+      GetDocument().GetFrame(), mojom::UserActivationNotificationType::kTest);
   Fullscreen::RequestFullscreen(*DivElement());
   SimulateDidEnterFullscreen();
   EXPECT_EQ(FullscreenElement(), DivElement());
@@ -287,7 +289,8 @@ TEST_F(HTMLVideoElementPersistentTest, removeVideoWithLayerWhilePersisting) {
   EXPECT_CALL(GetMockChromeClient(), EnterFullscreen(_, _, _)).Times(1);
   EXPECT_CALL(GetMockChromeClient(), ExitFullscreen(_)).Times(0);
 
-  LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
+  LocalFrame::NotifyUserActivation(
+      GetDocument().GetFrame(), mojom::UserActivationNotificationType::kTest);
   Fullscreen::RequestFullscreen(*DivElement());
   SimulateDidEnterFullscreen();
   EXPECT_EQ(FullscreenElement(), DivElement());
@@ -308,7 +311,8 @@ TEST_F(HTMLVideoElementPersistentTest, containsPersistentVideoScopedToFS) {
   EXPECT_CALL(GetMockChromeClient(), EnterFullscreen(_, _, _)).Times(1);
   EXPECT_CALL(GetMockChromeClient(), ExitFullscreen(_)).Times(0);
 
-  LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
+  LocalFrame::NotifyUserActivation(
+      GetDocument().GetFrame(), mojom::UserActivationNotificationType::kTest);
   Fullscreen::RequestFullscreen(*DivElement());
   SimulateDidEnterFullscreen();
   EXPECT_EQ(FullscreenElement(), DivElement());

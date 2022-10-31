@@ -7,6 +7,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
 #include "third_party/blink/renderer/core/streams/readable_stream_default_controller_with_script_scope.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame.h"
+#include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame_delegate.h"
 #include "third_party/blink/renderer/platform/bindings/exception_code.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/webrtc/api/frame_transformer_interface.h"
@@ -52,8 +53,20 @@ void RTCEncodedVideoUnderlyingSource::OnFrameFromSource(
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   // If the source is canceled or there are too many queued frames,
   // drop the new frame.
-  if (!disconnect_callback_ || !Controller() ||
-      Controller()->DesiredSize() <= kMinQueueDesiredSize) {
+  if (!disconnect_callback_ || !GetExecutionContext()) {
+    return;
+  }
+  if (!Controller()) {
+    // TODO(ricea): Maybe avoid dropping frames during transfer?
+    DVLOG(1) << "Dropped frame due to null Controller(). This can happen "
+                "during transfer.";
+    return;
+  }
+  if (Controller()->DesiredSize() <= kMinQueueDesiredSize) {
+    dropped_frames_++;
+    VLOG_IF(2, (dropped_frames_ % 20 == 0))
+        << "Dropped total of " << dropped_frames_
+        << " encoded video frames due to too many already being queued.";
     return;
   }
 
@@ -67,8 +80,7 @@ void RTCEncodedVideoUnderlyingSource::Close() {
   if (disconnect_callback_)
     std::move(disconnect_callback_).Run();
 
-  if (Controller())
-    Controller()->Close();
+  Controller()->Close();
 }
 
 }  // namespace blink

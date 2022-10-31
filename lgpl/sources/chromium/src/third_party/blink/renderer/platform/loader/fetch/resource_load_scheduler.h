@@ -9,10 +9,13 @@
 #include <set>
 
 #include "base/time/time.h"
+#include "base/types/strong_alias.h"
+#include "net/http/http_response_info.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 
@@ -24,6 +27,7 @@ namespace blink {
 
 class DetachableConsoleLogger;
 class DetachableResourceFetcherProperties;
+class LoadingBehaviorObserver;
 
 // Client interface to use the throttling/scheduling functionality that
 // ResourceLoadScheduler provides.
@@ -81,9 +85,13 @@ class PLATFORM_EXPORT ResourceLoadSchedulerClient
 //     and sub frames. When the frame has been background for more than five
 //     minutes, all throttleable resource loading requests are throttled
 //     indefinitely (i.e., threshold is zero in such a circumstance).
+//   - (As of M86): Low-priority requests are delayed behind "important"
+//     requests before some general loading milestone has been reached.
+//     "Important", for the experiment means either kHigh or kMedium priority,
+//     and the milestones being experimented with are first paint and first
+//     contentful paint so far.
 class PLATFORM_EXPORT ResourceLoadScheduler final
-    : public GarbageCollected<ResourceLoadScheduler>,
-      public FrameOrWorkerScheduler::Observer {
+    : public GarbageCollected<ResourceLoadScheduler> {
  public:
   // An option to use in calling Request(). If kCanNotBeStoppedOrThrottled is
   // specified, the request should be granted and Run() should be called
@@ -167,8 +175,11 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
                         ThrottleOptionOverride throttle_option_override,
                         const DetachableResourceFetcherProperties&,
                         FrameOrWorkerScheduler*,
-                        DetachableConsoleLogger& console_logger);
-  ~ResourceLoadScheduler() override;
+                        DetachableConsoleLogger& console_logger,
+                        LoadingBehaviorObserver* loading_behavior_observer);
+  ResourceLoadScheduler(const ResourceLoadScheduler&) = delete;
+  ResourceLoadScheduler& operator=(const ResourceLoadScheduler&) = delete;
+  ~ResourceLoadScheduler();
 
   void Trace(Visitor*) const;
 
@@ -213,8 +224,8 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
   }
   void SetOutstandingLimitForTesting(size_t tight_limit, size_t normal_limit);
 
-  // FrameOrWorkerScheduler::Observer overrides:
-  void OnLifecycleStateChanged(scheduler::SchedulingLifecycleState) override;
+  // FrameOrWorkerScheduler lifecycle observer callback.
+  void OnLifecycleStateChanged(scheduler::SchedulingLifecycleState);
 
   // The caller is the owner of the |clock|. The |clock| must outlive the
   // ResourceLoadScheduler.
@@ -223,6 +234,25 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
   void SetThrottleOptionOverride(
       ThrottleOptionOverride throttle_option_override) {
     throttle_option_override_ = throttle_option_override;
+  }
+
+  // Updates the connection info of the given client. This function may initiate
+  // a new resource loading.
+  void SetConnectionInfo(ClientId id,
+                         net::HttpResponseInfo::ConnectionInfo connection_info);
+
+  // Start accumulating delayable fetches as part of a batch operation. If
+  // multiple batch operations are nested, they will be ref-counted and only
+  // released once all of the batches have ended.
+  void StartBatch();
+
+  // End the collection of delayable fetches as part of a batch operation. This
+  // function may initiate new resources loading.
+  void EndBatch();
+
+  // Sets the HTTP RTT for testing.
+  void SetHttpRttForTesting(base::TimeDelta http_rtt) {
+    http_rtt_for_testing_ = http_rtt;
   }
 
  private:
@@ -247,7 +277,7 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
           intra_priority(intra_priority) {}
 
     const ClientId client_id;
-    const WebURLRequest::Priority priority;
+    const ResourceLoadPriority priority;
     const int intra_priority;
   };
 
@@ -268,6 +298,11 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
     ResourceLoadPriority priority;
     int intra_priority;
   };
+
+  using PendingRequestMap = HeapHashMap<ClientId, Member<ClientInfo>>;
+
+  using IsMultiplexedConnection =
+      base::StrongAlias<class IsMultiplexedConnectionTag, bool>;
 
   // Checks if |pending_requests_| for the specified option is effectively
   // empty, that means it does not contain any request that is still alive in
@@ -294,6 +329,11 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
 
   void ShowConsoleMessageIfNeeded();
 
+  bool IsRunningThrottleableRequestsLessThanOutStandingLimit(
+      size_t out_standing_limit);
+
+  bool CanRequestForMultiplexedConnectionsInTight() const;
+
   const Member<const DetachableResourceFetcherProperties>
       resource_fetcher_properties_;
 
@@ -312,14 +352,18 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
   // Used when |policy_| is |kNormal|.
   size_t normal_outstanding_limit_ = kOutstandingUnlimited;
 
+  // The count of in-flight requests that support multiplexed connections.
+  size_t in_flight_on_multiplexed_connections_ = 0u;
+
   // Used when |frame_scheduler_throttling_state_| is |kThrottled|.
   const size_t outstanding_limit_for_throttled_frame_scheduler_;
 
   // The last used ClientId to calculate the next.
   ClientId current_id_ = kInvalidClientId;
 
-  // Holds clients that were granted and are running.
-  HashSet<ClientId> running_requests_;
+  // Holds clients that were granted and are running and whether the connection
+  // is multiplexed.
+  HashMap<ClientId, IsMultiplexedConnection> running_requests_;
 
   HashSet<ClientId> running_throttleable_requests_;
 
@@ -330,7 +374,7 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
       scheduler::SchedulingLifecycleState::kNotThrottled;
 
   // Holds clients that haven't been granted, and are waiting for a grant.
-  HeapHashMap<ClientId, Member<ClientInfo>> pending_request_map_;
+  PendingRequestMap pending_request_map_;
 
   // We use std::set here because WTF doesn't have its counterpart.
   // This tracks two sets of requests, throttleable and stoppable.
@@ -352,9 +396,15 @@ class PLATFORM_EXPORT ResourceLoadScheduler final
 
   ThrottleOptionOverride throttle_option_override_;
 
-  DISALLOW_COPY_AND_ASSIGN(ResourceLoadScheduler);
+  Member<LoadingBehaviorObserver> loading_behavior_observer_;
+
+  absl::optional<base::TimeDelta> http_rtt_ = absl::nullopt;
+  absl::optional<base::TimeDelta> http_rtt_for_testing_ = absl::nullopt;
+
+  // The ref count of batch operations to accumulate fetches.
+  uint32_t pending_batch_operations_ = 0u;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_FETCH_RESOURCE_LOAD_SCHEDULER_H_

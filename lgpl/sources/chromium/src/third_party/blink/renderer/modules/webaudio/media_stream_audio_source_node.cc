@@ -25,101 +25,15 @@
 
 #include "third_party/blink/renderer/modules/webaudio/media_stream_audio_source_node.h"
 
-#include <memory>
+#include <inttypes.h>
+
+#include "third_party/blink/public/platform/modules/webrtc/webrtc_logging.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_media_stream_audio_source_options.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_context.h"
-#include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
-#include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
+#include "third_party/blink/renderer/modules/webaudio/media_stream_audio_source_handler.h"
 
 namespace blink {
-
-MediaStreamAudioSourceHandler::MediaStreamAudioSourceHandler(
-    AudioNode& node,
-    std::unique_ptr<AudioSourceProvider> audio_source_provider)
-    : AudioHandler(kNodeTypeMediaStreamAudioSource,
-                   node,
-                   node.context()->sampleRate()),
-      audio_source_provider_(std::move(audio_source_provider)),
-      source_number_of_channels_(0) {
-  // Default to stereo. This could change depending on the format of the
-  // MediaStream's audio track.
-  AddOutput(2);
-
-  Initialize();
-}
-
-scoped_refptr<MediaStreamAudioSourceHandler>
-MediaStreamAudioSourceHandler::Create(
-    AudioNode& node,
-    std::unique_ptr<AudioSourceProvider> audio_source_provider) {
-  return base::AdoptRef(new MediaStreamAudioSourceHandler(
-      node, std::move(audio_source_provider)));
-}
-
-MediaStreamAudioSourceHandler::~MediaStreamAudioSourceHandler() {
-  Uninitialize();
-}
-
-void MediaStreamAudioSourceHandler::SetFormat(uint32_t number_of_channels,
-                                              float source_sample_rate) {
-  if (number_of_channels != source_number_of_channels_ ||
-      source_sample_rate != Context()->sampleRate()) {
-    // The sample-rate must be equal to the context's sample-rate.
-    if (!number_of_channels ||
-        number_of_channels > BaseAudioContext::MaxNumberOfChannels() ||
-        source_sample_rate != Context()->sampleRate()) {
-      // process() will generate silence for these uninitialized values.
-      DLOG(ERROR) << "setFormat(" << number_of_channels << ", "
-                  << source_sample_rate << ") - unhandled format change";
-      source_number_of_channels_ = 0;
-      return;
-    }
-
-    // Synchronize with process().
-    MutexLocker locker(process_lock_);
-
-    source_number_of_channels_ = number_of_channels;
-
-    {
-      // The context must be locked when changing the number of output channels.
-      BaseAudioContext::GraphAutoLocker context_locker(Context());
-
-      // Do any necesssary re-configuration to the output's number of channels.
-      Output(0).SetNumberOfChannels(number_of_channels);
-    }
-  }
-}
-
-void MediaStreamAudioSourceHandler::Process(uint32_t number_of_frames) {
-  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("webaudio.audionode"),
-               "MediaStreamAudioSourceHandler::Process");
-
-  AudioBus* output_bus = Output(0).Bus();
-
-  if (!GetAudioSourceProvider()) {
-    output_bus->Zero();
-    return;
-  }
-
-  if (source_number_of_channels_ != output_bus->NumberOfChannels()) {
-    output_bus->Zero();
-    return;
-  }
-
-  // Use a tryLock() to avoid contention in the real-time audio thread.
-  // If we fail to acquire the lock then the MediaStream must be in the middle
-  // of a format change, so we output silence in this case.
-  MutexTryLocker try_locker(process_lock_);
-  if (try_locker.Locked()) {
-    GetAudioSourceProvider()->ProvideInput(output_bus, number_of_frames);
-  } else {
-    // We failed to acquire the lock.
-    output_bus->Zero();
-  }
-}
-
-// ----------------------------------------------------------------
 
 MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(
     AudioContext& context,
@@ -131,6 +45,17 @@ MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(
       media_stream_(media_stream) {
   SetHandler(MediaStreamAudioSourceHandler::Create(
       *this, std::move(audio_source_provider)));
+  WebRtcLogMessage(String::Format("MSASN::%s({audio_track=[kind: %s, id: "
+                                  "%s, label: %s, enabled: "
+                                  "%d, muted: %d]}, {handler=0x%" PRIXPTR
+                                  "}, [this=0x%" PRIXPTR "])",
+                                  __func__, audio_track->kind().Utf8().c_str(),
+                                  audio_track->id().Utf8().c_str(),
+                                  audio_track->label().Utf8().c_str(),
+                                  audio_track->enabled(), audio_track->muted(),
+                                  reinterpret_cast<uintptr_t>(&Handler()),
+                                  reinterpret_cast<uintptr_t>(this))
+                       .Utf8());
 }
 
 MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
@@ -141,9 +66,14 @@ MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
 
   // TODO(crbug.com/1055983): Remove this when the execution context validity
   // check is not required in the AudioNode factory methods.
-  if (!context.CheckExecutionContextAndThrowIfNecessary(exception_state))
+  if (!context.CheckExecutionContextAndThrowIfNecessary(exception_state)) {
     return nullptr;
+  }
 
+  // The constructor algorithm:
+  // https://webaudio.github.io/web-audio-api/#mediastreamaudiosourcenode
+
+  // 1.24.1. Step 1 & 2.
   MediaStreamTrackVector audio_tracks = media_stream.getAudioTracks();
   if (audio_tracks.IsEmpty()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
@@ -151,28 +81,30 @@ MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
     return nullptr;
   }
 
-  // Find the first track, which is the track whose id comes first given a
-  // lexicographic ordering of the code units of the track id.
+  // 1.24.1. Step 3: Sort the elements in tracks based on their id attribute
+  // using an ordering on sequences of code unit values.
+  // (See: https://infra.spec.whatwg.org/#code-unit)
   MediaStreamTrack* audio_track = audio_tracks[0];
   for (auto track : audio_tracks) {
     if (CodeUnitCompareLessThan(track->id(), audio_track->id())) {
       audio_track = track;
     }
   }
+
+  // 1.24.1. Step 5: The step is out of order because the constructor needs
+  // this provider, which is [[input track]] from the spec.
   std::unique_ptr<AudioSourceProvider> provider =
       audio_track->CreateWebAudioSource(context.sampleRate());
 
+  // 1.24.1. Step 4.
   MediaStreamAudioSourceNode* node =
       MakeGarbageCollected<MediaStreamAudioSourceNode>(
           context, media_stream, audio_track, std::move(provider));
 
-  if (!node)
-    return nullptr;
-
-  // TODO(hongchan): Only stereo streams are supported right now. We should be
-  // able to accept multi-channel streams.
+  // Initializes the node with the stereo output channel.
   node->SetFormat(2, context.sampleRate());
-  // context keeps reference until node is disconnected
+
+  // Lets the context know this source node started.
   context.NotifySourceNodeStartedProcessing(node);
 
   return node;
@@ -185,6 +117,27 @@ MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
   return Create(*context, *options->mediaStream(), exception_state);
 }
 
+void MediaStreamAudioSourceNode::SetFormat(uint32_t number_of_channels,
+                                           float source_sample_rate) {
+  GetMediaStreamAudioSourceHandler().SetFormat(number_of_channels,
+                                               source_sample_rate);
+}
+
+void MediaStreamAudioSourceNode::ReportDidCreate() {
+  GraphTracer().DidCreateAudioNode(this);
+}
+
+void MediaStreamAudioSourceNode::ReportWillBeDestroyed() {
+  GraphTracer().WillDestroyAudioNode(this);
+}
+
+bool MediaStreamAudioSourceNode::HasPendingActivity() const {
+  // The node stays alive as long as the context is running. It also will not
+  // be collected until the context is suspended or stopped.
+  // (See https://crbug.com/937231)
+  return context()->ContextState() == BaseAudioContext::kRunning;
+}
+
 void MediaStreamAudioSourceNode::Trace(Visitor* visitor) const {
   visitor->Trace(audio_track_);
   visitor->Trace(media_stream_);
@@ -195,29 +148,6 @@ void MediaStreamAudioSourceNode::Trace(Visitor* visitor) const {
 MediaStreamAudioSourceHandler&
 MediaStreamAudioSourceNode::GetMediaStreamAudioSourceHandler() const {
   return static_cast<MediaStreamAudioSourceHandler&>(Handler());
-}
-
-MediaStream* MediaStreamAudioSourceNode::getMediaStream() const {
-  return media_stream_;
-}
-
-void MediaStreamAudioSourceNode::SetFormat(uint32_t number_of_channels,
-                                           float source_sample_rate) {
-  GetMediaStreamAudioSourceHandler().SetFormat(number_of_channels,
-                                               source_sample_rate);
-}
-
-bool MediaStreamAudioSourceNode::HasPendingActivity() const {
-  // As long as the context is running, this node has activity.
-  return (context()->ContextState() == BaseAudioContext::kRunning);
-}
-
-void MediaStreamAudioSourceNode::ReportDidCreate() {
-  GraphTracer().DidCreateAudioNode(this);
-}
-
-void MediaStreamAudioSourceNode::ReportWillBeDestroyed() {
-  GraphTracer().WillDestroyAudioNode(this);
 }
 
 }  // namespace blink

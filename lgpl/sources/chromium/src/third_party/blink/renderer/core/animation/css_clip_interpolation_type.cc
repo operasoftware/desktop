@@ -88,7 +88,7 @@ class InheritedClipChecker : public CSSInterpolationType::CSSConversionChecker {
   const Vector<Length> inherited_length_list_;
 };
 
-class CSSClipNonInterpolableValue : public NonInterpolableValue {
+class CSSClipNonInterpolableValue final : public NonInterpolableValue {
  public:
   ~CSSClipNonInterpolableValue() final = default;
 
@@ -121,7 +121,7 @@ struct DowncastTraits<CSSClipNonInterpolableValue> {
   }
 };
 
-class UnderlyingAutosChecker
+class UnderlyingAutosChecker final
     : public CSSInterpolationType::CSSConversionChecker {
  public:
   explicit UnderlyingAutosChecker(const ClipAutos& underlying_autos)
@@ -289,7 +289,8 @@ void CSSClipInterpolationType::ApplyStandardPropertyValue(
     if (is_auto)
       return Length::Auto();
     return To<InterpolableLength>(*list.Get(index))
-        .CreateLength(state.CssToLengthConversionData(), kValueRangeAll);
+        .CreateLength(state.CssToLengthConversionData(),
+                      Length::ValueRange::kAll);
   };
   state.Style()->SetClip(
       LengthBox(convert_index(autos.is_top_auto, kClipTop),

@@ -13,7 +13,6 @@
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
-#include "third_party/blink/renderer/core/layout/layout_object.h"
 
 namespace blink {
 
@@ -93,10 +92,6 @@ ALWAYS_INLINE bool StyleInvalidator::MatchesCurrentInvalidationSets(
                                                     kInvalidateCustomPseudo);
     return true;
   }
-
-  if (invalidation_flags_.InsertionPointCrossing() &&
-      element.IsV0InsertionPoint())
-    return true;
 
   for (auto* const invalidation_set : invalidation_sets_) {
     if (invalidation_set->InvalidatesElement(element))
@@ -188,7 +183,11 @@ void StyleInvalidator::PushInvalidationSetsForContainerNode(
     ContainerNode& node,
     SiblingData& sibling_data) {
   auto pending_invalidations_iterator = pending_invalidation_map_.find(&node);
-  DCHECK(pending_invalidations_iterator != pending_invalidation_map_.end());
+  if (pending_invalidations_iterator == pending_invalidation_map_.end()) {
+    NOTREACHED() << "We should strictly not have marked an element for "
+                    "invalidation without any pending invalidations.";
+    return;
+  }
   NodeInvalidationSets& pending_invalidations =
       pending_invalidations_iterator->value;
 
@@ -214,12 +213,11 @@ void StyleInvalidator::PushInvalidationSetsForContainerNode(
       PushInvalidationSet(*invalidation_set);
     }
     if (UNLIKELY(*g_style_invalidator_tracing_enabled)) {
-      TRACE_EVENT_INSTANT1(
+      DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT_WITH_CATEGORIES(
           TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"),
-          "StyleInvalidatorInvalidationTracking", TRACE_EVENT_SCOPE_THREAD,
-          "data",
-          inspector_style_invalidator_invalidate_event::InvalidationList(
-              node, pending_invalidations.Descendants()));
+          "StyleInvalidatorInvalidationTracking",
+          inspector_style_invalidator_invalidate_event::InvalidationList, node,
+          pending_invalidations.Descendants());
     }
   }
 }
@@ -308,12 +306,6 @@ void StyleInvalidator::Invalidate(Element& element, SiblingData& sibling_data) {
     auto* html_slot_element = DynamicTo<HTMLSlotElement>(element);
     if (html_slot_element && InvalidatesSlotted())
       InvalidateSlotDistributedElements(*html_slot_element);
-
-    if (InsertionPointCrossing() && element.IsV0InsertionPoint()) {
-      element.SetNeedsStyleRecalc(kSubtreeStyleChange,
-                                  StyleChangeReasonForTracing::Create(
-                                      style_change_reason::kStyleInvalidator));
-    }
   }
 
   // We need to recurse into children if:

@@ -1,4 +1,4 @@
-#!/usr/bin/env vpython
+#!/usr/bin/env vpython3
 # Copyright 2020 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -15,14 +15,11 @@ import sys
 import unittest
 import upload_download_utils
 
-THIS_DIR = os.path.abspath(os.path.dirname(__file__))
-CHROMIUM_SRC = os.path.abspath(os.path.join(THIS_DIR, '..', '..', '..', '..'))
-PYMOCK_PATH = os.path.join(
-    CHROMIUM_SRC, 'third_party', 'pymock')
-sys.path.append(PYMOCK_PATH)
 import mock
 
 from pyfakefs import fake_filesystem_unittest
+
+THIS_DIR = os.path.abspath(os.path.dirname(__file__))
 
 
 def filter_all(f):
@@ -85,7 +82,8 @@ class UploadDownloadUtilsTest(fake_filesystem_unittest.TestCase):
         os.path.join(pathname, 'scenario1.wprgo'),
     ].sort()
     self.assertEquals(
-        upload_download_utils._get_files_to_upload(pathname, filter_all).sort(),
+        upload_download_utils._get_files_to_upload(
+            pathname, filter_all).sort(),
         expected_file_list)
 
     expected_file_list = [
@@ -93,8 +91,8 @@ class UploadDownloadUtilsTest(fake_filesystem_unittest.TestCase):
         os.path.join(pathname, 'image2.png'),
     ].sort()
     self.assertEquals(
-        upload_download_utils._get_files_to_upload(pathname, filter_image_only)
-            .sort(),
+        upload_download_utils._get_files_to_upload(
+            pathname, filter_image_only).sort(),
         expected_file_list)
 
   def test_get_files_to_upload_no_entries(self):
@@ -107,6 +105,56 @@ class UploadDownloadUtilsTest(fake_filesystem_unittest.TestCase):
     self.assertEquals(
         upload_download_utils._get_files_to_upload(pathname, filter_image_only),
         [])
+
+  def test_verify_file_exists_no_file(self):
+    pathname = os.path.join(THIS_DIR, 'tmp')
+    self.fs.create_dir(pathname)
+    self.assertFalse(upload_download_utils.verify_file_exists(
+        pathname, filter_all))
+
+  def test_verify_file_exists_in_top_directory(self):
+    pathname = os.path.join(THIS_DIR, 'tmp')
+    self.fs.create_dir(pathname)
+    self.fs.create_file(os.path.join(pathname, 'file'))
+    self.assertTrue(upload_download_utils.verify_file_exists(
+        pathname, filter_all))
+
+  def test_verify_file_exists_not_matching_filter(self):
+    pathname = os.path.join(THIS_DIR, 'tmp')
+    self.fs.create_dir(pathname)
+    self.fs.create_file(os.path.join(pathname, 'file'))
+    self.assertFalse(upload_download_utils.verify_file_exists(
+        pathname, filter_image_only))
+
+  def test_verify_file_exists_deep_in_directory(self):
+    pathname = os.path.join(THIS_DIR, 'tmp')
+    self.fs.create_dir(pathname)
+    pathname_2 = os.path.join(pathname, 'deep')
+    self.fs.create_dir(pathname_2)
+
+    pathname_3 = os.path.join(pathname_2, 'deeper')
+    self.fs.create_dir(pathname_3)
+
+    pathname_4 = os.path.join(pathname_3, 'deeper')
+    self.fs.create_dir(pathname_4)
+    self.fs.create_file(os.path.join(pathname_4, 'file'))
+    self.assertTrue(upload_download_utils.verify_file_exists(
+        pathname, filter_all))
+
+  def test_verify_file_exists_deep_in_directory_not_match_filter(self):
+    pathname = os.path.join(THIS_DIR, 'tmp')
+    self.fs.create_dir(pathname)
+    pathname_2 = os.path.join(pathname, 'deep')
+    self.fs.create_dir(pathname_2)
+
+    pathname_3 = os.path.join(pathname_2, 'deeper')
+    self.fs.create_dir(pathname_3)
+
+    pathname_4 = os.path.join(pathname_3, 'deeper')
+    self.fs.create_dir(pathname_4)
+    self.fs.create_file(os.path.join(pathname_4, 'file'))
+    self.assertFalse(upload_download_utils.verify_file_exists(
+        pathname, filter_image_only))
 
   @mock.patch.object(multiprocessing, 'cpu_count')
   def test_get_thread_count_not_implemented(self, multiplecore_mock):
@@ -126,4 +174,3 @@ class UploadDownloadUtilsTest(fake_filesystem_unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
-

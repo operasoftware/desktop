@@ -8,99 +8,82 @@
 #include <memory>
 
 #include "cc/paint/paint_flags.h"
-#include "third_party/blink/renderer/platform/graphics/color.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/graphics/dark_mode_settings.h"
-#include "third_party/blink/renderer/platform/graphics/paint/paint_image.h"
+#include "third_party/blink/renderer/platform/graphics/dark_mode_types.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/skia/include/core/SkRefCnt.h"
 
 class SkColorFilter;
+class SkPixmap;
 
 namespace blink {
 
-class GraphicsContext;
 class DarkModeColorClassifier;
 class DarkModeImageClassifier;
 class DarkModeColorFilter;
-class ScopedDarkModeElementRoleOverride;
 class DarkModeInvertedColorCache;
+class Image;
 
 class PLATFORM_EXPORT DarkModeFilter {
  public:
   // Dark mode is disabled by default. Enable it by calling UpdateSettings()
   // with a mode other than DarkMode::kOff.
-  DarkModeFilter();
+  explicit DarkModeFilter(const DarkModeSettings& settings);
   ~DarkModeFilter();
 
-  bool IsDarkModeActive() const;
-
-  const DarkModeSettings& settings() const { return settings_; }
-  void UpdateSettings(const DarkModeSettings& new_settings);
-
-  // TODO(gilmanmh): Add a role for shadows. In general, we don't want to
-  // invert shadows, but we may need to do some other kind of processing for
-  // them.
-  enum class ElementRole {
-    kText,
-    kListSymbol,
-    kBackground,
-    kSVG,
-    kUnhandledImage,
-    kBitmapImage,
-    kSVGImage,
-    kGradientGeneratedImage
-  };
+  enum class ElementRole { kForeground, kListSymbol, kBackground, kSVG };
+  enum class ImageType { kNone, kIcon, kSeparator, kPhoto };
 
   SkColor InvertColorIfNeeded(SkColor color, ElementRole element_role);
-  base::Optional<cc::PaintFlags> ApplyToFlagsIfNeeded(
+
+  absl::optional<cc::PaintFlags> ApplyToFlagsIfNeeded(
       const cc::PaintFlags& flags,
       ElementRole element_role);
 
-  // |image| and |flags| must not be null.
-  void ApplyToImageFlagsIfNeeded(const SkRect& src,
-                                 const SkRect& dst,
-                                 const PaintImage& paint_image,
-                                 cc::PaintFlags* flags,
-                                 ElementRole element_role);
-
-  SkColorFilter* GetImageFilterForTesting() { return image_filter_.get(); }
   size_t GetInvertedColorCacheSizeForTesting();
 
- private:
-  friend class ScopedDarkModeElementRoleOverride;
+  // Decides whether to apply dark mode or not.
+  bool ShouldApplyFilterToImage(ImageType type) const;
 
-  DarkModeSettings settings_;
+  // Returns dark mode color filter based on the classification done on
+  // |pixmap|. The image cannot be classified if pixmap is empty or |src| is
+  // empty or |src| is larger than pixmap bounds. This function should be called
+  // only if image policy is set to DarkModeImagePolicy::kFilterSmart and image
+  // is classified as ImageType::kIcon or kSeparator. This API is thread-safe.
+  sk_sp<SkColorFilter> GenerateImageFilter(const SkPixmap& pixmap,
+                                           const SkIRect& src) const;
+
+  void ApplyFilterToImage(Image* image,
+                          cc::PaintFlags* flags,
+                          const SkRect& src);
+
+ private:
+  struct ImmutableData {
+    explicit ImmutableData(const DarkModeSettings& settings);
+
+    DarkModeSettings settings;
+    std::unique_ptr<DarkModeColorClassifier> foreground_classifier;
+    std::unique_ptr<DarkModeColorClassifier> background_classifier;
+    std::unique_ptr<DarkModeImageClassifier> image_classifier;
+    std::unique_ptr<DarkModeColorFilter> color_filter;
+    sk_sp<SkColorFilter> image_filter;
+  };
 
   bool ShouldApplyToColor(SkColor color, ElementRole role);
-  bool ShouldApplyToImage(const DarkModeSettings& settings,
-                          const SkRect& src,
-                          const SkRect& dst,
-                          const PaintImage& paint_image,
-                          ElementRole role);
 
-  std::unique_ptr<DarkModeColorClassifier> text_classifier_;
-  std::unique_ptr<DarkModeColorClassifier> background_classifier_;
-  std::unique_ptr<DarkModeImageClassifier> bitmap_image_classifier_;
-  std::unique_ptr<DarkModeImageClassifier> svg_image_classifier_;
-  std::unique_ptr<DarkModeImageClassifier> gradient_generated_image_classifier_;
+  // Returns dark mode color filter for images. This function should be called
+  // only if image policy is set to DarkModeImagePolicy::kFilterAll or image is
+  // classified as ImageType::kIcon or kSeparator. This API is thread-safe.
+  sk_sp<SkColorFilter> GetImageFilter() const;
 
-  std::unique_ptr<DarkModeColorFilter> color_filter_;
-  sk_sp<SkColorFilter> image_filter_;
-  base::Optional<ElementRole> role_override_;
+  DarkModeImagePolicy GetDarkModeImagePolicy() const;
+
+  // This is read-only data and is thread-safe.
+  const ImmutableData immutable_;
+
+  // Following member is used for color classifications and is not thread-safe.
+  // TODO(prashant.n): Move cache out of dark mode filter.
   std::unique_ptr<DarkModeInvertedColorCache> inverted_color_cache_;
-};
-
-// Temporarily override the element role for the scope of this object's
-// lifetime - for example when drawing symbols that play the role of text.
-class PLATFORM_EXPORT ScopedDarkModeElementRoleOverride {
- public:
-  ScopedDarkModeElementRoleOverride(GraphicsContext* graphics_context,
-                                    DarkModeFilter::ElementRole role);
-  ~ScopedDarkModeElementRoleOverride();
-
- private:
-  GraphicsContext* graphics_context_;
-  base::Optional<DarkModeFilter::ElementRole> previous_role_override_;
 };
 
 }  // namespace blink

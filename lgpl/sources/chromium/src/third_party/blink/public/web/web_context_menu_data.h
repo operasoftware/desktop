@@ -33,8 +33,9 @@
 
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "third_party/blink/public/common/context_menu_data/input_field_type.h"
-#include "third_party/blink/public/common/context_menu_data/media_type.h"
 #include "third_party/blink/public/common/input/web_menu_source_type.h"
+#include "third_party/blink/public/mojom/context_menu/context_menu.mojom-shared.h"
+#include "third_party/blink/public/platform/web_impression.h"
 #include "third_party/blink/public/platform/web_rect.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
@@ -47,8 +48,8 @@ namespace blink {
 // This struct is passed to WebViewClient::ShowContextMenu.
 struct WebContextMenuData {
   // The type of media the context menu is being invoked on.
-  // using MediaType = ContextMenuDataMediaType;
-  ContextMenuDataMediaType media_type;
+  // using MediaType = blink::mojom::ContextMenuDataMediaType;
+  blink::mojom::ContextMenuDataMediaType media_type;
 
   // The x and y position of the mouse pointer (relative to the webview).
   gfx::Point mouse_position;
@@ -61,6 +62,15 @@ struct WebContextMenuData {
 
   // Whether the image in context is a null.
   bool has_image_contents;
+
+  // The absolute keyword search URL including the %s search tag when the
+  // "Add as search engine..." option is clicked (left empty if not used).
+  WebURL keyword_url;
+
+  // The post query string including the %s search tag. Only set if clicked
+  // form element belongs to a POST form. keywordURL does not contain %s
+  // search tag if this one is set.
+  WebString post_data;
 
   // The absolute keyword search URL including the %s search tag when the
   // "Add as search engine..." option is clicked (left empty if not used).
@@ -96,6 +106,10 @@ struct WebContextMenuData {
 
   // The text of the link that is in the context.
   WebString link_text;
+
+  // If the node is a link, the impression declared by the link's conversion
+  // measurement attributes.
+  base::Optional<WebImpression> impression;
 
   // The raw text of the selection in context.
   WebString selected_text;
@@ -159,7 +173,7 @@ struct WebContextMenuData {
   WebMenuSourceType source_type;
 
   WebContextMenuData()
-      : media_type(ContextMenuDataMediaType::kNone),
+      : media_type(blink::mojom::ContextMenuDataMediaType::kNone),
         has_image_contents(false),
         media_flags(kMediaNone),
         is_spell_checking_enabled(false),

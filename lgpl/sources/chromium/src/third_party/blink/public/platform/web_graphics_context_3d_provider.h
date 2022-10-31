@@ -35,7 +35,7 @@
 #include "base/callback_forward.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 
-class GrContext;
+class GrDirectContext;
 
 namespace cc {
 class ImageDecodeCache;
@@ -65,7 +65,11 @@ class RasterInterface;
 namespace webgpu {
 class WebGPUInterface;
 }
-}
+}  // namespace gpu
+
+namespace viz {
+class RasterContextProvider;
+}  // namespace viz
 
 namespace blink {
 enum AntialiasingMode {
@@ -77,7 +81,7 @@ enum AntialiasingMode {
 
 struct WebglPreferences {
   AntialiasingMode anti_aliasing_mode = kAntialiasingModeUnspecified;
-  uint32_t msaa_sample_count = 8;
+  uint32_t msaa_sample_count = 4;
   uint32_t eqaa_storage_sample_count = 4;
   // WebGL-specific numeric limits.
   uint32_t max_active_webgl_contexts = 0;
@@ -94,7 +98,7 @@ class WebGraphicsContext3DProvider {
   virtual gpu::webgpu::WebGPUInterface* WebGPUInterface() = 0;
   virtual bool IsContextLost() = 0;  // Has the GPU driver lost this context?
   virtual bool BindToCurrentThread() = 0;
-  virtual GrContext* GetGrContext() = 0;
+  virtual GrDirectContext* GetGrContext() = 0;
   virtual const gpu::Capabilities& GetCapabilities() const = 0;
   virtual const gpu::GpuFeatureInfo& GetGpuFeatureInfo() const = 0;
   virtual const WebglPreferences& GetWebglPreferences() const = 0;
@@ -111,8 +115,9 @@ class WebGraphicsContext3DProvider {
   virtual void CopyVideoFrame(media::PaintCanvasVideoRenderer* video_render,
                               media::VideoFrame* video_frame,
                               cc::PaintCanvas* canvas) = 0;
+  virtual viz::RasterContextProvider* RasterContextProvider() const = 0;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_GRAPHICS_CONTEXT_3D_PROVIDER_H_

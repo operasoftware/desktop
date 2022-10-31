@@ -7,11 +7,14 @@
 
 #include <utility>
 
+#include "base/callback.h"
+#include "base/gtest_prod_util.h"
 #include "mojo/public/cpp/bindings/associated_receiver_set.h"
 #include "third_party/blink/renderer/platform/context_lifecycle_observer.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/mojo/features.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
+#include "third_party/blink/renderer/platform/mojo/mojo_binding_context.h"
 
 namespace blink {
 
@@ -42,6 +45,11 @@ class HeapMojoAssociatedReceiverSet {
       const HeapMojoAssociatedReceiverSet&) = delete;
 
   // Methods to redirect to mojo::AssociatedReceiverSet:
+  void set_disconnect_handler(base::RepeatingClosure handler) {
+    wrapper_->associated_receiver_set().set_disconnect_handler(
+        std::move(handler));
+  }
+
   mojo::ReceiverId Add(
       mojo::PendingAssociatedReceiver<Interface> associated_receiver,
       scoped_refptr<base::SequencedTaskRunner> task_runner) {
@@ -73,7 +81,6 @@ class HeapMojoAssociatedReceiverSet {
   class Wrapper final : public GarbageCollected<Wrapper>,
                         public ContextLifecycleObserver {
     USING_PRE_FINALIZER(Wrapper, Dispose);
-    USING_GARBAGE_COLLECTED_MIXIN(Wrapper);
 
    public:
     explicit Wrapper(Owner* owner, ContextLifecycleNotifier* notifier)
@@ -95,9 +102,7 @@ class HeapMojoAssociatedReceiverSet {
 
     // ContextLifecycleObserver methods
     void ContextDestroyed() override {
-      if (Mode == HeapMojoWrapperMode::kWithContextObserver ||
-          (Mode == HeapMojoWrapperMode::kWithoutContextObserver &&
-           base::FeatureList::IsEnabled(kHeapMojoUseContextObserver)))
+      if (Mode == HeapMojoWrapperMode::kWithContextObserver)
         associated_receiver_set_.Clear();
     }
 

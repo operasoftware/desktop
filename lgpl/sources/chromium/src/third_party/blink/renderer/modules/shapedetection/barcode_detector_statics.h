@@ -7,8 +7,8 @@
 
 #include "services/shape_detection/public/mojom/barcodedetection_provider.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
@@ -24,8 +24,6 @@ class ScriptPromiseResolver;
 class BarcodeDetectorStatics final
     : public GarbageCollected<BarcodeDetectorStatics>,
       public Supplement<ExecutionContext> {
-  USING_GARBAGE_COLLECTED_MIXIN(BarcodeDetectorStatics);
-
  public:
   static const char kSupplementName[];
 
@@ -48,8 +46,7 @@ class BarcodeDetectorStatics final
       const Vector<shape_detection::mojom::blink::BarcodeFormat>&);
   void OnConnectionError();
 
-  HeapMojoRemote<shape_detection::mojom::blink::BarcodeDetectionProvider,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
+  HeapMojoRemote<shape_detection::mojom::blink::BarcodeDetectionProvider>
       service_;
 
   // Holds Promises returned by EnumerateSupportedFormats() so that they can be

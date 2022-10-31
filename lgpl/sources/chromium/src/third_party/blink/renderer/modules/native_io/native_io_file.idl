@@ -6,16 +6,28 @@
 
 [
   Exposed=(Window, Worker),
-  RuntimeEnabled=NativeIO,
+  RuntimeEnabled=StorageFoundationAPI,
   SecureContext
 ] interface NativeIOFile {
   [CallWith=ScriptState] Promise<void> close();
+
   [
     CallWith=ScriptState, RaisesException
-  ] Promise<unsigned long long> read([AllowShared] ArrayBufferView buffer,
+  ] Promise<unsigned long long> getLength();
+
+  [
+    CallWith=ScriptState, RaisesException
+  ] Promise<void> setLength(unsigned long long length);
+
+  [
+    CallWith=ScriptState, RaisesException, MeasureAs=StorageFoundationRead
+  ] Promise<NativeIOReadResult> read(ArrayBufferView buffer,
                                      unsigned long long file_offset);
   [
-    CallWith=ScriptState, RaisesException
-  ] Promise<unsigned long long> write([AllowShared] ArrayBufferView buffer,
+    CallWith=ScriptState, RaisesException, MeasureAs=StorageFoundationWrite
+  ] Promise<NativeIOWriteResult> write(ArrayBufferView buffer,
                                       unsigned long long file_offset);
+  [
+    CallWith=ScriptState, RaisesException, MeasureAs=StorageFoundationFlush
+  ] Promise<void> flush();
 };

@@ -6,7 +6,6 @@
 
 #include "third_party/blink/renderer/bindings/modules/v8/v8_launch_consumer.h"
 #include "third_party/blink/renderer/modules/launch/launch_params.h"
-#include "third_party/blink/renderer/platform/heap/visitor.h"
 
 namespace blink {
 
@@ -20,7 +19,7 @@ void LaunchQueue::Enqueue(LaunchParams* params) {
     return;
   }
 
-  consumer_->Invoke(nullptr, params).Check();
+  consumer_->InvokeAndReportException(nullptr, params);
 }
 
 void LaunchQueue::setConsumer(V8LaunchConsumer* consumer) {
@@ -34,7 +33,7 @@ void LaunchQueue::setConsumer(V8LaunchConsumer* consumer) {
     LaunchParams* params = unconsumed_launch_params_.at(0);
     unconsumed_launch_params_.EraseAt(0);
 
-    consumer_->Invoke(nullptr, params).Check();
+    consumer_->InvokeAndReportException(nullptr, params);
   }
 }
 

@@ -54,14 +54,6 @@ Date:   Fri Feb 3 16:12:21 2012 -0800
     TEST=ffmpeg_regression_tests
 
 Affects:
-    libavcodec/h263dec.c
-    libavcodec/h264_cabac.c
-    libavcodec/h264_cavlc.c
-    libavcodec/h264_parser.c
-    libavcodec/ituh263dec.c
-    libavcodec/mpeg12.c
-    libavcodec/mpeg4video_parser.c
-    libavcodec/mpeg4videodec.c
     libavformat/matroskadec.c
 
 ------------------------------------------------------------------
@@ -149,9 +141,6 @@ Date:   Thu Jan 29 14:10:48 2015 -0800
     Change-Id: Ie0eab2bf3ab6c52cd088e54172792175ab7cb2de
 
 Affects:
-    libavcodec/cdxl.c
-    libavcodec/huffyuvdec.c
-    libavcodec/mpeg12dec.c
     libavformat/matroskadec.c
 
 ------------------------------------------------------------------
@@ -277,39 +266,6 @@ Date:   Tue Oct 25 14:31:38 2016 -0700
 
 Affects:
     libavformat/matroskadec.c
-
-------------------------------------------------------------------
-commit b259f2d64436ebdcaa48f619154edde2ad5cd29b
-Author: Matt Wolenetz <wolenetz@chromium.org>
-Date:   Tue Oct 25 16:38:27 2016 -0700
-
-    Chromium patch and README updates
-
-    Updated date/hash of merge in README.chromium
-    Updated Chromium patches:
-      The merge from upstream tentatively took the rewritten upstream
-        version of configure's mips64 logic. Previously, a downstream patch
-        to configure was necessary to prevent mips arch selection conflict.
-      The merge from upstream also removed our custom downstream declaration
-        of matroska_read_close from lavf/matroskadec.c now that upstream
-        includes it later in that file.
-      In the merge from upstream, previously 8b946dec7 removed lavf/mov.c
-        mov_seek_stream()'s |ret| local, but more recent dd34e89f needed it.
-        Resolved by declaring |ret|.
-      The merge commit included additional removal of extra const from
-        static EbmlSyntax arrays in lavf/matroskadec.c
-      riffdec.c VS2015 update 1 codegen workaround is now in ffmpeg
-        upstream.
-      Removed from README previous cherry-picks from upstream, confirmed in
-        git history.
-      generate_gn.py should now autorename to escape conflicts like
-        lavc/videodsp.S and lavc/aarch64/videodsp.S which otherwise both
-        result in videodsp.o in the same folder. Removed the temporary
-        downstream rename of lavc/aarch64/videodsp.S to videodsp_aarch64.S
-    Removed more UNCHECKED_BITSTREAM_READER defines from lavc/*
-
-Affects:
-    libavcodec/dnxhddec.c
 
 ------------------------------------------------------------------
 commit b281073a7b1ccff67b2cd8ec636facceeeb82327
@@ -499,7 +455,6 @@ Date:   Mon Nov 6 17:37:45 2017 -0800
 
 Affects:
     configure
-    libavcodec/mips/aacdec_mips.c
 
 ------------------------------------------------------------------
 commit 732525a160bc98935b757d6e13b8a0115e62d929
@@ -527,39 +482,6 @@ Date:   Fri Nov 17 15:44:24 2017 -0800
 
 Affects:
     libavformat/oggdec.c
-
-------------------------------------------------------------------
-commit 54813536efea1f447067a2af02fd89e25b65b920
-Author: Dale Curtis <dalecurtis@chromium.org>
-Date:   Tue Nov 21 15:15:20 2017 -0800
-
-    Update wrap_bits fix to work with wrap_bits == 63,64.
-
-    BUG=783459
-
-    Signed-off-by: Dale Curtis <dalecurtis@chromium.org>
-
-Affects:
-    libavformat/utils.c
-
-------------------------------------------------------------------
-commit e881e753b0d47f3dd82484695dc24a321a948002
-Author: Dan Sanders <sandersd@chromium.org>
-Date:   Tue Feb 13 14:35:49 2018 -0800
-
-    Prevent NULL dereference in mov_read_sidx()
-
-    When there are no segments in a sidx, mov_read_sidx() will try to
-    dereference a NULL pointer. This patch adds an early return for empty sidx
-    boxes.
-
-    Change-Id: I99145a3a3372c2f3af3bea9cd2c32fb23487cb6f
-    Bug: 802335
-    Reviewed-on: https://chromium-review.googlesource.com/917229
-    Reviewed-by: Dale Curtis <dalecurtis@chromium.org>
-
-Affects:
-    libavformat/mov.c
 
 ------------------------------------------------------------------
 commit 9ed334093692f2dc77c4ad8186ddadde584e1e20
@@ -666,21 +588,6 @@ Affects:
     libavutil/encryption_info.c
 
 ------------------------------------------------------------------
-commit 9846ee38e057a93db62f6730d0107bf68d8329ae
-Merge: bbe6b81a6c 179ed2d2e0
-Author: John Rummell <jrummell@chromium.org>
-Date:   Fri Sep 28 10:56:34 2018 -0700
-
-    Merge remote-tracking branch 'upstream/master' into sushi-2018-09-28-10-43-19
-
-    Conflicts:
-      configure
-      libavcodec/utvideodec.c
-
-Affects:
-    libavcodec/utvideodec.c
-
-------------------------------------------------------------------
 commit 81f7d1dd5fa4ff50d9a8cd86e7b76796c056459d
 Author: Dale Curtis <dalecurtis@chromium.org>
 Date:   Thu Nov 8 10:55:58 2018 -0800
@@ -702,62 +609,6 @@ Affects:
     libavutil/x86/x86inc.asm
 
 ------------------------------------------------------------------
-commit d19d9dd0a834fb9ce89df31c321d981cdfeaf76c
-Author: chcunningham <chcunningham@chromium.org>
-Date:   Mon Jan 7 17:47:21 2019 -0800
-
-    Update ffmpeg configs, patches, and fix android arm64 build error.
-
-    See patches/README for details of android arm64 fix
-
-    Bug: 916298
-    Test: media_unittests, ffmpeg_regression_tests
-    Change-Id: Ia0f1095a8d1a1e347102c09a9831e428296d15f3
-    Reviewed-on: https://chromium-review.googlesource.com/c/1395497
-    Reviewed-by: John Rummell <jrummell@chromium.org>
-
-Affects:
-    libavutil/avsscanf.c
-
-------------------------------------------------------------------
-commit b62555c76193045c2e3643c626e8e8d7a8f4b93f
-Author: liberato@chromium.org <liberato@chromium.org>
-Date:   Mon Mar 4 14:01:22 2019 -0800
-
-    Check return value of avio_read().
-
-    Otherwise, it can use an uninitialized value immediately after.
-
-    Bug: 937663
-    Change-Id: I59bfb59982c18c2d523b015045b7ad261fb6aca8
-    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/1500992
-    Reviewed-by: Dale Curtis <dalecurtis@chromium.org>
-
-Affects:
-    libavformat/mov.c
-
-------------------------------------------------------------------
-commit 68f1932090d5e35d958434d0588a33986cd3d65d
-Author: Felicia Lim <flim@chromium.org>
-Date:   Thu May 9 17:40:11 2019 -0700
-
-    Revert "Revert "libopus: Add channel mapping 2 support in libopusdec""
-
-    This reverts commit ffec9d32feaff7075c0b150f1168e08aeb4a296a to avoid
-    incorrect reordering of Opus Ambisonics channels.
-
-    This is a temporary fix that should be removed once Opus Ambisonics is properly
-    supported upstream.
-
-    Bug: chromium:958645
-    Change-Id: I2842b8084eda12e5bed19789056075d5ef3d8de3
-    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/1604210
-    Reviewed-by: Dale Curtis <dalecurtis@chromium.org>
-
-Affects:
-    libavcodec/libopusdec.c
-
-------------------------------------------------------------------
 commit d7ba23c23434eb938c6fcae4fe77ca1e2a2fbeff
 Author: liberato@chromium.org <liberato@chromium.org>
 Date:   Thu Aug 22 10:52:09 2019 -0700
@@ -771,48 +622,6 @@ Date:   Thu Aug 22 10:52:09 2019 -0700
 
 Affects:
     libavformat/matroskadec.c
-
-------------------------------------------------------------------
-commit e30ef377648b2f6bb9a96353b42cfe9d9fdec09d
-Author: Thomas Guilbert <tguilbert@chromium.org>
-Date:   Fri Dec 6 17:25:16 2019 -0800
-
-    Fix null pointer arithmetic
-
-    Clusterfuzz has uncovered scenarios where we add 0 to a null pointer,
-    which is undefined behavior. It doesn't seem like anything else is
-    inherently wrong with the code, so this CL applies the simplest fix
-    to avoid the issue.
-
-    This will be reported upstream, and a better fix might come out.
-
-    Bug: 1027044, 1028506, 1028511
-    Change-Id: I838282097e69f08bb14d8da1d931f01add438066
-    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/1956356
-    Reviewed-by: Ted Meyer <tmathmeyer@chromium.org>
-
-Affects:
-    libavcodec/h264dec.c
-
-------------------------------------------------------------------
-commit 252792a1ff65deadc4e627e59ce80b8811c5a5de
-Author: Thomas Guilbert <tguilbert@chromium.org>
-Date:   Mon Dec 9 17:09:54 2019 -0800
-
-    Fix null pointer addition error
-
-    Clusterfuzz uncovered a scenario in which 0 is added to a null pointer,
-    which is undefined behavior. This CL fixes the issue by checking the
-    pointer is null before incrementing it.
-
-    BUG= 1027047, 1028812
-
-    Change-Id: I160c7e36134687a7d2ef4099078d89a714c8cfe4
-    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/1958714
-    Reviewed-by: Ted Meyer <tmathmeyer@chromium.org>
-
-Affects:
-    libavformat/utils.c
 
 ------------------------------------------------------------------
 commit 6a44f89787a6103bf85825aac5b7bcfdba0dde5f
@@ -837,159 +646,256 @@ Affects:
     libavutil/log.h
 
 ------------------------------------------------------------------
-commit 587a3f48499df05d3c65f1529fd08b0783217b39
-Author: Dale Curtis <dalecurtis@chromium.org>
-Date:   Tue Apr 28 16:40:05 2020 -0700
+commit a3009baf841ca86aab37210dbec5e6d65b85d197
+Author: Nico Weber <thakis@chromium.org>
+Date:   Fri Jul 10 11:21:38 2020 -0400
 
-    Updated ffmpeg for M84.
+    Make sure arm assembly functions have hidden visibility.
 
-    - README.chromium file
-    - Chromium patches file
-    - GN Configuration
-    - Fix mismerge in MIPS code.
+    This is the ARM port of 58315b1a02fa9761d0.
 
-    Bug: 1061648
+    Bug: chromium:1103879
+    Change-Id: I470e62d7e49d547c4d12428f748e0d524fd3cdd8
+    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/2290844
+    Reviewed-by: Dale Curtis <dalecurtis@chromium.org>
 
-    Change-Id: I7f91b326e87d1ab17dcf93356e8c0888b30ab967
-    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/2171422
+Affects:
+    libavutil/aarch64/asm.S
+
+------------------------------------------------------------------
+commit d2dd36c03501e995e8ce2d792d834392b2e62bfe
+Author: Nico Weber <thakis@chromium.org>
+Date:   Fri Jul 10 14:23:02 2020 -0400
+
+    Use correct comment syntax for arm assembly.
+
+    Apparently clang accepts ';' as comment character in arm64
+    assembly when targeting macOS, but not when targeting Android.
+
+    Bug: chromium:1103879
+    Change-Id: I23d1e6facbe3eddd25e58762de096fb9c1ffda15
+    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/2292785
+    Reviewed-by: Dale Curtis <dalecurtis@chromium.org>
+
+Affects:
+    libavutil/aarch64/asm.S
+
+------------------------------------------------------------------
+commit 45b753b2d1d27b673a14419070ccc9558774efc2
+Author: Dan Sanders <sandersd@chromium.org>
+Date:   Mon Aug 17 15:55:19 2020 -0700
+
+    Always use av_realloc() for ogg_stream |buf|.
+
+    Mixing av_malloc() with av_realloc() does not work when posix_memalign()
+    is available.
+
+    Bug: 721872
+    Change-Id: I3d6a9dc6a638ff210c5f32a99beff26f11d65b33
+    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/2358822
     Reviewed-by: John Rummell <jrummell@chromium.org>
 
 Affects:
-    libavcodec/mips/aacdec_mips.c
+    libavformat/oggdec.c
 
 ------------------------------------------------------------------
-commit cdb287b92716421adaee679e9261de8a8dbeb5c4
-Author: Dale Curtis <dalecurtis@chromium.org>
-Date:   Thu Apr 30 15:16:31 2020 -0700
+commit afa2b4327ab4beb4cd47f6cf4e59df620b5d6e4f
+Author: Matt Wolenetz <wolenetz@chromium.org>
+Date:   Wed Mar 10 16:57:29 2021 -0800
 
-    Add saturated add/sub operations for int64_t.
+    Update mac build_ffmpeg and configure to work with ld64.lld changes
 
-    Many places are using their own custom code for handling overflow
-    around timestamps or other int64_t values. There are enough of these
-    now that having some common saturated math functions seems sound.
+    The minimal linking done with real, yet unstable, ld64.lld no longer
+    recognizes "-m64", needs "-arch x64_64" instead, and needs a
+    "-platform_version <platform> <min_version> <sdk_version>" set of
+    arguments. Beyond the initial configure step, build_ffmpeg for mac
+    cross-compilation still uses a fake linker.
 
-    Signed-off-by: Dale Curtis <dalecurtis@chromium.org>
+    Also, ld64.lld now issues error instead of warning for unrecognized
+    arguments '-Wl,-dynamic,-search_paths_first' inserted by configure,
+    causing misdetection of features due to widespread link failures in
+    configure's probing, resulting in build_ffmpeg.py failure. This change
+    updates our downstream configure script to not insert those options.
+
+    BUG=1170998
+
+    Change-Id: If6d5a73f23bf8b6d3053961e13e89b0c50ccd8a6
+    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/2749496
+    Reviewed-by: Ted Meyer <tmathmeyer@chromium.org>
 
 Affects:
-    libavutil/common.h
+    configure
 
 ------------------------------------------------------------------
-commit d0cc093d860a1df9a176cb17487a7593e34759a3
-Author: Dale Curtis <dalecurtis@chromium.org>
-Date:   Fri May 1 10:20:43 2020 -0700
+commit 4fb42ae52e7327469281d612784dd9d0e066d5ed
+Author: Matt Wolenetz <wolenetz@chromium.org>
+Date:   Mon Mar 29 16:26:05 2021 -0700
 
-    Use gcc/clang builtins for av_sat_(add|sub)_64_c if available.
+    Always use av_realloc_array() for nal->skipped_bytes_pos
 
-    Signed-off-by: Dale Curtis <dalecurtis@chromium.org>
-    Signed-off-by: Michael Niedermayer <michael@niedermayer.cc>
+    Mixing av_malloc_array() with av_realloc_array() does not work when
+    posix_memalign() is available.
+
+    BUG=1193797,721872
+    TEST=No repro of scenario in crbug with patch applied.
+
+    Change-Id: I6ecd8a34798a3c892409877b2c42d9cdeb3fdd81
+    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/2792764
+    Reviewed-by: John Rummell <jrummell@chromium.org>
 
 Affects:
-    libavutil/attributes.h
-    libavutil/common.h
+    libavcodec/h2645_parse.c
 
 ------------------------------------------------------------------
-commit aee9f6ca755dcd26da25b415c640d117c895feb5
-Author: Dale Curtis <dalecurtis@chromium.org>
-Date:   Fri May 1 10:20:43 2020 -0700
+commit 95aab0fd83619408995720ce53d7a74790580220
+Author: liberato@chromium.org <liberato@chromium.org>
+Date:   Wed Jul 7 19:01:22 2021 -0700
 
-    Use gcc/clang builtins for av_sat_(add|sub)_64_c if available.
-
-    Signed-off-by: Dale Curtis <dalecurtis@chromium.org>
+    Add av_stream_get_first_dts for Chromium
 
 Affects:
-    libavutil/common.h
-
-------------------------------------------------------------------
-commit 7482aaef44fa4c6c43efd16b2ed8eb474b1283b0
-Author: Dale Curtis <dalecurtis@chromium.org>
-Date:   Thu May 14 14:29:15 2020 -0700
-
-    Use av_sat_add64() when updating start_time by skip_samples.
-
-    Avoids overflow from fuzzed skip_samples values.
-
-    Signed-off-by: Dale Curtis <dalecurtis@chromium.org>
-
-Affects:
+    libavformat/avformat.h
     libavformat/utils.c
 
 ------------------------------------------------------------------
-commit 6ae2834612ddc47e4ce40c87a9cc7e76e402bbdc
-Author: Dale Curtis <dalecurtis@chromium.org>
-Date:   Thu May 14 14:33:55 2020 -0700
+commit b4d520ca6786368a829b38147364f22096f284fa
+Author: liberato@chromium.org <liberato@chromium.org>
+Date:   Fri Jul 30 18:46:38 2021 -0700
 
-    [oggparsetheora] Use av_sat_sub64() when updating pts by duration.
+    M94 FFmpeg roll.
 
-    Signed-off-by: Dale Curtis <dalecurtis@chromium.org>
+    Bug: 1227259
+    Change-Id: I53e21333100fc603d814806a9f6f807fede2adb6
+    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/3063817
+    Reviewed-by: Ted Meyer <tmathmeyer@chromium.org>
 
 Affects:
-    libavformat/oggparsetheora.c
+    libavformat/oggparsevorbis.c
+    libavutil/macos_kperf.c
+    libavutil/macos_kperf.h
 
 ------------------------------------------------------------------
-commit e4b963f890ae37e2a06276a3067daab75013c8f9
-Author: Dale Curtis <dalecurtis@chromium.org>
-Date:   Thu May 14 14:38:07 2020 -0700
+commit 47273666537556c923cc4f4a03d9d42666931876
+Author: Thomas Guilbert <tguilbert@chromium.org>
+Date:   Wed Sep 15 15:44:40 2021 -0700
 
-    [mov] Check if DTS is AV_NOPTS_VALUE in mov_find_next_sample().
+    Fix macro expansion error
 
-    Signed-off-by: Dale Curtis <dalecurtis@chromium.org>
+    This CL fixes an issue that results from the CHROMIUM_NO_LOGGING macro.
+    When it is defined, av_log(...) expands to nothing, which causes this
+    expansion:
+            ff_dlog(ctx, ...) -->  do { if (0) av_log(...)  ; } while (0)
+
+    to cause a -Wempty-statement error, due to the empty `if (0) ;`.
+
+    Bug: 1249257
+    Change-Id: I0011ae8e50c8931ac64517fa604775a9838ac8a1
+    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/3163777
+    Reviewed-by: John Rummell <jrummell@chromium.org>
 
 Affects:
-    libavformat/mov.c
+    libavutil/internal.h
 
 ------------------------------------------------------------------
-commit fbe9f4552d7153286cfa50d3f03b5e474f6a9a66
-Author: Dale Curtis <dalecurtis@chromium.org>
-Date:   Thu May 14 14:47:49 2020 -0700
+commit 52ef7a785f90179d78453b889e82f0604131f962
+Merge: 731bf2abeb 45dc668aea
+Author: John Rummell <jrummell@chromium.org>
+Date:   Mon Nov 8 14:39:18 2021 -0800
 
-    [utils, mathematics] Fix overflow in compute_pkt_fields().
+    Merge remote-tracking branch 'upstream/master' into sushi-2021-11-08-14-35-25
 
-    Fixes one issue in the function itself and one in the depdendent
-    function av_add_stable() which wasn't checking for NaN.
-
-    Signed-off-by: Dale Curtis <dalecurtis@chromium.org>
+    Conflicts:
+      libavformat/mp3dec.c
+      libavformat/utils.c
 
 Affects:
+    libavformat/mp3dec.c
     libavformat/utils.c
-    libavutil/mathematics.c
 
 ------------------------------------------------------------------
-commit 3cd1ecb83c4b100bef99d9cd23d0066f0ad3cc5c
+commit bdb9bbd8a11003c0c3d9e2c12215bf5338372b1a
 Author: Dale Curtis <dalecurtis@chromium.org>
-Date:   Thu May 14 14:57:08 2020 -0700
+Date:   Thu Mar 31 16:49:37 2022 -0700
 
-    [mov] Don't allow negative sample sizes.
+    Remove stale patches and cleanup UNCHECKED_BITSTREAM_READER.
 
-    Signed-off-by: Dale Curtis <dalecurtis@chromium.org>
+    Specifically:
+    - This merge had several UNCHECKED_BITSTREAM_READER conflicts, so
+      change them all to be one line changes to avoid future hurdles.
+    - We don't compile MIPS anymore, so can drop that change.
+    - Drop rotate section from mov headers, code should use
+      av_stream_get_side_data() instead.
+    - Adds CONFIG_LZO back to matroskadec, since we still don't want that
+      and they deleted it upstream.
+
+    Bug: 1293918
+    Change-Id: If4d028f49dfdf64e8704ecbe208398642a27341d
+    Reviewed-on: https://chromium-review.googlesource.com/c/chromium/third_party/ffmpeg/+/3564810
+    Reviewed-by: Dan Sanders <sandersd@chromium.org>
 
 Affects:
-    libavformat/mov.c
+    libavcodec/cdxl.c
+    libavcodec/dnxhddec.c
+    libavcodec/fraps.c
+    libavcodec/h263dec.c
+    libavcodec/h264_cabac.c
+    libavcodec/h264_cavlc.c
+    libavcodec/h264_parser.c
+    libavcodec/huffyuvdec.c
+    libavcodec/ituh263dec.c
+    libavcodec/jpeglsenc.c
+    libavcodec/mpeg12.c
+    libavcodec/mpeg12dec.c
+    libavcodec/mpeg4video_parser.c
+    libavcodec/smacker.c
+    libavcodec/utvideodec.c
+    libavformat/matroskadec.c
 
 ------------------------------------------------------------------
-commit e4e121c110b06d6d52fc75a2964e8c14657763ec
+commit 1bc7749f096fc98032fc3206217b4fc47047258f
 Author: Dale Curtis <dalecurtis@chromium.org>
-Date:   Fri May 15 12:37:02 2020 -0700
+Date:   Thu Mar 31 17:02:26 2022 -0700
 
-    [oggtheora] Don't update start time when lastpts is AV_NOPTS_VALUE.
-
-    Signed-off-by: Dale Curtis <dalecurtis@chromium.org>
+    Fix a couple missed headers.
 
 Affects:
-    libavformat/oggparsetheora.c
+    libavcodec/h264dec.c
+    libavcodec/mpeg4videodec.c
 
 ------------------------------------------------------------------
-commit 696586aaed6ba1ae588118953deb834d0182649c
+commit 4cfd75d794ea5917d7526d6a993f305591ce52d8
 Author: Dale Curtis <dalecurtis@chromium.org>
-Date:   Mon May 18 15:35:35 2020 -0700
+Date:   Fri Apr 1 16:01:02 2022 -0700
 
-    Free temp buffer upon negative sample_size error.
+    Redisable av_sscanf since it's little used and takes ~8kb.
 
-    2d8d554f15a7a27cfeca81467cc9341a86f784e2 added a new error condition
-    to mov_read_stsz() but forgot to free a temporary buffer when it
-    occurs.
-
-    Signed-off-by: Dale Curtis <dalecurtis@chromium.org>
+    I removed this patch in the M102 roll thinking we didn't need it
+    anymore, but the Android binary size bot complains at the size
+    increase.
 
 Affects:
-    libavformat/mov.c
+    libavutil/avstring.h
+
+------------------------------------------------------------------
+commit 71c81ea6d295b2940df5a265c9298229a4bced03
+Author: Dan Sanders <sandersd@chromium.org>
+Date:   Thu May 19 14:16:20 2022 -0700
+
+    GN Configuration
+
+Affects:
+    libavutil/avsscanf.c
+
+------------------------------------------------------------------
+commit 8d12faf8f791f7655b48641ba47ff1ce9cd0d3f3
+Author: Eugene Zemtsov <eugene@chromium.org>
+Date:   Tue Jul 26 20:00:50 2022 -0700
+
+    Remove forward declaration for enum.
+
+    ISO C forbids forward references to enum types. And this breaks
+    x86 windows build of Chromium.
+
+Affects:
+    libavutil/hwcontext_stub.c
 

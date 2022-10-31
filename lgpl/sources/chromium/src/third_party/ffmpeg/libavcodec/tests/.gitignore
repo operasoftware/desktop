@@ -1,3 +1,4 @@
+/avcodec
 /avfft
 /avpacket
 /cabac
@@ -5,20 +6,16 @@
 /codec_desc
 /dct
 /fft
-/fft-fixed
 /fft-fixed32
 /golomb
 /h264_levels
 /h265_levels
 /htmlsubtitles
 /iirfilter
-/imgconvert
 /jpeg2000dwt
 /mathops
 /mjpegenc_huffman
 /motion
 /mpeg12framerate
-/options
 /rangecoder
 /snowenc
-/utils

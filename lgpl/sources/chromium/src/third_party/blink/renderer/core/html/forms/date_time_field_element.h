@@ -26,7 +26,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_DATE_TIME_FIELD_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_DATE_TIME_FIELD_ELEMENT_H_
 
-#include "base/macros.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/html/html_div_element.h"
 #include "third_party/blink/renderer/core/html/html_span_element.h"
@@ -55,6 +54,7 @@ class DateTimeFieldElement : public HTMLSpanElement {
     kDispatchNoEvent,
     kDispatchEvent,
   };
+  enum FieldRolloverType { kPastMin, kPastMax, kToPm };
 
   // FieldOwner implementer must call removeEventHandler when
   // it doesn't handle event, e.g. at destruction.
@@ -66,11 +66,15 @@ class DateTimeFieldElement : public HTMLSpanElement {
     virtual void FieldValueChanged() = 0;
     virtual bool FocusOnNextField(const DateTimeFieldElement&) = 0;
     virtual bool FocusOnPreviousField(const DateTimeFieldElement&) = 0;
+    virtual void HandleAmPmRollover(FieldRolloverType) {}
     virtual bool IsFieldOwnerDisabled() const = 0;
     virtual bool IsFieldOwnerReadOnly() const = 0;
     virtual AtomicString LocaleIdentifier() const = 0;
     virtual void FieldDidChangeValueByKeyboard() = 0;
   };
+
+  DateTimeFieldElement(const DateTimeFieldElement&) = delete;
+  DateTimeFieldElement& operator=(const DateTimeFieldElement&) = delete;
 
   void DefaultEventHandler(Event&) override;
   virtual bool HasValue() const = 0;
@@ -96,6 +100,7 @@ class DateTimeFieldElement : public HTMLSpanElement {
  protected:
   DateTimeFieldElement(Document&, FieldOwner&, DateTimeField);
   void FocusOnNextField();
+  void HandleAmPmRollover(FieldRolloverType);
   virtual void HandleKeyboardEvent(KeyboardEvent&) = 0;
   void Initialize(const AtomicString& pseudo,
                   const String& ax_help_text,
@@ -119,10 +124,8 @@ class DateTimeFieldElement : public HTMLSpanElement {
 
   Member<FieldOwner> field_owner_;
   DateTimeField type_;
-
-  DISALLOW_COPY_AND_ASSIGN(DateTimeFieldElement);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_DATE_TIME_FIELD_ELEMENT_H_

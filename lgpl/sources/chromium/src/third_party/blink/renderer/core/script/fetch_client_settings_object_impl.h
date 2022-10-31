@@ -36,14 +36,13 @@ class CORE_EXPORT FetchClientSettingsObjectImpl final
   const KURL& BaseUrl() const override;
   const SecurityOrigin* GetSecurityOrigin() const override;
   network::mojom::ReferrerPolicy GetReferrerPolicy() const override;
+
   const String GetOutgoingReferrer() const override;
 
   HttpsState GetHttpsState() const override;
 
   AllowedByNosniff::MimeTypeCheck MimeTypeCheckForClassicWorkerScript()
       const override;
-
-  network::mojom::IPAddressSpace GetAddressSpace() const override;
 
   mojom::blink::InsecureRequestPolicy GetInsecureRequestsPolicy()
       const override;

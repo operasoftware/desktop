@@ -9,13 +9,13 @@
 
 #include "build/build_config.h"
 
-#if defined(ARCH_CPU_X86_FAMILY) && !defined(OS_MACOSX)
+#if defined(ARCH_CPU_X86_FAMILY) && !BUILDFLAG(IS_MAC)
 
 #include <algorithm>
 #include <cmath>
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/platform/audio/audio_array.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
 namespace vector_math {
@@ -422,4 +422,4 @@ void Zvmul(const float* real1p,
 }  // namespace vector_math
 }  // namespace blink
 
-#endif  // defined(ARCH_CPU_X86_FAMILY) && !defined(OS_MACOSX)
+#endif  // defined(ARCH_CPU_X86_FAMILY) && !BUILDFLAG(IS_MAC)

@@ -7,10 +7,14 @@
 
 #include "third_party/blink/renderer/modules/webgpu/dawn_object.h"
 
+#include <dawn/webgpu.h>
+
 namespace blink {
 
 class GPUShaderModuleDescriptor;
 class ExceptionState;
+class ScriptPromise;
+class ScriptPromiseResolver;
 
 class GPUShaderModule : public DawnObject<WGPUShaderModule> {
   DEFINE_WRAPPERTYPEINFO();
@@ -20,10 +24,21 @@ class GPUShaderModule : public DawnObject<WGPUShaderModule> {
                                  const GPUShaderModuleDescriptor* webgpu_desc,
                                  ExceptionState& exception_state);
   explicit GPUShaderModule(GPUDevice* device, WGPUShaderModule shader_module);
-  ~GPUShaderModule() override;
+
+  GPUShaderModule(const GPUShaderModule&) = delete;
+  GPUShaderModule& operator=(const GPUShaderModule&) = delete;
+
+  ScriptPromise compilationInfo(ScriptState* script_state);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(GPUShaderModule);
+  void OnCompilationInfoCallback(ScriptPromiseResolver* resolver,
+                                 WGPUCompilationInfoRequestStatus status,
+                                 const WGPUCompilationInfo* info);
+
+  void setLabelImpl(const String& value) override {
+    std::string utf8_label = value.Utf8();
+    GetProcs().shaderModuleSetLabel(GetHandle(), utf8_label.c_str());
+  }
 };
 
 }  // namespace blink

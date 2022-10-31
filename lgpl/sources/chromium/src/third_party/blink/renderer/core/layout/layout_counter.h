@@ -22,15 +22,17 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_COUNTER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_COUNTER_H_
 
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
-#include "third_party/blink/renderer/core/style/counter_content.h"
+#include "third_party/blink/renderer/core/style/content_data.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 
 namespace blink {
 
 class CounterNode;
 class PseudoElement;
 
-using CounterMap = HashMap<AtomicString, scoped_refptr<CounterNode>>;
+using CounterMap = HeapHashMap<AtomicString, Member<CounterNode>>;
 
 // LayoutCounter is used to represent the text of a counter.
 // See http://www.w3.org/TR/CSS21/generate.html#counters
@@ -50,10 +52,11 @@ using CounterMap = HashMap<AtomicString, scoped_refptr<CounterNode>>;
 //
 // Keeping the map up to date is the reason why LayoutObjects need to call into
 // LayoutCounter during their lifetime (see the static functions below).
-class LayoutCounter final : public LayoutText {
+class LayoutCounter : public LayoutText {
  public:
-  LayoutCounter(PseudoElement&, const CounterContent&);
+  LayoutCounter(PseudoElement&, const CounterContentData&);
   ~LayoutCounter() override;
+  void Trace(Visitor*) const override;
 
   // These functions are static so that any LayoutObject can call them.
   // The reason is that any LayoutObject in the tree can have a CounterNode
@@ -71,13 +74,17 @@ class LayoutCounter final : public LayoutText {
 
   void UpdateCounter();
 
-  const char* GetName() const override { return "LayoutCounter"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutCounter";
+  }
 
  protected:
   void WillBeDestroyed() override;
 
  private:
   bool IsOfType(LayoutObjectType type) const override {
+    NOT_DESTROYED();
     return type == kLayoutObjectCounter || LayoutText::IsOfType(type);
   }
   scoped_refptr<StringImpl> OriginalText() const override;
@@ -87,19 +94,24 @@ class LayoutCounter final : public LayoutText {
   // changes.
   void Invalidate();
 
-  CounterContent counter_;
-  CounterNode* counter_node_;
-  LayoutCounter* next_for_same_counter_;
+  Member<const CounterContentData> counter_;
+  Member<CounterNode> counter_node_;
+  Member<LayoutCounter> next_for_same_counter_;
   friend class CounterNode;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutCounter, IsCounter());
+template <>
+struct DowncastTraits<LayoutCounter> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsCounter();
+  }
+};
 
 }  // namespace blink
 
 #if DCHECK_IS_ON()
 // Outside the blink namespace for ease of invocation from gdb.
-void showCounterLayoutTree(const blink::LayoutObject*, const char* counterName);
+void ShowCounterLayoutTree(const blink::LayoutObject*, const char* counterName);
 #endif
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_COUNTER_H_

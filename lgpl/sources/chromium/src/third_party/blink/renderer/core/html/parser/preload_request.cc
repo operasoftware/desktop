@@ -4,23 +4,53 @@
 
 #include "third_party/blink/renderer/core/html/parser/preload_request.h"
 
+#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/attribution_src_loader.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/preload_helper.h"
 #include "third_party/blink/renderer/core/script/document_write_intervention.h"
 #include "third_party/blink/renderer/core/script/script_loader.h"
+#include "third_party/blink/renderer/platform/loader/attribution_header_constants.h"
 #include "third_party/blink/renderer/platform/loader/fetch/cross_origin_attribute_value.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_info.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
+#include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 
 namespace blink {
+
+PreloadRequest::ExclusionInfo::ExclusionInfo(const KURL& document_url,
+                                             HashSet<KURL> scopes,
+                                             HashSet<KURL> resources)
+    : document_url_(document_url),
+      scopes_(std::move(scopes)),
+      resources_(std::move(resources)) {}
+
+PreloadRequest::ExclusionInfo::~ExclusionInfo() = default;
+
+bool PreloadRequest::ExclusionInfo::ShouldExclude(
+    const KURL& base_url,
+    const String& resource_url) const {
+  if (resources_.IsEmpty() && scopes_.IsEmpty())
+    return false;
+  KURL url = KURL(base_url.IsEmpty() ? document_url_ : base_url, resource_url);
+  if (resources_.Contains(url))
+    return true;
+  for (const auto& scope : scopes_) {
+    if (url.GetString().StartsWith(scope.GetString()))
+      return true;
+  }
+  return false;
+}
 
 KURL PreloadRequest::CompleteURL(Document* document) {
   if (!base_url_.IsEmpty())
@@ -36,10 +66,9 @@ std::unique_ptr<PreloadRequest> PreloadRequest::CreateIfNeeded(
     const KURL& base_url,
     ResourceType resource_type,
     const network::mojom::ReferrerPolicy referrer_policy,
-    ReferrerSource referrer_source,
     ResourceFetcher::IsImageSet is_image_set,
+    const ExclusionInfo* exclusion_info,
     const FetchParameters::ResourceWidth& resource_width,
-    const ClientHintsPreferences& client_hints_preferences,
     RequestType request_type) {
   // Never preload data URLs. We also disallow relative ref URLs which become
   // data URLs if the document's URL is a data URL. We don't want to create
@@ -49,14 +78,19 @@ std::unique_ptr<PreloadRequest> PreloadRequest::CreateIfNeeded(
       ProtocolIs(resource_url, "data")) {
     return nullptr;
   }
+
+  if (exclusion_info && exclusion_info->ShouldExclude(base_url, resource_url))
+    return nullptr;
+
   return base::WrapUnique(new PreloadRequest(
       initiator_name, initiator_position, resource_url, base_url, resource_type,
-      resource_width, client_hints_preferences, request_type, referrer_policy,
-      referrer_source, is_image_set));
+      resource_width, request_type, referrer_policy, is_image_set));
 }
 
 Resource* PreloadRequest::Start(Document* document) {
-  DCHECK(IsMainThread());
+  DCHECK(document->domWindow());
+  base::UmaHistogramTimes("Blink.PreloadRequestWaitTime",
+                          base::TimeTicks::Now() - creation_time_);
 
   FetchInitiatorInfo initiator_info;
   initiator_info.name = AtomicString(initiator_name_);
@@ -68,46 +102,41 @@ Resource* PreloadRequest::Start(Document* document) {
 
   ResourceRequest resource_request(url);
   resource_request.SetReferrerPolicy(referrer_policy_);
-  if (referrer_source_ == kBaseUrlIsReferrer) {
-    resource_request.SetReferrerString(base_url_.StrippedForUseAsReferrer());
-  }
 
   resource_request.SetRequestContext(
       ResourceFetcher::DetermineRequestContext(resource_type_, is_image_set_));
   resource_request.SetRequestDestination(
       ResourceFetcher::DetermineRequestDestination(resource_type_));
 
-  resource_request.SetFetchImportanceMode(importance_);
+  resource_request.SetFetchPriorityHint(fetch_priority_hint_);
 
-  if (resource_type_ == ResourceType::kImage && url.ProtocolIsInHTTPFamily() &&
-      base::FeatureList::IsEnabled(blink::features::kSubresourceRedirect) &&
-      blink::GetNetworkStateNotifier().SaveDataEnabled()) {
-    resource_request.SetPreviewsState(resource_request.GetPreviewsState() |
-                                      WebURLRequest::kSubresourceRedirectOn);
+  // Disable issue logging to avoid duplicates, since `CanRegister()` will be
+  // called again later.
+  if (is_attribution_reporting_eligible_img_or_script_ &&
+      document->domWindow()->GetFrame()->GetAttributionSrcLoader()->CanRegister(
+          url, /*element=*/nullptr,
+          /*request_id=*/absl::nullopt, /*log_issues=*/false)) {
+    resource_request.SetHttpHeaderField(
+        http_names::kAttributionReportingEligible,
+        kAttributionEligibleEventSourceAndTrigger);
   }
 
-  ResourceLoaderOptions options;
+  ResourceLoaderOptions options(document->domWindow()->GetCurrentWorld());
   options.initiator_info = initiator_info;
   FetchParameters params(std::move(resource_request), options);
 
-  if (resource_type_ == ResourceType::kImportResource) {
-    params.SetCrossOriginAccessControl(document->GetSecurityOrigin(),
-                                       kCrossOriginAttributeAnonymous);
-  }
-
-  if (script_type_ == mojom::ScriptType::kModule) {
+  auto* origin = document->domWindow()->GetSecurityOrigin();
+  if (script_type_ == mojom::blink::ScriptType::kModule) {
     DCHECK_EQ(resource_type_, ResourceType::kScript);
     params.SetCrossOriginAccessControl(
-        document->GetSecurityOrigin(),
-        ScriptLoader::ModuleScriptCredentialsMode(cross_origin_));
+        origin, ScriptLoader::ModuleScriptCredentialsMode(cross_origin_));
+    params.SetModuleScript();
   } else if (cross_origin_ != kCrossOriginAttributeNotSet) {
-    params.SetCrossOriginAccessControl(document->GetSecurityOrigin(),
-                                       cross_origin_);
+    params.SetCrossOriginAccessControl(origin, cross_origin_);
   }
 
   params.SetDefer(defer_);
   params.SetResourceWidth(resource_width_);
-  params.GetClientHintsPreferences().UpdateFrom(client_hints_preferences_);
   params.SetIntegrityMetadata(integrity_metadata_);
   params.SetContentSecurityPolicyNonce(nonce_);
   params.SetParserDisposition(kParserInserted);
@@ -115,12 +144,11 @@ Resource* PreloadRequest::Start(Document* document) {
   if (request_type_ == kRequestTypeLinkRelPreload)
     params.SetLinkPreload(true);
 
-  if (script_type_ == mojom::ScriptType::kModule) {
+  if (script_type_ == mojom::blink::ScriptType::kModule) {
     DCHECK_EQ(resource_type_, ResourceType::kScript);
     params.SetDecoderOptions(TextResourceDecoderOptions::CreateUTF8Decode());
   } else if (resource_type_ == ResourceType::kScript ||
-             resource_type_ == ResourceType::kCSSStyleSheet ||
-             resource_type_ == ResourceType::kImportResource) {
+             resource_type_ == ResourceType::kCSSStyleSheet) {
     params.SetCharset(charset_.IsEmpty() ? document->Encoding()
                                          : WTF::TextEncoding(charset_));
   }
@@ -133,10 +161,11 @@ Resource* PreloadRequest::Start(Document* document) {
   params.SetSpeculativePreloadType(speculative_preload_type);
 
   if (resource_type_ == ResourceType::kScript) {
-    MaybeDisallowFetchForDocWrittenScript(params, *document);
     // We intentionally ignore the returned value, because we don't resend
     // the async request to the blocked script here.
+    MaybeDisallowFetchForDocWrittenScript(params, *document);
   }
+  params.SetRenderBlockingBehavior(render_blocking_behavior_);
 
   return PreloadHelper::StartPreload(resource_type_, params, *document);
 }

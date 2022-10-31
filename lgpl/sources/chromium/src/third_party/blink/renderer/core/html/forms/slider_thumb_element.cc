@@ -45,7 +45,6 @@
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 #include "third_party/blink/renderer/core/layout/layout_object_factory.h"
-#include "third_party/blink/renderer/core/layout/layout_slider_container.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "ui/base/ui_base_features.h"
 
@@ -54,7 +53,7 @@ namespace blink {
 SliderThumbElement::SliderThumbElement(Document& document)
     : HTMLDivElement(document), in_drag_mode_(false) {
   SetHasCustomStyleCallbacks();
-  setAttribute(html_names::kIdAttr, shadow_element_names::SliderThumb());
+  setAttribute(html_names::kIdAttr, shadow_element_names::kIdSliderThumb);
 }
 
 void SliderThumbElement::SetPositionFromValue() {
@@ -64,12 +63,10 @@ void SliderThumbElement::SetPositionFromValue() {
   if (GetLayoutObject()) {
     GetLayoutObject()->SetNeedsLayoutAndFullPaintInvalidation(
         layout_invalidation_reason::kSliderValueChanged);
-    if (features::IsFormControlsRefreshEnabled()) {
-      HTMLInputElement* input(HostInput());
-      if (input && input->GetLayoutObject()) {
-        // the slider track selected value needs to be updated.
-        input->GetLayoutObject()->SetShouldDoFullPaintInvalidation();
-      }
+    HTMLInputElement* input(HostInput());
+    if (input && input->GetLayoutObject()) {
+      // the slider track selected value needs to be updated.
+      input->GetLayoutObject()->SetShouldDoFullPaintInvalidation();
     }
   }
 }
@@ -91,10 +88,6 @@ bool SliderThumbElement::MatchesReadWritePseudoClass() const {
   return HostInput() && HostInput()->MatchesReadWritePseudoClass();
 }
 
-const Node* SliderThumbElement::FocusDelegate() const {
-  return HostInput();
-}
-
 void SliderThumbElement::DragFrom(const LayoutPoint& point) {
   StartDragging();
   SetPositionFromPoint(point);
@@ -103,7 +96,7 @@ void SliderThumbElement::DragFrom(const LayoutPoint& point) {
 void SliderThumbElement::SetPositionFromPoint(const LayoutPoint& point) {
   HTMLInputElement* input(HostInput());
   Element* track_element = input->UserAgentShadowRoot()->getElementById(
-      shadow_element_names::SliderTrack());
+      shadow_element_names::kIdSliderTrack);
 
   const LayoutObject* input_object = input->GetLayoutObject();
   const LayoutBox* thumb_box = GetLayoutBox();
@@ -119,7 +112,7 @@ void SliderThumbElement::SetPositionFromPoint(const LayoutPoint& point) {
   LayoutUnit track_size;
   LayoutUnit position;
   LayoutUnit current_position;
-  const LayoutBox* input_box = ToLayoutBox(input_object);
+  const auto* input_box = To<LayoutBox>(input_object);
   PhysicalOffset thumb_offset =
       thumb_box->LocalToAncestorPoint(PhysicalOffset(), input_box) -
       track_box->LocalToAncestorPoint(PhysicalOffset(), input_box);
@@ -158,7 +151,7 @@ void SliderThumbElement::SetPositionFromPoint(const LayoutPoint& point) {
   }
 
   String value_string = SerializeForNumberType(value);
-  if (value_string == input->value())
+  if (value_string == input->Value())
     return;
 
   // FIXME: This is no longer being set from renderer. Consider updating the
@@ -243,7 +236,7 @@ void SliderThumbElement::DefaultEventHandler(Event& event) {
   HTMLDivElement::DefaultEventHandler(event);
 }
 
-bool SliderThumbElement::WillRespondToMouseMoveEvents() {
+bool SliderThumbElement::WillRespondToMouseMoveEvents() const {
   const HTMLInputElement* input = HostInput();
   if (input && !input->IsDisabledFormControl() && in_drag_mode_)
     return true;
@@ -275,22 +268,10 @@ HTMLInputElement* SliderThumbElement::HostInput() const {
   return To<HTMLInputElement>(OwnerShadowHost());
 }
 
-static const AtomicString& SliderThumbShadowPartId() {
-  DEFINE_STATIC_LOCAL(const AtomicString, slider_thumb,
-                      ("-webkit-slider-thumb"));
-  return slider_thumb;
-}
-
-static const AtomicString& MediaSliderThumbShadowPartId() {
-  DEFINE_STATIC_LOCAL(const AtomicString, media_slider_thumb,
-                      ("-webkit-media-slider-thumb"));
-  return media_slider_thumb;
-}
-
 const AtomicString& SliderThumbElement::ShadowPseudoId() const {
   HTMLInputElement* input = HostInput();
   if (!input || !input->GetLayoutObject())
-    return SliderThumbShadowPartId();
+    return shadow_element_names::kPseudoSliderThumb;
 
   const ComputedStyle& slider_style = input->GetLayoutObject()->StyleRef();
   switch (slider_style.EffectiveAppearance()) {
@@ -298,17 +279,19 @@ const AtomicString& SliderThumbElement::ShadowPseudoId() const {
     case kMediaSliderThumbPart:
     case kMediaVolumeSliderPart:
     case kMediaVolumeSliderThumbPart:
-      return MediaSliderThumbShadowPartId();
+      return shadow_element_names::kPseudoMediaSliderThumb;
     default:
-      return SliderThumbShadowPartId();
+      return shadow_element_names::kPseudoSliderThumb;
   }
 }
 
-scoped_refptr<ComputedStyle> SliderThumbElement::CustomStyleForLayoutObject() {
+scoped_refptr<ComputedStyle> SliderThumbElement::CustomStyleForLayoutObject(
+    const StyleRecalcContext& style_recalc_context) {
   Element* host = OwnerShadowHost();
   DCHECK(host);
   const ComputedStyle& host_style = host->ComputedStyleRef();
-  scoped_refptr<ComputedStyle> style = OriginalStyleForLayoutObject();
+  scoped_refptr<ComputedStyle> style =
+      OriginalStyleForLayoutObject(style_recalc_context);
 
   if (host_style.EffectiveAppearance() == kSliderVerticalPart)
     style->SetEffectiveAppearance(kSliderThumbVerticalPart);
@@ -327,10 +310,7 @@ scoped_refptr<ComputedStyle> SliderThumbElement::CustomStyleForLayoutObject() {
 // --------------------------------
 
 SliderContainerElement::SliderContainerElement(Document& document)
-    : HTMLDivElement(document),
-      has_touch_event_handler_(false),
-      touch_started_(false),
-      sliding_direction_(kNoMove) {
+    : HTMLDivElement(document) {
   UpdateTouchEventHandlerRegistry();
   SetHasCustomStyleCallbacks();
 }
@@ -339,9 +319,10 @@ HTMLInputElement* SliderContainerElement::HostInput() const {
   return To<HTMLInputElement>(OwnerShadowHost());
 }
 
-LayoutObject* SliderContainerElement::CreateLayoutObject(const ComputedStyle&,
-                                                         LegacyLayout) {
-  return new LayoutSliderContainer(this);
+LayoutObject* SliderContainerElement::CreateLayoutObject(
+    const ComputedStyle& style,
+    LegacyLayout legacy) {
+  return LayoutObjectFactory::CreateFlexibleBox(*this, style, legacy);
 }
 
 void SliderContainerElement::DefaultEventHandler(Event& event) {
@@ -360,7 +341,7 @@ void SliderContainerElement::HandleTouchEvent(TouchEvent* event) {
     // TODO: Also do this for touchcancel?
     input->DispatchFormControlChangeEvent();
     event->SetDefaultHandled();
-    sliding_direction_ = kNoMove;
+    sliding_direction_ = Direction::kNoMove;
     touch_started_ = false;
     return;
   }
@@ -373,20 +354,20 @@ void SliderContainerElement::HandleTouchEvent(TouchEvent* event) {
 
   TouchList* touches = event->targetTouches();
   auto* thumb = To<SliderThumbElement>(
-      GetTreeScope().getElementById(shadow_element_names::SliderThumb()));
+      GetTreeScope().getElementById(shadow_element_names::kIdSliderThumb));
   if (!thumb || !touches)
     return;
 
   if (touches->length() == 1) {
     if (event->type() == event_type_names::kTouchstart) {
       start_point_ = touches->item(0)->AbsoluteLocation();
-      sliding_direction_ = kNoMove;
+      sliding_direction_ = Direction::kNoMove;
       touch_started_ = true;
       thumb->SetPositionFromPoint(touches->item(0)->AbsoluteLocation());
     } else if (touch_started_) {
       LayoutPoint current_point = touches->item(0)->AbsoluteLocation();
-      if (sliding_direction_ ==
-          kNoMove) {  // Still needs to update the direction.
+      if (sliding_direction_ == Direction::kNoMove) {
+        // Still needs to update the direction.
         sliding_direction_ = GetDirection(current_point, start_point_);
       }
 
@@ -404,12 +385,12 @@ SliderContainerElement::Direction SliderContainerElement::GetDirection(
     LayoutPoint& point1,
     LayoutPoint& point2) {
   if (point1 == point2) {
-    return kNoMove;
+    return Direction::kNoMove;
   }
   if ((point1.X() - point2.X()).Abs() >= (point1.Y() - point2.Y()).Abs()) {
-    return kHorizontal;
+    return Direction::kHorizontal;
   }
-  return kVertical;
+  return Direction::kVertical;
 }
 
 bool SliderContainerElement::CanSlide() {
@@ -422,27 +403,23 @@ bool SliderContainerElement::CanSlide() {
   int transform_size = transforms.size();
   if (transform_size > 0) {
     for (int i = 0; i < transform_size; ++i) {
-      if (transforms.at(i)->GetType() == TransformOperation::kRotate) {
+      if (transforms.at(i)->GetType() == TransformOperation::kRotate ||
+          transforms.at(i)->GetType() == TransformOperation::kRotateZ) {
         return true;
       }
     }
   }
   bool is_horizontal = GetComputedStyle()->IsHorizontalWritingMode();
-  if ((sliding_direction_ == kVertical && is_horizontal) ||
-      (sliding_direction_ == kHorizontal && !is_horizontal)) {
+  if ((sliding_direction_ == Direction::kVertical && is_horizontal) ||
+      (sliding_direction_ == Direction::kHorizontal && !is_horizontal)) {
     return false;
   }
   return true;
 }
 
 const AtomicString& SliderContainerElement::ShadowPseudoId() const {
-  DEFINE_STATIC_LOCAL(const AtomicString, media_slider_container,
-                      ("-webkit-media-slider-container"));
-  DEFINE_STATIC_LOCAL(const AtomicString, slider_container,
-                      ("-webkit-slider-container"));
-
   if (!OwnerShadowHost() || !OwnerShadowHost()->GetLayoutObject())
-    return slider_container;
+    return shadow_element_names::kPseudoSliderContainer;
 
   const ComputedStyle& slider_style =
       OwnerShadowHost()->GetLayoutObject()->StyleRef();
@@ -451,9 +428,9 @@ const AtomicString& SliderContainerElement::ShadowPseudoId() const {
     case kMediaSliderThumbPart:
     case kMediaVolumeSliderPart:
     case kMediaVolumeSliderThumbPart:
-      return media_slider_container;
+      return shadow_element_names::kPseudoMediaSliderContainer;
     default:
-      return slider_container;
+      return shadow_element_names::kPseudoSliderContainer;
   }
 }
 

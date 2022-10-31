@@ -24,25 +24,28 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_FONT_BUILDER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_FONT_BUILDER_H_
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/font_size_functions.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
+#include "third_party/blink/renderer/platform/fonts/font_palette.h"
 #include "third_party/blink/renderer/platform/fonts/font_variant_numeric.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
-class FontSelector;
 class ComputedStyle;
+class FontSelector;
+class TreeScope;
 
 class CORE_EXPORT FontBuilder {
   STACK_ALLOCATED();
 
  public:
   explicit FontBuilder(Document*);
+  FontBuilder(const FontBuilder&) = delete;
+  FontBuilder& operator=(const FontBuilder&) = delete;
 
   void SetInitial(float effective_zoom);
 
@@ -64,14 +67,20 @@ class CORE_EXPORT FontBuilder {
   void SetWeight(FontSelectionValue);
 
   void SetFamilyDescription(const FontDescription::FamilyDescription&);
+  // font-family is a tree-scoped reference.
+  void SetFamilyTreeScope(const TreeScope*);
   void SetFeatureSettings(scoped_refptr<FontFeatureSettings>);
   void SetLocale(scoped_refptr<const LayoutLocale>);
   void SetVariantCaps(FontDescription::FontVariantCaps);
   void SetVariantEastAsian(const FontVariantEastAsian);
   void SetVariantLigatures(const FontDescription::VariantLigatures&);
   void SetVariantNumeric(const FontVariantNumeric&);
+  void SetFontSynthesisWeight(FontDescription::FontSynthesisWeight);
+  void SetFontSynthesisStyle(FontDescription::FontSynthesisStyle);
+  void SetFontSynthesisSmallCaps(FontDescription::FontSynthesisSmallCaps);
   void SetTextRendering(TextRenderingMode);
   void SetKerning(FontDescription::Kerning);
+  void SetFontPalette(scoped_refptr<FontPalette>);
   void SetFontOpticalSizing(OpticalSizing);
   void SetFontSmoothing(FontSmoothingMode);
   void SetVariationSettings(scoped_refptr<FontVariationSettings>);
@@ -80,7 +89,7 @@ class CORE_EXPORT FontBuilder {
   void UpdateFontDescription(FontDescription&,
                              FontOrientation = FontOrientation::kHorizontal);
   void CreateFont(ComputedStyle&, const ComputedStyle* parent_style);
-  void CreateFontForDocument(ComputedStyle&);
+  void CreateInitialFont(ComputedStyle&);
 
   bool FontDirty() const { return flags_; }
 
@@ -89,6 +98,7 @@ class CORE_EXPORT FontBuilder {
   }
   static FontFeatureSettings* InitialFeatureSettings() { return nullptr; }
   static FontVariationSettings* InitialVariationSettings() { return nullptr; }
+  static FontPalette* InitialFontPalette() { return nullptr; }
   static FontDescription::GenericFamilyType InitialGenericFamily() {
     return FontDescription::kStandardFamily;
   }
@@ -120,6 +130,16 @@ class CORE_EXPORT FontBuilder {
   static FontSelectionValue InitialStretch() { return NormalWidthValue(); }
   static FontSelectionValue InitialStyle() { return NormalSlopeValue(); }
   static FontSelectionValue InitialWeight() { return NormalWeightValue(); }
+  static FontDescription::FontSynthesisWeight InitialFontSynthesisWeight() {
+    return FontDescription::kAutoFontSynthesisWeight;
+  }
+  static FontDescription::FontSynthesisStyle InitialFontSynthesisStyle() {
+    return FontDescription::kAutoFontSynthesisStyle;
+  }
+  static FontDescription::FontSynthesisSmallCaps
+  InitialFontSynthesisSmallCaps() {
+    return FontDescription::kAutoFontSynthesisSmallCaps;
+  }
 
  private:
   void SetFamilyDescription(FontDescription&,
@@ -140,7 +160,11 @@ class CORE_EXPORT FontBuilder {
                                          float effective_zoom,
                                          float specified_size);
 
-  Document* document_;
+  FontSelector* FontSelectorFromTreeScope(const TreeScope* tree_scope);
+  FontSelector* ComputeFontSelector(const ComputedStyle& style);
+
+  Document* document_{nullptr};
+  const TreeScope* family_tree_scope_{nullptr};
   FontDescription font_description_;
 
   enum class PropertySetFlag {
@@ -160,7 +184,11 @@ class CORE_EXPORT FontBuilder {
     kTextRendering,
     kKerning,
     kFontOpticalSizing,
+    kFontPalette,
     kFontSmoothing,
+    kFontSynthesisWeight,
+    kFontSynthesisStyle,
+    kFontSynthesisSmallCaps,
 
     kEffectiveZoom,
     kTextOrientation,
@@ -172,10 +200,9 @@ class CORE_EXPORT FontBuilder {
     return flags_ & (1 << unsigned(flag));
   }
 
-  unsigned flags_;
-  DISALLOW_COPY_AND_ASSIGN(FontBuilder);
+  unsigned flags_{0};
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_FONT_BUILDER_H_

@@ -7,15 +7,16 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
+#include "base/time/time.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/web/modules/mediastream/encoded_video_frame.h"
 #include "third_party/blink/renderer/modules/mediarecorder/audio_track_recorder.h"
 #include "third_party/blink/renderer/modules/mediarecorder/video_track_recorder.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/heap/thread_state.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -48,6 +49,10 @@ class MODULES_EXPORT MediaRecorderHandler final
  public:
   explicit MediaRecorderHandler(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+
+  MediaRecorderHandler(const MediaRecorderHandler&) = delete;
+  MediaRecorderHandler& operator=(const MediaRecorderHandler&) = delete;
+
   ~MediaRecorderHandler();
 
   // MediaRecorder API isTypeSupported(), which boils down to
@@ -62,8 +67,12 @@ class MODULES_EXPORT MediaRecorderHandler final
                   MediaStreamDescriptor* media_stream,
                   const String& type,
                   const String& codecs,
-                  int32_t audio_bits_per_second,
-                  int32_t video_bits_per_second);
+                  uint32_t audio_bits_per_second,
+                  uint32_t video_bits_per_second,
+                  AudioTrackRecorder::BitrateMode audio_bitrate_mode);
+
+  AudioTrackRecorder::BitrateMode AudioBitrateMode();
+
   bool Start(int timeslice);
   void Stop();
   void Pause();
@@ -80,7 +89,7 @@ class MODULES_EXPORT MediaRecorderHandler final
   void Trace(Visitor*) const;
 
  private:
-  friend class MediaRecorderHandlerTest;
+  friend class MediaRecorderHandlerFixture;
   friend class MediaRecorderHandlerPassthroughTest;
 
   // Called to indicate there is encoded video data available. |encoded_alpha|
@@ -119,6 +128,8 @@ class MODULES_EXPORT MediaRecorderHandler final
   void OnAudioBusForTesting(const media::AudioBus& audio_bus,
                             const base::TimeTicks& timestamp);
   void SetAudioFormatForTesting(const media::AudioParameters& params);
+  void UpdateTrackLiveAndEnabled(const MediaStreamComponent& track,
+                                 bool is_video);
 
   // Set to true if there is no MIME type configured upon Initialize()
   // and the video track's source supports encoded output, giving
@@ -126,14 +137,17 @@ class MODULES_EXPORT MediaRecorderHandler final
   bool passthrough_enabled_;
 
   // Sanitized video and audio bitrate settings passed on initialize().
-  int32_t video_bits_per_second_;
-  int32_t audio_bits_per_second_;
+  uint32_t video_bits_per_second_{0};
+  uint32_t audio_bits_per_second_{0};
 
-  // Video Codec, VP8 is used by default.
-  VideoTrackRecorder::CodecId video_codec_id_;
+  // Video Codec and profile, VP8 is used by default.
+  VideoTrackRecorder::CodecProfile video_codec_profile_;
 
   // Audio Codec, OPUS is used by default.
   AudioTrackRecorder::CodecId audio_codec_id_;
+
+  // Audio bitrate mode (constant, variable, etc.), VBR is used by default.
+  AudioTrackRecorder::BitrateMode audio_bitrate_mode_;
 
   // |recorder_| has no notion of time, thus may configure us via
   // start(timeslice) to notify it after a certain |timeslice_| has passed. We
@@ -142,7 +156,7 @@ class MODULES_EXPORT MediaRecorderHandler final
   base::TimeTicks slice_origin_timestamp_;
 
   // The last seen video codec of the last received encoded video frame.
-  base::Optional<media::VideoCodec> last_seen_codec_;
+  absl::optional<media::VideoCodec> last_seen_codec_;
 
   bool invalidated_ = false;
   bool recording_;
@@ -160,8 +174,6 @@ class MODULES_EXPORT MediaRecorderHandler final
   std::unique_ptr<media::WebmMuxer> webm_muxer_;
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaRecorderHandler);
 };
 
 }  // namespace blink

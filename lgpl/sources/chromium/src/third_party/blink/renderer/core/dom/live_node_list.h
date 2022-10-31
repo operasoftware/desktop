@@ -29,15 +29,13 @@
 #include "third_party/blink/renderer/core/dom/node_list.h"
 #include "third_party/blink/renderer/core/html/collection_items_cache.h"
 #include "third_party/blink/renderer/core/html/collection_type.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 class Element;
 
 class CORE_EXPORT LiveNodeList : public NodeList, public LiveNodeListBase {
-  USING_GARBAGE_COLLECTED_MIXIN(LiveNodeList);
-
  public:
   LiveNodeList(ContainerNode& owner_node,
                CollectionType collection_type,

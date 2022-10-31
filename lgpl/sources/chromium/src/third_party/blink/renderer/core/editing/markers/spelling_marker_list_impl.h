@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_SPELLING_MARKER_LIST_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_SPELLING_MARKER_LIST_IMPL_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/markers/spell_check_marker_list_impl.h"
 
 namespace blink {
@@ -14,11 +15,10 @@ class CORE_EXPORT SpellingMarkerListImpl final
     : public SpellCheckMarkerListImpl {
  public:
   SpellingMarkerListImpl() = default;
+  SpellingMarkerListImpl(const SpellingMarkerListImpl&) = delete;
+  SpellingMarkerListImpl& operator=(const SpellingMarkerListImpl&) = delete;
 
   DocumentMarker::MarkerType MarkerType() const final;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SpellingMarkerListImpl);
 };
 
 }  // namespace blink

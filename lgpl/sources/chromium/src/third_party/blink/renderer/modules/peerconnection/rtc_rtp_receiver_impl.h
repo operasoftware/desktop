@@ -7,11 +7,8 @@
 
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/single_thread_task_runner.h"
-#include "third_party/blink/public/platform/web_media_stream.h"
-#include "third_party/blink/public/platform/web_media_stream_track.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/peerconnection/webrtc_media_stream_track_adapter_map.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_rtp_receiver_platform.h"
@@ -117,8 +114,7 @@ class MODULES_EXPORT RTCRtpReceiverImpl : public RTCRtpReceiverPlatform {
   RTCRtpReceiverImpl(
       scoped_refptr<webrtc::PeerConnectionInterface> native_peer_connection,
       RtpReceiverState state,
-      bool force_encoded_audio_insertable_streams,
-      bool force_encoded_video_insertable_streams);
+      bool encoded_insertable_streams);
   RTCRtpReceiverImpl(const RTCRtpReceiverImpl& other);
   ~RTCRtpReceiverImpl() override;
 
@@ -139,7 +135,7 @@ class MODULES_EXPORT RTCRtpReceiverImpl : public RTCRtpReceiverPlatform {
                 const Vector<webrtc::NonStandardGroupId>&) override;
   std::unique_ptr<webrtc::RtpParameters> GetParameters() const override;
   void SetJitterBufferMinimumDelay(
-      base::Optional<double> delay_seconds) override;
+      absl::optional<double> delay_seconds) override;
   RTCEncodedAudioStreamTransformer* GetEncodedAudioStreamTransformer()
       const override;
   RTCEncodedVideoStreamTransformer* GetEncodedVideoStreamTransformer()
@@ -153,7 +149,7 @@ class MODULES_EXPORT RTCRtpReceiverImpl : public RTCRtpReceiverPlatform {
 };
 
 class MODULES_EXPORT RTCRtpReceiverOnlyTransceiver
-    : public RTCRtpTransceiverPlatform {
+    : public RTCRtpPlanBTransceiverPlatform {
  public:
   RTCRtpReceiverOnlyTransceiver(
       std::unique_ptr<RTCRtpReceiverPlatform> receiver);
@@ -165,12 +161,12 @@ class MODULES_EXPORT RTCRtpReceiverOnlyTransceiver
   String Mid() const override;
   std::unique_ptr<blink::RTCRtpSenderPlatform> Sender() const override;
   std::unique_ptr<RTCRtpReceiverPlatform> Receiver() const override;
-  bool Stopped() const override;
   webrtc::RtpTransceiverDirection Direction() const override;
-  void SetDirection(webrtc::RtpTransceiverDirection direction) override;
-  base::Optional<webrtc::RtpTransceiverDirection> CurrentDirection()
+  webrtc::RTCError SetDirection(
+      webrtc::RtpTransceiverDirection direction) override;
+  absl::optional<webrtc::RtpTransceiverDirection> CurrentDirection()
       const override;
-  base::Optional<webrtc::RtpTransceiverDirection> FiredDirection()
+  absl::optional<webrtc::RtpTransceiverDirection> FiredDirection()
       const override;
   webrtc::RTCError SetCodecPreferences(
       Vector<webrtc::RtpCodecCapability>) override;

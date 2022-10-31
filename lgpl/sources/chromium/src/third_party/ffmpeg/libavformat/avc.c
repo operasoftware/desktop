@@ -27,7 +27,7 @@
 #include "avc.h"
 #include "avio_internal.h"
 
-static const uint8_t *ff_avc_find_startcode_internal(const uint8_t *p, const uint8_t *end)
+static const uint8_t *avc_find_startcode_internal(const uint8_t *p, const uint8_t *end)
 {
     const uint8_t *a = p + 4 - ((intptr_t)p & 3);
 
@@ -65,12 +65,13 @@ static const uint8_t *ff_avc_find_startcode_internal(const uint8_t *p, const uin
 }
 
 const uint8_t *ff_avc_find_startcode(const uint8_t *p, const uint8_t *end){
-    const uint8_t *out= ff_avc_find_startcode_internal(p, end);
+    const uint8_t *out = avc_find_startcode_internal(p, end);
     if(p<out && out<end && !out[-1]) out--;
     return out;
 }
 
-int ff_avc_parse_nal_units(AVIOContext *pb, const uint8_t *buf_in, int size)
+static int avc_parse_nal_units(AVIOContext *pb, NALUList *list,
+                               const uint8_t *buf_in, int size)
 {
     const uint8_t *p = buf_in;
     const uint8_t *end = p + size;
@@ -79,17 +80,50 @@ int ff_avc_parse_nal_units(AVIOContext *pb, const uint8_t *buf_in, int size)
     size = 0;
     nal_start = ff_avc_find_startcode(p, end);
     for (;;) {
+        const size_t nalu_limit = SIZE_MAX / sizeof(*list->nalus);
         while (nal_start < end && !*(nal_start++));
         if (nal_start == end)
             break;
 
         nal_end = ff_avc_find_startcode(nal_start, end);
-        avio_wb32(pb, nal_end - nal_start);
-        avio_write(pb, nal_start, nal_end - nal_start);
+        if (pb) {
+            avio_wb32(pb, nal_end - nal_start);
+            avio_write(pb, nal_start, nal_end - nal_start);
+        } else if (list->nb_nalus >= nalu_limit) {
+            return AVERROR(ERANGE);
+        } else {
+            NALU *tmp = av_fast_realloc(list->nalus, &list->nalus_array_size,
+                                        (list->nb_nalus + 1) * sizeof(*list->nalus));
+            if (!tmp)
+                return AVERROR(ENOMEM);
+            list->nalus = tmp;
+            tmp[list->nb_nalus++] = (NALU){ .offset = nal_start - p,
+                                            .size   = nal_end - nal_start };
+        }
         size += 4 + nal_end - nal_start;
         nal_start = nal_end;
     }
     return size;
+}
+
+int ff_avc_parse_nal_units(AVIOContext *pb, const uint8_t *buf_in, int size)
+{
+    return avc_parse_nal_units(pb, NULL, buf_in, size);
+}
+
+int ff_nal_units_create_list(NALUList *list, const uint8_t *buf, int size)
+{
+    list->nb_nalus = 0;
+    return avc_parse_nal_units(NULL, list, buf, size);
+}
+
+void ff_nal_units_write_list(const NALUList *list, AVIOContext *pb,
+                             const uint8_t *buf)
+{
+    for (unsigned i = 0; i < list->nb_nalus; i++) {
+        avio_wb32(pb, list->nalus[i].size);
+        avio_write(pb, buf + list->nalus[i].offset, list->nalus[i].size);
+    }
 }
 
 int ff_avc_parse_nal_units_buf(const uint8_t *buf_in, uint8_t **buf, int *size)
@@ -196,18 +230,17 @@ int ff_isom_write_avcc(AVIOContext *pb, const uint8_t *data, int len)
     avio_write(pb, pps, pps_size);
 
     if (sps[3] != 66 && sps[3] != 77 && sps[3] != 88) {
-        H264SequenceParameterSet *seq = ff_avc_decode_sps(sps + 3, sps_size - 3);
-        if (!seq) {
-            ret = AVERROR(ENOMEM);
+        H264SPS seq;
+        ret = ff_avc_decode_sps(&seq, sps + 3, sps_size - 3);
+        if (ret < 0)
             goto fail;
-        }
-        avio_w8(pb, 0xfc | seq->chroma_format_idc); /* 6 bits reserved (111111) + chroma_format_idc */
-        avio_w8(pb, 0xf8 | (seq->bit_depth_luma - 8)); /* 5 bits reserved (11111) + bit_depth_luma_minus8 */
-        avio_w8(pb, 0xf8 | (seq->bit_depth_chroma - 8)); /* 5 bits reserved (11111) + bit_depth_chroma_minus8 */
+
+        avio_w8(pb, 0xfc |  seq.chroma_format_idc); /* 6 bits reserved (111111) + chroma_format_idc */
+        avio_w8(pb, 0xf8 | (seq.bit_depth_luma - 8)); /* 5 bits reserved (11111) + bit_depth_luma_minus8 */
+        avio_w8(pb, 0xf8 | (seq.bit_depth_chroma - 8)); /* 5 bits reserved (11111) + bit_depth_chroma_minus8 */
         avio_w8(pb, nb_sps_ext); /* number of sps ext */
         if (nb_sps_ext)
             avio_write(pb, sps_ext, sps_ext_size);
-        av_free(seq);
     }
 
 fail:
@@ -332,27 +365,24 @@ static inline int get_se_golomb(GetBitContext *gb) {
     return ((v >> 1) ^ sign) - sign;
 }
 
-H264SequenceParameterSet *ff_avc_decode_sps(const uint8_t *buf, int buf_size)
+int ff_avc_decode_sps(H264SPS *sps, const uint8_t *buf, int buf_size)
 {
     int i, j, ret, rbsp_size, aspect_ratio_idc, pic_order_cnt_type;
     int num_ref_frames_in_pic_order_cnt_cycle;
     int delta_scale, lastScale = 8, nextScale = 8;
     int sizeOfScalingList;
-    H264SequenceParameterSet *sps = NULL;
     GetBitContext gb;
     uint8_t *rbsp_buf;
 
     rbsp_buf = ff_nal_unit_extract_rbsp(buf, buf_size, &rbsp_size, 0);
     if (!rbsp_buf)
-        return NULL;
+        return AVERROR(ENOMEM);
 
     ret = init_get_bits8(&gb, rbsp_buf, rbsp_size);
     if (ret < 0)
         goto end;
 
-    sps = av_mallocz(sizeof(*sps));
-    if (!sps)
-        goto end;
+    memset(sps, 0, sizeof(*sps));
 
     sps->profile_idc = get_bits(&gb, 8);
     sps->constraint_set_flags |= get_bits1(&gb) << 0; // constraint_set0_flag
@@ -448,7 +478,8 @@ H264SequenceParameterSet *ff_avc_decode_sps(const uint8_t *buf, int buf_size)
         sps->sar.den = 1;
     }
 
+    ret = 0;
  end:
     av_free(rbsp_buf);
-    return sps;
+    return ret;
 }

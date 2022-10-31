@@ -42,12 +42,13 @@ StorageController::DomStorageConnection GetDomStorageConnection() {
 
 // static
 StorageController* StorageController::GetInstance() {
-  DEFINE_STATIC_LOCAL(StorageController, gCachedStorageAreaController,
-                      (GetDomStorageConnection(),
-                       Thread::MainThread()->Scheduler()->IPCTaskRunner(),
-                       base::SysInfo::IsLowEndDevice()
-                           ? kStorageControllerTotalCacheLimitInBytesLowEnd
-                           : kStorageControllerTotalCacheLimitInBytes));
+  DEFINE_STATIC_LOCAL(
+      StorageController, gCachedStorageAreaController,
+      (GetDomStorageConnection(),
+       Thread::MainThread()->Scheduler()->DeprecatedDefaultTaskRunner(),
+       base::SysInfo::IsLowEndDevice()
+           ? kStorageControllerTotalCacheLimitInBytesLowEnd
+           : kStorageControllerTotalCacheLimitInBytes));
   return &gCachedStorageAreaController;
 }
 
@@ -55,17 +56,23 @@ StorageController* StorageController::GetInstance() {
 bool StorageController::CanAccessStorageArea(LocalFrame* frame,
                                              StorageArea::StorageType type) {
   if (auto* settings_client = frame->GetContentSettingsClient()) {
-    return settings_client->AllowStorage(
-        type == StorageArea::StorageType::kLocalStorage);
+    switch (type) {
+      case StorageArea::StorageType::kLocalStorage:
+        return settings_client->AllowStorageAccessSync(
+            WebContentSettingsClient::StorageType::kLocalStorage);
+      case StorageArea::StorageType::kSessionStorage:
+        return settings_client->AllowStorageAccessSync(
+            WebContentSettingsClient::StorageType::kSessionStorage);
+    }
   }
   return true;
 }
 
 StorageController::StorageController(
     DomStorageConnection connection,
-    scoped_refptr<base::SingleThreadTaskRunner> ipc_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     size_t total_cache_limit)
-    : ipc_runner_(std::move(ipc_runner)),
+    : task_runner_(std::move(task_runner)),
       namespaces_(MakeGarbageCollected<
                   HeapHashMap<String, WeakMember<StorageNamespace>>>()),
       total_cache_limit_(total_cache_limit),
@@ -111,10 +118,12 @@ void StorageController::ClearAreasIfNeeded() {
 }
 
 scoped_refptr<CachedStorageArea> StorageController::GetLocalStorageArea(
-    const SecurityOrigin* origin) {
+    const LocalDOMWindow* local_dom_window,
+    mojo::PendingRemote<mojom::blink::StorageArea> local_storage_area) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   EnsureLocalStorageNamespaceCreated();
-  return local_storage_namespace_->GetCachedArea(origin);
+  return local_storage_namespace_->GetCachedArea(local_dom_window,
+                                                 std::move(local_storage_area));
 }
 
 void StorageController::AddLocalStorageInspectorStorageAgent(
@@ -129,17 +138,6 @@ void StorageController::RemoveLocalStorageInspectorStorageAgent(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   EnsureLocalStorageNamespaceCreated();
   local_storage_namespace_->RemoveInspectorStorageAgent(agent);
-}
-
-void StorageController::DidDispatchLocalStorageEvent(
-    const SecurityOrigin* origin,
-    const String& key,
-    const String& old_value,
-    const String& new_value) {
-  if (local_storage_namespace_) {
-    local_storage_namespace_->DidDispatchStorageEvent(origin, key, old_value,
-                                                      new_value);
-  }
 }
 
 void StorageController::EnsureLocalStorageNamespaceCreated() {

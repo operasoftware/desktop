@@ -32,8 +32,6 @@ KURL mock_path_as_kurl() {
 
 class TestableFileWriter : public GarbageCollected<TestableFileWriter>,
                            public FileWriterBase {
-  USING_GARBAGE_COLLECTED_MIXIN(TestableFileWriter);
-
  public:
   explicit TestableFileWriter() { reset(); }
 
@@ -159,6 +157,9 @@ class FileWriterTest : public testing::Test {
  public:
   FileWriterTest() = default;
 
+  FileWriterTest(const FileWriterTest&) = delete;
+  FileWriterTest& operator=(const FileWriterTest&) = delete;
+
   FileWriterBase* writer() { return testable_writer_.Get(); }
 
  protected:
@@ -168,8 +169,6 @@ class FileWriterTest : public testing::Test {
   }
 
   Persistent<TestableFileWriter> testable_writer_;
-
-  DISALLOW_COPY_AND_ASSIGN(FileWriterTest);
 };
 
 TEST_F(FileWriterTest, BasicFileWrite) {

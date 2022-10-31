@@ -10,8 +10,11 @@
 #include "third_party/blink/renderer/core/animation/animation_clock.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document_lifecycle.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+
+namespace cc {
+class AnimationHost;
+}
 
 namespace blink {
 
@@ -40,12 +43,25 @@ class CORE_EXPORT PageAnimator final : public GarbageCollected<PageAnimator> {
   // See documents of methods with the same names in LocalFrameView class.
   void UpdateAllLifecyclePhases(LocalFrame& root_frame,
                                 DocumentUpdateReason reason);
-  void UpdateAllLifecyclePhasesExceptPaint(LocalFrame& root_frame,
-                                           DocumentUpdateReason reason);
+  void UpdateLifecycleToPrePaintClean(LocalFrame& root_frame,
+                                      DocumentUpdateReason reason);
   void UpdateLifecycleToLayoutClean(LocalFrame& root_frame,
                                     DocumentUpdateReason reason);
   AnimationClock& Clock() { return animation_clock_; }
   HeapVector<Member<Animation>> GetAnimations(const TreeScope&);
+  void SetHasCanvasInvalidation();
+  bool has_canvas_invalidation_for_test() const {
+    return has_canvas_invalidation_;
+  }
+  void SetHasInlineStyleMutation();
+  bool has_inline_style_mutation_for_test() const {
+    return has_inline_style_mutation_;
+  }
+  void SetHasSmilAnimation();
+  void SetCurrentFrameHadRaf();
+  void SetNextFrameHasPendingRaf();
+  void SetHasSharedElementTransition(bool);
+  void ReportFrameAnimations(cc::AnimationHost* animation_host);
 
  private:
   Member<Page> page_;
@@ -53,6 +69,19 @@ class CORE_EXPORT PageAnimator final : public GarbageCollected<PageAnimator> {
   bool updating_layout_and_style_for_painting_;
   bool suppress_frame_requests_workaround_for704763_only_ = false;
   AnimationClock animation_clock_;
+
+  // True if there is inline style mutation in the current frame.
+  bool has_inline_style_mutation_ = false;
+  // True if the current main frame has canvas invalidation.
+  bool has_canvas_invalidation_ = false;
+  // True if the current main frame has svg smil animation.
+  bool has_smil_animation_ = false;
+  // True if there is a raf scheduled in this frame.
+  bool current_frame_had_raf_ = false;
+  // True if there is a raf scheduled for the next frame.
+  bool next_frame_has_pending_raf_ = false;
+  // True if there is an ongoing shared element transition.
+  bool has_shared_element_transition_ = false;
 };
 
 }  // namespace blink

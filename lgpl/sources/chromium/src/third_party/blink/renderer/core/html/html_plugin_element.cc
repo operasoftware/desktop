@@ -22,13 +22,17 @@
 
 #include "third_party/blink/renderer/core/html/html_plugin_element.h"
 
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
-#include "third_party/blink/public/mojom/feature_policy/policy_value.mojom-blink-forward.h"
+#include "base/feature_list.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/policy_value.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
+#include "third_party/blink/renderer/core/display_lock/display_lock_utilities.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/node.h"
@@ -51,9 +55,8 @@
 #include "third_party/blink/renderer/core/loader/mixed_content_checker.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/plugin_data.h"
-#include "third_party/blink/renderer/core/page/scrolling/scrolling_coordinator.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/network/mime/mime_type_from_url.h"
@@ -109,29 +112,29 @@ void PluginParameters::MapDataParamToSrc() {
   });
 
   if (data != names_.end()) {
-    AppendNameWithValue("src", values_[data - names_.begin()]);
+    AppendNameWithValue(
+        "src", values_[base::checked_cast<wtf_size_t>(data - names_.begin())]);
   }
 }
 
-HTMLPlugInElement::HTMLPlugInElement(
-    const QualifiedName& tag_name,
-    Document& doc,
-    const CreateElementFlags flags,
-    PreferPlugInsForImagesOption prefer_plug_ins_for_images_option)
+HTMLPlugInElement::HTMLPlugInElement(const QualifiedName& tag_name,
+                                     Document& doc,
+                                     const CreateElementFlags flags)
     : HTMLFrameOwnerElement(tag_name, doc),
       is_delaying_load_event_(false),
       // needs_plugin_update_(!IsCreatedByParser) allows HTMLObjectElement to
       // delay EmbeddedContentView updates until after all children are
       // parsed. For HTMLEmbedElement this delay is unnecessary, but it is
       // simpler to make both classes share the same codepath in this class.
-      needs_plugin_update_(!flags.IsCreatedByParser()),
-      should_prefer_plug_ins_for_images_(prefer_plug_ins_for_images_option ==
-                                         kShouldPreferPlugInsForImages) {
+      needs_plugin_update_(!flags.IsCreatedByParser()) {
   SetHasCustomStyleCallbacks();
-  if (auto* context = doc.GetExecutionContext()) {
-    context->GetScheduler()->RegisterStickyFeature(
-        SchedulingPolicy::Feature::kContainsPlugins,
-        {SchedulingPolicy::RecordMetricsForBackForwardCache()});
+  if (!base::FeatureList::IsEnabled(
+          features::kBackForwardCacheEnabledForNonPluginEmbed)) {
+    if (auto* context = doc.GetExecutionContext()) {
+      context->GetScheduler()->RegisterStickyFeature(
+          SchedulingPolicy::Feature::kContainsPlugins,
+          {SchedulingPolicy::DisableBackForwardCache()});
+    }
   }
 }
 
@@ -232,13 +235,22 @@ void HTMLPlugInElement::AttachLayoutTree(AttachContext& context) {
              !GetLayoutEmbeddedObject()->ShowsUnavailablePluginIndicator() &&
              GetObjectContentType() != ObjectContentType::kPlugin &&
              !is_delaying_load_event_) {
+    // If we're in a content-visibility subtree that can prevent layout, then
+    // add our layout object to the frame view's update list. This is typically
+    // done during layout, but if we're blocking layout, we will never update
+    // the plugin and thus delay the load event indefinitely.
+    if (DisplayLockUtilities::LockedAncestorPreventingLayout(*this)) {
+      auto* embedded_object = GetLayoutEmbeddedObject();
+      if (auto* frame_view = embedded_object->GetFrameView())
+        frame_view->AddPartToUpdate(*embedded_object);
+    }
     is_delaying_load_event_ = true;
     GetDocument().IncrementLoadEventDelayCount();
     GetDocument().LoadPluginsSoon();
   }
   if (image_loader_ && layout_object->IsLayoutImage()) {
     LayoutImageResource* image_resource =
-        ToLayoutImage(layout_object)->ImageResource();
+        To<LayoutImage>(layout_object)->ImageResource();
     image_resource->SetImageResource(image_loader_->GetContent());
   }
   if (layout_object->AffectsWhitespaceSiblings())
@@ -260,6 +272,13 @@ void HTMLPlugInElement::UpdatePlugin() {
   }
 }
 
+Node::InsertionNotificationRequest HTMLPlugInElement::InsertedInto(
+    ContainerNode& insertion_point) {
+  if (insertion_point.isConnected())
+    GetDocument().DelayLoadEventUntilLayoutTreeUpdate();
+  return HTMLFrameOwnerElement::InsertedInto(insertion_point);
+}
+
 void HTMLPlugInElement::RemovedFrom(ContainerNode& insertion_point) {
   // Plugins can persist only through reattachment during a lifecycle
   // update. This method shouldn't be called in that lifecycle phase.
@@ -273,15 +292,15 @@ bool HTMLPlugInElement::ShouldAccelerate() const {
   return plugin && plugin->CcLayer();
 }
 
-ParsedFeaturePolicy HTMLPlugInElement::ConstructContainerPolicy() const {
+ParsedPermissionsPolicy HTMLPlugInElement::ConstructContainerPolicy() const {
   // Plugin elements (<object> and <embed>) are not allowed to enable the
   // fullscreen feature. Add an empty allowlist for the fullscreen feature so
   // that the nested browsing context is unable to use the API, regardless of
   // origin.
   // https://fullscreen.spec.whatwg.org/#model
-  ParsedFeaturePolicy container_policy;
-  ParsedFeaturePolicyDeclaration allowlist(
-      mojom::blink::FeaturePolicyFeature::kFullscreen);
+  ParsedPermissionsPolicy container_policy;
+  ParsedPermissionsPolicyDeclaration allowlist(
+      mojom::blink::PermissionsPolicyFeature::kFullscreen);
   container_policy.push_back(allowlist);
   return container_policy;
 }
@@ -340,13 +359,13 @@ LayoutObject* HTMLPlugInElement::CreateLayoutObject(const ComputedStyle& style,
     return LayoutObject::CreateObject(this, style, legacy);
 
   if (IsImageType()) {
-    LayoutImage* image = new LayoutImage(this);
+    LayoutImage* image = MakeGarbageCollected<LayoutImage>(this);
     image->SetImageResource(MakeGarbageCollected<LayoutImageResource>());
     return image;
   }
 
   plugin_is_available_ = true;
-  return new LayoutEmbeddedObject(this);
+  return MakeGarbageCollected<LayoutEmbeddedObject>(this);
 }
 
 void HTMLPlugInElement::FinishParsingChildren() {
@@ -387,6 +406,8 @@ v8::Local<v8::Object> HTMLPlugInElement::PluginWrapper() {
       // is handled externally. Also note that it is possible to call
       // PluginWrapper before the plugin has gone through the update phase(see
       // https://crbug.com/946709).
+      if (!frame->Client())
+        return v8::Local<v8::Object>();
       plugin_wrapper_.Reset(
           isolate, frame->Client()->GetScriptableObject(*this, isolate));
     }
@@ -453,16 +474,15 @@ void HTMLPlugInElement::DefaultEventHandler(Event& event) {
   LayoutObject* r = GetLayoutObject();
   if (!r || !r->IsLayoutEmbeddedContent())
     return;
-  if (r->IsEmbeddedObject()) {
-    if (ToLayoutEmbeddedObject(r)->ShowsUnavailablePluginIndicator())
+  if (auto* embedded_object = DynamicTo<LayoutEmbeddedObject>(r)) {
+    if (embedded_object->ShowsUnavailablePluginIndicator())
       return;
   }
-  WebPluginContainerImpl* plugin = OwnedPlugin();
-  if (!plugin)
-    return;
-  plugin->HandleEvent(event);
-  if (event.DefaultHandled())
-    return;
+  if (WebPluginContainerImpl* plugin = OwnedPlugin()) {
+    plugin->HandleEvent(event);
+    if (event.DefaultHandled())
+      return;
+  }
   HTMLFrameOwnerElement::DefaultEventHandler(event);
 }
 
@@ -481,8 +501,16 @@ LayoutEmbeddedContent* HTMLPlugInElement::LayoutEmbeddedContentForJSBindings()
 bool HTMLPlugInElement::IsKeyboardFocusable() const {
   if (HTMLFrameOwnerElement::IsKeyboardFocusable())
     return true;
-  return GetDocument().IsActive() && PluginEmbeddedContentView() &&
-         PluginEmbeddedContentView()->SupportsKeyboardFocus() && IsFocusable();
+
+  WebPluginContainerImpl* embedded_content_view = nullptr;
+  if (LayoutEmbeddedContent* layout_embedded_content =
+          ExistingLayoutEmbeddedContent()) {
+    embedded_content_view = layout_embedded_content->Plugin();
+  }
+
+  return GetDocument().IsActive() && embedded_content_view &&
+         embedded_content_view->SupportsKeyboardFocus() &&
+         IsBaseElementFocusable();
 }
 
 bool HTMLPlugInElement::HasCustomFocusLogic() const {
@@ -536,9 +564,8 @@ HTMLPlugInElement::ObjectContentType HTMLPlugInElement::GetObjectContentType()
   }
 
   if (MIMETypeRegistry::IsSupportedImageMIMEType(mime_type)) {
-    return should_prefer_plug_ins_for_images_ && plugin_supports_mime_type
-               ? ObjectContentType::kPlugin
-               : ObjectContentType::kImage;
+    return plugin_supports_mime_type ? ObjectContentType::kPlugin
+                                     : ObjectContentType::kImage;
   }
 
   if (plugin_supports_mime_type)
@@ -557,7 +584,7 @@ bool HTMLPlugInElement::IsImageType() const {
 LayoutEmbeddedObject* HTMLPlugInElement::GetLayoutEmbeddedObject() const {
   // HTMLObjectElement and HTMLEmbedElement may return arbitrary LayoutObjects
   // when using fallback content.
-  return ToLayoutEmbeddedObjectOrNull(GetLayoutObject());
+  return DynamicTo<LayoutEmbeddedObject>(GetLayoutObject());
 }
 
 // We don't use url_, as it may not be the final URL that the object loads,
@@ -565,7 +592,7 @@ LayoutEmbeddedObject* HTMLPlugInElement::GetLayoutEmbeddedObject() const {
 bool HTMLPlugInElement::AllowedToLoadFrameURL(const String& url) {
   KURL complete_url = GetDocument().CompleteURL(url);
   return !(ContentFrame() && complete_url.ProtocolIsJavaScript() &&
-           !GetDocument().GetSecurityOrigin()->CanAccess(
+           !GetExecutionContext()->GetSecurityOrigin()->CanAccess(
                ContentFrame()->GetSecurityContext()->GetSecurityOrigin()));
 }
 
@@ -637,7 +664,7 @@ bool HTMLPlugInElement::LoadPlugin(const KURL& url,
     return false;
 
   LocalFrame* frame = GetDocument().GetFrame();
-  if (!frame->Loader().AllowPlugins(kAboutToInstantiatePlugin))
+  if (!frame->Loader().AllowPlugins())
     return false;
 
   auto* layout_object = GetLayoutEmbeddedObject();
@@ -660,7 +687,9 @@ bool HTMLPlugInElement::LoadPlugin(const KURL& url,
         *this, url, plugin_params.Names(), plugin_params.Values(), mime_type,
         load_manually);
     if (!plugin) {
-      if (!layout_object->ShowsUnavailablePluginIndicator()) {
+      layout_object = GetLayoutEmbeddedObject();
+      // LayoutObject can be destroyed between the previous check and here.
+      if (layout_object && !layout_object->ShowsUnavailablePluginIndicator()) {
         plugin_is_available_ = false;
         layout_object->SetPluginAvailability(
             LayoutEmbeddedObject::kPluginMissing);
@@ -672,19 +701,23 @@ bool HTMLPlugInElement::LoadPlugin(const KURL& url,
     layout_object->GetFrameView()->AddPlugin(plugin);
   }
 
+  if (base::FeatureList::IsEnabled(
+          features::kBackForwardCacheEnabledForNonPluginEmbed)) {
+    // Disable back/forward cache when a document uses a plugin. This is not
+    // done in the constructor since |HTMLPlugInElement| is a base class for
+    // HTMLObjectElement and HTMLEmbedElement which can host child browsing
+    // contexts instead.
+    GetExecutionContext()->GetScheduler()->RegisterStickyFeature(
+        SchedulingPolicy::Feature::kContainsPlugins,
+        {SchedulingPolicy::DisableBackForwardCache()});
+  }
+
   GetDocument().SetContainsPlugins();
   // TODO(esprehn): WebPluginContainerImpl::SetCcLayer() also schedules a
   // compositing update, do we need both?
   SetNeedsCompositingUpdate();
-  // Make sure any input event handlers introduced by the plugin are taken into
-  // account.
-  if (Page* page = GetDocument().GetFrame()->GetPage()) {
-    if (ScrollingCoordinator* scrolling_coordinator =
-            page->GetScrollingCoordinator()) {
-      LocalFrameView* frame_view = GetDocument().GetFrame()->View();
-      scrolling_coordinator->NotifyGeometryChanged(frame_view);
-    }
-  }
+  if (layout_object->HasLayer())
+    layout_object->Layer()->SetNeedsCompositingInputsUpdate();
   return true;
 }
 
@@ -711,9 +744,8 @@ bool HTMLPlugInElement::AllowedToLoadObject(const KURL& url,
     return false;
 
   AtomicString declared_mime_type = FastGetAttribute(html_names::kTypeAttr);
-  if (!GetDocument().GetContentSecurityPolicy()->AllowObjectFromSource(url) ||
-      !GetDocument().GetContentSecurityPolicy()->AllowPluginTypeForDocument(
-          GetDocument(), mime_type, declared_mime_type, url)) {
+  auto* csp = GetExecutionContext()->GetContentSecurityPolicy();
+  if (!csp->AllowObjectFromSource(url)) {
     if (auto* layout_object = GetLayoutEmbeddedObject()) {
       plugin_is_available_ = false;
       layout_object->SetPluginAvailability(
@@ -725,22 +757,25 @@ bool HTMLPlugInElement::AllowedToLoadObject(const KURL& url,
   // is specified.
   return (!mime_type.IsEmpty() && url.IsEmpty()) ||
          !MixedContentChecker::ShouldBlockFetch(
-             frame, mojom::RequestContextType::OBJECT, url,
+             frame, mojom::blink::RequestContextType::OBJECT,
+             network::mojom::blink::IPAddressSpace::kUnknown, url,
              ResourceRequest::RedirectStatus::kNoRedirect, url,
-             /* devtools_id= */ base::nullopt);
+             /* devtools_id= */ absl::nullopt, ReportingDisposition::kReport,
+             GetDocument().Loader()->GetContentSecurityNotifier());
 }
 
 bool HTMLPlugInElement::AllowedToLoadPlugin(const KURL& url,
                                             const String& mime_type) {
-  if (GetDocument().IsSandboxed(
+  if (GetExecutionContext()->IsSandboxed(
           network::mojom::blink::WebSandboxFlags::kPlugins)) {
-    GetDocument().AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::ConsoleMessageSource::kSecurity,
-        mojom::ConsoleMessageLevel::kError,
-        "Failed to load '" + url.ElidedString() +
-            "' as a plugin, because the "
-            "frame into which the plugin "
-            "is loading is sandboxed."));
+    GetExecutionContext()->AddConsoleMessage(
+        MakeGarbageCollected<ConsoleMessage>(
+            mojom::blink::ConsoleMessageSource::kSecurity,
+            mojom::blink::ConsoleMessageLevel::kError,
+            "Failed to load '" + url.ElidedString() +
+                "' as a plugin, because the "
+                "frame into which the plugin "
+                "is loading is sandboxed."));
     return false;
   }
   return true;
@@ -766,8 +801,10 @@ void HTMLPlugInElement::RemovePluginFromFrameView(
 }
 
 void HTMLPlugInElement::DidAddUserAgentShadowRoot(ShadowRoot&) {
-  UserAgentShadowRoot()->AppendChild(
-      HTMLSlotElement::CreateUserAgentDefaultSlot(GetDocument()));
+  ShadowRoot* shadow_root = UserAgentShadowRoot();
+  DCHECK(shadow_root);
+  shadow_root->AppendChild(
+      MakeGarbageCollected<HTMLSlotElement>(GetDocument()));
 }
 
 bool HTMLPlugInElement::HasFallbackContent() const {
@@ -797,8 +834,10 @@ void HTMLPlugInElement::UpdateServiceTypeIfEmpty() {
   }
 }
 
-scoped_refptr<ComputedStyle> HTMLPlugInElement::CustomStyleForLayoutObject() {
-  scoped_refptr<ComputedStyle> style = OriginalStyleForLayoutObject();
+scoped_refptr<ComputedStyle> HTMLPlugInElement::CustomStyleForLayoutObject(
+    const StyleRecalcContext& style_recalc_context) {
+  scoped_refptr<ComputedStyle> style =
+      OriginalStyleForLayoutObject(style_recalc_context);
   if (IsImageType() && !GetLayoutObject() && style &&
       LayoutObjectIsNeeded(*style)) {
     if (!image_loader_)

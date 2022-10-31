@@ -24,7 +24,7 @@ const CSSValue* InlineStylePropertyMap::GetProperty(
 }
 
 const CSSValue* InlineStylePropertyMap::GetCustomProperty(
-    AtomicString property_name) const {
+    const AtomicString& property_name) const {
   const CSSPropertyValueSet* inline_style = owner_element_->InlineStyle();
   return inline_style ? inline_style->GetPropertyCSSValue(property_name)
                       : nullptr;
@@ -32,7 +32,9 @@ const CSSValue* InlineStylePropertyMap::GetCustomProperty(
 
 void InlineStylePropertyMap::SetProperty(CSSPropertyID property_id,
                                          const CSSValue& value) {
+  DCHECK_NE(property_id, CSSPropertyID::kVariable);
   owner_element_->SetInlineStyleProperty(property_id, value);
+  owner_element_->NotifyInlineStyleMutation();
 }
 
 bool InlineStylePropertyMap::SetShorthandProperty(
@@ -42,7 +44,7 @@ bool InlineStylePropertyMap::SetShorthandProperty(
   DCHECK(CSSProperty::Get(property_id).IsShorthand());
   const auto result = owner_element_->EnsureMutableInlineStyle().SetProperty(
       property_id, value, false /* important */, secure_context_mode);
-  return result.did_parse;
+  return result != MutableCSSPropertyValueSet::kParseError;
 }
 
 void InlineStylePropertyMap::SetCustomProperty(
@@ -52,9 +54,9 @@ void InlineStylePropertyMap::SetCustomProperty(
   auto* variable_data =
       To<CSSVariableReferenceValue>(value).VariableDataValue();
   owner_element_->SetInlineStyleProperty(
-      CSSPropertyID::kVariable,
-      *MakeGarbageCollected<CSSCustomPropertyDeclaration>(property_name,
-                                                          variable_data));
+      CSSPropertyName(property_name),
+      *MakeGarbageCollected<CSSCustomPropertyDeclaration>(variable_data));
+  owner_element_->NotifyInlineStyleMutation();
 }
 
 void InlineStylePropertyMap::RemoveProperty(CSSPropertyID property_id) {
@@ -87,8 +89,6 @@ String InlineStylePropertyMap::SerializationForShorthand(
     return StylePropertySerializer(*inline_style)
         .SerializeShorthand(property.PropertyID());
   }
-
-  NOTREACHED();
   return "";
 }
 

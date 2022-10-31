@@ -29,7 +29,7 @@ from .user_defined_type import UserDefinedType
 
 class Interface(UserDefinedType, WithExtendedAttributes, WithCodeGeneratorInfo,
                 WithExposure, WithComponent, WithDebugInfo):
-    """https://heycam.github.io/webidl/#idl-interfaces"""
+    """https://webidl.spec.whatwg.org/#idl-interfaces"""
 
     class IR(IRMap.IR, WithExtendedAttributes, WithCodeGeneratorInfo,
              WithExposure, WithComponent, WithDebugInfo):
@@ -180,8 +180,9 @@ class Interface(UserDefinedType, WithExtendedAttributes, WithCodeGeneratorInfo,
         self._constructor_groups = tuple([
             ConstructorGroup(
                 group_ir,
-                filter(lambda x: x.identifier == group_ir.identifier,
-                       self._constructors),
+                list(
+                    filter(lambda x: x.identifier == group_ir.identifier,
+                           self._constructors)),
                 owner=self) for group_ir in ir.constructor_groups
         ])
         assert len(self._constructor_groups) <= 1
@@ -192,8 +193,9 @@ class Interface(UserDefinedType, WithExtendedAttributes, WithCodeGeneratorInfo,
         self._named_constructor_groups = tuple([
             ConstructorGroup(
                 group_ir,
-                filter(lambda x: x.identifier == group_ir.identifier,
-                       self._named_constructors),
+                list(
+                    filter(lambda x: x.identifier == group_ir.identifier,
+                           self._named_constructors)),
                 owner=self) for group_ir in ir.named_constructor_groups
         ])
         self._operations = tuple([
@@ -201,24 +203,26 @@ class Interface(UserDefinedType, WithExtendedAttributes, WithCodeGeneratorInfo,
             for operation_ir in ir.operations
         ])
         self._operation_groups = tuple([
-            OperationGroup(
-                group_ir,
-                filter(lambda x: x.identifier == group_ir.identifier,
-                       self._operations),
-                owner=self) for group_ir in ir.operation_groups
+            OperationGroup(group_ir,
+                           list(
+                               filter(
+                                   lambda x: x.is_static == group_ir.is_static
+                                   and x.identifier == group_ir.identifier,
+                                   self._operations)),
+                           owner=self) for group_ir in ir.operation_groups
         ])
         self._exposed_constructs = tuple(ir.exposed_constructs)
         self._legacy_window_aliases = tuple(ir.legacy_window_aliases)
         self._indexed_and_named_properties = None
-        indexed_and_named_property_operations = filter(
-            lambda x: x.is_indexed_or_named_property_operation,
-            self._operations)
+        indexed_and_named_property_operations = list(
+            filter(lambda x: x.is_indexed_or_named_property_operation,
+                   self._operations))
         if indexed_and_named_property_operations:
             self._indexed_and_named_properties = IndexedAndNamedProperties(
                 indexed_and_named_property_operations, owner=self)
         self._stringifier = None
-        stringifier_operation_irs = filter(lambda x: x.is_stringifier,
-                                           ir.operations)
+        stringifier_operation_irs = list(
+            filter(lambda x: x.is_stringifier, ir.operations))
         if stringifier_operation_irs:
             assert len(stringifier_operation_irs) == 1
             op_ir = make_copy(stringifier_operation_irs[0])
@@ -231,8 +235,9 @@ class Interface(UserDefinedType, WithExtendedAttributes, WithCodeGeneratorInfo,
             attribute = None
             if operation.stringifier_attribute:
                 attr_id = operation.stringifier_attribute
-                attributes = filter(lambda x: x.identifier == attr_id,
-                                    self._attributes)
+                attributes = list(
+                    filter(lambda x: x.identifier == attr_id,
+                           self._attributes))
                 assert len(attributes) == 1
                 attribute = attributes[0]
             self._stringifier = Stringifier(operation, attribute, owner=self)
@@ -261,7 +266,7 @@ class Interface(UserDefinedType, WithExtendedAttributes, WithCodeGeneratorInfo,
         """
         Returns the list of inclusive inherited interfaces.
 
-        https://heycam.github.io/webidl/#interface-inclusive-inherited-interfaces
+        https://webidl.spec.whatwg.org/#interface-inclusive-inherited-interfaces
         """
         result = []
         interface = self
@@ -284,7 +289,8 @@ class Interface(UserDefinedType, WithExtendedAttributes, WithCodeGeneratorInfo,
     @property
     def attributes(self):
         """
-        Returns attributes, including [Unforgeable] attributes in ancestors.
+        Returns attributes, including [LegacyUnforgeable] attributes in
+        ancestors.
         """
         return self._attributes
 
@@ -321,14 +327,14 @@ class Interface(UserDefinedType, WithExtendedAttributes, WithCodeGeneratorInfo,
     def operations(self):
         """
         Returns all operations, including special operations without an
-        identifier, as well as [Unforgeable] operations in ancestors.
+        identifier, as well as [LegacyUnforgeable] operations in ancestors.
         """
         return self._operations
 
     @property
     def operation_groups(self):
         """
-        Returns groups of overloaded operations, including [Unforgeable]
+        Returns groups of overloaded operations, including [LegacyUnforgeable]
         operations in ancestors.
 
         All operations that have an identifier are grouped by identifier, thus
@@ -408,8 +414,8 @@ class IndexedAndNamedProperties(WithOwner):
     """
     Represents a set of indexed/named getter/setter/deleter.
 
-    https://heycam.github.io/webidl/#idl-indexed-properties
-    https://heycam.github.io/webidl/#idl-named-properties
+    https://webidl.spec.whatwg.org/#idl-indexed-properties
+    https://webidl.spec.whatwg.org/#idl-named-properties
     """
 
     def __init__(self, operations, owner):
@@ -518,7 +524,7 @@ class IndexedAndNamedProperties(WithOwner):
 
 
 class Stringifier(WithOwner):
-    """https://heycam.github.io/webidl/#idl-stringifiers"""
+    """https://webidl.spec.whatwg.org/#idl-stringifiers"""
 
     def __init__(self, operation, attribute, owner):
         assert isinstance(operation, Operation)
@@ -539,7 +545,7 @@ class Stringifier(WithOwner):
 
 
 class Iterable(WithDebugInfo):
-    """https://heycam.github.io/webidl/#idl-iterable"""
+    """https://webidl.spec.whatwg.org/#idl-iterable"""
 
     class IR(WithDebugInfo):
         def __init__(self,
@@ -577,8 +583,9 @@ class Iterable(WithDebugInfo):
         self._operation_groups = tuple([
             OperationGroup(
                 group_ir,
-                filter(lambda x: x.identifier == group_ir.identifier,
-                       self._operations),
+                list(
+                    filter(lambda x: x.identifier == group_ir.identifier,
+                           self._operations)),
                 owner=owner) for group_ir in ir.operation_groups
         ])
 
@@ -612,7 +619,7 @@ class Iterable(WithDebugInfo):
 
 
 class Maplike(WithDebugInfo):
-    """https://heycam.github.io/webidl/#idl-maplike"""
+    """https://webidl.spec.whatwg.org/#idl-maplike"""
 
     class IR(WithDebugInfo):
         def __init__(self,
@@ -665,8 +672,9 @@ class Maplike(WithDebugInfo):
         self._operation_groups = tuple([
             OperationGroup(
                 group_ir,
-                filter(lambda x: x.identifier == group_ir.identifier,
-                       self._operations),
+                list(
+                    filter(lambda x: x.identifier == group_ir.identifier,
+                           self._operations)),
                 owner=owner) for group_ir in ir.operation_groups
         ])
 
@@ -705,7 +713,7 @@ class Maplike(WithDebugInfo):
 
 
 class Setlike(WithDebugInfo):
-    """https://heycam.github.io/webidl/#idl-setlike"""
+    """https://webidl.spec.whatwg.org/#idl-setlike"""
 
     class IR(WithDebugInfo):
         def __init__(self,
@@ -754,8 +762,9 @@ class Setlike(WithDebugInfo):
         self._operation_groups = tuple([
             OperationGroup(
                 group_ir,
-                filter(lambda x: x.identifier == group_ir.identifier,
-                       self._operations),
+                list(
+                    filter(lambda x: x.identifier == group_ir.identifier,
+                           self._operations)),
                 owner=owner) for group_ir in ir.operation_groups
         ])
 

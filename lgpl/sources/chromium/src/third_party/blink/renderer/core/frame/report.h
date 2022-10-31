@@ -14,13 +14,14 @@ namespace blink {
 // The constants are implemented as static members of a class to have an unique
 // address and not violate ODR.
 struct CORE_EXPORT ReportType {
+  static constexpr const char kCSPViolation[] = "csp-violation";
+  static constexpr const char kCoopAccessViolation[] = "coop-access-violation";
   static constexpr const char kDeprecation[] = "deprecation";
-  static constexpr const char kFeaturePolicyViolation[] =
-      "feature-policy-violation";
   static constexpr const char kDocumentPolicyViolation[] =
       "document-policy-violation";
+  static constexpr const char kPermissionsPolicyViolation[] =
+      "permissions-policy-violation";
   static constexpr const char kIntervention[] = "intervention";
-  static constexpr const char kCSPViolation[] = "csp-violation";
 };
 
 class CORE_EXPORT Report : public ScriptWrappable {
@@ -28,7 +29,9 @@ class CORE_EXPORT Report : public ScriptWrappable {
 
  public:
   Report(const String& type, const String& url, ReportBody* body)
-      : type_(type), url_(url), body_(body) {}
+      : type_(type), url_(url), body_(body) {
+    DCHECK(!type.IsNull());
+  }
 
   ~Report() override = default;
 
@@ -42,6 +45,10 @@ class CORE_EXPORT Report : public ScriptWrappable {
   }
 
   ScriptValue toJSON(ScriptState* script_state) const;
+
+  // Provides a hash-like value for identifying reports with same content.
+  // Collision of match id is possible.
+  unsigned MatchId() const;
 
  private:
   const String type_;

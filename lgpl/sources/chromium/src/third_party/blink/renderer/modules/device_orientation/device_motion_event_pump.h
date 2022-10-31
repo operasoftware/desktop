@@ -5,10 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_DEVICE_ORIENTATION_DEVICE_MOTION_EVENT_PUMP_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_DEVICE_ORIENTATION_DEVICE_MOTION_EVENT_PUMP_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/modules/device_orientation/device_sensor_event_pump.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -19,10 +18,12 @@ class PlatformEventController;
 class MODULES_EXPORT DeviceMotionEventPump
     : public GarbageCollected<DeviceMotionEventPump>,
       public DeviceSensorEventPump {
-  USING_GARBAGE_COLLECTED_MIXIN(DeviceMotionEventPump);
-
  public:
   explicit DeviceMotionEventPump(LocalFrame&);
+
+  DeviceMotionEventPump(const DeviceMotionEventPump&) = delete;
+  DeviceMotionEventPump& operator=(const DeviceMotionEventPump&) = delete;
+
   ~DeviceMotionEventPump() override;
 
   void SetController(PlatformEventController*);
@@ -59,8 +60,6 @@ class MODULES_EXPORT DeviceMotionEventPump
 
   Member<DeviceMotionData> data_;
   Member<PlatformEventController> controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(DeviceMotionEventPump);
 };
 
 }  // namespace blink

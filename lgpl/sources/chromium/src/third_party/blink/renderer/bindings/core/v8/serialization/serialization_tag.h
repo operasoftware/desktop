@@ -43,16 +43,15 @@ enum SerializationTag {
                           // transferred MojoHandle.
   kBlobTag = 'b',  // uuid:WebCoreString, type:WebCoreString, size:uint64_t ->
                    // Blob (ref)
-  kBlobIndexTag = 'i',      // index:int32_t -> Blob (ref)
-  kFileTag = 'f',           // file:RawFile -> File (ref)
-  kFileIndexTag = 'e',      // index:int32_t -> File (ref)
-  kDOMFileSystemTag = 'd',  // type:int32_t, name:WebCoreString,
-                            // uuid:WebCoreString -> FileSystem (ref)
-  kNativeFileSystemFileHandleTag = 'n',  // name:WebCoreString, index:uint32_t
-                                         // -> NativeFileSystemFileHandle (ref)
-  kNativeFileSystemDirectoryHandleTag =
-      'N',  // name:WebCoreString, index:uint32_t ->
-            // NativeFileSystemDirectoryHandle (ref)
+  kBlobIndexTag = 'i',             // index:int32_t -> Blob (ref)
+  kFileTag = 'f',                  // file:RawFile -> File (ref)
+  kFileIndexTag = 'e',             // index:int32_t -> File (ref)
+  kDOMFileSystemTag = 'd',         // type:int32_t, name:WebCoreString,
+                                   // uuid:WebCoreString -> FileSystem (ref)
+  kFileSystemFileHandleTag = 'n',  // name:WebCoreString, index:uint32_t
+                                   // -> FileSystemFileHandle (ref)
+  kFileSystemDirectoryHandleTag = 'N',  // name:WebCoreString, index:uint32_t ->
+                                        // FileSystemDirectoryHandle (ref)
   kFileListTag =
       'l',  // length:uint32_t, files:RawFile[length] -> FileList (ref)
   kFileListIndexTag =
@@ -76,8 +75,14 @@ enum SerializationTag {
   kReadableStreamTransferTag = 'r',   // index:uint32_t
   kTransformStreamTransferTag = 'm',  // index:uint32_t
   kWritableStreamTransferTag = 'w',   // index:uint32_t
-  kDOMPointTag = 'Q',                 // x:Double, y:Double, z:Double, w:Double
-  kDOMPointReadOnlyTag = 'W',         // x:Double, y:Double, z:Double, w:Double
+  kMediaStreamTrack =
+      's',             // session_id.high:uint64_t, session_id.low:uint64_t,
+                       // transfer_id.high:uint64_t, transfer_id.low:uint64_t,
+                       // kind:WebCoreString, id:WebCoreString,
+                       // label:WebCoreString, enabled:byte, muted:byte,
+                       // contentHint:Uint32Enum, readyState:Uint32Enum
+  kDOMPointTag = 'Q',  // x:Double, y:Double, z:Double, w:Double
+  kDOMPointReadOnlyTag = 'W',  // x:Double, y:Double, z:Double, w:Double
   kDOMRectTag = 'E',          // x:Double, y:Double, width:Double, height:Double
   kDOMRectReadOnlyTag = 'R',  // x:Double, y:Double, width:Double, height:Double
   kDOMQuadTag = 'T',          // p1:Double, p2:Double, p3:Double, p4:Double
@@ -105,6 +110,15 @@ enum SerializationTag {
   kRTCEncodedAudioFrameTag = 'A',  // uint32_t -> transferred audio frame ID
   kRTCEncodedVideoFrameTag = 'V',  // uint32_t -> transferred video frame ID
 
+  kAudioDataTag = 'a',          // uint32_t -> transferred audio data
+  kVideoFrameTag = 'v',         // uint32_t -> transferred video frame ID
+  kEncodedAudioChunkTag = 'y',  // uint32_t -> transferred chunk
+  kEncodedVideoChunkTag = 'z',  // uint32_t -> transferred chunk
+
+  kCropTargetTag = 'c',  // crop_id:WebCoreString
+
+  kMediaSourceHandleTag = 'S',  // uint32_t -> transferred MediaSourceHandle
+
   // The following tags were used by the Shape Detection API implementation
   // between M71 and M81. During these milestones, the API was always behind
   // a flag. Usage was removed in https://crrev.com/c/2040378.
@@ -118,4 +132,4 @@ enum SerializationTag {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SERIALIZATION_SERIALIZATION_TAG_H_

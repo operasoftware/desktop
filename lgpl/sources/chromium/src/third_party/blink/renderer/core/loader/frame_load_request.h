@@ -26,17 +26,24 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_FRAME_LOAD_REQUEST_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_FRAME_LOAD_REQUEST_H_
 
+#include "base/memory/ref_counted.h"
+#include "base/time/time.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/network/public/mojom/referrer_policy.mojom-blink.h"
-#include "third_party/blink/public/common/navigation/triggering_event_info.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/navigation/impression.h"
 #include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink.h"
+#include "third_party/blink/public/mojom/frame/policy_container.mojom-blink.h"
+#include "third_party/blink/public/mojom/frame/triggering_event_info.mojom-blink.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
-#include "third_party/blink/public/platform/web_impression.h"
+#include "third_party/blink/public/web/web_picture_in_picture_window_options.h"
 #include "third_party/blink/public/web/web_window_features.h"
-#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/frame_types.h"
 #include "third_party/blink/renderer/core/loader/frame_loader_types.h"
 #include "third_party/blink/renderer/core/loader/navigation_policy.h"
+#include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer.h"
@@ -44,18 +51,19 @@
 namespace blink {
 
 class HTMLFormElement;
+class LocalDOMWindow;
 class KURL;
 
 struct CORE_EXPORT FrameLoadRequest {
   STACK_ALLOCATED();
 
  public:
-  FrameLoadRequest(Document* origin_document, const ResourceRequest&);
-  FrameLoadRequest(Document* origin_document, const ResourceRequestHead&);
+  FrameLoadRequest(LocalDOMWindow* origin_window, const ResourceRequest&);
+  FrameLoadRequest(LocalDOMWindow* origin_window, const ResourceRequestHead&);
   FrameLoadRequest(const FrameLoadRequest&) = delete;
   FrameLoadRequest& operator=(const FrameLoadRequest&) = delete;
 
-  Document* OriginDocument() const { return origin_document_; }
+  LocalDOMWindow* GetOriginWindow() const { return origin_window_; }
 
   mojom::RequestContextFrameType GetFrameType() const { return frame_type_; }
   void SetFrameType(mojom::RequestContextFrameType frame_type) {
@@ -66,10 +74,6 @@ struct CORE_EXPORT FrameLoadRequest {
   const ResourceRequest& GetResourceRequest() const {
     return resource_request_;
   }
-
-  // TODO(japhet): This is only used from frame_loader.cc, and can probably be
-  // an implementation detail there.
-  ClientRedirectPolicy ClientRedirect() const;
 
   void SetClientRedirectReason(ClientNavigationReason reason) {
     client_navigation_reason_ = reason;
@@ -84,12 +88,29 @@ struct CORE_EXPORT FrameLoadRequest {
     navigation_policy_ = navigation_policy;
   }
 
-  TriggeringEventInfo GetTriggeringEventInfo() const {
+  mojom::blink::TriggeringEventInfo GetTriggeringEventInfo() const {
     return triggering_event_info_;
   }
-  void SetTriggeringEventInfo(TriggeringEventInfo info) {
-    DCHECK(info != TriggeringEventInfo::kUnknown);
+  void SetTriggeringEventInfo(mojom::blink::TriggeringEventInfo info) {
+    DCHECK(info != mojom::blink::TriggeringEventInfo::kUnknown);
     triggering_event_info_ = info;
+  }
+
+  mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>
+  TakeInitiatorPolicyContainerKeepAliveHandle() {
+    return std::move(initiator_policy_container_keep_alive_handle_);
+  }
+  void SetInitiatorPolicyContainerKeepAliveHandle(
+      mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>
+          handle) {
+    initiator_policy_container_keep_alive_handle_ = std::move(handle);
+  }
+
+  std::unique_ptr<SourceLocation> TakeSourceLocation() {
+    return std::move(source_location_);
+  }
+  void SetSourceLocation(std::unique_ptr<SourceLocation> source_location) {
+    source_location_ = std::move(source_location);
   }
 
   HTMLFormElement* Form() const { return form_; }
@@ -104,9 +125,9 @@ struct CORE_EXPORT FrameLoadRequest {
     href_translate_ = translate;
   }
 
-  network::mojom::CSPDisposition ShouldCheckMainWorldContentSecurityPolicy()
-      const {
-    return should_check_main_world_content_security_policy_;
+  // The javascript world in which this request initiated.
+  const scoped_refptr<const DOMWrapperWorld>& JavascriptWorld() const {
+    return world_;
   }
 
   // The BlobURLToken that should be used when fetching the resource. This
@@ -133,9 +154,16 @@ struct CORE_EXPORT FrameLoadRequest {
   }
   void SetFeaturesForWindowOpen(const WebWindowFeatures& features) {
     window_features_ = features;
-    is_window_open_ = true;
   }
-  bool IsWindowOpen() const { return is_window_open_; }
+
+  const absl::optional<WebPictureInPictureWindowOptions>&
+  GetPictureInPictureWindowOptions() const {
+    return picture_in_picture_window_options_;
+  }
+  void SetPictureInPictureWindowOptions(
+      const WebPictureInPictureWindowOptions& options) {
+    picture_in_picture_window_options_ = options;
+  }
 
   void SetNoOpener() { window_features_.noopener = true; }
   void SetNoReferrer() {
@@ -147,37 +175,57 @@ struct CORE_EXPORT FrameLoadRequest {
 
   // Impressions are set when a FrameLoadRequest is created for a click on an
   // anchor tag that has conversion measurement attributes.
-  void SetImpression(const WebImpression& impression) {
+  void SetImpression(const absl::optional<Impression>& impression) {
     impression_ = impression;
   }
 
-  const base::Optional<WebImpression>& Impression() { return impression_; }
+  const absl::optional<blink::Impression>& Impression() const {
+    return impression_;
+  }
 
-  // Whether either OriginDocument, RequestorOrigin or IsolatedWorldOrigin can
-  // display the |url|,
   bool CanDisplay(const KURL&) const;
 
+  void SetInitiatorFrameToken(const LocalFrameToken& token) {
+    initiator_frame_token_ = token;
+  }
+  const LocalFrameToken* GetInitiatorFrameToken() const;
+
+  bool IsUnfencedTopNavigation() const { return is_unfenced_top_navigation_; }
+  void SetIsUnfencedTopNavigation(bool is_unfenced_top_navigation) {
+    is_unfenced_top_navigation_ = is_unfenced_top_navigation;
+  }
+
  private:
-  Document* origin_document_;
+  LocalDOMWindow* origin_window_;
   ResourceRequest resource_request_;
   AtomicString href_translate_;
   ClientNavigationReason client_navigation_reason_ =
       ClientNavigationReason::kNone;
   NavigationPolicy navigation_policy_ = kNavigationPolicyCurrentTab;
-  TriggeringEventInfo triggering_event_info_ =
-      TriggeringEventInfo::kNotFromEvent;
+  mojom::blink::TriggeringEventInfo triggering_event_info_ =
+      mojom::blink::TriggeringEventInfo::kNotFromEvent;
   HTMLFormElement* form_ = nullptr;
   ShouldSendReferrer should_send_referrer_;
-  network::mojom::CSPDisposition
-      should_check_main_world_content_security_policy_;
+  scoped_refptr<const DOMWrapperWorld> world_;
   scoped_refptr<base::RefCountedData<mojo::Remote<mojom::blink::BlobURLToken>>>
       blob_url_token_;
   base::TimeTicks input_start_time_;
   mojom::RequestContextFrameType frame_type_ =
       mojom::RequestContextFrameType::kNone;
   WebWindowFeatures window_features_;
-  bool is_window_open_ = false;
-  base::Optional<WebImpression> impression_;
+  absl::optional<WebPictureInPictureWindowOptions>
+      picture_in_picture_window_options_;
+  absl::optional<blink::Impression> impression_;
+  absl::optional<LocalFrameToken> initiator_frame_token_;
+  mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>
+      initiator_policy_container_keep_alive_handle_;
+  std::unique_ptr<SourceLocation> source_location_;
+
+  // This is only used for navigations originating in MPArch fenced frames
+  // targeting the outermost frame, which is not visible to the renderer
+  // process as a remote frame.
+  // TODO(crbug.com/1315802): Refactor _unfencedTop handling.
+  bool is_unfenced_top_navigation_ = false;
 };
 
 }  // namespace blink

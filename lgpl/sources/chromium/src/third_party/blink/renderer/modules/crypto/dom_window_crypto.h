@@ -31,7 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_CRYPTO_DOM_WINDOW_CRYPTO_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_CRYPTO_DOM_WINDOW_CRYPTO_H_
 
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
@@ -41,8 +41,6 @@ class LocalDOMWindow;
 
 class DOMWindowCrypto final : public GarbageCollected<DOMWindowCrypto>,
                               public Supplement<LocalDOMWindow> {
-  USING_GARBAGE_COLLECTED_MIXIN(DOMWindowCrypto);
-
  public:
   static const char kSupplementName[];
 

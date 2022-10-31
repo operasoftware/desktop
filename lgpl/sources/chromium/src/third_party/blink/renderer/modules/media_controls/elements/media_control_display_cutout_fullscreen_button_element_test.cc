@@ -8,6 +8,7 @@
 #include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_touch_event_init.h"
 #include "third_party/blink/renderer/core/events/touch_event.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/viewport_data.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
@@ -15,8 +16,7 @@
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
@@ -30,7 +30,7 @@ class MockDisplayCutoutChromeClient : public EmptyChromeClient {
   // ChromeClient overrides:
   void EnterFullscreen(LocalFrame& frame,
                        const FullscreenOptions*,
-                       bool for_cross_process_descendant) override {
+                       FullscreenRequestType) override {
     Fullscreen::DidResolveEnterFullscreenRequest(*frame.GetDocument(),
                                                  true /* granted */);
   }
@@ -53,11 +53,7 @@ class MediaControlDisplayCutoutFullscreenButtonElementTest
       : ScopedDisplayCutoutAPIForTest(true) {}
   void SetUp() override {
     chrome_client_ = MakeGarbageCollected<MockDisplayCutoutChromeClient>();
-
-    Page::PageClients clients;
-    FillWithEmptyClients(clients);
-    clients.chrome_client = chrome_client_.Get();
-    SetupPageWithClients(&clients,
+    SetupPageWithClients(chrome_client_,
                          MakeGarbageCollected<EmptyLocalFrameClient>());
     video_ = MakeGarbageCollected<HTMLVideoElement>(GetDocument());
     GetDocument().body()->AppendChild(video_);
@@ -73,7 +69,9 @@ class MediaControlDisplayCutoutFullscreenButtonElementTest
 
   void SimulateEnterFullscreen() {
     {
-      LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
+      LocalFrame::NotifyUserActivation(
+          GetDocument().GetFrame(),
+          mojom::UserActivationNotificationType::kTest);
       Fullscreen::RequestFullscreen(*video_);
     }
 
@@ -126,12 +124,10 @@ TEST_F(MediaControlDisplayCutoutFullscreenButtonElementTest,
 
   EXPECT_EQ(mojom::ViewportFit::kAuto, CurrentViewportFit());
 
-  display_cutout_fullscreen_button_->DispatchSimulatedClick(
-      nullptr, kSendNoEvents, SimulatedClickCreationScope::kFromUserAgent);
+  display_cutout_fullscreen_button_->DispatchSimulatedClick(nullptr);
   EXPECT_EQ(mojom::ViewportFit::kCoverForcedByUserAgent, CurrentViewportFit());
 
-  display_cutout_fullscreen_button_->DispatchSimulatedClick(
-      nullptr, kSendNoEvents, SimulatedClickCreationScope::kFromUserAgent);
+  display_cutout_fullscreen_button_->DispatchSimulatedClick(nullptr);
   EXPECT_EQ(mojom::ViewportFit::kAuto, CurrentViewportFit());
 }
 

@@ -19,8 +19,9 @@ uint32_t AtomicStringToFourByteTag(AtomicString tag) {
 
 AtomicString FourByteTagToAtomicString(uint32_t tag) {
   constexpr size_t tag_size = 4;
-  LChar tag_string[tag_size] = {(tag >> 24) & 0xFF, (tag >> 16) & 0xFF,
-                                (tag >> 8) & 0xFF, tag & 0xFF};
+  LChar tag_string[tag_size] = {
+      static_cast<LChar>(tag >> 24), static_cast<LChar>(tag >> 16),
+      static_cast<LChar>(tag >> 8), static_cast<LChar>(tag)};
   return AtomicString(tag_string, tag_size);
 }
 
@@ -28,12 +29,7 @@ unsigned FontVariationSettings::GetHash() const {
   unsigned computed_hash = size() ? 5381 : 0;
   unsigned num_features = size();
   for (unsigned i = 0; i < num_features; ++i) {
-    StringHasher string_hasher;
-    const AtomicString& tag = at(i).Tag();
-    for (unsigned j = 0; j < tag.length(); j++) {
-      string_hasher.AddCharacter(tag[j]);
-    }
-    WTF::AddIntToHash(computed_hash, string_hasher.GetHash());
+    WTF::AddIntToHash(computed_hash, at(i).Tag());
     WTF::AddFloatToHash(computed_hash, at(i).Value());
   }
   return computed_hash;

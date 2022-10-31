@@ -28,7 +28,7 @@
 
 #include "third_party/blink/renderer/core/layout/layout_image.h"
 
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -38,6 +38,7 @@
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/html/media/media_element_parser_helpers.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/intrinsic_sizing_info.h"
 #include "third_party/blink/renderer/core/layout/layout_video.h"
@@ -49,24 +50,28 @@
 #include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "ui/gfx/geometry/size_conversions.h"
 
 namespace blink {
 
 LayoutImage::LayoutImage(Element* element)
-    : LayoutReplaced(element, LayoutSize()),
-      did_increment_visually_non_empty_pixel_count_(false),
-      is_generated_content_(false),
-      image_device_pixel_ratio_(1.0f) {}
+    : LayoutReplaced(element, LayoutSize()) {}
 
 LayoutImage* LayoutImage::CreateAnonymous(PseudoElement& pseudo) {
-  LayoutImage* image = new LayoutImage(nullptr);
+  LayoutImage* image = MakeGarbageCollected<LayoutImage>(nullptr);
   image->SetDocumentForAnonymous(&pseudo.GetDocument());
   return image;
 }
 
 LayoutImage::~LayoutImage() = default;
 
+void LayoutImage::Trace(Visitor* visitor) const {
+  visitor->Trace(image_resource_);
+  LayoutReplaced::Trace(visitor);
+}
+
 void LayoutImage::WillBeDestroyed() {
+  NOT_DESTROYED();
   DCHECK(image_resource_);
   image_resource_->Shutdown();
 
@@ -75,6 +80,7 @@ void LayoutImage::WillBeDestroyed() {
 
 void LayoutImage::StyleDidChange(StyleDifference diff,
                                  const ComputedStyle* old_style) {
+  NOT_DESTROYED();
   LayoutReplaced::StyleDidChange(diff, old_style);
 
   bool old_orientation =
@@ -85,6 +91,7 @@ void LayoutImage::StyleDidChange(StyleDifference diff,
 }
 
 void LayoutImage::SetImageResource(LayoutImageResource* image_resource) {
+  NOT_DESTROYED();
   DCHECK(!image_resource_);
   image_resource_ = image_resource;
   image_resource_->Initialize(this);
@@ -92,6 +99,7 @@ void LayoutImage::SetImageResource(LayoutImageResource* image_resource) {
 
 void LayoutImage::ImageChanged(WrappedImagePtr new_image,
                                CanDeferInvalidation defer) {
+  NOT_DESTROYED();
   DCHECK(View());
   DCHECK(View()->GetFrameView());
   if (DocumentBeingDestroyed())
@@ -116,8 +124,14 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image,
 
   // If error occurred, image marker should be replaced by a LayoutText.
   // NotifyOfSubtreeChange to make list item updating its marker content.
-  if (IsListMarkerImage() && image_resource_->ErrorOccurred())
-    NotifyOfSubtreeChange();
+  if (IsListMarkerImage() && image_resource_->ErrorOccurred()) {
+    LayoutObject* item = this;
+    while (item->IsAnonymous())
+      item = item->Parent();
+    DCHECK(item);
+    if (item->NotifyOfSubtreeChange())
+      item->GetNode()->MarkAncestorsWithChildNeedsStyleRecalc();
+  }
 
   // Per the spec, we let the server-sent header override srcset/other sources
   // of dpr.
@@ -132,7 +146,7 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image,
   if (!did_increment_visually_non_empty_pixel_count_) {
     // At a zoom level of 1 the image is guaranteed to have an integer size.
     View()->GetFrameView()->IncrementVisuallyNonEmptyPixelCount(
-        FlooredIntSize(ImageSizeOverriddenByIntrinsicSize(1.0f)));
+        gfx::ToFlooredSize(ImageSizeOverriddenByIntrinsicSize(1.0f)));
     did_increment_visually_non_empty_pixel_count_ = true;
   }
 
@@ -143,34 +157,30 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image,
 }
 
 void LayoutImage::UpdateIntrinsicSizeIfNeeded(const LayoutSize& new_size) {
+  NOT_DESTROYED();
   if (image_resource_->ErrorOccurred())
     return;
   SetIntrinsicSize(new_size);
 }
 
 bool LayoutImage::NeedsLayoutOnIntrinsicSizeChange() const {
-  // If the actual area occupied by the image has changed and it is not
-  // constrained by style then a layout is required.
-  bool image_size_is_constrained =
-      StyleRef().LogicalWidth().IsSpecified() &&
-      StyleRef().LogicalHeight().IsSpecified() &&
-      !HasAutoHeightOrContainingBlockWithAutoHeight(
-          kDontRegisterPercentageDescendant);
-  if (!image_size_is_constrained)
-    return true;
+  NOT_DESTROYED();
   // Flex layout algorithm uses the intrinsic image width/height even if
   // width/height are specified.
   if (IsFlexItemIncludingNG())
     return true;
-  // FIXME: We only need to recompute the containing block's preferred size if
-  // the containing block's size depends on the image's size (i.e., the
-  // container uses shrink-to-fit sizing). There's no easy way to detect that
-  // shrink-to-fit is needed, always force a layout.
-  return HasRelativeLogicalWidth();
+
+  const auto& style = StyleRef();
+  bool is_fixed_sized =
+      style.LogicalWidth().IsFixed() && style.LogicalHeight().IsFixed() &&
+      (style.LogicalMinWidth().IsFixed() || style.LogicalMinWidth().IsAuto()) &&
+      (style.LogicalMaxWidth().IsFixed() || style.LogicalMaxWidth().IsNone());
+  return !is_fixed_sized;
 }
 
 void LayoutImage::InvalidatePaintAndMarkForLayoutIfNeeded(
     CanDeferInvalidation defer) {
+  NOT_DESTROYED();
   LayoutSize old_intrinsic_size = IntrinsicSize();
 
   LayoutSize new_intrinsic_size = RoundedLayoutSize(
@@ -200,38 +210,23 @@ void LayoutImage::InvalidatePaintAndMarkForLayoutIfNeeded(
   if (defer == CanDeferInvalidation::kYes && ImageResource() &&
       ImageResource()->MaybeAnimated())
     SetShouldDelayFullPaintInvalidation();
-
-  // Tell any potential compositing layers that the image needs updating.
-  ContentChanged(kImageChanged);
-}
-
-void LayoutImage::ImageNotifyFinished(ImageResourceContent* new_image) {
-  LayoutObject::ImageNotifyFinished(new_image);
-  if (!image_resource_)
-    return;
-
-  if (DocumentBeingDestroyed())
-    return;
-
-  if (new_image == image_resource_->CachedImage()) {
-    // tell any potential compositing layers
-    // that the image is done and they can reference it directly.
-    ContentChanged(kImageChanged);
-  }
 }
 
 void LayoutImage::PaintReplaced(const PaintInfo& paint_info,
                                 const PhysicalOffset& paint_offset) const {
-  if (PaintBlockedByDisplayLock(DisplayLockLifecycleTarget::kChildren))
+  NOT_DESTROYED();
+  if (ChildPaintBlockedByDisplayLock())
     return;
   ImagePainter(*this).PaintReplaced(paint_info, paint_offset);
 }
 
 void LayoutImage::Paint(const PaintInfo& paint_info) const {
+  NOT_DESTROYED();
   ImagePainter(*this).Paint(paint_info);
 }
 
 void LayoutImage::AreaElementFocusChanged(HTMLAreaElement* area_element) {
+  NOT_DESTROYED();
   DCHECK_EQ(area_element->ImageElement(), GetNode());
 
   if (area_element->GetPath(this).IsEmpty())
@@ -243,6 +238,9 @@ void LayoutImage::AreaElementFocusChanged(HTMLAreaElement* area_element) {
 bool LayoutImage::ForegroundIsKnownToBeOpaqueInRect(
     const PhysicalRect& local_rect,
     unsigned) const {
+  NOT_DESTROYED();
+  if (ChildPaintBlockedByDisplayLock())
+    return false;
   if (!image_resource_->HasImage() || image_resource_->ErrorOccurred())
     return false;
   ImageResourceContent* image_content = image_resource_->CachedImage();
@@ -270,27 +268,28 @@ bool LayoutImage::ForegroundIsKnownToBeOpaqueInRect(
   if (object_fit != EObjectFit::kFill && object_fit != EObjectFit::kCover)
     return false;
   // Check for image with alpha.
-  TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "PaintImage",
-               "data", inspector_paint_image_event::Data(this, *image_content));
+  DEVTOOLS_TIMELINE_TRACE_EVENT_WITH_CATEGORIES(
+      TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "PaintImage",
+      inspector_paint_image_event::Data, this, *image_content);
   return image_content->GetImage()->CurrentFrameKnownToBeOpaque();
 }
 
 bool LayoutImage::ComputeBackgroundIsKnownToBeObscured() const {
+  NOT_DESTROYED();
   if (!StyleRef().HasBackground())
     return false;
 
-  PhysicalRect painted_extent;
-  if (!GetBackgroundPaintedExtent(painted_extent))
-    return false;
-  return ForegroundIsKnownToBeOpaqueInRect(painted_extent, 0);
+  return ForegroundIsKnownToBeOpaqueInRect(BackgroundPaintedExtent(), 0);
 }
 
 LayoutUnit LayoutImage::MinimumReplacedHeight() const {
+  NOT_DESTROYED();
   return image_resource_->ErrorOccurred() ? IntrinsicSize().Height()
                                           : LayoutUnit();
 }
 
 HTMLMapElement* LayoutImage::ImageMap() const {
+  NOT_DESTROYED();
   auto* i = DynamicTo<HTMLImageElement>(GetNode());
   return i ? i->GetTreeScope().GetImageMap(
                  i->FastGetAttribute(html_names::kUsemapAttr))
@@ -300,10 +299,11 @@ HTMLMapElement* LayoutImage::ImageMap() const {
 bool LayoutImage::NodeAtPoint(HitTestResult& result,
                               const HitTestLocation& hit_test_location,
                               const PhysicalOffset& accumulated_offset,
-                              HitTestAction hit_test_action) {
+                              HitTestPhase phase) {
+  NOT_DESTROYED();
   HitTestResult temp_result(result);
-  bool inside = LayoutReplaced::NodeAtPoint(
-      temp_result, hit_test_location, accumulated_offset, hit_test_action);
+  bool inside = LayoutReplaced::NodeAtPoint(temp_result, hit_test_location,
+                                            accumulated_offset, phase);
 
   if (!inside && result.GetHitTestRequest().ListBased())
     result.Append(temp_result);
@@ -313,24 +313,26 @@ bool LayoutImage::NodeAtPoint(HitTestResult& result,
 }
 
 bool LayoutImage::HasOverriddenIntrinsicSize() const {
-  if (!RuntimeEnabledFeatures::ExperimentalProductivityFeaturesEnabled())
+  NOT_DESTROYED();
+  if (!RuntimeEnabledFeatures::ExperimentalPoliciesEnabled())
     return false;
   auto* image_element = DynamicTo<HTMLImageElement>(GetNode());
   return image_element && image_element->IsDefaultIntrinsicSize();
 }
 
-FloatSize LayoutImage::ImageSizeOverriddenByIntrinsicSize(
+gfx::SizeF LayoutImage::ImageSizeOverriddenByIntrinsicSize(
     float multiplier) const {
+  NOT_DESTROYED();
   if (!HasOverriddenIntrinsicSize())
     return image_resource_->ImageSize(multiplier);
 
-  FloatSize overridden_intrinsic_size(kDefaultWidth, kDefaultHeight);
+  gfx::SizeF overridden_intrinsic_size(kDefaultWidth, kDefaultHeight);
   if (multiplier != 1) {
     overridden_intrinsic_size.Scale(multiplier);
-    if (overridden_intrinsic_size.Width() < 1.0f)
-      overridden_intrinsic_size.SetWidth(1.0f);
-    if (overridden_intrinsic_size.Height() < 1.0f)
-      overridden_intrinsic_size.SetHeight(1.0f);
+    if (overridden_intrinsic_size.width() < 1.0f)
+      overridden_intrinsic_size.set_width(1.0f);
+    if (overridden_intrinsic_size.height() < 1.0f)
+      overridden_intrinsic_size.set_height(1.0f);
   }
 
   return overridden_intrinsic_size;
@@ -338,10 +340,11 @@ FloatSize LayoutImage::ImageSizeOverriddenByIntrinsicSize(
 
 bool LayoutImage::OverrideIntrinsicSizingInfo(
     IntrinsicSizingInfo& intrinsic_sizing_info) const {
+  NOT_DESTROYED();
   if (!HasOverriddenIntrinsicSize())
     return false;
 
-  FloatSize overridden_intrinsic_size(kDefaultWidth, kDefaultHeight);
+  gfx::SizeF overridden_intrinsic_size(kDefaultWidth, kDefaultHeight);
   intrinsic_sizing_info.size = overridden_intrinsic_size;
   intrinsic_sizing_info.aspect_ratio = intrinsic_sizing_info.size;
   if (!IsHorizontalWritingMode())
@@ -350,24 +353,50 @@ bool LayoutImage::OverrideIntrinsicSizingInfo(
   return true;
 }
 
+bool LayoutImage::CanApplyObjectViewBox() const {
+  auto* svg_image = EmbeddedSVGImage();
+  if (!svg_image)
+    return true;
+
+  // Only apply object-view-box if the image has both intrinsic width/height.
+  IntrinsicSizingInfo info;
+  svg_image->GetIntrinsicSizingInfo(info);
+  return info.has_width && info.has_height;
+}
+
 void LayoutImage::ComputeIntrinsicSizingInfo(
     IntrinsicSizingInfo& intrinsic_sizing_info) const {
+  NOT_DESTROYED();
   DCHECK(!ShouldApplySizeContainment());
   if (!OverrideIntrinsicSizingInfo(intrinsic_sizing_info)) {
     if (SVGImage* svg_image = EmbeddedSVGImage()) {
       svg_image->GetIntrinsicSizingInfo(intrinsic_sizing_info);
 
+      // Scale for the element's effective zoom (which includes scaling for
+      // device scale) is already applied when computing the view box. If the
+      // element has no view box then it needs to be explicitly applied here.
+      if (auto view_box_size = ComputeObjectViewBoxSizeForIntrinsicSizing()) {
+        DCHECK(intrinsic_sizing_info.has_width);
+        DCHECK(intrinsic_sizing_info.has_height);
+        intrinsic_sizing_info.size = *view_box_size;
+      } else {
+        intrinsic_sizing_info.size.Scale(StyleRef().EffectiveZoom());
+      }
+
       // Handle zoom & vertical writing modes here, as the embedded SVG document
       // doesn't know about them.
-      intrinsic_sizing_info.size.Scale(StyleRef().EffectiveZoom());
       if (StyleRef().GetObjectFit() != EObjectFit::kScaleDown)
         intrinsic_sizing_info.size.Scale(ImageDevicePixelRatio());
 
       // Handle an overridden aspect ratio
-      if (const base::Optional<IntSize>& aspect_ratio =
-              StyleRef().AspectRatio()) {
-        intrinsic_sizing_info.aspect_ratio.SetWidth(aspect_ratio->Width());
-        intrinsic_sizing_info.aspect_ratio.SetHeight(aspect_ratio->Height());
+      const StyleAspectRatio& aspect_ratio = StyleRef().AspectRatio();
+      if (aspect_ratio.GetType() == EAspectRatioType::kRatio ||
+          (aspect_ratio.GetType() == EAspectRatioType::kAutoAndRatio &&
+           intrinsic_sizing_info.aspect_ratio.IsEmpty())) {
+        intrinsic_sizing_info.aspect_ratio.set_width(
+            aspect_ratio.GetRatio().width());
+        intrinsic_sizing_info.aspect_ratio.set_height(
+            aspect_ratio.GetRatio().height());
       }
 
       if (!IsHorizontalWritingMode())
@@ -383,18 +412,18 @@ void LayoutImage::ComputeIntrinsicSizingInfo(
         !image_resource_->HasIntrinsicSize() && !IsListMarkerImage()) {
       if (HasOverrideContainingBlockContentLogicalWidth() &&
           HasOverrideContainingBlockContentLogicalHeight()) {
-        intrinsic_sizing_info.size.SetWidth(
+        intrinsic_sizing_info.size.set_width(
             OverrideContainingBlockContentLogicalWidth().ToFloat());
-        intrinsic_sizing_info.size.SetHeight(
+        intrinsic_sizing_info.size.set_height(
             OverrideContainingBlockContentLogicalHeight().ToFloat());
       } else {
         LayoutObject* containing_block =
             IsOutOfFlowPositioned() ? Container() : ContainingBlock();
         if (containing_block->IsBox()) {
-          LayoutBox* box = ToLayoutBox(containing_block);
-          intrinsic_sizing_info.size.SetWidth(
+          auto* box = To<LayoutBox>(containing_block);
+          intrinsic_sizing_info.size.set_width(
               box->AvailableLogicalWidth().ToFloat());
-          intrinsic_sizing_info.size.SetHeight(
+          intrinsic_sizing_info.size.set_height(
               box->AvailableLogicalHeight(kIncludeMarginBorderPadding)
                   .ToFloat());
         }
@@ -407,12 +436,13 @@ void LayoutImage::ComputeIntrinsicSizingInfo(
   // aspect ratio that a failed poster image load should not override.
   if (image_resource_ && image_resource_->ErrorOccurred() &&
       !IsA<LayoutVideo>(this)) {
-    intrinsic_sizing_info.aspect_ratio = FloatSize(1, 1);
+    intrinsic_sizing_info.aspect_ratio = gfx::SizeF(1, 1);
     return;
   }
 }
 
 bool LayoutImage::NeedsPreferredWidthsRecalculation() const {
+  NOT_DESTROYED();
   if (LayoutReplaced::NeedsPreferredWidthsRecalculation())
     return true;
   SVGImage* svg_image = EmbeddedSVGImage();
@@ -420,6 +450,7 @@ bool LayoutImage::NeedsPreferredWidthsRecalculation() const {
 }
 
 SVGImage* LayoutImage::EmbeddedSVGImage() const {
+  NOT_DESTROYED();
   if (!image_resource_)
     return nullptr;
   ImageResourceContent* cached_image = image_resource_->CachedImage();
@@ -431,11 +462,23 @@ SVGImage* LayoutImage::EmbeddedSVGImage() const {
 }
 
 void LayoutImage::UpdateAfterLayout() {
+  NOT_DESTROYED();
   LayoutBox::UpdateAfterLayout();
   Node* node = GetNode();
   if (auto* image_element = DynamicTo<HTMLImageElement>(node)) {
     media_element_parser_helpers::CheckUnsizedMediaViolation(
         this, image_element->IsDefaultIntrinsicSize());
+
+    // Scope to the outermost frame to avoid counting image ads that are
+    // (likely) already in ad iframes. Exclude image ads that are invisible or
+    // too small (e.g. tracking pixels).
+    if (!image_ad_use_counter_recorded_ && image_element->IsAdRelated() &&
+        GetDocument().IsInOutermostMainFrame() &&
+        image_element->LayoutBoxWidth() > 1 &&
+        image_element->LayoutBoxHeight() > 1) {
+      UseCounter::Count(GetDocument(), WebFeature::kImageAd);
+      image_ad_use_counter_recorded_ = true;
+    }
   } else if (auto* video_element = DynamicTo<HTMLVideoElement>(node)) {
     media_element_parser_helpers::CheckUnsizedMediaViolation(
         this, video_element->IsDefaultIntrinsicSize());

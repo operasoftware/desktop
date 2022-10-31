@@ -23,23 +23,20 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_STYLE_RESOLVER_STATE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_STYLE_RESOLVER_STATE_H_
 
-#include <memory>
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/animation/css/css_animation_update.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/css/css_pending_substitution_value.h"
 #include "third_party/blink/renderer/core/css/css_property_name.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_mode.h"
-#include "third_party/blink/renderer/core/css/pseudo_style_request.h"
 #include "third_party/blink/renderer/core/css/resolver/css_to_style_map.h"
 #include "third_party/blink/renderer/core/css/resolver/element_resolve_context.h"
 #include "third_party/blink/renderer/core/css/resolver/element_style_resources.h"
 #include "third_party/blink/renderer/core/css/resolver/font_builder.h"
+#include "third_party/blink/renderer/core/css/style_recalc_context.h"
+#include "third_party/blink/renderer/core/css/style_request.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/style/cached_ua_style.h"
 
 namespace blink {
 
@@ -53,18 +50,21 @@ class PseudoElement;
 class CORE_EXPORT StyleResolverState {
   STACK_ALLOCATED();
 
+  enum class ElementType { kElement, kPseudoElement };
+
  public:
   StyleResolverState(Document&,
                      Element&,
-                     const ComputedStyle* parent_style = nullptr,
-                     const ComputedStyle* layout_parent_style = nullptr);
-  StyleResolverState(Document&,
-                     Element&,
-                     PseudoId,
-                     PseudoElementStyleRequest::RequestType,
-                     const ComputedStyle* parent_style,
-                     const ComputedStyle* layout_parent_style);
+                     const StyleRecalcContext* = nullptr,
+                     const StyleRequest& = StyleRequest());
+  StyleResolverState(const StyleResolverState&) = delete;
+  StyleResolverState& operator=(const StyleResolverState&) = delete;
   ~StyleResolverState();
+
+  bool IsForPseudoElement() const {
+    return element_type_ == ElementType::kPseudoElement;
+  }
+  bool IsInheritedForUnset(const CSSProperty& property) const;
 
   // In FontFaceSet and CanvasRenderingContext2D, we don't have an element to
   // grab the document from.  This is why we have to store the document
@@ -72,18 +72,16 @@ class CORE_EXPORT StyleResolverState {
   Document& GetDocument() const { return *document_; }
   // These are all just pass-through methods to ElementResolveContext.
   Element& GetElement() const { return element_context_.GetElement(); }
-  TreeScope& GetTreeScope() const;
   const ContainerNode* ParentNode() const {
     return element_context_.ParentNode();
   }
   const ComputedStyle* RootElementStyle() const {
-    return element_context_.RootElementStyle();
+    if (const auto* root_element_style = element_context_.RootElementStyle())
+      return root_element_style;
+    return Style();
   }
   EInsideLink ElementLinkState() const {
     return element_context_.ElementLinkState();
-  }
-  bool DistributedToV0InsertionPoint() const {
-    return element_context_.DistributedToV0InsertionPoint();
   }
 
   const ElementResolveContext& ElementContext() const {
@@ -94,6 +92,10 @@ class CORE_EXPORT StyleResolverState {
   const ComputedStyle* Style() const { return style_.get(); }
   ComputedStyle* Style() { return style_.get(); }
   ComputedStyle& StyleRef() {
+    DCHECK(style_);
+    return *style_;
+  }
+  const ComputedStyle& StyleRef() const {
     DCHECK(style_);
     return *style_;
   }
@@ -118,21 +120,11 @@ class CORE_EXPORT StyleResolverState {
     return animation_update_;
   }
 
-  bool IsAnimationInterpolationMapReady() const {
-    return is_animation_interpolation_map_ready_;
-  }
-  void SetIsAnimationInterpolationMapReady() {
-    is_animation_interpolation_map_ready_ = true;
-  }
-
-  bool IsAnimatingCustomProperties() const {
-    return is_animating_custom_properties_;
-  }
-  void SetIsAnimatingCustomProperties(bool value) {
-    is_animating_custom_properties_ = value;
-  }
-
   Element* GetAnimatingElement() const;
+
+  // Returns the pseudo element if the style resolution is targeting a pseudo
+  // element, null otherwise.
+  PseudoElement* GetPseudoElement() const;
 
   void SetParentStyle(scoped_refptr<const ComputedStyle>);
   const ComputedStyle* ParentStyle() const { return parent_style_.get(); }
@@ -140,12 +132,6 @@ class CORE_EXPORT StyleResolverState {
   void SetLayoutParentStyle(scoped_refptr<const ComputedStyle>);
   const ComputedStyle* LayoutParentStyle() const {
     return layout_parent_style_.get();
-  }
-
-  void CacheUserAgentBorderAndBackground();
-
-  const CachedUAStyle* GetCachedUAStyle() const {
-    return cached_ua_style_.get();
   }
 
   ElementStyleResources& GetElementStyleResources() {
@@ -175,95 +161,47 @@ class CORE_EXPORT StyleResolverState {
   void SetWritingMode(WritingMode);
   void SetTextOrientation(ETextOrientation);
 
-  void SetHasDirAutoAttribute(bool value) { has_dir_auto_attribute_ = value; }
-  bool HasDirAutoAttribute() const { return has_dir_auto_attribute_; }
-
-  const CSSValue* GetCascadedColorValue() const {
-    return cascaded_color_value_;
-  }
-  const CSSValue* GetCascadedVisitedColorValue() const {
-    return cascaded_visited_color_value_;
-  }
-
-  void SetCascadedColorValue(const CSSValue* color) {
-    cascaded_color_value_ = color;
-  }
-  void SetCascadedVisitedColorValue(const CSSValue* color) {
-    cascaded_visited_color_value_ = color;
-  }
-
-  HeapHashMap<CSSPropertyID, Member<const CSSValue>>&
-  ParsedPropertiesForPendingSubstitutionCache(
-      const cssvalue::CSSPendingSubstitutionValue&) const;
-
   CSSParserMode GetParserMode() const;
 
   // If the input CSSValue is a CSSLightDarkValuePair, return the light or dark
   // CSSValue based on the UsedColorScheme. For all other values, just return a
-  // reference to the passed value. If the property is a non-inherited one, mark
-  // the ComputedStyle as having such a pair since that will make sure its not
-  // stored in the MatchedPropertiesCache.
-  const CSSValue& ResolveLightDarkPair(const CSSProperty&, const CSSValue&);
+  // reference to the passed value.
+  const CSSValue& ResolveLightDarkPair(const CSSValue&);
 
-  // The dependencies we track here end up in an entry in the
-  // MatchedPropertiesCache. Declarations such as "all:inherit" incurs several
-  // hundred dependencies, which is too big to cache, hence the number of
-  // dependencies we can track is limited.
-  static const size_t kMaxDependencies = 8;
-
-  // Mark the ComputedStyle as possibly dependent on the specified property.
-  //
-  // A "dependency" in this context means that one or more of the computed
-  // values held by the ComputedStyle depends on the computed value of the
-  // parent ComputedStyle.
-  //
-  // For example, a declaration such as background-color:var(--x) would incur
-  // a dependency on --x.
-  void MarkDependency(const CSSProperty&);
-
-  // Returns the set of all properties seen by MarkDependency.
-  //
-  // The caller must check if the dependencies are valid via
-  // HasValidDependencies() before calling this function.
-  //
-  // Note that this set might be larger than the actual set of dependencies,
-  // as we do some degree of over-marking to keep the implementation simple.
-  //
-  // For example, we mark all custom properties referenced as dependencies, even
-  // though the ComputedStyle itself may define a value for some or all of those
-  // custom properties. In the following example, both --x and --y will be
-  // added to this set, even though only --y is a true dependency:
-  //
-  //  div {
-  //    --x: 10px;
-  //    margin: var(--x) (--y);
-  //  }
-  //
-  const HashSet<CSSPropertyName>& Dependencies() const {
-    DCHECK(HasValidDependencies());
-    return dependencies_;
+  const ComputedStyle* OriginatingElementStyle() const {
+    return originating_element_style_.get();
+  }
+  bool IsForHighlight() const { return is_for_highlight_; }
+  bool UsesHighlightPseudoInheritance() const {
+    return uses_highlight_pseudo_inheritance_;
   }
 
-  // True if there's a dependency without the kComputedValueComparable flag.
-  bool HasIncomparableDependency() const {
-    return has_incomparable_dependency_;
-  }
+  bool CanCacheBaseStyle() const { return can_cache_base_style_; }
 
-  bool HasValidDependencies() const {
-    return dependencies_.size() <= kMaxDependencies;
+  bool HadNoMatchedProperties() const { return had_no_matched_properties_; }
+  void SetHadNoMatchedProperties() { had_no_matched_properties_ = true; }
+
+  // True if the cascade observed any  "animation" or "transition" properties,
+  // or when such properties were found within non-matching container queries.
+  //
+  // The flag is supposed to represent whether or not animations can be
+  // affected by at least one of the style variations produced by evaluating
+  // @container rules differently.
+  bool CanAffectAnimations() const { return can_affect_animations_; }
+  void SetCanAffectAnimations() { can_affect_animations_ = true; }
+
+  bool AffectsCompositorSnapshots() const {
+    return affects_compositor_snapshots_;
   }
+  void SetAffectsCompositorSnapshots() { affects_compositor_snapshots_ = true; }
+
+  bool RejectedLegacyOverlapping() const {
+    return rejected_legacy_overlapping_;
+  }
+  void SetRejectedLegacyOverlapping() { rejected_legacy_overlapping_ = true; }
 
  private:
-  enum class AnimatingElementType { kElement, kPseudoElement };
-
-  StyleResolverState(Document&,
-                     Element&,
-                     PseudoElement*,
-                     PseudoElementStyleRequest::RequestType,
-                     AnimatingElementType,
-                     const ComputedStyle* parent_style,
-                     const ComputedStyle* layout_parent_style);
-
+  void UpdateLengthConversionData();
   CSSToLengthConversionData UnzoomedLengthConversionData(
       const ComputedStyle* font_style) const;
 
@@ -284,34 +222,40 @@ class CORE_EXPORT StyleResolverState {
   scoped_refptr<const ComputedStyle> layout_parent_style_;
 
   CSSAnimationUpdate animation_update_;
-  bool is_animation_interpolation_map_ready_ = false;
-  bool is_animating_custom_properties_ = false;
-  bool has_dir_auto_attribute_ = false;
-  PseudoElementStyleRequest::RequestType pseudo_request_type_;
-
-  const CSSValue* cascaded_color_value_ = nullptr;
-  const CSSValue* cascaded_visited_color_value_ = nullptr;
+  StyleRequest::RequestType pseudo_request_type_;
 
   FontBuilder font_builder_;
 
-  std::unique_ptr<CachedUAStyle> cached_ua_style_;
-
+  PseudoElement* pseudo_element_;
   ElementStyleResources element_style_resources_;
-  Element* pseudo_element_;
-  AnimatingElementType animating_element_type_;
+  ElementType element_type_;
+  Element* container_unit_context_;
 
-  // Properties depended on by the ComputedStyle. This is known after the
-  // cascade is applied.
-  HashSet<CSSPropertyName> dependencies_;
-  // True if there's an entry in 'dependencies_' which does not have the
-  // CSSProperty::kComputedValueComparable flag set.
-  bool has_incomparable_dependency_ = false;
+  scoped_refptr<const ComputedStyle> originating_element_style_;
+  // True if we are resolving styles for a highlight pseudo-element.
+  const bool is_for_highlight_;
+  // True if this is a highlight style request, and highlight inheritance
+  // should be used for this highlight pseudo.
+  const bool uses_highlight_pseudo_inheritance_;
 
-  mutable HeapHashMap<
-      Member<const cssvalue::CSSPendingSubstitutionValue>,
-      Member<HeapHashMap<CSSPropertyID, Member<const CSSValue>>>>
-      parsed_properties_for_pending_substitution_cache_;
-  DISALLOW_COPY_AND_ASSIGN(StyleResolverState);
+  // True if the base style can be cached to optimize style recalculations for
+  // animation updates or transition retargeting.
+  bool can_cache_base_style_ = false;
+
+  // Set to true if a given style resolve produced an empty MatchResult.
+  // This is used to return a nullptr style for pseudo-element style resolves.
+  bool had_no_matched_properties_ = false;
+
+  // True whenever a matching rule in a non-matching container query contains
+  // any properties that can affect animations or transitions.
+  bool can_affect_animations_ = false;
+
+  // True if snapshots of composited keyframes require re-validation.
+  bool affects_compositor_snapshots_ = false;
+
+  // True if the cascade rejected any properties with the kLegacyOverlapping
+  // flag.
+  bool rejected_legacy_overlapping_ = false;
 };
 
 }  // namespace blink

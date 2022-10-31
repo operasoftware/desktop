@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
 
 namespace blink {
 
@@ -41,6 +42,7 @@ class CORE_EXPORT SourceLocation {
   static std::unique_ptr<SourceLocation> CaptureWithFullStackTrace();
 
   SourceLocation(const String& url,
+                 const String& function,
                  unsigned line_number,
                  unsigned column_number,
                  std::unique_ptr<v8_inspector::V8StackTrace>,
@@ -51,6 +53,7 @@ class CORE_EXPORT SourceLocation {
     return url_.IsNull() && !script_id_ && !line_number_;
   }
   const String& Url() const { return url_; }
+  const String& Function() const { return function_; }
   unsigned LineNumber() const { return line_number_; }
   unsigned ColumnNumber() const { return column_number_; }
   int ScriptId() const { return script_id_; }
@@ -58,10 +61,18 @@ class CORE_EXPORT SourceLocation {
     return std::move(stack_trace_);
   }
 
+  bool HasStackTrace() const {
+    return stack_trace_ && !stack_trace_->isEmpty();
+  }
+
   // Safe to pass between threads, drops async chain in stack trace.
   std::unique_ptr<SourceLocation> Clone() const;
 
+  void WriteIntoTrace(perfetto::TracedValue context) const;
+
   // No-op when stack trace is unknown.
+  // TODO(altimin): Replace all usages of `ToTracedValue` with
+  // `WriteIntoTrace` and remove this method.
   void ToTracedValue(TracedValue*, const char* name) const;
 
   // Could be null string when stack trace is unknown.
@@ -76,10 +87,10 @@ class CORE_EXPORT SourceLocation {
 
  private:
   static std::unique_ptr<SourceLocation> CreateFromNonEmptyV8StackTrace(
-      std::unique_ptr<v8_inspector::V8StackTrace>,
-      int script_id);
+      std::unique_ptr<v8_inspector::V8StackTrace>);
 
   String url_;
+  String function_;
   unsigned line_number_;
   unsigned column_number_;
   std::unique_ptr<v8_inspector::V8StackTrace> stack_trace_;

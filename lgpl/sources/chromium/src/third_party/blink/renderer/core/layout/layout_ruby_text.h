@@ -37,12 +37,16 @@ namespace blink {
 
 class LayoutRubyText : public LayoutBlockFlow {
  public:
-  LayoutRubyText(Element*);
+  explicit LayoutRubyText(ContainerNode*);
   ~LayoutRubyText() override;
 
-  const char* GetName() const override { return "LayoutRubyText"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutRubyText";
+  }
 
   bool IsOfType(LayoutObjectType type) const override {
+    NOT_DESTROYED();
     return type == kLayoutObjectRubyText || LayoutBlockFlow::IsOfType(type);
   }
 
@@ -52,6 +56,7 @@ class LayoutRubyText : public LayoutBlockFlow {
                       const ComputedStyle* old_style) override;
 
   bool CreatesNewFormattingContext() const final {
+    NOT_DESTROYED();
     // Ruby text objects are pushed around after layout, to become flush with
     // the associated ruby base. As such, we cannot let floats leak out from
     // ruby text objects.
@@ -66,7 +71,12 @@ class LayoutRubyText : public LayoutBlockFlow {
       LayoutUnit& logical_width) const override;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutRubyText, IsRubyText());
+template <>
+struct DowncastTraits<LayoutRubyText> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsRubyText();
+  }
+};
 
 }  // namespace blink
 

@@ -31,19 +31,23 @@
 
 #include "third_party/blink/renderer/core/layout/layout_ruby_text.h"
 
+#include "third_party/blink/renderer/core/frame/web_feature.h"
+
 namespace blink {
 
-LayoutRubyText::LayoutRubyText(Element* element) : LayoutBlockFlow(element) {}
+LayoutRubyText::LayoutRubyText(ContainerNode* node) : LayoutBlockFlow(node) {}
 
 LayoutRubyText::~LayoutRubyText() = default;
 
 bool LayoutRubyText::IsChildAllowed(LayoutObject* child,
                                     const ComputedStyle&) const {
+  NOT_DESTROYED();
   return child->IsInline();
 }
 
 void LayoutRubyText::StyleDidChange(StyleDifference diff,
                                     const ComputedStyle* old_style) {
+  NOT_DESTROYED();
   if (StyleRef().GetTextAlign() !=
       ComputedStyleInitialValues::InitialTextAlign()) {
     UseCounter::Count(GetDocument(),
@@ -54,6 +58,7 @@ void LayoutRubyText::StyleDidChange(StyleDifference diff,
 
 ETextAlign LayoutRubyText::TextAlignmentForLine(
     bool ends_with_soft_break) const {
+  NOT_DESTROYED();
   ETextAlign text_align = StyleRef().GetTextAlign();
   // FIXME: This check is bogus since user can set the initial value.
   if (text_align != ComputedStyleInitialValues::InitialTextAlign())
@@ -68,6 +73,7 @@ void LayoutRubyText::AdjustInlineDirectionLineBounds(
     unsigned expansion_opportunity_count,
     LayoutUnit& logical_left,
     LayoutUnit& logical_width) const {
+  NOT_DESTROYED();
   ETextAlign text_align = StyleRef().GetTextAlign();
   // FIXME: This check is bogus since user can set the initial value.
   if (text_align != ComputedStyleInitialValues::InitialTextAlign()) {

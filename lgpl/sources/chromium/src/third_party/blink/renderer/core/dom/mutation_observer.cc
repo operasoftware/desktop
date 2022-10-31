@@ -32,6 +32,7 @@
 
 #include <algorithm>
 
+#include "third_party/blink/public/mojom/frame/lifecycle.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_mutation_callback.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_mutation_observer_init.h"
@@ -51,8 +52,6 @@ namespace blink {
 class MutationObserver::V8DelegateImpl final
     : public MutationObserver::Delegate,
       public ExecutionContextClient {
-  USING_GARBAGE_COLLECTED_MIXIN(V8DelegateImpl);
-
  public:
   static V8DelegateImpl* Create(V8MutationCallback* callback,
                                 ExecutionContext* execution_context) {
@@ -267,8 +266,8 @@ void MutationObserver::EnqueueMutationRecord(MutationRecord* mutation) {
   DCHECK(IsMainThread());
   records_.push_back(mutation);
   ActivateObserver(this);
-  probe::AsyncTaskScheduled(delegate_->GetExecutionContext(), mutation->type(),
-                            mutation->async_task_id());
+  mutation->async_task_context()->Schedule(delegate_->GetExecutionContext(),
+                                           mutation->type());
 }
 
 void MutationObserver::SetHasTransientRegistration() {
@@ -291,8 +290,7 @@ void MutationObserver::ContextLifecycleStateChanged(
 
 void MutationObserver::CancelInspectorAsyncTasks() {
   for (auto& record : records_) {
-    probe::AsyncTaskCanceled(delegate_->GetExecutionContext(),
-                             record->async_task_id());
+    record->async_task_context()->Cancel();
   }
 }
 
@@ -319,7 +317,7 @@ void MutationObserver::Deliver() {
 
   // Report the first (earliest) stack as the async cause.
   probe::AsyncTask async_task(delegate_->GetExecutionContext(),
-                              records.front()->async_task_id());
+                              records.front()->async_task_context());
   delegate_->Deliver(records, *this);
 }
 

@@ -22,7 +22,7 @@ from .user_defined_type import UserDefinedType
 
 class Namespace(UserDefinedType, WithExtendedAttributes, WithCodeGeneratorInfo,
                 WithExposure, WithComponent, WithDebugInfo):
-    """https://heycam.github.io/webidl/#idl-namespaces"""
+    """https://webidl.spec.whatwg.org/#idl-namespaces"""
 
     class IR(IRMap.IR, WithExtendedAttributes, WithCodeGeneratorInfo,
              WithExposure, WithComponent, WithDebugInfo):
@@ -107,11 +107,13 @@ class Namespace(UserDefinedType, WithExtendedAttributes, WithCodeGeneratorInfo,
             for operation_ir in ir.operations
         ])
         self._operation_groups = tuple([
-            OperationGroup(
-                operation_group_ir,
-                filter(lambda x: x.identifier == operation_group_ir.identifier,
-                       self._operations),
-                owner=self) for operation_group_ir in ir.operation_groups
+            OperationGroup(operation_group_ir,
+                           list(
+                               filter(
+                                   lambda x: x.identifier == operation_group_ir
+                                   .identifier, self._operations)),
+                           owner=self)
+            for operation_group_ir in ir.operation_groups
         ])
 
     @property
@@ -132,7 +134,7 @@ class Namespace(UserDefinedType, WithExtendedAttributes, WithCodeGeneratorInfo,
     @property
     def constants(self):
         """Returns constants."""
-        return ()
+        return self._constants
 
     @property
     def constructors(self):
@@ -168,3 +170,8 @@ class Namespace(UserDefinedType, WithExtendedAttributes, WithCodeGeneratorInfo,
     def exposed_constructs(self):
         """Returns exposed constructs."""
         return ()
+
+    # UserDefinedType overrides
+    @property
+    def is_namespace(self):
+        return True

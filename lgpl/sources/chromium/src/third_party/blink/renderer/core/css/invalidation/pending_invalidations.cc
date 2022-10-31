@@ -14,7 +14,6 @@
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
-#include "third_party/blink/renderer/core/layout/layout_object.h"
 
 namespace blink {
 
@@ -52,7 +51,7 @@ void PendingInvalidations::ScheduleInvalidationSetsForNode(
     }
     // No need to schedule descendant invalidations on display:none elements.
     if (requires_descendant_invalidation && !node.GetComputedStyle() &&
-        node.CanParticipateInFlatTree()) {
+        !node.IsShadowRoot()) {
       requires_descendant_invalidation = false;
     }
   }

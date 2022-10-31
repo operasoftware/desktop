@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_overflow_menu_button_element.h"
 
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/platform/user_metrics_action.h"
 #include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
@@ -23,6 +24,7 @@ MediaControlOverflowMenuButtonElement::MediaControlOverflowMenuButtonElement(
   setAttribute(html_names::kTitleAttr,
                WTF::AtomicString(
                    GetLocale().QueryString(IDS_AX_MEDIA_OVERFLOW_BUTTON_HELP)));
+  setAttribute(html_names::kAriaHaspopupAttr, "menu");
   SetShadowPseudoId(AtomicString("-internal-media-controls-overflow-button"));
   SetIsWanted(false);
 }

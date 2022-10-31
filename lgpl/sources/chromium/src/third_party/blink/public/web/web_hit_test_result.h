@@ -26,6 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_HIT_TEST_RESULT_H_
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_HIT_TEST_RESULT_H_
 
+#include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_private_ptr.h"
 #include "ui/gfx/geometry/point_f.h"
 
@@ -52,13 +53,6 @@ class WebHitTestResult {
 
   // The node that was hit (only one for point-based tests).
   BLINK_EXPORT WebNode GetNode() const;
-
-  // Coordinates of the point that was hit. Relative to the node, but with
-  // ContentBoxOffset removed if the node has box layout.
-  BLINK_EXPORT gfx::PointF LocalPointWithoutContentBoxOffset() const;
-
-  // Returns whether the content box contains the hit test point.
-  BLINK_EXPORT bool ContentBoxContainsPoint() const;
 
   // If a link (eg. anchor or area tag) is hit, return the element.
   // Return null otheriwse.
@@ -88,4 +82,4 @@ class WebHitTestResult {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_HIT_TEST_RESULT_H_

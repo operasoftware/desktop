@@ -18,6 +18,7 @@
 
 #include "config.h"
 
+#include "avassert.h"
 #include "buffer.h"
 #include "common.h"
 #include "hwcontext.h"
@@ -308,7 +309,7 @@ static int hwframe_pool_prealloc(AVBufferRef *ref)
     AVFrame **frames;
     int i, ret = 0;
 
-    frames = av_mallocz_array(ctx->initial_pool_size, sizeof(*frames));
+    frames = av_calloc(ctx->initial_pool_size, sizeof(*frames));
     if (!frames)
         return AVERROR(ENOMEM);
 
@@ -422,7 +423,7 @@ static int transfer_data_alloc(AVFrame *dst, const AVFrame *src, int flags)
     frame_tmp->width  = ctx->width;
     frame_tmp->height = ctx->height;
 
-    ret = av_frame_get_buffer(frame_tmp, 32);
+    ret = av_frame_get_buffer(frame_tmp, 0);
     if (ret < 0)
         goto fail;
 
@@ -643,9 +644,10 @@ fail:
     return ret;
 }
 
-int av_hwdevice_ctx_create_derived(AVBufferRef **dst_ref_ptr,
-                                   enum AVHWDeviceType type,
-                                   AVBufferRef *src_ref, int flags)
+int av_hwdevice_ctx_create_derived_opts(AVBufferRef **dst_ref_ptr,
+                                        enum AVHWDeviceType type,
+                                        AVBufferRef *src_ref,
+                                        AVDictionary *options, int flags)
 {
     AVBufferRef *dst_ref = NULL, *tmp_ref;
     AVHWDeviceContext *dst_ctx, *tmp_ctx;
@@ -678,6 +680,7 @@ int av_hwdevice_ctx_create_derived(AVBufferRef **dst_ref_ptr,
         if (dst_ctx->internal->hw_type->device_derive) {
             ret = dst_ctx->internal->hw_type->device_derive(dst_ctx,
                                                             tmp_ctx,
+                                                            options,
                                                             flags);
             if (ret == 0) {
                 dst_ctx->internal->source_device = av_buffer_ref(src_ref);
@@ -707,6 +710,14 @@ fail:
     av_buffer_unref(&dst_ref);
     *dst_ref_ptr = NULL;
     return ret;
+}
+
+int av_hwdevice_ctx_create_derived(AVBufferRef **dst_ref_ptr,
+                                   enum AVHWDeviceType type,
+                                   AVBufferRef *src_ref, int flags)
+{
+    return av_hwdevice_ctx_create_derived_opts(dst_ref_ptr, type, src_ref,
+                                               NULL, flags);
 }
 
 static void ff_hwframe_unmap(void *opaque, uint8_t *data)
@@ -778,6 +789,8 @@ fail:
 
 int av_hwframe_map(AVFrame *dst, const AVFrame *src, int flags)
 {
+    AVBufferRef    *orig_dst_frames = dst->hw_frames_ctx;
+    enum AVPixelFormat orig_dst_fmt = dst->format;
     AVHWFramesContext *src_frames, *dst_frames;
     HWMapDescriptor *hwmap;
     int ret;
@@ -814,8 +827,10 @@ int av_hwframe_map(AVFrame *dst, const AVFrame *src, int flags)
             src_frames->internal->hw_type->map_from) {
             ret = src_frames->internal->hw_type->map_from(src_frames,
                                                           dst, src, flags);
-            if (ret != AVERROR(ENOSYS))
+            if (ret >= 0)
                 return ret;
+            else if (ret != AVERROR(ENOSYS))
+                goto fail;
         }
     }
 
@@ -826,12 +841,30 @@ int av_hwframe_map(AVFrame *dst, const AVFrame *src, int flags)
             dst_frames->internal->hw_type->map_to) {
             ret = dst_frames->internal->hw_type->map_to(dst_frames,
                                                         dst, src, flags);
-            if (ret != AVERROR(ENOSYS))
+            if (ret >= 0)
                 return ret;
+            else if (ret != AVERROR(ENOSYS))
+                goto fail;
         }
     }
 
     return AVERROR(ENOSYS);
+
+fail:
+    // if the caller provided dst frames context, it should be preserved
+    // by this function
+    av_assert0(orig_dst_frames == NULL ||
+               orig_dst_frames == dst->hw_frames_ctx);
+
+    // preserve user-provided dst frame fields, but clean
+    // anything we might have set
+    dst->hw_frames_ctx = NULL;
+    av_frame_unref(dst);
+
+    dst->hw_frames_ctx = orig_dst_frames;
+    dst->format        = orig_dst_fmt;
+
+    return ret;
 }
 
 int av_hwframe_ctx_create_derived(AVBufferRef **derived_frame_ctx,

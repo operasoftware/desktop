@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/ui_mode.gni")
 import("config.gni")
 if (is_clang) {
   import("//build/config/clang/clang.gni")
@@ -48,10 +49,6 @@ config("inside_blink") {
       "-Wno-implicit-float-conversion",
       "-Wno-implicit-int-conversion",
     ]
-
-    if (!is_chromeos || default_toolchain != "//build/toolchain/cros:target") {
-      cflags += [ "-Wno-enum-float-conversion" ]
-    }
   }
 }
 
@@ -80,6 +77,8 @@ config("blink_pch") {
       cflags = [ "/FI$precompiled_header" ]
     } else if (is_mac) {
       precompiled_source = "//third_party/blink/renderer/build/mac/prefix.h"
+    } else if (is_linux) {
+      precompiled_source = "//third_party/blink/renderer/build/linux/prefix.h"
     }
   }
 }
@@ -96,7 +95,6 @@ config("config") {
       "/wd4324",  # Struct padded due to declspec(align).
       "/wd4714",  # Function marked forceinline not inlined.
       "/wd4800",  # Value forced to bool.
-      "/wd4996",  # Deprecated function call.
     ]
   }
 
@@ -114,15 +112,6 @@ config("config") {
       "-add-plugin",
       "-Xclang",
       "blink-gc-plugin",
-    ]
-
-    # TODO(bikineev): Remove when clang pre-built has been updated.
-    # Disallow members in stack allocated classes.
-    cflags += [
-      "-Xclang",
-      "-plugin-arg-blink-gc-plugin",
-      "-Xclang",
-      "no-members-in-stack-allocated",
     ]
 
     # Add arguments for enabled GC plugin options:

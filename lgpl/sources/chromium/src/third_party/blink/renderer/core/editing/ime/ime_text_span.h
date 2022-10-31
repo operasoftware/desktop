@@ -31,11 +31,8 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "ui/base/ime/ime_text_span.h"
 #include "ui/base/ime/mojom/ime_types.mojom-blink-forward.h"
-
-namespace ui {
-struct ImeTextSpan;
-}  // namespace ui
 
 namespace blink {
 
@@ -48,11 +45,12 @@ class CORE_EXPORT ImeTextSpan {
     kSuggestion,
     kMisspellingSuggestion,
     kAutocorrect,
+    kGrammarSuggestion,
   };
 
   ImeTextSpan(Type,
-              unsigned start_offset,
-              unsigned end_offset,
+              wtf_size_t start_offset,
+              wtf_size_t end_offset,
               const Color& underline_color,
               ui::mojom::ImeTextSpanThickness,
               ui::mojom::ImeTextSpanUnderlineStyle,
@@ -66,8 +64,8 @@ class CORE_EXPORT ImeTextSpan {
   explicit ImeTextSpan(const ui::ImeTextSpan&);
 
   Type GetType() const { return type_; }
-  unsigned StartOffset() const { return start_offset_; }
-  unsigned EndOffset() const { return end_offset_; }
+  wtf_size_t StartOffset() const { return start_offset_; }
+  wtf_size_t EndOffset() const { return end_offset_; }
   const Color& UnderlineColor() const { return underline_color_; }
   ui::mojom::ImeTextSpanThickness Thickness() const { return thickness_; }
   ui::mojom::ImeTextSpanUnderlineStyle UnderlineStyle() const {
@@ -84,10 +82,12 @@ class CORE_EXPORT ImeTextSpan {
   bool InterimCharSelection() const { return interim_char_selection_; }
   const Vector<String>& Suggestions() const { return suggestions_; }
 
+  ui::ImeTextSpan ToUiImeTextSpan();
+
  private:
   Type type_;
-  unsigned start_offset_;
-  unsigned end_offset_;
+  wtf_size_t start_offset_;
+  wtf_size_t end_offset_;
   Color underline_color_;
   ui::mojom::ImeTextSpanThickness thickness_;
   ui::mojom::ImeTextSpanUnderlineStyle underline_style_;
@@ -98,6 +98,8 @@ class CORE_EXPORT ImeTextSpan {
   bool interim_char_selection_;
   Vector<String> suggestions_;
 };
+
+ImeTextSpan::Type ConvertUiTypeToType(ui::ImeTextSpan::Type type);
 
 }  // namespace blink
 

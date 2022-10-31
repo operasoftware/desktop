@@ -35,7 +35,7 @@
 #include "third_party/blink/renderer/core/fileapi/file_error.h"
 #include "third_party/blink/renderer/modules/filesystem/file_writer_base.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -46,7 +46,6 @@ class FileWriterSync final : public ScriptWrappable,
                              public FileWriterBase,
                              public ExecutionContextClient {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(FileWriterSync);
 
  public:
   explicit FileWriterSync(ExecutionContext* context);

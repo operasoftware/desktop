@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/animation_frame/worker_animation_frame_provider.h"
 
+#include "base/trace_event/trace_event.h"
 #include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
 #include "third_party/blink/renderer/core/timing/worker_global_scope_performance.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
@@ -21,8 +22,7 @@ WorkerAnimationFrameProvider::WorkerAnimationFrameProvider(
       callback_collection_(context),
       context_(context) {}
 
-int WorkerAnimationFrameProvider::RegisterCallback(
-    FrameRequestCallbackCollection::FrameCallback* callback) {
+int WorkerAnimationFrameProvider::RegisterCallback(FrameCallback* callback) {
   if (!begin_frame_provider_->IsValidFrameProvider()) {
     return WorkerAnimationFrameProvider::kInvalidCallbackId;
   }
@@ -68,6 +68,11 @@ void WorkerAnimationFrameProvider::BeginFrame(const viz::BeginFrameArgs& args) {
         provider->begin_frame_provider_->FinishBeginFrame(args);
       },
       WrapWeakPersistent(this), args));
+}
+
+scoped_refptr<base::SingleThreadTaskRunner>
+WorkerAnimationFrameProvider::GetCompositorTaskRunner() {
+  return context_->GetScheduler()->CompositorTaskRunner();
 }
 
 void WorkerAnimationFrameProvider::RegisterOffscreenCanvas(

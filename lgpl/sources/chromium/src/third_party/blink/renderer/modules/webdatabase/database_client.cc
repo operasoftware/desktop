@@ -39,7 +39,8 @@
 
 namespace blink {
 
-DatabaseClient::DatabaseClient() : inspector_agent_(nullptr) {}
+DatabaseClient::DatabaseClient()
+    : Supplement(nullptr), inspector_agent_(nullptr) {}
 
 void DatabaseClient::Trace(Visitor* visitor) const {
   visitor->Trace(inspector_agent_);
@@ -60,8 +61,10 @@ const char DatabaseClient::kSupplementName[] = "DatabaseClient";
 bool DatabaseClient::AllowDatabase(ExecutionContext* context) {
   DCHECK(context->IsContextThread());
   LocalDOMWindow* window = To<LocalDOMWindow>(context);
-  if (auto* client = window->GetFrame()->GetContentSettingsClient())
-    return client->AllowDatabase();
+  if (auto* client = window->GetFrame()->GetContentSettingsClient()) {
+    return client->AllowStorageAccessSync(
+        WebContentSettingsClient::StorageType::kDatabase);
+  }
   return true;
 }
 

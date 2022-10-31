@@ -4,20 +4,7 @@
 
 // https://wicg.github.io/scroll-animations/#dictdef-scrolltimelineoptions
 
-enum ScrollDirection {
-    "block",
-    "inline",
-    "horizontal",
-    "vertical"
-};
-
-enum ScrollTimelineAutoKeyword { "auto" };
-
 dictionary ScrollTimelineOptions {
-        Element? scrollSource = null;
+        Element? source;
         ScrollDirection orientation = "block";
-        (DOMString or ScrollTimelineElementBasedOffset) startScrollOffset = "auto";
-        (DOMString or ScrollTimelineElementBasedOffset)  endScrollOffset = "auto";
-
-        (double or ScrollTimelineAutoKeyword) timeRange = "auto";
 };

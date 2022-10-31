@@ -8,6 +8,7 @@
 #include "base/callback.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/simple_thread.h"
+#include "base/time/time.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 
 namespace base {
@@ -54,4 +55,4 @@ class PLATFORM_EXPORT SimpleThreadImpl : public SimpleThread {
 }  // namespace sequence_manager
 }  // namespace base
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_TEST_FUZZER_SIMPLE_THREAD_IMPL_H_

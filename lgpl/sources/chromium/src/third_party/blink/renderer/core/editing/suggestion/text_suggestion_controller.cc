@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/editing/suggestion/text_suggestion_controller.h"
 
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/renderer/core/clipboard/data_transfer.h"
 #include "third_party/blink/renderer/core/clipboard/data_transfer_access_policy.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
@@ -147,7 +148,8 @@ SuggestionInfosWithNodeAndHighlightColor ComputeSuggestionInfos(
       node_suggestion_marker_pairs_sorted_by_length.front().second.Get());
 
   suggestion_infos_with_node_and_highlight_color.highlight_color =
-      (first_suggestion_marker->SuggestionHighlightColor() == 0)
+      (first_suggestion_marker->SuggestionHighlightColor() ==
+       Color::kTransparent)
           ? LayoutTheme::TapHighlightColor()
           : first_suggestion_marker->SuggestionHighlightColor();
 
@@ -370,7 +372,7 @@ void TextSuggestionController::OnSuggestionMenuClosed() {
 
   GetDocument().Markers().RemoveMarkersOfTypes(
       DocumentMarker::MarkerTypes::ActiveSuggestion());
-  GetFrame().Selection().SetCaretVisible(true);
+  GetFrame().Selection().SetCaretEnabled(true);
   is_suggestion_menu_open_ = false;
 }
 
@@ -425,11 +427,11 @@ void TextSuggestionController::ShowSpellCheckMenu(
   const String& description = marker->Description();
 
   is_suggestion_menu_open_ = true;
-  GetFrame().Selection().SetCaretVisible(false);
+  GetFrame().Selection().SetCaretEnabled(false);
   GetDocument().Markers().AddActiveSuggestionMarker(
-      active_suggestion_range, SK_ColorTRANSPARENT,
+      active_suggestion_range, Color::kTransparent,
       ui::mojom::ImeTextSpanThickness::kNone,
-      ui::mojom::ImeTextSpanUnderlineStyle::kSolid, SK_ColorTRANSPARENT,
+      ui::mojom::ImeTextSpanUnderlineStyle::kSolid, Color::kTransparent,
       LayoutTheme::GetTheme().PlatformActiveSpellingMarkerHighlightColor());
 
   Vector<String> suggestions;
@@ -443,12 +445,13 @@ void TextSuggestionController::ShowSpellCheckMenu(
     suggestion_ptrs.push_back(std::move(info_ptr));
   }
 
-  const IntRect& absolute_bounds = GetFrame().Selection().AbsoluteCaretBounds();
-  const IntRect& viewport_bounds =
+  const gfx::Rect& absolute_bounds =
+      GetFrame().Selection().AbsoluteCaretBounds();
+  const gfx::Rect& viewport_bounds =
       GetFrame().View()->FrameToViewport(absolute_bounds);
 
   text_suggestion_host_->ShowSpellCheckSuggestionMenu(
-      viewport_bounds.X(), viewport_bounds.MaxY(), std::move(misspelled_word),
+      viewport_bounds.x(), viewport_bounds.bottom(), std::move(misspelled_word),
       std::move(suggestion_ptrs));
 }
 
@@ -494,12 +497,12 @@ void TextSuggestionController::ShowSuggestionMenu(
                                     Position(text_node, span_union_end));
 
   GetDocument().Markers().AddActiveSuggestionMarker(
-      marker_range, SK_ColorTRANSPARENT, ui::mojom::ImeTextSpanThickness::kThin,
-      ui::mojom::ImeTextSpanUnderlineStyle::kSolid, SK_ColorTRANSPARENT,
+      marker_range, Color::kTransparent, ui::mojom::ImeTextSpanThickness::kThin,
+      ui::mojom::ImeTextSpanUnderlineStyle::kSolid, Color::kTransparent,
       suggestion_infos_with_node_and_highlight_color.highlight_color);
 
   is_suggestion_menu_open_ = true;
-  GetFrame().Selection().SetCaretVisible(false);
+  GetFrame().Selection().SetCaretEnabled(false);
 
   const String& misspelled_word = PlainText(marker_range);
   CallMojoShowTextSuggestionMenu(
@@ -523,12 +526,13 @@ void TextSuggestionController::CallMojoShowTextSuggestionMenu(
     suggestion_info_ptrs.push_back(std::move(info_ptr));
   }
 
-  const IntRect& absolute_bounds = GetFrame().Selection().AbsoluteCaretBounds();
-  const IntRect& viewport_bounds =
+  const gfx::Rect& absolute_bounds =
+      GetFrame().Selection().AbsoluteCaretBounds();
+  const gfx::Rect& viewport_bounds =
       GetFrame().View()->FrameToViewport(absolute_bounds);
 
   text_suggestion_host_->ShowTextSuggestionMenu(
-      viewport_bounds.X(), viewport_bounds.MaxY(), misspelled_word,
+      viewport_bounds.x(), viewport_bounds.bottom(), misspelled_word,
       std::move(suggestion_info_ptrs));
 }
 

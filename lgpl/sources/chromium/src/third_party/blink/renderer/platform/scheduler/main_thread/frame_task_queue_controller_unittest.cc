@@ -5,17 +5,16 @@
 #include "third_party/blink/renderer/platform/scheduler/main_thread/frame_task_queue_controller.h"
 
 #include <memory>
-#include <tuple>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/task/sequence_manager/task_queue.h"
 #include "base/task/sequence_manager/test/sequence_manager_for_test.h"
 #include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/frame_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_scheduler_impl.h"
@@ -39,6 +38,9 @@ class FrameTaskQueueControllerTest : public testing::Test,
             base::test::TaskEnvironment::TimeSource::MOCK_TIME,
             base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED),
         task_queue_created_count_(0) {}
+  FrameTaskQueueControllerTest(const FrameTaskQueueControllerTest&) = delete;
+  FrameTaskQueueControllerTest& operator=(const FrameTaskQueueControllerTest&) =
+      delete;
 
   ~FrameTaskQueueControllerTest() override = default;
 
@@ -46,11 +48,14 @@ class FrameTaskQueueControllerTest : public testing::Test,
     scheduler_ = std::make_unique<MainThreadSchedulerImpl>(
         base::sequence_manager::SequenceManagerForTest::Create(
             nullptr, task_environment_.GetMainThreadTaskRunner(),
-            task_environment_.GetMockTickClock()),
-        base::nullopt);
-    page_scheduler_ = scheduler_->CreatePageScheduler(nullptr);
+            task_environment_.GetMockTickClock()));
+    agent_group_scheduler_ = scheduler_->CreateAgentGroupScheduler();
+    page_scheduler_ =
+        agent_group_scheduler_->AsAgentGroupScheduler().CreatePageScheduler(
+            nullptr);
     frame_scheduler_ = page_scheduler_->CreateFrameScheduler(
-        nullptr, nullptr, FrameScheduler::FrameType::kSubframe);
+        nullptr, /*is_in_embedded_frame_tree=*/false,
+        FrameScheduler::FrameType::kSubframe);
     frame_task_queue_controller_ = std::make_unique<FrameTaskQueueController>(
         scheduler_.get(),
         static_cast<FrameSchedulerImpl*>(frame_scheduler_.get()), this);
@@ -60,6 +65,7 @@ class FrameTaskQueueControllerTest : public testing::Test,
     frame_task_queue_controller_.reset();
     frame_scheduler_.reset();
     page_scheduler_.reset();
+    agent_group_scheduler_.reset();
     scheduler_->Shutdown();
     scheduler_.reset();
   }
@@ -113,14 +119,13 @@ class FrameTaskQueueControllerTest : public testing::Test,
  protected:
   base::test::TaskEnvironment task_environment_;
   std::unique_ptr<MainThreadSchedulerImpl> scheduler_;
+  std::unique_ptr<WebAgentGroupScheduler> agent_group_scheduler_;
   std::unique_ptr<PageScheduler> page_scheduler_;
   std::unique_ptr<FrameScheduler> frame_scheduler_;
   std::unique_ptr<FrameTaskQueueController> frame_task_queue_controller_;
 
  private:
   size_t task_queue_created_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(FrameTaskQueueControllerTest);
 };
 
 TEST_F(FrameTaskQueueControllerTest, CreateAllTaskQueues) {
@@ -186,9 +191,7 @@ TEST_F(FrameTaskQueueControllerTest, CreateAllTaskQueues) {
             frame_task_queue_controller_->GetAllTaskQueuesAndVoters().size());
   for (const auto& task_queue_and_voter :
        frame_task_queue_controller_->GetAllTaskQueuesAndVoters()) {
-    MainThreadTaskQueue* task_queue_ptr;
-    TaskQueue::QueueEnabledVoter* voter;
-    std::tie(task_queue_ptr, voter) = task_queue_and_voter;
+    auto [task_queue_ptr, voter] = task_queue_and_voter;
 
     EXPECT_NE(task_queue_ptr, nullptr);
     EXPECT_TRUE(all_task_queues.find(task_queue_ptr) != all_task_queues.end());
@@ -254,7 +257,7 @@ TEST_F(FrameTaskQueueControllerTest,
   scoped_refptr<MainThreadTaskQueue> task_queue =
       frame_task_queue_controller_->GetTaskQueue(
           MainThreadTaskQueue::QueueTraits());
-  EXPECT_EQ(base::nullopt, task_queue->web_scheduling_priority());
+  EXPECT_EQ(absl::nullopt, task_queue->web_scheduling_priority());
 }
 
 TEST_F(FrameTaskQueueControllerTest, AddWebSchedulingTaskQueues) {
@@ -279,6 +282,31 @@ TEST_F(FrameTaskQueueControllerTest, AddWebSchedulingTaskQueues) {
             frame_task_queue_controller_->GetAllTaskQueuesAndVoters().size());
   EXPECT_EQ(WebSchedulingPriority::kBackgroundPriority,
             task_queue->web_scheduling_priority().value());
+}
+
+TEST_F(FrameTaskQueueControllerTest, RemoveWebSchedulingTaskQueues) {
+  scoped_refptr<MainThreadTaskQueue> task_queue =
+      frame_task_queue_controller_->NewWebSchedulingTaskQueue(
+          QueueTraits(), WebSchedulingPriority::kUserBlockingPriority);
+  EXPECT_EQ(1u,
+            frame_task_queue_controller_->GetAllTaskQueuesAndVoters().size());
+  EXPECT_EQ(WebSchedulingPriority::kUserBlockingPriority,
+            task_queue->web_scheduling_priority().value());
+
+  scoped_refptr<MainThreadTaskQueue> task_queue2 =
+      frame_task_queue_controller_->NewWebSchedulingTaskQueue(
+          QueueTraits(), WebSchedulingPriority::kUserVisiblePriority);
+  EXPECT_EQ(2u,
+            frame_task_queue_controller_->GetAllTaskQueuesAndVoters().size());
+  EXPECT_EQ(WebSchedulingPriority::kUserVisiblePriority,
+            task_queue2->web_scheduling_priority().value());
+
+  frame_task_queue_controller_->RemoveWebSchedulingTaskQueue(task_queue.get());
+  EXPECT_EQ(1u,
+            frame_task_queue_controller_->GetAllTaskQueuesAndVoters().size());
+  frame_task_queue_controller_->RemoveWebSchedulingTaskQueue(task_queue2.get());
+  EXPECT_EQ(0u,
+            frame_task_queue_controller_->GetAllTaskQueuesAndVoters().size());
 }
 
 TEST_F(FrameTaskQueueControllerTest,
@@ -323,14 +351,17 @@ class TaskQueueCreationFromQueueTraitsTest :
 INSTANTIATE_TEST_SUITE_P(
     All,
     TaskQueueCreationFromQueueTraitsTest,
-    ::testing::Values(QueueTraits::PrioritisationType::kVeryHigh,
-                      QueueTraits::PrioritisationType::kBestEffort,
-                      QueueTraits::PrioritisationType::kRegular,
-                      QueueTraits::PrioritisationType::kLoading,
-                      QueueTraits::PrioritisationType::kLoadingControl,
-                      QueueTraits::PrioritisationType::kFindInPage,
-                      QueueTraits::PrioritisationType::kExperimentalDatabase,
-                      QueueTraits::PrioritisationType::kJavaScriptTimer));
+    ::testing::Values(
+        QueueTraits::PrioritisationType::kInternalScriptContinuation,
+        QueueTraits::PrioritisationType::kBestEffort,
+        QueueTraits::PrioritisationType::kRegular,
+        QueueTraits::PrioritisationType::kLoading,
+        QueueTraits::PrioritisationType::kLoadingControl,
+        QueueTraits::PrioritisationType::kFindInPage,
+        QueueTraits::PrioritisationType::kExperimentalDatabase,
+        QueueTraits::PrioritisationType::kJavaScriptTimer,
+        QueueTraits::PrioritisationType::kHighPriorityLocalFrame,
+        QueueTraits::PrioritisationType::kInput));
 
 TEST_P(TaskQueueCreationFromQueueTraitsTest,
         AddAndRetrieveAllTaskQueues) {

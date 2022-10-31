@@ -1,11 +1,15 @@
-# Dutch Braille based on the standard of 2017: see «Braillestandaard voor algemeen
-# gebruik in het Nederlandse taalgebied, Van toepassing vanaf 19 april 2018» (Braille
-# Autoriteit, 2018) http://liblouis.org/braille-specs/dutch
+# Dutch braille based on the 2017 standard, see «Braillestandaard voor
+# algemeen gebruik in het Nederlandse taalgebied, Van toepassing vanaf
+# 19 april 2018» by Braille Autoriteit
+# <http://liblouis.org/braille-specs/dutch>
 #
 # Copyright © 2010-2011 by DocArch <http://www.docarch.be>
-# Copyright © 2014-2015, 2019 by Bert Frees
+# Copyright © 2014-2015, 2019, 2021 by Bert Frees
 # Copyright © 2015-2016, 2018-2019 by Dedicon <http://www.dedicon.nl>
 # Copyright © 2019 by Transkript <http://www.transkript.be>
+# Copyright © 2019 by Braille Autoriteit <https://braille-autoriteit.org>
+# Copyright © 2019 by Licht en Liefde <https://www.blindenzorglichtenliefde.be>
+# Copyright © 2019 by Luisterpuntbibliotheek <https://www.luisterpuntbibliotheek.be>
 #
 # Copying and distribution of this file, with or without modification,
 # are permitted in any medium without royalty provided the copyright
@@ -16,13 +20,9 @@
 
 display: unicode-without-blank.dis
 table:
-  locale: nl
+  language: nl
   grade: 0
   __assert-match: nl.tbl # nl-NL-g0.utb
-table:
-  locale: nl-BE
-  grade: 0
-  __assert-match: nl_BE.tbl # nl-BE-g0.utb
 tests:
   - - Lowercase letters
     - a b c d e f g h i j k l m n o p q r s t u v w x y z
@@ -52,8 +52,8 @@ tests:
     - ï î
     - ⠻ ⠩
   - - n accent
-    - ñ
-    - ⠻
+    - ñ Ñ
+    - ⠰⠻ ⠰⠨⠻
   - - o accent
     - ó ö ô
     - ⠬ ⠪ ⠹
@@ -156,6 +156,8 @@ tests:
   - [abCDef, ⠁⠃⠘⠉⠙⠠⠑⠋]
   - [ONZE DIRECTEUR-GENERAAL WOONT IN BRUSSEL, ⠘⠘⠕⠝⠵⠑ ⠙⠊⠗⠑⠉⠞⠑⠥⠗⠤⠛⠑⠝⠑⠗⠁⠁⠇ ⠺⠕⠕⠝⠞ ⠊⠝ ⠘⠃⠗⠥⠎⠎⠑⠇]
   - [IN BRUSSEL WOONT ONZE DIRECTEUR-GENERAAL, ⠘⠘⠊⠝ ⠃⠗⠥⠎⠎⠑⠇ ⠺⠕⠕⠝⠞ ⠕⠝⠵⠑ ⠙⠊⠗⠑⠉⠞⠑⠥⠗⠤⠘⠛⠑⠝⠑⠗⠁⠁⠇]
+  - - HUIS-TUIN-EN-KEUKEN-MIDDELTJES
+    - ⠘⠘⠓⠥⠊⠎⠤⠞⠥⠊⠝⠤⠑⠝⠤⠅⠑⠥⠅⠑⠝⠤⠘⠍⠊⠙⠙⠑⠇⠞⠚⠑⠎
   - [Eghezée of Éghezée, ⠨⠑⠛⠓⠑⠵⠿⠑ ⠕⠋ ⠨⠿⠛⠓⠑⠵⠿⠑]
   - [EGHEZEE of ÉGHEZÉE, ⠘⠑⠛⠓⠑⠵⠑⠑ ⠕⠋ ⠘⠿⠛⠓⠑⠵⠿⠑]
   - [Saint-Etienne of Saint-Étienne, ⠨⠎⠁⠊⠝⠞⠤⠨⠑⠞⠊⠑⠝⠝⠑ ⠕⠋ ⠨⠎⠁⠊⠝⠞⠤⠨⠿⠞⠊⠑⠝⠝⠑]
@@ -172,6 +174,9 @@ tests:
   - [WAT IS FOUT - De fout..., ⠘⠺⠁⠞ ⠘⠊⠎ ⠘⠋⠕⠥⠞ ⠤ ⠨⠙⠑ ⠋⠕⠥⠞⠲⠲⠲]
   - [WAT IS FOUT - de fout..., ⠘⠺⠁⠞ ⠘⠊⠎ ⠘⠋⠕⠥⠞ ⠤ ⠙⠑ ⠋⠕⠥⠞⠲⠲⠲]
   - [WAT IS FOUT De fout..., ⠘⠺⠁⠞ ⠘⠊⠎ ⠘⠋⠕⠥⠞ ⠨⠙⠑ ⠋⠕⠥⠞⠲⠲⠲]
+  - # permanent hoofdletterteken begint reeds bij "IK" en komt na het leesteken
+    - "'IK DACHT DAT IK HIER DE ENIGE KONINGIN ZOU ZIJN'"
+    - ⠄⠘⠘⠊⠅ ⠙⠁⠉⠓⠞ ⠙⠁⠞ ⠊⠅ ⠓⠊⠑⠗ ⠙⠑ ⠑⠝⠊⠛⠑ ⠅⠕⠝⠊⠝⠛⠊⠝ ⠵⠕⠥ ⠘⠵⠊⠚⠝⠄
   - [BTW-TARIEF volledig in hoofdletters, ⠘⠃⠞⠺⠤⠘⠞⠁⠗⠊⠑⠋ ⠧⠕⠇⠇⠑⠙⠊⠛ ⠊⠝ ⠓⠕⠕⠋⠙⠇⠑⠞⠞⠑⠗⠎]
   - [BTW-tarief alleen btw in hoofdletters, ⠘⠃⠞⠺⠤⠞⠁⠗⠊⠑⠋ ⠁⠇⠇⠑⠑⠝ ⠃⠞⠺ ⠊⠝ ⠓⠕⠕⠋⠙⠇⠑⠞⠞⠑⠗⠎]
   - [VN-verdrag, ⠘⠧⠝⠤⠧⠑⠗⠙⠗⠁⠛]
@@ -200,6 +205,10 @@ tests:
     - ⠘⠘⠃⠊⠚ ⠍⠑⠑⠗ ⠙⠁⠝ ⠙⠗⠊⠑ ⠺⠕⠕⠗⠙⠑⠝ ⠊⠝ ⠓⠕⠕⠋⠙⠇⠑⠞⠞⠑⠗⠎ ⠺⠕⠗⠙⠞ ⠼⠃⠠⠙⠑ ⠝⠊⠑⠞ ⠉⠕⠗⠗⠑⠉⠞ ⠘⠕⠍⠛⠑⠵⠑⠞
   - - Zie refertes D-NE004W, D-NB007B en D-NB007BDK.
     - ⠨⠵⠊⠑ ⠗⠑⠋⠑⠗⠞⠑⠎ ⠨⠙⠤⠘⠝⠑⠼⠚⠚⠙⠨⠺⠂ ⠨⠙⠤⠘⠝⠃⠼⠚⠚⠛⠨⠃ ⠑⠝ ⠨⠙⠤⠘⠝⠃⠼⠚⠚⠛⠘⠃⠙⠅⠲
+    - xfail: "'D-NE004W, D-NB007B' is now seen as 6 words ('D', 'NE', 'W', 'D', 'NB' and 'B') so that phrase indication is used"
+  - - Zie refertes D-NE004W, D-NB007B, D-NB007BDK.
+    - ⠨⠵⠊⠑ ⠗⠑⠋⠑⠗⠞⠑⠎ ⠨⠙⠤⠘⠝⠑⠼⠚⠚⠙⠨⠺⠂ ⠨⠙⠤⠘⠝⠃⠼⠚⠚⠛⠨⠃⠂ ⠨⠙⠤⠘⠝⠃⠼⠚⠚⠛⠘⠃⠙⠅⠲
+    - xfail: "'D-NE004W, D-NB007B, D-NB007BDK' is now seen as 9 words"
   # §2.13 Internettekens
   - [lisa_dirk@yahoo.com, ⠇⠊⠎⠁⠸⠙⠊⠗⠅⠜⠽⠁⠓⠕⠕⠲⠉⠕⠍]
   - ['http://www.avh.asso.fr/', ⠓⠞⠞⠏⠒⠌⠌⠺⠺⠺⠲⠁⠧⠓⠲⠁⠎⠎⠕⠲⠋⠗⠌]
@@ -211,8 +220,14 @@ tests:
   - ['ja|nee', ⠚⠁ ⠹ ⠝⠑⠑]
   - [no_reply@skynet.be, ⠝⠕⠸⠗⠑⠏⠇⠽⠜⠎⠅⠽⠝⠑⠞⠲⠃⠑]
   # §2.2 Alfabetwisselingsteken
-  - [cañon, ⠉⠁⠻⠕⠝]
-  - [α β γ, ⠰⠁ ⠰⠃ ⠰⠛] # Some Greek lowercase
+  - - cañon
+    - ⠉⠁⠰⠻⠕⠝
+  - - "De eerste drie letters van het Griekse alfabet zijn: alfa (α), bèta (β) en gamma (γ)."
+    - ⠨⠙⠑ ⠑⠑⠗⠎⠞⠑ ⠙⠗⠊⠑ ⠇⠑⠞⠞⠑⠗⠎ ⠧⠁⠝ ⠓⠑⠞ ⠨⠛⠗⠊⠑⠅⠎⠑ ⠁⠇⠋⠁⠃⠑⠞ ⠵⠊⠚⠝⠒ ⠁⠇⠋⠁ ⠦⠰⠁⠴⠂ ⠃⠮⠞⠁ ⠦⠰⠃⠴ ⠑⠝ ⠛⠁⠍⠍⠁ ⠦⠰⠛⠴⠲
+  - - De Poolse stad Łódź
+    - ⠨⠙⠑ ⠨⠏⠕⠕⠇⠎⠑ ⠎⠞⠁⠙ ⠰⠨⠣⠬⠙⠮
+  - - Σας καλωσορίζουμε στην Ελλάδα!
+    - ⠰⠰⠨⠎⠁⠎ ⠅⠁⠇⠺⠎⠕⠗⠊⠵⠕⠥⠍⠑ ⠎⠞⠱⠝ ⠰⠨⠑⠇⠇⠁⠙⠁⠖
   # §2.1 Aanhalingstekens
   - - '''s morgens, baby''s, Alex'' boeken, de jaren ''90'
     - ⠄⠎ ⠍⠕⠗⠛⠑⠝⠎⠂ ⠃⠁⠃⠽⠄⠎⠂ ⠨⠁⠇⠑⠭⠄ ⠃⠕⠑⠅⠑⠝⠂ ⠙⠑ ⠚⠁⠗⠑⠝ ⠄⠼⠊⠚
@@ -281,6 +296,57 @@ tests:
     - ⠸⠧⠑⠞⠛⠑⠙⠗⠥⠅⠞
     - typeform:
         bold: '++++++++++'
+  # permanent drukwijzigingsteken
+  - - vier woorden in cursief
+    - ⠸⠸⠧⠊⠑⠗ ⠺⠕⠕⠗⠙⠑⠝ ⠊⠝ ⠸⠉⠥⠗⠎⠊⠑⠋
+    - typeform:
+        italic: '+++++++++++++++++++++++'
+  - - Priester-dichter Guido Gezelle schreef in het West-Vlaams.
+    - ⠸⠸⠨⠏⠗⠊⠑⠎⠞⠑⠗⠤⠙⠊⠉⠓⠞⠑⠗ ⠨⠛⠥⠊⠙⠕ ⠨⠛⠑⠵⠑⠇⠇⠑ ⠎⠉⠓⠗⠑⠑⠋ ⠊⠝ ⠓⠑⠞ ⠨⠺⠑⠎⠞⠤⠸⠨⠧⠇⠁⠁⠍⠎⠲
+    - typeform:
+        italic: '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+  # drukwijzigingsteken komt na het leesteken
+  - - "'cursief'"
+    - ⠄⠸⠉⠥⠗⠎⠊⠑⠋⠄
+    - typeform:
+        italic: '+++++++++'
+  - - "'cursief'"
+    - ⠄⠸⠉⠥⠗⠎⠊⠑⠋⠄
+    - typeform:
+        italic: ' +++++++ '
+  - - (cursief)
+    - ⠦⠸⠉⠥⠗⠎⠊⠑⠋⠴
+    - typeform:
+        italic: '+++++++++'
+  - - (cursief)
+    - ⠦⠸⠉⠥⠗⠎⠊⠑⠋⠴
+    - typeform:
+        italic: ' +++++++ '
+  - # indien het eerste woord met een leesteken begint, begint het permanent drukwijzigingsteken toch
+    # bij het eerste woord, na het leesteken en wordt het pas bij het laatste woord opgeheven
+    - "'meer dan drie woorden in cursief'"
+    - ⠄⠸⠸⠍⠑⠑⠗ ⠙⠁⠝ ⠙⠗⠊⠑ ⠺⠕⠕⠗⠙⠑⠝ ⠊⠝ ⠸⠉⠥⠗⠎⠊⠑⠋⠄
+    - typeform:
+        italic: '++++++++++++++++++++++++++++++++++'
+  - # ... ook indien de leestekens niet cursief zijn
+    - "'meer dan drie woorden in cursief'"
+    - ⠄⠸⠸⠍⠑⠑⠗ ⠙⠁⠝ ⠙⠗⠊⠑ ⠺⠕⠕⠗⠙⠑⠝ ⠊⠝ ⠸⠉⠥⠗⠎⠊⠑⠋⠄
+    - typeform:
+        italic: ' ++++++++++++++++++++++++++++++++ '
+  # volgorde van hoofdletterteken en drukwijzigingsteken (drukwijzigingsteken eerst)
+  - - CURSIEF
+    - ⠸⠘⠉⠥⠗⠎⠊⠑⠋
+    - typeform:
+        italic: '+++++++'
+  - - VIER WOORDEN IN CURSIEF
+    - ⠸⠸⠘⠘⠧⠊⠑⠗ ⠺⠕⠕⠗⠙⠑⠝ ⠊⠝ ⠸⠘⠉⠥⠗⠎⠊⠑⠋
+    - typeform:
+        italic: '+++++++++++++++++++++++'
+  - - "'IK DACHT DAT IK HIER DE ENIGE KONINGIN ZOU ZIJN.'"
+    - ⠄⠸⠸⠘⠘⠊⠅ ⠙⠁⠉⠓⠞ ⠙⠁⠞ ⠊⠅ ⠓⠊⠑⠗ ⠙⠑ ⠑⠝⠊⠛⠑ ⠅⠕⠝⠊⠝⠛⠊⠝ ⠵⠕⠥ ⠸⠘⠵⠊⠚⠝⠲⠄
+    - typeform:
+        italic: ' ++++++++++++++++++++++++++++++++++++++++++++++++ '
+
   # Misc
   - - Not part of the braille standard
     - 'CO₂-uitstoot: 158 g CO₂/km'

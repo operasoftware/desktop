@@ -32,20 +32,24 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_TEXT_AUTOSIZER_H_
 
 #include <unicode/uchar.h>
-#include <memory>
-#include "base/macros.h"
-#include "third_party/blink/public/platform/web_text_autosizer_page_info.h"
+
+#include "base/dcheck_is_on.h"
+#include "third_party/blink/public/mojom/frame/text_autosizer_page_info.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+
+namespace gfx {
+class Size;
+}
 
 namespace blink {
 
 class Document;
 class Frame;
-class IntSize;
 class LayoutBlock;
 class LayoutBox;
 class LayoutNGTableInterface;
@@ -55,12 +59,26 @@ class LocalFrame;
 class Page;
 class SubtreeLayoutScope;
 
+inline bool operator==(const mojom::blink::TextAutosizerPageInfo& lhs,
+                       const mojom::blink::TextAutosizerPageInfo& rhs) {
+  return lhs.main_frame_width == rhs.main_frame_width &&
+         lhs.main_frame_layout_width == rhs.main_frame_layout_width &&
+         lhs.device_scale_adjustment == rhs.device_scale_adjustment;
+}
+
+inline bool operator!=(const mojom::blink::TextAutosizerPageInfo& lhs,
+                       const mojom::blink::TextAutosizerPageInfo& rhs) {
+  return !(lhs == rhs);
+}
+
 // Single-pass text autosizer. Documentation at:
 // http://tinyurl.com/TextAutosizer
 
 class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
  public:
   explicit TextAutosizer(const Document*);
+  TextAutosizer(const TextAutosizer&) = delete;
+  TextAutosizer& operator=(const TextAutosizer&) = delete;
   ~TextAutosizer();
 
   // computed_size should include zoom.
@@ -76,7 +94,7 @@ class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
   void UpdatePageInfo();
   void Record(LayoutBlock*);
   void Record(LayoutText*);
-  void Destroy(LayoutBlock*);
+  void Destroy(LayoutObject*);
 
   bool PageNeedsAutosizing() const;
 
@@ -125,8 +143,8 @@ class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
   };
 
  private:
-  typedef HashSet<LayoutBlock*> BlockSet;
-  typedef HashSet<const LayoutBlock*> ConstBlockSet;
+  typedef HeapHashSet<Member<LayoutBlock>> BlockSet;
+  typedef HeapHashSet<Member<const LayoutBlock>> ConstBlockSet;
 
   enum HasEnoughTextToAutosize {
     kUnknownAmountOfText,
@@ -170,38 +188,37 @@ class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
   // more blocks that all have the same fingerprint. Clusters whose roots
   // belong to a supercluster will share a common multiplier and
   // text-length-based autosizing status.
-  struct Supercluster {
-    USING_FAST_MALLOC(Supercluster);
-
+  struct Supercluster : public GarbageCollected<Supercluster> {
    public:
     explicit Supercluster(const BlockSet* roots)
         : roots_(roots),
           has_enough_text_to_autosize_(kUnknownAmountOfText),
           multiplier_(0),
           inherit_parent_multiplier_(kUnknown) {}
+    void Trace(Visitor*) const;
 
-    const BlockSet* roots_;
+    Member<const BlockSet> roots_;
     HasEnoughTextToAutosize has_enough_text_to_autosize_;
     float multiplier_;
     InheritParentMultiplier inherit_parent_multiplier_;
   };
 
-  struct Cluster {
-    USING_FAST_MALLOC(Cluster);
-
+  struct Cluster : public GarbageCollected<Cluster> {
    public:
     explicit Cluster(const LayoutBlock* root,
                      BlockFlags,
                      Cluster* parent,
                      Supercluster* = nullptr);
 
-    const LayoutBlock* const root_;
+    void Trace(Visitor*) const;
+
+    Member<const LayoutBlock> const root_;
     BlockFlags flags_;
     // The deepest block containing all text is computed lazily (see:
     // deepestBlockContainingAllText). A value of 0 indicates the value has not
     // been computed yet.
-    const LayoutBlock* deepest_block_containing_all_text_;
-    Cluster* parent_;
+    Member<const LayoutBlock> deepest_block_containing_all_text_;
+    Member<Cluster> parent_;
     // The multiplier is computed lazily (see: clusterMultiplier) because it
     // must be calculated after the lowest block containing all text has entered
     // layout (the m_blocksThatHaveBegunLayout assertions cover this). Note: the
@@ -210,7 +227,7 @@ class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
     float multiplier_;
     HasEnoughTextToAutosize has_enough_text_to_autosize_;
     // A set of blocks that are similar to this block.
-    Supercluster* supercluster_;
+    Member<Supercluster> supercluster_;
     bool has_table_ancestor_;
   };
 
@@ -239,7 +256,7 @@ class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
                 "sizeof(FingerprintSourceData) must be a multiple of UChar");
 
   typedef unsigned Fingerprint;
-  typedef Vector<std::unique_ptr<Cluster>> ClusterStack;
+  typedef HeapVector<Member<Cluster>> ClusterStack;
 
   // Fingerprints are computed during style recalc, for (some subset of)
   // blocks that will become cluster roots.
@@ -256,15 +273,16 @@ class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
     BlockSet* GetTentativeClusterRoots(Fingerprint);
     Supercluster* CreateSuperclusterIfNeeded(LayoutBlock*, bool& is_new_entry);
     bool HasFingerprints() const { return !fingerprints_.IsEmpty(); }
-    HashSet<Supercluster*>& GetPotentiallyInconsistentSuperclusters() {
+    HeapHashSet<Member<Supercluster>>&
+    GetPotentiallyInconsistentSuperclusters() {
       return potentially_inconsistent_superclusters_;
     }
+    void Trace(Visitor* visitor) const;
 
    private:
-    typedef HashMap<const LayoutObject*, Fingerprint> FingerprintMap;
-    typedef HashMap<Fingerprint, std::unique_ptr<BlockSet>>
-        ReverseFingerprintMap;
-    typedef HashMap<Fingerprint, std::unique_ptr<Supercluster>> SuperclusterMap;
+    typedef HeapHashMap<Member<const LayoutObject>, Fingerprint> FingerprintMap;
+    typedef HeapHashMap<Fingerprint, Member<BlockSet>> ReverseFingerprintMap;
+    typedef HeapHashMap<Fingerprint, Member<Supercluster>> SuperclusterMap;
 
     FingerprintMap fingerprints_;
     ReverseFingerprintMap blocks_for_fingerprint_;
@@ -272,7 +290,7 @@ class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
     SuperclusterMap superclusters_;
     // Superclusters that need to be checked for consistency at the start of the
     // next layout.
-    HashSet<Supercluster*> potentially_inconsistent_superclusters_;
+    HeapHashSet<Member<Supercluster>> potentially_inconsistent_superclusters_;
 #if DCHECK_IS_ON()
     void AssertMapsAreConsistent();
 #endif
@@ -282,7 +300,7 @@ class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
     DISALLOW_NEW();
     PageInfo() = default;
 
-    WebTextAutosizerPageInfo shared_info_;
+    mojom::blink::TextAutosizerPageInfo shared_info_;
     float accessibility_font_scale_factor_;
     bool page_needs_autosizing_;
     bool has_autosized_;
@@ -297,7 +315,7 @@ class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
                 InflateBehavior = kThisBlockOnly,
                 float multiplier = 0);
   bool ShouldHandleLayout() const;
-  IntSize WindowSize() const;
+  gfx::Size WindowSize() const;
   void SetAllTextNeedsLayout(LayoutBlock* container = nullptr);
   void ResetMultipliers();
   BeginLayoutBehavior PrepareForLayout(LayoutBlock*);
@@ -354,7 +372,7 @@ class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
   void ReportIfCrossSiteFrame();
 
   Member<const Document> document_;
-  const LayoutBlock* first_block_to_begin_layout_;
+  Member<const LayoutBlock> first_block_to_begin_layout_;
 #if DCHECK_IS_ON()
   // Used to ensure we don't compute properties of a block before beginLayout()
   // is called on it.
@@ -371,8 +389,6 @@ class CORE_EXPORT TextAutosizer final : public GarbageCollected<TextAutosizer> {
   // Inflate reports a use counter if we're autosizing a cross site iframe.
   // This flag makes sure we only check it once per layout pass.
   bool did_check_cross_site_use_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextAutosizer);
 };
 
 }  // namespace blink

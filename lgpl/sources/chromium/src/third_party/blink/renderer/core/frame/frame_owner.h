@@ -6,9 +6,10 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FRAME_OWNER_H_
 
 #include "third_party/blink/public/common/frame/frame_policy.h"
+#include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink.h"
 #include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
@@ -42,18 +43,6 @@ class CORE_EXPORT FrameOwner : public GarbageCollectedMixin {
   virtual void AddResourceTiming(const ResourceTimingInfo&) = 0;
   virtual void DispatchLoad() = 0;
 
-  // On load failure, a frame can ask its owner to render fallback content
-  // which replaces the frame contents.
-  virtual bool CanRenderFallbackContent() const = 0;
-
-  // The argument refers to the frame with the failed navigation. Note that this
-  // is not always the ContentFrame() for this owner; this argument is needed to
-  // support showing fallback using DOM of parent frame in a separate process.
-  // The use case is limited to RemoteFrameOwner when the corresponding local
-  // FrameOwner in parent process is an <object>. In such cases the frame with
-  // failed navigation could be provisional (cross-site navigations).
-  virtual void RenderFallbackContent(Frame*) = 0;
-
   // The intrinsic dimensions of the embedded object changed. This is only
   // relevant for SVG documents that are embedded via <object> or <embed>.
   virtual void IntrinsicSizingInfoChanged() = 0;
@@ -72,13 +61,19 @@ class CORE_EXPORT FrameOwner : public GarbageCollectedMixin {
   virtual bool AllowFullscreen() const = 0;
   virtual bool AllowPaymentRequest() const = 0;
   virtual bool IsDisplayNone() const = 0;
-  virtual AtomicString RequiredCsp() const = 0;
+  virtual mojom::blink::ColorScheme GetColorScheme() const = 0;
 
   // Returns whether or not children of the owned frame should be lazily loaded.
   virtual bool ShouldLazyLoadChildren() const = 0;
 
+  // Returns whether this is an iframe with the anonymous attribute set.
+  // [spec]
+  // https://wicg.github.io/anonymous-iframe/#dom-htmliframeelement-anonymous
+  virtual bool Anonymous() const { return false; }
+
  protected:
   virtual void FrameOwnerPropertiesChanged() {}
+  virtual void DidChangeAttributes() {}
 
  private:
   virtual void SetIsSwappingFrames(bool) {}
@@ -107,6 +102,7 @@ class FrameSwapScope {
     if (frame_owner_) {
       frame_owner_->SetIsSwappingFrames(false);
       frame_owner_->FrameOwnerPropertiesChanged();
+      frame_owner_->DidChangeAttributes();
     }
   }
 
@@ -120,8 +116,6 @@ class FrameSwapScope {
 class CORE_EXPORT DummyFrameOwner final
     : public GarbageCollected<DummyFrameOwner>,
       public FrameOwner {
-  USING_GARBAGE_COLLECTED_MIXIN(DummyFrameOwner);
-
  public:
   void Trace(Visitor* visitor) const override { FrameOwner::Trace(visitor); }
 
@@ -135,8 +129,6 @@ class CORE_EXPORT DummyFrameOwner final
   }
   void AddResourceTiming(const ResourceTimingInfo&) override {}
   void DispatchLoad() override {}
-  bool CanRenderFallbackContent() const override { return false; }
-  void RenderFallbackContent(Frame*) override {}
   void IntrinsicSizingInfoChanged() override {}
   void SetNeedsOcclusionTracking(bool) override {}
   AtomicString BrowsingContextContainerName() const override {
@@ -150,7 +142,9 @@ class CORE_EXPORT DummyFrameOwner final
   bool AllowFullscreen() const override { return false; }
   bool AllowPaymentRequest() const override { return false; }
   bool IsDisplayNone() const override { return false; }
-  AtomicString RequiredCsp() const override { return g_null_atom; }
+  mojom::blink::ColorScheme GetColorScheme() const override {
+    return mojom::blink::ColorScheme::kLight;
+  }
   bool ShouldLazyLoadChildren() const override { return false; }
 
  private:

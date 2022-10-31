@@ -32,12 +32,11 @@
 
 #include <algorithm>
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/hash_functions.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
@@ -101,6 +100,8 @@ static unsigned MakePresentationAttributeCacheKey(
   // Interpretation of the size attributes on <input> depends on the type
   // attribute.
   if (IsA<HTMLInputElement>(element))
+    return 0;
+  if (element.HasExtraStyleForPresentationAttribute())
     return 0;
   AttributeCollection attributes = element.AttributesWithoutUpdate();
   for (const Attribute& attr : attributes) {

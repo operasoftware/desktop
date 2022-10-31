@@ -4,12 +4,13 @@
 
 #include "third_party/blink/renderer/core/fetch/multipart_parser.h"
 
+#include <string.h>
+
+#include <algorithm>
+
+#include "base/numerics/safe_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
-#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
-
-#include <string.h>
-#include <algorithm>
 
 namespace blink {
 
@@ -24,8 +25,6 @@ String toString(const Vector<char>& data) {
 class MockMultipartParserClient final
     : public GarbageCollected<MockMultipartParserClient>,
       public MultipartParser::Client {
-  USING_GARBAGE_COLLECTED_MIXIN(MockMultipartParserClient);
-
  public:
   struct Part {
     Part() = default;
@@ -40,7 +39,7 @@ class MockMultipartParserClient final
     parts_.push_back(header_fields);
   }
   void PartDataInMultipartReceived(const char* bytes, size_t size) override {
-    parts_.back().data.Append(bytes, SafeCast<wtf_size_t>(size));
+    parts_.back().data.Append(bytes, base::checked_cast<wtf_size_t>(size));
   }
   void PartDataInMultipartFullyReceived() override {
     parts_.back().data_fully_received = true;

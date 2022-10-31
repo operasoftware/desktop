@@ -7,10 +7,11 @@
 
 #include <utility>
 
+#include "net/cookies/canonical_cookie.h"
 #include "services/network/public/mojom/cookie_manager.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_cookie_list_item.h"
 #include "third_party/blink/renderer/modules/event_modules.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -62,14 +63,15 @@ class CookieChangeEvent final : public Event {
   void Trace(Visitor*) const override;
 
   static CookieListItem* ToCookieListItem(
-      const CanonicalCookie& canonical_cookie,
+      const net::CanonicalCookie& canonical_cookie,
+      const network::mojom::blink::CookieEffectiveSameSite&,
       bool is_deleted);  // True for information from a cookie deletion event.
 
   // Helper for converting backend event information into a CookieChangeEvent.
-  static void ToEventInfo(const CanonicalCookie& cookie,
-                          ::network::mojom::CookieChangeCause cause,
-                          HeapVector<Member<CookieListItem>>& changed,
-                          HeapVector<Member<CookieListItem>>& deleted);
+  static void ToEventInfo(
+      const network::mojom::blink::CookieChangeInfoPtr& change_info,
+      HeapVector<Member<CookieListItem>>& changed,
+      HeapVector<Member<CookieListItem>>& deleted);
 
  private:
   HeapVector<Member<CookieListItem>> changed_;

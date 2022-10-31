@@ -28,7 +28,6 @@
 #include <memory>
 
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/public/platform/web_media_stream_track.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_dtmf_tone_change_event.h"
@@ -165,7 +164,7 @@ void RTCDTMFSender::DidPlayTone(const String& tone) {
         ->PostDelayedTask(
             FROM_HERE,
             WTF::Bind(&RTCDTMFSender::PlayoutTask, WrapPersistent(this)),
-            base::TimeDelta::FromMilliseconds(inter_tone_gap_));
+            base::Milliseconds(inter_tone_gap_));
   }
 }
 

@@ -11,7 +11,6 @@ namespace blink {
 // SwapPromise swap times for.
 enum class PaintEvent {
   kFirstPaint,
-  kFirstPaintAfterBackForwardCacheRestore,
   kFirstContentfulPaint,
   kProvisionalFirstMeaningfulPaint,
   kFirstImagePaint,
@@ -20,4 +19,4 @@ enum class PaintEvent {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_PAINT_EVENT_H_

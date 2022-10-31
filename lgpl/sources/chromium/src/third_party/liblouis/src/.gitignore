@@ -1,5 +1,4 @@
 *~
-.DS_Store
 
 # for .dockerignore
 #/.git
@@ -101,6 +100,7 @@ TAGS
 /gnulib/dirent.h
 /gnulib/errno.h
 /gnulib/getopt.h
+/gnulib/inttypes.h
 /gnulib/limits.h
 /gnulib/stddef.h
 /gnulib/stdint.h
@@ -109,6 +109,7 @@ TAGS
 /gnulib/string.h
 /gnulib/sys/
 /gnulib/unistd.h
+/gnulib/wchar.h
 
 # /liblouis/
 /liblouis/.libs
@@ -169,6 +170,7 @@ TAGS
 /tests/*.trs
 /tests/Makefile
 /tests/Makefile.in
+/tests/attributeNames
 /tests/backtranslate
 /tests/backtranslate_noUndefinedDots
 /tests/backtranslate_partialTrans
@@ -225,6 +227,8 @@ TAGS
 # /tests/tables/
 /tests/tables/Makefile.in
 /tests/tables/Makefile
+/tests/tables/attribute/Makefile
+/tests/tables/attribute/Makefile.in
 /tests/tables/emphclass/Makefile
 /tests/tables/emphclass/Makefile.in
 /tests/tables/moreTables/Makefile.in
@@ -270,9 +274,12 @@ TAGS
 /tools/gnulib/*.la
 /tools/gnulib/Makefile
 /tools/gnulib/Makefile.in
+/tools/gnulib/alloca.h
 /tools/gnulib/errno.h
+/tools/gnulib/fcntl.h
 /tools/gnulib/getopt-cdefs.h
 /tools/gnulib/getopt.h
+/tools/gnulib/inttypes.h
 /tools/gnulib/limits.h
 /tools/gnulib/stddef.h
 /tools/gnulib/stdint.h
@@ -280,10 +287,12 @@ TAGS
 /tools/gnulib/stdlib.h
 /tools/gnulib/string.h
 /tools/gnulib/sys/
+/tools/gnulib/time.h
 /tools/gnulib/unistd.h
 /tools/gnulib/unistr.h
 /tools/gnulib/unistr/.dirstamp
 /tools/gnulib/unitypes.h
+/tools/gnulib/wchar.h
 
 # /tools/gnulib/unistr/
 /tools/gnulib/unistr/.libs

@@ -7,6 +7,7 @@
 #include <memory>
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/css/css_font_selector.h"
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
@@ -18,7 +19,7 @@ namespace blink {
 class FontBuilderTest {
  public:
   FontBuilderTest()
-      : dummy_(std::make_unique<DummyPageHolder>(IntSize(800, 600))) {
+      : dummy_(std::make_unique<DummyPageHolder>(gfx::Size(800, 600))) {
     GetSettings().SetDefaultFontSize(16.0f);
   }
 
@@ -45,7 +46,8 @@ class FontBuilderAdditiveTest : public FontBuilderTest,
                                 public testing::TestWithParam<FunctionPair> {};
 
 TEST_F(FontBuilderInitTest, InitialFontSizeNotScaled) {
-  scoped_refptr<ComputedStyle> initial = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> initial =
+      GetDocument().GetStyleResolver().CreateComputedStyle();
 
   FontBuilder builder(&GetDocument());
   builder.SetInitial(1.0f);  // FIXME: Remove unused param.
@@ -68,10 +70,12 @@ TEST_P(FontBuilderAdditiveTest, OnlySetValueIsModified) {
   FontDescription parent_description;
   funcs.set_base_value(parent_description);
 
-  scoped_refptr<ComputedStyle> parent_style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> parent_style =
+      GetDocument().GetStyleResolver().CreateComputedStyle();
   parent_style->SetFontDescription(parent_description);
 
-  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style =
+      GetDocument().GetStyleResolver().CreateComputedStyle();
   style->InheritFrom(*parent_style);
 
   FontBuilder font_builder(&GetDocument());
@@ -154,6 +158,27 @@ static void FontVariantNumericValue(FontBuilder& b) {
   b.SetVariantNumeric(variant_numeric);
 }
 
+static void FontSynthesisWeightBase(FontDescription& d) {
+  d.SetFontSynthesisWeight(FontDescription::kAutoFontSynthesisWeight);
+}
+static void FontSynthesisWeightValue(FontBuilder& b) {
+  b.SetFontSynthesisWeight(FontDescription::kNoneFontSynthesisWeight);
+}
+
+static void FontSynthesisStyleBase(FontDescription& d) {
+  d.SetFontSynthesisStyle(FontDescription::kAutoFontSynthesisStyle);
+}
+static void FontSynthesisStyleValue(FontBuilder& b) {
+  b.SetFontSynthesisStyle(FontDescription::kNoneFontSynthesisStyle);
+}
+
+static void FontSynthesisSmallCapsBase(FontDescription& d) {
+  d.SetFontSynthesisSmallCaps(FontDescription::kAutoFontSynthesisSmallCaps);
+}
+static void FontSynthesisSmallCapsValue(FontBuilder& b) {
+  b.SetFontSynthesisSmallCaps(FontDescription::kNoneFontSynthesisSmallCaps);
+}
+
 static void FontTextRenderingBase(FontDescription& d) {
   d.SetTextRendering(kGeometricPrecision);
 }
@@ -211,6 +236,9 @@ INSTANTIATE_TEST_SUITE_P(
         FunctionPair(FontVariantCapsBase, FontVariantCapsValue),
         FunctionPair(FontVariantLigaturesBase, FontVariantLigaturesValue),
         FunctionPair(FontVariantNumericBase, FontVariantNumericValue),
+        FunctionPair(FontSynthesisWeightBase, FontSynthesisWeightValue),
+        FunctionPair(FontSynthesisStyleBase, FontSynthesisStyleValue),
+        FunctionPair(FontSynthesisSmallCapsBase, FontSynthesisSmallCapsValue),
         FunctionPair(FontTextRenderingBase, FontTextRenderingValue),
         FunctionPair(FontKerningBase, FontKerningValue),
         FunctionPair(FontFontSmoothingBase, FontFontSmoothingValue),

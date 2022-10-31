@@ -38,7 +38,7 @@
 #include "third_party/blink/renderer/core/xml/xsl_style_sheet.h"
 #include "third_party/blink/renderer/core/xml/xslt_extensions.h"
 #include "third_party/blink/renderer/core/xml/xslt_unicode_sort.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/raw_resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
@@ -49,10 +49,15 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/utf8.h"
+
+namespace {
+
+constexpr int kDoubleXsltMaxVars = 30000;
+
+}
 
 namespace blink {
 
@@ -82,7 +87,8 @@ void XSLTProcessor::ParseErrorFunc(void* user_data, xmlError* error) {
 
   console->AddMessage(MakeGarbageCollected<ConsoleMessage>(
       mojom::ConsoleMessageSource::kXml, level, error->message,
-      std::make_unique<SourceLocation>(error->file, error->line, 0, nullptr)));
+      std::make_unique<SourceLocation>(error->file, String(), error->line, 0,
+                                       nullptr)));
 }
 
 // FIXME: There seems to be no way to control the ctxt pointer for loading here,
@@ -106,7 +112,7 @@ static xmlDocPtr DocLoaderFunc(const xmlChar* uri,
                reinterpret_cast<const char*>(uri));
       xmlFree(base);
 
-      ResourceLoaderOptions fetch_options;
+      ResourceLoaderOptions fetch_options(nullptr /* world */);
       fetch_options.initiator_info.name = fetch_initiator_type_names::kXml;
       FetchParameters params(ResourceRequest(url), fetch_options);
       params.MutableResourceRequest().SetMode(
@@ -137,8 +143,9 @@ static xmlDocPtr DocLoaderFunc(const xmlChar* uri,
         size_t offset = 0;
         for (const auto& span : *data) {
           bool final_chunk = offset + span.size() == data->size();
-          if (!xmlParseChunk(ctx, span.data(), static_cast<int>(span.size()),
-                             final_chunk))
+          // Stop parsing chunks if xmlParseChunk returns an error.
+          if (xmlParseChunk(ctx, span.data(), static_cast<int>(span.size()),
+                            final_chunk))
             break;
           offset += span.size();
         }
@@ -361,6 +368,15 @@ bool XSLTProcessor::TransformToString(Node* source_node,
     // and it's not needed even for documents, as the result of this
     // function is always immediately parsed.
     sheet->omitXmlDeclaration = true;
+
+    // Double the number of vars xslt uses internally before it is used in
+    // xsltNewTransformContext. See http://crbug.com/796505
+    DCHECK(xsltMaxVars == kDoubleXsltMaxVars ||
+           xsltMaxVars == kDoubleXsltMaxVars / 2)
+        << "We should be doubling xsltMaxVars' default value from libxslt with "
+           "our new value. actual value: "
+        << xsltMaxVars;
+    xsltMaxVars = kDoubleXsltMaxVars;
 
     xsltTransformContextPtr transform_context =
         xsltNewTransformContext(sheet, source_doc);

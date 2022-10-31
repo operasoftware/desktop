@@ -5,7 +5,6 @@
 import("//build/config/jumbo.gni")
 
 platform_config_add = [
-  "//build/config/compiler:no_size_t_to_int_warning",
   "//build/config/compiler:wexit_time_destructors",
   "//third_party/blink/renderer:config",
   "//third_party/blink/renderer:inside_blink",
@@ -20,11 +19,8 @@ template("blink_platform_sources") {
   jumbo_source_set(target_name) {
     # Only platform can directly depend on this.
     # Any target outside platform should instead depend on platform.
-    visibility = [ "//third_party/blink/renderer/platform" ]
+    visibility = [ "//third_party/blink/renderer/platform/*" ]
 
-    assert(
-        !defined(invoker.public_deps),
-        "$target_name's public_deps should be moved to //third_party/blink/renderer/platform:blink_platform_public_deps")
     deps =
         [ "//third_party/blink/renderer/platform:blink_platform_public_deps" ]
     if (defined(invoker.deps)) {

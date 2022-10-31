@@ -29,6 +29,7 @@
 #include <memory>
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_dtmf_sender_handler.h"
 #include "third_party/blink/renderer/platform/timer.h"
 
@@ -40,7 +41,6 @@ class RtcDtmfSenderHandler;
 class RTCDTMFSender final : public EventTargetWithInlineData,
                             public RtcDtmfSenderHandler::Client,
                             public ExecutionContextLifecycleObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(RTCDTMFSender);
   DEFINE_WRAPPERTYPEINFO();
   USING_PRE_FINALIZER(RTCDTMFSender, Dispose);
 

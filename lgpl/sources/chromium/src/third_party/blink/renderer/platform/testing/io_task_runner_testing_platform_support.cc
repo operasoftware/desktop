@@ -4,14 +4,13 @@
 
 #include "third_party/blink/renderer/platform/testing/io_task_runner_testing_platform_support.h"
 
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 
 namespace blink {
 
 IOTaskRunnerTestingPlatformSupport::IOTaskRunnerTestingPlatformSupport()
-    : io_thread_(
-          Thread::CreateThread(ThreadCreationParams(ThreadType::kTestThread))) {
-}
+    : io_thread_(NonMainThread::CreateThread(
+          ThreadCreationParams(ThreadType::kTestThread))) {}
 
 scoped_refptr<base::SingleThreadTaskRunner>
 IOTaskRunnerTestingPlatformSupport::GetIOTaskRunner() const {

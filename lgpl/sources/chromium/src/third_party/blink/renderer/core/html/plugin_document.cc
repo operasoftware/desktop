@@ -24,7 +24,7 @@
 
 #include "third_party/blink/renderer/core/html/plugin_document.h"
 
-#include "third_party/blink/renderer/core/css/css_color_value.h"
+#include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
 #include "third_party/blink/renderer/core/dom/raw_data_document_parser.h"
@@ -42,8 +42,9 @@
 #include "third_party/blink/renderer/core/layout/layout_embedded_object.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
+#include "third_party/blink/renderer/core/page/plugin_data.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/scheduler/public/scheduling_policy.h"
 
@@ -94,8 +95,7 @@ void PluginDocumentParser::CreateDocumentStructure() {
     return;
 
   // FIXME: Why does this check settings?
-  if (!frame->GetSettings() ||
-      !frame->Loader().AllowPlugins(kNotAboutToInstantiatePlugin))
+  if (!frame->GetSettings() || !frame->Loader().AllowPlugins())
     return;
 
   auto* root_element = MakeGarbageCollected<HTMLHtmlElement>(*GetDocument());
@@ -107,9 +107,8 @@ void PluginDocumentParser::CreateDocumentStructure() {
   auto* body = MakeGarbageCollected<HTMLBodyElement>(*GetDocument());
   body->setAttribute(html_names::kStyleAttr,
                      "height: 100%; width: 100%; overflow: hidden; margin: 0");
-  body->SetInlineStyleProperty(
-      CSSPropertyID::kBackgroundColor,
-      *cssvalue::CSSColorValue::Create(background_color_.Rgb()));
+  body->SetInlineStyleProperty(CSSPropertyID::kBackgroundColor,
+                               *cssvalue::CSSColor::Create(background_color_));
   root_element->AppendChild(body);
   if (IsStopped()) {
     // Possibly detached by a mutation event listener installed in
@@ -143,7 +142,7 @@ void PluginDocumentParser::CreateDocumentStructure() {
   frame->View()->FlushAnyPendingPostLayoutTasks();
   // Focus the plugin here, as the line above is where the plugin is created.
   if (frame->IsMainFrame()) {
-    embed_element_->focus();
+    embed_element_->Focus();
     if (IsStopped()) {
       // Possibly detached by a mutation event listener installed in
       // runScriptsAtDocumentElementAvailable.
@@ -182,14 +181,14 @@ WebPluginContainerImpl* PluginDocumentParser::GetPluginView() const {
 
 PluginDocument::PluginDocument(const DocumentInit& initializer)
     : HTMLDocument(initializer, kPluginDocumentClass),
-      background_color_(initializer.GetPluginBackgroundColor()) {
-  SetCompatibilityMode(kQuirksMode);
+      background_color_(
+          GetFrame()->GetPluginData()->PluginBackgroundColorForMimeType(
+              initializer.GetMimeType())) {
+  SetCompatibilityMode(kNoQuirksMode);
   LockCompatibilityMode();
-  if (GetExecutionContext()) {
-    GetExecutionContext()->GetScheduler()->RegisterStickyFeature(
-        SchedulingPolicy::Feature::kContainsPlugins,
-        {SchedulingPolicy::RecordMetricsForBackForwardCache()});
-  }
+  GetExecutionContext()->GetScheduler()->RegisterStickyFeature(
+      SchedulingPolicy::Feature::kContainsPlugins,
+      {SchedulingPolicy::DisableBackForwardCache()});
 }
 
 DocumentParser* PluginDocument::CreateParser() {

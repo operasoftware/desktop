@@ -7,43 +7,45 @@
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 
+GEN('#include "build/chromeos_buildflags.h"');
 GEN('#include "content/public/test/browser_test.h"');
 
-/**
- * Test fixture for Polymer Settings elements.
- * @constructor
- * @extends {PolymerTest}
- */
-function WebUIResourcesBrowserTest() {}
+/* eslint-disable no-var */
 
-WebUIResourcesBrowserTest.prototype = {
-  __proto__: PolymerTest.prototype,
-
+var WebUIResourcesBrowserTest = class extends PolymerTest {
   /** @override */
   get browsePreload() {
-    throw 'this is abstract and should be overridden by subclasses';
-  },
+    throw new Error('this is abstract and should be overridden by subclasses');
+  }
 
   /** @override */
-  setUp: function() {
-    PolymerTest.prototype.setUp.call(this);
-  },
+  get webuiHost() {
+    return 'dummyurl';
+  }
 };
 
-function WebUIResourcesListPropertyUpdateBehaviorTest() {}
-
-WebUIResourcesListPropertyUpdateBehaviorTest.prototype = {
-  __proto__: WebUIResourcesBrowserTest.prototype,
-
+GEN('#if BUILDFLAG(IS_CHROMEOS_ASH)');
+var WebUIResourcesListPropertyUpdateBehaviorTest =
+    class extends WebUIResourcesBrowserTest {
   /** @override */
-  browsePreload: 'chrome://resources/html/list_property_update_behavior.html',
-
-  /** @override */
-  extraLibraries: WebUIResourcesBrowserTest.prototype.extraLibraries.concat([
-    'list_property_update_behavior_tests.js',
-  ]),
+  get browsePreload() {
+    return 'chrome://test/test_loader.html?module=resources/list_property_update_behavior_tests.js';
+  }
 };
 
 TEST_F('WebUIResourcesListPropertyUpdateBehaviorTest', 'All', function() {
+  mocha.run();
+});
+GEN('#endif');
+
+var WebUIResourcesListPropertyUpdateMixinTest =
+    class extends WebUIResourcesBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://test/test_loader.html?module=resources/list_property_update_mixin_tests.js';
+  }
+};
+
+TEST_F('WebUIResourcesListPropertyUpdateMixinTest', 'All', function() {
   mocha.run();
 });

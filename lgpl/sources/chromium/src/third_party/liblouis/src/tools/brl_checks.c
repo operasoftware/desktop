@@ -30,6 +30,33 @@
 #include "brl_checks.h"
 #include "unistr.h"
 
+/* see http://stackoverflow.com/questions/5117393/utf-8-strings-length-in-linux-c */
+static int
+my_strlen_utf8_c(char *s) {
+	int i = 0, j = 0;
+	while (s[i]) {
+		if ((s[i] & 0xc0) != 0x80) j++;
+		i++;
+	}
+	return j;
+}
+
+/*
+ * String parsing is also done later in check_base. At this point we
+ * only need it to compute the actual string length in order to be
+ * able to provide error messages when parsing typeform and position arrays.
+ */
+int
+parsed_strlen(char *s) {
+	widechar *buf;
+	int len, maxlen;
+	maxlen = my_strlen_utf8_c(s);
+	buf = malloc(sizeof(widechar) * maxlen);
+	len = _lou_extParseChars(s, buf);
+	free(buf);
+	return len;
+}
+
 static void
 print_int_array(const char *prefix, int *pos_list, int len) {
 	int i;
@@ -98,7 +125,7 @@ check_base(const char *tableList, const char *input, const char *expected,
 	}
 	while (1) {
 		widechar *inbuf, *outbuf, *expectedbuf;
-		int inlen = strlen(input);
+		int inlen = parsed_strlen(input);
 		int actualInlen;
 		const int outlen_multiplier = 4 + sizeof(widechar) * 2;
 		int outlen = inlen * outlen_multiplier;
@@ -379,6 +406,95 @@ fail:
 	free(outbuf);
 	free(inpos);
 	free(outpos);
+	return retval;
+}
+
+/** Check if a display table maps characters to the right dots.
+ *
+ * The dots are read as Unicode braille. Multiple input characters are
+ * allowed to map to the same dot pattern. Virtual dots in the actual
+ * output are discarded.
+ *
+ * @return 0 if the result is as expected and 1 otherwise.
+ */
+int
+check_display(const char *displayTableList, const char *input, const char *expected) {
+	widechar *inbuf = NULL;
+	widechar *outbuf = NULL;
+	widechar *expectedbuf = NULL;
+	int retval = 0;
+	int inlen = strlen(input);
+	inbuf = malloc(sizeof(widechar) * inlen);
+	inlen = _lou_extParseChars(input, inbuf);
+	if (!inlen) {
+		fprintf(stderr, "Cannot parse input string.\n");
+		retval = 1;
+		goto fail;
+	}
+	int expectedlen = strlen(expected);
+	expectedbuf = malloc(sizeof(widechar) * expectedlen);
+	expectedlen = _lou_extParseChars(expected, expectedbuf);
+	if (!expectedlen) {
+		fprintf(stderr, "Cannot parse output string.\n");
+		retval = 1;
+		goto fail;
+	}
+	if (inlen != expectedlen) {
+		fprintf(stderr, "Input and output string must be the same length.\n");
+		retval = 1;
+		goto fail;
+	}
+	for (int i = 0; i < expectedlen; i++) {
+		if ((expectedbuf[i] & 0xff00) != LOU_ROW_BRAILLE) {
+			fprintf(stderr, "Output string must be Unicode braille.\n");
+			retval = 1;
+			goto fail;
+		}
+	}
+	outbuf = malloc(sizeof(widechar) * inlen);
+	if (!lou_charToDots(displayTableList, inbuf, outbuf, inlen, ucBrl)) {
+		// This should only happen if the table can not be compiled.
+		// If the table does not have a display rule for a character
+		// in the input, it will result in a blank dot pattern in the
+		// output.
+		fprintf(stderr, "Mapping to dots failed.\n");
+		retval = 1;
+		goto fail;
+	}
+	for (int i = 0; i < inlen; i++) {
+		if (outbuf[i] != expectedbuf[i]) {
+			retval = 1;
+			fprintf(stderr, "Input:    '%s'\n", input);
+			fprintf(stderr, "Expected: '%s'\n", expected);
+			fprintf(stderr, "Received: '");
+			print_widechars(outbuf, inlen);
+			fprintf(stderr, "'\n");
+			uint8_t *expected_utf8;
+			uint8_t *out_utf8;
+			size_t expected_utf8_len;
+			size_t out_utf8_len;
+#ifdef WIDECHARS_ARE_UCS4
+			expected_utf8 = u32_to_u8(&expectedbuf[i], 1, NULL, &expected_utf8_len);
+			out_utf8 = u32_to_u8(&outbuf[i], 1, NULL, &out_utf8_len);
+#else
+			expected_utf8 = u16_to_u8(&expectedbuf[i], 1, NULL, &expected_utf8_len);
+			out_utf8 = u16_to_u8(&outbuf[i], 1, NULL, &out_utf8_len);
+#endif
+			expectedbuf[i] = (expectedbuf[i] & 0x00ff) | LOU_DOTS;
+			outbuf[i] = (outbuf[i] & 0x00ff) | LOU_DOTS;
+			fprintf(stderr, "Diff:     Expected '%.*s' (dots %s)", (int)expected_utf8_len,
+					expected_utf8, _lou_showDots(&expectedbuf[i], 1));
+			fprintf(stderr, " but received '%.*s' (dots %s) in index %d\n",
+					(int)out_utf8_len, out_utf8, _lou_showDots(&outbuf[i], 1), i);
+			free(expected_utf8);
+			free(out_utf8);
+			break;
+		}
+	}
+fail:
+	free(inbuf);
+	free(outbuf);
+	free(expectedbuf);
 	return retval;
 }
 

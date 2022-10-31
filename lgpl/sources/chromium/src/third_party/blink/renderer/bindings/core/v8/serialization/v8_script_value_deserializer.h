@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SERIALIZATION_V8_SCRIPT_VALUE_DESERIALIZER_H_
 #define THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SERIALIZATION_V8_SCRIPT_VALUE_DESERIALIZER_H_
 
-#include "base/macros.h"
+#include "base/dcheck_is_on.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialization_tag.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_color_params.h"
@@ -43,6 +43,10 @@ class CORE_EXPORT V8ScriptValueDeserializer
                             scoped_refptr<SerializedScriptValue>,
                             const Options& = Options());
 
+  V8ScriptValueDeserializer(const V8ScriptValueDeserializer&) = delete;
+  V8ScriptValueDeserializer& operator=(const V8ScriptValueDeserializer&) =
+      delete;
+
   v8::Local<v8::Value> Deserialize();
 
  protected:
@@ -65,6 +69,7 @@ class CORE_EXPORT V8ScriptValueDeserializer
   bool ReadRawBytes(size_t size, const void** data) {
     return deserializer_.ReadRawBytes(size, data);
   }
+  bool ReadUnguessableToken(base::UnguessableToken* token_out);
   bool ReadUTF8String(String* string_out);
   DOMRectReadOnly* ReadDOMRectReadOnly();
 
@@ -109,8 +114,6 @@ class CORE_EXPORT V8ScriptValueDeserializer
       v8::Isolate*,
       uint32_t) override;
 
-  bool TransferableStreamsEnabled() const;
-
   ScriptState* script_state_;
   UnpackedSerializedScriptValue* unpacked_value_;
   scoped_refptr<SerializedScriptValue> serialized_script_value_;
@@ -119,7 +122,7 @@ class CORE_EXPORT V8ScriptValueDeserializer
   // Message ports which were transferred in.
   const MessagePortArray* transferred_message_ports_ = nullptr;
 
-  MessagePortArray* transferred_stream_ports_ = nullptr;
+  Vector<SerializedScriptValue::Stream> streams_;
 
   // Blob info for blobs stored by index.
   const WebBlobInfoArray* blob_info_array_ = nullptr;
@@ -130,8 +133,6 @@ class CORE_EXPORT V8ScriptValueDeserializer
 #if DCHECK_IS_ON()
   bool deserialize_invoked_ = false;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(V8ScriptValueDeserializer);
 };
 
 }  // namespace blink

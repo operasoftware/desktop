@@ -4,9 +4,12 @@
 #-index-name: Finnish, computer
 #-display-name: Finnish computer braille
 #
-#+locale:fi
+#+language:fi
 #+type:computer
 #+dots:8
+# Marked as "direction:both" by Bue Vester-Andersen
+# as it is a computer Braille table.
+#+direction:both
 #
 # TODO: Please correct the metadata above. It is not meant to be
 # accurate nor complete. It hasn't been verified by the table
@@ -170,7 +173,7 @@ punctuation ? 26
 letter @ 4
 
 punctuation [   12356
-letter \x005C  146 # escape for \
+letter \x005C  146 # escape for '\'
 punctuation ]   23456
 letter ^  457
 letter _  346

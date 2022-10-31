@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/html/forms/menu_list_inner_element.h"
 
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
@@ -16,12 +17,12 @@ MenuListInnerElement::MenuListInnerElement(Document& document)
   SetHasCustomStyleCallbacks();
 }
 
-scoped_refptr<ComputedStyle>
-MenuListInnerElement::CustomStyleForLayoutObject() {
+scoped_refptr<ComputedStyle> MenuListInnerElement::CustomStyleForLayoutObject(
+    const StyleRecalcContext& style_recalc_context) {
   const ComputedStyle& parent_style = OwnerShadowHost()->ComputedStyleRef();
   scoped_refptr<ComputedStyle> style =
-      ComputedStyle::CreateAnonymousStyleWithDisplay(parent_style,
-                                                     EDisplay::kBlock);
+      GetDocument().GetStyleResolver().CreateAnonymousStyleWithDisplay(
+          parent_style, EDisplay::kBlock);
   style->SetFlexGrow(1);
   style->SetFlexShrink(1);
   // min-width: 0; is needed for correct shrinking.
@@ -61,14 +62,13 @@ MenuListInnerElement::CustomStyleForLayoutObject() {
   Length margin_end = Length::Fixed(
       theme.PopupInternalPaddingEnd(GetDocument().GetFrame(), parent_style));
   if (parent_style.IsLeftToRightDirection()) {
-    style->SetTextAlign(ETextAlign::kLeft);
     style->SetMarginLeft(margin_start);
     style->SetMarginRight(margin_end);
   } else {
-    style->SetTextAlign(ETextAlign::kRight);
     style->SetMarginLeft(margin_end);
     style->SetMarginRight(margin_start);
   }
+  style->SetTextAlign(parent_style.GetTextAlign(true));
   style->SetPaddingTop(
       Length::Fixed(theme.PopupInternalPaddingTop(parent_style)));
   style->SetPaddingBottom(

@@ -5,8 +5,8 @@
 #include "third_party/blink/renderer/core/workers/main_thread_worklet_reporting_proxy.h"
 
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
 
@@ -19,13 +19,6 @@ void MainThreadWorkletReportingProxy::CountFeature(WebFeature feature) {
   // A parent context is on the same thread, so just record API use in the
   // context's UseCounter.
   UseCounter::Count(context_, feature);
-}
-
-void MainThreadWorkletReportingProxy::CountDeprecation(WebFeature feature) {
-  DCHECK(IsMainThread());
-  // A parent context is on the same thread, so just record API use in the
-  // context's UseCounter.
-  Deprecation::CountDeprecation(context_, feature);
 }
 
 void MainThreadWorkletReportingProxy::DidTerminateWorkerThread() {

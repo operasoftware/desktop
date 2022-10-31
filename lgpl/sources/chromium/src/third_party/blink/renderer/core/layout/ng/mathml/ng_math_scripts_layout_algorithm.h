@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_MATHML_NG_MATH_SCRIPTS_LAYOUT_ALGORITHM_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_MATHML_NG_MATH_SCRIPTS_LAYOUT_ALGORITHM_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_box_fragment_builder.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_algorithm.h"
 #include "third_party/blink/renderer/core/mathml/mathml_scripts_element.h"
@@ -21,24 +22,47 @@ class CORE_EXPORT NGMathScriptsLayoutAlgorithm
  public:
   explicit NGMathScriptsLayoutAlgorithm(const NGLayoutAlgorithmParams& params);
 
- private:
-  void GatherChildren(NGBlockNode* base,
-                      NGBlockNode* sup,
-                      NGBlockNode* sub,
-                      NGBoxFragmentBuilder* = nullptr) const;
-
-  MinMaxSizesResult ComputeMinMaxSizes(const MinMaxSizesInput&) const final;
-
   struct ChildAndMetrics {
-    STACK_ALLOCATED();
+    DISALLOW_NEW();
 
    public:
-    scoped_refptr<const NGLayoutResult> result;
+    Member<const NGLayoutResult> result;
     LayoutUnit ascent;
     LayoutUnit descent;
     LayoutUnit inline_size;
+    LayoutUnit base_italic_correction;
     NGBoxStrut margins;
+    NGBlockNode node = nullptr;
+
+    void Trace(Visitor* visitor) const {
+      visitor->Trace(result);
+      visitor->Trace(node);
+    }
   };
+
+  struct SubSupPair {
+    DISALLOW_NEW();
+
+   public:
+    void Trace(Visitor* visitor) const {
+      visitor->Trace(sub);
+      visitor->Trace(sup);
+    }
+
+    NGBlockNode sub = nullptr;
+    NGBlockNode sup = nullptr;
+  };
+
+ private:
+  void GatherChildren(NGBlockNode* base,
+                      HeapVector<SubSupPair>*,
+                      NGBlockNode* prescripts,
+                      unsigned* first_prescript_index,
+                      NGBoxFragmentBuilder* = nullptr) const;
+
+  MinMaxSizesResult ComputeMinMaxSizes(const MinMaxSizesFloatInput&) final;
+
+  typedef HeapVector<ChildAndMetrics, 4> ChildrenAndMetrics;
 
   ChildAndMetrics LayoutAndGetMetrics(NGBlockNode child) const;
 
@@ -52,13 +76,19 @@ class CORE_EXPORT NGMathScriptsLayoutAlgorithm
     LayoutUnit descent;
     NGBoxStrut margins;
   };
-  VerticalMetrics GetVerticalMetrics(const ChildAndMetrics& base_metrics,
-                                     const ChildAndMetrics& sub_metrics,
-                                     const ChildAndMetrics& sup_metrics) const;
+  VerticalMetrics GetVerticalMetrics(
+      const ChildAndMetrics& base_metrics,
+      const ChildrenAndMetrics& sub_metrics,
+      const ChildrenAndMetrics& sup_metrics) const;
 
-  scoped_refptr<const NGLayoutResult> Layout() final;
+  const NGLayoutResult* Layout() final;
 };
 
 }  // namespace blink
+
+WTF_ALLOW_CLEAR_UNUSED_SLOTS_WITH_MEM_FUNCTIONS(
+    blink::NGMathScriptsLayoutAlgorithm::ChildAndMetrics)
+WTF_ALLOW_CLEAR_UNUSED_SLOTS_WITH_MEM_FUNCTIONS(
+    blink::NGMathScriptsLayoutAlgorithm::SubSupPair)
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_MATHML_NG_MATH_SCRIPTS_LAYOUT_ALGORITHM_H_

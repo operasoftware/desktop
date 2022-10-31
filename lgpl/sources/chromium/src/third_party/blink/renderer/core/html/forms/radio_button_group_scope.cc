@@ -73,7 +73,7 @@ void RadioButtonGroup::SetCheckedButton(HTMLInputElement* button) {
     return;
   checked_button_ = button;
   if (old_checked_button)
-    old_checked_button->setChecked(false);
+    old_checked_button->SetChecked(false);
 }
 
 void RadioButtonGroup::UpdateRequiredButton(MemberKeyValue& it,
@@ -97,7 +97,7 @@ void RadioButtonGroup::Add(HTMLInputElement* button) {
     return;
   bool group_was_valid = IsValid();
   UpdateRequiredButton(*add_result.stored_value, button->IsRequired());
-  if (button->checked())
+  if (button->Checked())
     SetCheckedButton(button);
 
   bool group_is_valid = IsValid();
@@ -114,7 +114,7 @@ void RadioButtonGroup::UpdateCheckedState(HTMLInputElement* button) {
   DCHECK_EQ(button->type(), input_type_names::kRadio);
   DCHECK(members_.Contains(button));
   bool was_valid = IsValid();
-  if (button->checked()) {
+  if (button->Checked()) {
     SetCheckedButton(button);
   } else {
     if (checked_button_ == button)
@@ -162,14 +162,6 @@ void RadioButtonGroup::Remove(HTMLInputElement* button) {
     // A radio button not in a group is always valid. We need to make it
     // valid only if the group was invalid.
     button->SetNeedsValidityCheck();
-  }
-
-  // Send notification to update AX attributes for AXObjects which radiobutton
-  // group has.
-  if (!members_.IsEmpty()) {
-    HTMLInputElement* input = members_.begin()->key;
-    if (AXObjectCache* cache = input->GetDocument().ExistingAXObjectCache())
-      cache->RadiobuttonRemovedFromGroup(input);
   }
 }
 
@@ -224,7 +216,6 @@ void RadioButtonGroupScope::UpdateCheckedState(HTMLInputElement* element) {
   if (!name_to_group_map_)
     return;
   RadioButtonGroup* group = name_to_group_map_->at(element->GetName());
-  DCHECK(group);
   group->UpdateCheckedState(element);
 }
 
@@ -237,15 +228,12 @@ void RadioButtonGroupScope::RequiredAttributeChanged(
   if (!name_to_group_map_)
     return;
   RadioButtonGroup* group = name_to_group_map_->at(element->GetName());
-  DCHECK(group);
   group->RequiredAttributeChanged(element);
 }
 
 HTMLInputElement* RadioButtonGroupScope::CheckedButtonForGroup(
     const AtomicString& name) const {
-  if (!name_to_group_map_)
-    return nullptr;
-  RadioButtonGroup* group = name_to_group_map_->at(name);
+  RadioButtonGroup* group = FindGroupByName(name);
   return group ? group->CheckedButton() : nullptr;
 }
 
@@ -253,31 +241,22 @@ bool RadioButtonGroupScope::IsInRequiredGroup(HTMLInputElement* element) const {
   DCHECK_EQ(element->type(), input_type_names::kRadio);
   if (element->GetName().IsEmpty())
     return false;
-  if (!name_to_group_map_)
-    return false;
-  RadioButtonGroup* group = name_to_group_map_->at(element->GetName());
+  RadioButtonGroup* group = FindGroupByName(element->GetName());
   return group && group->IsRequired() && group->Contains(element);
 }
 
 unsigned RadioButtonGroupScope::GroupSizeFor(
     const HTMLInputElement* element) const {
-  if (!name_to_group_map_)
-    return 0;
-
-  RadioButtonGroup* group = name_to_group_map_->at(element->GetName());
-  if (!group)
-    return 0;
-  return group->size();
+  RadioButtonGroup* group = FindGroupByName(element->GetName());
+  return group ? group->size() : 0;
 }
 
 void RadioButtonGroupScope::RemoveButton(HTMLInputElement* element) {
   DCHECK_EQ(element->type(), input_type_names::kRadio);
   if (element->GetName().IsEmpty())
     return;
-  if (!name_to_group_map_)
-    return;
 
-  RadioButtonGroup* group = name_to_group_map_->at(element->GetName());
+  RadioButtonGroup* group = FindGroupByName(element->GetName());
   if (!group)
     return;
   group->Remove(element);
@@ -291,6 +270,14 @@ void RadioButtonGroupScope::RemoveButton(HTMLInputElement* element) {
 
 void RadioButtonGroupScope::Trace(Visitor* visitor) const {
   visitor->Trace(name_to_group_map_);
+}
+
+RadioButtonGroup* RadioButtonGroupScope::FindGroupByName(
+    const AtomicString& name) const {
+  if (!name_to_group_map_)
+    return nullptr;
+  auto it = name_to_group_map_->find(name);
+  return it != name_to_group_map_->end() ? it->value : nullptr;
 }
 
 }  // namespace blink

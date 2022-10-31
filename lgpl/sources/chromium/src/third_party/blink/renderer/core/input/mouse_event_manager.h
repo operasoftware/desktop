@@ -5,16 +5,18 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_INPUT_MOUSE_EVENT_MANAGER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INPUT_MOUSE_EVENT_MANAGER_H_
 
-#include "base/macros.h"
+#include "base/time/time.h"
+#include "third_party/blink/public/common/input/pointer_id.h"
 #include "third_party/blink/public/common/input/web_mouse_event.h"
 #include "third_party/blink/public/platform/web_input_event_result.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/synchronous_mutation_observer.h"
+#include "third_party/blink/renderer/core/events/pointer_event_factory.h"
 #include "third_party/blink/renderer/core/input/boundary_event_dispatcher.h"
-#include "third_party/blink/renderer/core/page/drag_actions.h"
 #include "third_party/blink/renderer/core/page/event_with_hit_test_results.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom-blink-forward.h"
 
 namespace blink {
 
@@ -35,33 +37,31 @@ enum class ThresholdAction;
 class CORE_EXPORT MouseEventManager final
     : public GarbageCollected<MouseEventManager>,
       public SynchronousMutationObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(MouseEventManager);
-
  public:
   MouseEventManager(LocalFrame&, ScrollManager&);
+  MouseEventManager(const MouseEventManager&) = delete;
+  MouseEventManager& operator=(const MouseEventManager&) = delete;
   virtual ~MouseEventManager();
   void Trace(Visitor*) const override;
 
-  WebInputEventResult DispatchMouseEvent(EventTarget*,
-                                         const AtomicString&,
-                                         const WebMouseEvent&,
-                                         const String& canvas_region_id,
-                                         const FloatPoint* last_position,
-                                         EventTarget* related_target,
-                                         bool check_for_listener = false,
-                                         const PointerId& pointer_id = 0,
-                                         const String& pointer_type = "");
+  WebInputEventResult DispatchMouseEvent(
+      EventTarget*,
+      const AtomicString&,
+      const WebMouseEvent&,
+      const gfx::PointF* last_position,
+      EventTarget* related_target,
+      bool check_for_listener = false,
+      const PointerId& pointer_id = PointerEventFactory::kInvalidId,
+      const String& pointer_type = "");
 
   WebInputEventResult SetMousePositionAndDispatchMouseEvent(
       Element* target_element,
-      const String& canvas_region_id,
       const AtomicString& event_type,
       const WebMouseEvent&);
 
   WebInputEventResult DispatchMouseClickIfNeeded(
       Element* mouse_release_target,
       const WebMouseEvent& mouse_event,
-      const String& canvas_region_id,
       const PointerId& pointer_id,
       const String& pointer_type);
 
@@ -78,11 +78,9 @@ class CORE_EXPORT MouseEventManager final
 
   void SendBoundaryEvents(EventTarget* exited_target,
                           EventTarget* entered_target,
-                          const String& canvas_region_id,
                           const WebMouseEvent&);
 
   void SetElementUnderMouse(Element*,
-                            const String& canvas_region_id,
                             const WebMouseEvent&);
 
   WebInputEventResult HandleMouseFocus(
@@ -110,7 +108,7 @@ class CORE_EXPORT MouseEventManager final
   // drag heuristics.
   void ClearDragHeuristicState();
 
-  void DragSourceEndedAt(const WebMouseEvent&, DragOperation);
+  void DragSourceEndedAt(const WebMouseEvent&, ui::mojom::blink::DragOperation);
 
   void UpdateSelectionForMouseDrag();
 
@@ -126,8 +124,8 @@ class CORE_EXPORT MouseEventManager final
   // refactoring to be able to remove the dependency from EventHandler.
   Element* GetElementUnderMouse();
   bool IsMousePositionUnknown();
-  FloatPoint LastKnownMousePositionInViewport();
-  FloatPoint LastKnownMouseScreenPosition();
+  gfx::PointF LastKnownMousePositionInViewport();
+  gfx::PointF LastKnownMouseScreenPosition();
 
   bool MousePressed();
   void ReleaseMousePress();
@@ -142,6 +140,8 @@ class CORE_EXPORT MouseEventManager final
   Node* MousePressNode();
   void SetMousePressNode(Node*);
 
+  Element* MouseDownElement();
+
   void SetClickElement(Element*);
   void SetClickCount(int);
 
@@ -155,10 +155,11 @@ class CORE_EXPORT MouseEventManager final
  private:
   class MouseEventBoundaryEventDispatcher : public BoundaryEventDispatcher {
    public:
-    MouseEventBoundaryEventDispatcher(MouseEventManager*,
-                                      const WebMouseEvent*,
-                                      EventTarget* exited_target,
-                                      const String& canvas_region_id);
+    MouseEventBoundaryEventDispatcher(MouseEventManager*, const WebMouseEvent*);
+    MouseEventBoundaryEventDispatcher(
+        const MouseEventBoundaryEventDispatcher&) = delete;
+    MouseEventBoundaryEventDispatcher& operator=(
+        const MouseEventBoundaryEventDispatcher&) = delete;
 
    protected:
     void DispatchOut(EventTarget*, EventTarget* related_target) override;
@@ -176,14 +177,10 @@ class CORE_EXPORT MouseEventManager final
     void Dispatch(EventTarget*,
                   EventTarget* related_target,
                   const AtomicString&,
-                  const String& canvas_region_id,
                   const WebMouseEvent&,
                   bool check_for_listener);
     MouseEventManager* mouse_event_manager_;
     const WebMouseEvent* web_mouse_event_;
-    EventTarget* exited_target_;
-    String canvas_region_id_;
-    DISALLOW_COPY_AND_ASSIGN(MouseEventBoundaryEventDispatcher);
   };
 
   // If the given element is a shadow host and its root has delegatesFocus=false
@@ -191,7 +188,7 @@ class CORE_EXPORT MouseEventManager final
   // is different from the given element.
   bool SlideFocusOnShadowHostIfNecessary(const Element&);
 
-  ThresholdAction GetActionForDragThreshold(const IntPoint&, bool) const;
+  ThresholdAction GetActionForDragThreshold(const gfx::Point&, bool) const;
   bool HandleDrag(const MouseEventWithHitTestResults&, DragInitiator);
   bool TryStartDrag(const MouseEventWithHitTestResults&);
   void ClearDragDataTransfer();
@@ -217,8 +214,9 @@ class CORE_EXPORT MouseEventManager final
 
   // The last mouse movement position this frame has seen in viewport
   // coordinates.
-  FloatPoint last_known_mouse_position_;
-  FloatPoint last_known_mouse_screen_position_;
+  PhysicalOffset last_known_mouse_position_in_root_frame_;
+  gfx::PointF last_known_mouse_position_;
+  gfx::PointF last_known_mouse_screen_position_;
 
   unsigned is_mouse_position_unknown_ : 1;
   // Current button-press state for mouse/mouse-like-stylus.
@@ -230,6 +228,8 @@ class CORE_EXPORT MouseEventManager final
   unsigned captures_dragging_ : 1;
   unsigned mouse_down_may_start_drag_ : 1;
 
+  // TODO(crbug.com/1220669): Do we need both |mouse_press_node_| and
+  // |mouse_down_element_|?
   Member<Node> mouse_press_node_;
 
   int click_count_;
@@ -239,18 +239,16 @@ class CORE_EXPORT MouseEventManager final
   // remains unchanged.
   Member<Element> mouse_down_element_;
 
-  IntPoint mouse_down_pos_;  // In our view's coords.
+  gfx::Point mouse_down_pos_;  // In our view's coords.
   base::TimeTicks mouse_down_timestamp_;
   WebMouseEvent mouse_down_;
 
-  PhysicalOffset drag_start_pos_;
+  PhysicalOffset drag_start_pos_in_root_frame_;
   // This indicates that whether we should update the hover at each begin
   // frame. This is set to be true after the compositor or main thread scroll
   // ends, and at each begin frame, we will dispatch a fake mouse move event to
   // update hover when this is true.
   bool hover_state_dirty_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(MouseEventManager);
 };
 
 }  // namespace blink

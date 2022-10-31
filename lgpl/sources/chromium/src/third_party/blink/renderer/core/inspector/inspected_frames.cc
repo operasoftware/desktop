@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/core/inspector/inspected_frames.h"
 
-#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
@@ -27,9 +27,19 @@ bool InspectedFrames::Contains(LocalFrame* frame) const {
 LocalFrame* InspectedFrames::FrameWithSecurityOrigin(
     const String& origin_raw_string) {
   for (LocalFrame* frame : *this) {
-    if (frame->GetDocument()->GetSecurityOrigin()->ToRawString() ==
+    if (frame->DomWindow()->GetSecurityOrigin()->ToRawString() ==
         origin_raw_string)
       return frame;
+  }
+  return nullptr;
+}
+
+LocalFrame* InspectedFrames::FrameWithStorageKey(const String& key_raw_string) {
+  for (LocalFrame* frame : *this) {
+    if (static_cast<StorageKey>(frame->DomWindow()->GetStorageKey())
+            .Serialize() == key_raw_string.Utf8()) {
+      return frame;
+    }
   }
   return nullptr;
 }
@@ -60,11 +70,11 @@ InspectedFrames::Iterator InspectedFrames::Iterator::operator++(int) {
   return Iterator(root_, old);
 }
 
-bool InspectedFrames::Iterator::operator==(const Iterator& other) {
+bool InspectedFrames::Iterator::operator==(const Iterator& other) const {
   return current_ == other.current_ && root_ == other.root_;
 }
 
-bool InspectedFrames::Iterator::operator!=(const Iterator& other) {
+bool InspectedFrames::Iterator::operator!=(const Iterator& other) const {
   return !(*this == other);
 }
 

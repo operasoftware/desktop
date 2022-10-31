@@ -12,6 +12,7 @@
 #include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/loader/url_loader_factory_bundle.h"
 #include "third_party/blink/public/mojom/loader/url_loader_factory_bundle.mojom-shared.h"
+#include "url/mojom/origin_mojom_traits.h"
 
 namespace mojo {
 
@@ -26,9 +27,6 @@ struct BLINK_COMMON_EXPORT
   static void SetToNull(BundleInfoType* bundle) { bundle->reset(); }
 
   static mojo::PendingRemote<network::mojom::URLLoaderFactory> default_factory(
-      BundleInfoType& bundle);
-
-  static mojo::PendingRemote<network::mojom::URLLoaderFactory> appcache_factory(
       BundleInfoType& bundle);
 
   static blink::PendingURLLoaderFactoryBundle::SchemeMap

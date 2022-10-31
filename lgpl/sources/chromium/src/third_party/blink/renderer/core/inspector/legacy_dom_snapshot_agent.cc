@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/core/inspector/legacy_dom_snapshot_agent.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/script_event_listener.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/css/css_computed_style_declaration.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
@@ -80,7 +79,8 @@ struct LegacyDOMSnapshotAgent::VectorStringHashTraits
   }
 
   static void ConstructDeletedValue(Vector<String>& vec, bool) {
-    new (NotNull, &vec) Vector<String>(WTF::kHashTableDeletedValue);
+    new (NotNullTag::kNotNull, &vec)
+        Vector<String>(WTF::kHashTableDeletedValue);
   }
 
   static bool IsDeletedValue(const Vector<String>& vec) {
@@ -113,6 +113,8 @@ Response LegacyDOMSnapshotAgent::GetSnapshot(
         layout_tree_nodes,
     std::unique_ptr<protocol::Array<protocol::DOMSnapshot::ComputedStyle>>*
         computed_styles) {
+  document->View()->UpdateLifecycleToCompositingInputsClean(
+      DocumentUpdateReason::kInspector);
   // Setup snapshot.
   dom_nodes_ =
       std::make_unique<protocol::Array<protocol::DOMSnapshot::DOMNode>>();
@@ -126,7 +128,7 @@ Response LegacyDOMSnapshotAgent::GetSnapshot(
   // Look up the CSSPropertyIDs for each entry in |style_filter|.
   for (const String& entry : *style_filter) {
     CSSPropertyID property_id =
-        cssPropertyID(document->GetExecutionContext(), entry);
+        CssPropertyID(document->GetExecutionContext(), entry);
     if (property_id == CSSPropertyID::kInvalid)
       continue;
     css_property_filter_->emplace_back(entry, property_id);
@@ -145,7 +147,7 @@ Response LegacyDOMSnapshotAgent::GetSnapshot(
   *computed_styles = std::move(computed_styles_);
   computed_styles_map_.reset();
   css_property_filter_.reset();
-  paint_order_map_.reset();
+  paint_order_map_ = nullptr;
   return Response::Success();
 }
 
@@ -186,10 +188,14 @@ int LegacyDOMSnapshotAgent::VisitNode(Node* node,
     String origin_url = origin_url_map_->at(owned_value->getBackendNodeId());
     // In common cases, it is implicit that a child node would have the same
     // origin url as its parent, so no need to mark twice.
-    if (!node->parentNode() || origin_url_map_->at(DOMNodeIds::IdForNode(
-                                   node->parentNode())) != origin_url) {
-      owned_value->setOriginURL(
-          origin_url_map_->at(owned_value->getBackendNodeId()));
+    if (!node->parentNode()) {
+      owned_value->setOriginURL(std::move(origin_url));
+    } else {
+      DOMNodeId parent_id = DOMNodeIds::IdForNode(node->parentNode());
+      auto it = origin_url_map_->find(parent_id);
+      String parent_url = it != origin_url_map_->end() ? it->value : String();
+      if (parent_url != origin_url)
+        owned_value->setOriginURL(std::move(origin_url));
     }
   }
   protocol::DOMSnapshot::DOMNode* value = owned_value.get();
@@ -244,13 +250,13 @@ int LegacyDOMSnapshotAgent::VisitNode(Node* node,
     }
 
     if (auto* textarea_element = DynamicTo<HTMLTextAreaElement>(*element))
-      value->setTextValue(textarea_element->value());
+      value->setTextValue(textarea_element->Value());
 
     if (auto* input_element = DynamicTo<HTMLInputElement>(*element)) {
-      value->setInputValue(input_element->value());
+      value->setInputValue(input_element->Value());
       if ((input_element->type() == input_type_names::kRadio) ||
           (input_element->type() == input_type_names::kCheckbox)) {
-        value->setInputChecked(input_element->checked());
+        value->setInputChecked(input_element->Checked());
       }
     }
 
@@ -278,8 +284,8 @@ int LegacyDOMSnapshotAgent::VisitNode(Node* node,
     value->setFrameId(IdentifiersFactory::FrameId(document->GetFrame()));
     if (document->View() && document->View()->LayoutViewport()) {
       auto offset = document->View()->LayoutViewport()->GetScrollOffset();
-      value->setScrollOffsetX(offset.Width());
-      value->setScrollOffsetY(offset.Height());
+      value->setScrollOffsetX(offset.x());
+      value->setScrollOffsetY(offset.y());
     }
   } else if (auto* doc_type = DynamicTo<DocumentType>(node)) {
     value->setPublicId(doc_type->publicId());
@@ -393,14 +399,13 @@ int LegacyDOMSnapshotAgent::VisitLayoutTreeNode(LayoutObject* layout_object,
     PaintLayer* paint_layer = layout_object->EnclosingLayer();
 
     // We visited all PaintLayers when building |paint_order_map_|.
-    DCHECK(paint_order_map_->Contains(paint_layer));
-
-    if (int paint_order = paint_order_map_->at(paint_layer))
-      layout_tree_node->setPaintOrder(paint_order);
+    const auto paint_order = paint_order_map_->find(paint_layer);
+    if (paint_order != paint_order_map_->end())
+      layout_tree_node->setPaintOrder(paint_order->value);
   }
 
   if (layout_object->IsText()) {
-    LayoutText* layout_text = ToLayoutText(layout_object);
+    auto* layout_text = To<LayoutText>(layout_object);
     layout_tree_node->setLayoutText(layout_text->GetText());
     Vector<LayoutText::TextBoxInfo> text_boxes = layout_text->GetTextBoxInfo();
     if (!text_boxes.IsEmpty()) {

@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/rejected_promises.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -47,10 +48,7 @@ class RejectedPromises::Message final {
 
   bool IsCollected() { return collected_ || !script_state_->ContextIsValid(); }
 
-  bool HasPromise(v8::Local<v8::Value> promise) {
-    ScriptState::Scope scope(script_state_);
-    return promise == promise_.NewLocal(script_state_->GetIsolate());
-  }
+  bool HasPromise(v8::Local<v8::Value> promise) { return promise_ == promise; }
 
   void Report() {
     if (!script_state_->ContextIsValid())
@@ -99,6 +97,11 @@ class RejectedPromises::Message final {
   }
 
   void Revoke() {
+    if (!script_state_->ContextIsValid()) {
+      // If the context is not valid, the frame is removed for example, then do
+      // nothing.
+      return;
+    }
     ExecutionContext* execution_context = ExecutionContext::From(script_state_);
     if (!execution_context)
       return;
@@ -214,7 +217,7 @@ void RejectedPromises::HandlerAdded(v8::PromiseRejectMessage data) {
       context->GetTaskRunner(TaskType::kDOMManipulation)
           ->PostTask(FROM_HERE, WTF::Bind(&RejectedPromises::RevokeNow,
                                           scoped_refptr<RejectedPromises>(this),
-                                          WTF::Passed(std::move(message))));
+                                          std::move(message)));
       reported_as_errors_.EraseAt(i);
       return;
     }
@@ -244,7 +247,7 @@ void RejectedPromises::ProcessQueue() {
     kv.key->GetTaskRunner(blink::TaskType::kDOMManipulation)
         ->PostTask(FROM_HERE, WTF::Bind(&RejectedPromises::ProcessQueueNow,
                                         scoped_refptr<RejectedPromises>(this),
-                                        WTF::Passed(std::move(kv.value))));
+                                        std::move(kv.value)));
   }
 }
 

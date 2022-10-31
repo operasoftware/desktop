@@ -22,9 +22,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_PROCESSING_INSTRUCTION_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_PROCESSING_INSTRUCTION_H_
 
-#include "third_party/blink/renderer/core/css/style_engine_context.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/character_data.h"
-#include "third_party/blink/renderer/core/loader/resource/text_resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_client.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
@@ -36,7 +35,6 @@ class EventListener;
 class CORE_EXPORT ProcessingInstruction final : public CharacterData,
                                                 private ResourceClient {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(ProcessingInstruction);
 
  public:
   ProcessingInstruction(Document&, const String& target, const String& data);
@@ -97,7 +95,6 @@ class CORE_EXPORT ProcessingInstruction final : public CharacterData,
   String title_;
   String media_;
   Member<StyleSheet> sheet_;
-  StyleEngineContext style_engine_context_;
   bool loading_;
   bool alternate_;
   bool is_css_;

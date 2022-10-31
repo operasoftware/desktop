@@ -27,7 +27,6 @@ class TextResourceDecoder;
 // If the fetch fails, the callback will be called with two empty objects.
 class ManifestFetcher final : public GarbageCollected<ManifestFetcher>,
                               public ThreadableLoaderClient {
-  USING_GARBAGE_COLLECTED_MIXIN(ManifestFetcher);
   // This will be called asynchronously after the URL has been fetched,
   // successfully or not.  If there is a failure, response and data will both be
   // empty.  |response| and |data| are both valid until the ManifestFetcher
@@ -37,6 +36,10 @@ class ManifestFetcher final : public GarbageCollected<ManifestFetcher>,
 
  public:
   explicit ManifestFetcher(const KURL& url);
+
+  ManifestFetcher(const ManifestFetcher&) = delete;
+  ManifestFetcher& operator=(const ManifestFetcher&) = delete;
+
   ~ManifestFetcher() override;
 
   void Start(LocalDOMWindow& window,
@@ -49,8 +52,8 @@ class ManifestFetcher final : public GarbageCollected<ManifestFetcher>,
   void DidReceiveResponse(uint64_t, const ResourceResponse&) override;
   void DidReceiveData(const char*, unsigned) override;
   void DidFinishLoading(uint64_t) override;
-  void DidFail(const ResourceError&) override;
-  void DidFailRedirectCheck() override;
+  void DidFail(uint64_t, const ResourceError&) override;
+  void DidFailRedirectCheck(uint64_t) override;
 
   void Trace(Visitor* visitor) const override;
 
@@ -62,8 +65,6 @@ class ManifestFetcher final : public GarbageCollected<ManifestFetcher>,
   std::unique_ptr<TextResourceDecoder> decoder_;
   StringBuilder data_;
   Member<ThreadableLoader> loader_;
-
-  DISALLOW_COPY_AND_ASSIGN(ManifestFetcher);
 };
 
 }  // namespace blink

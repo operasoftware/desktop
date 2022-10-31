@@ -34,6 +34,7 @@
 
 namespace blink {
 
+class GraphicsContextStateSaver;
 class LayoutThemeDefault;
 
 class ThemePainterDefault final : public ThemePainter {
@@ -41,65 +42,74 @@ class ThemePainterDefault final : public ThemePainter {
   explicit ThemePainterDefault(LayoutThemeDefault&);
 
  private:
-  bool PaintCheckbox(const Node*,
+  bool PaintCheckbox(const Element&,
                      const Document&,
                      const ComputedStyle&,
                      const PaintInfo&,
-                     const IntRect&) override;
-  bool PaintRadio(const Node*,
+                     const gfx::Rect&) override;
+  bool PaintRadio(const Element&,
                   const Document&,
                   const ComputedStyle&,
                   const PaintInfo&,
-                  const IntRect&) override;
-  bool PaintButton(const Node*,
+                  const gfx::Rect&) override;
+  bool PaintButton(const Element&,
                    const Document&,
                    const ComputedStyle&,
                    const PaintInfo&,
-                   const IntRect&) override;
-  bool PaintTextField(const Node*,
+                   const gfx::Rect&) override;
+  bool PaintTextField(const Element&,
                       const ComputedStyle&,
                       const PaintInfo&,
-                      const IntRect&) override;
-  bool PaintMenuList(const Node*,
+                      const gfx::Rect&) override;
+  bool PaintMenuList(const Element&,
                      const Document&,
                      const ComputedStyle&,
                      const PaintInfo&,
-                     const IntRect&) override;
-  bool PaintMenuListButton(const Node*,
+                     const gfx::Rect&) override;
+  bool PaintMenuListButton(const Element&,
                            const Document&,
                            const ComputedStyle&,
                            const PaintInfo&,
-                           const IntRect&) override;
-  bool PaintSliderTrack(const LayoutObject&,
+                           const gfx::Rect&) override;
+  bool PaintSliderTrack(const Element& element,
+                        const LayoutObject&,
                         const PaintInfo&,
-                        const IntRect&) override;
-  bool PaintSliderThumb(const Node*,
+                        const gfx::Rect&,
+                        const ComputedStyle&) override;
+  bool PaintSliderThumb(const Element&,
                         const ComputedStyle&,
                         const PaintInfo&,
-                        const IntRect&) override;
-  bool PaintInnerSpinButton(const Node*,
+                        const gfx::Rect&) override;
+  bool PaintInnerSpinButton(const Element&,
                             const ComputedStyle&,
                             const PaintInfo&,
-                            const IntRect&) override;
-  bool PaintProgressBar(const LayoutObject&,
+                            const gfx::Rect&) override;
+  bool PaintProgressBar(const Element& element,
+                        const LayoutObject&,
                         const PaintInfo&,
-                        const IntRect&) override;
-  bool PaintTextArea(const Node*,
+                        const gfx::Rect&,
+                        const ComputedStyle&) override;
+  bool PaintTextArea(const Element&,
                      const ComputedStyle&,
                      const PaintInfo&,
-                     const IntRect&) override;
-  bool PaintSearchField(const Node*,
+                     const gfx::Rect&) override;
+  bool PaintSearchField(const Element&,
                         const ComputedStyle&,
                         const PaintInfo&,
-                        const IntRect&) override;
+                        const gfx::Rect&) override;
   bool PaintSearchFieldCancelButton(const LayoutObject&,
                                     const PaintInfo&,
-                                    const IntRect&) override;
+                                    const gfx::Rect&) override;
 
   void SetupMenuListArrow(const Document&,
                           const ComputedStyle&,
-                          const IntRect&,
+                          const gfx::Rect&,
                           WebThemeEngine::ExtraParams&);
+
+  gfx::Rect ApplyZoomToRect(const gfx::Rect&,
+                            const PaintInfo&,
+                            GraphicsContextStateSaver&,
+                            float zoom_level);
 
   // ThemePaintDefault is a part object of m_theme.
   LayoutThemeDefault& theme_;
@@ -107,4 +117,4 @@ class ThemePainterDefault final : public ThemePainter {
 
 }  // namespace blink
 
-#endif  // ThemePainerDefault_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_THEME_PAINTER_DEFAULT_H_

@@ -14,10 +14,15 @@ class GPUTextureView : public DawnObject<WGPUTextureView> {
 
  public:
   explicit GPUTextureView(GPUDevice* device, WGPUTextureView texture_view);
-  ~GPUTextureView() override;
+
+  GPUTextureView(const GPUTextureView&) = delete;
+  GPUTextureView& operator=(const GPUTextureView&) = delete;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(GPUTextureView);
+  void setLabelImpl(const String& value) override {
+    std::string utf8_label = value.Utf8();
+    GetProcs().textureViewSetLabel(GetHandle(), utf8_label.c_str());
+  }
 };
 
 }  // namespace blink

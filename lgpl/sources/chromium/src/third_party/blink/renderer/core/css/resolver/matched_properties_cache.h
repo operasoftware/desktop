@@ -24,12 +24,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_MATCHED_PROPERTIES_CACHE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_MATCHED_PROPERTIES_CACHE_H_
 
-#include "base/macros.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css/resolver/match_result.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/forward.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace blink {
 
@@ -49,21 +51,11 @@ class CORE_EXPORT CachedMatchedProperties final
   scoped_refptr<ComputedStyle> computed_style;
   scoped_refptr<ComputedStyle> parent_computed_style;
 
-  // g_null_atom-terminated array of property names.
-  //
-  // Note that this stores AtomicString for both standard and custom
-  // properties, for memory saving purposes. (CSSPropertyName is twice as
-  // big).
-  std::unique_ptr<AtomicString[]> dependencies;
-
   void Set(const ComputedStyle&,
            const ComputedStyle& parent_style,
-           const MatchedPropertiesVector&,
-           const HashSet<CSSPropertyName>& dependencies);
+           const MatchedPropertiesVector&);
   void Clear();
 
-  // True if the computed value for each dependency is equal for the
-  // cached parent style vs. the incoming parent style.
   bool DependenciesEqual(const StyleResolverState&);
 
   void Trace(Visitor*) const {}
@@ -77,6 +69,8 @@ class CORE_EXPORT MatchedPropertiesCache {
 
  public:
   MatchedPropertiesCache();
+  MatchedPropertiesCache(const MatchedPropertiesCache&) = delete;
+  MatchedPropertiesCache& operator=(const MatchedPropertiesCache&) = delete;
   ~MatchedPropertiesCache() { DCHECK(cache_.IsEmpty()); }
 
   class CORE_EXPORT Key {
@@ -103,10 +97,7 @@ class CORE_EXPORT MatchedPropertiesCache {
   };
 
   const CachedMatchedProperties* Find(const Key&, const StyleResolverState&);
-  void Add(const Key&,
-           const ComputedStyle&,
-           const ComputedStyle& parent_style,
-           const HashSet<CSSPropertyName>& dependencies);
+  void Add(const Key&, const ComputedStyle&, const ComputedStyle& parent_style);
 
   void Clear();
   void ClearViewportDependent();
@@ -129,9 +120,8 @@ class CORE_EXPORT MatchedPropertiesCache {
   void RemoveCachedMatchedPropertiesWithDeadEntries(const LivenessBroker&);
 
   Cache cache_;
-  DISALLOW_COPY_AND_ASSIGN(MatchedPropertiesCache);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_MATCHED_PROPERTIES_CACHE_H_

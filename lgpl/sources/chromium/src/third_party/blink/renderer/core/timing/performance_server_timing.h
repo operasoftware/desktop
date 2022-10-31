@@ -8,6 +8,7 @@
 #include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -31,6 +32,8 @@ class CORE_EXPORT PerformanceServerTiming final : public ScriptWrappable {
 
   static Vector<mojom::blink::ServerTimingInfoPtr> ParseServerTimingToMojo(
       const ResourceTimingInfo&);
+  static Vector<mojom::blink::ServerTimingInfoPtr>
+  ParseServerTimingFromHeaderValueToMojo(const String& value);
   static HeapVector<Member<PerformanceServerTiming>> ParseServerTiming(
       const ResourceTimingInfo&);
   static HeapVector<Member<PerformanceServerTiming>> FromParsedServerTiming(

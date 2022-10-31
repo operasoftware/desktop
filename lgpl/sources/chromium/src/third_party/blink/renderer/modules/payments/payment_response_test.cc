@@ -7,7 +7,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
@@ -27,13 +26,14 @@ namespace {
 class MockPaymentStateResolver final
     : public GarbageCollected<MockPaymentStateResolver>,
       public PaymentStateResolver {
-  USING_GARBAGE_COLLECTED_MIXIN(MockPaymentStateResolver);
-
  public:
   MockPaymentStateResolver() {
     ON_CALL(*this, Complete(testing::_, testing::_, testing::_))
         .WillByDefault(testing::ReturnPointee(&dummy_promise_));
   }
+
+  MockPaymentStateResolver(const MockPaymentStateResolver&) = delete;
+  MockPaymentStateResolver& operator=(const MockPaymentStateResolver&) = delete;
 
   ~MockPaymentStateResolver() override = default;
 
@@ -52,8 +52,6 @@ class MockPaymentStateResolver final
 
  private:
   ScriptPromise dummy_promise_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockPaymentStateResolver);
 };
 
 TEST(PaymentResponseTest, DataCopiedOver) {

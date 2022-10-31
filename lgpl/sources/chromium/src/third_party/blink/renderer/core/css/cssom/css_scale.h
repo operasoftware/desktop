@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_CSS_SCALE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_CSS_SCALE_H_
 
-#include "base/macros.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/cssom/css_transform_component.h"
 #include "third_party/blink/renderer/core/css/cssom/css_unit_value.h"
 #include "third_party/blink/renderer/core/geometry/dom_matrix.h"
@@ -23,13 +23,13 @@ class CORE_EXPORT CSSScale final : public CSSTransformComponent {
 
  public:
   // Constructors defined in the IDL.
-  static CSSScale* Create(const CSSNumberish&,
-                          const CSSNumberish&,
-                          ExceptionState&);
-  static CSSScale* Create(const CSSNumberish&,
-                          const CSSNumberish&,
-                          const CSSNumberish&,
-                          ExceptionState&);
+  static CSSScale* Create(const V8CSSNumberish* x,
+                          const V8CSSNumberish* y,
+                          ExceptionState& exception_state);
+  static CSSScale* Create(const V8CSSNumberish* x,
+                          const V8CSSNumberish* y,
+                          const V8CSSNumberish* z,
+                          ExceptionState& exception_state);
 
   // Blink-internal ways of creating CSSScales.
   static CSSScale* Create(CSSNumericValue* x, CSSNumericValue* y) {
@@ -47,14 +47,16 @@ class CORE_EXPORT CSSScale final : public CSSTransformComponent {
            CSSNumericValue* y,
            CSSNumericValue* z,
            bool is2D);
+  CSSScale(const CSSScale&) = delete;
+  CSSScale& operator=(const CSSScale&) = delete;
 
   // Getters and setters for attributes defined in the IDL.
-  void x(CSSNumberish& x) { x.SetCSSNumericValue(x_); }
-  void y(CSSNumberish& y) { y.SetCSSNumericValue(y_); }
-  void z(CSSNumberish& z) { z.SetCSSNumericValue(z_); }
-  void setX(const CSSNumberish&, ExceptionState&);
-  void setY(const CSSNumberish&, ExceptionState&);
-  void setZ(const CSSNumberish&, ExceptionState&);
+  V8CSSNumberish* x();
+  V8CSSNumberish* y();
+  V8CSSNumberish* z();
+  void setX(const V8CSSNumberish* x, ExceptionState& exception_state);
+  void setY(const V8CSSNumberish* y, ExceptionState& exception_state);
+  void setZ(const V8CSSNumberish* z, ExceptionState& exception_state);
 
   DOMMatrix* toMatrix(ExceptionState&) const final;
 
@@ -73,10 +75,8 @@ class CORE_EXPORT CSSScale final : public CSSTransformComponent {
   Member<CSSNumericValue> x_;
   Member<CSSNumericValue> y_;
   Member<CSSNumericValue> z_;
-
-  DISALLOW_COPY_AND_ASSIGN(CSSScale);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_CSS_SCALE_H_

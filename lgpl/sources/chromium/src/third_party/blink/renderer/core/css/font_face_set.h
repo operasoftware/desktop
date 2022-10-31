@@ -6,29 +6,27 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_FONT_FACE_SET_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_FONT_FACE_SET_H_
 
-#include "base/macros.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/iterable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/font_face.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
+#include "third_party/blink/renderer/core/event_target_names.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/fonts/font_selector.h"
-
-// Mac OS X 10.6 SDK defines check() macro that interferes with our check()
-// method
-#ifdef check
-#undef check
-#endif
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_hash_set.h"
 
 namespace blink {
 
+class Font;
 class FontFaceCache;
 
-using FontFaceSetIterable = SetlikeIterable<Member<FontFace>>;
+using FontFaceSetIterable = SetlikeIterable<Member<FontFace>, FontFace>;
 
 class CORE_EXPORT FontFaceSet : public EventTargetWithInlineData,
                                 public ExecutionContextClient,
@@ -40,6 +38,8 @@ class CORE_EXPORT FontFaceSet : public EventTargetWithInlineData,
   FontFaceSet(ExecutionContext& context)
       : ExecutionContextClient(&context),
         ready_(MakeGarbageCollected<ReadyProperty>(GetExecutionContext())) {}
+  FontFaceSet(const FontFaceSet&) = delete;
+  FontFaceSet& operator=(const FontFaceSet&) = delete;
   ~FontFaceSet() override = default;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(loading, kLoading)
@@ -125,8 +125,6 @@ class CORE_EXPORT FontFaceSet : public EventTargetWithInlineData,
   class LoadFontPromiseResolver final
       : public GarbageCollected<LoadFontPromiseResolver>,
         public FontFace::LoadFontCallback {
-    USING_GARBAGE_COLLECTED_MIXIN(LoadFontPromiseResolver);
-
    public:
     LoadFontPromiseResolver(FontFaceArray* faces, ScriptState* script_state)
         : num_loading_(faces->size()),
@@ -157,7 +155,6 @@ class CORE_EXPORT FontFaceSet : public EventTargetWithInlineData,
 
   void HandlePendingEventsAndPromises();
   void FireLoadingEvent();
-  DISALLOW_COPY_AND_ASSIGN(FontFaceSet);
 };
 
 }  // namespace blink

@@ -5,15 +5,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_PRESENTATION_PRESENTATION_CONNECTION_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_PRESENTATION_PRESENTATION_CONNECTION_H_
 
-#include <memory>
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/mojom/presentation/presentation.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_state_observer.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
-#include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -31,12 +30,13 @@ enum class FileErrorCode;
 class PresentationController;
 class PresentationReceiver;
 class PresentationRequest;
+class ScriptPromiseResolver;
 class WebString;
 
-class PresentationConnection : public EventTargetWithInlineData,
-                               public ExecutionContextLifecycleStateObserver,
-                               public mojom::blink::PresentationConnection {
-  USING_GARBAGE_COLLECTED_MIXIN(PresentationConnection);
+class MODULES_EXPORT PresentationConnection
+    : public EventTargetWithInlineData,
+      public ExecutionContextLifecycleStateObserver,
+      public mojom::blink::PresentationConnection {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -88,8 +88,6 @@ class PresentationConnection : public EventTargetWithInlineData,
   mojom::blink::PresentationConnectionState GetState() const;
 
  protected:
-  static void DispatchEventAsync(EventTarget*, Event*);
-
   PresentationConnection(LocalDOMWindow&, const String& id, const KURL&);
 
   // EventTarget implementation.
@@ -151,9 +149,6 @@ class PresentationConnection : public EventTargetWithInlineData,
   // target connection.
   void DoClose(mojom::blink::PresentationConnectionCloseReason);
 
-  // Internal helper function to dispatch state change events asynchronously.
-  void DispatchStateChangeEvent(Event*);
-
   // Cancel loads and pending messages when the connection is closed.
   void TearDown();
 
@@ -168,7 +163,8 @@ class PresentationConnection : public EventTargetWithInlineData,
 
 // Represents the controller side of a connection of either a 1-UA or 2-UA
 // presentation.
-class ControllerPresentationConnection final : public PresentationConnection {
+class MODULES_EXPORT ControllerPresentationConnection final
+    : public PresentationConnection {
  public:
   // For CallbackPromiseAdapter.
   static ControllerPresentationConnection* Take(

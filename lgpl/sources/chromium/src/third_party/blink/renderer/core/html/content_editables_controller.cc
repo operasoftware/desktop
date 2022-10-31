@@ -32,7 +32,7 @@
 
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
@@ -71,9 +71,9 @@ void ContentEditablesState::RestoreContentsIn(Element* element) {
   String elementPath = htmlElement->GetPath();
 
   if (content_editables_with_paths_.at(htmlElement) == elementPath) {
-    String content = saved_contents_.at(elementPath);
-    if (!content.IsEmpty()) {
-      htmlElement->setInnerHTML(content,
+    auto iter = saved_contents_.find(elementPath);
+    if (iter != saved_contents_.end()) {
+      htmlElement->setInnerHTML(iter.Get()->value,
                                 IGNORE_EXCEPTION_FOR_TESTING);
     }
   }
@@ -98,7 +98,7 @@ void ContentEditablesState::SetContentEditablesContent(
   if (contents.size() &&
       contents[0] == kContentEditablesSavedContentsSignature) {
     // i == 1 is version - unused for now.
-    for (size_t idx = 2; idx < contents.size(); idx += 2) {
+    for (WTF::wtf_size_t idx = 2; idx < contents.size(); idx += 2) {
       saved_contents_.insert(contents[idx], contents[idx + 1]);
     }
   }

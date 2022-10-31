@@ -329,32 +329,28 @@ typedef enum { LOU_ROW_BRAILLE = 0X2800 } LOU_UnicodeConstants;
  * Definitions of braille dots
  */
 typedef enum BrailleDots {
-	LOU_DOT_1 = 0X01,	/** dot 1 */
-	LOU_DOT_2 = 0X02,	/** dot 2 */
-	LOU_DOT_3 = 0X04,	/** dot 3 */
-	LOU_DOT_4 = 0X08,	/** dot 4 */
-	LOU_DOT_5 = 0X10,	/** dot 5 */
-	LOU_DOT_6 = 0X20,	/** dot 6 */
-	LOU_DOT_7 = 0X40,	/** dot 7 */
-	LOU_DOT_8 = 0X80,	/** dot 8 */
-	LOU_DOT_9 = 0X100,   /** virtual dot 9 */
-	LOU_DOT_10 = 0X200,  /** virtual dot A */
-	LOU_DOT_11 = 0X400,  /** virtual dot B */
-	LOU_DOT_12 = 0X800,  /** virtual dot C */
+	LOU_DOT_1 = 0X01,	 /** dot 1 */
+	LOU_DOT_2 = 0X02,	 /** dot 2 */
+	LOU_DOT_3 = 0X04,	 /** dot 3 */
+	LOU_DOT_4 = 0X08,	 /** dot 4 */
+	LOU_DOT_5 = 0X10,	 /** dot 5 */
+	LOU_DOT_6 = 0X20,	 /** dot 6 */
+	LOU_DOT_7 = 0X40,	 /** dot 7 */
+	LOU_DOT_8 = 0X80,	 /** dot 8 */
+	LOU_DOT_9 = 0X100,	 /** virtual dot 9 */
+	LOU_DOT_10 = 0X200,	 /** virtual dot A */
+	LOU_DOT_11 = 0X400,	 /** virtual dot B */
+	LOU_DOT_12 = 0X800,	 /** virtual dot C */
 	LOU_DOT_13 = 0X1000, /** virtual dot D */
 	LOU_DOT_14 = 0X2000, /** virtual dot E */
 	LOU_DOT_15 = 0X4000, /** virtual dot F */
-	LOU_DOTS = 0X8000	/** if this bit is true, the widechar represents a dot pattern */
+	LOU_DOTS = 0X8000	 /** if this bit is true, the widechar represents a dot pattern */
 } BrailleDots;
 
 /**
  * A sentinel, used in liblouisutdml
  */
 #define LOU_ENDSEGMENT 0xffff
-
-/* =========================  BETA API ========================= */
-
-// Use the following two function with care, API is subject to change!
 
 /**
  * Parse, analyze and index tables.
@@ -400,9 +396,10 @@ lou_findTables(const char *query);
 /**
  * Read metadata from a file.
  *
- * Returns the value of the metadata field specified by `key' in
- * `table', or NULL when the field does not exist. Freeing the memory
- * of the returned string is the responsibility of the caller.
+ * Returns the value of the first occuring metadata field specified by
+ * `key' in `table', or NULL when the field does not exist. Freeing
+ * the memory of the returned string is the responsibility of the
+ * caller.
  */
 LIBLOUIS_API
 char *EXPORT_CALL
@@ -421,8 +418,6 @@ lou_getTableInfo(const char *table, const char *key);
 LIBLOUIS_API
 char **EXPORT_CALL
 lou_listTables(void);
-
-/* ====================== END OF BETA API ====================== */
 
 /**
  * Free all memory allocated by liblouis.

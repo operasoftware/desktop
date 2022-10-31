@@ -29,6 +29,8 @@
 #include <libxml/parser.h>
 #include <libxml/parserInternals.h>
 #include <libxml/xmlversion.h>
+
+#include "base/numerics/safe_conversions.h"
 #if defined(LIBXML_CATALOG_ENABLED)
 #include <libxml/catalog.h>
 #endif
@@ -37,7 +39,7 @@
 #include <memory>
 
 #include "base/auto_reset.h"
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/cdata_section.h"
 #include "third_party/blink/renderer/core/dom/comment.h"
@@ -65,7 +67,7 @@
 #include "third_party/blink/renderer/core/xml/parser/xml_document_parser_scope.h"
 #include "third_party/blink/renderer/core/xml/parser/xml_parser_input.h"
 #include "third_party/blink/renderer/core/xmlns_names.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
@@ -111,8 +113,8 @@ static inline bool HasNoStyleInformation(Document* document) {
   if (!document->GetFrame() || !document->GetFrame()->GetPage())
     return false;
 
-  if (document->GetFrame()->Tree().Parent())
-    return false;  // This document is not in a top frame
+  if (!document->IsInMainFrame() || document->GetFrame()->IsInFencedFrameTree())
+    return false;  // This document has style information from a parent.
 
   if (SVGImage::IsInSVGImage(document))
     return false;
@@ -502,9 +504,10 @@ static int MatchFunc(const char*) {
          CurrentThread() == g_libxml_loader_thread;
 }
 
-static inline void SetAttributes(Element* element,
-                                 Vector<Attribute>& attribute_vector,
-                                 ParserContentPolicy parser_content_policy) {
+static inline void SetAttributes(
+    Element* element,
+    Vector<Attribute, kAttributePrealloc>& attribute_vector,
+    ParserContentPolicy parser_content_policy) {
   if (!ScriptingContentIsAllowed(parser_content_policy))
     element->StripScriptingAttributes(attribute_vector);
   element->ParserSetAttributes(attribute_vector);
@@ -547,7 +550,7 @@ static void FinishParsing(xmlParserCtxtPtr ctxt) {
 }
 
 #define xmlParseChunk \
-  #error "Use parseChunk instead to select the correct encoding."
+#error "Use parseChunk instead to select the correct encoding."
 
 static bool IsLibxmlDefaultCatalogFile(const String& url_string) {
   // On non-Windows platforms libxml with catalogs enabled asks for
@@ -585,20 +588,19 @@ static bool ShouldAllowExternalLoad(const KURL& url) {
   // content. If we had more context, we could potentially allow the parser to
   // load a DTD. As things stand, we take the conservative route and allow
   // same-origin requests only.
-  if (!XMLDocumentParserScope::current_document_->GetSecurityOrigin()
-           ->CanRequest(url)) {
+  auto* current_context =
+      XMLDocumentParserScope::current_document_->GetExecutionContext();
+  if (!current_context->GetSecurityOrigin()->CanRequest(url)) {
     // FIXME: This is copy/pasted. We should probably build console logging into
     // canRequest().
     if (!url.IsNull()) {
-      String message =
-          "Unsafe attempt to load URL " + url.ElidedString() +
-          " from frame with URL " +
-          XMLDocumentParserScope::current_document_->Url().ElidedString() +
-          ". Domains, protocols and ports must match.\n";
-      XMLDocumentParserScope::current_document_->AddConsoleMessage(
-          MakeGarbageCollected<ConsoleMessage>(
-              mojom::ConsoleMessageSource::kSecurity,
-              mojom::ConsoleMessageLevel::kError, message));
+      String message = "Unsafe attempt to load URL " + url.ElidedString() +
+                       " from frame with URL " +
+                       current_context->Url().ElidedString() +
+                       ". Domains, protocols and ports must match.\n";
+      current_context->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+          mojom::blink::ConsoleMessageSource::kSecurity,
+          mojom::blink::ConsoleMessageLevel::kError, message));
     }
     return false;
   }
@@ -607,10 +609,16 @@ static bool ShouldAllowExternalLoad(const KURL& url) {
 }
 
 static void* OpenFunc(const char* uri) {
-  DCHECK(XMLDocumentParserScope::current_document_);
+  Document* document = XMLDocumentParserScope::current_document_;
+  DCHECK(document);
   DCHECK_EQ(CurrentThread(), g_libxml_loader_thread);
 
   KURL url(NullURL(), uri);
+
+  // If the document has no ExecutionContext, it's detached. Detached documents
+  // aren't allowed to fetch.
+  if (!document->GetExecutionContext())
+    return &g_global_descriptor;
 
   if (!ShouldAllowExternalLoad(url))
     return &g_global_descriptor;
@@ -619,10 +627,10 @@ static void* OpenFunc(const char* uri) {
   scoped_refptr<const SharedBuffer> data;
 
   {
-    Document* document = XMLDocumentParserScope::current_document_;
     XMLDocumentParserScope scope(nullptr);
     // FIXME: We should restore the original global error handler as well.
-    ResourceLoaderOptions options;
+    ResourceLoaderOptions options(
+        document->GetExecutionContext()->GetCurrentWorld());
     options.initiator_info.name = fetch_initiator_type_names::kXml;
     FetchParameters params(ResourceRequest(url), options);
     params.MutableResourceRequest().SetMode(
@@ -707,8 +715,8 @@ scoped_refptr<XMLParserContext> XMLParserContext::CreateMemoryParser(
   InitializeLibXMLIfNecessary();
 
   // appendFragmentSource() checks that the length doesn't overflow an int.
-  xmlParserCtxtPtr parser =
-      xmlCreateMemoryParserCtxt(chunk.c_str(), chunk.length());
+  xmlParserCtxtPtr parser = xmlCreateMemoryParserCtxt(
+      chunk.c_str(), base::checked_cast<int>(chunk.length()));
 
   if (!parser)
     return nullptr;
@@ -880,7 +888,7 @@ struct xmlSAX2Namespace {
 };
 
 static inline void HandleNamespaceAttributes(
-    Vector<Attribute>& prefixed_attributes,
+    Vector<Attribute, kAttributePrealloc>& prefixed_attributes,
     const xmlChar** libxml_namespaces,
     int nb_namespaces,
     ExceptionState& exception_state) {
@@ -911,7 +919,7 @@ struct xmlSAX2Attributes {
 };
 
 static inline void HandleElementAttributes(
-    Vector<Attribute>& prefixed_attributes,
+    Vector<Attribute, kAttributePrealloc>& prefixed_attributes,
     const xmlChar** libxml_attributes,
     int nb_attributes,
     const HashMap<AtomicString, AtomicString>& initial_prefix_to_namespace_map,
@@ -981,16 +989,19 @@ void XMLDocumentParser::StartElementNs(const AtomicString& local_name,
 
   AtomicString adjusted_uri = uri;
   if (parsing_fragment_ && adjusted_uri.IsNull()) {
-    if (!prefix.IsNull())
-      adjusted_uri = prefix_to_namespace_map_.at(prefix);
-    else
+    if (!prefix.IsNull()) {
+      auto it = prefix_to_namespace_map_.find(prefix);
+      if (it != prefix_to_namespace_map_.end())
+        adjusted_uri = it->value;
+    } else {
       adjusted_uri = default_namespace_uri_;
+    }
   }
 
   bool is_first_element = !saw_first_element_;
   saw_first_element_ = true;
 
-  Vector<Attribute> prefixed_attributes;
+  Vector<Attribute, kAttributePrealloc> prefixed_attributes;
   DummyExceptionStateForTesting exception_state;
   HandleNamespaceAttributes(prefixed_attributes, libxml_namespaces,
                             nb_namespaces, exception_state);
@@ -1404,7 +1415,7 @@ static xmlEntityPtr GetXHTMLEntity(const xmlChar* name) {
     return nullptr;
 
   constexpr size_t kSharedXhtmlEntityResultLength =
-      base::size(g_shared_xhtml_entity_result);
+      std::size(g_shared_xhtml_entity_result);
   size_t entity_length_in_utf8;
   // Unlike HTML parser, XML parser parses the content of named
   // entities. So we need to escape '&' and '<'.
@@ -1445,7 +1456,7 @@ static xmlEntityPtr GetXHTMLEntity(const xmlChar* name) {
   DCHECK_LE(entity_length_in_utf8, kSharedXhtmlEntityResultLength);
 
   xmlEntityPtr entity = SharedXHTMLEntity();
-  entity->length = SafeCast<int>(entity_length_in_utf8);
+  entity->length = base::checked_cast<int>(entity_length_in_utf8);
   entity->name = name;
   return entity;
 }

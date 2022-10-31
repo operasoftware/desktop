@@ -5,8 +5,9 @@
 #include <fuzzer/FuzzedDataProvider.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/time/default_tick_clock.h"
+#include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
@@ -27,8 +28,9 @@ class PageHelper {
         settings.SetAcceleratedCompositingEnabled(true);
     });
     EnablePlatform();
-    dummy_page_holder_ = std::make_unique<DummyPageHolder>(
-        IntSize(800, 600), nullptr, nullptr, std::move(setter), GetTickClock());
+    dummy_page_holder_ =
+        std::make_unique<DummyPageHolder>(gfx::Size(800, 600), nullptr, nullptr,
+                                          std::move(setter), GetTickClock());
 
     // Use no-quirks (ake "strict") mode by default.
     GetDocument().SetCompatibilityMode(Document::kNoQuirksMode);

@@ -25,6 +25,7 @@
 #include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
+#include "third_party/blink/renderer/core/dom/focus_params.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
@@ -56,6 +57,10 @@ const AtomicString& RadioInputType::FormControlType() const {
   return input_type_names::kRadio;
 }
 
+ControlPart RadioInputType::AutoAppearance() const {
+  return kRadioPart;
+}
+
 bool RadioInputType::ValueMissing(const String&) const {
   HTMLInputElement& input = GetElement();
   if (auto* scope = input.GetRadioButtonGroupScope())
@@ -76,7 +81,7 @@ bool RadioInputType::ValueMissing(const String&) const {
     if (another->type() != input_type_names::kRadio ||
         another->GetName() != name || another->formOwner())
       continue;
-    if (another->checked())
+    if (another->Checked())
       is_checked = true;
     if (another->FastHasAttribute(html_names::kRequiredAttr))
       is_required = true;
@@ -157,25 +162,29 @@ void RadioInputType::HandleKeydownEvent(KeyboardEvent& event) {
     document.SetFocusedElement(
         input_element, FocusParams(SelectionBehaviorOnFocus::kRestore,
                                    mojom::blink::FocusType::kNone, nullptr));
-    input_element->DispatchSimulatedClick(&event, kSendNoEvents);
+    input_element->DispatchSimulatedClick(&event);
     event.SetDefaultHandled();
     return;
   }
 }
 
 void RadioInputType::HandleKeyupEvent(KeyboardEvent& event) {
-  // If an unselected radio is tabbed into (because the entire group has nothing
-  // checked, or because of some explicit .focus() call), then allow space to
-  // check it.
-  if (GetElement().checked())
-    return;
-
   // Use Space key simulated click by default.
   // Use Enter key simulated click when Spatial Navigation enabled.
   if (event.key() == " " ||
       (IsSpatialNavigationEnabled(GetElement().GetDocument().GetFrame()) &&
        event.key() == "Enter")) {
-    DispatchSimulatedClickIfActive(event);
+    // If an unselected radio is tabbed into (because the entire group has
+    // nothing checked, or because of some explicit .focus() call), then allow
+    // space to check it.
+    if (GetElement().Checked()) {
+      // If we are going to skip DispatchSimulatedClick, then at least call
+      // SetActive(false) to prevent the radio from being stuck in the active
+      // state.
+      GetElement().SetActive(false);
+    } else {
+      DispatchSimulatedClickIfActive(event);
+    }
   }
 }
 
@@ -201,13 +210,13 @@ bool RadioInputType::IsKeyboardFocusable() const {
 
   // Allow keyboard focus if we're checked or if nothing in the group is
   // checked.
-  return GetElement().checked() || !CheckedRadioButtonForGroup();
+  return GetElement().Checked() || !CheckedRadioButtonForGroup();
 }
 
 bool RadioInputType::ShouldSendChangeEventAfterCheckedChanged() {
   // Don't send a change event for a radio button that's getting unchecked.
   // This was done to match the behavior of other browsers.
-  return GetElement().checked();
+  return GetElement().Checked();
 }
 
 ClickHandlingState* RadioInputType::WillDispatchClick() {
@@ -222,9 +231,9 @@ ClickHandlingState* RadioInputType::WillDispatchClick() {
 
   ClickHandlingState* state = MakeGarbageCollected<ClickHandlingState>();
 
-  state->checked = GetElement().checked();
+  state->checked = GetElement().Checked();
   state->checked_radio_button = CheckedRadioButtonForGroup();
-  GetElement().setChecked(true, TextFieldEventBehavior::kDispatchChangeEvent);
+  GetElement().SetChecked(true, TextFieldEventBehavior::kDispatchChangeEvent);
   is_in_click_handler_ = true;
   return state;
 }
@@ -237,12 +246,12 @@ void RadioInputType::DidDispatchClick(Event& event,
     // still belongs to our group.
     HTMLInputElement* checked_radio_button = state.checked_radio_button.Get();
     if (!checked_radio_button)
-      GetElement().setChecked(false);
+      GetElement().SetChecked(false);
     else if (checked_radio_button->type() == input_type_names::kRadio &&
              checked_radio_button->Form() == GetElement().Form() &&
              checked_radio_button->GetName() == GetElement().GetName())
-      checked_radio_button->setChecked(true);
-  } else if (state.checked != GetElement().checked()) {
+      checked_radio_button->SetChecked(true);
+  } else if (state.checked != GetElement().Checked()) {
     GetElement().DispatchInputAndChangeEventIfNeeded();
   }
   is_in_click_handler_ = false;
@@ -275,7 +284,7 @@ HTMLInputElement* RadioInputType::NextRadioButtonInGroup(
 
 HTMLInputElement* RadioInputType::CheckedRadioButtonForGroup() const {
   HTMLInputElement& input = GetElement();
-  if (input.checked())
+  if (input.Checked())
     return &input;
   if (auto* scope = input.GetRadioButtonGroupScope())
     return scope->CheckedButtonForGroup(input.GetName());
@@ -293,7 +302,7 @@ HTMLInputElement* RadioInputType::CheckedRadioButtonForGroup() const {
     if (another->type() != input_type_names::kRadio ||
         another->GetName() != name || another->formOwner())
       continue;
-    if (another->checked())
+    if (another->Checked())
       return another;
   }
   return nullptr;
@@ -304,11 +313,11 @@ void RadioInputType::WillUpdateCheckedness(bool new_checked) {
     return;
   if (GetElement().GetRadioButtonGroupScope()) {
     // Buttons in RadioButtonGroupScope are handled in
-    // HTMLInputElement::setChecked().
+    // HTMLInputElement::SetChecked().
     return;
   }
   if (auto* input = CheckedRadioButtonForGroup())
-    input->setChecked(false);
+    input->SetChecked(false);
 }
 
 }  // namespace blink

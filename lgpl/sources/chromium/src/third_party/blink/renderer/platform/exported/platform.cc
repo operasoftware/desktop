@@ -33,34 +33,44 @@
 #include <memory>
 
 #include "base/allocator/partition_allocator/memory_reclaimer.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
+#include "components/viz/common/gpu/raster_context_provider.h"
+#include "gpu/ipc/client/gpu_channel_host.h"
+#include "media/base/media_log.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
+#include "third_party/blink/public/platform/web_dedicated_worker_host_factory_client.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
+#include "third_party/blink/public/platform/web_url_loader_factory.h"
 #include "third_party/blink/public/platform/websocket_handshake_throttle.h"
-#include "third_party/blink/renderer/platform/bindings/blink_isolate/blink_isolate.h"
 #include "third_party/blink/renderer/platform/bindings/parkable_string_manager.h"
 #include "third_party/blink/renderer/platform/font_family_names.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache_memory_dump_provider.h"
+#include "third_party/blink/renderer/platform/graphics/parkable_image_manager.h"
 #include "third_party/blink/renderer/platform/heap/blink_gc_memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/heap/gc_task_runner.h"
+#include "third_party/blink/renderer/platform/heap/process_heap.h"
 #include "third_party/blink/renderer/platform/instrumentation/canvas_memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/instrumentation/instance_counters_memory_dump_provider.h"
 #include "third_party/blink/renderer/platform/instrumentation/memory_pressure_listener.h"
 #include "third_party/blink/renderer/platform/instrumentation/partition_alloc_memory_dump_provider.h"
-#include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/renderer_resource_coordinator.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/memory_cache_dump_provider.h"
 #include "third_party/blink/renderer/platform/language.h"
-#include "third_party/blink/renderer/platform/scheduler/common/simple_thread_scheduler.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/scheduler/common/simple_main_thread_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/non_main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/theme/web_theme_engine_helper.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
+#include "third_party/skia/include/core/SkGraphics.h"
 #include "third_party/webrtc/api/rtp_parameters.h"
 #include "third_party/webrtc/p2p/base/port_allocator.h"
 
@@ -87,6 +97,8 @@ class IdleDelayedTaskHelper : public base::SingleThreadTaskRunner {
 
  public:
   IdleDelayedTaskHelper() = default;
+  IdleDelayedTaskHelper(const IdleDelayedTaskHelper&) = delete;
+  IdleDelayedTaskHelper& operator=(const IdleDelayedTaskHelper&) = delete;
 
   bool RunsTasksInCurrentSequence() const override { return IsMainThread(); }
 
@@ -114,7 +126,6 @@ class IdleDelayedTaskHelper : public base::SingleThreadTaskRunner {
 
  private:
   THREAD_CHECKER(thread_checker_);
-  DISALLOW_COPY_AND_ASSIGN(IdleDelayedTaskHelper);
 };
 
 }  // namespace
@@ -133,7 +144,7 @@ namespace {
 
 class SimpleMainThread : public Thread {
  public:
-  SimpleMainThread() : isolate_(WebIsolate::Create()) {}
+  SimpleMainThread() = default;
 
   // We rely on base::ThreadTaskRunnerHandle for tasks posted on the main
   // thread. The task runner handle may not be available on Blink's startup
@@ -153,7 +164,8 @@ class SimpleMainThread : public Thread {
   // and Platform::UnsetMainThreadTaskRunnerForTesting().
 
   ThreadScheduler* Scheduler() override { return &scheduler_; }
-  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() const override {
+  scoped_refptr<base::SingleThreadTaskRunner> GetDeprecatedTaskRunner()
+      const override {
     if (main_thread_task_runner_for_testing_)
       return main_thread_task_runner_for_testing_;
     DCHECK(WTF::IsMainThread());
@@ -168,13 +180,16 @@ class SimpleMainThread : public Thread {
  private:
   bool IsSimpleMainThread() const override { return true; }
 
-  std::unique_ptr<WebIsolate> isolate_;
-  scheduler::SimpleThreadScheduler scheduler_;
+  scheduler::SimpleMainThreadScheduler scheduler_;
   scoped_refptr<base::SingleThreadTaskRunner>
       main_thread_task_runner_for_testing_;
 };
 
 }  // namespace
+
+WebThemeEngine* Platform::ThemeEngine() {
+  return WebThemeEngineHelper::GetNativeThemeEngine();
+}
 
 void Platform::InitializeBlink() {
   DCHECK(!did_initialize_blink_);
@@ -239,10 +254,15 @@ void Platform::InitializeMainThreadCommon(Platform* platform,
       ParkableStringManagerDumpProvider::Instance(), "ParkableStrings",
       base::ThreadTaskRunnerHandle::Get());
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      &ParkableImageManager::Instance(), "ParkableImages",
+      base::ThreadTaskRunnerHandle::Get());
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
       CanvasMemoryDumpProvider::Instance(), "Canvas",
       base::ThreadTaskRunnerHandle::Get());
 
-  RendererResourceCoordinator::MaybeInitialize();
+  SkGraphics::SetVariableColrV1EnabledFunc(
+      RuntimeEnabledFeatures::VariableCOLRV1Enabled);
+
   // Use a delayed idle task as this is low priority work that should stop when
   // the main thread is not doing any work.
   WTF::Partitions::StartPeriodicReclaim(
@@ -277,14 +297,29 @@ Platform* Platform::Current() {
   return g_platform;
 }
 
+std::unique_ptr<WebURLLoaderFactory> Platform::WrapURLLoaderFactory(
+    CrossVariantMojoRemote<network::mojom::URLLoaderFactoryInterfaceBase>) {
+  return nullptr;
+}
+
+std::unique_ptr<WebDedicatedWorkerHostFactoryClient>
+Platform::CreateDedicatedWorkerHostFactoryClient(
+    WebDedicatedWorker*,
+    const BrowserInterfaceBrokerProxy&) {
+  return nullptr;
+}
+
+void Platform::CreateServiceWorkerSubresourceLoaderFactory(
+    CrossVariantMojoRemote<mojom::ServiceWorkerContainerHostInterfaceBase>
+        service_worker_container_host,
+    const WebString& client_id,
+    std::unique_ptr<network::PendingSharedURLLoaderFactory> fallback_factory,
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
+    scoped_refptr<base::SequencedTaskRunner> task_runner) {}
+
 ThreadSafeBrowserInterfaceBrokerProxy* Platform::GetBrowserInterfaceBroker() {
   DEFINE_STATIC_LOCAL(DefaultBrowserInterfaceBrokerProxy, proxy, ());
   return &proxy;
-}
-
-std::unique_ptr<Thread> Platform::CreateThread(
-    const ThreadCreationParams& params) {
-  return Thread::CreateThread(params);
 }
 
 void Platform::CreateAndSetCompositorThread() {
@@ -293,7 +328,7 @@ void Platform::CreateAndSetCompositorThread() {
 
 scoped_refptr<base::SingleThreadTaskRunner>
 Platform::CompositorThreadTaskRunner() {
-  if (Thread* compositor_thread = Thread::CompositorThread())
+  if (NonMainThread* compositor_thread = Thread::CompositorThread())
     return compositor_thread->GetTaskRunner();
   return nullptr;
 }
@@ -314,6 +349,35 @@ Platform::CreateSharedOffscreenGraphicsContext3DProvider() {
 std::unique_ptr<WebGraphicsContext3DProvider>
 Platform::CreateWebGPUGraphicsContext3DProvider(
     const WebURL& top_document_url) {
+  return nullptr;
+}
+
+scoped_refptr<viz::RasterContextProvider>
+Platform::SharedMainThreadContextProvider() {
+  return nullptr;
+}
+
+scoped_refptr<viz::RasterContextProvider>
+Platform::SharedCompositorWorkerContextProvider() {
+  return nullptr;
+}
+
+scoped_refptr<gpu::GpuChannelHost> Platform::EstablishGpuChannelSync() {
+  return nullptr;
+}
+
+void Platform::EstablishGpuChannel(EstablishGpuChannelCallback callback) {
+  std::move(callback).Run(nullptr);
+}
+
+gfx::ColorSpace Platform::GetRenderingColorSpace() const {
+  return {};
+}
+
+std::unique_ptr<media::MediaLog> Platform::GetMediaLog(
+    MediaInspectorContext* inspector_context,
+    scoped_refptr<base::SingleThreadTaskRunner> owner_task_runner,
+    bool is_on_worker) {
   return nullptr;
 }
 

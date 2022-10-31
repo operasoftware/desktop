@@ -5,14 +5,15 @@
 #include "third_party/blink/renderer/core/input/touch_event_manager.h"
 
 #include <memory>
+
 #include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/common/input/web_touch_event.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/events/touch_event.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
 #include "third_party/blink/renderer/core/input/event_handling_util.h"
@@ -21,7 +22,7 @@
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace blink {
 
@@ -169,7 +170,6 @@ Touch* TouchEventManager::CreateDomTouch(
     const TouchEventManager::TouchPointAttributes* point_attr,
     bool* known_target) {
   Node* touch_node = point_attr->target_;
-  String region_id = point_attr->region_;
   *known_target = false;
 
   LocalFrame* target_frame = nullptr;
@@ -206,48 +206,46 @@ Touch* TouchEventManager::CreateDomTouch(
       point_attr->event_.WebPointerEventInRootFrame();
   float scale_factor = 1.0f / target_frame->PageZoomFactor();
 
-  FloatPoint document_point = target_frame->View()
-                                  ->RootFrameToDocument(FloatPoint(
-                                      transformed_event.PositionInWidget()))
-                                  .ScaledBy(scale_factor);
-  FloatSize adjusted_radius =
-      FloatSize(transformed_event.width / 2.f, transformed_event.height / 2.f)
-          .ScaledBy(scale_factor);
+  gfx::PointF document_point =
+      gfx::ScalePoint(target_frame->View()->RootFrameToDocument(
+                          transformed_event.PositionInWidget()),
+                      scale_factor);
+  gfx::SizeF adjusted_radius = gfx::ScaleSize(
+      gfx::SizeF(transformed_event.width / 2.f, transformed_event.height / 2.f),
+      scale_factor);
 
   return MakeGarbageCollected<Touch>(
       target_frame, touch_node, point_attr->event_.id,
-      FloatPoint(transformed_event.PositionInScreen()), document_point,
-      adjusted_radius, transformed_event.rotation_angle,
-      transformed_event.force, region_id);
+      transformed_event.PositionInScreen(), document_point, adjusted_radius,
+      transformed_event.rotation_angle, transformed_event.force);
 }
 
 WebCoalescedInputEvent TouchEventManager::GenerateWebCoalescedInputEvent() {
   DCHECK(!touch_attribute_map_.IsEmpty());
 
-  WebTouchEvent event;
+  auto event = std::make_unique<WebTouchEvent>();
 
   const auto& first_touch_pointer_event =
       touch_attribute_map_.begin()->value->event_;
 
-  SetWebTouchEventAttributesFromWebPointerEvent(&event,
+  SetWebTouchEventAttributesFromWebPointerEvent(event.get(),
                                                 first_touch_pointer_event);
   SetWebTouchEventAttributesFromWebPointerEvent(&last_coalesced_touch_event_,
                                                 first_touch_pointer_event);
   WebInputEvent::Type touch_event_type = WebInputEvent::Type::kTouchMove;
   Vector<WebPointerEvent> all_coalesced_events;
   Vector<int> available_ids;
-  for (const auto& id : touch_attribute_map_.Keys())
-    available_ids.push_back(id);
+  WTF::CopyKeysToVector(touch_attribute_map_, available_ids);
   std::sort(available_ids.begin(), available_ids.end());
   for (const int& touch_point_id : available_ids) {
     auto* const touch_point_attribute = touch_attribute_map_.at(touch_point_id);
     const WebPointerEvent& touch_pointer_event = touch_point_attribute->event_;
-    event.touches[event.touches_length++] =
+    event->touches[event->touches_length++] =
         CreateWebTouchPointFromWebPointerEvent(touch_pointer_event,
                                                touch_point_attribute->stale_);
     if (!touch_point_attribute->stale_) {
-      event.SetTimeStamp(std::max(event.TimeStamp(),
-                                  touch_point_attribute->event_.TimeStamp()));
+      event->SetTimeStamp(std::max(event->TimeStamp(),
+                                   touch_point_attribute->event_.TimeStamp()));
     }
 
     // Only change the touch event type from move. So if we have two pointers
@@ -271,7 +269,7 @@ WebCoalescedInputEvent TouchEventManager::GenerateWebCoalescedInputEvent() {
       all_coalesced_events.push_back(coalesced_event);
     }
   }
-  event.SetType(touch_event_type);
+  event->SetType(touch_event_type);
   last_coalesced_touch_event_.SetType(touch_event_type);
 
   // Create all coalesced touch events based on pointerevents
@@ -282,7 +280,7 @@ WebCoalescedInputEvent TouchEventManager::GenerateWebCoalescedInputEvent() {
   } timestamp_based_event_comparison;
   std::sort(all_coalesced_events.begin(), all_coalesced_events.end(),
             timestamp_based_event_comparison);
-  WebCoalescedInputEvent result(event.Clone(), {}, {}, ui::LatencyInfo());
+  WebCoalescedInputEvent result(std::move(event), {}, {}, ui::LatencyInfo());
   for (const auto& web_pointer_event : all_coalesced_events) {
     if (web_pointer_event.GetType() == WebInputEvent::Type::kPointerDown) {
       // TODO(crbug.com/732842): Technically we should never receive the
@@ -343,12 +341,6 @@ WebCoalescedInputEvent TouchEventManager::GenerateWebCoalescedInputEvent() {
           break;
         }
       }
-    }
-
-    for (unsigned i = 0; i < event.touches_length; ++i) {
-      event.touches[i].state = blink::WebTouchPoint::State::kStateStationary;
-      event.touches[i].movement_x = 0;
-      event.touches[i].movement_y = 0;
     }
   }
 
@@ -506,14 +498,46 @@ TouchEventManager::DispatchTouchEventFromAccumulatdTouchPoints() {
   return event_result;
 }
 
-void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
+Node* TouchEventManager::GetTouchPointerNode(
     const WebPointerEvent& event,
     const event_handling_util::PointerEventTarget& pointer_event_target) {
-  // Touch events implicitly capture to the touched node, and don't change
-  // active/hover states themselves (Gesture events do). So we only need
-  // to hit-test on touchstart and when the target could be different than
-  // the corresponding pointer event target.
   DCHECK(event.GetType() == WebInputEvent::Type::kPointerDown);
+
+  Node* touch_pointer_node = pointer_event_target.target_element;
+
+  if (touch_sequence_document_ &&
+      (!touch_pointer_node ||
+       &touch_pointer_node->GetDocument() != touch_sequence_document_)) {
+    if (!touch_sequence_document_->GetFrame())
+      return nullptr;
+
+    HitTestLocation location(PhysicalOffset::FromPointFRound(
+        touch_sequence_document_->GetFrame()->View()->ConvertFromRootFrame(
+            event.PositionInWidget())));
+    HitTestRequest::HitTestRequestType hit_type = HitTestRequest::kTouchEvent |
+                                                  HitTestRequest::kReadOnly |
+                                                  HitTestRequest::kActive;
+    HitTestResult result = event_handling_util::HitTestResultInFrame(
+        touch_sequence_document_->GetFrame(), location, hit_type);
+    Node* node = result.InnerNode();
+    if (!node)
+      return nullptr;
+    // Touch events should not go to text nodes.
+    if (node->IsTextNode())
+      node = FlatTreeTraversal::Parent(*node);
+    touch_pointer_node = node;
+  }
+
+  return touch_pointer_node;
+}
+
+void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
+    const WebPointerEvent& event,
+    Node* touch_node,
+    TouchAction effective_touch_action) {
+  DCHECK(event.GetType() == WebInputEvent::Type::kPointerDown);
+  DCHECK(touch_node);
+
   // Ideally we'd DCHECK(!touch_attribute_map_.Contains(event.id))
   // since we shouldn't get a touchstart for a touch that's already
   // down. However EventSender allows this to be violated and there's
@@ -523,49 +547,6 @@ void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
   touch_attribute_map_.Set(event.id,
                            MakeGarbageCollected<TouchPointAttributes>(event));
 
-  Node* touch_node = pointer_event_target.target_element;
-  String region = pointer_event_target.region;
-
-  HitTestRequest::HitTestRequestType hit_type = HitTestRequest::kTouchEvent |
-                                                HitTestRequest::kReadOnly |
-                                                HitTestRequest::kActive;
-  HitTestResult result;
-  // For the touchPressed points hit-testing is done in
-  // PointerEventManager. If it was the second touch there is a
-  // capturing documents for the touch and |m_touchSequenceDocument|
-  // is not null. So if PointerEventManager should hit-test again
-  // against |m_touchSequenceDocument| if the target set by
-  // PointerEventManager was either null or not in
-  // |m_touchSequenceDocument|.
-  if (touch_sequence_document_ &&
-      (!touch_node || &touch_node->GetDocument() != touch_sequence_document_)) {
-    if (touch_sequence_document_->GetFrame()) {
-      HitTestLocation location(PhysicalOffset::FromFloatPointRound(
-          touch_sequence_document_->GetFrame()->View()->ConvertFromRootFrame(
-              FloatPoint(event.PositionInWidget()))));
-      result = event_handling_util::HitTestResultInFrame(
-          touch_sequence_document_->GetFrame(), location, hit_type);
-      Node* node = result.InnerNode();
-      if (!node)
-        return;
-      if (auto* canvas = DynamicTo<HTMLCanvasElement>(node)) {
-        HitTestCanvasResult* hit_test_canvas_result =
-            canvas->GetControlAndIdIfHitRegionExists(
-                result.PointInInnerNodeFrame());
-        if (hit_test_canvas_result->GetControl())
-          node = hit_test_canvas_result->GetControl();
-        region = hit_test_canvas_result->GetId();
-      }
-      // Touch events should not go to text nodes.
-      if (node->IsTextNode())
-        node = FlatTreeTraversal::Parent(*node);
-      touch_node = node;
-    } else {
-      return;
-    }
-  }
-  if (!touch_node)
-    return;
   if (!touch_sequence_document_) {
     // Keep track of which document should receive all touch events
     // in the active sequence. This must be a single document to
@@ -576,10 +557,6 @@ void TouchEventManager::UpdateTouchAttributeMapsForPointerDown(
 
   TouchPointAttributes* attributes = touch_attribute_map_.at(event.id);
   attributes->target_ = touch_node;
-  attributes->region_ = region;
-
-  TouchAction effective_touch_action =
-      touch_action_util::ComputeEffectiveTouchAction(*touch_node);
 
   should_enforce_vertical_scroll_ =
       touch_sequence_document_->IsVerticalScrollEnforced();
@@ -628,12 +605,6 @@ void TouchEventManager::HandleTouchPoint(
       attributes->event_ = event;
     }
     return;
-  }
-
-  // In touch event model only touch starts can set the target and after that
-  // the touch event always goes to that target.
-  if (event.GetType() == WebInputEvent::Type::kPointerDown) {
-    UpdateTouchAttributeMapsForPointerDown(event, pointer_event_target);
   }
 
   // We might not receive the down action for a touch point. In that case we
@@ -697,12 +668,19 @@ void TouchEventManager::AllTouchesReleasedCleanup() {
   // we still get here and if |touch_sequence_document| was of the type which
   // cannot block scroll, then the flag is certainly set
   // (https://crbug.com/345372).
-  delayed_effective_touch_action_ = base::nullopt;
+  delayed_effective_touch_action_ = absl::nullopt;
   should_enforce_vertical_scroll_ = false;
 }
 
 bool TouchEventManager::IsAnyTouchActive() const {
   return !touch_attribute_map_.IsEmpty();
+}
+
+Element* TouchEventManager::CurrentTouchDownElement() {
+  if (touch_attribute_map_.IsEmpty() || touch_attribute_map_.size() > 1)
+    return nullptr;
+  Node* touch_node = touch_attribute_map_.begin()->value->target_;
+  return touch_node ? DynamicTo<Element>(*touch_node) : nullptr;
 }
 
 WebInputEventResult TouchEventManager::EnsureVerticalScrollIsPossible(
@@ -723,7 +701,7 @@ WebInputEventResult TouchEventManager::EnsureVerticalScrollIsPossible(
     // (https://crbug.com/844493).
     frame_->GetPage()->GetChromeClient().SetTouchAction(
         frame_, delayed_effective_touch_action_.value());
-    delayed_effective_touch_action_ = base::nullopt;
+    delayed_effective_touch_action_ = absl::nullopt;
   }
 
   // If the event was canceled the result is ignored to make sure vertical

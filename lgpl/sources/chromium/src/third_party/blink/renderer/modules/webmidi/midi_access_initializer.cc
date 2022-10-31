@@ -19,7 +19,7 @@
 #include "third_party/blink/renderer/modules/permissions/permission_utils.h"
 #include "third_party/blink/renderer/modules/webmidi/midi_access.h"
 #include "third_party/blink/renderer/modules/webmidi/midi_port.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mojo/mojo_helper.h"
 
 namespace blink {
@@ -34,18 +34,12 @@ MIDIAccessInitializer::MIDIAccessInitializer(ScriptState* script_state,
       options_(options),
       permission_service_(ExecutionContext::From(script_state)) {}
 
-void MIDIAccessInitializer::Dispose() {
-  dispatcher_.reset();
-}
-
 void MIDIAccessInitializer::ContextDestroyed() {
-  dispatcher_.reset();
-
   ScriptPromiseResolver::ContextDestroyed();
 }
 
 ScriptPromise MIDIAccessInitializer::Start() {
-  ScriptPromise promise = this->Promise();
+  ScriptPromise promise = Promise();
 
   // See https://bit.ly/2S0zRAS for task types.
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
@@ -72,7 +66,7 @@ void MIDIAccessInitializer::DidAddInputPort(const String& id,
                                             PortState state) {
   DCHECK(dispatcher_);
   port_descriptors_.push_back(PortDescriptor(
-      id, manufacturer, name, MIDIPort::kTypeInput, version, state));
+      id, manufacturer, name, MIDIPortType::kInput, version, state));
 }
 
 void MIDIAccessInitializer::DidAddOutputPort(const String& id,
@@ -82,7 +76,7 @@ void MIDIAccessInitializer::DidAddOutputPort(const String& id,
                                              PortState state) {
   DCHECK(dispatcher_);
   port_descriptors_.push_back(PortDescriptor(
-      id, manufacturer, name, MIDIPort::kTypeOutput, version, state));
+      id, manufacturer, name, MIDIPortType::kOutput, version, state));
 }
 
 void MIDIAccessInitializer::DidSetInputPortState(unsigned port_index,
@@ -108,7 +102,7 @@ void MIDIAccessInitializer::DidStartSession(Result result) {
       break;
     case Result::OK:
       return Resolve(MakeGarbageCollected<MIDIAccess>(
-          std::move(dispatcher_), options_->hasSysex() && options_->sysex(),
+          dispatcher_, options_->hasSysex() && options_->sysex(),
           port_descriptors_, GetExecutionContext()));
     case Result::NOT_SUPPORTED:
       return Reject(MakeGarbageCollected<DOMException>(
@@ -125,6 +119,7 @@ void MIDIAccessInitializer::DidStartSession(Result result) {
 }
 
 void MIDIAccessInitializer::Trace(Visitor* visitor) const {
+  visitor->Trace(dispatcher_);
   visitor->Trace(options_);
   visitor->Trace(permission_service_);
   ScriptPromiseResolver::Trace(visitor);
@@ -137,10 +132,7 @@ ExecutionContext* MIDIAccessInitializer::GetExecutionContext() const {
 void MIDIAccessInitializer::StartSession() {
   DCHECK(!dispatcher_);
 
-  // See https://bit.ly/2S0zRAS for task types.
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-      GetExecutionContext()->GetTaskRunner(TaskType::kMiscPlatformAPI);
-  dispatcher_ = std::make_unique<MIDIDispatcher>(task_runner);
+  dispatcher_ = MakeGarbageCollected<MIDIDispatcher>(GetExecutionContext());
   dispatcher_->SetClient(this);
 }
 

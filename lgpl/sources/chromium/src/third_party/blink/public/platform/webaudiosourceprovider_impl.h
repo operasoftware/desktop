@@ -11,12 +11,13 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/callback_forward.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "media/base/audio_renderer_sink.h"
-#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_audio_source_provider.h"
+#include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_vector.h"
 
 namespace media {
@@ -51,14 +52,23 @@ class BLINK_PLATFORM_EXPORT WebAudioSourceProviderImpl
                                    uint32_t frames_delayed,
                                    int sample_rate)>;
 
+  // Optionally provide a callback to be run the first time a
+  // WebAudioSourceProviderClient is attached via SetClient(). Note that the
+  // callback will be run once at most, however SetClient may be called any
+  // number of times.
   WebAudioSourceProviderImpl(
       scoped_refptr<media::SwitchableAudioRendererSink> sink,
-      media::MediaLog* media_log);
+      media::MediaLog* media_log,
+      base::OnceClosure on_set_client_callback = base::OnceClosure());
+
+  WebAudioSourceProviderImpl(const WebAudioSourceProviderImpl&) = delete;
+  WebAudioSourceProviderImpl& operator=(const WebAudioSourceProviderImpl&) =
+      delete;
 
   // WebAudioSourceProvider implementation.
   void SetClient(WebAudioSourceProviderClient* client) override;
   void ProvideInput(const WebVector<float*>& audio_data,
-                    size_t number_of_frames) override;
+                    int number_of_frames) override;
 
   // RestartableAudioRendererSink implementation.
   void Initialize(const media::AudioParameters& params,
@@ -75,6 +85,7 @@ class BLINK_PLATFORM_EXPORT WebAudioSourceProviderImpl
   bool CurrentThreadIsRenderingThread() override;
   void SwitchOutputDevice(const std::string& device_id,
                           media::OutputDeviceStatusCB callback) override;
+  void TaintOrigin();
 
   // These methods allow a client to get a copy of the rendered audio.
   void SetCopyAudioCallback(CopyAudioCB callback);
@@ -102,7 +113,7 @@ class BLINK_PLATFORM_EXPORT WebAudioSourceProviderImpl
   base::RepeatingClosure set_format_cb_;
 
   // When set via setClient() it overrides |sink_| for consuming audio.
-  WebAudioSourceProviderClient* client_;
+  raw_ptr<WebAudioSourceProviderClient> client_;
 
   // Where audio ends up unless overridden by |client_|.
   base::Lock sink_lock_;
@@ -114,12 +125,12 @@ class BLINK_PLATFORM_EXPORT WebAudioSourceProviderImpl
   class TeeFilter;
   const std::unique_ptr<TeeFilter> tee_filter_;
 
-  media::MediaLog* const media_log_;
+  const raw_ptr<media::MediaLog> media_log_;
+
+  base::OnceClosure on_set_client_callback_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<WebAudioSourceProviderImpl> weak_factory_{this};
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(WebAudioSourceProviderImpl);
 };
 
 }  // namespace blink

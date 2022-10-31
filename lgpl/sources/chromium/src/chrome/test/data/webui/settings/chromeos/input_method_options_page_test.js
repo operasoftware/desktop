@@ -2,6 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'chrome://os-settings/chromeos/lazy_load.js';
+
+import {CrSettingsPrefs, Router, routes} from 'chrome://os-settings/chromeos/os_settings.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {waitAfterNextRender} from '../../test_util.js';
+
+import {FakeSettingsPrivate} from './fake_settings_private.js';
+
 /**
  * @fileoverview Suite of tests for the OS Settings input method options page.
  */
@@ -23,7 +32,7 @@ function getFakePrefs() {
       'xkb:us::eng': {
         physicalKeyboardAutoCorrectionLevel: 0,
         physicalKeyboardEnableCapitalization: false,
-      }
+      },
     },
   }];
 }
@@ -36,7 +45,7 @@ suite('InputMethodOptionsPage', function() {
     PolymerTest.clearBody();
     CrSettingsPrefs.deferInitialization = true;
     const settingsPrefs = document.createElement('settings-prefs');
-    settingsPrivate = new settings.FakeSettingsPrivate(getFakePrefs());
+    settingsPrivate = new FakeSettingsPrivate(getFakePrefs());
     settingsPrefs.initialize(settingsPrivate);
     document.body.appendChild(settingsPrefs);
     await CrSettingsPrefs.initialized;
@@ -51,15 +60,16 @@ suite('InputMethodOptionsPage', function() {
    * @param {string} id Input method ID.
    */
   function createOptionsPage(id) {
-    const params = new URLSearchParams;
+    const params = new URLSearchParams();
     params.append('id', id);
-    settings.Router.getInstance().navigateTo(
-        settings.routes.OS_LANGUAGES_INPUT_METHOD_OPTIONS, params);
+    Router.getInstance().navigateTo(
+        routes.OS_LANGUAGES_INPUT_METHOD_OPTIONS, params);
 
-    Polymer.dom.flush();
+    flush();
   }
 
   test('US English page', () => {
+    loadTimeData.overrideValues({allowPredictiveWriting: false});
     createOptionsPage(FIRST_PARTY_INPUT_METHOD_ID_PREFIX + 'xkb:us::eng');
     const titles = optionsPage.shadowRoot.querySelectorAll('h2');
     assertTrue(!!titles);
@@ -68,20 +78,31 @@ suite('InputMethodOptionsPage', function() {
     assertEquals(titles[1].textContent, 'On-screen keyboard');
   });
 
+  test('US English page with predictive writing', () => {
+    loadTimeData.overrideValues({allowPredictiveWriting: true});
+    createOptionsPage(FIRST_PARTY_INPUT_METHOD_ID_PREFIX + 'xkb:us::eng');
+    const titles = optionsPage.shadowRoot.querySelectorAll('h2');
+    assertTrue(!!titles);
+    assertEquals(titles.length, 3);
+    assertEquals(titles[0].textContent, 'Physical keyboard');
+    assertEquals(titles[1].textContent, 'On-screen keyboard');
+    assertEquals(titles[2].textContent, 'Suggestions');
+  });
+
   test('Pinyin page', () => {
     createOptionsPage(FIRST_PARTY_INPUT_METHOD_ID_PREFIX + 'zh-t-i0-pinyin');
     const titles = optionsPage.shadowRoot.querySelectorAll('h2');
     assertTrue(!!titles);
     assertEquals(titles.length, 2);
-    assertEquals(titles[0].textContent, 'Basics');
-    assertEquals(titles[1].textContent, 'Advanced');
+    assertEquals(titles[0].textContent, 'Advanced');
+    assertEquals(titles[1].textContent, 'Physical keyboard');
   });
 
   test('updates options in prefs', async () => {
     createOptionsPage(FIRST_PARTY_INPUT_METHOD_ID_PREFIX + 'xkb:us::eng');
     const options = optionsPage.shadowRoot.querySelectorAll('.list-item');
     assertTrue(!!options);
-    assertEquals(options.length, 9);
+    assertEquals(options.length, 8);
     assertEquals(
         options[0].querySelector('.start').textContent.trim(),
         'Auto-correction');
@@ -89,7 +110,7 @@ suite('InputMethodOptionsPage', function() {
     assertEquals(select.value, '0');
     select.value = '1';
     select.dispatchEvent(new CustomEvent('change'));
-    await test_util.waitAfterNextRender(select);
+    await waitAfterNextRender(select);
     assertEquals(
         optionsPage.getPref(PREFS_KEY)
             .value['xkb:us::eng']['physicalKeyboardAutoCorrectionLevel'],
@@ -97,15 +118,15 @@ suite('InputMethodOptionsPage', function() {
 
     assertEquals(
         options[1].querySelector('.start').textContent.trim(),
-        'Auto-capitalization');
+        'Sound on keypress');
     const toggleButton = options[1].querySelector('cr-toggle');
     assertEquals(toggleButton.checked, false);
     toggleButton.click();
-    await test_util.waitAfterNextRender(toggleButton);
+    await waitAfterNextRender(toggleButton);
     assertEquals(toggleButton.checked, true);
     assertEquals(
         optionsPage.getPref(PREFS_KEY)
-            .value['xkb:us::eng']['physicalKeyboardEnableCapitalization'],
+            .value['xkb:us::eng']['enableSoundOnKeypress'],
         true);
   });
 });

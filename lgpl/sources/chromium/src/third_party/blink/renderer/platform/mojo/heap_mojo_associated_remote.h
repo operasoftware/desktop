@@ -9,9 +9,9 @@
 
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "third_party/blink/renderer/platform/context_lifecycle_observer.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/mojo/features.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
+#include "third_party/blink/renderer/platform/mojo/mojo_binding_context.h"
 
 namespace blink {
 
@@ -57,16 +57,17 @@ class HeapMojoAssociatedRemote {
     wrapper_->associated_remote().set_disconnect_with_reason_handler(
         std::move(handler));
   }
-  mojo::PendingAssociatedReceiver<Interface> BindNewEndpointAndPassReceiver(
-      scoped_refptr<base::SequencedTaskRunner> task_runner) WARN_UNUSED_RESULT {
+  [[nodiscard]] mojo::PendingAssociatedReceiver<Interface>
+  BindNewEndpointAndPassReceiver(
+      scoped_refptr<base::SequencedTaskRunner> task_runner) {
     DCHECK(task_runner);
     return wrapper_->associated_remote().BindNewEndpointAndPassReceiver(
         std::move(task_runner));
   }
-  mojo::PendingAssociatedReceiver<Interface>
-  BindNewEndpointAndPassDedicatedReceiverForTesting() WARN_UNUSED_RESULT {
+  [[nodiscard]] mojo::PendingAssociatedReceiver<Interface>
+  BindNewEndpointAndPassDedicatedReceiver() {
     return wrapper_->associated_remote()
-        .BindNewEndpointAndPassDedicatedReceiverForTesting();
+        .BindNewEndpointAndPassDedicatedReceiver();
   }
   void Bind(mojo::PendingAssociatedRemote<Interface> pending_associated_remote,
             scoped_refptr<base::SequencedTaskRunner> task_runner) {
@@ -84,8 +85,6 @@ class HeapMojoAssociatedRemote {
   // Garbage collected wrapper class to add ContextLifecycleObserver.
   class Wrapper final : public GarbageCollected<Wrapper>,
                         public ContextLifecycleObserver {
-    USING_GARBAGE_COLLECTED_MIXIN(Wrapper);
-
    public:
     explicit Wrapper(ContextLifecycleNotifier* notifier) {
       SetContextLifecycleNotifier(notifier);
@@ -105,9 +104,7 @@ class HeapMojoAssociatedRemote {
 
     // ContextLifecycleObserver methods
     void ContextDestroyed() override {
-      if (Mode == HeapMojoWrapperMode::kWithContextObserver ||
-          (Mode == HeapMojoWrapperMode::kWithoutContextObserver &&
-           base::FeatureList::IsEnabled(kHeapMojoUseContextObserver)))
+      if (Mode == HeapMojoWrapperMode::kWithContextObserver)
         associated_remote_.reset();
     }
 

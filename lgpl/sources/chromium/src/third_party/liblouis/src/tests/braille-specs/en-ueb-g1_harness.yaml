@@ -9,14 +9,14 @@
 
 display: unicode-without-blank.dis
 table:
-  locale: en
+  language: en
   grade: 1
   system: ueb
   __assert-match: en-ueb-g1.ctb
 tests:
   - [°, ⠘⠚]
   - [–, ⠠⠤]
-  - [—, ⠐⠠⠤]
+  - [—, ⠠⠤]
   - [―, ⠐⠠⠤]
   - [±, ⠸⠖]
   - [¼, ⠼⠁⠌⠙]
@@ -104,3 +104,7 @@ tests:
     - {typeform: {underline: '++++++++++++++++++++++'}}
   - - ..... ---- __init__
     - ⠲⠲⠲⠲⠲ ⠤⠤⠤⠤ ⠨⠤⠨⠤⠊⠝⠊⠞⠨⠤⠨⠤
+
+  # more ligature examples (see section 4.3.3 in the rule book)
+  - [Ætna, ⠠⠁⠠⠘⠖⠑⠞⠝⠁]
+  - [ŒDIPUS, ⠠⠠⠕⠘⠖⠑⠙⠊⠏⠥⠎]

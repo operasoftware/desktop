@@ -112,6 +112,14 @@ scoped_refptr<SimpleFontData> CSSFontFace::GetFontData(
   if (!IsValid())
     return nullptr;
 
+  // Apply the 'size-adjust' descriptor before font selection.
+  // https://drafts.csswg.org/css-fonts-5/#descdef-font-face-size-adjust
+  const FontDescription& size_adjusted_description =
+      font_face_->HasSizeAdjust()
+          ? font_description.SizeAdjustedFontDescription(
+                font_face_->GetSizeAdjust())
+          : font_description;
+
   // https://www.w3.org/TR/css-fonts-4/#src-desc
   // "When a font is needed the user agent iterates over the set of references
   // listed, using the first one it can successfully activate."
@@ -123,8 +131,15 @@ scoped_refptr<SimpleFontData> CSSFontFace::GetFontData(
     if (source->IsInFailurePeriod())
       return nullptr;
 
-    if (scoped_refptr<SimpleFontData> result = source->GetFontData(
-            font_description, font_face_->GetFontSelectionCapabilities())) {
+    if (scoped_refptr<SimpleFontData> result =
+            source->GetFontData(size_adjusted_description,
+                                font_face_->GetFontSelectionCapabilities())) {
+      if (font_face_->HasFontMetricsOverride()) {
+        // TODO(xiaochengh): Try not to create a temporary
+        // SimpleFontData.
+        result = result->MetricsOverriddenFontData(
+            font_face_->GetFontMetricsOverride());
+      }
       // The active source may already be loading or loaded. Adjust our
       // FontFace status accordingly.
       if (LoadStatus() == FontFace::kUnloaded &&
@@ -174,7 +189,7 @@ bool CSSFontFace::MaybeLoadFont(const FontDescription& font_description,
 void CSSFontFace::Load() {
   FontDescription font_description;
   FontFamily font_family;
-  font_family.SetFamily(font_face_->family());
+  font_family.SetFamily(font_face_->family(), FontFamily::Type::kFamilyName);
   font_description.SetFamily(font_family);
   Load(font_description);
 }

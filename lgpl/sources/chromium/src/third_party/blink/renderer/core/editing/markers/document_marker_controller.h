@@ -31,32 +31,34 @@
 
 #include <utility>
 
-#include "base/macros.h"
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/synchronous_mutation_observer.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/editing/iterators/text_iterator.h"
 #include "third_party/blink/renderer/core/editing/markers/composition_marker.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker.h"
+#include "third_party/blink/renderer/core/editing/markers/document_marker_group.h"
 #include "third_party/blink/renderer/core/editing/markers/suggestion_marker.h"
 #include "third_party/blink/renderer/core/editing/markers/text_match_marker.h"
-#include "third_party/blink/renderer/platform/geometry/int_rect.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace blink {
 
 class DocumentMarkerList;
+class Highlight;
 class SuggestionMarkerProperties;
 
 class CORE_EXPORT DocumentMarkerController final
     : public GarbageCollected<DocumentMarkerController>,
       public SynchronousMutationObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(DocumentMarkerController);
-
  public:
   explicit DocumentMarkerController(Document&);
+  DocumentMarkerController(const DocumentMarkerController&) = delete;
+  DocumentMarkerController& operator=(const DocumentMarkerController&) = delete;
 
   void Clear();
   void AddSpellingMarker(const EphemeralRange&,
@@ -79,6 +81,9 @@ class CORE_EXPORT DocumentMarkerController final
   void AddSuggestionMarker(const EphemeralRange&,
                            const SuggestionMarkerProperties&);
   void AddTextFragmentMarker(const EphemeralRange&);
+  void AddCustomHighlightMarker(const EphemeralRange&,
+                                const String& highlight_name,
+                                const Member<Highlight> highlight);
 
   void MoveMarkers(const Text& src_node, int length, const Text& dst_node);
 
@@ -92,6 +97,8 @@ class CORE_EXPORT DocumentMarkerController final
   void RemoveSuggestionMarkerByTag(const Text&, int32_t marker_tag);
   void RemoveSuggestionMarkerByType(
       const EphemeralRangeInFlatTree& range,
+      const SuggestionMarker::SuggestionType& type);
+  void RemoveSuggestionMarkerByType(
       const SuggestionMarker::SuggestionType& type);
   // Removes suggestion marker with |RemoveOnFinishComposing::kRemove|.
   void RemoveSuggestionMarkerInRangeOnFinish(const EphemeralRangeInFlatTree&);
@@ -138,6 +145,29 @@ class CORE_EXPORT DocumentMarkerController final
       unsigned start_offset,
       unsigned end_offset,
       DocumentMarker::MarkerTypes);
+  // Wrappers for FirstMarker functions that return the DocumentMarkerGroup for
+  // the found DocumentMarker.
+  DocumentMarkerGroup* FirstMarkerGroupAroundPosition(
+      const PositionInFlatTree&,
+      DocumentMarker::MarkerTypes);
+  DocumentMarkerGroup* FirstMarkerGroupIntersectingEphemeralRange(
+      const EphemeralRange&,
+      DocumentMarker::MarkerTypes);
+  DocumentMarkerGroup* FirstMarkerGroupIntersectingOffsetRange(
+      const Text&,
+      unsigned start_offset,
+      unsigned end_offset,
+      DocumentMarker::MarkerTypes);
+  // If the given position is either at the boundary or inside a word, expands
+  // the position to the surrounding word and then looks for all markers having
+  // the specified type. If the position is neither at the boundary or inside a
+  // word, expands the position to cover the space between the end of the
+  // previous and the start of the next words. If such markers exist, this
+  // method will return all of them in their corresponding node. Otherwise,
+  // this method will return an empty list.
+  HeapVector<std::pair<Member<const Text>, Member<DocumentMarker>>>
+  MarkersAroundPosition(const PositionInFlatTree& position,
+                        DocumentMarker::MarkerTypes types);
   // Return all markers of the specified types whose interiors have non-empty
   // overlap with the specified range. Note that the range can be collapsed, in
   // in which case markers containing the position in their interiors are
@@ -149,10 +179,11 @@ class CORE_EXPORT DocumentMarkerController final
       const Text&,
       DocumentMarker::MarkerTypes = DocumentMarker::MarkerTypes::All()) const;
   DocumentMarkerVector Markers() const;
+  DocumentMarkerVector CustomHighlightMarkersNotOverlapping(const Text&) const;
   DocumentMarkerVector ComputeMarkersToPaint(const Text&) const;
 
   bool PossiblyHasTextMatchMarkers() const;
-  Vector<IntRect> LayoutRectsForTextMatchMarkers();
+  Vector<gfx::Rect> LayoutRectsForTextMatchMarkers();
   void InvalidateRectsForAllTextMatchMarkers();
   void InvalidateRectsForTextMatchMarkersInNode(const Text&);
 
@@ -176,6 +207,7 @@ class CORE_EXPORT DocumentMarkerController final
       std::function<DocumentMarker*(int, int)> create_marker_from_offsets,
       const TextIteratorBehavior& iterator_behavior = {});
   void AddMarkerToNode(const Text&, DocumentMarker*);
+  DocumentMarkerGroup* GetMarkerGroupForMarker(const DocumentMarker* marker);
 
   using MarkerLists = HeapVector<Member<DocumentMarkerList>,
                                  DocumentMarker::kMarkerTypeIndexesCount>;
@@ -190,23 +222,28 @@ class CORE_EXPORT DocumentMarkerController final
                              unsigned start_offset,
                              int length,
                              DocumentMarker::MarkerTypes);
+  // Searches `markers_` for `key`. Returns the mapped value if it is present,
+  // otherwise nullptr. Crashes if the value is present and it is nullptr.
+  MarkerLists* FindMarkers(const Text* key) const;
 
   // Called after weak processing of |markers_| is done.
   void DidProcessMarkerMap(const LivenessBroker&);
 
   MarkerMap markers_;
+
+  using MarkerGroup = HeapHashMap<WeakMember<const DocumentMarker>,
+                                  Member<DocumentMarkerGroup>>;
+  MarkerGroup marker_groups_;
   // Provide a quick way to determine whether a particular marker type is absent
   // without going through the map.
   DocumentMarker::MarkerTypes possibly_existing_marker_types_;
   const Member<Document> document_;
-
-  DISALLOW_COPY_AND_ASSIGN(DocumentMarkerController);
 };
 
 }  // namespace blink
 
 #if DCHECK_IS_ON()
-void showDocumentMarkers(const blink::DocumentMarkerController*);
+void ShowDocumentMarkers(const blink::DocumentMarkerController*);
 #endif
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_DOCUMENT_MARKER_CONTROLLER_H_

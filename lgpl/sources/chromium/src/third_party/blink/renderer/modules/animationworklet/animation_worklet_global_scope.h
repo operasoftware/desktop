@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_ANIMATIONWORKLET_ANIMATION_WORKLET_GLOBAL_SCOPE_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_ANIMATIONWORKLET_ANIMATION_WORKLET_GLOBAL_SCOPE_H_
 
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/core/workers/worklet_global_scope.h"
 #include "third_party/blink/renderer/modules/animationworklet/animator.h"
@@ -12,6 +13,7 @@
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/graphics/animation_worklet_mutators_state.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
@@ -61,21 +63,38 @@ class MODULES_EXPORT AnimationWorkletGlobalScope : public WorkletGlobalScope {
   }
   unsigned GetAnimatorsSizeForTest() { return animators_.size(); }
 
+  // Returns the token that uniquely identifies this worklet.
+  const AnimationWorkletToken& GetAnimationWorkletToken() const {
+    return token_;
+  }
+  WorkletToken GetWorkletToken() const final { return token_; }
+  ExecutionContextToken GetExecutionContextToken() const final {
+    return token_;
+  }
+
  private:
   void RegisterWithProxyClientIfNeeded();
+
+  // TODO(crbug.com/1286242): Return a proper destination for AnimationWorklet.
+  network::mojom::RequestDestination GetDestination() const override {
+    return network::mojom::RequestDestination::kScript;
+  }
+
   Animator* CreateInstance(
       const String& name,
       WorkletAnimationOptions options,
       scoped_refptr<SerializedScriptValue> serialized_state,
-      const Vector<base::Optional<base::TimeDelta>>& local_times,
-      const Vector<Timing>& timings);
+      const Vector<absl::optional<base::TimeDelta>>& local_times,
+      const Vector<Timing>& timings,
+      const Vector<Timing::NormalizedTiming>& normalized_timings);
   Animator* CreateAnimatorFor(
       int animation_id,
       const String& name,
       WorkletAnimationOptions options,
       scoped_refptr<SerializedScriptValue> serialized_state,
-      const Vector<base::Optional<base::TimeDelta>>& local_times,
-      const Vector<Timing>& timings);
+      const Vector<absl::optional<base::TimeDelta>>& local_times,
+      const Vector<Timing>& timings,
+      const Vector<Timing::NormalizedTiming>& normalized_timings);
   typedef HeapHashMap<String, Member<AnimatorDefinition>> DefinitionMap;
   DefinitionMap animator_definitions_;
 
@@ -83,6 +102,9 @@ class MODULES_EXPORT AnimationWorkletGlobalScope : public WorkletGlobalScope {
   AnimatorMap animators_;
 
   bool registered_ = false;
+
+  // Default initialized to generate a distinct token for this worklet.
+  const AnimationWorkletToken token_;
 };
 
 template <>

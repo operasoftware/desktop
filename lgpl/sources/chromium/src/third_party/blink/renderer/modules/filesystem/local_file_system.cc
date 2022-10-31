@@ -83,9 +83,6 @@ void LocalFileSystem::RequestFileSystem(
   RequestFileSystemAccessInternal(WTF::Bind(
       &LocalFileSystem::RequestFileSystemCallback,
       WrapCrossThreadPersistent(this), type, std::move(callbacks), sync_type));
-  GetSupplementable()->GetScheduler()->RegisterStickyFeature(
-      blink::SchedulingPolicy::Feature::kWebFileSystem,
-      {blink::SchedulingPolicy::RecordMetricsForBackForwardCache()});
 }
 
 void LocalFileSystem::RequestFileSystemCallback(
@@ -107,7 +104,9 @@ void LocalFileSystem::RequestFileSystemAccessInternal(
     if (!client) {
       std::move(callback).Run(true);
     } else {
-      client->RequestFileSystemAccessAsync(std::move(callback));
+      client->AllowStorageAccess(
+          WebContentSettingsClient::StorageType::kFileSystem,
+          std::move(callback));
     }
     return;
   }
@@ -116,7 +115,8 @@ void LocalFileSystem::RequestFileSystemAccessInternal(
     if (!client) {
       std::move(callback).Run(true);
     } else {
-      std::move(callback).Run(client->RequestFileSystemAccessSync());
+      std::move(callback).Run(client->AllowStorageAccessSync(
+          WebContentSettingsClient::StorageType::kFileSystem));
     }
     return;
   }
@@ -127,18 +127,18 @@ void LocalFileSystem::FileSystemNotAllowedInternal(
     std::unique_ptr<FileSystemCallbacks> callbacks) {
   GetSupplementable()
       ->GetTaskRunner(TaskType::kFileReading)
-      ->PostTask(FROM_HERE, WTF::Bind(&FileSystemCallbacks::DidFail,
-                                      WTF::Passed(std::move(callbacks)),
-                                      base::File::FILE_ERROR_ABORT));
+      ->PostTask(FROM_HERE,
+                 WTF::Bind(&FileSystemCallbacks::DidFail, std::move(callbacks),
+                           base::File::FILE_ERROR_ABORT));
 }
 
 void LocalFileSystem::FileSystemNotAllowedInternal(
     std::unique_ptr<ResolveURICallbacks> callbacks) {
   GetSupplementable()
       ->GetTaskRunner(TaskType::kFileReading)
-      ->PostTask(FROM_HERE, WTF::Bind(&ResolveURICallbacks::DidFail,
-                                      WTF::Passed(std::move(callbacks)),
-                                      base::File::FILE_ERROR_ABORT));
+      ->PostTask(FROM_HERE,
+                 WTF::Bind(&ResolveURICallbacks::DidFail, std::move(callbacks),
+                           base::File::FILE_ERROR_ABORT));
 }
 
 void LocalFileSystem::FileSystemAllowedInternal(

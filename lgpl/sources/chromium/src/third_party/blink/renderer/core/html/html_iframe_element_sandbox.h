@@ -6,7 +6,6 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_IFRAME_ELEMENT_SANDBOX_H_
 
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace blink {
 
@@ -22,4 +21,4 @@ class HTMLIFrameElementSandbox final : public DOMTokenList {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_IFRAME_ELEMENT_SANDBOX_H_

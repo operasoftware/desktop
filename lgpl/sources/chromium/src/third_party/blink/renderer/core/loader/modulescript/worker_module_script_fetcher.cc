@@ -4,17 +4,24 @@
 
 #include "third_party/blink/renderer/core/loader/modulescript/worker_module_script_fetcher.h"
 
-#include "services/network/public/mojom/ip_address_space.mojom-blink.h"
+#include <memory>
+
 #include "services/network/public/mojom/referrer_policy.mojom-blink.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/loader/network_utils.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_source_location_type.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher_properties.h"
+#include "third_party/blink/renderer/platform/loader/fetch/unique_identifier.h"
 #include "third_party/blink/renderer/platform/network/content_security_policy_response_headers.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
+#include "third_party/blink/renderer/platform/network/http_parsers.h"
+#include "third_party/blink/renderer/platform/network/mime/mime_type_registry.h"
 #include "third_party/blink/renderer/platform/network/network_utils.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 
@@ -22,20 +29,45 @@ namespace blink {
 
 WorkerModuleScriptFetcher::WorkerModuleScriptFetcher(
     WorkerGlobalScope* global_scope,
-    util::PassKey<ModuleScriptLoader> pass_key)
+    base::PassKey<ModuleScriptLoader> pass_key)
     : ModuleScriptFetcher(pass_key), global_scope_(global_scope) {}
 
 // <specdef href="https://html.spec.whatwg.org/C/#run-a-worker">
 void WorkerModuleScriptFetcher::Fetch(
     FetchParameters& fetch_params,
+    ModuleType expected_module_type,
     ResourceFetcher* fetch_client_settings_object_fetcher,
     ModuleGraphLevel level,
     ModuleScriptFetcher::Client* client) {
+  DCHECK_EQ(fetch_params.GetScriptType(), mojom::blink::ScriptType::kModule);
   DCHECK(global_scope_->IsContextThread());
   DCHECK(!fetch_client_settings_object_fetcher_);
   fetch_client_settings_object_fetcher_ = fetch_client_settings_object_fetcher;
   client_ = client;
   level_ = level;
+  expected_module_type_ = expected_module_type;
+
+  // Use WorkerMainScriptLoader to load the main script when
+  // dedicated workers (PlzDedicatedWorker) and shared workers.
+  std::unique_ptr<WorkerMainScriptLoadParameters>
+      worker_main_script_load_params =
+          global_scope_->TakeWorkerMainScriptLoadingParametersForModules();
+  if (worker_main_script_load_params) {
+    DCHECK_EQ(level_, ModuleGraphLevel::kTopLevelModuleFetch);
+
+    auto identifier = CreateUniqueIdentifier();
+    if (global_scope_->IsServiceWorkerGlobalScope()) {
+      global_scope_->SetMainResoureIdentifier(identifier);
+    }
+
+    fetch_params.MutableResourceRequest().SetInspectorId(identifier);
+    worker_main_script_loader_ = MakeGarbageCollected<WorkerMainScriptLoader>();
+    worker_main_script_loader_->Start(
+        fetch_params, std::move(worker_main_script_load_params),
+        &fetch_client_settings_object_fetcher->Context(),
+        fetch_client_settings_object_fetcher->GetResourceLoadObserver(), this);
+    return;
+  }
 
   // <spec step="12">In both cases, to perform the fetch given request, perform
   // the following steps if the is top-level flag is set:</spec>
@@ -56,6 +88,7 @@ void WorkerModuleScriptFetcher::Trace(Visitor* visitor) const {
   visitor->Trace(client_);
   visitor->Trace(global_scope_);
   visitor->Trace(fetch_client_settings_object_fetcher_);
+  visitor->Trace(worker_main_script_loader_);
 }
 
 // https://html.spec.whatwg.org/C/#worker-processing-model
@@ -63,14 +96,30 @@ void WorkerModuleScriptFetcher::NotifyFinished(Resource* resource) {
   DCHECK(global_scope_->IsContextThread());
   ClearResource();
 
-  ScriptResource* script_resource = ToScriptResource(resource);
-  HeapVector<Member<ConsoleMessage>> error_messages;
-  ModuleScriptCreationParams::ModuleType module_type;
-  if (!WasModuleLoadSuccessful(script_resource, &error_messages,
-                               &module_type)) {
-    client_->NotifyFetchFinished(base::nullopt, error_messages);
-    return;
+  auto* script_resource = To<ScriptResource>(resource);
+  {
+    HeapVector<Member<ConsoleMessage>> error_messages;
+    if (!WasModuleLoadSuccessful(script_resource, expected_module_type_,
+                                 &error_messages)) {
+      client_->NotifyFetchFinishedError(error_messages);
+      return;
+    }
   }
+
+  NotifyClient(resource->Url(), expected_module_type_,
+               script_resource->SourceText(), resource->GetResponse(),
+               script_resource->CacheHandler());
+}
+
+void WorkerModuleScriptFetcher::NotifyClient(
+    const KURL& request_url,
+    ModuleType module_type,
+    const ParkableString& source_text,
+    const ResourceResponse& response,
+    SingleCachedMetadataHandler* cache_handler) {
+  HeapVector<Member<ConsoleMessage>> error_messages;
+
+  const KURL response_url = response.ResponseUrl();
 
   if (level_ == ModuleGraphLevel::kTopLevelModuleFetch) {
     // TODO(nhiroki, hiroshige): Access to WorkerGlobalScope in module loaders
@@ -81,8 +130,6 @@ void WorkerModuleScriptFetcher::NotifyFinished(Resource* resource) {
     // (https://crbug.com/845285)
 
     // Ensure redirects don't affect SecurityOrigin.
-    const KURL request_url = resource->Url();
-    const KURL response_url = resource->GetResponse().CurrentRequestUrl();
     DCHECK(fetch_client_settings_object_fetcher_->GetProperties()
                .GetFetchClientSettingsObject()
                .GetSecurityOrigin()
@@ -108,61 +155,85 @@ void WorkerModuleScriptFetcher::NotifyFinished(Resource* resource) {
           mojom::ConsoleMessageSource::kSecurity,
           mojom::ConsoleMessageLevel::kError,
           "Refused to cross-origin redirects of the top-level worker script."));
-      client_->NotifyFetchFinished(base::nullopt, error_messages);
+      client_->NotifyFetchFinishedError(error_messages);
       return;
     }
 
     auto response_referrer_policy = network::mojom::ReferrerPolicy::kDefault;
     const String response_referrer_policy_header =
-        resource->GetResponse().HttpHeaderField(http_names::kReferrerPolicy);
+        response.HttpHeaderField(http_names::kReferrerPolicy);
     if (!response_referrer_policy_header.IsNull()) {
       SecurityPolicy::ReferrerPolicyFromHeaderValue(
           response_referrer_policy_header,
           kDoNotSupportReferrerPolicyLegacyKeywords, &response_referrer_policy);
     }
 
-    // Calculate an address space from worker script's response url according to
-    // the "CORS and RFC1918" spec:
-    // https://wicg.github.io/cors-rfc1918/#integration-html
-    //
-    // Currently this implementation is not fully consistent with the spec for
-    // historical reasons.
-    // TODO(https://crbug.com/955213): Make this consistent with the spec.
-    // TODO(https://crbug.com/955213): Move this function to a more appropriate
-    // place so that this is shareable out of worker code.
-    auto response_address_space = network::mojom::IPAddressSpace::kPublic;
-    if (network_utils::IsReservedIPAddress(
-            resource->GetResponse().RemoteIPAddress())) {
-      response_address_space = network::mojom::IPAddressSpace::kPrivate;
-    }
-    if (SecurityOrigin::Create(response_url)->IsLocalhost())
-      response_address_space = network::mojom::IPAddressSpace::kLocal;
-
-    auto* response_content_security_policy =
-        MakeGarbageCollected<ContentSecurityPolicy>();
-    response_content_security_policy->DidReceiveHeaders(
-        ContentSecurityPolicyResponseHeaders(resource->GetResponse()));
-
     std::unique_ptr<Vector<String>> response_origin_trial_tokens =
         OriginTrialContext::ParseHeaderValue(
-            resource->GetResponse().HttpHeaderField(http_names::kOriginTrial));
+            response.HttpHeaderField(http_names::kOriginTrial));
 
     // Step 12.3-12.6 are implemented in Initialize().
-    global_scope_->Initialize(response_url, response_referrer_policy,
-                              response_address_space,
-                              response_content_security_policy->Headers(),
-                              response_origin_trial_tokens.get(),
-                              resource->GetResponse().AppCacheID());
+    global_scope_->Initialize(
+        response_url, response_referrer_policy,
+        ParseContentSecurityPolicyHeaders(
+            ContentSecurityPolicyResponseHeaders(response)),
+        response_origin_trial_tokens.get());
   }
-
-  ModuleScriptCreationParams params(
-      script_resource->GetResponse().CurrentRequestUrl(), module_type,
-      script_resource->SourceText(), script_resource->CacheHandler(),
-      script_resource->GetResourceRequest().GetCredentialsMode());
 
   // <spec step="12.7">Asynchronously complete the perform the fetch steps with
   // response.</spec>
-  client_->NotifyFetchFinished(params, error_messages);
+  // Create an external module script where base_url == source_url.
+  // https://html.spec.whatwg.org/multipage/webappapis.html#concept-script-base-url
+  client_->NotifyFetchFinishedSuccess(ModuleScriptCreationParams(
+      /*source_url=*/response_url, /*base_url=*/response_url,
+      ScriptSourceLocationType::kExternalFile, module_type, source_text,
+      cache_handler));
+}
+
+void WorkerModuleScriptFetcher::DidReceiveData(base::span<const char> span) {
+  if (!decoder_) {
+    decoder_ = std::make_unique<TextResourceDecoder>(TextResourceDecoderOptions(
+        TextResourceDecoderOptions::kPlainTextContent,
+        worker_main_script_loader_->GetScriptEncoding()));
+  }
+  if (!span.size())
+    return;
+  source_text_.Append(decoder_->Decode(span.data(), span.size()));
+}
+
+void WorkerModuleScriptFetcher::OnStartLoadingBody(
+    const ResourceResponse& resource_response) {
+  if (!MIMETypeRegistry::IsSupportedJavaScriptMIMEType(
+          resource_response.HttpContentType())) {
+    HeapVector<Member<ConsoleMessage>> error_messages;
+    String message =
+        "Failed to load module script: The server responded with a "
+        "non-JavaScript MIME type of \"" +
+        resource_response.HttpContentType() +
+        "\". Strict MIME type checking is enforced for module scripts per HTML "
+        "spec.";
+    error_messages.push_back(MakeGarbageCollected<ConsoleMessage>(
+        mojom::ConsoleMessageSource::kJavaScript,
+        mojom::ConsoleMessageLevel::kError, message,
+        resource_response.ResponseUrl().GetString(), /*loader=*/nullptr, -1));
+    worker_main_script_loader_->Cancel();
+    client_->NotifyFetchFinishedError(error_messages);
+    return;
+  }
+}
+
+void WorkerModuleScriptFetcher::OnFinishedLoadingWorkerMainScript() {
+  const ResourceResponse& response = worker_main_script_loader_->GetResponse();
+  if (decoder_)
+    source_text_.Append(decoder_->Flush());
+  NotifyClient(worker_main_script_loader_->GetRequestURL(),
+               ModuleType::kJavaScript,
+               ParkableString(source_text_.ToString().ReleaseImpl()), response,
+               worker_main_script_loader_->CreateCachedMetadataHandler());
+}
+
+void WorkerModuleScriptFetcher::OnFailedLoadingWorkerMainScript() {
+  client_->NotifyFetchFinishedError(HeapVector<Member<ConsoleMessage>>());
 }
 
 }  // namespace blink

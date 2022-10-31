@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/platform/scheduler/common/tracing_helper.h"
 
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
@@ -33,10 +34,10 @@ const char* SignOfInt(int value) {
 }
 
 class TraceableStateForTest
-    : public TraceableState<int, TracingCategoryName::kDefault> {
+    : public TraceableState<int, TracingCategory::kDefault> {
  public:
   TraceableStateForTest(TraceableVariableController* controller)
-      : TraceableState(0, "State", controller, controller, SignOfInt) {
+      : TraceableState(0, "State", controller, SignOfInt) {
     // We shouldn't expect trace in constructor here because mock isn't set yet.
     mock_trace_for_test_ = &MockTrace;
   }
@@ -72,10 +73,10 @@ TEST(TracingHelperTest, TraceableState) {
 
 TEST(TracingHelperTest, TraceableStateOperators) {
   TraceableVariableController controller;
-  TraceableState<int, TracingCategoryName::kDebug> x(-1, "X", &controller,
-                                                     &controller, SignOfInt);
-  TraceableState<int, TracingCategoryName::kDebug> y(1, "Y", &controller,
-                                                     &controller, SignOfInt);
+  TraceableState<int, TracingCategory::kDebug> x(-1, "X", &controller,
+                                                 SignOfInt);
+  TraceableState<int, TracingCategory::kDebug> y(1, "Y", &controller,
+                                                 SignOfInt);
   EXPECT_EQ(0, x + y);
   EXPECT_FALSE(x == y);
   EXPECT_TRUE(x != y);

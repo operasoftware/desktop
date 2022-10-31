@@ -2,15 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <atomic>
-#include <iostream>
-#include <memory>
-
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/heap_test_objects.h"
 #include "third_party/blink/renderer/platform/heap/heap_test_utilities.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
-#include "third_party/blink/renderer/platform/heap/visitor.h"
-#include "third_party/blink/renderer/platform/wtf/hash_traits.h"
 
 namespace blink {
 
@@ -149,60 +147,6 @@ TEST_F(WeaknessMarkingTest, NullValueInReverseEphemeron) {
 
 namespace weakness_marking_test {
 
-class EphemeronCallbacksCounter
-    : public GarbageCollected<EphemeronCallbacksCounter> {
- public:
-  EphemeronCallbacksCounter(size_t* count_holder)
-      : count_holder_(count_holder) {}
-
-  void Trace(Visitor* visitor) const {
-    visitor->RegisterWeakCallbackMethod<EphemeronCallbacksCounter,
-                                        &EphemeronCallbacksCounter::Callback>(
-        this);
-  }
-
-  void Callback(const LivenessBroker& info) {
-    *count_holder_ = ThreadState::Current()
-                         ->Heap()
-                         .GetDiscoveredEphemeronPairsWorklist()
-                         ->SizeForTesting();
-  }
-
- private:
-  size_t* count_holder_;
-};
-
-TEST_F(WeaknessMarkingTest, UntracableEphemeronIsNotRegsitered) {
-  size_t ephemeron_count;
-  Persistent<EphemeronCallbacksCounter> ephemeron_callbacks_counter =
-      MakeGarbageCollected<EphemeronCallbacksCounter>(&ephemeron_count);
-  TestSupportingGC::PreciselyCollectGarbage();
-  size_t old_ephemeron_count = ephemeron_count;
-  using Map = HeapHashMap<WeakMember<IntegerObject>, int>;
-  Persistent<Map> map = MakeGarbageCollected<Map>();
-  map->insert(MakeGarbageCollected<IntegerObject>(1), 2);
-  TestSupportingGC::PreciselyCollectGarbage();
-  // Ephemeron value is not traceable, thus the map shouldn't be treated as an
-  // ephemeron.
-  EXPECT_EQ(old_ephemeron_count, ephemeron_count);
-}
-
-TEST_F(WeaknessMarkingTest, TracableEphemeronIsRegsitered) {
-  size_t ephemeron_count;
-  Persistent<EphemeronCallbacksCounter> ephemeron_callbacks_counter =
-      MakeGarbageCollected<EphemeronCallbacksCounter>(&ephemeron_count);
-  TestSupportingGC::PreciselyCollectGarbage();
-  size_t old_ephemeron_count = ephemeron_count;
-  using Map = HeapHashMap<WeakMember<IntegerObject>, Member<IntegerObject>>;
-  Persistent<Map> map = MakeGarbageCollected<Map>();
-  map->insert(MakeGarbageCollected<IntegerObject>(1),
-              MakeGarbageCollected<IntegerObject>(2));
-  TestSupportingGC::PreciselyCollectGarbage();
-  EXPECT_NE(old_ephemeron_count, ephemeron_count);
-}
-
-// TODO(keinakashima): add tests for NewLinkedHashSet after supporting
-// WeakMember
 TEST_F(WeaknessMarkingTest, SwapIntoAlreadyProcessedWeakSet) {
   // Regression test: https://crbug.com/1038623
   //
@@ -210,14 +154,14 @@ TEST_F(WeaknessMarkingTest, SwapIntoAlreadyProcessedWeakSet) {
   // weakness callbacks. This is important as another backing may be swapped in
   // at some point after marking it initially.
   using WeakLinkedSet = HeapLinkedHashSet<WeakMember<IntegerObject>>;
-  Persistent<WeakLinkedSet> holder1(MakeGarbageCollected<WeakLinkedSet>());
-  Persistent<WeakLinkedSet> holder2(MakeGarbageCollected<WeakLinkedSet>());
-  holder1->insert(MakeGarbageCollected<IntegerObject>(1));
-  IncrementalMarkingTestDriver driver(ThreadState::Current());
-  driver.Start();
-  driver.FinishSteps();
-  holder1->Swap(*holder2.Get());
-  driver.FinishGC();
+  Persistent<WeakLinkedSet> holder3(MakeGarbageCollected<WeakLinkedSet>());
+  Persistent<WeakLinkedSet> holder4(MakeGarbageCollected<WeakLinkedSet>());
+  holder3->insert(MakeGarbageCollected<IntegerObject>(1));
+  IncrementalMarkingTestDriver driver2(ThreadState::Current());
+  driver2.StartGC();
+  driver2.TriggerMarkingSteps();
+  holder3->Swap(*holder4.Get());
+  driver2.FinishGC();
 }
 
 TEST_F(WeaknessMarkingTest, EmptyEphemeronCollection) {
@@ -239,10 +183,26 @@ TEST_F(WeaknessMarkingTest, ClearWeakHashTableAfterMarking) {
   Persistent<Set> holder(MakeGarbageCollected<Set>());
   holder->insert(MakeGarbageCollected<IntegerObject>(1));
   IncrementalMarkingTestDriver driver(ThreadState::Current());
-  driver.Start();
-  driver.FinishSteps();
+  driver.StartGC();
+  driver.TriggerMarkingSteps();
   holder->clear();
   driver.FinishGC();
+}
+
+TEST_F(WeaknessMarkingTest, StrongifyBackingOnStack) {
+  // Test eunsures that conservative GC strongifies the backing store of
+  // on-stack HeapLinkedHashSet.
+  using WeakSet = HeapLinkedHashSet<WeakMember<IntegerObject>>;
+  using StrongSet = HeapLinkedHashSet<Member<IntegerObject>>;
+  WeakSet weak_set_on_stack;
+  weak_set_on_stack.insert(MakeGarbageCollected<IntegerObject>(1));
+  StrongSet strong_set_on_stack;
+  strong_set_on_stack.insert(MakeGarbageCollected<IntegerObject>(1));
+  TestSupportingGC::ConservativelyCollectGarbage();
+  EXPECT_EQ(1u, weak_set_on_stack.size());
+  EXPECT_EQ(1u, strong_set_on_stack.size());
+  EXPECT_EQ(1, weak_set_on_stack.begin()->Get()->Value());
+  EXPECT_EQ(1, strong_set_on_stack.begin()->Get()->Value());
 }
 
 }  // namespace weakness_marking_test

@@ -34,14 +34,17 @@
 #include <memory>
 
 #include "base/containers/span.h"
-#include "base/optional.h"
+#include "base/dcheck_is_on.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/common/messaging/message_port_channel.h"
-#include "third_party/blink/public/mojom/native_file_system/native_file_system_transfer_token.mojom-blink-forward.h"
+#include "third_party/blink/public/common/messaging/message_port_descriptor.h"
+#include "third_party/blink/public/mojom/file_system_access/file_system_access_transfer_token.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/transferables.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/mojo/mojo_handle.h"
+#include "third_party/blink/renderer/core/streams/readable_stream_transferring_optimizer.h"
+#include "third_party/blink/renderer/core/streams/writable_stream_transferring_optimizer.h"
 #include "third_party/blink/renderer/core/typed_arrays/array_buffer/array_buffer_contents.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
@@ -73,13 +76,34 @@ class CORE_EXPORT SerializedScriptValue
   USING_FAST_MALLOC(SerializedScriptValue);
 
  public:
+  class Stream final {
+    DISALLOW_NEW();
+
+   public:
+    explicit Stream(MessagePortDescriptor descriptor)
+        : channel(std::move(descriptor)) {}
+    Stream(MessagePortDescriptor descriptor,
+           std::unique_ptr<ReadableStreamTransferringOptimizer> optimizer)
+        : channel(std::move(descriptor)),
+          readable_optimizer(std::move(optimizer)) {}
+    Stream(MessagePortDescriptor descriptor,
+           std::unique_ptr<WritableStreamTransferringOptimizer> optimizer)
+        : channel(std::move(descriptor)),
+          writable_optimizer(std::move(optimizer)) {}
+
+    MessagePortChannel channel;
+    std::unique_ptr<ReadableStreamTransferringOptimizer> readable_optimizer;
+    std::unique_ptr<WritableStreamTransferringOptimizer> writable_optimizer;
+  };
+
   using ArrayBufferContentsArray = Vector<ArrayBufferContents, 1>;
   using SharedArrayBufferContentsArray = Vector<ArrayBufferContents, 1>;
   using ImageBitmapContentsArray = Vector<scoped_refptr<StaticBitmapImage>, 1>;
   using TransferredWasmModulesArray = WTF::Vector<v8::CompiledWasmModule>;
   using MessagePortChannelArray = Vector<MessagePortChannel>;
-  using NativeFileSystemTokensArray =
-      Vector<mojo::PendingRemote<mojom::blink::NativeFileSystemTransferToken>>;
+  using StreamArray = Vector<Stream>;
+  using FileSystemAccessTokensArray =
+      Vector<mojo::PendingRemote<mojom::blink::FileSystemAccessTransferToken>>;
 
   // Increment this for each incompatible change to the wire format.
   // Version 2: Added StringUCharTag for UChar v8 strings.
@@ -162,6 +186,7 @@ class CORE_EXPORT SerializedScriptValue
   ~SerializedScriptValue();
 
   static scoped_refptr<SerializedScriptValue> NullValue();
+  static scoped_refptr<SerializedScriptValue> UndefinedValue();
 
   String ToWireString() const;
 
@@ -202,11 +227,6 @@ class CORE_EXPORT SerializedScriptValue
   // exceptions as appropriate.
   // Returns true if the array was filled, or false if the passed value was not
   // of an appropriate type.
-  static bool ExtractTransferables(v8::Isolate*,
-                                   v8::Local<v8::Value>,
-                                   int,
-                                   Transferables&,
-                                   ExceptionState&);
   static bool ExtractTransferables(v8::Isolate*,
                                    const HeapVector<ScriptValue>&,
                                    Transferables&,
@@ -250,8 +270,8 @@ class CORE_EXPORT SerializedScriptValue
     return shared_array_buffers_contents_;
   }
   BlobDataHandleMap& BlobDataHandles() { return blob_data_handles_; }
-  NativeFileSystemTokensArray& NativeFileSystemTokens() {
-    return native_file_system_tokens_;
+  FileSystemAccessTokensArray& FileSystemAccessTokens() {
+    return file_system_access_tokens_;
   }
   MojoScopedHandleArray& MojoHandles() { return mojo_handles_; }
   ArrayBufferContentsArray& GetArrayBufferContentsArray() {
@@ -265,7 +285,7 @@ class CORE_EXPORT SerializedScriptValue
   }
   void SetImageBitmapContentsArray(ImageBitmapContentsArray contents);
 
-  MessagePortChannelArray& GetStreamChannels() { return stream_channels_; }
+  StreamArray& GetStreams() { return streams_; }
 
   bool IsLockedToAgentCluster() const {
     return !wasm_modules_.IsEmpty() ||
@@ -362,16 +382,16 @@ class CORE_EXPORT SerializedScriptValue
   ArrayBufferContentsArray array_buffer_contents_array_;
   ImageBitmapContentsArray image_bitmap_contents_array_;
 
-  // |stream_channels_| is also single-use but is special-cased because it works
+  // |streams_| is also single-use but is special-cased because it works
   // with ServiceWorkers.
-  MessagePortChannelArray stream_channels_;
+  StreamArray streams_;
 
   // These do not have one-use transferred contents, like the above.
   TransferredWasmModulesArray wasm_modules_;
   BlobDataHandleMap blob_data_handles_;
   MojoScopedHandleArray mojo_handles_;
   SharedArrayBufferContentsArray shared_array_buffers_contents_;
-  NativeFileSystemTokensArray native_file_system_tokens_;
+  FileSystemAccessTokensArray file_system_access_tokens_;
   HashMap<const void* const*, std::unique_ptr<Attachment>> attachments_;
 
   bool has_registered_external_allocation_;

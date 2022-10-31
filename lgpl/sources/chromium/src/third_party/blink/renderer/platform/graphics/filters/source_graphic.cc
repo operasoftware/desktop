@@ -20,7 +20,6 @@
 
 #include "third_party/blink/renderer/platform/graphics/filters/source_graphic.h"
 
-#include "third_party/blink/renderer/platform/graphics/filters/filter.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
 
 namespace blink {
@@ -31,11 +30,11 @@ SourceGraphic::SourceGraphic(Filter* filter) : FilterEffect(filter) {
 
 SourceGraphic::~SourceGraphic() = default;
 
-FloatRect SourceGraphic::MapInputs(const FloatRect& rect) const {
-  return !source_rect_.IsEmpty() ? FloatRect(source_rect_) : rect;
+gfx::RectF SourceGraphic::MapInputs(const gfx::RectF& rect) const {
+  return !source_rect_.IsEmpty() ? gfx::RectF(source_rect_) : rect;
 }
 
-void SourceGraphic::SetSourceRect(const IntRect& source_rect) {
+void SourceGraphic::SetSourceRectForTests(const gfx::Rect& source_rect) {
   source_rect_ = source_rect;
 }
 

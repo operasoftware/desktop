@@ -41,11 +41,12 @@
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/json/json_values.h"
 #include "third_party/blink/renderer/platform/loader/fetch/memory_cache.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
 #include "third_party/blink/renderer/platform/wtf/text/parsing_utilities.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -199,13 +200,13 @@ static void TokenizeDescriptors(const CharType* attribute_start,
 
 static void SrcsetError(Document* document, String message) {
   if (document && document->GetFrame()) {
-    StringBuilder error_message;
-    error_message.Append("Failed parsing 'srcset' attribute value since ");
-    error_message.Append(message);
+    StringBuilder warning_message;
+    warning_message.Append("Failed parsing 'srcset' attribute value since ");
+    warning_message.Append(message);
     document->GetFrame()->Console().AddMessage(
         MakeGarbageCollected<ConsoleMessage>(
             mojom::ConsoleMessageSource::kOther,
-            mojom::ConsoleMessageLevel::kError, error_message.ToString()));
+            mojom::ConsoleMessageLevel::kWarning, warning_message.ToString()));
   }
 }
 
@@ -335,7 +336,7 @@ static void ParseImageCandidatesFromSrcsetAttribute(
             document->GetFrame()->Console().AddMessage(
                 MakeGarbageCollected<ConsoleMessage>(
                     mojom::ConsoleMessageSource::kOther,
-                    mojom::ConsoleMessageLevel::kError,
+                    mojom::ConsoleMessageLevel::kWarning,
                     String("Dropped srcset candidate ") +
                         JSONValue::QuoteString(
                             String(image_url_start,
@@ -412,7 +413,7 @@ static unsigned AvoidDownloadIfHigherDensityResourceIsInCache(
     KURL url = document->CompleteURL(
         StripLeadingAndTrailingHTMLSpaces(image_candidates[i]->Url()));
     if (GetMemoryCache()->ResourceForURL(
-            url, document->Fetcher()->GetCacheIdentifier()) ||
+            url, document->Fetcher()->GetCacheIdentifier(url)) ||
         url.ProtocolIsData())
       return i;
   }
@@ -425,9 +426,19 @@ static ImageCandidate PickBestImageCandidate(
     Vector<ImageCandidate>& image_candidates,
     Document* document = nullptr) {
   const float kDefaultDensityValue = 1.0;
+  // The srcset image source selection mechanism is user-agent specific:
+  // https://html.spec.whatwg.org/multipage/images.html#selecting-an-image-source
+  //
+  // Setting max density value based on https://github.com/whatwg/html/pull/5901
+  const float kMaxDensity = 2.2;
   bool ignore_src = false;
   if (image_candidates.IsEmpty())
     return ImageCandidate();
+
+  if (RuntimeEnabledFeatures::SrcsetMaxDensityEnabled() &&
+      device_scale_factor > kMaxDensity) {
+    device_scale_factor = kMaxDensity;
+  }
 
   // http://picture.responsiveimages.org/#normalize-source-densities
   for (ImageCandidate& image : image_candidates) {

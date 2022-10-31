@@ -1,5 +1,5 @@
 table:
-  locale: en
+  language: en
   grade: 2
   system: ueb
   __assert-match: en-ueb-g2.ctb
@@ -56,7 +56,7 @@ tests:
   - '#b-#a/b'
 - - ¼-½ tsp
   - '#a/d-#a/b tsp'
-- - 6¼–6½
+- - 6¼—6½
   - '#f#a/d,-#f#a/b'
 - - 1/4 cup
   - '#a_/#d cup'
@@ -68,7 +68,7 @@ tests:
   - '#g"<#b">'
 - - 7(b)
   - '#g"<b">'
-- - 4–7
+- - 4—7
   - '#d,-#g'
 - - 4..7
   - '#d44g'
@@ -81,7 +81,6 @@ tests:
 
 - - Piano Sonata No.16 in C major is K.545.
   - ',piano ,sonata ,no4#af 9 ;,c major is ,k4#ede4'
-  - xfail: true
 - - ⅜ = .375
   - '#c/h "7 #4cge'
 
@@ -119,13 +118,16 @@ tests:
   - h|ses#dlease
 - - He came 4th in the race.
   - ',he came #dth 9 ! race4'
-- - If you go 1st–will I go 2nd?
+
+# 6.5.4 page 63
+
+- - If you go 1st—will I go 2nd?
   - ',if y g #ast,-w ,i g #bnd8'
 - - I have a 6-CD boxed set.
   - ',i h a #f-;,,cd box$ set4'
 - - There are 3 beds in this 4-bed ward.
   - ',"! >e #c b$s 9 ? #d-b$ w>d4'
-- - in 1970–about March
+- - in 1970—about March
   - '9 #aigj,-ab ,m>*'
 - - 3-dimensional
   - '#c-dim5.nal'
@@ -133,7 +135,7 @@ tests:
   - '#c-;,d'
 - - The 6-can pack–under seat 6-c.
   - ',! #f-c pack,-"u s1t #f-;c4'
-- - only 4–more please
+- - only 4—more please
   - 'only #d,-m pl1se'
 - - 4-m
   - '#d-;m'
@@ -142,19 +144,30 @@ tests:
 - - 20yr period
   - '#bjyr p}iod'
 
-# 6.6.1 page 64
+# 6.6 The numeric space
 
+# 6.6.1 page 64: When spaces are used as separators within a single
+# number use the ten symbols ⠐⠁ ("a) to ⠐⠚ ("j) to represent the space
+# and its following digit.
+
+flags: {testmode: bothDirections}
+tests:
 - - 'population: 3 245 000'
   - 'popula;n3 #c"bde"jjj'
 - - 'ISBN: 978 1 55468 513 4'
   - ',,isbn3 #igh"a"eedfh"eac"d'
-  - xfail: true
 - - 'phone: (61) 3 1234 5678'
   - 'ph"o3 "<#fa"> #c"abcd"efgh'
 - - 'date: 1947 08 31'
   - 'date3 #aidg"jh"ca'
 - - 'time: 16 00'
   - '"t3 #af"jj'
+- # from https://github.com/liblouis/liblouis/issues/1012
+  - '1 2 3 4'
+  - '#a"b"c"d'
+
+flags: {testmode: forward}
+tests:
 
 # 6.7.1 page 64
 

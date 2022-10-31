@@ -37,7 +37,7 @@
 #ifdef __has_builtin
 #    define AV_HAS_BUILTIN(x) __has_builtin(x)
 #else
-#    define AV_HAS_BUILTIN(x) false
+#    define AV_HAS_BUILTIN(x) 0
 #endif
 
 #ifndef av_always_inline
@@ -110,7 +110,7 @@
  * scheduled for removal.
  */
 #ifndef AV_NOWARN_DEPRECATED
-#if AV_GCC_VERSION_AT_LEAST(4,6)
+#if AV_GCC_VERSION_AT_LEAST(4,6) || defined(__clang__)
 #    define AV_NOWARN_DEPRECATED(code) \
         _Pragma("GCC diagnostic push") \
         _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"") \

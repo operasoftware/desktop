@@ -20,9 +20,11 @@
 #include "third_party/blink/renderer/core/svg/svg_fe_morphology_element.h"
 
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_number_optional_number.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_string.h"
 #include "third_party/blink/renderer/core/svg/svg_enumeration_map.h"
 #include "third_party/blink/renderer/core/svg_names.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -54,6 +56,14 @@ SVGFEMorphologyElement::SVGFEMorphologyElement(Document& document)
   AddToPropertyMap(svg_operator_);
 }
 
+SVGAnimatedNumber* SVGFEMorphologyElement::radiusX() {
+  return radius_->FirstNumber();
+}
+
+SVGAnimatedNumber* SVGFEMorphologyElement::radiusY() {
+  return radius_->SecondNumber();
+}
+
 void SVGFEMorphologyElement::Trace(Visitor* visitor) const {
   visitor->Trace(radius_);
   visitor->Trace(in1_);
@@ -80,7 +90,8 @@ bool SVGFEMorphologyElement::SetFilterEffectAttribute(
 }
 
 void SVGFEMorphologyElement::SvgAttributeChanged(
-    const QualifiedName& attr_name) {
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kOperatorAttr ||
       attr_name == svg_names::kRadiusAttr) {
     SVGElement::InvalidationGuard invalidation_guard(this);
@@ -94,7 +105,7 @@ void SVGFEMorphologyElement::SvgAttributeChanged(
     return;
   }
 
-  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(attr_name);
+  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(params);
 }
 
 FilterEffect* SVGFEMorphologyElement::Build(SVGFilterBuilder* filter_builder,

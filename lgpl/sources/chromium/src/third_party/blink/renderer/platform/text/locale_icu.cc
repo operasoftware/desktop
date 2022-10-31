@@ -33,12 +33,11 @@
 #include <unicode/udatpg.h>
 #include <unicode/udisplaycontext.h>
 #include <unicode/uloc.h>
+
 #include <limits>
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -144,7 +143,7 @@ UDateFormat* LocaleICU::OpenDateFormat(UDateFormatStyle time_style,
   const UChar kGmtTimezone[3] = {'G', 'M', 'T'};
   UErrorCode status = U_ZERO_ERROR;
   return udat_open(time_style, date_style, locale_.c_str(), kGmtTimezone,
-                   base::size(kGmtTimezone), nullptr, -1, &status);
+                   std::size(kGmtTimezone), nullptr, -1, &status);
 }
 
 // We cannot use udat_*Symbols API to get standalone month names to use in
@@ -169,12 +168,12 @@ static String GetDateFormatPattern(const UDateFormat* date_format) {
     return g_empty_string;
 
   UErrorCode status = U_ZERO_ERROR;
-  int32_t length = udat_toPattern(date_format, TRUE, nullptr, 0, &status);
+  int32_t length = udat_toPattern(date_format, true, nullptr, 0, &status);
   if (status != U_BUFFER_OVERFLOW_ERROR || !length)
     return g_empty_string;
   StringBuffer<UChar> buffer(length);
   status = U_ZERO_ERROR;
-  udat_toPattern(date_format, TRUE, buffer.Characters(), length, &status);
+  udat_toPattern(date_format, true, buffer.Characters(), length, &status);
   if (U_FAILURE(status))
     return g_empty_string;
   return String::Adopt(buffer);
@@ -250,21 +249,16 @@ void LocaleICU::InitializeCalendar() {
                                          UCAL_FIRST_DAY_OF_WEEK) -
                        UCAL_SUNDAY;
 
-  if (features::IsFormControlsRefreshEnabled()) {
-    week_day_short_labels_ = CreateLabelVector(
-        short_date_format_, UDAT_NARROW_WEEKDAYS, UCAL_SUNDAY, 7);
-  } else {
-    week_day_short_labels_ = CreateLabelVector(
-        short_date_format_, UDAT_SHORT_WEEKDAYS, UCAL_SUNDAY, 7);
-  }
+  week_day_short_labels_ = CreateLabelVector(
+      short_date_format_, UDAT_NARROW_WEEKDAYS, UCAL_SUNDAY, 7);
   if (!week_day_short_labels_)
     week_day_short_labels_ = CreateFallbackWeekDayShortLabels();
 }
 
 static std::unique_ptr<Vector<String>> CreateFallbackMonthLabels() {
   std::unique_ptr<Vector<String>> labels = std::make_unique<Vector<String>>();
-  labels->ReserveCapacity(base::size(WTF::kMonthFullName));
-  for (unsigned i = 0; i < base::size(WTF::kMonthFullName); ++i)
+  labels->ReserveCapacity(std::size(WTF::kMonthFullName));
+  for (unsigned i = 0; i < std::size(WTF::kMonthFullName); ++i)
     labels->push_back(WTF::kMonthFullName[i]);
   return labels;
 }
@@ -420,8 +414,8 @@ const Vector<String>& LocaleICU::ShortMonthLabels() {
       return short_month_labels_;
     }
   }
-  short_month_labels_.ReserveCapacity(base::size(WTF::kMonthName));
-  for (unsigned i = 0; i < base::size(WTF::kMonthName); ++i)
+  short_month_labels_.ReserveCapacity(std::size(WTF::kMonthName));
+  for (unsigned i = 0; i < std::size(WTF::kMonthName); ++i)
     short_month_labels_.push_back(WTF::kMonthName[i]);
   return short_month_labels_;
 }

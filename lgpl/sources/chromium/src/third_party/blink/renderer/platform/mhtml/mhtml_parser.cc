@@ -33,7 +33,8 @@
 #include <stddef.h>
 #include <utility>
 
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "base/logging.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mhtml/archive_resource.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
 #include "third_party/blink/renderer/platform/network/parsed_content_type.h"

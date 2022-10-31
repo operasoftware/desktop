@@ -28,6 +28,7 @@
 
 import errno
 import fnmatch
+import hashlib
 import json
 import logging
 import math
@@ -50,17 +51,24 @@ class WebTestFinder(object):
         self.WEB_TESTS_DIRECTORIES = ('src', 'third_party', 'blink',
                                       'web_tests')
 
-    def find_tests(self,
-                   args,
-                   test_list=None,
-                   fastest_percentile=None,
-                   filters=None):
+    def find_tests(
+            self,
+            args,
+            filter_files=None,
+            fastest_percentile=None,
+            filters=None,
+    ):
         filters = filters or []
         paths = self._strip_test_dir_prefixes(args)
-        if test_list:
-            paths += self._strip_test_dir_prefixes(
-                self._read_test_names_from_file(
-                    test_list, self._port.TEST_PATH_SEPARATOR))
+        positive_matches, negative_matches, positive_globs, negative_globs = [], [], [], []
+        if filter_files:
+            file_filters = self._read_filter_files(
+                filter_files, self._port.TEST_PATH_SEPARATOR)
+            positive_matches, negative_matches, positive_globs, negative_globs = [
+                self._strip_test_dir_prefixes(file_filter)
+                for file_filter in file_filters
+            ]
+            paths += positive_matches
 
         all_tests = []
         if not paths or fastest_percentile:
@@ -90,9 +98,16 @@ class WebTestFinder(object):
             test_files = all_tests
             running_all_tests = True
 
-        test_files = filter_tests(test_files, [f.split('::') for f in filters])
-        # de-dupe the test list here before running them.
+        test_files = filter_tests(test_files,
+                                  [f.split('::') for f in filters] +
+                                  [positive_globs, negative_globs])
+        if negative_matches:
+            test_files = filter_out_exact_negative_matches(
+                test_files, negative_matches)
+
+        # de-dupe the test list and paths here before running them.
         test_files = list(OrderedDict.fromkeys(test_files))
+        paths = list(OrderedDict.fromkeys(paths))
         return (paths, test_files, running_all_tests)
 
     def _times_trie(self):
@@ -111,9 +126,8 @@ class WebTestFinder(object):
         times = convert_times_trie_to_flat_paths(times_trie)
 
         # Ignore tests with a time==0 because those are skipped tests.
-        sorted_times = sorted(
-            [test for (test, time) in times.iteritems() if time],
-            key=lambda t: (times[t], t))
+        sorted_times = sorted([test for (test, time) in times.items() if time],
+                              key=lambda t: (times[t], t))
         clamped_percentile = max(0, min(100, fastest_percentile))
         number_of_tests_to_return = int(
             len(sorted_times) * clamped_percentile / 100)
@@ -147,9 +161,19 @@ class WebTestFinder(object):
                     return path[len(directory_prefix):]
         return path
 
-    def _read_test_names_from_file(self, filenames, test_path_separator):
+    def _read_filter_files(self, filenames, test_path_separator):
+        # TODO(crbug.com/794783)
+        # https://bit.ly/chromium-test-runner-api says "A test should be run
+        # only if it would be RUN when EVERY flag is evaluated individually.
+        # A test should be SKIPPED if it would be skipped if ANY flag was
+        # evaluated individually."
+        # The current logic here unions the positive flags, while it should
+        # intersect them.
         fs = self._filesystem
-        tests = []
+        positive_matches = []
+        negative_matches = []
+        positive_globs = []
+        negative_globs = []
         for filename in filenames:
             try:
                 if test_path_separator != fs.sep:
@@ -157,19 +181,30 @@ class WebTestFinder(object):
                 file_contents = fs.read_text_file(filename).split('\n')
                 for line in file_contents:
                     line = self._strip_comments(line)
-                    if line:
-                        tests.append(line)
+                    if not line:
+                        continue
+                    is_glob = line[-1] == '*' and (len(line) == 1
+                                                   or line[-2] != '\\')
+                    if line[0] == '-':
+                        if is_glob:
+                            negative_globs.append(line)
+                        else:
+                            negative_matches.append(line)
+                    elif is_glob:
+                        positive_globs.append(line)
+                    else:
+                        positive_matches.append(line)
             except IOError as error:
                 if error.errno == errno.ENOENT:
                     _log.critical('')
-                    _log.critical('--test-list file "%s" not found', file)
+                    _log.critical('--test-list file "%s" not found', filename)
                 raise
-        return tests
+        return positive_matches, negative_matches, positive_globs, negative_globs
 
     @staticmethod
     def _strip_comments(line):
-        commentIndex = line.find('//')
-        if commentIndex is -1:
+        commentIndex = line.find('#')
+        if commentIndex == -1:
             commentIndex = len(line)
 
         line = re.sub(r'\s+', ' ', line[:commentIndex].strip())
@@ -198,7 +233,15 @@ class WebTestFinder(object):
         all_tests = set(all_tests_list)
         tests_to_skip = set()
         idlharness_skips = set()
+        tests_always_skipped = set()
         for test in all_tests:
+            # Manual tests and virtual tests skipped by platform config are
+            # always skipped and not affected by the --skip parameter
+            if (self._port.is_manual_test(test) or
+                    self._port.virtual_test_skipped_due_to_platform_config(test)):
+                tests_always_skipped.update({test})
+                continue
+
             # We always skip idlharness tests for MSAN/ASAN, even when running
             # with --no-expectations (https://crbug.com/856601). Note we will
             # run the test anyway if it is explicitly specified on the command
@@ -240,6 +283,8 @@ class WebTestFinder(object):
             # make sure we're explicitly running any tests passed on the command line; equivalent to 'default'.
             tests_to_skip -= set(paths)
 
+        tests_to_skip.update(tests_always_skipped)
+
         return tests_to_skip
 
     def split_into_chunks(self, test_names):
@@ -265,8 +310,11 @@ class WebTestFinder(object):
 
     @staticmethod
     def _split_into_chunks(test_names, index, count):
-        tests_and_indices = [(test_name, hash(test_name) % count)
-                             for test_name in test_names]
+        tests_and_indices = [
+            (test_name,
+             int(hashlib.sha256(test_name.encode('utf-8')).hexdigest(), 16) %
+             count) for test_name in test_names
+        ]
 
         tests_to_run = [
             test_name for test_name, test_index in tests_and_indices
@@ -277,6 +325,19 @@ class WebTestFinder(object):
                    len(tests_to_run), len(test_names))
 
         return tests_to_run
+
+
+def filter_out_exact_negative_matches(tests, negative_matches):
+    """Similar to filter_tests, but filters only negative match filters for more speed
+
+    With globbing disallowed, we can use sets, which have O(1) lookup time in
+    CPython. This allows for larger filter lists.
+
+    negative_filters is a list of lists of filters (because the user can pass the flag
+    multiple times
+    """
+    filter_set = set(fil[1:] for fil in negative_matches)
+    return [test for test in tests if test not in filter_set]
 
 
 def filter_tests(tests, filters):
@@ -314,7 +375,7 @@ def filter_tests(tests, filters):
             include = include_by_default
             for glob in sorted(globs, key=glob_sort_key):
                 if (glob.startswith('-') and not glob[1:]) or not glob:
-                    raise ValueError('Empty glob filter "%s"' % (filter, ))
+                    raise ValueError('Empty glob filter "%s"' % (glob, ))
                 if '*' in glob[:-1]:
                     raise ValueError(
                         'Bad test filter "%s" specified; '

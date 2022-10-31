@@ -7,7 +7,11 @@
 
 #include "third_party/blink/renderer/modules/event_modules.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_connection.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+
+namespace WTF {
+class AtomicString;
+}  // namespace WTF
 
 namespace blink {
 
@@ -49,15 +53,6 @@ class PresentationConnectionAvailableEvent final : public Event {
  private:
   Member<PresentationConnection> connection_;
 };
-
-DEFINE_TYPE_CASTS(
-    PresentationConnectionAvailableEvent,
-    Event,
-    event,
-    event->InterfaceName() ==
-        event_interface_names::kPresentationConnectionAvailableEvent,
-    event.InterfaceName() ==
-        event_interface_names::kPresentationConnectionAvailableEvent);
 
 }  // namespace blink
 

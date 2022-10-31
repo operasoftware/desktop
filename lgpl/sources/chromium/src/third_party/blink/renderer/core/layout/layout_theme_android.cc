@@ -4,6 +4,9 @@
 
 #include "third_party/blink/renderer/core/layout/layout_theme_android.h"
 
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
+#include "ui/base/ui_base_features.h"
+
 namespace blink {
 
 scoped_refptr<LayoutTheme> LayoutThemeAndroid::Create() {
@@ -16,5 +19,21 @@ LayoutTheme& LayoutTheme::NativeTheme() {
 }
 
 LayoutThemeAndroid::~LayoutThemeAndroid() {}
+
+Color LayoutThemeAndroid::PlatformActiveSelectionBackgroundColor(
+    mojom::blink::ColorScheme color_scheme) const {
+  return color_scheme == mojom::blink::ColorScheme::kDark
+             ? Color::FromRGBA32(0xFF99C8FF)
+             : LayoutThemeMobile::PlatformActiveSelectionBackgroundColor(
+                   color_scheme);
+}
+
+Color LayoutThemeAndroid::PlatformActiveSelectionForegroundColor(
+    mojom::blink::ColorScheme color_scheme) const {
+  return color_scheme == mojom::blink::ColorScheme::kDark
+             ? Color::FromRGBA32(0xFF3B3B3B)
+             : LayoutThemeMobile::PlatformActiveSelectionForegroundColor(
+                   color_scheme);
+}
 
 }  // namespace blink

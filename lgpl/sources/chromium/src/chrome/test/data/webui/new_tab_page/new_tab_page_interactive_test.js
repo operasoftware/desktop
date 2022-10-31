@@ -7,41 +7,16 @@
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_interactive_ui_test.js']);
 
 GEN('#include "content/public/test/browser_test.h"');
-GEN('#include "services/network/public/cpp/features.h"');
+
+/* eslint-disable no-var */
 
 class NewTabPageInteractiveTest extends PolymerInteractiveUITest {
   /** @override */
   get browsePreload() {
-    throw 'this is abstract and should be overriden by subclasses';
-  }
-
-  /** @override */
-  get extraLibraries() {
-    return [
-      '//third_party/mocha/mocha.js',
-      '//chrome/test/data/webui/mocha_adapter.js',
-    ];
-  }
-
-  /** @override */
-  get featureList() {
-    return {enabled: ['network::features::kOutOfBlinkCors']};
+    throw new Error('this is abstract and should be overriden by subclasses');
   }
 }
 
-// eslint-disable-next-line no-var
-var NewTabPageMostVisitedFocusTest = class extends NewTabPageInteractiveTest {
-  /** @override */
-  get browsePreload() {
-    return 'chrome://new-tab-page/test_loader.html?module=new_tab_page/most_visited_focus_test.js';
-  }
-};
-
-TEST_F('NewTabPageMostVisitedFocusTest', 'All', function() {
-  mocha.run();
-});
-
-// eslint-disable-next-line no-var
 var NewTabPageCustomizeDialogFocusTest =
     class extends NewTabPageInteractiveTest {
   /** @override */
@@ -54,19 +29,6 @@ TEST_F('NewTabPageCustomizeDialogFocusTest', 'All', function() {
   mocha.run();
 });
 
-// eslint-disable-next-line no-var
-var NewTabPageGridFocusTest = class extends NewTabPageInteractiveTest {
-  /** @override */
-  get browsePreload() {
-    return 'chrome://new-tab-page/test_loader.html?module=new_tab_page/grid_focus_test.js';
-  }
-};
-
-TEST_F('NewTabPageGridFocusTest', 'All', function() {
-  mocha.run();
-});
-
-// eslint-disable-next-line no-var
 var NewTabPageDoodleShareDialogFocusTest =
     class extends NewTabPageInteractiveTest {
   /** @override */

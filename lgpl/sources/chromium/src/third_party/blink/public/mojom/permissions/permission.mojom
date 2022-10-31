@@ -29,6 +29,8 @@ enum PermissionName {
   NFC,
   STORAGE_ACCESS,
   WINDOW_PLACEMENT,
+  LOCAL_FONTS,
+  DISPLAY_CAPTURE,
 };
 
 struct MidiPermissionDescriptor {

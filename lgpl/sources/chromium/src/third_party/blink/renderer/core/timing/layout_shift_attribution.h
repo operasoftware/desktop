@@ -7,10 +7,12 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
 class DOMRectReadOnly;
+class Node;
 class ScriptState;
 class ScriptValue;
 
@@ -27,6 +29,9 @@ class CORE_EXPORT LayoutShiftAttribution : public ScriptWrappable {
   ~LayoutShiftAttribution() override;
 
   Node* node() const;
+  // Return node_ unconditionally, skipping the checks that apply
+  // to exposing it through bindings.
+  Node* rawNodeForInspector() const;
   DOMRectReadOnly* previousRect() const;
   DOMRectReadOnly* currentRect() const;
 

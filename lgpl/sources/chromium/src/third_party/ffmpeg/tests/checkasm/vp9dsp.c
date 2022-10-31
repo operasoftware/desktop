@@ -27,6 +27,7 @@
 #include "libavutil/internal.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem_internal.h"
 
 static const uint32_t pixel_mask[3] = { 0xffffffff, 0x03ff03ff, 0x0fff0fff };
 #define SIZEOF_PIXEL ((bit_depth + 7) / 8)
@@ -293,7 +294,7 @@ static int copy_subcoefs(int16_t *out, const int16_t *in, enum TxfmMode tx,
     return eob;
 }
 
-static int iszero(const int16_t *c, int sz)
+static int is_zero(const int16_t *c, int sz)
 {
     int n;
 
@@ -361,8 +362,8 @@ static void check_itxfm(void)
                         call_ref(dst0, sz * SIZEOF_PIXEL, subcoef0, eob);
                         call_new(dst1, sz * SIZEOF_PIXEL, subcoef1, eob);
                         if (memcmp(dst0, dst1, sz * sz * SIZEOF_PIXEL) ||
-                            !iszero(subcoef0, sz * sz * SIZEOF_COEF) ||
-                            !iszero(subcoef1, sz * sz * SIZEOF_COEF))
+                            !is_zero(subcoef0, sz * sz * SIZEOF_COEF) ||
+                            !is_zero(subcoef1, sz * sz * SIZEOF_COEF))
                             fail();
 
                         bench_new(dst, sz * SIZEOF_PIXEL, coef, eob);

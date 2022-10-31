@@ -4,8 +4,9 @@
 
 #include "third_party/blink/public/common/messaging/web_message_port.h"
 
+#include <string>
+
 #include "base/run_loop.h"
-#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -85,7 +86,7 @@ TEST(WebMessagePortTest, EndToEnd) {
   EXPECT_TRUE(port1.CanPostMessage());
 
   // Send a simple string-only message one way from port 0 to port 1.
-  base::string16 message(base::UTF8ToUTF16("foo"));
+  std::u16string message(u"foo");
   {
     base::RunLoop run_loop;
     EXPECT_CALL(receiver1, OnMessage(_))
@@ -152,6 +153,35 @@ TEST(WebMessagePortTest, EndToEnd) {
   EXPECT_FALSE(port1.is_transferable());
   EXPECT_FALSE(port1.HasReceiver());
   EXPECT_FALSE(port1.CanPostMessage());
+}
+
+TEST(WebMessagePortTest, MoveAssignToConnectedPort) {
+  base::test::SingleThreadTaskEnvironment task_env;
+
+  // Create a pipe.
+  auto pipe = WebMessagePort::CreatePair();
+  WebMessagePort port0 = std::move(pipe.first);
+  WebMessagePort port1 = std::move(pipe.second);
+
+  // And bind both endpoints to distinct receivers.
+  MockReceiver receiver0;
+  MockReceiver receiver1;
+  port0.SetReceiver(&receiver0, task_env.GetMainThreadTaskRunner());
+  port1.SetReceiver(&receiver1, task_env.GetMainThreadTaskRunner());
+
+  // Move assign a new port into the open one. This should result in the
+  // open port being closed, which can be noticed on the remote half as a
+  // connection error.
+  base::RunLoop run_loop;
+  EXPECT_CALL(receiver1, OnPipeError()).WillOnce(Invoke([&run_loop]() {
+    run_loop.Quit();
+  }));
+
+  port0 = WebMessagePort();
+
+  run_loop.Run();
+  testing::Mock::VerifyAndClearExpectations(&receiver0);
+  testing::Mock::VerifyAndClearExpectations(&receiver1);
 }
 
 }  // namespace blink

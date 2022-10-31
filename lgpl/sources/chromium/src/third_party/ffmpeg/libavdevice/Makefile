@@ -3,18 +3,20 @@ DESC    = FFmpeg device handling library
 
 HEADERS = avdevice.h                                                    \
           version.h                                                     \
+          version_major.h                                               \
 
 OBJS    = alldevices.o                                                  \
           avdevice.o                                                    \
           utils.o                                                       \
+          version.o                                                     \
 
 OBJS-$(HAVE_LIBC_MSVCRT)                 += file_open.o
-OBJS-$(CONFIG_SHARED)                    += reverse.o
 
 # input/output devices
 OBJS-$(CONFIG_ALSA_INDEV)                += alsa_dec.o alsa.o timefilter.o
 OBJS-$(CONFIG_ALSA_OUTDEV)               += alsa_enc.o alsa.o
 OBJS-$(CONFIG_ANDROID_CAMERA_INDEV)      += android_camera.o
+OBJS-$(CONFIG_AUDIOTOOLBOX_OUTDEV)       += audiotoolbox.o
 OBJS-$(CONFIG_AVFOUNDATION_INDEV)        += avfoundation.o
 OBJS-$(CONFIG_BKTR_INDEV)                += bktr.o
 OBJS-$(CONFIG_CACA_OUTDEV)               += caca.o
@@ -52,6 +54,9 @@ OBJS-$(CONFIG_XV_OUTDEV)                 += xv.o
 # external libraries
 OBJS-$(CONFIG_LIBCDIO_INDEV)             += libcdio.o
 OBJS-$(CONFIG_LIBDC1394_INDEV)           += libdc1394.o
+
+# Objects duplicated from other libraries for shared builds
+SHLIBOBJS-$(CONFIG_DECKLINK_INDEV)       += reverse.o
 
 # Windows resource file
 SLIBOBJS-$(HAVE_GNU_WINDRES)             += avdeviceres.o

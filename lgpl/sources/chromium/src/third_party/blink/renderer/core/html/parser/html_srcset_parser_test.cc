@@ -7,9 +7,11 @@
 #include <limits.h>
 
 #include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/web_network_state_notifier.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
 
@@ -177,7 +179,13 @@ TEST(HTMLSrcsetParserTest, Basic) {
   }
 }
 
-TEST(HTMLSrcsetParserTest, SaveDataEnabledBasic) {
+#if BUILDFLAG(IS_ANDROID) && defined(ADDRESS_SANITIZER)
+// https://crbug.com/1189511
+#define MAYBE_SaveDataEnabledBasic DISABLED_SaveDataEnabledBasic
+#else
+#define MAYBE_SaveDataEnabledBasic SaveDataEnabledBasic
+#endif
+TEST(HTMLSrcsetParserTest, MAYBE_SaveDataEnabledBasic) {
   SrcsetParserTestCase test_cases[] = {
       // 0
       {2.0, 0.5, "", "data:,a 1w, data:,b 2x", "data:,a", 2.0, 1},
@@ -312,6 +320,27 @@ TEST(HTMLSrcsetParserTest, SaveDataEnabledBasic) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitWithFeatures({blink::features::kSaveDataImgSrcset},
                                        {});
+  for (unsigned i = 0; test_cases[i].src_input; ++i) {
+    SrcsetParserTestCase test = test_cases[i];
+    ImageCandidate candidate = BestFitSourceForImageAttributes(
+        test.device_scale_factor, test.effective_size, test.src_input,
+        test.srcset_input);
+    ASSERT_EQ(test.output_density, candidate.Density());
+    ASSERT_EQ(test.output_resource_width, candidate.GetResourceWidth());
+    ASSERT_EQ(test.output_url, candidate.ToString().Ascii());
+  }
+}
+
+TEST(HTMLSrcsetParserTest, MaxDensityEnabled) {
+  ScopedSrcsetMaxDensityForTest srcset_max_density(true);
+  SrcsetParserTestCase test_cases[] = {
+      {10.0, -1, "src.gif", "2x.gif 2e1x", "src.gif", 1.0, -1},
+      {2.5, -1, "src.gif", "1.5x.gif 1.5x, 3x.gif 3x", "3x.gif", 3.0, -1},
+      {4.0, 400, "", "400.gif 400w, 1000.gif 1000w", "1000.gif", 2.5, 1000},
+      {0, 0, nullptr, nullptr, nullptr,
+       0}  // Do not remove the terminator line.
+  };
+
   for (unsigned i = 0; test_cases[i].src_input; ++i) {
     SrcsetParserTestCase test = test_cases[i];
     ImageCandidate candidate = BestFitSourceForImageAttributes(

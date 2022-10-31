@@ -11,6 +11,10 @@
 
 namespace blink {
 
+extern template class CORE_EXTERN_TEMPLATE_EXPORT
+    LayoutNGBlockFlowMixin<LayoutRubyRun>;
+extern template class CORE_EXTERN_TEMPLATE_EXPORT LayoutNGMixin<LayoutRubyRun>;
+
 // A LayoutNG version of LayoutRubyRun.
 class CORE_EXPORT LayoutNGRubyRun final
     : public LayoutNGBlockFlowMixin<LayoutRubyRun> {
@@ -18,7 +22,10 @@ class CORE_EXPORT LayoutNGRubyRun final
   explicit LayoutNGRubyRun();
   ~LayoutNGRubyRun() override;
 
-  const char* GetName() const override { return "LayoutNGRubyRun"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutNGRubyRun";
+  }
   void UpdateBlockLayout(bool relayout_children) override;
 };
 

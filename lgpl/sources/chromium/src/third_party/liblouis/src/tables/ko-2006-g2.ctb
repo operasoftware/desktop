@@ -4,11 +4,14 @@
 #-index-name: Korean, contracted, 2006
 #-display-name: Korean contracted braille (2006 standard)
 #
-#+locale:ko
+#+language:ko
 #+type:literary
 #+contraction:full
 #+grade:2
 #+version:2006
+# Marked as "direction:forward" by Bue Vester-Andersen
+# as tests only run forward.
+#+direction:forward
 #
 # TODO: Please correct the metadata above. It is not meant to be
 # accurate nor complete. It hasn't been verified by the table

@@ -11,6 +11,7 @@
 #include "base/containers/span.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_piece.h"
+#include "base/template_util.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_internal_templates.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_metrics.h"
 
@@ -95,6 +96,9 @@ class IdentifiableToken {
   // Representation type of the sample.
   using TokenType = int64_t;
 
+  // Required for use in certain data structures. Represents no bytes.
+  constexpr IdentifiableToken() : value_(kIdentifiabilityDigestOfNoBytes) {}
+
   // A byte buffer specified as a span.
   //
   // This is essentially the base case. If it were the base case, then
@@ -106,7 +110,7 @@ class IdentifiableToken {
 
   // Integers, big and small. Includes char.
   template <typename T,
-            typename U = internal::remove_cvref_t<T>,
+            typename U = base::remove_cvref_t<T>,
             typename std::enable_if_t<std::is_integral<U>::value>* = nullptr>
   constexpr IdentifiableToken(T in)  // NOLINT(google-explicit-constructor)
       : value_(base::IsValueInRangeForNumericType<TokenType, U>(in)
@@ -115,8 +119,9 @@ class IdentifiableToken {
 
   // Enums. Punt to the underlying type.
   template <typename T,
-            typename U = typename std::underlying_type<T>::type,
-            typename std::enable_if_t<std::is_enum<T>::value>* = nullptr>
+            // Set dummy type before U to avoid GCC compile errors
+            typename std::enable_if_t<std::is_enum<T>::value>* = nullptr,
+            typename U = typename std::underlying_type<T>::type>
   constexpr IdentifiableToken(T in)  // NOLINT(google-explicit-constructor)
       : IdentifiableToken(static_cast<U>(in)) {}
 
@@ -131,7 +136,7 @@ class IdentifiableToken {
   // resulting digest to be useless.
   template <
       typename T,
-      typename U = internal::remove_cvref_t<T>,
+      typename U = base::remove_cvref_t<T>,
       typename std::enable_if_t<std::is_floating_point<U>::value>* = nullptr>
   constexpr IdentifiableToken(T in)  // NOLINT(google-explicit-constructor)
       : value_(internal::DigestOfObjectRepresentation<double>(
@@ -155,7 +160,7 @@ class IdentifiableToken {
   // Span of known trivial types except for BytesSpan, which is the base case.
   template <typename T,
             size_t Extent,
-            typename U = internal::remove_cvref_t<T>,
+            typename U = base::remove_cvref_t<T>,
             typename std::enable_if_t<
                 std::is_arithmetic<U>::value &&
                 !std::is_same<ByteSpan::element_type, T>::value>* = nullptr>
@@ -216,9 +221,14 @@ class IdentifiableToken {
     return value_ != that.value_;
   }
 
+  // Returns a value that can be passed into the UKM metrics recording
+  // interfaces.
+  int64_t ToUkmMetricValue() const { return value_; }
+
  private:
   friend class IdentifiabilityMetricBuilder;
   friend class IdentifiableSurface;
+  friend class IdentifiableTokenBuilder;
 
   // TODO(asanka): This should be const. Switch over once the incremental digest
   // functions land.

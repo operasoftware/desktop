@@ -7,16 +7,16 @@
 #include <utility>
 
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/trace_event/trace_event.h"
 #include "third_party/blink/public/mojom/mediastream/media_devices.mojom-blink.h"
-#include "third_party/blink/public/platform/web_media_stream_source.h"
-#include "third_party/blink/public/platform/web_media_stream_track.h"
+#include "third_party/blink/public/platform/modules/mediastream/web_media_stream_track.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_source.h"
-#include "third_party/blink/public/web/modules/mediastream/media_stream_video_track.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_audio.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_content.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_device.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_video_track.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -63,11 +63,11 @@ void ApplyConstraintsProcessor::ProcessRequest(
   }
   request_completed_cb_ = std::move(callback);
   current_request_ = request;
-  if (current_request_->Track()->Source()->GetType() ==
+  if (current_request_->Track()->GetSourceType() ==
       MediaStreamSource::kTypeVideo) {
     ProcessVideoRequest();
   } else {
-    DCHECK_EQ(current_request_->Track()->Source()->GetType(),
+    DCHECK_EQ(current_request_->Track()->GetSourceType(),
               MediaStreamSource::kTypeAudio);
     ProcessAudioRequest();
   }
@@ -76,7 +76,7 @@ void ApplyConstraintsProcessor::ProcessRequest(
 void ApplyConstraintsProcessor::ProcessAudioRequest() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(current_request_);
-  DCHECK_EQ(current_request_->Track()->Source()->GetType(),
+  DCHECK_EQ(current_request_->Track()->GetSourceType(),
             MediaStreamSource::kTypeAudio);
   DCHECK(request_completed_cb_);
   blink::MediaStreamAudioSource* audio_source = GetCurrentAudioSource();
@@ -97,7 +97,7 @@ void ApplyConstraintsProcessor::ProcessAudioRequest() {
 void ApplyConstraintsProcessor::ProcessVideoRequest() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(current_request_);
-  DCHECK_EQ(current_request_->Track()->Source()->GetType(),
+  DCHECK_EQ(current_request_->Track()->GetSourceType(),
             MediaStreamSource::kTypeVideo);
   DCHECK(request_completed_cb_);
   video_source_ = GetCurrentVideoSource();
@@ -116,6 +116,9 @@ void ApplyConstraintsProcessor::ProcessVideoRequest() {
 
 void ApplyConstraintsProcessor::ProcessVideoDeviceRequest() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  video_device_request_trace_ =
+      ScopedMediaStreamTrace::CreateIfEnabled("VideoDeviceRequest");
+
   if (AbortIfVideoRequestStateInvalid())
     return;
 
@@ -125,6 +128,9 @@ void ApplyConstraintsProcessor::ProcessVideoDeviceRequest() {
     FinalizeVideoRequest();
     return;
   }
+
+  if (video_device_request_trace_)
+    video_device_request_trace_->AddStep("GetAllVideoInputDeviceFormats");
 
   // It might be necessary to restart the video source. Before doing that,
   // check if the current format is the best format to satisfy the new
@@ -153,7 +159,11 @@ void ApplyConstraintsProcessor::MaybeStopSourceForRestart(
     video_source_->ReconfigureTrack(GetCurrentVideoTrack(),
                                     settings.track_adapter_settings());
     ApplyConstraintsSucceeded();
+    GetCurrentVideoTrack()->NotifyConstraintsConfigurationComplete();
   } else {
+    if (video_device_request_trace_)
+      video_device_request_trace_->AddStep("StopForRestart");
+
     video_source_->StopForRestart(
         WTF::Bind(&ApplyConstraintsProcessor::MaybeSourceStoppedForRestart,
                   WrapWeakPersistent(this)));
@@ -163,6 +173,7 @@ void ApplyConstraintsProcessor::MaybeStopSourceForRestart(
 void ApplyConstraintsProcessor::MaybeSourceStoppedForRestart(
     blink::MediaStreamVideoSource::RestartResult result) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
   if (AbortIfVideoRequestStateInvalid())
     return;
 
@@ -170,6 +181,9 @@ void ApplyConstraintsProcessor::MaybeSourceStoppedForRestart(
     FinalizeVideoRequest();
     return;
   }
+
+  if (video_device_request_trace_)
+    video_device_request_trace_->AddStep("GetAvailableVideoInputDeviceFormats");
 
   DCHECK_EQ(result, blink::MediaStreamVideoSource::RestartResult::IS_STOPPED);
   GetMediaDevicesDispatcher()->GetAvailableVideoInputDeviceFormats(
@@ -181,8 +195,12 @@ void ApplyConstraintsProcessor::MaybeSourceStoppedForRestart(
 void ApplyConstraintsProcessor::FindNewFormatAndRestart(
     const Vector<media::VideoCaptureFormat>& formats) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
   if (AbortIfVideoRequestStateInvalid())
     return;
+
+  if (video_device_request_trace_)
+    video_device_request_trace_->AddStep("Restart");
 
   blink::VideoCaptureSettings settings = SelectVideoSettings(formats);
   DCHECK(video_source_->GetCurrentFormat());
@@ -205,6 +223,9 @@ void ApplyConstraintsProcessor::MaybeSourceRestarted(
   if (result == blink::MediaStreamVideoSource::RestartResult::IS_RUNNING) {
     FinalizeVideoRequest();
   } else {
+    if (video_device_request_trace_)
+      video_device_request_trace_->AddStep("StopSource");
+
     DCHECK_EQ(result, blink::MediaStreamVideoSource::RestartResult::IS_STOPPED);
     CannotApplyConstraints("Source failed to restart");
     video_source_->StopSource();
@@ -213,6 +234,9 @@ void ApplyConstraintsProcessor::MaybeSourceRestarted(
 
 void ApplyConstraintsProcessor::FinalizeVideoRequest() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  if (video_device_request_trace_)
+    video_device_request_trace_->AddStep(__func__);
+
   if (AbortIfVideoRequestStateInvalid())
     return;
 
@@ -225,9 +249,14 @@ void ApplyConstraintsProcessor::FinalizeVideoRequest() {
   blink::VideoCaptureSettings settings = SelectVideoSettings({format});
 
   if (settings.HasValue()) {
+    if (settings.min_frame_rate().has_value()) {
+      GetCurrentVideoTrack()->SetMinimumFrameRate(
+          settings.min_frame_rate().value());
+    }
     video_source_->ReconfigureTrack(GetCurrentVideoTrack(),
                                     settings.track_adapter_settings());
     ApplyConstraintsSucceeded();
+    GetCurrentVideoTrack()->NotifyConstraintsConfigurationComplete();
   } else {
     ApplyConstraintsFailed(settings.failed_constraint_name());
   }
@@ -237,7 +266,7 @@ blink::VideoCaptureSettings ApplyConstraintsProcessor::SelectVideoSettings(
     Vector<media::VideoCaptureFormat> formats) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(current_request_);
-  DCHECK_EQ(current_request_->Track()->Source()->GetType(),
+  DCHECK_EQ(current_request_->Track()->GetSourceType(),
             MediaStreamSource::kTypeVideo);
   DCHECK(request_completed_cb_);
   DCHECK_GT(formats.size(), 0U);
@@ -246,8 +275,10 @@ blink::VideoCaptureSettings ApplyConstraintsProcessor::SelectVideoSettings(
   device_capabilities.device_id = current_request_->Track()->Source()->Id();
   device_capabilities.group_id = current_request_->Track()->Source()->GroupId();
   device_capabilities.facing_mode =
-      GetCurrentVideoSource() ? GetCurrentVideoSource()->device().video_facing
-                              : media::MEDIA_VIDEO_FACING_NONE;
+      GetCurrentVideoSource()
+          ? static_cast<mojom::blink::FacingMode>(
+                GetCurrentVideoSource()->device().video_facing)
+          : mojom::blink::FacingMode::NONE;
   device_capabilities.formats = std::move(formats);
 
   blink::VideoDeviceCaptureCapabilities video_capabilities;
@@ -260,7 +291,7 @@ blink::VideoCaptureSettings ApplyConstraintsProcessor::SelectVideoSettings(
   // values. However, initialize |settings| with the default values as a
   // fallback in case GetSettings returns nothing and leaves |settings|
   // unmodified.
-  blink::WebMediaStreamTrack::Settings settings;
+  MediaStreamTrackPlatform::Settings settings;
   settings.width = blink::MediaStreamVideoSource::kDefaultWidth;
   settings.height = blink::MediaStreamVideoSource::kDefaultHeight;
   settings.frame_rate = blink::MediaStreamVideoSource::kDefaultFrameRate;
@@ -283,8 +314,8 @@ ApplyConstraintsProcessor::GetCurrentAudioSource() {
 blink::MediaStreamVideoTrack*
 ApplyConstraintsProcessor::GetCurrentVideoTrack() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  blink::MediaStreamVideoTrack* track =
-      blink::MediaStreamVideoTrack::GetVideoTrack(current_request_->Track());
+  MediaStreamVideoTrack* track =
+      MediaStreamVideoTrack::From(current_request_->Track());
   DCHECK(track);
   return track;
 }
@@ -298,10 +329,13 @@ ApplyConstraintsProcessor::GetCurrentVideoSource() {
 bool ApplyConstraintsProcessor::AbortIfVideoRequestStateInvalid() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(current_request_);
-  DCHECK_EQ(current_request_->Track()->Source()->GetType(),
+  DCHECK_EQ(current_request_->Track()->GetSourceType(),
             MediaStreamSource::kTypeVideo);
   DCHECK(request_completed_cb_);
+
   if (GetCurrentVideoSource() != video_source_) {
+    if (video_device_request_trace_)
+      video_device_request_trace_->AddStep("Aborted");
     CannotApplyConstraints(
         "Track stopped or source changed. ApplyConstraints not possible.");
     return true;
@@ -349,6 +383,7 @@ void ApplyConstraintsProcessor::CleanupRequest(
   std::move(user_media_request_callback).Run();
   current_request_ = nullptr;
   video_source_ = nullptr;
+  video_device_request_trace_.reset();
 }
 
 blink::mojom::blink::MediaDevicesDispatcherHost*

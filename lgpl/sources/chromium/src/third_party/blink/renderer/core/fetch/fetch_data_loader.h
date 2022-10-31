@@ -5,12 +5,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_FETCH_DATA_LOADER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_FETCH_DATA_LOADER_H_
 
-#include "base/single_thread_task_runner.h"
+#include "base/notreached.h"
+#include "base/task/single_thread_task_runner.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -69,7 +70,11 @@ class CORE_EXPORT FetchDataLoader : public GarbageCollected<FetchDataLoader> {
     void Trace(Visitor* visitor) const override {}
   };
 
-  static FetchDataLoader* CreateLoaderAsBlobHandle(const String& mime_type);
+  // The task runner is used to post tasks necessary for creating a blob
+  // from certain kinds of consumers.
+  static FetchDataLoader* CreateLoaderAsBlobHandle(
+      const String& mime_type,
+      scoped_refptr<base::SingleThreadTaskRunner>);
   static FetchDataLoader* CreateLoaderAsArrayBuffer();
   static FetchDataLoader* CreateLoaderAsFailure();
   static FetchDataLoader* CreateLoaderAsFormData(

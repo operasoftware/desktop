@@ -55,6 +55,11 @@ int suite_basic_tests_init();
 int suite_basic_tests_clean();
 
 /**
+ * Decide if the suite is enabled by default or not.
+ */
+CU_BOOL suite_basic_tests_enable(void);
+
+/**
  * Tests in basic test suite
  */
 extern CU_TestInfo basic_tests[];
@@ -133,6 +138,26 @@ CU_BOOL suite_vcn_tests_enable(void);
 + * Tests in vcn test suite
 + */
 extern CU_TestInfo vcn_tests[];
+
+/**
++ * Initialize jpeg test suite
++ */
+int suite_jpeg_tests_init();
+
+/**
++ * Deinitialize jpeg test suite
++ */
+int suite_jpeg_tests_clean();
+
+/**
+ * Decide if the suite is enabled by default or not.
+ */
+CU_BOOL suite_jpeg_tests_enable(void);
+
+/**
++ * Tests in vcn test suite
++ */
+extern CU_TestInfo jpeg_tests[];
 
 /**
  * Initialize uvd enc test suite
@@ -235,6 +260,60 @@ CU_BOOL suite_syncobj_timeline_tests_enable(void);
  * Tests in syncobj timeline test suite
  */
 extern CU_TestInfo syncobj_timeline_tests[];
+
+void amdgpu_dispatch_hang_helper(amdgpu_device_handle device_handle, uint32_t ip_type);
+void amdgpu_dispatch_hang_slow_helper(amdgpu_device_handle device_handle, uint32_t ip_type);
+void amdgpu_memcpy_draw_test(amdgpu_device_handle device_handle, uint32_t ring,
+			     int hang);
+void amdgpu_memcpy_draw_hang_slow_test(amdgpu_device_handle device_handle, uint32_t ring);
+
+/**
+ * Initialize security test suite
+ */
+int suite_security_tests_init();
+
+/**
+ * Deinitialize security test suite
+ */
+int suite_security_tests_clean();
+
+/**
+ * Decide if the suite is enabled by default or not.
+ */
+CU_BOOL suite_security_tests_enable(void);
+
+/**
+ * Tests in security test suite
+ */
+extern CU_TestInfo security_tests[];
+
+extern void
+amdgpu_command_submission_write_linear_helper_with_secure(amdgpu_device_handle
+							  device,
+							  unsigned ip_type,
+							  bool secure);
+
+
+
+/**
+ * Initialize hotunplug test suite
+ */
+int suite_hotunplug_tests_init();
+
+/**
+ * Deinitialize hotunplug test suite
+ */
+int suite_hotunplug_tests_clean();
+
+/**
+ * Decide if the suite is enabled by default or not.
+ */
+CU_BOOL suite_hotunplug_tests_enable(void);
+
+/**
+ * Tests in uvd enc test suite
+ */
+extern CU_TestInfo hotunplug_tests[];
 
 
 /**
@@ -412,5 +491,36 @@ static inline CU_ErrorCode amdgpu_set_test_active(const char *suite_name,
 
 	return r;
 }
+
+
+static inline bool asic_is_gfx_pipe_removed(uint32_t family_id, uint32_t chip_id, uint32_t chip_rev)
+{
+
+	if (family_id != AMDGPU_FAMILY_AI)
+	return false;
+
+	switch (chip_id - chip_rev) {
+	/* Arcturus */
+	case 0x32:
+	/* Aldebaran */
+	case 0x3c:
+		return true;
+	default:
+		return false;
+	}
+}
+
+void amdgpu_test_exec_cs_helper_raw(amdgpu_device_handle device_handle,
+				    amdgpu_context_handle context_handle,
+				    unsigned ip_type, int instance, int pm4_dw,
+				    uint32_t *pm4_src, int res_cnt,
+				    amdgpu_bo_handle *resources,
+				    struct amdgpu_cs_ib_info *ib_info,
+				    struct amdgpu_cs_request *ibs_request,
+				    bool secure);
+
+void amdgpu_close_devices();
+int amdgpu_open_device_on_test_index(int render_node);
+char *amdgpu_get_device_from_fd(int fd);
 
 #endif  /* #ifdef _AMDGPU_TEST_H_ */

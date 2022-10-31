@@ -30,18 +30,30 @@
 
 #include "third_party/blink/renderer/core/animation/document_animations.h"
 
+#include <algorithm>
+
 #include "cc/animation/animation_host.h"
+#include "cc/animation/animation_timeline.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/animation/animation_clock.h"
 #include "third_party/blink/renderer/core/animation/animation_timeline.h"
+#include "third_party/blink/renderer/core/animation/css/css_scroll_timeline.h"
 #include "third_party/blink/renderer/core/animation/keyframe_effect.h"
 #include "third_party/blink/renderer/core/animation/pending_animations.h"
 #include "third_party/blink/renderer/core/animation/worklet_animation_controller.h"
+#include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/page_animator.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/platform/bindings/microtask.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 
 namespace blink {
 
@@ -69,10 +81,27 @@ DocumentAnimations::DocumentAnimations(Document* document)
 
 void DocumentAnimations::AddTimeline(AnimationTimeline& timeline) {
   timelines_.insert(&timeline);
+  unvalidated_timelines_.insert(&timeline);
 }
 
 void DocumentAnimations::UpdateAnimationTimingForAnimationFrame() {
+  // https://w3.org/TR/web-animations-1/#timelines
+
+  // 1. Update the current time of all timelines associated with doc passing now
+  //    as the timestamp.
   UpdateAnimationTiming(*document_, timelines_, kTimingUpdateForAnimationFrame);
+
+  // 2. Remove replaced animations for doc.
+  ReplaceableAnimationsMap replaceable_animations_map;
+  for (auto& timeline : timelines_)
+    timeline->getReplaceableAnimations(&replaceable_animations_map);
+  RemoveReplacedAnimations(&replaceable_animations_map);
+
+  // 3. Perform a microtask checkpoint
+  // This is to ensure that any microtasks queued up as a result of resolving or
+  // rejecting Promise objects as part of updating timelines run their callbacks
+  // prior to dispatching animation events and generating the next main frame.
+  Microtask::PerformCheckpoint(V8PerIsolateData::MainThreadIsolate());
 }
 
 bool DocumentAnimations::NeedsAnimationTimingUpdate() {
@@ -91,34 +120,43 @@ void DocumentAnimations::UpdateAnimationTimingIfNeeded() {
 
 void DocumentAnimations::UpdateAnimations(
     DocumentLifecycle::LifecycleState required_lifecycle_state,
-    const PaintArtifactCompositor* paint_artifact_compositor) {
+    const PaintArtifactCompositor* paint_artifact_compositor,
+    bool compositor_properties_updated) {
   DCHECK(document_->Lifecycle().GetState() >= required_lifecycle_state);
+
+  if (compositor_properties_updated)
+    MarkPendingIfCompositorPropertyAnimationChanges(paint_artifact_compositor);
 
   if (document_->GetPendingAnimations().Update(paint_artifact_compositor)) {
     DCHECK(document_->View());
     document_->View()->ScheduleAnimation();
   }
-  if (document_->View()) {
-    if (cc::AnimationHost* host =
-            document_->View()->GetCompositorAnimationHost()) {
-      wtf_size_t total_animations_count = 0;
-      for (auto& timeline : timelines_) {
-        if (timeline->HasAnimations())
-          total_animations_count += timeline->AnimationsNeedingUpdateCount();
-      }
-
-      // In the CompositorTimingHistory::DidDraw where we know that there is
-      // visual update, we will use document.CurrentFrameHadRAF as a signal to
-      // record UMA or not.
-      host->SetAnimationCounts(total_animations_count,
-                               document_->CurrentFrameHadRAF(),
-                               document_->NextFrameHasPendingRAF());
-    }
-  }
 
   document_->GetWorkletAnimationController().UpdateAnimationStates();
   for (auto& timeline : timelines_)
     timeline->ScheduleNextService();
+}
+
+void DocumentAnimations::MarkPendingIfCompositorPropertyAnimationChanges(
+    const PaintArtifactCompositor* paint_artifact_compositor) {
+  for (auto& timeline : timelines_) {
+    timeline->MarkPendingIfCompositorPropertyAnimationChanges(
+        paint_artifact_compositor);
+  }
+}
+
+size_t DocumentAnimations::GetAnimationsCount() {
+  wtf_size_t total_animations_count = 0;
+  if (document_->View()) {
+    if (cc::AnimationHost* host =
+            document_->View()->GetCompositorAnimationHost()) {
+      for (auto& timeline : timelines_) {
+        if (timeline->HasAnimations())
+          total_animations_count += timeline->AnimationsNeedingUpdateCount();
+      }
+    }
+  }
+  return total_animations_count;
 }
 
 void DocumentAnimations::MarkAnimationsCompositorPending() {
@@ -130,9 +168,7 @@ HeapVector<Member<Animation>> DocumentAnimations::getAnimations(
     const TreeScope& tree_scope) {
   // This method implements the Document::getAnimations method defined in the
   // web-animations-1 spec.
-  // https://drafts.csswg.org/web-animations-1/#dom-document-getanimations
-  // TODO(crbug.com/1046916): refactoring work to create a shared implementation
-  // of getAnimations for Documents and ShadowRoots.
+  // https://w3.org/TR/web-animations-1/#extensions-to-the-documentorshadowroot-interface-mixin
   document_->UpdateStyleAndLayoutTree();
   HeapVector<Member<Animation>> animations;
   if (document_->GetPage())
@@ -144,9 +180,38 @@ HeapVector<Member<Animation>> DocumentAnimations::getAnimations(
   return animations;
 }
 
+void DocumentAnimations::ValidateTimelines() {
+  for (auto& timeline : unvalidated_timelines_) {
+    if (auto* scroll_timeline = DynamicTo<CSSScrollTimeline>(timeline.Get()))
+      scroll_timeline->ValidateState();
+  }
+
+  unvalidated_timelines_.clear();
+}
+
+void DocumentAnimations::DetachCompositorTimelines() {
+  if (!Platform::Current()->IsThreadedAnimationEnabled() ||
+      !document_->GetSettings()->GetAcceleratedCompositingEnabled() ||
+      !document_->GetPage())
+    return;
+
+  for (auto& timeline : timelines_) {
+    cc::AnimationTimeline* compositor_timeline = timeline->CompositorTimeline();
+    if (!compositor_timeline)
+      continue;
+
+    if (cc::AnimationHost* host =
+            document_->GetPage()->GetChromeClient().GetCompositorAnimationHost(
+                *document_->GetFrame())) {
+      host->RemoveAnimationTimeline(compositor_timeline);
+    }
+  }
+}
+
 void DocumentAnimations::Trace(Visitor* visitor) const {
   visitor->Trace(document_);
   visitor->Trace(timelines_);
+  visitor->Trace(unvalidated_timelines_);
 }
 
 void DocumentAnimations::GetAnimationsTargetingTreeScope(
@@ -172,4 +237,59 @@ void DocumentAnimations::GetAnimationsTargetingTreeScope(
     }
   }
 }
+
+void DocumentAnimations::RemoveReplacedAnimations(
+    DocumentAnimations::ReplaceableAnimationsMap* replaceable_animations_map) {
+  HeapVector<Member<Animation>> animations_to_remove;
+  for (auto& elem_it : *replaceable_animations_map) {
+    HeapVector<Member<Animation>>* animations = elem_it.value;
+
+    // Only elements with multiple animations in the replaceable state need to
+    // be checked.
+    if (animations->size() == 1)
+      continue;
+
+    // By processing in decreasing order by priority, we can perform a single
+    // pass for discovery of replaced properties.
+    std::sort(animations->begin(), animations->end(), CompareAnimations);
+    PropertyHandleSet replaced_properties;
+    for (auto anim_it = animations->rbegin(); anim_it != animations->rend();
+         anim_it++) {
+      // Remaining conditions for removal:
+      // * has a replace state of active,  and
+      // * for which there exists for each target property of every animation
+      //   effect associated with animation, an animation effect associated with
+      //   a replaceable animation with a higher composite order than animation
+      //   that includes the same target property.
+
+      // Only active animations can be removed. We still need to go through
+      // the process of iterating over properties if not removable to update
+      // the set of properties being replaced.
+      bool replace = (*anim_it)->ReplaceStateActive();
+      PropertyHandleSet animation_properties =
+          To<KeyframeEffect>((*anim_it)->effect())->Model()->Properties();
+      for (const auto& property : animation_properties) {
+        auto inserted = replaced_properties.insert(property);
+        if (inserted.is_new_entry) {
+          // Top-most compositor order animation affecting this property.
+          replace = false;
+        }
+      }
+      if (replace)
+        animations_to_remove.push_back(*anim_it);
+    }
+  }
+
+  // The list of animations for removal is constructed in reverse composite
+  // ordering for efficiency. Flip the ordering to ensure that events are
+  // dispatched in composite order.  Queue as a microtask so that the finished
+  // event is dispatched ahead of the remove event.
+  for (auto it = animations_to_remove.rbegin();
+       it != animations_to_remove.rend(); it++) {
+    Animation* animation = *it;
+    Microtask::EnqueueMicrotask(WTF::Bind(&Animation::RemoveReplacedAnimation,
+                                          WrapWeakPersistent(animation)));
+  }
+}
+
 }  // namespace blink

@@ -4,7 +4,9 @@
 #-index-name: Norwegian, uncontracted, 8-dot
 #-display-name: Norwegian 8-dot uncontracted braille
 #
-#+locale:no
+#+language:no
+#+language:nb
+#+language:nn
 #+type:literary
 #+contraction:no
 #+dots:8
@@ -26,6 +28,9 @@
 # Official norwegian braille specifications are collected here:
 # http://liblouis.org/braille-specs/norwegian
 # This specific table is based on the document "Punkttabell for JAWS".
+#
+# Input is expected to be normalized to NFC (fully composed)
+#-unicode-form:nfc
 #
 #  Copyright (C) 2015 NLB Norwegian library of talking books and braille, http://www.nlb.no/
 #

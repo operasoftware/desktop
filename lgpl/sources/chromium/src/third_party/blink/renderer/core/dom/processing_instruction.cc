@@ -28,12 +28,13 @@
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/increment_load_event_delay_count.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/loader/resource/css_style_sheet_resource.h"
 #include "third_party/blink/renderer/core/loader/resource/xsl_style_sheet_resource.h"
 #include "third_party/blink/renderer/core/xml/document_xslt.h"
 #include "third_party/blink/renderer/core/xml/parser/xml_document_parser.h"  // for parseAttributes()
 #include "third_party/blink/renderer/core/xml/xsl_style_sheet.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
@@ -120,12 +121,17 @@ bool ProcessingInstruction::CheckStyleSheet(String& href, String& charset) {
   if (!is_css_ && !is_xsl_)
     return false;
 
-  href = attrs.at("href");
-  charset = attrs.at("charset");
-  String alternate = attrs.at("alternate");
+  auto it_href = attrs.find("href");
+  href = it_href != attrs.end() ? it_href->value : "";
+  auto it_charset = attrs.find("charset");
+  charset = it_charset != attrs.end() ? it_charset->value : "";
+  auto it_alternate = attrs.find("alternate");
+  String alternate = it_alternate != attrs.end() ? it_alternate->value : "";
   alternate_ = alternate == "yes";
-  title_ = attrs.at("title");
-  media_ = attrs.at("media");
+  auto it_title = attrs.find("title");
+  title_ = it_title != attrs.end() ? it_title->value : "";
+  auto it_media = attrs.find("media");
+  media_ = it_media != attrs.end() ? it_media->value : "";
 
   return !alternate_ || !title_.IsEmpty();
 }
@@ -150,7 +156,7 @@ void ProcessingInstruction::Process(const String& href, const String& charset) {
   if (is_xsl_ && !RuntimeEnabledFeatures::XSLTEnabled())
     return;
 
-  ResourceLoaderOptions options;
+  ResourceLoaderOptions options(GetExecutionContext()->GetCurrentWorld());
   options.initiator_info.name =
       fetch_initiator_type_names::kProcessinginstruction;
   FetchParameters params(ResourceRequest(GetDocument().CompleteURL(href)),
@@ -164,7 +170,8 @@ void ProcessingInstruction::Process(const String& href, const String& charset) {
   } else {
     params.SetCharset(charset.IsEmpty() ? GetDocument().Encoding()
                                         : WTF::TextEncoding(charset));
-    GetDocument().GetStyleEngine().AddPendingSheet(style_engine_context_);
+    GetDocument().GetStyleEngine().AddPendingBlockingSheet(
+        *this, PendingSheetType::kBlocking);
     CSSStyleSheetResource::Fetch(params, GetDocument().Fetcher(), this);
   }
 }
@@ -199,14 +206,16 @@ void ProcessingInstruction::NotifyFinished(Resource* resource) {
     sheet_ = MakeGarbageCollected<XSLStyleSheet>(
         this, resource->Url(), resource->GetResponse().ResponseUrl(), false);
     To<XSLStyleSheet>(sheet_.Get())
-        ->ParseString(ToXSLStyleSheetResource(resource)->Sheet());
+        ->ParseString(To<XSLStyleSheetResource>(resource)->Sheet());
   } else {
     DCHECK(is_css_);
-    CSSStyleSheetResource* style_resource = ToCSSStyleSheetResource(resource);
+    auto* style_resource = To<CSSStyleSheetResource>(resource);
     auto* parser_context = MakeGarbageCollected<CSSParserContext>(
         GetDocument(), style_resource->GetResponse().ResponseUrl(),
         style_resource->GetResponse().IsCorsSameOrigin(),
-        style_resource->GetReferrerPolicy(), style_resource->Encoding());
+        Referrer(style_resource->GetResponse().ResponseUrl(),
+                 style_resource->GetReferrerPolicy()),
+        style_resource->Encoding());
     if (style_resource->GetResourceRequest().IsAdResource())
       parser_context->SetIsAdRelated();
 
@@ -288,8 +297,8 @@ void ProcessingInstruction::ClearSheet() {
 void ProcessingInstruction::RemovePendingSheet() {
   if (is_xsl_)
     return;
-  GetDocument().GetStyleEngine().RemovePendingSheet(*this,
-                                                    style_engine_context_);
+  GetDocument().GetStyleEngine().RemovePendingBlockingSheet(
+      *this, PendingSheetType::kBlocking);
 }
 
 void ProcessingInstruction::Trace(Visitor* visitor) const {

@@ -1,101 +1,151 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/** @fileoverview Tests for shared Polymer components. */
+/** @fileoverview Tests for shared Polymer 3 components. */
 
 // Polymer BrowserTest fixture.
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 
+GEN('#include "chrome/browser/browser_features.h"');
 GEN('#include "chrome/browser/ui/ui_features.h"');
 GEN('#include "content/public/test/browser_test.h"');
+GEN('#include "build/chromeos_buildflags.h"');
+GEN('#include "crypto/crypto_buildflags.h"');
 
-/**
- * Test fixture for shared Polymer components.
- * @constructor
- * @extends {PolymerTest}
- */
-function CrComponentsBrowserTest() {}
+/* eslint-disable no-var */
 
-CrComponentsBrowserTest.prototype = {
-  __proto__: PolymerTest.prototype,
-
+/** Test fixture for shared Polymer 3 components. */
+var CrComponentsBrowserTest = class extends PolymerTest {
   /** @override */
   get browsePreload() {
-    throw 'subclasses should override to load a WebUI page that includes it.';
-  },
-};
-
-/**
- * @constructor
- * @extends {CrComponentsBrowserTest}
- */
-function CrComponentsManagedFootnoteTest() {}
-
-CrComponentsManagedFootnoteTest.prototype = {
-  __proto__: CrComponentsBrowserTest.prototype,
+    return 'chrome://dummyurl';
+  }
 
   /** @override */
-  browsePreload:
-      'chrome://resources/cr_components/managed_footnote/managed_footnote.html',
-
-  /** @override */
-  extraLibraries: CrComponentsBrowserTest.prototype.extraLibraries.concat([
-    'managed_footnote_test.js',
-  ]),
-
-  /** @override */
-  get suiteName() {
-    return managed_footnote_test.suiteName;
+  get webuiHost() {
+    return 'dummyurl';
   }
 };
 
-TEST_F('CrComponentsManagedFootnoteTest', 'Hidden', function() {
-  runMochaTest(this.suiteName, managed_footnote_test.TestNames.Hidden);
-});
-
-TEST_F('CrComponentsManagedFootnoteTest', 'LoadTimeDataBrowser', function() {
-  runMochaTest(
-      this.suiteName, managed_footnote_test.TestNames.LoadTimeDataBrowser);
-});
-
-TEST_F('CrComponentsManagedFootnoteTest', 'Events', function() {
-  runMochaTest(this.suiteName, managed_footnote_test.TestNames.Events);
-});
-
-GEN('#if defined(OS_CHROMEOS)');
-
-TEST_F('CrComponentsManagedFootnoteTest', 'LoadTimeDataDevice', function() {
-  runMochaTest(
-      this.suiteName, managed_footnote_test.TestNames.LoadTimeDataDevice);
-});
-
-/**
- * @constructor
- * @extends {CrComponentsBrowserTest}
- */
-function CrComponentsNetworkConfigTest() {}
-
-CrComponentsNetworkConfigTest.prototype = {
-  __proto__: CrComponentsBrowserTest.prototype,
-
+var CrComponentsColorChangeListenerTest =
+    class extends CrComponentsBrowserTest {
   /** @override */
-
-  browsePreload: 'chrome://internet-config-dialog',
-
-  /** @override */
-  extraLibraries: CrComponentsBrowserTest.prototype.extraLibraries.concat([
-    '//ui/webui/resources/js/assert.js',
-    '//ui/webui/resources/js/promise_resolver.js',
-    '../fake_chrome_event.js',
-    '../chromeos/networking_private_constants.js',
-    '../chromeos/fake_network_config_mojom.js',
-    'network_config_test.js',
-  ]),
+  get browsePreload() {
+    return 'chrome://test/test_loader.html?module=cr_components/color_change_listener_test.js';
+  }
 };
 
-TEST_F('CrComponentsNetworkConfigTest', 'All', function() {
+TEST_F('CrComponentsColorChangeListenerTest', 'All', function() {
   mocha.run();
 });
 
-GEN('#endif');
+var CrComponentsManagedFootnoteTest = class extends CrComponentsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://test/test_loader.html?module=cr_components/managed_footnote_test.js';
+  }
+};
+
+TEST_F('CrComponentsManagedFootnoteTest', 'All', function() {
+  mocha.run();
+});
+
+GEN('#if BUILDFLAG(USE_NSS_CERTS)');
+
+/**
+ * Test fixture for chrome://settings/certificates. This tests the
+ * certificate-manager component in the context of the Settings privacy page.
+ */
+var CrComponentsCertificateManagerTest = class extends CrComponentsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://settings/test_loader.html?module=cr_components/certificate_manager_test.js';
+  }
+};
+
+TEST_F('CrComponentsCertificateManagerTest', 'All', function() {
+  mocha.run();
+});
+
+GEN('#endif  // BUILDFLAG(USE_NSS_CERTS)');
+
+
+GEN('#if BUILDFLAG(USE_NSS_CERTS) && BUILDFLAG(IS_CHROMEOS)');
+
+/**
+ * ChromeOS specific test fixture for chrome://settings/certificates, testing
+ * the certificate provisioning UI. This tests the certificate-manager component
+ * in the context of the Settings privacy page.
+ */
+var CrComponentsCertificateManagerProvisioningTest =
+    class extends CrComponentsCertificateManagerTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://settings/test_loader.html?module=cr_components/certificate_manager_provisioning_test.js';
+  }
+};
+
+TEST_F('CrComponentsCertificateManagerProvisioningTest', 'All', function() {
+  mocha.run();
+});
+
+GEN('#endif  // BUILDFLAG(USE_NSS_CERTS) && BUILDFLAG(IS_CHROMEOS)');
+
+var CrComponentsManagedDialogTest = class extends CrComponentsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://test/test_loader.html?module=cr_components/managed_dialog_test.js';
+  }
+};
+
+TEST_F('CrComponentsManagedDialogTest', 'All', function() {
+  mocha.run();
+});
+
+var CrComponentsLocalizedLinkTest = class extends CrComponentsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://test/test_loader.html?module=cr_components/localized_link_test.js';
+  }
+};
+
+TEST_F('CrComponentsLocalizedLinkTest', 'All', function() {
+  mocha.run();
+});
+
+var CrComponentsAppManagementPermissionItemTest =
+    class extends CrComponentsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://test/test_loader.html?module=cr_components/app_management/permission_item_test.js';
+  }
+};
+
+TEST_F('CrComponentsAppManagementPermissionItemTest', 'All', function() {
+  mocha.run();
+});
+
+var CrComponentsAppManagementFileHandlingItemTest =
+    class extends CrComponentsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://test/test_loader.html?module=cr_components/app_management/file_handling_item_test.js';
+  }
+};
+
+TEST_F('CrComponentsAppManagementFileHandlingItemTest', 'All', function() {
+  mocha.run();
+});
+
+var CrComponentsAppManagementWindowModeTest =
+    class extends CrComponentsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://test/test_loader.html?module=cr_components/app_management/window_mode_item_test.js';
+  }
+};
+
+TEST_F('CrComponentsAppManagementWindowModeTest', 'All', function() {
+  mocha.run();
+});

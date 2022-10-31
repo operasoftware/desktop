@@ -5,15 +5,18 @@
 // https://gpuweb.github.io/gpuweb/
 
 dictionary GPURenderPassDescriptor : GPUObjectDescriptorBase {
-    required sequence<GPURenderPassColorAttachmentDescriptor> colorAttachments;
-    GPURenderPassDepthStencilAttachmentDescriptor depthStencilAttachment;
+    required sequence<GPURenderPassColorAttachment?> colorAttachments;
+    GPURenderPassDepthStencilAttachment depthStencilAttachment;
+    GPUQuerySet occlusionQuerySet;
+    GPUSize64 maxDrawCount;
 };
 
 enum GPULoadOp {
-    "load"
+    "load",
+    "clear",
 };
 
 enum GPUStoreOp {
     "store",
-    "clear"
+    "discard",
 };

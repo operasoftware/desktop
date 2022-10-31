@@ -30,26 +30,37 @@
 #include <memory>
 #include <utility>
 
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/unguessable_token.h"
+#include "services/metrics/public/cpp/mojo_ukm_recorder.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/service_worker/controller_service_worker_mode.mojom-blink-forward.h"
+#include "third_party/blink/public/platform/web_url_loader.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
+#include "third_party/blink/renderer/platform/loader/fetch/early_hints_preload_entry.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
+#include "third_party/blink/renderer/platform/loader/fetch/loader_freeze_mode.h"
 #include "third_party/blink/renderer/platform/loader/fetch/preload_key.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_scheduler.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
+#include "third_party/blink/renderer/platform/mojo/mojo_binding_context.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/timer.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 
 namespace blink {
 
 enum class ResourceType : uint8_t;
-class CodeCacheLoader;
+class BackForwardCacheLoaderHelper;
 class DetachableConsoleLogger;
 class DetachableUseCounter;
 class DetachableResourceFetcherProperties;
@@ -61,7 +72,10 @@ class Resource;
 class ResourceError;
 class ResourceLoadObserver;
 class ResourceTimingInfo;
-class WebURLLoader;
+class SubresourceWebBundle;
+class SubresourceWebBundleList;
+class WebBackForwardCacheLoaderHelper;
+class WebCodeCacheLoader;
 struct ResourceFetcherInit;
 struct ResourceLoaderOptions;
 
@@ -89,19 +103,25 @@ class PLATFORM_EXPORT ResourceFetcher
 
     virtual void Trace(Visitor*) const {}
 
-    // Create a WebURLLoader for given the request information and task runner.
+    // Create a WebURLLoader for given the request information and task runners.
+    // TODO(yuzus): Take only unfreezable task runner once both
+    // URLLoaderClientImpl and ResponseBodyLoader use unfreezable task runner.
     virtual std::unique_ptr<WebURLLoader> CreateURLLoader(
         const ResourceRequest&,
         const ResourceLoaderOptions&,
-        scoped_refptr<base::SingleThreadTaskRunner>) = 0;
+        scoped_refptr<base::SingleThreadTaskRunner> freezable_task_runner,
+        scoped_refptr<base::SingleThreadTaskRunner> unfreezable_task_runner,
+        WebBackForwardCacheLoaderHelper) = 0;
 
     // Create a code cache loader to fetch data from code caches.
-    virtual std::unique_ptr<CodeCacheLoader> CreateCodeCacheLoader() = 0;
+    virtual std::unique_ptr<WebCodeCacheLoader> CreateCodeCacheLoader() = 0;
   };
 
   // ResourceFetcher creators are responsible for setting consistent objects
   // in ResourceFetcherInit to ensure correctness of this ResourceFetcher.
   explicit ResourceFetcher(const ResourceFetcherInit&);
+  ResourceFetcher(const ResourceFetcher&) = delete;
+  ResourceFetcher& operator=(const ResourceFetcher&) = delete;
   virtual ~ResourceFetcher();
   virtual void Trace(Visitor*) const;
 
@@ -144,26 +164,28 @@ class PLATFORM_EXPORT ResourceFetcher
   // this fetcher initiates. The returned task runner will keep working even
   // after ClearContext is called.
   const scoped_refptr<base::SingleThreadTaskRunner>& GetTaskRunner() const {
-    return task_runner_;
+    return freezable_task_runner_;
   }
 
   // Create a loader. This cannot be called after ClearContext is called.
-  std::unique_ptr<WebURLLoader> CreateURLLoader(const ResourceRequest&,
+  std::unique_ptr<WebURLLoader> CreateURLLoader(const ResourceRequestHead&,
                                                 const ResourceLoaderOptions&);
   // Create a code cache loader. This cannot be called after ClearContext is
   // called.
-  std::unique_ptr<CodeCacheLoader> CreateCodeCacheLoader();
+  std::unique_ptr<WebCodeCacheLoader> CreateCodeCacheLoader();
 
   Resource* CachedResource(const KURL&) const;
   static void AddPriorityObserverForTesting(const KURL&,
                                             base::OnceCallback<void(int)>);
 
   using DocumentResourceMap = HeapHashMap<String, WeakMember<Resource>>;
+  // Note: This function is defined for devtools. Do not use this function in
+  // non-inspector/non-tent-only contexts.
   const DocumentResourceMap& AllResources() const {
     return cached_resources_map_;
   }
 
-  enum class LoadBlockingPolicy {
+  enum class ImageLoadBlockingPolicy {
     kDefault,
     kForceNonBlockingLoad,
   };
@@ -174,7 +196,10 @@ class PLATFORM_EXPORT ResourceFetcher
   // call this method explicitly on cases such as ResourceNeedsLoad() returning
   // false.
   bool StartLoad(Resource*);
-  bool StartLoad(Resource*, ResourceRequestBody, LoadBlockingPolicy);
+  bool StartLoad(Resource*,
+                 ResourceRequestBody,
+                 ImageLoadBlockingPolicy,
+                 RenderBlockingBehavior);
 
   void SetAutoLoadImages(bool);
   void SetImagesEnabled(bool);
@@ -202,7 +227,11 @@ class PLATFORM_EXPORT ResourceFetcher
 
   MHTMLArchive* Archive() const { return archive_.Get(); }
 
-  void SetDefersLoading(bool);
+  // Set the deferring state of each loader owned by this ResourceFetcher. This
+  // method must be called when the page freezing state changes.
+  // TODO(yhirano): Rename this to a more easily recognizable name.
+  void SetDefersLoading(LoaderFreezeMode);
+
   void StopFetching();
 
   bool ShouldDeferImageLoad(const KURL&) const;
@@ -218,15 +247,23 @@ class PLATFORM_EXPORT ResourceFetcher
                           uint32_t inflight_keepalive_bytes,
                           bool should_report_corb_blocking);
   void HandleLoaderError(Resource*,
+                         base::TimeTicks finish_time,
                          const ResourceError&,
                          uint32_t inflight_keepalive_bytes);
   blink::mojom::ControllerServiceWorkerMode IsControlledByServiceWorker() const;
 
-  String GetCacheIdentifier() const;
+  String GetCacheIdentifier(const KURL& url) const;
+
+  // If `url` exists as a resource in a subresource bundle in this frame,
+  // returns its UnguessableToken; otherwise, returns absl::nullopt.
+  absl::optional<base::UnguessableToken> GetSubresourceBundleToken(
+      const KURL& url) const;
+
+  absl::optional<KURL> GetSubresourceBundleSourceUrl(const KURL& url) const;
 
   enum IsImageSet { kImageNotImageSet, kImageIsImageSet };
 
-  WARN_UNUSED_RESULT static mojom::RequestContextType DetermineRequestContext(
+  [[nodiscard]] static mojom::blink::RequestContextType DetermineRequestContext(
       ResourceType,
       IsImageSet);
 
@@ -242,11 +279,14 @@ class PLATFORM_EXPORT ResourceFetcher
 
   void LoosenLoadThrottlingPolicy() { scheduler_->LoosenThrottlingPolicy(); }
 
+  void StartBatch() { scheduler_->StartBatch(); }
+  void EndBatch() { scheduler_->EndBatch(); }
+
   // Workaround for https://crbug.com/666214.
   // TODO(hiroshige): Remove this hack.
   void EmulateLoadStartedForInspector(Resource*,
                                       const KURL&,
-                                      mojom::RequestContextType,
+                                      mojom::blink::RequestContextType,
                                       network::mojom::RequestDestination,
                                       const AtomicString& initiator_name);
 
@@ -268,19 +308,35 @@ class PLATFORM_EXPORT ResourceFetcher
       ResourcePriority::VisibilityStatus visibility_statue,
       FetchParameters::DeferOption defer_option,
       FetchParameters::SpeculativePreloadType speculative_preload_type,
+      RenderBlockingBehavior render_blocking_behavior,
       bool is_link_preload) {
     return ComputeLoadPriority(type, request, visibility_statue, defer_option,
-                               speculative_preload_type, is_link_preload);
-  }
-
-  void SetShouldLogRequestAsInvalidInImportedDocument() {
-    should_log_request_as_invalid_in_imported_document_ = true;
+                               speculative_preload_type,
+                               render_blocking_behavior, is_link_preload);
   }
 
   void SetThrottleOptionOverride(
       ResourceLoadScheduler::ThrottleOptionOverride throttle_option_override) {
     scheduler_->SetThrottleOptionOverride(throttle_option_override);
   }
+
+  void AttachWebBundleTokenIfNeeded(ResourceRequest&) const;
+  SubresourceWebBundleList* GetOrCreateSubresourceWebBundleList();
+
+  BackForwardCacheLoaderHelper* GetBackForwardCacheLoaderHelper() {
+    return back_forward_cache_loader_helper_;
+  }
+
+  void SetEarlyHintsPreloadedResources(
+      HashMap<KURL, EarlyHintsPreloadEntry> resources) {
+    early_hints_preloaded_resources_ = std::move(resources);
+  }
+
+  // Access the UKMRecorder.
+  ukm::MojoUkmRecorder* UkmRecorder();
+
+  void CancelWebBundleSubresourceLoadersFor(
+      const base::UnguessableToken& web_bundle_token);
 
  private:
   friend class ResourceCacheValidationSuppressor;
@@ -297,33 +353,35 @@ class PLATFORM_EXPORT ResourceFetcher
   void AddToMemoryCacheIfNeeded(const FetchParameters&, Resource*);
   Resource* CreateResourceForLoading(const FetchParameters&,
                                      const ResourceFactory&);
-  void StorePerformanceTimingInitiatorInformation(Resource*);
+  void StorePerformanceTimingInitiatorInformation(Resource*,
+                                                  RenderBlockingBehavior);
   ResourceLoadPriority ComputeLoadPriority(
       ResourceType,
       const ResourceRequestHead&,
       ResourcePriority::VisibilityStatus,
-      FetchParameters::DeferOption = FetchParameters::kNoDefer,
+      FetchParameters::DeferOption = FetchParameters::DeferOption::kNoDefer,
       FetchParameters::SpeculativePreloadType =
           FetchParameters::SpeculativePreloadType::kNotSpeculative,
+      RenderBlockingBehavior = RenderBlockingBehavior::kNonBlocking,
       bool is_link_preload = false);
 
   // |virtual_time_pauser| is an output parameter. PrepareRequest may
   // create a new WebScopedVirtualTimePauser and set it to
   // |virtual_time_pauser|.
-  base::Optional<ResourceRequestBlockedReason> PrepareRequest(
+  absl::optional<ResourceRequestBlockedReason> PrepareRequest(
       FetchParameters&,
       const ResourceFactory&,
       WebScopedVirtualTimePauser& virtual_time_pauser);
 
-  Resource* ResourceForStaticData(const FetchParameters&,
-                                  const ResourceFactory&);
+  Resource* CreateResourceForStaticData(const FetchParameters&,
+                                        const ResourceFactory&);
   Resource* ResourceForBlockedRequest(const FetchParameters&,
                                       const ResourceFactory&,
                                       ResourceRequestBlockedReason,
                                       ResourceClient*);
 
   Resource* MatchPreload(const FetchParameters& params, ResourceType);
-  void PrintPreloadWarning(Resource*, Resource::MatchStatus);
+  void PrintPreloadMismatch(Resource*, Resource::MatchStatus);
   void InsertAsPreloadIfNecessary(Resource*,
                                   const FetchParameters& params,
                                   ResourceType);
@@ -368,7 +426,8 @@ class PLATFORM_EXPORT ResourceFetcher
 
   void DidLoadResourceFromMemoryCache(Resource*,
                                       const ResourceRequest&,
-                                      bool is_static_data);
+                                      bool is_static_data,
+                                      RenderBlockingBehavior);
 
   bool ResourceNeedsLoad(Resource*, const FetchParameters&, RevalidationPolicy);
 
@@ -380,21 +439,29 @@ class PLATFORM_EXPORT ResourceFetcher
                               RevalidationPolicy,
                               const FetchParameters&,
                               const ResourceFactory&,
-                              bool is_static_data) const;
+                              bool is_static_data,
+                              bool same_top_frame_site_resource_cached) const;
 
   void ScheduleStaleRevalidate(Resource* stale_resource);
   void RevalidateStaleResource(Resource* stale_resource);
 
   void WarnUnusedPreloads();
 
+  void PopulateAndAddResourceTimingInfo(Resource* resource,
+                                        scoped_refptr<ResourceTimingInfo> info,
+                                        base::TimeTicks response_end);
+  SubresourceWebBundle* GetMatchingBundle(const KURL& url) const;
+
   Member<DetachableResourceFetcherProperties> properties_;
   Member<ResourceLoadObserver> resource_load_observer_;
   Member<FetchContext> context_;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> freezable_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> unfreezable_task_runner_;
   const Member<DetachableUseCounter> use_counter_;
   const Member<DetachableConsoleLogger> console_logger_;
   Member<LoaderFactory> loader_factory_;
   const Member<ResourceLoadScheduler> scheduler_;
+  Member<BackForwardCacheLoaderHelper> back_forward_cache_loader_helper_;
 
   DocumentResourceMap cached_resources_map_;
 
@@ -410,7 +477,7 @@ class PLATFORM_EXPORT ResourceFetcher
   HeapVector<Member<Resource>> matched_preloads_;
   Member<MHTMLArchive> archive_;
 
-  TaskRunnerTimer<ResourceFetcher> resource_timing_report_timer_;
+  HeapTaskRunnerTimer<ResourceFetcher> resource_timing_report_timer_;
 
   TaskHandle unused_preloads_timer_;
 
@@ -423,6 +490,8 @@ class PLATFORM_EXPORT ResourceFetcher
   HeapHashSet<Member<ResourceLoader>> loaders_;
   HeapHashSet<Member<ResourceLoader>> non_blocking_loaders_;
 
+  HashMap<KURL, EarlyHintsPreloadEntry> early_hints_preloaded_resources_;
+
   std::unique_ptr<HashSet<String>> preloaded_urls_for_test_;
 
   // TODO(altimin): Move FrameScheduler to oilpan.
@@ -433,25 +502,27 @@ class PLATFORM_EXPORT ResourceFetcher
 
   uint32_t inflight_keepalive_bytes_ = 0;
 
-  HeapMojoRemote<mojom::blink::BlobRegistry,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      blob_registry_remote_;
+  HeapMojoRemote<mojom::blink::BlobRegistry> blob_registry_remote_;
+
+  // Lazily initialized when the first <script type=webbundle> is inserted.
+  Member<SubresourceWebBundleList> subresource_web_bundles_;
 
   // This is not in the bit field below because we want to use AutoReset.
   bool is_in_request_resource_ = false;
 
-  // 26 bits left
+  // 27 bits left
   bool auto_load_images_ : 1;
   bool images_enabled_ : 1;
   bool allow_stale_resources_ : 1;
   bool image_fetched_ : 1;
   bool stale_while_revalidate_enabled_ : 1;
-  // for https://crbug.com/961614
-  bool should_log_request_as_invalid_in_imported_document_ : 1;
 
   static constexpr uint32_t kKeepaliveInflightBytesQuota = 64 * 1024;
 
-  DISALLOW_COPY_AND_ASSIGN(ResourceFetcher);
+  std::unique_ptr<ukm::MojoUkmRecorder> ukm_recorder_;
+
+  // NOTE: This must be the last member.
+  base::WeakPtrFactory<ResourceFetcher> weak_ptr_factory_{this};
 };
 
 class ResourceCacheValidationSuppressor {
@@ -465,6 +536,10 @@ class ResourceCacheValidationSuppressor {
       loader_->allow_stale_resources_ = true;
     }
   }
+  ResourceCacheValidationSuppressor(const ResourceCacheValidationSuppressor&) =
+      delete;
+  ResourceCacheValidationSuppressor& operator=(
+      const ResourceCacheValidationSuppressor&) = delete;
   ~ResourceCacheValidationSuppressor() {
     if (loader_)
       loader_->allow_stale_resources_ = previous_state_;
@@ -473,8 +548,6 @@ class ResourceCacheValidationSuppressor {
  private:
   ResourceFetcher* loader_;
   bool previous_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(ResourceCacheValidationSuppressor);
 };
 
 // Used for ResourceFetcher construction.
@@ -486,15 +559,28 @@ struct PLATFORM_EXPORT ResourceFetcherInit final {
  public:
   // |context| and |task_runner| must not be null.
   // |loader_factory| can be null if |properties.IsDetached()| is true.
-  ResourceFetcherInit(DetachableResourceFetcherProperties& properties,
-                      FetchContext* context,
-                      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-                      ResourceFetcher::LoaderFactory* loader_factory);
+  // This takes two types of task runners: freezable and unfreezable one.
+  // |unfreezable_task_runner| is used for handling incoming resource load from
+  // outside the renderer via Mojo (i.e. by URLLoaderClientImpl and
+  // ResponseBodyLoader) so that network loading can make progress even when a
+  // frame is frozen, while |freezable_task_runner| is used for everything else.
+  ResourceFetcherInit(
+      DetachableResourceFetcherProperties& properties,
+      FetchContext* context,
+      scoped_refptr<base::SingleThreadTaskRunner> freezable_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> unfreezable_task_runner,
+      ResourceFetcher::LoaderFactory* loader_factory,
+      ContextLifecycleNotifier* context_lifecycle_notifier,
+      BackForwardCacheLoaderHelper* back_forward_cache_loader_helper = nullptr);
+  ResourceFetcherInit(const ResourceFetcherInit&) = delete;
+  ResourceFetcherInit& operator=(const ResourceFetcherInit&) = delete;
 
   DetachableResourceFetcherProperties* const properties;
   FetchContext* const context;
-  const scoped_refptr<base::SingleThreadTaskRunner> task_runner;
+  const scoped_refptr<base::SingleThreadTaskRunner> freezable_task_runner;
+  const scoped_refptr<base::SingleThreadTaskRunner> unfreezable_task_runner;
   ResourceFetcher::LoaderFactory* const loader_factory;
+  ContextLifecycleNotifier* const context_lifecycle_notifier;
   DetachableUseCounter* use_counter = nullptr;
   DetachableConsoleLogger* console_logger = nullptr;
   ResourceLoadScheduler::ThrottlingPolicy initial_throttling_policy =
@@ -503,8 +589,8 @@ struct PLATFORM_EXPORT ResourceFetcherInit final {
   FrameOrWorkerScheduler* frame_or_worker_scheduler = nullptr;
   ResourceLoadScheduler::ThrottleOptionOverride throttle_option_override =
       ResourceLoadScheduler::ThrottleOptionOverride::kNone;
-
-  DISALLOW_COPY_AND_ASSIGN(ResourceFetcherInit);
+  LoadingBehaviorObserver* loading_behavior_observer = nullptr;
+  BackForwardCacheLoaderHelper* back_forward_cache_loader_helper = nullptr;
 };
 
 }  // namespace blink

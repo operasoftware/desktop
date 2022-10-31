@@ -86,7 +86,7 @@ static bool IsNonLatin1Separator(UChar32 character) {
 
 bool IsSeparator(UChar32 character) {
   // clang-format off
-  static const bool kLatin1SeparatorTable[256] = {
+  static constexpr int kLatin1SeparatorTable[256] = {
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       // space ! " # $ % & ' ( ) * + , - . /
@@ -112,7 +112,7 @@ bool IsSeparator(UChar32 character) {
   };
   // clang-format on
   if (character < 256)
-    return kLatin1SeparatorTable[character];
+    return static_cast<bool>(kLatin1SeparatorTable[character]);
 
   return IsNonLatin1Separator(character);
 }
@@ -300,7 +300,7 @@ void NormalizeCharactersIntoNFCForm(const UChar* characters,
   DCHECK(U_SUCCESS(status));
   int32_t input_length = static_cast<int32_t>(length);
   // copy-on-write.
-  icu::UnicodeString normalized(FALSE, characters, input_length);
+  icu::UnicodeString normalized(false, characters, input_length);
   // In the vast majority of cases, input is already NFC. Run a quick check
   // to avoid normalizing the entire input unnecessarily.
   int32_t normalized_prefix_length =

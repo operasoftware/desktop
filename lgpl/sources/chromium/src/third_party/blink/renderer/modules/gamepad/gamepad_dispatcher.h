@@ -5,8 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_GAMEPAD_GAMEPAD_DISPATCHER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_GAMEPAD_GAMEPAD_DISPATCHER_H_
 
-#include <memory>
-
 #include "base/memory/scoped_refptr.h"
 #include "device/gamepad/public/mojom/gamepad.mojom-blink.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -27,8 +25,6 @@ class GamepadSharedMemoryReader;
 class GamepadDispatcher final : public GarbageCollected<GamepadDispatcher>,
                                 public PlatformEventDispatcher,
                                 public GamepadListener {
-  USING_GARBAGE_COLLECTED_MIXIN(GamepadDispatcher);
-
  public:
   explicit GamepadDispatcher(ExecutionContext& context);
   ~GamepadDispatcher() override;
@@ -55,17 +51,16 @@ class GamepadDispatcher final : public GarbageCollected<GamepadDispatcher>,
   void ButtonOrAxisDidChange(uint32_t index, const device::Gamepad&) override;
 
   // PlatformEventDispatcher
-  void StartListening(LocalFrame* frame) override;
+  void StartListening(LocalDOMWindow*) override;
   void StopListening() override;
 
   void DispatchDidConnectOrDisconnectGamepad(uint32_t index,
                                              const device::Gamepad&,
                                              bool connected);
 
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  WeakMember<ExecutionContext> execution_context_;
   Member<GamepadSharedMemoryReader> reader_;
-  HeapMojoRemote<device::mojom::blink::GamepadHapticsManager,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
+  HeapMojoRemote<device::mojom::blink::GamepadHapticsManager>
       gamepad_haptics_manager_remote_;
 };
 

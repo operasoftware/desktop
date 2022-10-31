@@ -6,7 +6,7 @@
 
 // clang-format off
 import {PluralStringProxy} from 'chrome://resources/js/plural_string_proxy.js';
-import {TestBrowserProxy} from './test_browser_proxy.m.js';
+import {TestBrowserProxy} from './test_browser_proxy.js';
 // clang-format on
 
 /**
@@ -22,9 +22,28 @@ export class TestPluralStringProxy extends TestBrowserProxy {
     this.text = 'some text';
   }
 
-  /** override */
+  // override
+  // Note: Not using @override because it breaks TypeScript.
   getPluralString(messageName, itemCount) {
     this.methodCalled('getPluralString', {messageName, itemCount});
+    return Promise.resolve(this.text);
+  }
+
+  // override
+  getPluralStringTupleWithComma(
+      messageName1, itemCount1, messageName2, itemCount2) {
+    this.methodCalled(
+        'getPluralStringTupleWithComma',
+        {messageName1, itemCount1, messageName2, itemCount2});
+    return Promise.resolve(this.text);
+  }
+
+  // override
+  getPluralStringTupleWithPeriods(
+      messageName1, itemCount1, messageName2, itemCount2) {
+    this.methodCalled(
+        'getPluralStringTupleWithPeriods',
+        {messageName1, itemCount1, messageName2, itemCount2});
     return Promise.resolve(this.text);
   }
 }

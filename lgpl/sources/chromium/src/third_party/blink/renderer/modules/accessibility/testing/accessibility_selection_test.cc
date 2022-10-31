@@ -8,6 +8,7 @@
 #include <iterator>
 
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/public/platform/file_path_conversion.h"
 #include "third_party/blink/renderer/core/dom/character_data.h"
 #include "third_party/blink/renderer/core/dom/container_node.h"
 #include "third_party/blink/renderer/core/dom/node.h"
@@ -20,7 +21,8 @@
 #include "third_party/blink/renderer/modules/accessibility/ax_object_cache_impl.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_position.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_selection.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -206,8 +208,7 @@ class AXSelectionDeserializer final {
   const Vector<AXSelection> Deserialize(const std::string& html_snippet,
                                         HTMLElement& element) {
     element.setInnerHTML(String::FromUTF8(html_snippet));
-    element.GetDocument().View()->UpdateAllLifecyclePhases(
-        DocumentUpdateReason::kTest);
+    element.GetDocument().View()->UpdateAllLifecyclePhasesForTest();
     AXObject* root = ax_object_cache_->GetOrCreate(&element);
     if (!root || root->IsDetached())
       return {};
@@ -234,7 +235,7 @@ class AXSelectionDeserializer final {
       return ax_selections;
     }
 
-    for (size_t i = 0; i < foci_->size(); ++i) {
+    for (wtf_size_t i = 0; i < foci_->size(); ++i) {
       DCHECK(anchors_->at(i).first);
       const Position base(*anchors_->at(i).first, anchors_->at(i).second);
       const auto ax_base = AXPosition::FromPosition(base);
@@ -280,8 +281,7 @@ class AXSelectionDeserializer final {
     // Remove the markers, otherwise they would be duplicated if the AXSelection
     // is re-serialized.
     node->setData(builder.ToString());
-    node->GetDocument().View()->UpdateAllLifecyclePhases(
-        DocumentUpdateReason::kTest);
+    node->GetDocument().View()->UpdateAllLifecyclePhasesForTest();
 
     //
     // Non-text selection.
@@ -313,7 +313,11 @@ class AXSelectionDeserializer final {
   }
 
   void HandleObject(const AXObject& object) {
-    for (const AXObject* child : object.ChildrenIncludingIgnored()) {
+    // Make a copy of the children, because they may be cleared when a sibling
+    // is invalidated and calls SetNeedsToUpdateChildren() on the parent.
+    const auto children = object.ChildrenIncludingIgnored();
+
+    for (const AXObject* child : children) {
       DCHECK(child);
       FindSelectionMarkers(*child);
     }
@@ -336,6 +340,8 @@ class AXSelectionDeserializer final {
 
   // Pairs of focus nodes + focus offsets.
   Persistent<VectorOfPairs<Node, int>> foci_;
+
+  ScopedAccessibilityExposeHTMLElementForTest expose_html_element_{true};
 };
 
 }  // namespace
@@ -343,11 +349,6 @@ class AXSelectionDeserializer final {
 AccessibilitySelectionTest::AccessibilitySelectionTest(
     LocalFrameClient* local_frame_client)
     : AccessibilityTest(local_frame_client) {}
-
-void AccessibilitySelectionTest::SetUp() {
-  AccessibilityTest::SetUp();
-  RuntimeEnabledFeatures::SetAccessibilityExposeHTMLElementEnabled(false);
-}
 
 std::string AccessibilitySelectionTest::GetCurrentSelectionText() const {
   const SelectionInDOMTree selection =
@@ -442,6 +443,11 @@ void AccessibilitySelectionTest::RunSelectionTest(
   }
 
   EXPECT_EQ(ax_file_contents, actual_ax_file_contents);
+
+  // Uncomment these lines to write the output to the expectations file.
+  // TODO(dmazzoni): make this a command-line parameter.
+  // if (ax_file_contents != actual_ax_file_contents)
+  //  base::WriteFile(WebStringToFilePath(ax_file), actual_ax_file_contents);
 }
 
 ParameterizedAccessibilitySelectionTest::

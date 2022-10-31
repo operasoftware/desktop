@@ -30,6 +30,9 @@
 static  amdgpu_device_handle device_handle;
 static  uint32_t  major_version;
 static  uint32_t  minor_version;
+static  uint32_t  family_id;
+static  uint32_t  chip_id;
+static  uint32_t  chip_rev;
 
 static void amdgpu_vmid_reserve_test(void);
 static void amdgpu_vm_unaligned_map(void);
@@ -104,6 +107,18 @@ static void amdgpu_vmid_reserve_test(void)
 	amdgpu_bo_list_handle bo_list;
 	amdgpu_va_handle va_handle;
 	static uint32_t *ptr;
+	struct amdgpu_gpu_info gpu_info = {0};
+	unsigned gc_ip_type;
+
+	r = amdgpu_query_gpu_info(device_handle, &gpu_info);
+	CU_ASSERT_EQUAL(r, 0);
+
+	family_id = device_handle->info.family_id;
+	chip_id = device_handle->info.chip_external_rev;
+	chip_rev = device_handle->info.chip_rev;
+
+	gc_ip_type = (asic_is_gfx_pipe_removed(family_id, chip_id, chip_rev)) ?
+			AMDGPU_HW_IP_COMPUTE : AMDGPU_HW_IP_GFX;
 
 	r = amdgpu_cs_ctx_create(device_handle, &context_handle);
 	CU_ASSERT_EQUAL(r, 0);
@@ -133,7 +148,7 @@ static void amdgpu_vmid_reserve_test(void)
 	ib_info.size = 16;
 
 	memset(&ibs_request, 0, sizeof(struct amdgpu_cs_request));
-	ibs_request.ip_type = AMDGPU_HW_IP_GFX;
+	ibs_request.ip_type = gc_ip_type;
 	ibs_request.ring = 0;
 	ibs_request.number_of_ibs = 1;
 	ibs_request.ibs = &ib_info;
@@ -146,7 +161,7 @@ static void amdgpu_vmid_reserve_test(void)
 
 	memset(&fence_status, 0, sizeof(struct amdgpu_cs_fence));
 	fence_status.context = context_handle;
-	fence_status.ip_type = AMDGPU_HW_IP_GFX;
+	fence_status.ip_type = gc_ip_type;
 	fence_status.ip_instance = 0;
 	fence_status.ring = 0;
 	fence_status.fence = ibs_request.seq_no;

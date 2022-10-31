@@ -21,27 +21,18 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-
-// CHROMIUM: re-mapped to sscanf to work around a clang bug that breaks
-// compilation on android x64
-
-#include <stdio.h>
-#define av_sscanf sscanf
-
-#if 0
-
+#include <errno.h>
+#include <limits.h>
+#include <math.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <float.h>
 
-#include "config.h"
-#include "common.h"
-#include "mem.h"
-#include "avassert.h"
 #include "avstring.h"
-#include "bprint.h"
+#include "libm.h"
 
 typedef struct FFFILE {
     size_t buf_size;
@@ -122,7 +113,7 @@ static int ffshgetc(FFFILE *f)
 }
 
 #define shlim(f, lim) ffshlim((f), (lim))
-#define shgetc(f) (((f)->rpos != (f)->shend) ? *(f)->rpos++ : ffshgetc(f))
+#define shgetc(f) (((f)->rpos < (f)->shend) ? *(f)->rpos++ : ffshgetc(f))
 #define shunget(f) ((f)->shend ? (void)(f)->rpos-- : (void)0)
 
 static const unsigned char table[] = { -1,
@@ -238,9 +229,9 @@ static long long scanexp(FFFILE *f, int pok)
         return LLONG_MIN;
     }
     for (x=0; c-'0'<10U && x<INT_MAX/10; c = shgetc(f))
-        x = 10*x + c-'0';
+        x = 10*x + (c-'0');
     for (y=x; c-'0'<10U && y<LLONG_MAX/100; c = shgetc(f))
-        y = 10*y + c-'0';
+        y = 10*y + (c-'0');
     for (; c-'0'<10U; c = shgetc(f));
     shunget(f);
     return neg ? -y : y;
@@ -968,6 +959,9 @@ static int ff_vsscanf(const char *s, const char *fmt, va_list ap)
     return ff_vfscanf(&f, fmt, ap);
 }
 
+// Chromium: av_sscanf() is ~8kb in implementation and isn't used by any
+// methods needed for Chromium; drop to save binary size.
+#if 0
 int av_sscanf(const char *string, const char *format, ...)
 {
     int ret;
@@ -977,5 +971,4 @@ int av_sscanf(const char *string, const char *format, ...)
     va_end(ap);
     return ret;
 }
-
 #endif

@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/core/intersection_observer/intersection_observer_delegate.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 #include "third_party/blink/renderer/platform/bindings/scoped_persistent.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 
 namespace blink {
 
@@ -19,7 +20,6 @@ class V8IntersectionObserverCallback;
 class V8IntersectionObserverDelegate final
     : public IntersectionObserverDelegate,
       public ExecutionContextClient {
-  USING_GARBAGE_COLLECTED_MIXIN(V8IntersectionObserverDelegate);
 
  public:
   CORE_EXPORT V8IntersectionObserverDelegate(V8IntersectionObserverCallback*,
@@ -29,6 +29,10 @@ class V8IntersectionObserverDelegate final
   ExecutionContext* GetExecutionContext() const override;
 
   void Trace(Visitor*) const override;
+
+  LocalFrameUkmAggregator::MetricId GetUkmMetricId() const override {
+    return LocalFrameUkmAggregator::kJavascriptIntersectionObserver;
+  }
 
   IntersectionObserver::DeliveryBehavior GetDeliveryBehavior() const override {
     return IntersectionObserver::kPostTaskToDeliver;

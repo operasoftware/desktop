@@ -26,22 +26,22 @@
 #import <AppKit/NSFont.h>
 #import <AvailabilityMacros.h>
 
-#include "base/mac/foundation_util.h"
-#include "base/mac/scoped_nsobject.h"
-#include "base/stl_util.h"
-#import "third_party/blink/public/platform/mac/web_sandbox_support.h"
-#import "third_party/blink/public/platform/platform.h"
-#import "third_party/blink/renderer/platform/fonts/font.h"
-#import "third_party/blink/renderer/platform/fonts/font_platform_data.h"
-#import "third_party/blink/renderer/platform/fonts/mac/core_text_font_format_support.h"
-#import "third_party/blink/renderer/platform/fonts/opentype/font_settings.h"
-#import "third_party/blink/renderer/platform/fonts/shaping/harfbuzz_face.h"
-#import "third_party/blink/renderer/platform/web_test_support.h"
-#import "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#import "third_party/skia/include/core/SkFont.h"
-#import "third_party/skia/include/core/SkStream.h"
-#import "third_party/skia/include/core/SkTypeface.h"
-#import "third_party/skia/include/core/SkTypes.h"
+#import "base/mac/foundation_util.h"
+#import "base/mac/scoped_nsobject.h"
+#include "third_party/blink/public/platform/mac/web_sandbox_support.h"
+#include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/platform/fonts/font.h"
+#include "third_party/blink/renderer/platform/fonts/font_platform_data.h"
+#include "third_party/blink/renderer/platform/fonts/mac/core_text_font_format_support.h"
+#include "third_party/blink/renderer/platform/fonts/opentype/font_settings.h"
+#include "third_party/blink/renderer/platform/fonts/shaping/harfbuzz_face.h"
+#include "third_party/blink/renderer/platform/web_test_support.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "third_party/skia/include/core/SkFont.h"
+#include "third_party/skia/include/core/SkStream.h"
+#include "third_party/skia/include/core/SkTypeface.h"
+#include "third_party/skia/include/core/SkTypes.h"
 #import "third_party/skia/include/ports/SkTypeface_mac.h"
 
 namespace {
@@ -58,9 +58,9 @@ bool VariableAxisChangeEffective(SkTypeface* typeface,
   if (num_axes <= 0)
     return false;
 
-  SkFontParameters::Variation::Axis axes_parameters[num_axes];
+  Vector<SkFontParameters::Variation::Axis> axes_parameters(num_axes);
   int returned_axes =
-      typeface->getVariationDesignParameters(axes_parameters, num_axes);
+      typeface->getVariationDesignParameters(axes_parameters.data(), num_axes);
   DCHECK_EQ(num_axes, returned_axes);
   DCHECK_GE(num_axes, 0);
 
@@ -78,9 +78,10 @@ bool VariableAxisChangeEffective(SkTypeface* typeface,
                   // effect.
 
   // Then compare if clamped value differs from what is set on the font.
-  SkFontArguments::VariationPosition::Coordinate coordinates[num_coordinates];
+  Vector<SkFontArguments::VariationPosition::Coordinate> coordinates(
+      num_coordinates);
   int returned_coordinates =
-      typeface->getVariationDesignPosition(coordinates, num_coordinates);
+      typeface->getVariationDesignPosition(coordinates.data(), num_coordinates);
 
   if (returned_coordinates != num_coordinates)
     return false;  // Something went wrong in retrieving actual axis positions,
@@ -111,13 +112,13 @@ static CFDictionaryRef CascadeToLastResortFontAttributes() {
       CTFontDescriptorCreateWithNameAndSize(CFSTR("LastResort"), 0));
   const void* descriptors[] = {last_resort};
   base::ScopedCFTypeRef<CFArrayRef> values_array(
-      CFArrayCreate(kCFAllocatorDefault, descriptors, base::size(descriptors),
+      CFArrayCreate(kCFAllocatorDefault, descriptors, std::size(descriptors),
                     &kCFTypeArrayCallBacks));
 
   const void* keys[] = {kCTFontCascadeListAttribute};
   const void* values[] = {values_array};
   attributes = CFDictionaryCreate(
-      kCFAllocatorDefault, keys, values, base::size(keys),
+      kCFAllocatorDefault, keys, values, std::size(keys),
       &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   return attributes;
 }
@@ -163,8 +164,10 @@ static sk_sp<SkTypeface> LoadFromBrowserProcess(NSFont* ns_font,
 std::unique_ptr<FontPlatformData> FontPlatformDataFromNSFont(
     NSFont* ns_font,
     float size,
+    float specified_size,
     bool synthetic_bold,
     bool synthetic_italic,
+    TextRenderingMode text_rendering,
     FontOrientation orientation,
     OpticalSizing optical_sizing,
     FontVariationSettings* variation_settings) {
@@ -180,10 +183,11 @@ std::unique_ptr<FontPlatformData> FontPlatformDataFromNSFont(
   }
 
   auto make_typeface_fontplatformdata = [&typeface, &size, &synthetic_bold,
-                                         &synthetic_italic, &orientation]() {
+                                         &synthetic_italic, &text_rendering,
+                                         &orientation]() {
     return std::make_unique<FontPlatformData>(
         std::move(typeface), std::string(), size, synthetic_bold,
-        synthetic_italic, orientation);
+        synthetic_italic, text_rendering, orientation);
   };
 
   wtf_size_t valid_configured_axes =
@@ -213,21 +217,22 @@ std::unique_ptr<FontPlatformData> FontPlatformDataFromNSFont(
   }
 
   // Iterate over the font's axes and find a missing tag from variation
-  // settings, special case opsz, track the number of axes reconfigured.
+  // settings, special case 'opsz', track the number of axes reconfigured.
   bool axes_reconfigured = false;
   for (auto& coordinate : coordinates_to_set) {
-    // Set opsz to font size but allow having it overriden by
-    // font-variation-settings in case it has 'opsz'.
+    // Set 'opsz' to specified size but allow having it overridden by
+    // font-variation-settings in case it has 'opsz'. Do not use font size here,
+    // but specified size in order to account for zoom.
     if (coordinate.axis == kOpszTag && optical_sizing == kAutoOpticalSizing) {
-      if (VariableAxisChangeEffective(typeface.get(), coordinate.axis, size)) {
-        coordinate.value = SkFloatToScalar(size);
+      if (VariableAxisChangeEffective(typeface.get(), coordinate.axis,
+                                      specified_size)) {
+        coordinate.value = SkFloatToScalar(specified_size);
         axes_reconfigured = true;
       }
     }
-    FontVariationAxis found_variation_setting(AtomicString(), 0);
-    if (variation_settings &&
-        variation_settings->FindPair(FourByteTagToAtomicString(coordinate.axis),
-                                     &found_variation_setting)) {
+    FontVariationAxis found_variation_setting(0, 0);
+    if (variation_settings && variation_settings->FindPair(
+                                  coordinate.axis, &found_variation_setting)) {
       if (VariableAxisChangeEffective(typeface.get(), coordinate.axis,
                                       found_variation_setting.Value())) {
         coordinate.value = found_variation_setting.Value();
@@ -242,28 +247,28 @@ std::unique_ptr<FontPlatformData> FontPlatformDataFromNSFont(
   }
 
   SkFontArguments::VariationPosition variation_design_position{
-      coordinates_to_set.data(), coordinates_to_set.size()};
+      coordinates_to_set.data(), static_cast<int>(coordinates_to_set.size())};
 
   sk_sp<SkTypeface> cloned_typeface(typeface->makeClone(
       SkFontArguments().setVariationDesignPosition(variation_design_position)));
 
   if (!cloned_typeface) {
-    // Applying varition parameters failed, return original typeface.
+    // Applying variation parameters failed, return original typeface.
     return make_typeface_fontplatformdata();
   }
   typeface = cloned_typeface;
   return make_typeface_fontplatformdata();
 }
 
-void FontPlatformData::SetupSkFont(SkFont* skfont,
-                                   float,
-                                   const Font* font) const {
+SkFont FontPlatformData::CreateSkFont(
+    bool,
+    const FontDescription* font_description) const {
   bool should_smooth_fonts = true;
   bool should_antialias = true;
   bool should_subpixel_position = true;
 
-  if (font) {
-    switch (font->GetFontDescription().FontSmoothing()) {
+  if (font_description) {
+    switch (font_description->FontSmoothing()) {
       case kAntialiased:
         should_smooth_fonts = false;
         break;
@@ -288,33 +293,35 @@ void FontPlatformData::SetupSkFont(SkFont* skfont,
         WebTestSupport::IsTextSubpixelPositioningAllowedForTest();
   }
 
+  SkFont skfont;
   if (should_antialias && should_smooth_fonts) {
-    skfont->setEdging(SkFont::Edging::kSubpixelAntiAlias);
+    skfont.setEdging(SkFont::Edging::kSubpixelAntiAlias);
   } else if (should_antialias) {
-    skfont->setEdging(SkFont::Edging::kAntiAlias);
+    skfont.setEdging(SkFont::Edging::kAntiAlias);
   } else {
-    skfont->setEdging(SkFont::Edging::kAlias);
+    skfont.setEdging(SkFont::Edging::kAlias);
   }
-  skfont->setEmbeddedBitmaps(false);
+  skfont.setEmbeddedBitmaps(false);
   const float ts = text_size_ >= 0 ? text_size_ : 12;
-  skfont->setSize(SkFloatToScalar(ts));
-  skfont->setTypeface(typeface_);
-  skfont->setEmbolden(synthetic_bold_);
-  skfont->setSkewX(synthetic_italic_ ? -SK_Scalar1 / 4 : 0);
-  skfont->setSubpixel(should_subpixel_position);
+  skfont.setSize(SkFloatToScalar(ts));
+  skfont.setTypeface(typeface_);
+  skfont.setEmbolden(synthetic_bold_);
+  skfont.setSkewX(synthetic_italic_ ? -SK_Scalar1 / 4 : 0);
+  skfont.setSubpixel(should_subpixel_position);
 
   // CoreText always provides linear metrics if it can, so the linear metrics
   // flag setting doesn't affect typefaces backed by CoreText. However, it
   // does affect FreeType backed typefaces, so set the flag for consistency.
-  skfont->setLinearMetrics(should_subpixel_position);
+  skfont.setLinearMetrics(should_subpixel_position);
 
   // When rendering using CoreGraphics, disable hinting when
   // webkit-font-smoothing:antialiased or text-rendering:geometricPrecision is
   // used.  See crbug.com/152304
-  if (font &&
-      (font->GetFontDescription().FontSmoothing() == kAntialiased ||
-       font->GetFontDescription().TextRendering() == kGeometricPrecision))
-    skfont->setHinting(SkFontHinting::kNone);
+  if (font_description &&
+      (font_description->FontSmoothing() == kAntialiased ||
+       font_description->TextRendering() == kGeometricPrecision))
+    skfont.setHinting(SkFontHinting::kNone);
+  return skfont;
 }
 
 }  // namespace blink

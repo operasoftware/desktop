@@ -39,7 +39,8 @@ class MODULES_EXPORT ModulesInitializer : public CoreInitializer {
   WebRemotePlaybackClient* CreateWebRemotePlaybackClient(
       HTMLMediaElement&) const override;
 
-  void ProvideModulesToPage(Page&, WebViewClient*) const override;
+  void ProvideModulesToPage(Page&,
+                            const SessionStorageNamespaceId&) const override;
   void ForceNextWebGLContextCreationToFail() const override;
 
   void CollectAllGarbageForAnimationAndPaintWorkletForTesting() const override;
@@ -47,9 +48,19 @@ class MODULES_EXPORT ModulesInitializer : public CoreInitializer {
   void CloneSessionStorage(
       Page* clone_from_page,
       const SessionStorageNamespaceId& clone_to_namespace) override;
+  void EvictSessionStorageCachedData(Page*) override;
 
   void DidChangeManifest(LocalFrame&) override;
   void NotifyOrientationChanged(LocalFrame&) override;
+  void DidUpdateScreens(LocalFrame&, const display::ScreenInfos&) override;
+  void SetLocalStorageArea(LocalFrame& frame,
+                           mojo::PendingRemote<mojom::blink::StorageArea>
+                               local_storage_area) override;
+  void SetSessionStorageArea(LocalFrame& frame,
+                             mojo::PendingRemote<mojom::blink::StorageArea>
+                                 session_storage_area) override;
+  mojom::blink::FileSystemManager& GetFileSystemManager(
+      ExecutionContext* context) override;
 };
 
 }  // namespace blink

@@ -17,7 +17,7 @@ namespace {
 // Describes the amount to shift the numerator/denominator of the fraction when
 // a fraction bar is present. Data is populated from the OpenType MATH table.
 // If the OpenType MATH table is not present fallback values are used.
-// https://mathml-refresh.github.io/mathml-core/#fraction-with-nonzero-line-thickness
+// https://w3c.github.io/mathml-core/#fraction-with-nonzero-line-thickness
 struct FractionParameters {
   LayoutUnit numerator_gap_min;
   LayoutUnit denominator_gap_min;
@@ -31,9 +31,7 @@ FractionParameters GetFractionParameters(const ComputedStyle& style) {
   bool has_display_style = HasDisplayStyle(style);
 
   // We try and read constants to draw the fraction from the OpenType MATH and
-  // use fallback values otherwise.
-  // The MATH table specification suggests default rule thickness or (in
-  // displaystyle) 3 times default rule thickness for the gaps.
+  // use fallback values suggested in the MathML Core specification otherwise.
   parameters.numerator_gap_min = LayoutUnit(
       MathConstant(
           style,
@@ -52,8 +50,6 @@ FractionParameters GetFractionParameters(const ComputedStyle& style) {
               : OpenTypeMathSupport::MathConstants::kFractionDenominatorGapMin)
           .value_or(parameters.numerator_gap_min));
 
-  // TODO(crbug.com/1058369): The MATH table specification does not suggest
-  // any values for shifts, so we leave them at zero for now.
   parameters.numerator_min_shift_up = LayoutUnit(
       MathConstant(
           style,
@@ -76,7 +72,7 @@ FractionParameters GetFractionParameters(const ComputedStyle& style) {
 // Describes the amount to shift the numerator/denominator of the fraction when
 // a fraction bar is not present. Data is populated from the OpenType MATH
 // table. If the OpenType MATH table is not present fallback values are used.
-// https://mathml-refresh.github.io/mathml-core/#fraction-with-zero-line-thickness
+// https://w3c.github.io/mathml-core/#fraction-with-zero-line-thickness
 struct FractionStackParameters {
   LayoutUnit gap_min;
   LayoutUnit top_shift_up;
@@ -126,9 +122,6 @@ NGMathFractionLayoutAlgorithm::NGMathFractionLayoutAlgorithm(
     const NGLayoutAlgorithmParams& params)
     : NGLayoutAlgorithm(params) {
   DCHECK(params.space.IsNewFormattingContext());
-  container_builder_.SetIsNewFormattingContext(
-      params.space.IsNewFormattingContext());
-  container_builder_.SetInitialFragmentGeometry(params.fragment_geometry);
   container_builder_.SetIsMathMLFraction();
 }
 
@@ -158,45 +151,46 @@ void NGMathFractionLayoutAlgorithm::GatherChildren(NGBlockNode* numerator,
   DCHECK(*denominator);
 }
 
-scoped_refptr<const NGLayoutResult> NGMathFractionLayoutAlgorithm::Layout() {
+const NGLayoutResult* NGMathFractionLayoutAlgorithm::Layout() {
   DCHECK(!BreakToken());
 
   NGBlockNode numerator = nullptr;
   NGBlockNode denominator = nullptr;
   GatherChildren(&numerator, &denominator);
 
-  auto numerator_space = CreateConstraintSpaceForMathChild(
+  const auto numerator_space = CreateConstraintSpaceForMathChild(
       Node(), ChildAvailableSize(), ConstraintSpace(), numerator);
-  scoped_refptr<const NGLayoutResult> numerator_layout_result =
+  const NGLayoutResult* numerator_layout_result =
       numerator.Layout(numerator_space);
-  auto numerator_margins =
+  const auto numerator_margins =
       ComputeMarginsFor(numerator_space, numerator.Style(), ConstraintSpace());
-  auto denominator_space = CreateConstraintSpaceForMathChild(
+  const auto denominator_space = CreateConstraintSpaceForMathChild(
       Node(), ChildAvailableSize(), ConstraintSpace(), denominator);
-  scoped_refptr<const NGLayoutResult> denominator_layout_result =
+  const NGLayoutResult* denominator_layout_result =
       denominator.Layout(denominator_space);
-  auto denominator_margins = ComputeMarginsFor(
+  const auto denominator_margins = ComputeMarginsFor(
       denominator_space, denominator.Style(), ConstraintSpace());
 
-  NGBoxFragment numerator_fragment(
-      ConstraintSpace().GetWritingMode(), ConstraintSpace().Direction(),
+  const NGBoxFragment numerator_fragment(
+      ConstraintSpace().GetWritingDirection(),
       To<NGPhysicalBoxFragment>(numerator_layout_result->PhysicalFragment()));
-  NGBoxFragment denominator_fragment(
-      ConstraintSpace().GetWritingMode(), ConstraintSpace().Direction(),
+  const NGBoxFragment denominator_fragment(
+      ConstraintSpace().GetWritingDirection(),
       To<NGPhysicalBoxFragment>(denominator_layout_result->PhysicalFragment()));
+  const auto baseline_type = Style().GetFontBaseline();
 
-  LayoutUnit numerator_ascent =
+  const LayoutUnit numerator_ascent =
       numerator_margins.block_start +
-      numerator_fragment.Baseline().value_or(numerator_fragment.BlockSize());
-  LayoutUnit numerator_descent = numerator_fragment.BlockSize() +
-                                 numerator_margins.BlockSum() -
-                                 numerator_ascent;
-  LayoutUnit denominator_ascent = denominator_margins.block_start +
-                                  denominator_fragment.Baseline().value_or(
-                                      denominator_fragment.BlockSize());
-  LayoutUnit denominator_descent = denominator_fragment.BlockSize() +
-                                   denominator_margins.BlockSum() -
-                                   denominator_ascent;
+      numerator_fragment.BaselineOrSynthesize(baseline_type);
+  const LayoutUnit numerator_descent = numerator_fragment.BlockSize() +
+                                       numerator_margins.BlockSum() -
+                                       numerator_ascent;
+  const LayoutUnit denominator_ascent =
+      denominator_margins.block_start +
+      denominator_fragment.BaselineOrSynthesize(baseline_type);
+  const LayoutUnit denominator_descent = denominator_fragment.BlockSize() +
+                                         denominator_margins.BlockSum() -
+                                         denominator_ascent;
 
   LayoutUnit numerator_shift, denominator_shift;
   LayoutUnit thickness = FractionLineThickness(Style());
@@ -257,10 +251,8 @@ scoped_refptr<const NGLayoutResult> NGMathFractionLayoutAlgorithm::Layout() {
                                     fraction_ascent + denominator_shift -
                                     denominator_ascent;
 
-  container_builder_.AddChild(numerator_layout_result->PhysicalFragment(),
-                              numerator_offset);
-  container_builder_.AddChild(denominator_layout_result->PhysicalFragment(),
-                              denominator_offset);
+  container_builder_.AddResult(*numerator_layout_result, numerator_offset);
+  container_builder_.AddResult(*denominator_layout_result, denominator_offset);
 
   numerator.StoreMargins(ConstraintSpace(), numerator_margins);
   denominator.StoreMargins(ConstraintSpace(), denominator_margins);
@@ -272,38 +264,35 @@ scoped_refptr<const NGLayoutResult> NGMathFractionLayoutAlgorithm::Layout() {
   container_builder_.SetIntrinsicBlockSize(total_block_size);
   container_builder_.SetFragmentsTotalBlockSize(block_size);
 
-  NGOutOfFlowLayoutPart(Node(), ConstraintSpace(), container_builder_.Borders(),
-                        &container_builder_)
-      .Run();
+  NGOutOfFlowLayoutPart(Node(), ConstraintSpace(), &container_builder_).Run();
 
   return container_builder_.ToBoxFragment();
 }
 
 MinMaxSizesResult NGMathFractionLayoutAlgorithm::ComputeMinMaxSizes(
-    const MinMaxSizesInput& child_input) const {
+    const MinMaxSizesFloatInput&) {
   if (auto result = CalculateMinMaxSizesIgnoringChildren(
           Node(), BorderScrollbarPadding()))
     return *result;
 
   MinMaxSizes sizes;
-  bool depends_on_percentage_block_size = false;
+  bool depends_on_block_constraints = false;
 
   for (NGLayoutInputNode child = Node().FirstChild(); child;
        child = child.NextSibling()) {
     if (child.IsOutOfFlowPositioned())
       continue;
-    auto child_result =
-        ComputeMinAndMaxContentContribution(Style(), child, child_input);
-    NGBoxStrut margins = ComputeMinMaxMargins(Style(), child);
-    child_result.sizes += margins.InlineSum();
+
+    const auto child_result = ComputeMinAndMaxContentContributionForMathChild(
+        Style(), ConstraintSpace(), To<NGBlockNode>(child),
+        ChildAvailableSize().block_size);
 
     sizes.Encompass(child_result.sizes);
-    depends_on_percentage_block_size |=
-        child_result.depends_on_percentage_block_size;
+    depends_on_block_constraints |= child_result.depends_on_block_constraints;
   }
 
   sizes += BorderScrollbarPadding().InlineSum();
-  return {sizes, depends_on_percentage_block_size};
+  return MinMaxSizesResult(sizes, depends_on_block_constraints);
 }
 
 }  // namespace blink

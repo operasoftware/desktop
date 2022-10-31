@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/layout/layout_replaced.h"
+#include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 
 namespace ui {
 class Cursor;
@@ -42,17 +43,11 @@ class WebPluginContainerImpl;
 class CORE_EXPORT LayoutEmbeddedContent : public LayoutReplaced {
  public:
   explicit LayoutEmbeddedContent(HTMLFrameOwnerElement*);
-  ~LayoutEmbeddedContent() override;
-
-  bool ContentDocumentIsCompositing() const;
 
   bool NodeAtPoint(HitTestResult&,
                    const HitTestLocation&,
                    const PhysicalOffset& accumulated_offset,
-                   HitTestAction) override;
-
-  void AddRef() { ++ref_count_; }
-  void Release();
+                   HitTestPhase) override;
 
   // LayoutEmbeddedContent::ChildFrameView returns the LocalFrameView associated
   // with the current Node, if Node is HTMLFrameOwnerElement. This is different
@@ -63,14 +58,32 @@ class CORE_EXPORT LayoutEmbeddedContent : public LayoutReplaced {
   WebPluginContainerImpl* Plugin() const;
   EmbeddedContentView* GetEmbeddedContentView() const;
 
+  // Subtracts border/padding, and other offsets if they exist.
+  PhysicalOffset EmbeddedContentFromBorderBox(const PhysicalOffset&) const;
+  gfx::PointF EmbeddedContentFromBorderBox(const gfx::PointF&) const;
+  // Adds border/padding, and other offsets if they exist.
+  PhysicalOffset BorderBoxFromEmbeddedContent(const PhysicalOffset&) const;
+  gfx::Rect BorderBoxFromEmbeddedContent(const gfx::Rect&) const;
+
   PhysicalRect ReplacedContentRect() const final;
 
   void UpdateOnEmbeddedContentViewChange();
   void UpdateGeometry(EmbeddedContentView&);
 
-  bool IsLayoutEmbeddedContent() const final { return true; }
+  bool IsLayoutEmbeddedContent() const final {
+    NOT_DESTROYED();
+    return true;
+  }
 
   bool IsThrottledFrameView() const;
+
+  // The size of the child frame when it should be "frozen"; i.e., it should not
+  // change even when the size of |this| changes.
+  virtual const absl::optional<PhysicalSize> FrozenFrameSize() const;
+
+  // A transform mapping from the coordinate space of the embedded content
+  // rendered by this object to the object's border-box.
+  AffineTransform EmbeddedContentTransform() const;
 
  protected:
   PaintLayerType LayerTypeRequired() const override;
@@ -79,33 +92,34 @@ class CORE_EXPORT LayoutEmbeddedContent : public LayoutReplaced {
   void UpdateLayout() override;
   void PaintReplaced(const PaintInfo&,
                      const PhysicalOffset& paint_offset) const override;
-  void InvalidatePaint(const PaintInvalidatorContext&) const final;
   CursorDirective GetCursor(const PhysicalOffset&, ui::Cursor&) const final;
 
-  bool CanBeSelectionLeafInternal() const final { return true; }
+  bool CanBeSelectionLeafInternal() const final {
+    NOT_DESTROYED();
+    return true;
+  }
+
+  HTMLFrameOwnerElement* GetFrameOwnerElement() const {
+    NOT_DESTROYED();
+    return To<HTMLFrameOwnerElement>(GetNode());
+  }
 
  private:
-  bool CanHaveAdditionalCompositingReasons() const override { return true; }
-  CompositingReasons AdditionalCompositingReasons() const override;
-
   void WillBeDestroyed() final;
-  void DeleteThis() final;
 
   bool NodeAtPointOverEmbeddedContentView(
       HitTestResult&,
       const HitTestLocation&,
       const PhysicalOffset& accumulated_offset,
-      HitTestAction);
-
-  HTMLFrameOwnerElement* GetFrameOwnerElement() const {
-    return To<HTMLFrameOwnerElement>(GetNode());
-  }
-
-  int ref_count_;
+      HitTestPhase);
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutEmbeddedContent,
-                                IsLayoutEmbeddedContent());
+template <>
+struct DowncastTraits<LayoutEmbeddedContent> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsLayoutEmbeddedContent();
+  }
+};
 
 }  // namespace blink
 

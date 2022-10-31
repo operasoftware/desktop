@@ -15,17 +15,20 @@ LayoutShift* LayoutShift::Create(double start_time,
                                  double value,
                                  bool input_detected,
                                  double input_timestamp,
-                                 AttributionList sources) {
+                                 AttributionList sources,
+                                 uint32_t navigation_id) {
   return MakeGarbageCollected<LayoutShift>(start_time, value, input_detected,
-                                           input_timestamp, sources);
+                                           input_timestamp, sources,
+                                           navigation_id);
 }
 
 LayoutShift::LayoutShift(double start_time,
                          double value,
                          bool input_detected,
                          double input_timestamp,
-                         AttributionList sources)
-    : PerformanceEntry(g_empty_atom, start_time, start_time),
+                         AttributionList sources,
+                         uint32_t navigation_id)
+    : PerformanceEntry(g_empty_atom, start_time, start_time, navigation_id),
       value_(value),
       had_recent_input_(input_detected),
       most_recent_input_timestamp_(input_timestamp),
@@ -47,11 +50,9 @@ void LayoutShift::BuildJSONValue(V8ObjectBuilder& builder) const {
   builder.Add("hadRecentInput", had_recent_input_);
   builder.Add("lastInputTime", most_recent_input_timestamp_);
 
-  if (RuntimeEnabledFeatures::LayoutShiftAttributionEnabled()) {
-    ScriptState* script_state = builder.GetScriptState();
-    builder.Add("sources", FreezeV8Object(ToV8(sources_, script_state),
-                                          script_state->GetIsolate()));
-  }
+  ScriptState* script_state = builder.GetScriptState();
+  builder.Add("sources", FreezeV8Object(ToV8(sources_, script_state),
+                                        script_state->GetIsolate()));
 }
 
 void LayoutShift::Trace(Visitor* visitor) const {

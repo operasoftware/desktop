@@ -6,18 +6,21 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PARSER_CSS_PARSER_H_
 
 #include <memory>
-#include "third_party/blink/public/platform/web_color_scheme.h"
+#include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
+#include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 
 namespace blink {
 
 class Color;
 class CSSParserObserver;
+class CSSParserSelector;
 class CSSSelectorList;
 class Element;
+class ExecutionContext;
 class ImmutableCSSPropertyValueSet;
 class StyleRuleBase;
 class StyleRuleKeyframe;
@@ -26,6 +29,9 @@ class CSSValue;
 class CSSPrimitiveValue;
 enum class ParseSheetResult;
 enum class SecureContextMode;
+
+// See css_selector_parser.h.
+using CSSSelectorVector = Vector<std::unique_ptr<CSSParserSelector>>;
 
 // This class serves as the public API for the css/parser subsystem
 class CORE_EXPORT CSSParser {
@@ -43,10 +49,11 @@ class CORE_EXPORT CSSParser {
       const String&,
       CSSDeferPropertyParsing defer_property_parsing =
           CSSDeferPropertyParsing::kNo,
-      bool allow_import_rules = true);
-  static CSSSelectorList ParseSelector(const CSSParserContext*,
-                                       StyleSheetContents*,
-                                       const String&);
+      bool allow_import_rules = true,
+      std::unique_ptr<CachedCSSTokenizer> tokenizer = nullptr);
+  static CSSSelectorVector ParseSelector(const CSSParserContext*,
+                                         StyleSheetContents*,
+                                         const String&);
   static CSSSelectorList ParsePageSelector(const CSSParserContext&,
                                            StyleSheetContents*,
                                            const String&);
@@ -59,14 +66,15 @@ class CORE_EXPORT CSSParser {
       CSSPropertyID unresolved_property,
       const String&,
       bool important,
-      SecureContextMode);
+      const ExecutionContext* execution_context = nullptr);
   static MutableCSSPropertyValueSet::SetResult ParseValue(
       MutableCSSPropertyValueSet*,
       CSSPropertyID unresolved_property,
       const String&,
       bool important,
       SecureContextMode,
-      StyleSheetContents*);
+      StyleSheetContents*,
+      const ExecutionContext* execution_context = nullptr);
 
   static MutableCSSPropertyValueSet::SetResult ParseValueForCustomProperty(
       MutableCSSPropertyValueSet*,
@@ -96,14 +104,14 @@ class CORE_EXPORT CSSParser {
   static StyleRuleKeyframe* ParseKeyframeRule(const CSSParserContext*,
                                               const String&);
 
-  static bool ParseSupportsCondition(const String&, SecureContextMode);
+  static bool ParseSupportsCondition(const String&, const ExecutionContext*);
 
   // The color will only be changed when string contains a valid CSS color, so
   // callers can set it to a default color and ignore the boolean result.
   static bool ParseColor(Color&, const String&, bool strict = false);
   static bool ParseSystemColor(Color&,
                                const String&,
-                               WebColorScheme color_scheme);
+                               mojom::blink::ColorScheme color_scheme);
 
   static void ParseSheetForInspector(const CSSParserContext*,
                                      StyleSheetContents*,
@@ -115,6 +123,11 @@ class CORE_EXPORT CSSParser {
 
   static CSSPrimitiveValue* ParseLengthPercentage(const String&,
                                                   const CSSParserContext*);
+
+  // https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-font
+  // https://drafts.csswg.org/css-font-loading/#find-the-matching-font-faces
+  static MutableCSSPropertyValueSet* ParseFont(const String&,
+                                               const ExecutionContext*);
 
  private:
   static MutableCSSPropertyValueSet::SetResult ParseValue(

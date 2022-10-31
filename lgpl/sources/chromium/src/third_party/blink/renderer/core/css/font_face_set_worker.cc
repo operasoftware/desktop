@@ -19,7 +19,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -76,19 +76,14 @@ bool FontFaceSetWorker::ResolveFontStyle(const String& font_string,
 
   // Interpret fontString in the same way as the 'font' attribute of
   // CanvasRenderingContext2D.
-  auto* parsed_style =
-      MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
-  CSSParser::ParseValue(parsed_style, CSSPropertyID::kFont, font_string, true,
-                        GetExecutionContext()->GetSecureContextMode());
-  if (parsed_style->IsEmpty())
-    return false;
-
-  String font_value = parsed_style->GetPropertyValue(CSSPropertyID::kFont);
-  if (css_parsing_utils::IsCSSWideKeyword(font_value))
+  auto* parsed_style = CSSParser::ParseFont(font_string, GetExecutionContext());
+  if (!parsed_style)
     return false;
 
   FontFamily font_family;
-  font_family.SetFamily(FontFaceSet::kDefaultFontFamily);
+  font_family.SetFamily(
+      FontFaceSet::kDefaultFontFamily,
+      FontFamily::InferredTypeFor(FontFaceSet::kDefaultFontFamily));
 
   FontDescription default_font_description;
   default_font_description.SetFamily(font_family);

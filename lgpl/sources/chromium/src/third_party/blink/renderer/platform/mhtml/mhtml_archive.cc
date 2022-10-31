@@ -31,8 +31,12 @@
 #include "third_party/blink/renderer/platform/mhtml/mhtml_archive.h"
 
 #include <stddef.h>
+
+#include "base/containers/contains.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/numerics/safe_conversions.h"
 #include "build/build_config.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "third_party/blink/public/mojom/loader/mhtml_load_result.mojom-blink.h"
 #include "third_party/blink/renderer/platform/mhtml/archive_resource.h"
 #include "third_party/blink/renderer/platform/mhtml/mhtml_parser.h"
@@ -192,7 +196,8 @@ String ConvertToPrintableCharacters(const String& text) {
   // Quoted-Printable format to convert to 7-bit printable ASCII characters.
   std::string utf8_text = text.Utf8();
   Vector<char> encoded_text;
-  QuotedPrintableEncode(utf8_text.c_str(), utf8_text.length(),
+  QuotedPrintableEncode(utf8_text.c_str(),
+                        base::checked_cast<wtf_size_t>(utf8_text.length()),
                         true /* is_header */, encoded_text);
   return String(encoded_text.data(), encoded_text.size());
 }
@@ -220,6 +225,7 @@ MHTMLArchive* MHTMLArchive::CreateArchive(
     const KURL& url,
     scoped_refptr<const SharedBuffer> data) {
   MHTMLArchive* archive = MakeGarbageCollected<MHTMLArchive>();
+  archive->archive_url_ = url;
 
   // |data| may be null if archive file is empty.
   if (!data || data->IsEmpty()) {
@@ -284,11 +290,11 @@ bool MHTMLArchive::CanLoadArchive(const KURL& url) {
   // MHTML pages can only be loaded from local URLs, http/https URLs, and
   // content URLs(Android specific).  The latter is now allowed due to full
   // sandboxing enforcement on MHTML pages.
-  if (SchemeRegistry::ShouldTreatURLSchemeAsLocal(url.Protocol()))
+  if (base::Contains(url::GetLocalSchemes(), url.Protocol().Ascii()))
     return true;
   if (url.ProtocolIsInHTTPFamily())
     return true;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (url.ProtocolIs("content"))
     return true;
 #endif
@@ -332,7 +338,8 @@ void MHTMLArchive::GenerateMHTMLHeader(const String& boundary,
   DCHECK(string_builder.ToString().ContainsOnlyASCIIOrEmpty());
   std::string utf8_string = string_builder.ToString().Utf8();
 
-  output_buffer.Append(utf8_string.c_str(), utf8_string.length());
+  output_buffer.Append(utf8_string.c_str(),
+                       static_cast<wtf_size_t>(utf8_string.length()));
 }
 
 void MHTMLArchive::GenerateMHTMLPart(const String& boundary,
@@ -382,17 +389,20 @@ void MHTMLArchive::GenerateMHTMLPart(const String& boundary,
   string_builder.Append("\r\n");
 
   std::string utf8_string = string_builder.ToString().Utf8();
-  output_buffer.Append(utf8_string.data(), utf8_string.length());
+  output_buffer.Append(utf8_string.data(),
+                       static_cast<wtf_size_t>(utf8_string.length()));
 
   if (!strcmp(content_encoding, kBinary)) {
-    for (const auto& span : *resource.data)
-      output_buffer.Append(span.data(), SafeCast<wtf_size_t>(span.size()));
+    for (const auto& span : *resource.data) {
+      output_buffer.Append(span.data(),
+                           base::checked_cast<wtf_size_t>(span.size()));
+    }
   } else {
     // FIXME: ideally we would encode the content as a stream without having to
     // fetch it all.
     const SharedBuffer::DeprecatedFlatData flat_data(resource.data);
     const char* data = flat_data.Data();
-    wtf_size_t data_length = SafeCast<wtf_size_t>(flat_data.size());
+    wtf_size_t data_length = base::checked_cast<wtf_size_t>(flat_data.size());
     Vector<char> encoded_data;
     if (!strcmp(content_encoding, kQuotedPrintable)) {
       QuotedPrintableEncode(data, data_length, false /* is_header */,
@@ -421,7 +431,8 @@ void MHTMLArchive::GenerateMHTMLFooterForTesting(const String& boundary,
                                                  Vector<char>& output_buffer) {
   DCHECK(!boundary.IsEmpty());
   std::string utf8_string = String("\r\n--" + boundary + "--\r\n").Utf8();
-  output_buffer.Append(utf8_string.c_str(), utf8_string.length());
+  output_buffer.Append(utf8_string.c_str(),
+                       static_cast<wtf_size_t>(utf8_string.length()));
 }
 
 void MHTMLArchive::SetMainResource(ArchiveResource* main_resource) {
@@ -437,7 +448,12 @@ void MHTMLArchive::AddSubresource(ArchiveResource* resource) {
 }
 
 ArchiveResource* MHTMLArchive::SubresourceForURL(const KURL& url) const {
-  return subresources_.at(url.GetString());
+  const auto it = subresources_.find(url.GetString());
+  return it != subresources_.end() ? it->value : nullptr;
+}
+
+String MHTMLArchive::GetCacheIdentifier() const {
+  return archive_url_.GetString();
 }
 
 void MHTMLArchive::Trace(Visitor* visitor) const {

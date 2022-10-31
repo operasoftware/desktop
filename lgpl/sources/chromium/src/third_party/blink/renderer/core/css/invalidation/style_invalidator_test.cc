@@ -7,6 +7,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 
@@ -15,7 +16,7 @@ namespace blink {
 class StyleInvalidatorTest : public testing::Test {
  protected:
   void SetUp() override {
-    dummy_page_holder_ = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+    dummy_page_holder_ = std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
   }
 
   Document& GetDocument() { return dummy_page_holder_->GetDocument(); }
@@ -34,7 +35,7 @@ TEST_F(StyleInvalidatorTest, SkipDisplayNone) {
     </div>
   )HTML");
 
-  GetDocument().View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  GetDocument().View()->UpdateAllLifecyclePhasesForTest();
 
   PendingInvalidations pending;
   {
@@ -63,7 +64,7 @@ TEST_F(StyleInvalidatorTest, SkipDisplayNoneClearPendingNth) {
     </div>
   )HTML");
 
-  GetDocument().View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  GetDocument().View()->UpdateAllLifecyclePhasesForTest();
 
   PendingInvalidations pending;
   {

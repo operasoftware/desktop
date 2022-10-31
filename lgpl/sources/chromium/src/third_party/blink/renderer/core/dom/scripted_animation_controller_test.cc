@@ -13,8 +13,10 @@
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
 #include "third_party/blink/renderer/core/dom/frame_request_callback_collection.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -33,7 +35,7 @@ class ScriptedAnimationControllerTest : public testing::Test {
 };
 
 void ScriptedAnimationControllerTest::SetUp() {
-  dummy_page_holder_ = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+  dummy_page_holder_ = std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
 
   // Note: The document doesn't know about this ScriptedAnimationController
   // instance.
@@ -154,8 +156,7 @@ TEST_F(ScriptedAnimationControllerTest, EnqueueTaskAndEvent) {
 
 namespace {
 
-class RunTaskCallback final
-    : public FrameRequestCallbackCollection::FrameCallback {
+class RunTaskCallback final : public FrameCallback {
  public:
   RunTaskCallback(base::RepeatingClosure task) : task_(std::move(task)) {}
   void Invoke(double) override { task_.Run(); }
@@ -208,6 +209,25 @@ TEST_F(ScriptedAnimationControllerTest, TestHasCallback) {
   // clear it.
   Controller().ServiceScriptedAnimations(base::TimeTicks());
   EXPECT_FALSE(Controller().HasFrameCallback());
+}
+
+TEST_F(ScriptedAnimationControllerTest, TestIsInRequestAnimationFrame) {
+  EXPECT_FALSE(Controller().GetExecutionContext()->IsInRequestAnimationFrame());
+
+  bool ran_callback = false;
+  Controller().RegisterFrameCallback(
+      MakeGarbageCollected<RunTaskCallback>(base::BindRepeating(
+          [](ScriptedAnimationController* controller, bool* ran_callback) {
+            EXPECT_TRUE(
+                controller->GetExecutionContext()->IsInRequestAnimationFrame());
+            *ran_callback = true;
+          },
+          WrapPersistent(&Controller()), WTF::Unretained(&ran_callback))));
+
+  Controller().ServiceScriptedAnimations(base::TimeTicks());
+  EXPECT_TRUE(ran_callback);
+
+  EXPECT_FALSE(Controller().GetExecutionContext()->IsInRequestAnimationFrame());
 }
 
 }  // namespace blink

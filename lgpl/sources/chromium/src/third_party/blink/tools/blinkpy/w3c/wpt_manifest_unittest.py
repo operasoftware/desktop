@@ -8,34 +8,35 @@ from blinkpy.common.host_mock import MockHost
 from blinkpy.common.system.executive import ScriptError
 from blinkpy.common.system.executive_mock import MockExecutive
 from blinkpy.w3c.wpt_manifest import WPTManifest
-from blinkpy.web_tests.port.test import TestPort, WEB_TEST_DIR
+from blinkpy.web_tests.port.test import TestPort, MOCK_WEB_TESTS
 
 
 class WPTManifestUnitTest(unittest.TestCase):
     def test_ensure_manifest_copies_new_manifest(self):
         host = MockHost()
         port = TestPort(host)
-        manifest_path = WEB_TEST_DIR + '/external/wpt/MANIFEST.json'
+        manifest_path = MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json'
 
         self.assertFalse(host.filesystem.exists(manifest_path))
         WPTManifest.ensure_manifest(port)
         self.assertTrue(host.filesystem.exists(manifest_path))
         self.assertEqual(host.filesystem.written_files,
-                         {manifest_path: '{"manifest": "base"}'})
+                         {manifest_path: b'{"manifest": "base"}'})
 
         self.assertEqual(host.executive.calls, [[
-            'python',
-            '/mock-checkout/third_party/blink/tools/blinkpy/third_party/wpt/wpt/wpt',
+            port.python3_command(),
+            '/mock-checkout/third_party/wpt_tools/wpt/wpt',
             'manifest',
+            '-v',
             '--no-download',
             '--tests-root',
-            WEB_TEST_DIR + '/external/wpt',
+            MOCK_WEB_TESTS + 'external/wpt',
         ]])
 
     def test_ensure_manifest_updates_manifest_if_it_exists(self):
         host = MockHost()
         port = TestPort(host)
-        manifest_path = WEB_TEST_DIR + '/external/wpt/MANIFEST.json'
+        manifest_path = MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json'
 
         host.filesystem.write_text_file(manifest_path,
                                         '{"manifest": "NOT base"}')
@@ -44,15 +45,16 @@ class WPTManifestUnitTest(unittest.TestCase):
         WPTManifest.ensure_manifest(port)
         self.assertTrue(host.filesystem.exists(manifest_path))
         self.assertEqual(host.filesystem.written_files,
-                         {manifest_path: '{"manifest": "base"}'})
+                         {manifest_path: b'{"manifest": "base"}'})
 
         self.assertEqual(host.executive.calls, [[
-            'python',
-            '/mock-checkout/third_party/blink/tools/blinkpy/third_party/wpt/wpt/wpt',
+            port.python3_command(),
+            '/mock-checkout/third_party/wpt_tools/wpt/wpt',
             'manifest',
+            '-v',
             '--no-download',
             '--tests-root',
-            WEB_TEST_DIR + '/external/wpt',
+            MOCK_WEB_TESTS + 'external/wpt',
         ]])
 
     def test_ensure_manifest_raises_exception(self):
@@ -68,12 +70,13 @@ class WPTManifestUnitTest(unittest.TestCase):
         port = TestPort(host)
         WPTManifest.ensure_manifest(port, 'wpt_internal')
         self.assertEqual(host.executive.calls, [[
-            'python',
-            '/mock-checkout/third_party/blink/tools/blinkpy/third_party/wpt/wpt/wpt',
+            port.python3_command(),
+            '/mock-checkout/third_party/wpt_tools/wpt/wpt',
             'manifest',
+            '-v',
             '--no-download',
             '--tests-root',
-            WEB_TEST_DIR + '/wpt_internal',
+            MOCK_WEB_TESTS + 'wpt_internal',
         ]])
 
     def test_does_not_throw_when_missing_some_test_types(self):
@@ -89,7 +92,11 @@ class WPTManifestUnitTest(unittest.TestCase):
     }
 }
         '''
-        manifest = WPTManifest(manifest_json)
+        host = MockHost()
+        host.filesystem.write_text_file(
+            MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json', manifest_json)
+        manifest = WPTManifest(host,
+                               MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json')
         self.assertTrue(manifest.is_test_file('test.any.js'))
         self.assertEqual(manifest.all_url_items(),
                          {u'test.any.html': [u'test.any.html', {}]})
@@ -111,7 +118,11 @@ class WPTManifestUnitTest(unittest.TestCase):
     }
 }
         '''
-        manifest = WPTManifest(manifest_json)
+        host = MockHost()
+        host.filesystem.write_text_file(
+            MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json', manifest_json)
+        manifest = WPTManifest(host,
+                               MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json')
         self.assertEqual(manifest.all_url_items(),
                          {u'test.any.html': [u'test.any.html', {}]})
 
@@ -132,7 +143,11 @@ class WPTManifestUnitTest(unittest.TestCase):
         }
     }
 }       '''
-        manifest = WPTManifest(manifest_json)
+        host = MockHost()
+        host.filesystem.write_text_file(
+            MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json', manifest_json)
+        manifest = WPTManifest(host,
+                               MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json')
         self.assertEqual(
             manifest.all_url_items(), {
                 u'test.any.html': [u'test.any.html', {}],
@@ -168,7 +183,11 @@ class WPTManifestUnitTest(unittest.TestCase):
     }
 }
         '''
-        manifest = WPTManifest(manifest_json)
+        host = MockHost()
+        host.filesystem.write_text_file(
+            MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json', manifest_json)
+        manifest = WPTManifest(host,
+                               MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json')
         self.assertEqual(
             manifest.all_url_items(), {
                 u'test.html': [u'test.html', {}],
@@ -178,3 +197,111 @@ class WPTManifestUnitTest(unittest.TestCase):
         self.assertTrue(manifest.is_crash_test(u'test-crash.html'))
         self.assertFalse(manifest.is_crash_test(u'test.html'))
         self.assertFalse(manifest.is_crash_test(u'different-test-crash.html'))
+
+    def test_extract_fuzzy_metadata(self):
+        manifest_json = '''
+{
+    "items": {
+        "reftest": {
+            "not_fuzzy.html": [
+                "d23fbb8c66def47e31ad01aa7a311064ba8fddbd",
+                [
+                    null,
+                    [
+                        [
+                            "not_fuzzy-ref.html",
+                            "=="
+                        ]
+                    ],
+                    {}
+                ]
+            ],
+            "fuzzy.html": [
+                "d23fbb8c66def47e31ad01aa7a311064ba8fddbd",
+                [
+                    null,
+                    [
+                        [
+                            "fuzzy-ref.html",
+                            "=="
+                        ]
+                    ],
+                    {
+                        "fuzzy": [
+                            [
+                                null,
+                                [
+                                    [2, 2],
+                                    [40, 40]
+                                ]
+                            ]
+                        ]
+                    }
+                ]
+            ]
+        },
+        "testharness": {
+            "not_a_reftest.html": [
+                "d23fbb8c66def47e31ad01aa7a311064ba8fddbd",
+                [null, {}]
+            ]
+        }
+    }
+}
+        '''
+
+        host = MockHost()
+        host.filesystem.write_text_file(
+            MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json', manifest_json)
+        manifest = WPTManifest(host,
+                               MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json')
+
+        self.assertEqual(
+            manifest.extract_fuzzy_metadata('fuzzy.html'),
+            [[2, 2], [40, 40]],
+        )
+
+        self.assertEqual(manifest.extract_fuzzy_metadata('not_fuzzy.html'),
+                         (None, None))
+        self.assertEqual(manifest.extract_fuzzy_metadata('not_a_reftest.html'),
+                         (None, None))
+
+    def test_extract_pac(self):
+        manifest_json = '''
+{
+    "items": {
+        "testharness": {
+     "without-pac.html": [
+      "df2f8b048c370d3ab009946d73d7de6f8a412471",
+      [
+       null,
+       {
+       }
+      ]
+     ],
+     "with-pac.html": [
+      "598836d376813b754366d49616b39a4183cd3753",
+      [
+       null,
+       {
+        "pac": "proxy.pac"
+       }
+      ]
+     ]
+    }
+    }
+}
+        '''
+
+        host = MockHost()
+        host.filesystem.write_text_file(
+            MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json', manifest_json)
+        manifest = WPTManifest(host,
+                               MOCK_WEB_TESTS + 'external/wpt/MANIFEST.json')
+
+        self.assertEqual(
+            manifest.extract_test_pac('with-pac.html'),
+            "proxy.pac",
+        )
+
+        self.assertEqual(manifest.extract_test_pac('without-pac.html'), None)

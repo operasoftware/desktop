@@ -21,8 +21,11 @@
 
 #include "third_party/blink/renderer/core/style/fill_layer.h"
 
-#include "third_party/blink/renderer/core/layout/layout_object.h"
-#include "third_party/blink/renderer/core/style/data_equivalency.h"
+#include "base/memory/values_equivalent.h"
+#include "third_party/blink/renderer/core/css/css_value.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/core/style/style_generated_image.h"
+#include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 
 namespace blink {
 
@@ -40,8 +43,7 @@ struct SameSizeAsFillLayer {
   unsigned bitfields2_;
 };
 
-static_assert(sizeof(FillLayer) == sizeof(SameSizeAsFillLayer),
-              "FillLayer should stay small");
+ASSERT_SIZE(FillLayer, SameSizeAsFillLayer);
 
 FillLayer::FillLayer(EFillLayerType type, bool use_initial_values)
     : next_(nullptr),
@@ -79,7 +81,8 @@ FillLayer::FillLayer(EFillLayerType type, bool use_initial_values)
       layers_clip_max_(0),
       any_layer_uses_content_box_(false),
       any_layer_has_image_(false),
-      any_layer_has_local_attachment_image_(false),
+      any_layer_has_url_image_(false),
+      any_layer_has_local_attachment_(false),
       any_layer_has_fixed_attachment_image_(false),
       any_layer_has_default_attachment_image_(false),
       cached_properties_computed_(false) {}
@@ -116,7 +119,8 @@ FillLayer::FillLayer(const FillLayer& o)
       layers_clip_max_(0),
       any_layer_uses_content_box_(false),
       any_layer_has_image_(false),
-      any_layer_has_local_attachment_image_(false),
+      any_layer_has_url_image_(false),
+      any_layer_has_local_attachment_(false),
       any_layer_has_fixed_attachment_image_(false),
       any_layer_has_default_attachment_image_(false),
       cached_properties_computed_(false) {}
@@ -167,8 +171,8 @@ FillLayer& FillLayer::operator=(const FillLayer& o) {
 }
 
 bool FillLayer::LayerPropertiesEqual(const FillLayer& o) const {
-  return DataEquivalent(image_, o.image_) && position_x_ == o.position_x_ &&
-         position_y_ == o.position_y_ &&
+  return base::ValuesEquivalent(image_, o.image_) &&
+         position_x_ == o.position_x_ && position_y_ == o.position_y_ &&
          background_x_origin_ == o.background_x_origin_ &&
          background_y_origin_ == o.background_y_origin_ &&
          attachment_ == o.attachment_ && clip_ == o.clip_ &&
@@ -346,12 +350,16 @@ void FillLayer::ComputeCachedProperties() const {
   any_layer_uses_content_box_ =
       Clip() == EFillBox::kContent || Origin() == EFillBox::kContent;
   any_layer_has_image_ = !!GetImage();
-  any_layer_has_local_attachment_image_ =
-      any_layer_has_image_ && Attachment() == EFillAttachment::kLocal;
+  any_layer_has_url_image_ =
+      any_layer_has_image_ && GetImage()->CssValue()->MayContainUrl();
+  any_layer_has_local_attachment_ = Attachment() == EFillAttachment::kLocal;
   any_layer_has_fixed_attachment_image_ =
       any_layer_has_image_ && Attachment() == EFillAttachment::kFixed;
   any_layer_has_default_attachment_image_ =
       any_layer_has_image_ && Attachment() == EFillAttachment::kScroll;
+  any_layer_uses_current_color_ =
+      (image_ && image_->IsGeneratedImage() &&
+       To<StyleGeneratedImage>(image_.Get())->IsUsingCurrentColor());
   cached_properties_computed_ = true;
 
   if (next_) {
@@ -360,12 +368,13 @@ void FillLayer::ComputeCachedProperties() const {
         EnclosingFillBox(LayersClipMax(), next_->LayersClipMax()));
     any_layer_uses_content_box_ |= next_->any_layer_uses_content_box_;
     any_layer_has_image_ |= next_->any_layer_has_image_;
-    any_layer_has_local_attachment_image_ |=
-        next_->any_layer_has_local_attachment_image_;
+    any_layer_has_url_image_ |= next_->any_layer_has_url_image_;
+    any_layer_has_local_attachment_ |= next_->any_layer_has_local_attachment_;
     any_layer_has_fixed_attachment_image_ |=
         next_->any_layer_has_fixed_attachment_image_;
     any_layer_has_default_attachment_image_ |=
         next_->any_layer_has_default_attachment_image_;
+    any_layer_uses_current_color_ |= next_->any_layer_uses_current_color_;
   }
 }
 
@@ -391,7 +400,7 @@ bool FillLayer::ImageIsOpaque(const Document& document,
   // checking for IsEmpty.
   return image_->KnownToBeOpaque(document, style) &&
          !image_
-              ->ImageSize(document, style.EffectiveZoom(), LayoutSize(),
+              ->ImageSize(style.EffectiveZoom(), gfx::SizeF(),
                           kRespectImageOrientation)
               .IsEmpty();
 }
@@ -402,10 +411,10 @@ bool FillLayer::ImageTilesLayer() const {
   // TODO(schenney) We could relax the repeat mode requirement if we also knew
   // the rect we had to fill, and the portion of the image we need to use, and
   // know that the latter covers the former.
-  return (static_cast<EFillRepeat>(repeat_x_) == EFillRepeat::kRepeatFill ||
-          static_cast<EFillRepeat>(repeat_x_) == EFillRepeat::kRoundFill) &&
-         (static_cast<EFillRepeat>(repeat_y_) == EFillRepeat::kRepeatFill ||
-          static_cast<EFillRepeat>(repeat_y_) == EFillRepeat::kRoundFill);
+  return (RepeatX() == EFillRepeat::kRepeatFill ||
+          RepeatX() == EFillRepeat::kRoundFill) &&
+         (RepeatY() == EFillRepeat::kRepeatFill ||
+          RepeatY() == EFillRepeat::kRoundFill);
 }
 
 bool FillLayer::ImageOccludesNextLayers(const Document& document,
@@ -419,9 +428,10 @@ bool FillLayer::ImageOccludesNextLayers(const Document& document,
     case kCompositeCopy:
       return ImageTilesLayer();
     case kCompositeSourceOver:
-      return (blend_mode_ == static_cast<unsigned>(BlendMode::kNormal)) &&
-             ImageTilesLayer() && ImageIsOpaque(document, style);
-    default: {}
+      return GetBlendMode() == BlendMode::kNormal && ImageTilesLayer() &&
+             ImageIsOpaque(document, style);
+    default: {
+    }
   }
 
   return false;

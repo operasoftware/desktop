@@ -35,7 +35,6 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
 #include "third_party/blink/renderer/platform/language.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/web_test_support.h"
@@ -48,7 +47,7 @@ namespace blink {
 static inline String LanguageFromLocale(const String& locale) {
   String normalized_locale = locale;
   normalized_locale.Replace('-', '_');
-  size_t separator_position = normalized_locale.find('_');
+  wtf_size_t separator_position = normalized_locale.find('_');
   if (separator_position == kNotFound)
     return normalized_locale;
   return normalized_locale.Left(separator_position);
@@ -125,10 +124,10 @@ const Vector<String>& LocaleMac::MonthLabels() {
   NSArray* array = [ShortDateFormatter() monthSymbols];
   if ([array count] == 12) {
     for (unsigned i = 0; i < 12; ++i)
-      month_labels_.push_back(String([array objectAtIndex:i]));
+      month_labels_.push_back(String(array[i]));
     return month_labels_;
   }
-  for (unsigned i = 0; i < base::size(WTF::kMonthFullName); ++i)
+  for (unsigned i = 0; i < std::size(WTF::kMonthFullName); ++i)
     month_labels_.push_back(WTF::kMonthFullName[i]);
   return month_labels_;
 }
@@ -137,15 +136,13 @@ const Vector<String>& LocaleMac::WeekDayShortLabels() {
   if (!week_day_short_labels_.IsEmpty())
     return week_day_short_labels_;
   week_day_short_labels_.ReserveCapacity(7);
-  NSArray* array = features::IsFormControlsRefreshEnabled()
-                       ? [ShortDateFormatter() veryShortWeekdaySymbols]
-                       : [ShortDateFormatter() shortWeekdaySymbols];
+  NSArray* array = [ShortDateFormatter() veryShortWeekdaySymbols];
   if ([array count] == 7) {
     for (unsigned i = 0; i < 7; ++i)
-      week_day_short_labels_.push_back(String([array objectAtIndex:i]));
+      week_day_short_labels_.push_back(String(array[i]));
     return week_day_short_labels_;
   }
-  for (unsigned i = 0; i < base::size(WTF::kWeekdayName); ++i) {
+  for (unsigned i = 0; i < std::size(WTF::kWeekdayName); ++i) {
     // weekdayName starts with Monday.
     week_day_short_labels_.push_back(WTF::kWeekdayName[(i + 6) % 7]);
   }
@@ -156,7 +153,7 @@ unsigned LocaleMac::FirstDayOfWeek() {
   // The document for NSCalendar - firstWeekday doesn't have an explanation of
   // firstWeekday value. We can guess it by the document of NSDateComponents -
   // weekDay, so it can be 1 through 7 and 1 is Sunday.
-  return [gregorian_calendar_ firstWeekday] - 1;
+  return static_cast<unsigned>([gregorian_calendar_ firstWeekday] - 1);
 }
 
 bool LocaleMac::IsRTL() {
@@ -255,10 +252,10 @@ const Vector<String>& LocaleMac::ShortMonthLabels() {
   NSArray* array = [ShortDateFormatter() shortMonthSymbols];
   if ([array count] == 12) {
     for (unsigned i = 0; i < 12; ++i)
-      short_month_labels_.push_back([array objectAtIndex:i]);
+      short_month_labels_.push_back(array[i]);
     return short_month_labels_;
   }
-  for (unsigned i = 0; i < base::size(WTF::kMonthName); ++i)
+  for (unsigned i = 0; i < std::size(WTF::kMonthName); ++i)
     short_month_labels_.push_back(WTF::kMonthName[i]);
   return short_month_labels_;
 }
@@ -270,7 +267,7 @@ const Vector<String>& LocaleMac::StandAloneMonthLabels() {
   if ([array count] == 12) {
     stand_alone_month_labels_.ReserveCapacity(12);
     for (unsigned i = 0; i < 12; ++i)
-      stand_alone_month_labels_.push_back([array objectAtIndex:i]);
+      stand_alone_month_labels_.push_back(array[i]);
     return stand_alone_month_labels_;
   }
   stand_alone_month_labels_ = ShortMonthLabels();
@@ -284,7 +281,7 @@ const Vector<String>& LocaleMac::ShortStandAloneMonthLabels() {
   if ([array count] == 12) {
     short_stand_alone_month_labels_.ReserveCapacity(12);
     for (unsigned i = 0; i < 12; ++i)
-      short_stand_alone_month_labels_.push_back([array objectAtIndex:i]);
+      short_stand_alone_month_labels_.push_back(array[i]);
     return short_stand_alone_month_labels_;
   }
   short_stand_alone_month_labels_ = ShortMonthLabels();

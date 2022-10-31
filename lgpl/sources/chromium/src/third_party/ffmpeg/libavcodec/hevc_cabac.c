@@ -454,12 +454,19 @@ void ff_hevc_save_states(HEVCContext *s, int ctb_addr_ts)
          (s->ps.sps->ctb_width == 2 &&
           ctb_addr_ts % s->ps.sps->ctb_width == 0))) {
         memcpy(s->cabac_state, s->HEVClc->cabac_state, HEVC_CONTEXTS);
+        if (s->ps.sps->persistent_rice_adaptation_enabled_flag) {
+            memcpy(s->stat_coeff, s->HEVClc->stat_coeff, HEVC_STAT_COEFFS);
+        }
     }
 }
 
-static void load_states(HEVCContext *s)
+static void load_states(HEVCContext *s, int thread)
 {
     memcpy(s->HEVClc->cabac_state, s->cabac_state, HEVC_CONTEXTS);
+    if (s->ps.sps->persistent_rice_adaptation_enabled_flag) {
+        const HEVCContext *prev = s->sList[(thread + s->threads_number - 1) % s->threads_number];
+        memcpy(s->HEVClc->stat_coeff, prev->stat_coeff, HEVC_STAT_COEFFS);
+    }
 }
 
 static int cabac_reinit(HEVCLocalContext *lc)
@@ -501,7 +508,7 @@ static void cabac_init_state(HEVCContext *s)
         s->HEVClc->stat_coeff[i] = 0;
 }
 
-int ff_hevc_cabac_init(HEVCContext *s, int ctb_addr_ts)
+int ff_hevc_cabac_init(HEVCContext *s, int ctb_addr_ts, int thread)
 {
     if (ctb_addr_ts == s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs]) {
         int ret = cabac_init_decoder(s);
@@ -518,7 +525,7 @@ int ff_hevc_cabac_init(HEVCContext *s, int ctb_addr_ts)
                 if (s->ps.sps->ctb_width == 1)
                     cabac_init_state(s);
                 else if (s->sh.dependent_slice_segment_flag == 1)
-                    load_states(s);
+                    load_states(s, thread);
             }
         }
     } else {
@@ -549,7 +556,7 @@ int ff_hevc_cabac_init(HEVCContext *s, int ctb_addr_ts)
                 if (s->ps.sps->ctb_width == 1)
                     cabac_init_state(s);
                 else
-                    load_states(s);
+                    load_states(s, thread);
             }
         }
     }
@@ -998,7 +1005,7 @@ static av_always_inline int coeff_abs_level_remaining_decode(HEVCContext *s, int
     } else {
         int prefix_minus3 = prefix - 3;
 
-        if (prefix == CABAC_MAX_BIN || prefix_minus3 + rc_rice_param >= 31) {
+        if (prefix == CABAC_MAX_BIN || prefix_minus3 + rc_rice_param > 16 + 6) {
             av_log(s->avctx, AV_LOG_ERROR, "CABAC_MAX_BIN : %d\n", prefix);
             return 0;
         }
@@ -1275,7 +1282,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             int scf_offset = 0;
             if (s->ps.sps->transform_skip_context_enabled_flag &&
                 (transform_skip_flag || lc->cu.cu_transquant_bypass_flag)) {
-                ctx_idx_map_p = (uint8_t*) &ctx_idx_map[4 * 16];
+                ctx_idx_map_p = &ctx_idx_map[4 * 16];
                 if (c_idx == 0) {
                     scf_offset = 40;
                 } else {
@@ -1285,9 +1292,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 if (c_idx != 0)
                     scf_offset = 27;
                 if (log2_trafo_size == 2) {
-                    ctx_idx_map_p = (uint8_t*) &ctx_idx_map[0];
+                    ctx_idx_map_p = &ctx_idx_map[0];
                 } else {
-                    ctx_idx_map_p = (uint8_t*) &ctx_idx_map[(prev_sig + 1) << 4];
+                    ctx_idx_map_p = &ctx_idx_map[(prev_sig + 1) << 4];
                     if (c_idx == 0) {
                         if ((x_cg > 0 || y_cg > 0))
                             scf_offset += 3;

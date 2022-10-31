@@ -24,6 +24,7 @@
 
 #include "third_party/blink/renderer/core/dom/node_iterator_base.h"
 
+#include "base/auto_reset.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_node_filter.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -80,9 +81,8 @@ unsigned NodeIteratorBase::AcceptNode(Node* node,
 
   UseCounter::Count(
       ExecutionContext::From(filter_->CallbackRelevantScriptState()),
-      filter_->IsCallbackObjectCallableForNodeIteratorBase()
-          ? WebFeature::kNodeFilterIsFunction
-          : WebFeature::kNodeFilterIsObject);
+      filter_->IsCallbackObjectCallable() ? WebFeature::kNodeFilterIsFunction
+                                          : WebFeature::kNodeFilterIsObject);
 
   // 7. Unset the active flag.
   // 8. Return result.

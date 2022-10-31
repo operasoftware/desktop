@@ -6,6 +6,7 @@
 
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/web_effective_connection_type.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
@@ -13,7 +14,7 @@
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/resource/script_resource.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/script_fetch_options.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
@@ -118,7 +119,7 @@ bool MaybeDisallowFetchForDocWrittenScript(FetchParameters& params,
   if (!settings)
     return false;
 
-  if (!document.GetFrame() || !document.GetFrame()->IsMainFrame())
+  if (!document.IsInOutermostMainFrame())
     return false;
 
   // Only block synchronously loaded (parser blocking) scripts.
@@ -134,7 +135,7 @@ bool MaybeDisallowFetchForDocWrittenScript(FetchParameters& params,
   // page content, whereas cross-origin scripts inserted via document.write
   // are likely to be third party content.
   String request_host = params.Url().Host();
-  String document_host = document.GetSecurityOrigin()->Domain();
+  String document_host = document.domWindow()->GetSecurityOrigin()->Domain();
 
   bool same_site = false;
   if (request_host == document_host)
@@ -155,15 +156,6 @@ bool MaybeDisallowFetchForDocWrittenScript(FetchParameters& params,
     same_site = true;
 
   if (same_site) {
-    // This histogram is introduced to help decide whether we should also check
-    // same scheme while deciding whether or not to block the script as is done
-    // in other cases of "same site" usage. On the other hand we do not want to
-    // block more scripts than necessary.
-    if (params.Url().Protocol() != document.GetSecurityOrigin()->Protocol()) {
-      document.Loader()->DidObserveLoadingBehavior(
-          LoadingBehaviorFlag::
-              kLoadingBehaviorDocumentWriteBlockDifferentScheme);
-    }
     return false;
   }
 
@@ -174,10 +166,6 @@ bool MaybeDisallowFetchForDocWrittenScript(FetchParameters& params,
   // reloads the page.
   const WebFrameLoadType load_type = document.Loader()->LoadType();
   if (IsReloadLoadType(load_type)) {
-    // Recording this metric since an increase in number of reloads for pages
-    // where a script was blocked could be indicative of a page break.
-    document.Loader()->DidObserveLoadingBehavior(
-        LoadingBehaviorFlag::kLoadingBehaviorDocumentWriteBlockReload);
     AddWarningHeader(&params);
     return false;
   }
@@ -218,9 +206,11 @@ void PossiblyFetchBlockedDocWriteScript(
 
   EmitErrorBlocked(resource->Url(), element_document);
 
+  ExecutionContext* context = element_document.GetExecutionContext();
   FetchParameters params(options.CreateFetchParameters(
-      resource->Url(), element_document.GetSecurityOrigin(), cross_origin,
-      resource->Encoding(), FetchParameters::kIdleLoad));
+      resource->Url(), context->GetSecurityOrigin(), context->GetCurrentWorld(),
+      cross_origin, resource->Encoding(), FetchParameters::kIdleLoad));
+  params.SetRenderBlockingBehavior(RenderBlockingBehavior::kNonBlocking);
   AddHeader(&params);
   ScriptResource::Fetch(params, element_document.Fetcher(), nullptr,
                         ScriptResource::kNoStreaming);

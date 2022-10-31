@@ -44,7 +44,6 @@
 #include "third_party/blink/renderer/modules/filesystem/file_system_callbacks.h"
 #include "third_party/blink/renderer/modules/filesystem/file_system_dispatcher.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 
@@ -173,7 +172,8 @@ bool DOMFileSystemBase::PathPrefixToFileSystemType(
   return false;
 }
 
-File* DOMFileSystemBase::CreateFile(const FileMetadata& metadata,
+File* DOMFileSystemBase::CreateFile(ExecutionContext* context,
+                                    const FileMetadata& metadata,
                                     const KURL& file_system_url,
                                     mojom::blink::FileSystemType type,
                                     const String name) {
@@ -202,7 +202,7 @@ File* DOMFileSystemBase::CreateFile(const FileMetadata& metadata,
     return File::CreateForFileSystemFile(name, metadata, user_visibility);
   } else {
     // Otherwise we create a File object for the fileSystemURL.
-    return File::CreateForFileSystemFile(file_system_url, metadata,
+    return File::CreateForFileSystemFile(*context, file_system_url, metadata,
                                          user_visibility);
   }
 }

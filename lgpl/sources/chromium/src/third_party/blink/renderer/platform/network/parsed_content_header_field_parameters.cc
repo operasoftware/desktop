@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/platform/network/parsed_content_header_field_parameters.h"
 
+#include "base/containers/adapters.h"
+#include "base/logging.h"
 #include "third_party/blink/renderer/platform/network/header_field_tokenizer.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -32,14 +34,14 @@ namespace blink {
 //               "/" / "[" / "]" / "?" / "="
 //               ; Must be in quoted-string,
 //               ; to use within parameter values
-base::Optional<ParsedContentHeaderFieldParameters>
+absl::optional<ParsedContentHeaderFieldParameters>
 ParsedContentHeaderFieldParameters::Parse(HeaderFieldTokenizer tokenizer,
                                           Mode mode) {
   NameValuePairs parameters;
   while (!tokenizer.IsConsumed()) {
     if (!tokenizer.Consume(';')) {
       DVLOG(1) << "Failed to find ';'";
-      return base::nullopt;
+      return absl::nullopt;
     }
 
     StringView key;
@@ -47,16 +49,16 @@ ParsedContentHeaderFieldParameters::Parse(HeaderFieldTokenizer tokenizer,
     if (!tokenizer.ConsumeToken(Mode::kNormal, key)) {
       DVLOG(1) << "Invalid content parameter name. (at " << tokenizer.Index()
                << ")";
-      return base::nullopt;
+      return absl::nullopt;
     }
     if (!tokenizer.Consume('=')) {
       DVLOG(1) << "Failed to find '='";
-      return base::nullopt;
+      return absl::nullopt;
     }
     if (!tokenizer.ConsumeTokenOrQuotedString(mode, value)) {
       DVLOG(1) << "Invalid content parameter value (at " << tokenizer.Index()
                << ", for '" << key.ToString() << "').";
-      return base::nullopt;
+      return absl::nullopt;
     }
     parameters.emplace_back(key.ToString(), value);
   }
@@ -70,9 +72,9 @@ String ParsedContentHeaderFieldParameters::ParameterValueForName(
     return String();
   String lower_name = name.LowerASCII();
 
-  for (auto i = rbegin(); i != rend(); ++i) {
-    if (i->name.LowerASCII() == lower_name)
-      return i->value;
+  for (const NameValue& param : base::Reversed(*this)) {
+    if (param.name.LowerASCII() == lower_name)
+      return param.value;
   }
   return String();
 }

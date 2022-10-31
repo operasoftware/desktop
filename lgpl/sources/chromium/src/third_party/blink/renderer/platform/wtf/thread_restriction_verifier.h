@@ -31,10 +31,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_THREAD_RESTRICTION_VERIFIER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_THREAD_RESTRICTION_VERIFIER_H_
 
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
+#include "base/dcheck_is_on.h"
 
 #if DCHECK_IS_ON()
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 

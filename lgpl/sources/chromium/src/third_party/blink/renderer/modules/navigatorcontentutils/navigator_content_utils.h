@@ -29,21 +29,25 @@
 
 #include "third_party/blink/renderer/core/frame/navigator.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
 class ExceptionState;
+class LocalFrame;
 class NavigatorContentUtilsClient;
+enum class ProtocolHandlerSecurityLevel;
 
-// Verify custom handler schemes for errors as described in
+// Verify custom handler schemes for errors as described in steps 1 and 2
 // https://html.spec.whatwg.org/multipage/system-state.html#custom-handlers.
 // Callers should surface an error with |error_message| if it returns false.
-bool VerifyCustomHandlerScheme(const String& scheme, String& error_message);
+bool VerifyCustomHandlerScheme(const String& scheme,
+                               String& error_message,
+                               ProtocolHandlerSecurityLevel security_level);
 
-// Verify custom handler URLs for syntax errors as described in
+// Verify custom handler URLs for syntax errors as described in step 3
 // https://html.spec.whatwg.org/multipage/system-state.html#custom-handlers.
 // Callers should surface an error with |error_message| if it returns false.
 // |full_url| is calculated URL that needs to resolve to a valid URL.
@@ -59,8 +63,6 @@ bool VerifyCustomHandlerURLSyntax(const KURL& full_url,
 class MODULES_EXPORT NavigatorContentUtils final
     : public GarbageCollected<NavigatorContentUtils>,
       public Supplement<Navigator> {
-  USING_GARBAGE_COLLECTED_MIXIN(NavigatorContentUtils);
-
  public:
   static const char kSupplementName[];
 
@@ -72,7 +74,6 @@ class MODULES_EXPORT NavigatorContentUtils final
   static void registerProtocolHandler(Navigator&,
                                       const String& scheme,
                                       const String& url,
-                                      const String& title,
                                       ExceptionState&);
   static void unregisterProtocolHandler(Navigator&,
                                         const String& scheme,

@@ -12,52 +12,66 @@
 #include "third_party/blink/renderer/modules/webgpu/gpu_device.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_render_bundle.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_render_pipeline.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 // static
 GPURenderBundleEncoder* GPURenderBundleEncoder::Create(
     GPUDevice* device,
-    const GPURenderBundleEncoderDescriptor* webgpu_desc) {
+    const GPURenderBundleEncoderDescriptor* webgpu_desc,
+    ExceptionState& exception_state) {
   uint32_t color_formats_count =
       static_cast<uint32_t>(webgpu_desc->colorFormats().size());
+
+  for (const auto& color_format : webgpu_desc->colorFormats()) {
+    if (color_format.has_value() &&
+        !device->ValidateTextureFormatUsage(color_format.value(),
+                                            exception_state)) {
+      return nullptr;
+    }
+  }
 
   std::unique_ptr<WGPUTextureFormat[]> color_formats =
       AsDawnEnum<WGPUTextureFormat>(webgpu_desc->colorFormats());
 
   WGPUTextureFormat depth_stencil_format = WGPUTextureFormat_Undefined;
   if (webgpu_desc->hasDepthStencilFormat()) {
-    depth_stencil_format =
-        AsDawnEnum<WGPUTextureFormat>(webgpu_desc->depthStencilFormat());
+    if (!device->ValidateTextureFormatUsage(webgpu_desc->depthStencilFormat(),
+                                            exception_state)) {
+      return nullptr;
+    }
+
+    depth_stencil_format = AsDawnEnum(webgpu_desc->depthStencilFormat());
   }
 
+  std::string label;
   WGPURenderBundleEncoderDescriptor dawn_desc = {};
   dawn_desc.nextInChain = nullptr;
   dawn_desc.colorFormatsCount = color_formats_count;
   dawn_desc.colorFormats = color_formats.get();
   dawn_desc.depthStencilFormat = depth_stencil_format;
   dawn_desc.sampleCount = webgpu_desc->sampleCount();
+  dawn_desc.depthReadOnly = webgpu_desc->depthReadOnly();
+  dawn_desc.stencilReadOnly = webgpu_desc->stencilReadOnly();
   if (webgpu_desc->hasLabel()) {
-    dawn_desc.label = webgpu_desc->label().Utf8().data();
+    label = webgpu_desc->label().Utf8();
+    dawn_desc.label = label.c_str();
   }
 
-  return MakeGarbageCollected<GPURenderBundleEncoder>(
-      device, device->GetProcs().deviceCreateRenderBundleEncoder(
-                  device->GetHandle(), &dawn_desc));
+  GPURenderBundleEncoder* encoder =
+      MakeGarbageCollected<GPURenderBundleEncoder>(
+          device, device->GetProcs().deviceCreateRenderBundleEncoder(
+                      device->GetHandle(), &dawn_desc));
+  if (webgpu_desc->hasLabel())
+    encoder->setLabel(webgpu_desc->label());
+  return encoder;
 }
 
 GPURenderBundleEncoder::GPURenderBundleEncoder(
     GPUDevice* device,
     WGPURenderBundleEncoder render_bundle_encoder)
     : DawnObject<WGPURenderBundleEncoder>(device, render_bundle_encoder) {}
-
-GPURenderBundleEncoder::~GPURenderBundleEncoder() {
-  if (IsDawnControlClientDestroyed()) {
-    return;
-  }
-  GetProcs().renderBundleEncoderRelease(GetHandle());
-}
 
 void GPURenderBundleEncoder::setBindGroup(
     uint32_t index,
@@ -89,75 +103,14 @@ void GPURenderBundleEncoder::setBindGroup(
                                              dynamic_offsets_data_length, data);
 }
 
-void GPURenderBundleEncoder::pushDebugGroup(String groupLabel) {
-  GetProcs().renderBundleEncoderPushDebugGroup(GetHandle(),
-                                               groupLabel.Utf8().data());
-}
-
-void GPURenderBundleEncoder::popDebugGroup() {
-  GetProcs().renderBundleEncoderPopDebugGroup(GetHandle());
-}
-
-void GPURenderBundleEncoder::insertDebugMarker(String markerLabel) {
-  GetProcs().renderBundleEncoderInsertDebugMarker(GetHandle(),
-                                                  markerLabel.Utf8().data());
-}
-
-void GPURenderBundleEncoder::setPipeline(GPURenderPipeline* pipeline) {
-  GetProcs().renderBundleEncoderSetPipeline(GetHandle(), pipeline->GetHandle());
-}
-
-void GPURenderBundleEncoder::setIndexBuffer(GPUBuffer* buffer,
-                                            uint64_t offset,
-                                            uint64_t size) {
-  GetProcs().renderBundleEncoderSetIndexBuffer(GetHandle(), buffer->GetHandle(),
-                                               offset, size);
-}
-
-void GPURenderBundleEncoder::setVertexBuffer(uint32_t slot,
-                                             const GPUBuffer* buffer,
-                                             uint64_t offset,
-                                             uint64_t size) {
-  GetProcs().renderBundleEncoderSetVertexBuffer(
-      GetHandle(), slot, buffer->GetHandle(), offset, size);
-}
-
-void GPURenderBundleEncoder::draw(uint32_t vertexCount,
-                                  uint32_t instanceCount,
-                                  uint32_t firstVertex,
-                                  uint32_t firstInstance) {
-  GetProcs().renderBundleEncoderDraw(GetHandle(), vertexCount, instanceCount,
-                                     firstVertex, firstInstance);
-}
-
-void GPURenderBundleEncoder::drawIndexed(uint32_t indexCount,
-                                         uint32_t instanceCount,
-                                         uint32_t firstIndex,
-                                         int32_t baseVertex,
-                                         uint32_t firstInstance) {
-  GetProcs().renderBundleEncoderDrawIndexed(GetHandle(), indexCount,
-                                            instanceCount, firstIndex,
-                                            baseVertex, firstInstance);
-}
-
-void GPURenderBundleEncoder::drawIndirect(GPUBuffer* indirectBuffer,
-                                          uint64_t indirectOffset) {
-  GetProcs().renderBundleEncoderDrawIndirect(
-      GetHandle(), indirectBuffer->GetHandle(), indirectOffset);
-}
-
-void GPURenderBundleEncoder::drawIndexedIndirect(GPUBuffer* indirectBuffer,
-                                                 uint64_t indirectOffset) {
-  GetProcs().renderBundleEncoderDrawIndexedIndirect(
-      GetHandle(), indirectBuffer->GetHandle(), indirectOffset);
-}
-
 GPURenderBundle* GPURenderBundleEncoder::finish(
     const GPURenderBundleDescriptor* webgpu_desc) {
+  std::string label;
   WGPURenderBundleDescriptor dawn_desc = {};
   dawn_desc.nextInChain = nullptr;
   if (webgpu_desc->hasLabel()) {
-    dawn_desc.label = webgpu_desc->label().Utf8().data();
+    label = webgpu_desc->label().Utf8();
+    dawn_desc.label = label.c_str();
   }
 
   WGPURenderBundle render_bundle =

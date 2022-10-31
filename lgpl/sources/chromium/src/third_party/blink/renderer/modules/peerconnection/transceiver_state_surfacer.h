@@ -51,7 +51,7 @@ class MODULES_EXPORT TransceiverStateSurfacer {
   blink::WebRTCSctpTransportSnapshot SctpTransportSnapshot();
   std::vector<blink::RtpTransceiverState> ObtainStates();
 
- protected:
+ private:
   scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> signaling_task_runner_;
   bool is_initialized_;
@@ -66,7 +66,8 @@ class MODULES_EXPORT TransceiverStateSurfacer {
 class MODULES_EXPORT SurfaceSenderStateOnly
     : public rtc::RefCountedObject<webrtc::RtpTransceiverInterface> {
  public:
-  SurfaceSenderStateOnly(rtc::scoped_refptr<webrtc::RtpSenderInterface> sender);
+  explicit SurfaceSenderStateOnly(
+      rtc::scoped_refptr<webrtc::RtpSenderInterface> sender);
   ~SurfaceSenderStateOnly() override;
 
   cricket::MediaType media_type() const override;
@@ -79,6 +80,17 @@ class MODULES_EXPORT SurfaceSenderStateOnly
   absl::optional<webrtc::RtpTransceiverDirection> current_direction()
       const override;
   void Stop() override;
+  bool stopping() const override;
+  webrtc::RTCError SetCodecPreferences(
+      rtc::ArrayView<webrtc::RtpCodecCapability> codecs) override;
+  std::vector<webrtc::RtpCodecCapability> codec_preferences() const override;
+  std::vector<webrtc::RtpHeaderExtensionCapability> HeaderExtensionsToOffer()
+      const override;
+  std::vector<webrtc::RtpHeaderExtensionCapability> HeaderExtensionsNegotiated()
+      const override;
+  webrtc::RTCError SetOfferedRtpHeaderExtensions(
+      rtc::ArrayView<const webrtc::RtpHeaderExtensionCapability>
+          header_extensions_to_offer) override;
 
  private:
   rtc::scoped_refptr<webrtc::RtpSenderInterface> sender_;
@@ -90,7 +102,7 @@ class MODULES_EXPORT SurfaceSenderStateOnly
 class MODULES_EXPORT SurfaceReceiverStateOnly
     : public rtc::RefCountedObject<webrtc::RtpTransceiverInterface> {
  public:
-  SurfaceReceiverStateOnly(
+  explicit SurfaceReceiverStateOnly(
       rtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver);
   ~SurfaceReceiverStateOnly() override;
 
@@ -104,6 +116,17 @@ class MODULES_EXPORT SurfaceReceiverStateOnly
   absl::optional<webrtc::RtpTransceiverDirection> current_direction()
       const override;
   void Stop() override;
+  bool stopping() const override;
+  webrtc::RTCError SetCodecPreferences(
+      rtc::ArrayView<webrtc::RtpCodecCapability> codecs) override;
+  std::vector<webrtc::RtpCodecCapability> codec_preferences() const override;
+  std::vector<webrtc::RtpHeaderExtensionCapability> HeaderExtensionsToOffer()
+      const override;
+  std::vector<webrtc::RtpHeaderExtensionCapability> HeaderExtensionsNegotiated()
+      const override;
+  webrtc::RTCError SetOfferedRtpHeaderExtensions(
+      rtc::ArrayView<const webrtc::RtpHeaderExtensionCapability>
+          header_extensions_to_offer) override;
 
  private:
   rtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver_;

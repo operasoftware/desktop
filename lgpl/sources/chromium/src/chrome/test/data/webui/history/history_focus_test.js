@@ -9,30 +9,18 @@
 
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_interactive_ui_test.js']);
 
+GEN('#include "build/build_config.h"');
 GEN('#include "content/public/test/browser_test.h"');
-GEN('#include "services/network/public/cpp/features.h"');
+
+/* eslint-disable no-var */
 
 const HistoryFocusTest = class extends PolymerInteractiveUITest {
   /** @override */
   get browsePreload() {
     return 'chrome://history/';
   }
-
-  /** @override */
-  get extraLibraries() {
-    return [
-      '//third_party/mocha/mocha.js',
-      '//chrome/test/data/webui/mocha_adapter.js',
-    ];
-  }
-
-  /** @override */
-  get featureList() {
-    return {enabled: ['network::features::kOutOfBlinkCors']};
-  }
 };
 
-// eslint-disable-next-line no-var
 var HistoryToolbarFocusTest = class extends HistoryFocusTest {
   /** @override */
   get browsePreload() {
@@ -40,11 +28,17 @@ var HistoryToolbarFocusTest = class extends HistoryFocusTest {
   }
 };
 
-TEST_F('HistoryToolbarFocusTest', 'All', function() {
+GEN('#if BUILDFLAG(IS_MAC)');
+GEN('// Flaky, https://crbug.com/1200678');
+GEN('#define MAYBE_All DISABLED_All');
+GEN('#else');
+GEN('#define MAYBE_All All');
+GEN('#endif');
+TEST_F('HistoryToolbarFocusTest', 'MAYBE_All', function() {
   mocha.run();
 });
+GEN('#undef MAYBE_All');
 
-// eslint-disable-next-line no-var
 var HistoryListFocusTest = class extends HistoryFocusTest {
   /** @override */
   get browsePreload() {
@@ -52,16 +46,11 @@ var HistoryListFocusTest = class extends HistoryFocusTest {
   }
 };
 
-GEN('#if defined(OS_WIN)');
-GEN('#define MAYBE_AllListFocus DISABLED_All');
-GEN('#else');
-GEN('#define MAYBE_AllListFocus All');
-GEN('#endif');
-TEST_F('HistoryListFocusTest', 'MAYBE_AllListFocus', function() {
+// Flaky. See crbug.com/1040940.
+TEST_F('HistoryListFocusTest', 'DISABLED_All', function() {
   mocha.run();
 });
 
-// eslint-disable-next-line no-var
 var HistorySyncedDeviceManagerFocusTest = class extends HistoryFocusTest {
   /** @override */
   get browsePreload() {
@@ -73,7 +62,6 @@ TEST_F('HistorySyncedDeviceManagerFocusTest', 'All', function() {
   mocha.run();
 });
 
-// eslint-disable-next-line no-var
 var HistoryItemFocusTest = class extends HistoryFocusTest {
   /** @override */
   get browsePreload() {

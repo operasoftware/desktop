@@ -36,6 +36,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/fullscreen/fullscreen_request_type.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
@@ -54,35 +55,22 @@ class ScriptPromiseResolver;
 class CORE_EXPORT Fullscreen final : public GarbageCollected<Fullscreen>,
                                      public Supplement<LocalDOMWindow>,
                                      public ExecutionContextLifecycleObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(Fullscreen);
-
  public:
   static const char kSupplementName[];
 
   explicit Fullscreen(LocalDOMWindow&);
-  virtual ~Fullscreen();
+  ~Fullscreen() override;
 
   static Element* FullscreenElementFrom(Document&);
   static Element* FullscreenElementForBindingFrom(TreeScope&);
   static bool IsFullscreenElement(const Element&);
   static bool IsInFullscreenElementStack(const Element&);
 
-  enum class RequestType {
-    // Element.requestFullscreen()
-    kUnprefixed,
-    // Element.webkitRequestFullscreen()/webkitRequestFullScreen() and
-    // HTMLVideoElement.webkitEnterFullscreen()/webkitEnterFullScreen()
-    kPrefixed,
-    // For WebRemoteFrameImpl to notify that a cross-process descendant frame
-    // has requested and is about to enter fullscreen.
-    kPrefixedForCrossProcessDescendant,
-  };
-
   static void RequestFullscreen(Element&);
   static ScriptPromise RequestFullscreen(
       Element&,
       const FullscreenOptions*,
-      RequestType,
+      FullscreenRequestType,
       ScriptState* state = nullptr,
       ExceptionState* exception_state = nullptr);
 
@@ -113,7 +101,8 @@ class CORE_EXPORT Fullscreen final : public GarbageCollected<Fullscreen>,
 
   static void ContinueRequestFullscreen(Document&,
                                         Element&,
-                                        RequestType,
+                                        FullscreenRequestType,
+                                        const FullscreenOptions*,
                                         ScriptPromiseResolver* resolver,
                                         bool error);
 
@@ -123,28 +112,31 @@ class CORE_EXPORT Fullscreen final : public GarbageCollected<Fullscreen>,
 
   void FullscreenElementChanged(Element* old_element,
                                 Element* new_element,
-                                RequestType new_request_type);
+                                FullscreenRequestType new_request_type);
 
   // Stores the pending request, promise and the type for executing
   // the asynchronous portion of the request.
   class PendingRequest : public GarbageCollected<PendingRequest> {
    public:
     PendingRequest(Element* element,
-                   RequestType type,
+                   FullscreenRequestType type,
+                   const FullscreenOptions* options,
                    ScriptPromiseResolver* resolver);
+    PendingRequest(const PendingRequest&) = delete;
+    PendingRequest& operator=(const PendingRequest&) = delete;
     virtual ~PendingRequest();
     virtual void Trace(Visitor* visitor) const;
 
     Element* element() { return element_; }
-    RequestType type() { return type_; }
+    FullscreenRequestType type() { return type_; }
+    const FullscreenOptions* options() { return options_; }
     ScriptPromiseResolver* resolver() { return resolver_; }
 
    private:
     Member<Element> element_;
-    RequestType type_;
+    FullscreenRequestType type_;
+    Member<const FullscreenOptions> options_;
     Member<ScriptPromiseResolver> resolver_;
-
-    DISALLOW_COPY_AND_ASSIGN(PendingRequest);
   };
   using PendingRequests = HeapVector<Member<PendingRequest>>;
   PendingRequests pending_requests_;

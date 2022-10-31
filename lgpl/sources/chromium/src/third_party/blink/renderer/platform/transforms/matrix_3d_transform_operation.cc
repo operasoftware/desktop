@@ -93,12 +93,11 @@ scoped_refptr<TransformOperation> Matrix3DTransformOperation::Blend(
     const TransformOperation* from,
     double progress,
     bool blend_to_identity) {
-  if (from && !from->IsSameType(*this))
-    return this;
+  DCHECK(!from || CanBlendWith(*from));
 
   // Convert the TransformOperations into matrices. Fail the blend operation
   // if either of the matrices is non-invertible.
-  FloatSize size;
+  gfx::SizeF size;
   TransformationMatrix from_t;
   TransformationMatrix to_t;
   if (from) {

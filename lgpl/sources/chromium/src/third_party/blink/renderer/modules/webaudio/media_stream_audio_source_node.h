@@ -27,87 +27,50 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_MEDIA_STREAM_AUDIO_SOURCE_NODE_H_
 
 #include <memory>
-#include "base/memory/scoped_refptr.h"
+
+#include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node.h"
-#include "third_party/blink/renderer/platform/audio/audio_source_provider.h"
 #include "third_party/blink/renderer/platform/audio/audio_source_provider_client.h"
-#include "third_party/blink/renderer/platform/wtf/threading.h"
+#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 
 namespace blink {
 
 class AudioContext;
 class MediaStreamAudioSourceOptions;
-
-class MediaStreamAudioSourceHandler final : public AudioHandler {
- public:
-  static scoped_refptr<MediaStreamAudioSourceHandler> Create(
-      AudioNode&,
-      std::unique_ptr<AudioSourceProvider>);
-  ~MediaStreamAudioSourceHandler() override;
-
-  // AudioHandler
-  void Process(uint32_t frames_to_process) override;
-
-  // AudioNode
-  double TailTime() const override { return 0; }
-  double LatencyTime() const override { return 0; }
-
-  // A helper for AudioSourceProviderClient implementation of
-  // MediaStreamAudioSourceNode.
-  void SetFormat(uint32_t number_of_channels, float sample_rate);
-
-  bool RequiresTailProcessing() const final { return false; }
-
- private:
-  MediaStreamAudioSourceHandler(AudioNode&,
-                                std::unique_ptr<AudioSourceProvider>);
-
-  // As an audio source, we will never propagate silence.
-  bool PropagatesSilence() const override { return false; }
-
-  AudioSourceProvider* GetAudioSourceProvider() const {
-    return audio_source_provider_.get();
-  }
-
-  std::unique_ptr<AudioSourceProvider> audio_source_provider_;
-
-  Mutex process_lock_;
-
-  unsigned source_number_of_channels_;
-};
+class MediaStreamAudioSourceHandler;
 
 class MediaStreamAudioSourceNode final
     : public AudioNode,
       public AudioSourceProviderClient,
       public ActiveScriptWrappable<MediaStreamAudioSourceNode> {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(MediaStreamAudioSourceNode);
 
  public:
   static MediaStreamAudioSourceNode* Create(AudioContext&,
                                             MediaStream&,
                                             ExceptionState&);
-  static MediaStreamAudioSourceNode*
-  Create(AudioContext*, const MediaStreamAudioSourceOptions*, ExceptionState&);
+  static MediaStreamAudioSourceNode* Create(
+      AudioContext*, const MediaStreamAudioSourceOptions*, ExceptionState&);
 
   MediaStreamAudioSourceNode(AudioContext&,
                              MediaStream&,
                              MediaStreamTrack*,
                              std::unique_ptr<AudioSourceProvider>);
 
-  void Trace(Visitor*) const override;
+  // V8 binding
+  MediaStream* getMediaStream() const { return media_stream_; }
 
-  MediaStream* getMediaStream() const;
-
-  // AudioSourceProviderClient functions:
+  // AudioSourceProviderClient
   void SetFormat(uint32_t number_of_channels, float sample_rate) override;
-
-  bool HasPendingActivity() const final;
 
   // InspectorHelperMixin
   void ReportDidCreate() final;
   void ReportWillBeDestroyed() final;
+
+  // GC
+  bool HasPendingActivity() const final;
+  void Trace(Visitor*) const override;
 
  private:
   MediaStreamAudioSourceHandler& GetMediaStreamAudioSourceHandler() const;

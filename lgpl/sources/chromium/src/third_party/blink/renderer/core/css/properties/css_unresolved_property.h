@@ -5,12 +5,16 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PROPERTIES_CSS_UNRESOLVED_PROPERTY_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PROPERTIES_CSS_UNRESOLVED_PROPERTY_H_
 
+#include "base/notreached.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/properties/css_exposure.h"
 #include "third_party/blink/renderer/core/css/properties/css_property_instances.h"
-#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
+
+class ExecutionContext;
+const CSSUnresolvedProperty& GetCSSPropertyVariableInternal();
 
 // TODO(crbug.com/793288): audit and consider redesigning how aliases are
 // handled once more of project Ribbon is done and all use of aliases can be
@@ -54,12 +58,14 @@ class CORE_EXPORT CSSUnresolvedProperty {
   }
 
  protected:
-  static const CSSUnresolvedProperty& GetNonAliasProperty(CSSPropertyID);
+  static const CSSUnresolvedProperty& GetNonAliasProperty(CSSPropertyID id) {
+    if (id == CSSPropertyID::kVariable)
+      return GetCSSPropertyVariableInternal();
+    return *kPropertyClasses[static_cast<int>(id)];
+  }
 
-  constexpr CSSUnresolvedProperty() {}
+  constexpr CSSUnresolvedProperty() = default;
 };
-
-const CSSUnresolvedProperty& GetCSSPropertyVariableInternal();
 
 }  // namespace blink
 

@@ -1,0 +1,6 @@
+Name: libzmq
+URL: https://github.com/zeromq/libzmq
+Version: 4.3.4
+License: LGPL v3, GPL v3 and custom licenses
+License File: COPYING
+

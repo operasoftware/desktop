@@ -29,23 +29,19 @@
 
 #include "third_party/blink/renderer/core/dom/document_init.h"
 
-#include "services/network/public/cpp/web_sandbox_flags.h"
-#include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_implementation.h"
 #include "third_party/blink/renderer/core/dom/sink_document.h"
 #include "third_party/blink/renderer/core/dom/xml_document.h"
-#include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
-#include "third_party/blink/renderer/core/html/custom/v0_custom_element_registration_context.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/html/html_view_source_document.h"
 #include "third_party/blink/renderer/core/html/image_document.h"
-#include "third_party/blink/renderer/core/html/imports/html_imports_controller.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/media_document.h"
 #include "third_party/blink/renderer/core/html/plugin_document.h"
@@ -57,25 +53,8 @@
 #include "third_party/blink/renderer/platform/network/mime/content_type.h"
 #include "third_party/blink/renderer/platform/network/mime/mime_type_registry.h"
 #include "third_party/blink/renderer/platform/network/network_utils.h"
-#include "third_party/blink/renderer/platform/web_test_support.h"
 
 namespace blink {
-
-// FIXME: Broken with OOPI.
-static Document* ParentDocument(DocumentLoader* loader) {
-  DCHECK(loader);
-  DCHECK(loader->GetFrame());
-
-  Element* owner_element = loader->GetFrame()->DeprecatedLocalOwner();
-  if (!owner_element)
-    return nullptr;
-  return &owner_element->GetDocument();
-}
-
-bool IsPagePopupRunningInWebTest(LocalFrame* frame) {
-  return frame && frame->GetPage()->GetChromeClient().IsPopup() &&
-         WebTestSupport::IsRunningWebTest();
-}
 
 // static
 DocumentInit DocumentInit::Create() {
@@ -88,103 +67,49 @@ DocumentInit::~DocumentInit() = default;
 
 DocumentInit& DocumentInit::ForTest() {
   DCHECK(!execution_context_);
-  DCHECK(!document_loader_);
+  DCHECK(!window_);
 #if DCHECK_IS_ON()
   DCHECK(!for_test_);
   for_test_ = true;
 #endif
-  content_security_policy_ = MakeGarbageCollected<ContentSecurityPolicy>();
-  return *this;
-}
-
-DocumentInit& DocumentInit::WithImportsController(
-    HTMLImportsController* controller) {
-  imports_controller_ = controller;
   return *this;
 }
 
 bool DocumentInit::ShouldSetURL() const {
-  DocumentLoader* loader = TreeRootDocumentLoader();
-  return (loader && loader->GetFrame()->Tree().Parent()) || !url_.IsEmpty();
+  return (window_ && !window_->GetFrame()->IsMainFrame()) || !url_.IsEmpty();
 }
 
 bool DocumentInit::IsSrcdocDocument() const {
-  // TODO(dgozman): why do we check |parent_document_| here?
-  return parent_document_ && is_srcdoc_document_;
+  return window_ && !window_->GetFrame()->IsMainFrame() && is_srcdoc_document_;
 }
 
-DocumentLoader* DocumentInit::TreeRootDocumentLoader() const {
-  if (document_loader_)
-    return document_loader_;
-  if (imports_controller_) {
-    return imports_controller_->TreeRoot()
-        ->GetFrame()
-        ->Loader()
-        .GetDocumentLoader();
-  }
-  return nullptr;
-}
-
-network::mojom::blink::WebSandboxFlags DocumentInit::GetSandboxFlags() const {
-  DCHECK(content_security_policy_);
-  network::mojom::blink::WebSandboxFlags flags =
-      sandbox_flags_ | content_security_policy_->GetSandboxMask();
-  if (DocumentLoader* loader = TreeRootDocumentLoader())
-    flags |= loader->GetFrame()->Loader().EffectiveSandboxFlags();
-  return flags;
-}
-
-mojom::blink::InsecureRequestPolicy DocumentInit::GetInsecureRequestPolicy()
-    const {
-  DCHECK(TreeRootDocumentLoader());
-  Frame* parent_frame = TreeRootDocumentLoader()->GetFrame()->Tree().Parent();
-  if (!parent_frame)
-    return mojom::blink::InsecureRequestPolicy::kLeaveInsecureRequestsAlone;
-  return parent_frame->GetSecurityContext()->GetInsecureRequestPolicy();
-}
-
-const SecurityContext::InsecureNavigationsSet*
-DocumentInit::InsecureNavigationsToUpgrade() const {
-  DCHECK(TreeRootDocumentLoader());
-  Frame* parent_frame = TreeRootDocumentLoader()->GetFrame()->Tree().Parent();
-  if (!parent_frame)
-    return nullptr;
-  return &parent_frame->GetSecurityContext()->InsecureNavigationsToUpgrade();
-}
-
-network::mojom::IPAddressSpace DocumentInit::GetIPAddressSpace() const {
-  return ip_address_space_;
-}
-
-DocumentInit& DocumentInit::WithDocumentLoader(DocumentLoader* loader,
-                                               ContentSecurityPolicy* policy) {
-  DCHECK(!document_loader_);
+DocumentInit& DocumentInit::WithWindow(LocalDOMWindow* window,
+                                       Document* owner_document) {
+  DCHECK(!window_);
   DCHECK(!execution_context_);
-  DCHECK(!imports_controller_);
 #if DCHECK_IS_ON()
   DCHECK(!for_test_);
 #endif
-  DCHECK(!content_security_policy_);
-  DCHECK(loader);
-  DCHECK(policy);
-  document_loader_ = loader;
-  parent_document_ = ParentDocument(document_loader_);
-  content_security_policy_ = policy;
+  DCHECK(window);
+  window_ = window;
+  execution_context_ = window;
+  owner_document_ = owner_document;
   return *this;
 }
 
-LocalFrame* DocumentInit::GetFrame() const {
-  return document_loader_ ? document_loader_->GetFrame() : nullptr;
+DocumentInit& DocumentInit::ForInitialEmptyDocument(bool empty) {
+  is_initial_empty_document_ = empty;
+  return *this;
 }
 
-UseCounter* DocumentInit::GetUseCounter() const {
-  return document_loader_;
+DocumentInit& DocumentInit::ForPrerendering(bool is_prerendering) {
+  is_prerendering_ = is_prerendering;
+  return *this;
 }
 
 // static
 DocumentInit::Type DocumentInit::ComputeDocumentType(
     LocalFrame* frame,
-    const KURL& url,
     const String& mime_type,
     bool* is_for_external_handler) {
   if (frame && frame->InViewSourceMode())
@@ -207,9 +132,8 @@ DocumentInit::Type DocumentInit::ComputeDocumentType(
   if (HTMLMediaElement::GetSupportsType(ContentType(mime_type)))
     return Type::kMedia;
 
-  if (frame && frame->GetPage() &&
-      frame->Loader().AllowPlugins(kNotAboutToInstantiatePlugin)) {
-    PluginData* plugin_data = GetPluginData(frame, url);
+  if (frame && frame->GetPage() && frame->Loader().AllowPlugins()) {
+    PluginData* plugin_data = GetPluginData(frame);
 
     // Everything else except text/plain can be overridden by plugins.
     // Disallowing plugins to use text/plain prevents plugins from hijacking a
@@ -247,41 +171,25 @@ DocumentInit::Type DocumentInit::ComputeDocumentType(
 }
 
 // static
-PluginData* DocumentInit::GetPluginData(LocalFrame* frame, const KURL& url) {
-  // If the document is being created for the main frame,
-  // frame()->tree().top()->securityContext() returns nullptr.
-  // For that reason, the origin must be retrieved directly from |url|.
-  if (frame->IsMainFrame())
-    return frame->GetPage()->GetPluginData(SecurityOrigin::Create(url).get());
-
-  const SecurityOrigin* main_frame_origin =
-      frame->Tree().Top().GetSecurityContext()->GetSecurityOrigin();
-  return frame->GetPage()->GetPluginData(main_frame_origin);
+PluginData* DocumentInit::GetPluginData(LocalFrame* frame) {
+  return frame->GetPage()->GetPluginData();
 }
 
 DocumentInit& DocumentInit::WithTypeFrom(const String& mime_type) {
   mime_type_ = mime_type;
-  type_ = ComputeDocumentType(GetFrame(), Url(), mime_type_,
-                              &is_for_external_handler_);
-  if (type_ == Type::kPlugin) {
-    plugin_background_color_ =
-        GetPluginData(GetFrame(), Url())
-            ->PluginBackgroundColorForMimeType(mime_type_);
-  }
+  type_ = ComputeDocumentType(window_ ? window_->GetFrame() : nullptr,
+                              mime_type_, &is_for_external_handler_);
   return *this;
 }
 
 DocumentInit& DocumentInit::WithExecutionContext(
     ExecutionContext* execution_context) {
   DCHECK(!execution_context_);
-  DCHECK(!document_loader_);
+  DCHECK(!window_);
 #if DCHECK_IS_ON()
   DCHECK(!for_test_);
 #endif
   execution_context_ = execution_context;
-  content_security_policy_ = MakeGarbageCollected<ContentSecurityPolicy>();
-  content_security_policy_->CopyStateFrom(
-      execution_context_->GetContentSecurityPolicy());
   return *this;
 }
 
@@ -291,122 +199,31 @@ DocumentInit& DocumentInit::WithURL(const KURL& url) {
   return *this;
 }
 
-void DocumentInit::CalculateAndCacheDocumentOrigin() {
-  DCHECK(!cached_document_origin_);
-  cached_document_origin_ = GetDocumentOrigin();
-}
+const KURL& DocumentInit::GetCookieUrl() const {
+  const KURL& cookie_url =
+      owner_document_ ? owner_document_->CookieURL() : url_;
 
-scoped_refptr<SecurityOrigin> DocumentInit::GetDocumentOrigin() const {
-  if (cached_document_origin_)
-    return cached_document_origin_;
-
-  scoped_refptr<SecurityOrigin> document_origin;
-  if (origin_to_commit_) {
-    // Origin to commit is specified by the browser process, it must be taken
-    // and used directly. It is currently supplied only for session history
-    // navigations, where the origin was already calcuated previously and
-    // stored on the session history entry.
-    document_origin = origin_to_commit_;
-  } else if (IsPagePopupRunningInWebTest(GetFrame())) {
-    // If we are a page popup in LayoutTests ensure we use the popup
-    // owner's security origin so the tests can possibly access the
-    // document via internals API.
-    document_origin = GetFrame()
-                          ->PagePopupOwner()
-                          ->GetDocument()
-                          .GetSecurityOrigin()
-                          ->IsolatedCopy();
-  } else if (owner_document_) {
-    document_origin = owner_document_->GetMutableSecurityOrigin();
-  } else {
-    // Otherwise, create an origin that propagates precursor information
-    // as needed. For non-opaque origins, this creates a standard tuple
-    // origin, but for opaque origins, it creates an origin with the
-    // initiator origin as the precursor.
-    document_origin = SecurityOrigin::CreateWithReferenceOrigin(
-        url_, initiator_origin_.get());
-  }
-
-  if (IsSandboxed(network::mojom::blink::WebSandboxFlags::kOrigin)) {
-    auto sandbox_origin = document_origin->DeriveNewOpaqueOrigin();
-
-    // If we're supposed to inherit our security origin from our
-    // owner, but we're also sandboxed, the only things we inherit are
-    // the origin's potential trustworthiness and the ability to
-    // load local resources. The latter lets about:blank iframes in
-    // file:// URL documents load images and other resources from
-    // the file system.
+  // An "about:blank" should inherit the `cookie_url` from the initiator of the
+  // navigation, but sometimes "about:blank" may commit without an
+  // `owner_document` (e.g. if the original initiator has been navigated away).
+  // In such scenario, it is important to use a safe `cookie_url` (e.g.
+  // kCookieAverseUrl) to avoid triggering mojo::ReportBadMessage and renderer
+  // kills via RestrictedCookieManager::ValidateAccessToCookiesAt.
+  //
+  // TODO(https://crbug.com/1176291): Correctly inherit the `cookie_url` from
+  // the initiator.
+  if (cookie_url.IsAboutBlankURL()) {
+    // Signify a cookie-averse document [1] with an null URL.  See how
+    // CookiesJar::GetCookies and other methods check `cookie_url` against
+    // KURL::IsEmpty.
     //
-    // Note: Sandboxed about:srcdoc iframe without "allow-same-origin" aren't
-    // allowed to load user's file, even if its parent can.
-    if (owner_document_) {
-      if (document_origin->IsPotentiallyTrustworthy())
-        sandbox_origin->SetOpaqueOriginIsPotentiallyTrustworthy(true);
-      if (document_origin->CanLoadLocalResources() && !IsSrcdocDocument())
-        sandbox_origin->GrantLoadLocalResources();
-    }
-    document_origin = sandbox_origin;
+    // [1] https://html.spec.whatwg.org/#cookie-averse-document-object
+    const KURL& kCookieAverseUrl = NullURL();
+
+    return kCookieAverseUrl;
   }
 
-  if (TreeRootDocumentLoader() &&
-      TreeRootDocumentLoader()->GetFrame()->GetSettings()) {
-    Settings* settings = TreeRootDocumentLoader()->GetFrame()->GetSettings();
-    if (!settings->GetWebSecurityEnabled()) {
-      // Web security is turned off. We should let this document access
-      // every other document. This is used primary by testing harnesses for
-      // web sites.
-      document_origin->GrantUniversalAccess();
-    } else if (document_origin->IsLocal()) {
-      if (settings->GetAllowUniversalAccessFromFileURLs()) {
-        // Some clients want local URLs to have universal access, but that
-        // setting is dangerous for other clients.
-        document_origin->GrantUniversalAccess();
-      } else if (!settings->GetAllowFileAccessFromFileURLs()) {
-        // Some clients do not want local URLs to have access to other local
-        // URLs.
-        document_origin->BlockLocalAccessFromLocalOrigin();
-      }
-    }
-  }
-
-  if (grant_load_local_resources_)
-    document_origin->GrantLoadLocalResources();
-
-  if (document_origin->IsOpaque() && ShouldSetURL()) {
-    KURL url = url_.IsEmpty() ? BlankURL() : url_;
-    if (SecurityOrigin::Create(url)->IsPotentiallyTrustworthy())
-      document_origin->SetOpaqueOriginIsPotentiallyTrustworthy(true);
-  }
-  return document_origin;
-}
-
-DocumentInit& DocumentInit::WithOwnerDocument(Document* owner_document) {
-  DCHECK(!owner_document_);
-  DCHECK(!initiator_origin_ || !owner_document ||
-         owner_document->GetSecurityOrigin() == initiator_origin_);
-  owner_document_ = owner_document;
-  return *this;
-}
-
-DocumentInit& DocumentInit::WithInitiatorOrigin(
-    scoped_refptr<const SecurityOrigin> initiator_origin) {
-  DCHECK(!initiator_origin_);
-  DCHECK(!initiator_origin || !owner_document_ ||
-         owner_document_->GetSecurityOrigin() == initiator_origin);
-  initiator_origin_ = std::move(initiator_origin);
-  return *this;
-}
-
-DocumentInit& DocumentInit::WithOriginToCommit(
-    scoped_refptr<SecurityOrigin> origin_to_commit) {
-  origin_to_commit_ = std::move(origin_to_commit);
-  return *this;
-}
-
-DocumentInit& DocumentInit::WithIPAddressSpace(
-    network::mojom::IPAddressSpace ip_address_space) {
-  ip_address_space_ = ip_address_space;
-  return *this;
+  return cookie_url;
 }
 
 DocumentInit& DocumentInit::WithSrcdocDocument(bool is_srcdoc_document) {
@@ -414,101 +231,6 @@ DocumentInit& DocumentInit::WithSrcdocDocument(bool is_srcdoc_document) {
   return *this;
 }
 
-DocumentInit& DocumentInit::WithGrantLoadLocalResources(
-    bool grant_load_local_resources) {
-  grant_load_local_resources_ = grant_load_local_resources;
-  return *this;
-}
-
-DocumentInit& DocumentInit::WithRegistrationContext(
-    V0CustomElementRegistrationContext* registration_context) {
-  DCHECK(!create_new_registration_context_);
-  DCHECK(!registration_context_);
-  registration_context_ = registration_context;
-  return *this;
-}
-
-DocumentInit& DocumentInit::WithNewRegistrationContext() {
-  DCHECK(!create_new_registration_context_);
-  DCHECK(!registration_context_);
-  create_new_registration_context_ = true;
-  return *this;
-}
-
-V0CustomElementRegistrationContext* DocumentInit::RegistrationContext(
-    Document* document) const {
-  if (!IsA<HTMLDocument>(document) && !document->IsXHTMLDocument())
-    return nullptr;
-
-  if (create_new_registration_context_)
-    return MakeGarbageCollected<V0CustomElementRegistrationContext>();
-
-  return registration_context_;
-}
-
-ExecutionContext* DocumentInit::GetExecutionContext() const {
-  if (execution_context_)
-    return execution_context_;
-  return GetFrame() ? GetFrame()->DomWindow() : nullptr;
-}
-
-DocumentInit& DocumentInit::WithFeaturePolicyHeader(const String& header) {
-  DCHECK(feature_policy_header_.IsEmpty());
-  feature_policy_header_ = header;
-  return *this;
-}
-
-DocumentInit& DocumentInit::WithReportOnlyFeaturePolicyHeader(
-    const String& header) {
-  DCHECK(report_only_feature_policy_header_.IsEmpty());
-  report_only_feature_policy_header_ = header;
-  return *this;
-}
-
-DocumentInit& DocumentInit::WithOriginTrialsHeader(const String& header) {
-  DCHECK(origin_trials_header_.IsEmpty());
-  origin_trials_header_ = header;
-  return *this;
-}
-
-DocumentInit& DocumentInit::WithSandboxFlags(
-    network::mojom::blink::WebSandboxFlags flags) {
-  // Only allow adding more sandbox flags.
-  sandbox_flags_ |= flags;
-  return *this;
-}
-
-ContentSecurityPolicy* DocumentInit::GetContentSecurityPolicy() const {
-  DCHECK(content_security_policy_);
-  return content_security_policy_;
-}
-
-DocumentInit& DocumentInit::WithFramePolicy(
-    const base::Optional<FramePolicy>& frame_policy) {
-  frame_policy_ = frame_policy;
-  if (frame_policy_.has_value()) {
-    DCHECK(document_loader_);
-    // Make the snapshot value of sandbox flags from the beginning of navigation
-    // available in frame loader, so that the value could be further used to
-    // initialize sandbox flags in security context. crbug.com/1026627
-    document_loader_->GetFrame()->Loader().SetFrameOwnerSandboxFlags(
-        frame_policy_.value().sandbox_flags);
-  }
-  return *this;
-}
-
-DocumentInit& DocumentInit::WithDocumentPolicy(
-    const DocumentPolicy::ParsedDocumentPolicy& document_policy) {
-  document_policy_ = document_policy;
-  return *this;
-}
-
-DocumentInit& DocumentInit::WithReportOnlyDocumentPolicyHeader(
-    const String& header) {
-  DCHECK(report_only_document_policy_header_.IsEmpty());
-  report_only_document_policy_header_ = header;
-  return *this;
-}
 
 DocumentInit& DocumentInit::WithWebBundleClaimedUrl(
     const KURL& web_bundle_claimed_url) {
@@ -516,25 +238,14 @@ DocumentInit& DocumentInit::WithWebBundleClaimedUrl(
   return *this;
 }
 
-bool DocumentInit::ShouldReuseDOMWindow() const {
-  DCHECK(GetFrame());
-  // Secure transitions can only happen when navigating from the initial empty
-  // document.
-  if (!GetFrame()->Loader().StateMachine()->IsDisplayingInitialEmptyDocument())
-    return false;
-  return GetFrame()->GetDocument()->GetSecurityOrigin()->CanAccess(
-      GetDocumentOrigin().get());
-}
-
-bool DocumentInit::IsSandboxed(
-    network::mojom::blink::WebSandboxFlags mask) const {
-  return (GetSandboxFlags() & mask) !=
-         network::mojom::blink::WebSandboxFlags::kNone;
+DocumentInit& DocumentInit::WithUkmSourceId(ukm::SourceId ukm_source_id) {
+  ukm_source_id_ = ukm_source_id;
+  return *this;
 }
 
 Document* DocumentInit::CreateDocument() const {
 #if DCHECK_IS_ON()
-  DCHECK(document_loader_ || execution_context_ || for_test_);
+  DCHECK(execution_context_ || for_test_);
 #endif
   switch (type_) {
     case Type::kHTML:
@@ -544,8 +255,11 @@ Document* DocumentInit::CreateDocument() const {
     case Type::kImage:
       return MakeGarbageCollected<ImageDocument>(*this);
     case Type::kPlugin: {
-      if (IsSandboxed(network::mojom::blink::WebSandboxFlags::kPlugins))
+      DCHECK(window_);
+      if (window_->IsSandboxed(
+              network::mojom::blink::WebSandboxFlags::kPlugins)) {
         return MakeGarbageCollected<SinkDocument>(*this);
+      }
       return MakeGarbageCollected<PluginDocument>(*this);
     }
     case Type::kMedia:
@@ -559,7 +273,7 @@ Document* DocumentInit::CreateDocument() const {
     case Type::kText:
       return MakeGarbageCollected<TextDocument>(*this);
     case Type::kUnspecified:
-      FALLTHROUGH;
+      [[fallthrough]];
     default:
       break;
   }

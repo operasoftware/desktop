@@ -18,22 +18,26 @@
  */
 
 #include "third_party/blink/renderer/core/xml/dom_parser.h"
+
+#include "third_party/blink/renderer/bindings/core/v8/v8_parse_from_string_options.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_init.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
-Document* DOMParser::parseFromString(const String& str, const String& type) {
+Document* DOMParser::parseFromString(const String& str,
+                                     const String& type,
+                                     const ParseFromStringOptions* options) {
   Document* doc = DocumentInit::Create()
-                      .WithURL(GetDocument()->Url())
+                      .WithURL(window_->Url())
                       .WithTypeFrom(type)
                       .WithExecutionContext(window_)
-                      .WithOwnerDocument(GetDocument())
                       .CreateDocument();
+  doc->setAllowDeclarativeShadowRoots(options->hasIncludeShadowRoots() &&
+                                      options->includeShadowRoots());
   doc->SetContent(str);
   doc->SetMimeType(AtomicString(type));
   return doc;
@@ -45,10 +49,6 @@ DOMParser::DOMParser(ScriptState* script_state)
 void DOMParser::Trace(Visitor* visitor) const {
   visitor->Trace(window_);
   ScriptWrappable::Trace(visitor);
-}
-
-Document* DOMParser::GetDocument() const {
-  return window_->document();
 }
 
 }  // namespace blink

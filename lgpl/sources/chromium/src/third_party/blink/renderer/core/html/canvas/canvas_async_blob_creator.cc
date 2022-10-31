@@ -10,9 +10,10 @@
 #include "build/build_config.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_metrics.h"
-#include "third_party/blink/public/common/privacy_budget/identifiability_study_participation.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -21,7 +22,7 @@
 #include "third_party/blink/renderer/platform/graphics/image_data_buffer.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/image-encoders/image_encoder_utils.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
@@ -38,12 +39,13 @@ namespace {
 
 // small slack period between deadline and current time for safety
 constexpr base::TimeDelta kCreateBlobSlackBeforeDeadline =
-    base::TimeDelta::FromMilliseconds(1);
+    base::Milliseconds(1);
 constexpr base::TimeDelta kEncodeRowSlackBeforeDeadline =
-    base::TimeDelta::FromMicroseconds(100);
+    base::Microseconds(100);
 
 /* The value is based on user statistics on Nov 2017. */
-#if (defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_WIN))
+#if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC) || \
+     BUILDFLAG(IS_WIN))
 const double kIdleTaskStartTimeoutDelayMs = 1000.0;
 #else
 const double kIdleTaskStartTimeoutDelayMs = 4000.0;  // For ChromeOS, Mobile
@@ -52,7 +54,7 @@ const double kIdleTaskStartTimeoutDelayMs = 4000.0;  // For ChromeOS, Mobile
 /* The value is based on user statistics on May 2018. */
 // We should be more lenient on completion timeout delay to ensure that the
 // switch from idle to main thread only happens to a minority of toBlob calls
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 // Png image encoding on 4k by 4k canvas on Mac HDD takes 5.7+ seconds
 // We see that 99% users require less than 5 seconds.
 const double kIdleTaskCompleteTimeoutDelayMs = 5700.0;
@@ -73,7 +75,7 @@ bool IsEncodeRowDeadlineNearOrPassed(base::TimeTicks deadline,
   int row_encode_time_us = 1000 * (kIdleTaskCompleteTimeoutDelayMs / 4000.0) *
                            (image_width / 4000.0);
   base::TimeDelta row_encode_time_delta =
-      base::TimeDelta::FromMicroseconds(row_encode_time_us);
+      base::Microseconds(row_encode_time_us);
   return base::TimeTicks::Now() >=
          deadline - row_encode_time_delta - kEncodeRowSlackBeforeDeadline;
 }
@@ -85,24 +87,23 @@ void RecordIdleTaskStatusHistogram(
 
 void RecordInitiateEncodingTimeHistogram(ImageEncodingMimeType mime_type,
                                          base::TimeDelta elapsed_time) {
-  // TODO(crbug.com/983261) Change this to use UmaHistogramMicrosecondsTimes.
   if (mime_type == kMimeTypePng) {
-    UmaHistogramMicrosecondsTimesUnderTenMilliseconds(
-        "Blink.Canvas.ToBlob.InitiateEncodingDelay.PNG", elapsed_time);
+    UmaHistogramMicrosecondsTimes(
+        "Blink.Canvas.ToBlob.InitialEncodingDelay.PNG", elapsed_time);
   } else if (mime_type == kMimeTypeJpeg) {
-    UmaHistogramMicrosecondsTimesUnderTenMilliseconds(
-        "Blink.Canvas.ToBlob.InitiateEncodingDelay.JPEG", elapsed_time);
+    UmaHistogramMicrosecondsTimes(
+        "Blink.Canvas.ToBlob.InitialEncodingDelay.JPEG", elapsed_time);
   }
 }
 
 void RecordCompleteEncodingTimeHistogram(ImageEncodingMimeType mime_type,
                                          base::TimeDelta elapsed_time) {
   if (mime_type == kMimeTypePng) {
-    UmaHistogramMicrosecondsTimesUnderTenMilliseconds(
-        "Blink.Canvas.ToBlob.CompleteEncodingDelay.PNG", elapsed_time);
+    UmaHistogramMicrosecondsTimes("Blink.Canvas.ToBlob.TotalEncodingDelay.PNG",
+                                  elapsed_time);
   } else if (mime_type == kMimeTypeJpeg) {
-    UmaHistogramMicrosecondsTimesUnderTenMilliseconds(
-        "Blink.Canvas.ToBlob.CompleteEncodingDelay.JPEG", elapsed_time);
+    UmaHistogramMicrosecondsTimes("Blink.Canvas.ToBlob.TotalEncodingDelay.JPEG",
+                                  elapsed_time);
   }
 }
 
@@ -149,7 +150,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
     ToBlobFunctionType function_type,
     base::TimeTicks start_time,
     ExecutionContext* context,
-    base::Optional<UkmParameters> ukm_params,
+    const IdentifiableToken& input_digest,
     ScriptPromiseResolver* resolver)
     : CanvasAsyncBlobCreator(image,
                              options,
@@ -157,7 +158,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
                              nullptr,
                              start_time,
                              context,
-                             ukm_params,
+                             input_digest,
                              resolver) {}
 
 CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
@@ -167,7 +168,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
     V8BlobCallback* callback,
     base::TimeTicks start_time,
     ExecutionContext* context,
-    base::Optional<UkmParameters> ukm_params,
+    const IdentifiableToken& input_digest,
     ScriptPromiseResolver* resolver)
     : fail_encoder_initialization_for_test_(false),
       enforce_idle_encoding_for_test_(false),
@@ -177,6 +178,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
       function_type_(function_type),
       start_time_(start_time),
       static_bitmap_image_loaded_(false),
+      input_digest_(input_digest),
       callback_(callback),
       script_promise_resolver_(resolver) {
   DCHECK(image);
@@ -190,7 +192,8 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
   // necessary.
   image_ = image_->MakeUnaccelerated();
 
-  sk_sp<SkImage> skia_image = image_->PaintImageForCurrentFrame().GetSkImage();
+  sk_sp<SkImage> skia_image =
+      image_->PaintImageForCurrentFrame().GetSwSkImage();
   DCHECK(skia_image);
   DCHECK(!skia_image->isTextureBacked());
 
@@ -202,23 +205,14 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
   }
 
   // For kHTMLCanvasToBlobCallback and kOffscreenCanvasConvertToBlobPromise
-  // to-blob function types, we color convert to sRGB and do not tag the image
-  // with any color space info.
+  // to-blob function types, we keep the color space of the image and save
+  // it in the info if color management is enabled; otherwise, we color convert
+  // to sRGB and do not tag the image with any color space info.
   // For kHTMLCanvasConvertToBlobPromise to-blob function type, we color
   // covnert to the requested color space and pixel format.
   if (function_type_ != kHTMLCanvasConvertToBlobPromise) {
-    if (skia_image->colorSpace()) {
-      image_ = image_->ConvertToColorSpace(
-          SkColorSpace::MakeSRGB(),
-          GetColorTypeForConversion(skia_image->colorType()));
-      skia_image = image_->PaintImageForCurrentFrame().GetSkImage();
-    }
-
-    if (skia_image->peekPixels(&src_data_)) {
-      src_data_.setColorSpace(nullptr);
+    if (skia_image->peekPixels(&src_data_))
       static_bitmap_image_loaded_ = true;
-    }
-    DCHECK(!src_data_.colorSpace());
   } else {
     sk_sp<SkColorSpace> blob_color_space =
         BlobColorSpaceToSkColorSpace(encode_options_->colorSpace());
@@ -239,7 +233,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
     if (needs_color_space_conversion) {
       image_ = UnacceleratedStaticBitmapImage::Create(skia_image);
       image_ = image_->ConvertToColorSpace(blob_color_space, target_color_type);
-      skia_image = image_->PaintImageForCurrentFrame().GetSkImage();
+      skia_image = image_->PaintImageForCurrentFrame().GetSwSkImage();
     } else if (skia_image->colorType() != target_color_type) {
       size_t data_length = skia_image->width() * skia_image->height() *
                            SkColorTypeBytesPerPixel(target_color_type);
@@ -272,7 +266,7 @@ CanvasAsyncBlobCreator::CanvasAsyncBlobCreator(
 
   idle_task_status_ = kIdleTaskNotSupported;
   num_rows_completed_ = 0;
-  if (context->IsDocument()) {
+  if (context->IsWindow()) {
     parent_frame_task_runner_ =
         context->GetTaskRunner(TaskType::kCanvasBlobSerialization);
   }
@@ -474,43 +468,48 @@ void CanvasAsyncBlobCreator::CreateBlobAndReturnResult() {
                              WrapPersistent(result_blob)));
   }
 
-  RecordIdentifiabilityMetric();
-
   RecordScaledDurationHistogram(mime_type_,
                                 base::TimeTicks::Now() - start_time_,
                                 image_->width(), image_->height());
-  // Avoid unwanted retention, see dispose().
-  Dispose();
+
+  if (IdentifiabilityStudySettings::Get()->ShouldSampleType(
+          blink::IdentifiableSurface::Type::kCanvasReadback)) {
+    // Creating this ImageDataBuffer has some overhead, namely getting the
+    // SkImage and computing the pixmap. We need the StaticBitmapImage to be
+    // deleted on the same thread on which it was created, so we use the same
+    // TaskType here in order to get the same TaskRunner.
+
+    // TODO(crbug.com/1143737) WrapPersistent(this) stores more data than is
+    // needed by the function. It would be good to find a way to wrap only the
+    // objects needed (image_, ukm_source_id_, input_digest_, context_)
+    context_->GetTaskRunner(TaskType::kCanvasBlobSerialization)
+        ->PostTask(
+            FROM_HERE,
+            WTF::Bind(&CanvasAsyncBlobCreator::RecordIdentifiabilityMetric,
+                      WrapPersistent(this)));
+  } else {
+    // RecordIdentifiabilityMetric needs a reference to image_, and will run
+    // dispose itself. So here we only call dispose if not recording the metric.
+    Dispose();
+  }
 }
 
 void CanvasAsyncBlobCreator::RecordIdentifiabilityMetric() {
-  if (!ukm_params_.has_value() || !IsUserInIdentifiabilityStudy())
-    return;
-  // Creating this ImageDataBuffer has some overhead, namely getting the SkImage
-  // and computing the pixmap.
-  // We need the StaticBitmapImage to be deleted on the same thread on which it
-  // was created, so we use the same TaskType here in order to get the same
-  // TaskRunner.
-  context_->GetTaskRunner(TaskType::kCanvasBlobSerialization)
-      ->PostTask(
-          FROM_HERE,
-          WTF::Bind(
-              [](scoped_refptr<StaticBitmapImage> image,
-                 UkmParameters ukm_params) {
-                std::unique_ptr<ImageDataBuffer> data_buffer =
-                    ImageDataBuffer::Create(image);
-                if (!data_buffer)
-                  return;
-                blink::IdentifiabilityMetricBuilder(ukm_params.source_id)
-                    .Set(blink::IdentifiableSurface::FromTypeAndInput(
-                             blink::IdentifiableSurface::Type::kCanvasReadback,
-                             0),
-                         blink::IdentifiabilityDigestOfBytes(
-                             base::make_span(data_buffer->Pixels(),
-                                             data_buffer->ComputeByteSize())))
-                    .Record(ukm_params.ukm_recorder);
-              },
-              image_, ukm_params_.value()));
+  std::unique_ptr<ImageDataBuffer> data_buffer =
+      ImageDataBuffer::Create(image_);
+
+  if (data_buffer) {
+    blink::IdentifiabilityMetricBuilder(context_->UkmSourceID())
+        .Add(blink::IdentifiableSurface::FromTypeAndToken(
+                 blink::IdentifiableSurface::Type::kCanvasReadback,
+                 input_digest_),
+             blink::IdentifiabilityDigestOfBytes(base::make_span(
+                 data_buffer->Pixels(), data_buffer->ComputeByteSize())))
+        .Record(context_->UkmRecorder());
+  }
+
+  // Avoid unwanted retention, see dispose().
+  Dispose();
 }
 
 void CanvasAsyncBlobCreator::CreateNullAndReturnResult() {
@@ -640,7 +639,7 @@ void CanvasAsyncBlobCreator::PostDelayedTaskToCurrentThread(
     double delay_ms) {
   context_->GetTaskRunner(TaskType::kCanvasBlobSerialization)
       ->PostDelayedTask(location, std::move(task),
-                        base::TimeDelta::FromMillisecondsD(delay_ms));
+                        base::Milliseconds(delay_ms));
 }
 
 void CanvasAsyncBlobCreator::Trace(Visitor* visitor) const {

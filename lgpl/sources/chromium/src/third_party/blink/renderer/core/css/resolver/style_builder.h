@@ -34,12 +34,12 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
 class CSSPropertyName;
-class CSSValue;
+class ScopedCSSValue;
 class StyleResolverState;
 
 class CORE_EXPORT StyleBuilder {
@@ -52,7 +52,7 @@ class CORE_EXPORT StyleBuilder {
   // CustomProperty instance is created to carry out the application.
   static void ApplyProperty(const CSSPropertyName&,
                             StyleResolverState&,
-                            const CSSValue&);
+                            const ScopedCSSValue&);
 
   // Apply a property/value pair to the ComputedStyle.
   //
@@ -61,9 +61,9 @@ class CORE_EXPORT StyleBuilder {
   // instance. See Variable::IsStaticInstance.
   static void ApplyProperty(const CSSProperty&,
                             StyleResolverState&,
-                            const CSSValue&);
+                            const ScopedCSSValue&);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_STYLE_BUILDER_H_

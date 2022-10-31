@@ -53,7 +53,7 @@ class EllipsisBox final : public InlineBox {
   }
 
   void Paint(const PaintInfo&,
-             const LayoutPoint&,
+             const PhysicalOffset&,
              LayoutUnit line_top,
              LayoutUnit line_bottom) const override;
   bool NodeAtPoint(HitTestResult&,
@@ -61,7 +61,7 @@ class EllipsisBox final : public InlineBox {
                    const PhysicalOffset& accumulated_offset,
                    LayoutUnit line_top,
                    LayoutUnit line_bottom) override;
-  IntRect SelectionRect() const;
+  gfx::Rect SelectionRect() const;
 
   LayoutUnit VirtualLogicalHeight() const override { return height_; }
   const AtomicString& EllipsisStr() const { return str_; }

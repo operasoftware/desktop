@@ -23,12 +23,14 @@
 
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_filter_primitive.h"
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_string.h"
 #include "third_party/blink/renderer/core/svg/svg_filter_element.h"
 #include "third_party/blink/renderer/core/svg/svg_length.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/platform/graphics/filters/filter.h"
 #include "third_party/blink/renderer/platform/graphics/filters/filter_effect.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -84,7 +86,7 @@ bool SVGFilterPrimitiveStandardAttributes::SetFilterEffectAttribute(
   DCHECK(attr_name == svg_names::kColorInterpolationFiltersAttr);
   DCHECK(GetLayoutObject());
   EColorInterpolation color_interpolation =
-      GetLayoutObject()->StyleRef().SvgStyle().ColorInterpolationFilters();
+      GetLayoutObject()->StyleRef().ColorInterpolationFilters();
   InterpolationSpace resolved_interpolation_space =
       SVGFilterBuilder::ResolveInterpolationSpace(color_interpolation);
   if (resolved_interpolation_space == effect->OperatingInterpolationSpace())
@@ -94,7 +96,8 @@ bool SVGFilterPrimitiveStandardAttributes::SetFilterEffectAttribute(
 }
 
 void SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(
-    const QualifiedName& attr_name) {
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kXAttr || attr_name == svg_names::kYAttr ||
       attr_name == svg_names::kWidthAttr ||
       attr_name == svg_names::kHeightAttr ||
@@ -104,7 +107,7 @@ void SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(
     return;
   }
 
-  SVGElement::SvgAttributeChanged(attr_name);
+  SVGElement::SvgAttributeChanged(params);
 }
 
 void SVGFilterPrimitiveStandardAttributes::ChildrenChanged(
@@ -115,7 +118,7 @@ void SVGFilterPrimitiveStandardAttributes::ChildrenChanged(
     Invalidate();
 }
 
-static FloatRect DefaultFilterPrimitiveSubregion(FilterEffect* filter_effect) {
+static gfx::RectF DefaultFilterPrimitiveSubregion(FilterEffect* filter_effect) {
   // https://drafts.fxtf.org/filter-effects/#FilterPrimitiveSubRegion
   DCHECK(filter_effect->GetFilter());
 
@@ -129,7 +132,7 @@ static FloatRect DefaultFilterPrimitiveSubregion(FilterEffect* filter_effect) {
 
   // "x, y, width and height default to the union (i.e., tightest fitting
   // bounding box) of the subregions defined for all referenced nodes."
-  FloatRect subregion_union;
+  gfx::RectF subregion_union;
   for (const auto& input_effect : filter_effect->InputEffects()) {
     // "If ... one or more of the referenced nodes is a standard input
     // ... the default subregion is 0%, 0%, 100%, 100%, where as a
@@ -137,7 +140,7 @@ static FloatRect DefaultFilterPrimitiveSubregion(FilterEffect* filter_effect) {
     // filter region..."
     if (input_effect->GetFilterEffectType() == kFilterEffectTypeSourceInput)
       return filter_effect->GetFilter()->FilterRegion();
-    subregion_union.Unite(input_effect->FilterPrimitiveSubregion());
+    subregion_union.Union(input_effect->FilterPrimitiveSubregion());
   }
   return subregion_union;
 }
@@ -145,21 +148,21 @@ static FloatRect DefaultFilterPrimitiveSubregion(FilterEffect* filter_effect) {
 void SVGFilterPrimitiveStandardAttributes::SetStandardAttributes(
     FilterEffect* filter_effect,
     SVGUnitTypes::SVGUnitType primitive_units,
-    const FloatRect& reference_box) const {
+    const gfx::RectF& reference_box) const {
   DCHECK(filter_effect);
 
-  FloatRect subregion = DefaultFilterPrimitiveSubregion(filter_effect);
-  FloatRect primitive_boundaries =
+  gfx::RectF subregion = DefaultFilterPrimitiveSubregion(filter_effect);
+  gfx::RectF primitive_boundaries =
       SVGLengthContext::ResolveRectangle(this, primitive_units, reference_box);
 
   if (x()->IsSpecified())
-    subregion.SetX(primitive_boundaries.X());
+    subregion.set_x(primitive_boundaries.x());
   if (y()->IsSpecified())
-    subregion.SetY(primitive_boundaries.Y());
+    subregion.set_y(primitive_boundaries.y());
   if (width()->IsSpecified())
-    subregion.SetWidth(primitive_boundaries.Width());
+    subregion.set_width(primitive_boundaries.width());
   if (height()->IsSpecified())
-    subregion.SetHeight(primitive_boundaries.Height());
+    subregion.set_height(primitive_boundaries.height());
 
   filter_effect->SetFilterPrimitiveSubregion(subregion);
 }
@@ -167,7 +170,7 @@ void SVGFilterPrimitiveStandardAttributes::SetStandardAttributes(
 LayoutObject* SVGFilterPrimitiveStandardAttributes::CreateLayoutObject(
     const ComputedStyle&,
     LegacyLayout) {
-  return new LayoutSVGFilterPrimitive(this);
+  return MakeGarbageCollected<LayoutSVGFilterPrimitive>(this);
 }
 
 bool SVGFilterPrimitiveStandardAttributes::LayoutObjectIsNeeded(

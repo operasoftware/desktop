@@ -42,7 +42,7 @@ CORE_EXPORT bool IsSpatialNavigationEnabled(const LocalFrame*);
 bool IsSpatialNavigationFindingFocusCandidateEnabled(LocalFrame*);
 void SetSpatialNavigationFindingFocusCandidateEnabled(LocalFrame*, bool);
 
-struct FocusCandidate {
+struct CORE_EXPORT FocusCandidate {
   STACK_ALLOCATED();
 
  public:
@@ -67,8 +67,10 @@ struct FocusCandidate {
 };
 
 CORE_EXPORT bool HasRemoteFrame(const Node*);
-CORE_EXPORT bool IsFragmentedInline(Node& node);
-CORE_EXPORT FloatRect RectInViewport(const Node&);
+CORE_EXPORT int LineBoxes(const LayoutObject& layout_object);
+CORE_EXPORT
+bool IsFragmentedInline(const LayoutObject& layout_object);
+CORE_EXPORT gfx::RectF RectInViewport(const Node&);
 CORE_EXPORT bool IsOffscreen(const Node*);
 CORE_EXPORT bool IsUnobscured(const FocusCandidate&);
 bool ScrollInDirection(Node* container, SpatialNavigationDirection);
@@ -89,6 +91,12 @@ CORE_EXPORT PhysicalRect RootViewport(const LocalFrame*);
 PhysicalRect StartEdgeForAreaElement(const HTMLAreaElement&,
                                      SpatialNavigationDirection);
 HTMLFrameOwnerElement* FrameOwnerElement(const FocusCandidate&);
+
+CORE_EXPORT PhysicalRect
+ShrinkInlineBoxToLineBox(const LayoutObject& layout_object,
+                         PhysicalRect visible_part,
+                         int line_boxes = -1);
+
 CORE_EXPORT PhysicalRect
 SearchOriginFragment(const PhysicalRect& visible_part,
                      const LayoutObject& fragmented,

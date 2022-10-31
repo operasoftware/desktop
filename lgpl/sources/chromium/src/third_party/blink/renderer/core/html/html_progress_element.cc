@@ -28,7 +28,7 @@
 #include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 #include "third_party/blink/renderer/core/layout/layout_progress.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
@@ -58,9 +58,7 @@ LayoutObject* HTMLProgressElement::CreateLayoutObject(
 }
 
 LayoutProgress* HTMLProgressElement::GetLayoutProgress() const {
-  if (GetLayoutObject() && GetLayoutObject()->IsProgress())
-    return ToLayoutProgress(GetLayoutObject());
-  return nullptr;
+  return DynamicTo<LayoutProgress>(GetLayoutObject());
 }
 
 void HTMLProgressElement::ParseAttribute(

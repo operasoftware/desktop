@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "base/auto_reset.h"
 #include "third_party/blink/renderer/core/display_lock/display_lock_utilities.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
@@ -43,6 +42,9 @@ class ElementInnerTextCollector final {
 
  public:
   ElementInnerTextCollector() = default;
+  ElementInnerTextCollector(const ElementInnerTextCollector&) = delete;
+  ElementInnerTextCollector& operator=(const ElementInnerTextCollector&) =
+      delete;
 
   String RunOn(const Element& element);
 
@@ -53,8 +55,9 @@ class ElementInnerTextCollector final {
   class Result final {
    public:
     Result() = default;
+    Result(const Result&) = delete;
+    Result& operator=(const Result&) = delete;
 
-    void EmitChar16(UChar code_point);
     void EmitNewline();
     void EmitRequiredLineBreak(int count);
     void EmitTab();
@@ -66,8 +69,6 @@ class ElementInnerTextCollector final {
 
     StringBuilder builder_;
     int required_line_break_count_ = 0;
-
-    DISALLOW_COPY_AND_ASSIGN(Result);
   };
 
   static bool HasDisplayContentsStyle(const Node& node);
@@ -90,8 +91,6 @@ class ElementInnerTextCollector final {
   // Result character buffer.
   Result result_;
   bool include_shadow_dom_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(ElementInnerTextCollector);
 };
 
 String ElementInnerTextCollector::RunOn(const Element& element) {
@@ -100,7 +99,7 @@ String ElementInnerTextCollector::RunOn(const Element& element) {
   // 1. If this element is locked or a part of a locked subtree, then it is
   // hidden from view (and also possibly not laid out) and innerText should be
   // empty.
-  if (DisplayLockUtilities::NearestLockedInclusiveAncestor(element))
+  if (DisplayLockUtilities::LockedInclusiveAncestorPreventingPaint(element))
     return {};
 
   // 2. If this element is not being rendered, or if the user agent is a non-CSS
@@ -155,12 +154,12 @@ bool ElementInnerTextCollector::IsDisplayBlockLevel(const Node& node) {
   const LayoutObject* const layout_object = node.GetLayoutObject();
   if (!layout_object)
     return false;
+  if (layout_object->IsTableSection()) {
+    // Note: |LayoutTableSection::IsInline()| returns false, but it is not
+    // block-level.
+    return false;
+  }
   if (!layout_object->IsLayoutBlock()) {
-    if (layout_object->IsTableSection()) {
-      // Note: |LayoutTableSeleciton::IsInline()| returns false, but it is not
-      // block-level.
-      return false;
-    }
     // Note: Block-level replaced elements, e.g. <img style=display:block>,
     // reach here. Unlike |LayoutBlockFlow::AddChild()|, innerText considers
     // floats and absolutely-positioned elements as block-level node.
@@ -270,11 +269,8 @@ void ElementInnerTextCollector::ProcessNode(const Node& node) {
 
   // 2. If the node is display locked, then we should not process it or its
   // children, since they are not visible or accessible via innerText.
-  if (auto* element = DynamicTo<Element>(node)) {
-    auto* context = element->GetDisplayLockContext();
-    if (context && context->IsLocked())
-      return;
-  }
+  if (DisplayLockUtilities::LockedInclusiveAncestorPreventingPaint(node))
+    return;
 
   // 3. If node's computed value of 'visibility' is not 'visible', then return
   // items.
@@ -358,7 +354,7 @@ void ElementInnerTextCollector::ProcessNode(const Node& node) {
   if (include_shadow_dom_) {
     // If node is an open shadow DOM, then process nodes inside.
     auto* shadow_root = node.GetShadowRoot();
-    if (shadow_root && shadow_root->IsOpenOrV0())
+    if (shadow_root && shadow_root->IsOpen())
       ProcessChildren(*shadow_root);
   }
 
@@ -415,12 +411,6 @@ void ElementInnerTextCollector::ProcessTextNode(const Text& node) {
 
 // ----
 
-void ElementInnerTextCollector::Result::EmitChar16(UChar code_point) {
-  FlushRequiredLineBreak();
-  DCHECK_EQ(required_line_break_count_, 0);
-  builder_.Append(code_point);
-}
-
 void ElementInnerTextCollector::Result::EmitNewline() {
   FlushRequiredLineBreak();
   builder_.Append(kNewlineCharacter);
@@ -474,6 +464,20 @@ String Element::innerText() {
   // boxes in the layout tree.
   GetDocument().UpdateStyleAndLayoutForNode(this,
                                             DocumentUpdateReason::kJavaScript);
+  return GetInnerTextWithoutUpdate();
+}
+
+// Used for callers that must ensure no document lifecycle rewind.
+String Element::GetInnerTextWithoutUpdate() {
+  // TODO(https:://crbug.com/1165850 https:://crbug.com/1166296) Layout should
+  // always be clean here, but the lifecycle does not report the correctly
+  // updated value unless servicing animations. Fix the UpdateStyleAndLayout()
+  // to correctly advance the lifecycle, and then update the following DCHECK to
+  // always require clean layout in active documents.
+  // DCHECK(!GetDocument().IsActive() || !GetDocument().GetPage() ||
+  //        GetDocument().Lifecycle().GetState() >=
+  //            DocumentLifecycle::kLayoutClean)
+  //     << "Layout must be clean when GetInnerTextWithoutUpdate() is called.";
   return ElementInnerTextCollector().RunOn(*this);
 }
 

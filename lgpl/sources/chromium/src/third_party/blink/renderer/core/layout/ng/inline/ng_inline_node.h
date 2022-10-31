@@ -5,23 +5,25 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_INLINE_NG_INLINE_NODE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_INLINE_NG_INLINE_NODE_H_
 
+#include "base/gtest_prod_util.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_node_data.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_input_node.h"
-#include "third_party/blink/renderer/core/paint/ng/ng_paint_fragment.h"
+#include "third_party/blink/renderer/core/layout/ng/svg/ng_svg_character_data.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
-class NGBlockBreakToken;
+class NGBreakToken;
+class NGColumnSpannerPath;
 class NGConstraintSpace;
 class NGInlineChildLayoutContext;
-class NGInlineNodeLegacy;
 class NGLayoutResult;
 class NGOffsetMapping;
 struct NGInlineItemsData;
+struct SvgTextContentRange;
 
 // Represents an anonymous block box to be laid out, that contains consecutive
 // inline nodes and their descendants.
@@ -31,37 +33,27 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
   explicit NGInlineNode(std::nullptr_t) : NGLayoutInputNode(nullptr) {}
 
   LayoutBlockFlow* GetLayoutBlockFlow() const {
-    return To<LayoutBlockFlow>(box_);
+    return To<LayoutBlockFlow>(box_.Get());
   }
-  NGLayoutInputNode NextSibling() { return nullptr; }
+  NGLayoutInputNode NextSibling() const { return nullptr; }
 
-  // True in quirks mode or limited-quirks mode, which require line-height
-  // quirks.
-  // https://quirks.spec.whatwg.org/#the-line-height-calculation-quirk
-  bool InLineHeightQuirksMode() const {
-    return GetDocument().InLineHeightQuirksMode();
-  }
-
-  scoped_refptr<const NGLayoutResult> Layout(
-      const NGConstraintSpace&,
-      const NGBreakToken*,
-      NGInlineChildLayoutContext* context) const;
+  const NGLayoutResult* Layout(const NGConstraintSpace&,
+                               const NGBreakToken*,
+                               const NGColumnSpannerPath*,
+                               NGInlineChildLayoutContext* context) const;
 
   // Computes the value of min-content and max-content for this anonymous block
   // box. min-content is the inline size when lines wrap at every break
   // opportunity, and max-content is when lines do not wrap at all.
-  MinMaxSizesResult ComputeMinMaxSizes(
-      WritingMode container_writing_mode,
-      const MinMaxSizesInput&,
-      const NGConstraintSpace* = nullptr) const;
+  MinMaxSizesResult ComputeMinMaxSizes(WritingMode container_writing_mode,
+                                       const NGConstraintSpace&,
+                                       const MinMaxSizesFloatInput&) const;
 
   // Instruct to re-compute |PrepareLayout| on the next layout.
   void InvalidatePrepareLayoutForTest() {
     LayoutBlockFlow* block_flow = GetLayoutBlockFlow();
     block_flow->ResetNGInlineNodeData();
     DCHECK(!IsPrepareLayoutFinished());
-    // There shouldn't be paint fragment if NGInlineNodeData does not exist.
-    block_flow->SetPaintFragment(nullptr, nullptr);
   }
 
   const NGInlineItemsData& ItemsData(bool is_first_line) const {
@@ -82,12 +74,6 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
   // needed.
   static String TextContentForStickyImagesQuirk(const NGInlineItemsData&);
 
-  // Clear associated fragments for LayoutObjects.
-  // They are associated when NGPaintFragment is constructed, but when clearing,
-  // NGInlineItem provides easier and faster logic.
-  static void ClearAssociatedFragments(const NGPhysicalFragment& fragment,
-                                       const NGBlockBreakToken* break_token);
-
   // Returns true if we don't need to collect inline items after replacing
   // |layout_text| after deleting replacing subtext from |offset| to |length|
   // |new_text| is new text of |layout_text|.
@@ -99,7 +85,7 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
 
   // Returns the DOM to text content offset mapping of this block. If it is not
   // computed before, compute and store it in NGInlineNodeData.
-  // This funciton must be called with clean layout.
+  // This function must be called with clean layout.
   const NGOffsetMapping* ComputeOffsetMappingIfNeeded() const;
 
   // Get |NGOffsetMapping| for the |layout_block_flow|. |layout_block_flow|
@@ -110,12 +96,15 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
   bool IsBidiEnabled() const { return Data().is_bidi_enabled_; }
   TextDirection BaseDirection() const { return Data().BaseDirection(); }
 
-  bool HasLineEvenIfEmpty() { return EnsureData().has_line_even_if_empty_; }
   bool HasRuby() const { return Data().has_ruby_; }
 
-  bool IsEmptyInline() { return EnsureData().is_empty_inline_; }
-
   bool IsBlockLevel() { return EnsureData().is_block_level_; }
+
+  // This returns true if Deferred Shaping was applied to this IFC, and
+  // it's unlocked and should be reshaped.
+  bool ShouldBeReshaped() const;
+  DisplayLockContext* GetDisplayLockContext() const;
+  bool IsDisplayLocked() const;
 
   // @return if this node can contain the "first formatted line".
   // https://www.w3.org/TR/CSS22/selector.html#first-formatted-line
@@ -126,6 +115,19 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
 
   bool UseFirstLineStyle() const;
   void CheckConsistency() const;
+
+  bool ShouldReportLetterSpacingUseCounterForTesting(
+      const LayoutObject* layout_object,
+      bool first_line,
+      const LayoutBlockFlow* block_flow);
+
+  // This function is available after PrepareLayout(), only for SVG <text>.
+  const Vector<std::pair<unsigned, NGSvgCharacterData>>& SvgCharacterDataList()
+      const;
+  // This function is available after PrepareLayout(), only for SVG <text>.
+  const HeapVector<SvgTextContentRange>& SvgTextLengthRangeList() const;
+  // This function is available after PrepareLayout(), only for SVG <text>.
+  const HeapVector<SvgTextContentRange>& SvgTextPathRangeList() const;
 
   String ToString() const;
 
@@ -139,53 +141,68 @@ class CORE_EXPORT NGInlineNode : public NGLayoutInputNode {
     LayoutUnit float_inline_max_size_with_margin;
   };
 
- protected:
-  bool IsPrepareLayoutFinished() const;
+  static bool NeedsShapingForTesting(const NGInlineItem& item);
 
   // Prepare inline and text content for layout. Must be called before
   // calling the Layout method.
   void PrepareLayoutIfNeeded() const;
-  void PrepareLayout(std::unique_ptr<NGInlineNodeData> previous_data) const;
+
+ protected:
+  FRIEND_TEST_ALL_PREFIXES(NGInlineNodeTest, SegmentBidiChangeSetsNeedsLayout);
+
+  bool IsPrepareLayoutFinished() const;
+
+  void PrepareLayout(NGInlineNodeData* previous_data) const;
 
   void CollectInlines(NGInlineNodeData*,
                       NGInlineNodeData* previous_data = nullptr) const;
+  const SvgTextChunkOffsets* FindSvgTextChunks(LayoutBlockFlow& block,
+                                               NGInlineNodeData& data) const;
   void SegmentText(NGInlineNodeData*) const;
   void SegmentScriptRuns(NGInlineNodeData*) const;
   void SegmentFontOrientation(NGInlineNodeData*) const;
   void SegmentBidiRuns(NGInlineNodeData*) const;
   void ShapeText(NGInlineItemsData*,
                  const String* previous_text = nullptr,
-                 const Vector<NGInlineItem>* previous_items = nullptr) const;
+                 const HeapVector<NGInlineItem>* previous_items = nullptr,
+                 const Font* override_font = nullptr) const;
   void ShapeTextForFirstLineIfNeeded(NGInlineNodeData*) const;
+  void ShapeTextIncludingFirstLine(
+      NGInlineNodeData::ShapingState new_state,
+      NGInlineNodeData* data,
+      const String* previous_text,
+      const HeapVector<NGInlineItem>* previous_items) const;
+  void ShapeTextOrDefer(const NGConstraintSpace& space) const;
   void AssociateItemsWithInlines(NGInlineNodeData*) const;
 
   NGInlineNodeData* MutableData() const {
-    return To<LayoutBlockFlow>(box_)->GetNGInlineNodeData();
+    return To<LayoutBlockFlow>(box_.Get())->GetNGInlineNodeData();
   }
   const NGInlineNodeData& Data() const {
     DCHECK(IsPrepareLayoutFinished() &&
            !GetLayoutBlockFlow()->NeedsCollectInlines());
-    return *To<LayoutBlockFlow>(box_)->GetNGInlineNodeData();
+    return *To<LayoutBlockFlow>(box_.Get())->GetNGInlineNodeData();
   }
   // Same as |Data()| but can access even when |NeedsCollectInlines()| is set.
   const NGInlineNodeData& MaybeDirtyData() const {
     DCHECK(IsPrepareLayoutFinished());
-    return *To<LayoutBlockFlow>(box_)->GetNGInlineNodeData();
+    return *To<LayoutBlockFlow>(box_.Get())->GetNGInlineNodeData();
   }
   const NGInlineNodeData& EnsureData() const;
+
+  void AdjustFontForTextCombineUprightAll() const;
 
   static void ComputeOffsetMapping(LayoutBlockFlow* layout_block_flow,
                                    NGInlineNodeData* data);
 
   friend class NGLineBreakerTest;
-  friend class NGInlineNodeLegacy;
 };
 
 inline bool NGInlineNode::IsStickyImagesQuirkForContentSize() const {
   if (UNLIKELY(GetDocument().InQuirksMode())) {
     const ComputedStyle& style = Style();
     if (UNLIKELY(style.Display() == EDisplay::kTableCell &&
-                 style.LogicalWidth().IsIntrinsicOrAuto()))
+                 !style.LogicalWidth().IsSpecified()))
       return true;
   }
   return false;

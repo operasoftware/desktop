@@ -9,6 +9,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/fetch/bytes_consumer_test_util.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/loader/threadable_loader.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
@@ -30,8 +31,6 @@ using Result = BytesConsumer::Result;
 class BlobBytesConsumerTestClient final
     : public GarbageCollected<BlobBytesConsumerTestClient>,
       public BytesConsumer::Client {
-  USING_GARBAGE_COLLECTED_MIXIN(BlobBytesConsumerTestClient);
-
  public:
   void OnStateChange() override { ++num_on_state_change_called_; }
   String DebugName() const override { return "BlobBytesConsumerTestClient"; }
@@ -43,7 +42,7 @@ class BlobBytesConsumerTestClient final
 
 class BlobBytesConsumerTest : public PageTestBase {
  public:
-  void SetUp() override { PageTestBase::SetUp(IntSize(1, 1)); }
+  void SetUp() override { PageTestBase::SetUp(gfx::Size(1, 1)); }
   scoped_refptr<BlobDataHandle> CreateBlob(const String& body) {
     mojo::PendingRemote<mojom::blink::Blob> mojo_blob;
     mojo::MakeSelfOwnedReceiver(

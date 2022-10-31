@@ -26,7 +26,6 @@ std::ostream& operator<<(std::ostream& out, const StyleDifference& diff) {
       break;
   }
 
-  out << ", collectInlines=" << diff.needs_collect_inlines_;
   out << ", reshape=" << diff.needs_reshape_;
   out << ", paintInvalidation=" << diff.needs_paint_invalidation_;
   out << ", recomputeVisualOverflow=" << diff.recompute_visual_overflow_;
@@ -51,9 +50,6 @@ std::ostream& operator<<(std::ostream& out, const StyleDifference& diff) {
           break;
         case StyleDifference::kFilterChanged:
           out << "FilterChanged";
-          break;
-        case StyleDifference::kBackdropFilterChanged:
-          out << "BackdropFilterChanged";
           break;
         case StyleDifference::kCSSClipChanged:
           out << "CSSClipChanged";

@@ -22,15 +22,17 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_IMAGE_ELEMENT_H_
 
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/canvas/image_element_base.h"
-#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
-#include "third_party/blink/renderer/core/svg/svg_animated_preserve_aspect_ratio.h"
 #include "third_party/blink/renderer/core/svg/svg_graphics_element.h"
 #include "third_party/blink/renderer/core/svg/svg_image_loader.h"
 #include "third_party/blink/renderer/core/svg/svg_uri_reference.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
+
+class SVGAnimatedLength;
+class SVGAnimatedPreserveAspectRatio;
 
 class CORE_EXPORT SVGImageElement final
     : public SVGGraphicsElement,
@@ -38,7 +40,6 @@ class CORE_EXPORT SVGImageElement final
       public SVGURIReference,
       public ActiveScriptWrappable<SVGImageElement> {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(SVGImageElement);
 
  public:
   explicit SVGImageElement(Document&);
@@ -84,7 +85,7 @@ class CORE_EXPORT SVGImageElement final
       const AtomicString&,
       MutableCSSPropertyValueSet*) override;
 
-  void SvgAttributeChanged(const QualifiedName&) override;
+  void SvgAttributeChanged(const SvgAttributeChangedParams&) override;
   void ParseAttribute(const AttributeModificationParams&) override;
 
   void AttachLayoutTree(AttachContext&) override;

@@ -4,11 +4,12 @@
 
 #include "third_party/blink/renderer/core/loader/threaded_icon_loader.h"
 
-#include "base/optional.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/web_size.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/testing/histogram_tester.h"
@@ -30,7 +31,7 @@ constexpr char kIconLoaderInvalidIcon[] = "file.txt";
 class ThreadedIconLoaderTest : public PageTestBase {
  public:
   void SetUp() override {
-    PageTestBase::SetUp(IntSize());
+    PageTestBase::SetUp(gfx::Size());
     GetDocument().SetBaseURLOverride(KURL(kIconLoaderBaseUrl));
   }
 
@@ -49,11 +50,11 @@ class ThreadedIconLoaderTest : public PageTestBase {
 
   std::pair<SkBitmap, double> LoadIcon(
       const KURL& url,
-      base::Optional<gfx::Size> resize_dimensions = base::nullopt) {
+      absl::optional<gfx::Size> resize_dimensions = absl::nullopt) {
     auto* icon_loader = MakeGarbageCollected<ThreadedIconLoader>();
 
     ResourceRequest resource_request(url);
-    resource_request.SetRequestContext(mojom::RequestContextType::IMAGE);
+    resource_request.SetRequestContext(mojom::blink::RequestContextType::IMAGE);
     resource_request.SetPriority(ResourceLoadPriority::kMedium);
 
     SkBitmap icon;

@@ -21,8 +21,6 @@ class DataObjectTest : public testing::Test {
 
 class DataObjectObserver : public GarbageCollected<DataObjectObserver>,
                            public DataObject::Observer {
-  USING_GARBAGE_COLLECTED_MIXIN(DataObjectObserver);
-
  public:
   DataObjectObserver() : call_count_(0) {}
   void OnItemListChanged() override { call_count_++; }
@@ -131,7 +129,8 @@ TEST_F(DataObjectTest, fileSystemId) {
   FileMetadata metadata;
   metadata.length = 0;
   data_object_->Add(
-      File::CreateForFileSystemFile(url, metadata, File::kIsUserVisible),
+      File::CreateForFileSystemFile(url, metadata, File::kIsUserVisible,
+                                    BlobDataHandle::Create()),
       "fileSystemIdForFileSystemFile");
 
   ASSERT_EQ(3U, data_object_->length());

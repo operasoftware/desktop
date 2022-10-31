@@ -18,9 +18,11 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/channel_layout.h"
 #include "libavutil/opt.h"
 #include "audio.h"
 #include "avfilter.h"
+#include "filters.h"
 #include "internal.h"
 #include "libavutil/lfg.h"
 #include "libavutil/random_seed.h"
@@ -82,35 +84,21 @@ AVFILTER_DEFINE_CLASS(anoisesrc);
 static av_cold int query_formats(AVFilterContext *ctx)
 {
     ANoiseSrcContext *s = ctx->priv;
-    static const int64_t chlayouts[] = { AV_CH_LAYOUT_MONO, -1 };
+    static const AVChannelLayout chlayouts[] = { AV_CHANNEL_LAYOUT_MONO, { 0 } };
     int sample_rates[] = { s->sample_rate, -1 };
     static const enum AVSampleFormat sample_fmts[] = {
         AV_SAMPLE_FMT_DBL,
         AV_SAMPLE_FMT_NONE
     };
-
-    AVFilterFormats *formats;
-    AVFilterChannelLayouts *layouts;
-    int ret;
-
-    formats = ff_make_format_list(sample_fmts);
-    if (!formats)
-        return AVERROR(ENOMEM);
-    ret = ff_set_common_formats (ctx, formats);
+    int ret = ff_set_common_formats_from_list(ctx, sample_fmts);
     if (ret < 0)
         return ret;
 
-    layouts = avfilter_make_format64_list(chlayouts);
-    if (!layouts)
-        return AVERROR(ENOMEM);
-    ret = ff_set_common_channel_layouts(ctx, layouts);
+    ret = ff_set_common_channel_layouts_from_list(ctx, chlayouts);
     if (ret < 0)
         return ret;
 
-    formats = ff_make_format_list(sample_rates);
-    if (!formats)
-        return AVERROR(ENOMEM);
-    return ff_set_common_samplerates(ctx, formats);
+    return ff_set_common_samplerates_from_list(ctx, sample_rates);
 }
 
 static double white_filter(double white, double *buf, double ha)
@@ -198,16 +186,20 @@ static av_cold int config_props(AVFilterLink *outlink)
     return 0;
 }
 
-static int request_frame(AVFilterLink *outlink)
+static int activate(AVFilterContext *ctx)
 {
-    AVFilterContext *ctx = outlink->src;
+    AVFilterLink *outlink = ctx->outputs[0];
     ANoiseSrcContext *s = ctx->priv;
     AVFrame *frame;
     int nb_samples, i;
     double *dst;
 
+    if (!ff_outlink_frame_wanted(outlink))
+        return FFERROR_NOT_READY;
+
     if (!s->infinite && s->duration <= 0) {
-        return AVERROR_EOF;
+        ff_outlink_set_status(outlink, AVERROR_EOF, s->pts);
+        return 0;
     } else if (!s->infinite && s->duration < s->nb_samples) {
         nb_samples = s->duration;
     } else {
@@ -236,18 +228,17 @@ static const AVFilterPad anoisesrc_outputs[] = {
     {
         .name          = "default",
         .type          = AVMEDIA_TYPE_AUDIO,
-        .request_frame = request_frame,
         .config_props  = config_props,
     },
-    { NULL }
 };
 
-AVFilter ff_asrc_anoisesrc = {
+const AVFilter ff_asrc_anoisesrc = {
     .name          = "anoisesrc",
     .description   = NULL_IF_CONFIG_SMALL("Generate a noise audio signal."),
-    .query_formats = query_formats,
     .priv_size     = sizeof(ANoiseSrcContext),
     .inputs        = NULL,
-    .outputs       = anoisesrc_outputs,
+    .activate      = activate,
+    FILTER_OUTPUTS(anoisesrc_outputs),
+    FILTER_QUERY_FUNC(query_formats),
     .priv_class    = &anoisesrc_class,
 };

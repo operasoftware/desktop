@@ -9,7 +9,7 @@
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_v8_reference.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -37,10 +37,12 @@ class CustomLayoutFragment : public ScriptWrappable {
  public:
   CustomLayoutFragment(CustomLayoutChild*,
                        CustomLayoutToken*,
-                       scoped_refptr<const NGLayoutResult>,
+                       const NGLayoutResult*,
                        const LogicalSize& size,
-                       const base::Optional<LayoutUnit> baseline,
+                       const absl::optional<LayoutUnit> baseline,
                        v8::Isolate*);
+  CustomLayoutFragment(const CustomLayoutFragment&) = delete;
+  CustomLayoutFragment& operator=(const CustomLayoutFragment&) = delete;
   ~CustomLayoutFragment() override = default;
 
   double inlineSize() const { return inline_size_; }
@@ -52,7 +54,7 @@ class CustomLayoutFragment : public ScriptWrappable {
   void setInlineOffset(double inline_offset) { inline_offset_ = inline_offset; }
   void setBlockOffset(double block_offset) { block_offset_ = block_offset; }
 
-  base::Optional<double> baseline() const { return baseline_; }
+  absl::optional<double> baseline() const { return baseline_; }
 
   ScriptValue data(ScriptState*) const;
 
@@ -81,7 +83,7 @@ class CustomLayoutFragment : public ScriptWrappable {
   // that the last layout on the child wasn't with the same inputs, and force a
   // layout again.
 
-  scoped_refptr<const NGLayoutResult> layout_result_;
+  Member<const NGLayoutResult> layout_result_;
 
   // The inline and block size on this object should never change.
   const double inline_size_;
@@ -92,11 +94,9 @@ class CustomLayoutFragment : public ScriptWrappable {
   double block_offset_ = 0;
 
   // The first-line baseline.
-  const base::Optional<double> baseline_;
+  const absl::optional<double> baseline_;
 
   TraceWrapperV8Reference<v8::Value> layout_worklet_world_v8_data_;
-
-  DISALLOW_COPY_AND_ASSIGN(CustomLayoutFragment);
 };
 
 }  // namespace blink

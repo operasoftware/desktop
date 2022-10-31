@@ -115,7 +115,21 @@ toLowercase(widechar c, const TranslationTableHeader *table) {
 	offset = table->characters[_lou_charHash(c)];
 	while (offset) {
 		character = (TranslationTableCharacter *)&table->ruleArea[offset];
-		if (character->realchar == c) return character->lowercase;
+		if (character->value == c) {
+			if (character->mode & CTC_UpperCase) {
+				const TranslationTableCharacter *c = character;
+				if (c->basechar)
+					c = (TranslationTableCharacter *)&table->ruleArea[c->basechar];
+				while (1) {
+					if ((c->mode & (character->mode & ~CTC_UpperCase)) ==
+							(character->mode & ~CTC_UpperCase))
+						return c->value;
+					if (!c->linked) break;
+					c = (TranslationTableCharacter *)&table->ruleArea[c->linked];
+				}
+			}
+			return character->value;
+		}
 		offset = character->next;
 	}
 	return c;
@@ -274,10 +288,10 @@ static const intCharTupple attributeMapping[] = {
 	{ CTC_Math, 'm' },
 	{ CTC_Sign, 'S' },
 	{ CTC_LitDigit, 'D' },
-	{ CTC_Class1, 'w' },
-	{ CTC_Class2, 'x' },
-	{ CTC_Class3, 'y' },
-	{ CTC_Class4, 'z' },
+	{ CTC_UserDefined9, 'w' },
+	{ CTC_UserDefined10, 'x' },
+	{ CTC_UserDefined11, 'y' },
+	{ CTC_UserDefined12, 'z' },
 	{ 0, 0 },
 };
 

@@ -144,11 +144,9 @@ printCharacter(TranslationTableCharacter *thisChar, int mode) {
 	TranslationTableOffset nextRule;
 	if (mode == 0) {
 		printf("Char: ");
-		printf("real=%s, ", print_chars(&thisChar->realchar, 1));
-		printf("upper=%s, ", print_chars(&thisChar->uppercase, 1));
-		printf("lower=%s, ", print_chars(&thisChar->lowercase, 1));
+		printf("value=%s, ", print_chars(&thisChar->value, 1));
 	} else
-		printf("Dots: real=%s, ", _lou_showDots(&thisChar->realchar, 1));
+		printf("Dots: value=%s, ", _lou_showDots(&thisChar->value, 1));
 	printf("attr=%s, ", _lou_showAttributes(thisChar->attributes));
 	nextRule = thisChar->otherRules;
 	while (nextRule) {
@@ -160,6 +158,13 @@ printCharacter(TranslationTableCharacter *thisChar, int mode) {
 			nextRule = thisRule->charsnext;
 		else
 			nextRule = thisRule->dotsnext;
+	}
+	if (mode == 0 && thisChar->compRule) {
+		TranslationTableRule *compRule =
+				(TranslationTableRule *)&table->ruleArea[thisChar->compRule];
+		printf("comp6 ");
+		printRule(compRule, 0);
+		printf("\n");
 	}
 	return 1;
 }
@@ -301,30 +306,25 @@ show_brailleIndicators(void) {
 	// FIXME: update to include all UEB opcodes.
 
 	for (EmphCodeOffset offset = 0; capsNames[offset]; offset++) {
-		print_brailleIndicator(table->emphRules[capsRule][offset], capsNames[offset]);
+		print_brailleIndicator(
+				table->emphRules[MAX_EMPH_CLASSES][offset], capsNames[offset]);
 	}
-	print_phraseLength(table->emphRules[capsRule][lenPhraseOffset], "lencapsphrase");
+	print_phraseLength(
+			table->emphRules[MAX_EMPH_CLASSES][lenPhraseOffset], "lencapsphrase");
 	print_brailleIndicator(table->letterSign, "letsign");
 	print_brailleIndicator(table->numberSign, "numsign");
+	print_brailleIndicator(table->noNumberSign, "nonumsign");
+	print_brailleIndicator(table->noContractSign, "nocontractsign");
 
-	for (int i = 0; table->emphClasses[i]; i++) {
+	for (int i = 0; i < MAX_EMPH_CLASSES && table->emphClassNames[i]; i++) {
 		for (EmphCodeOffset offset = 0; emphNames[offset]; offset++) {
 			snprintf(name, BUFSIZE, emphNames[offset], table->emphClasses[i]);
-			print_brailleIndicator(table->emphRules[emph1Rule][offset], name);
+			print_brailleIndicator(table->emphRules[i][offset], name);
 		}
 		snprintf(name, BUFSIZE, "lenemphphrase %s", table->emphClasses[i]);
-		print_phraseLength(table->emphRules[emph1Rule][lenPhraseOffset], name);
+		print_phraseLength(table->emphRules[i][lenPhraseOffset], name);
 	}
 	print_brailleIndicator(table->begComp, "begcomp");
-	print_brailleIndicator(table->compBegEmph1, "compbegemph1");
-	print_brailleIndicator(table->compEndEmph1, "compendemph1");
-	print_brailleIndicator(table->compBegEmph2, "compbegemph2");
-	print_brailleIndicator(table->compEndEmph2, "compendemph2");
-	print_brailleIndicator(table->compBegEmph3, "compbegemph3");
-	print_brailleIndicator(table->compEndEmph3, "compendemph3");
-	print_brailleIndicator(table->compCapSign, "compcapsign");
-	print_brailleIndicator(table->compBegCaps, "compbegcaps");
-	print_brailleIndicator(table->compEndCaps, "compendcaps");
 	print_brailleIndicator(table->endComp, "endcomp");
 	return 1;
 }
@@ -355,7 +355,7 @@ show_misc(void) {
 static int
 show_charMap(int startHash) {
 	int k;
-	CharOrDots *thisChar;
+	CharDotsMapping *thisChar;
 	TranslationTableOffset nextChar;
 	printf("Press enter for next or (e)xit, next-(h)ash, then enter\n");
 	if (startHash < 0)
@@ -367,7 +367,7 @@ show_charMap(int startHash) {
 			printf("Hash=%d\n", k);
 			nextChar = displayTable->charToDots[k];
 			while (nextChar) {
-				thisChar = (CharOrDots *)&displayTable->ruleArea[nextChar];
+				thisChar = (CharDotsMapping *)&displayTable->ruleArea[nextChar];
 				printf("Char: %s ", print_chars(&thisChar->lookFor, 1));
 				printf("dots=%s\n", _lou_showDots(&thisChar->found, 1));
 				printf("=> ");
@@ -383,7 +383,7 @@ show_charMap(int startHash) {
 static int
 show_dotsMap(int startHash) {
 	int k;
-	CharOrDots *thisDots;
+	CharDotsMapping *thisDots;
 	TranslationTableOffset nextDots;
 	printf("Press enter for next or (e)xit, next-(h)ash, then enter\n");
 	if (startHash < 0)
@@ -395,7 +395,7 @@ show_dotsMap(int startHash) {
 			printf("Hash=%d\n", k);
 			nextDots = displayTable->dotsToChar[k];
 			while (nextDots) {
-				thisDots = (CharOrDots *)&displayTable->ruleArea[nextDots];
+				thisDots = (CharDotsMapping *)&displayTable->ruleArea[nextDots];
 				printf("Dots: %s ", _lou_showDots(&thisDots->lookFor, 1));
 				printf("char=%s\n", print_chars(&thisDots->found, 1));
 				printf("=> ");
@@ -408,34 +408,12 @@ show_dotsMap(int startHash) {
 	return 1;
 }
 
-static int
-show_compDots(int startChar) {
-	widechar k;
-	printf("Press enter for next or (e)xit, next-(h)ash, then enter\n");
-	if (startChar < 0)
-		k = 0;
-	else
-		k = startChar;
-	for (; k < 256; k++)
-		if (table->compdotsPattern[k]) {
-			TranslationTableRule *thisRule =
-					(TranslationTableRule *)&table->ruleArea[table->compdotsPattern[k]];
-			printf("Char: %s ", print_chars(&k, 1));
-			printf("dots=%s\n",
-					_lou_showDots(&thisRule->charsdots[1], thisRule->dotslen));
-			printf("=> ");
-			getInput();
-			if (*inputBuffer == 'e') return 1;
-		}
-	return 1;
-}
-
 static void
 part_paramLetters(void) {
 	printf("show particular hash chains.\n");
 	printf("show-(f)orward-rules, show-(b)ackward-rules, show-(c)haracters, \n");
 	printf("show-(d)ot-patterns, show-(C)har-to-dots, show-(D)ots-tochar\n");
-	printf("(z)-compdots, (h)elp, e(x)it\n");
+	printf("(h)elp, e(x)it\n");
 }
 
 static void
@@ -523,17 +501,6 @@ particular(void) {
 			}
 			show_backRules(startHash);
 			break;
-		case 'z':
-			printf("-> ");
-			getInput();
-			if (!_lou_extParseChars(inputBuffer, parsed)) break;
-			startHash = _lou_charHash(*parsed);
-			if (*parsed > 255 || table->compdotsPattern[startHash] == 0) {
-				printf("Character not in table.\n");
-				break;
-			}
-			show_compDots(startHash);
-			break;
 		case 'x':
 			return 1;
 		default:
@@ -549,8 +516,7 @@ paramLetters(void) {
 	printf("Press one of the letters in parentheses, then enter.\n");
 	printf("show-(f)orward-rules, show-(b)ackward-rules, show-(c)haracters, \n");
 	printf("show-(d)ot-patterns, show-(C)har-to-dots, show-(D)ots-tochar\n");
-	printf("show-(m)isc, show-(z)-compdots\n");
-	printf("show-braille(i)ndicators, show-(p)articulars\n");
+	printf("show-(m)isc, show-braille(i)ndicators, show-(p)articulars\n");
 	printf("(h)elp, (q)uit\n");
 }
 
@@ -576,9 +542,6 @@ getCommands(void) {
 			break;
 		case 'D':
 			show_dotsMap(-1);
-			break;
-		case 'z':
-			show_compDots(-1);
 			break;
 		case 'c':
 			show_characters(-1);

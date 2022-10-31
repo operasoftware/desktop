@@ -1,4 +1,4 @@
-#!/usr/bin/env vpython
+#!/usr/bin/env vpython3
 # Copyright (C) 2012 Google Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -40,7 +40,6 @@ on WebSocket, you can navigate to:
 import sys
 import optparse
 
-from blinkpy.common import version_check  # pylint: disable=unused-import
 from blinkpy.web_tests.servers import cli_wrapper
 from blinkpy.web_tests.servers import pywebsocket
 

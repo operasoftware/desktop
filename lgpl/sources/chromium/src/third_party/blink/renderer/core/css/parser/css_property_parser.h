@@ -25,7 +25,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PARSER_CSS_PROPERTY_PARSER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PARSER_CSS_PROPERTY_PARSER_H_
 
-#include "base/macros.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_mode.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
@@ -45,11 +45,14 @@ class CORE_EXPORT CSSPropertyParser {
   STACK_ALLOCATED();
 
  public:
+  CSSPropertyParser(const CSSPropertyParser&) = delete;
+  CSSPropertyParser& operator=(const CSSPropertyParser&) = delete;
+
   static bool ParseValue(CSSPropertyID,
                          bool important,
                          const CSSParserTokenRange&,
                          const CSSParserContext*,
-                         HeapVector<CSSPropertyValue, 256>&,
+                         HeapVector<CSSPropertyValue, 64>&,
                          StyleRule::RuleType);
 
   // Parses a non-shorthand CSS property
@@ -60,11 +63,15 @@ class CORE_EXPORT CSSPropertyParser {
  private:
   CSSPropertyParser(const CSSParserTokenRange&,
                     const CSSParserContext*,
-                    HeapVector<CSSPropertyValue, 256>*);
+                    HeapVector<CSSPropertyValue, 64>*);
 
   // TODO(timloh): Rename once the CSSParserValue-based parseValue is removed
-  bool ParseValueStart(CSSPropertyID unresolved_property, bool important);
-  bool ConsumeCSSWideKeyword(CSSPropertyID unresolved_property, bool important);
+  bool ParseValueStart(CSSPropertyID unresolved_property,
+                       StyleRule::RuleType rule_type,
+                       bool important);
+  bool ConsumeCSSWideKeyword(CSSPropertyID unresolved_property,
+                             bool important,
+                             StyleRule::RuleType rule_type);
 
   bool ParseViewportDescriptor(CSSPropertyID prop_id, bool important);
   bool ParseFontFaceDescriptor(CSSPropertyID);
@@ -74,8 +81,7 @@ class CORE_EXPORT CSSPropertyParser {
   CSSParserTokenRange range_;
   const CSSParserContext* context_;
   // Outputs:
-  HeapVector<CSSPropertyValue, 256>* parsed_properties_;
-  DISALLOW_COPY_AND_ASSIGN(CSSPropertyParser);
+  HeapVector<CSSPropertyValue, 64>* parsed_properties_;
 };
 
 CSSPropertyID UnresolvedCSSPropertyID(const ExecutionContext*,

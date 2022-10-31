@@ -27,11 +27,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_PATH_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_PATH_H_
 
-#include "base/macros.h"
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/node_event_context.h"
 #include "third_party/blink/renderer/core/dom/events/tree_scope_event_context.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -46,6 +47,8 @@ class WindowEventContext;
 class CORE_EXPORT EventPath final : public GarbageCollected<EventPath> {
  public:
   explicit EventPath(Node&, Event* = nullptr);
+  EventPath(const EventPath&) = delete;
+  EventPath& operator=(const EventPath&) = delete;
 
   void InitializeWith(Node&, Event*);
 
@@ -128,9 +131,8 @@ class CORE_EXPORT EventPath final : public GarbageCollected<EventPath> {
   Member<Event> event_;
   HeapVector<Member<TreeScopeEventContext>, 8> tree_scope_event_contexts_;
   Member<WindowEventContext> window_event_context_;
-  DISALLOW_COPY_AND_ASSIGN(EventPath);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_PATH_H_

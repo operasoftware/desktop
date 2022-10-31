@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher_properties.h"
 
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
 
@@ -18,8 +19,9 @@ void DetachableResourceFetcherProperties::Detach() {
   fetch_client_settings_object_ =
       MakeGarbageCollected<FetchClientSettingsObjectSnapshot>(
           properties_->GetFetchClientSettingsObject());
-  is_main_frame_ = properties_->IsMainFrame();
+  is_outermost_main_frame_ = properties_->IsOutermostMainFrame();
   paused_ = properties_->IsPaused();
+  freeze_mode_ = properties_->FreezeMode();
   load_complete_ = properties_->IsLoadComplete();
   is_subframe_deprioritization_enabled_ =
       properties_->IsSubframeDeprioritizationEnabled();

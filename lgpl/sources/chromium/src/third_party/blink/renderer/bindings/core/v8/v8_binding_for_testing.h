@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -49,6 +50,7 @@ class V8TestingScope {
   v8::Local<v8::Context> context_;
   v8::Context::Scope context_scope_;
   v8::TryCatch try_catch_;
+  v8::MicrotasksScope microtasks_scope_;
   DummyExceptionStateForTesting exception_state_;
 };
 
@@ -77,12 +79,10 @@ class BindingTestSupportingGC : public testing::Test {
         v8::Isolate::GarbageCollectionType::kMinorGarbageCollection);
   }
 
-  void RunV8FullGC(v8::EmbedderHeapTracer::EmbedderStackState stack_state =
-                       v8::EmbedderHeapTracer::EmbedderStackState::kEmpty) {
-    ThreadState::Current()->CollectAllGarbageForTesting(
-        stack_state == v8::EmbedderHeapTracer::EmbedderStackState::kEmpty
-            ? BlinkGC::kNoHeapPointersOnStack
-            : BlinkGC::kHeapPointersOnStack);
+  void RunV8FullGC(
+      v8::EmbedderHeapTracer::EmbedderStackState stack_state =
+          v8::EmbedderHeapTracer::EmbedderStackState::kNoHeapPointers) {
+    ThreadState::Current()->CollectAllGarbageForTesting(stack_state);
   }
 
  private:

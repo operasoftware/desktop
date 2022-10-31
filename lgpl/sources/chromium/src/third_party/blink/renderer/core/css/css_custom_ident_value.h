@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_CUSTOM_IDENT_VALUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_CUSTOM_IDENT_VALUE_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
@@ -17,7 +18,7 @@ class CORE_EXPORT CSSCustomIdentValue : public CSSValue {
   explicit CSSCustomIdentValue(const AtomicString&);
   explicit CSSCustomIdentValue(CSSPropertyID);
 
-  AtomicString Value() const {
+  const AtomicString& Value() const {
     DCHECK(!IsKnownPropertyID());
     return string_;
   }

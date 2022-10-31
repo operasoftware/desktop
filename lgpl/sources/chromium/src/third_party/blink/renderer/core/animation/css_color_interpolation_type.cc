@@ -10,8 +10,9 @@
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/renderer/core/animation/color_property_functions.h"
 #include "third_party/blink/renderer/core/animation/interpolable_value.h"
-#include "third_party/blink/renderer/core/css/css_color_value.h"
+#include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
@@ -68,25 +69,27 @@ CSSColorInterpolationType::CreateInterpolableColor(CSSValueID keyword) {
     case CSSValueID::kInternalQuirkInherit:
       return CreateInterpolableColorForIndex(kQuirkInherit);
     case CSSValueID::kWebkitFocusRingColor:
-      return CreateInterpolableColor(LayoutTheme::GetTheme().FocusRingColor());
+      // TODO(crbug.com/929098) Need to pass an appropriate color scheme here.
+      return CreateInterpolableColor(LayoutTheme::GetTheme().FocusRingColor(
+          mojom::blink::ColorScheme::kLight));
     default:
       DCHECK(StyleColor::IsColorKeyword(keyword));
       // TODO(crbug.com/929098) Need to pass an appropriate color scheme here.
       return CreateInterpolableColor(StyleColor::ColorFromKeyword(
-          keyword, ComputedStyle::InitialStyle().UsedColorScheme()));
+          keyword, mojom::blink::ColorScheme::kLight));
   }
 }
 
 std::unique_ptr<InterpolableValue>
 CSSColorInterpolationType::CreateInterpolableColor(const StyleColor& color) {
-  if (color.IsCurrentColor())
-    return CreateInterpolableColorForIndex(kCurrentcolor);
+  if (!color.IsNumeric())
+    return CreateInterpolableColor(color.GetColorKeyword());
   return CreateInterpolableColor(color.GetColor());
 }
 
 std::unique_ptr<InterpolableValue>
 CSSColorInterpolationType::MaybeCreateInterpolableColor(const CSSValue& value) {
-  if (auto* color_value = DynamicTo<cssvalue::CSSColorValue>(value))
+  if (auto* color_value = DynamicTo<cssvalue::CSSColor>(value))
     return CreateInterpolableColor(color_value->Value());
   auto* identifier_value = DynamicTo<CSSIdentifierValue>(value);
   if (!identifier_value)
@@ -94,6 +97,51 @@ CSSColorInterpolationType::MaybeCreateInterpolableColor(const CSSValue& value) {
   if (!StyleColor::IsColorKeyword(identifier_value->GetValueID()))
     return nullptr;
   return CreateInterpolableColor(identifier_value->GetValueID());
+}
+
+// Spec link: https://www.w3.org/TR/css-color-4/#interpolation-alpha
+Color CSSColorInterpolationType::GetRGBA(const InterpolableValue& value) {
+  const InterpolableList& list = To<InterpolableList>(value);
+  DCHECK_GE(list.length(), kAlpha);
+  double color[kAlpha + 1];
+  for (unsigned i = kRed; i <= kAlpha; i++) {
+    const InterpolableValue& current_value = *(list.Get(i));
+    color[i] = To<InterpolableNumber>(current_value).Value();
+  }
+  // Prevent dividing 0
+  if (color[kAlpha] == 0)
+    return Color::kTransparent;
+
+  return Color::FromRGBA(
+      ClampTo<int>(std::round(color[kRed] / color[kAlpha])),
+      ClampTo<int>(std::round(color[kGreen] / color[kAlpha])),
+      ClampTo<int>(std::round(color[kBlue] / color[kAlpha])),
+      ClampTo<int>(color[kAlpha]));
+}
+
+bool CSSColorInterpolationType::IsRGBA(const InterpolableValue& value) {
+  if (!value.IsList())
+    return false;
+
+  const InterpolableList& list = To<InterpolableList>(value);
+  if (list.length() != kInterpolableColorIndexCount)
+    return false;
+
+  for (wtf_size_t i = 0; i < list.length(); i++) {
+    if (!list.Get(i)->IsNumber())
+      return false;
+  }
+
+  // Values stored outside of the RGBA range of indices indicate fractional
+  // blending amounts and are important for resolving the color. If any of these
+  // store a non-zero value, then the interpolated color is not the same as the
+  // color produced by simply looking at the RGBA values.
+  for (wtf_size_t i = kCurrentcolor; i < list.length(); i++) {
+    if (To<InterpolableNumber>(*(list.Get(i))).Value() != 0)
+      return false;
+  }
+
+  return true;
 }
 
 static void AddPremultipliedColor(double& red,
@@ -141,8 +189,9 @@ Color CSSColorInterpolationType::ResolveInterpolableColor(
                                *state.Style())
               .Access();
     }
-    AddPremultipliedColor(red, green, blue, alpha, currentcolor_fraction,
-                          current_style_color.GetColor());
+    AddPremultipliedColor(
+        red, green, blue, alpha, currentcolor_fraction,
+        current_style_color.Resolve(Color(), state.Style()->UsedColorScheme()));
   }
   const TextLinkColors& colors = state.GetDocument().GetTextLinkColors();
   if (double webkit_activelink_fraction =
@@ -159,13 +208,13 @@ Color CSSColorInterpolationType::ResolveInterpolableColor(
     AddPremultipliedColor(red, green, blue, alpha, quirk_inherit_fraction,
                           colors.TextColor());
 
-  alpha = clampTo<double>(alpha, 0, 255);
+  alpha = ClampTo<double>(alpha, 0, 255);
   if (alpha == 0)
     return Color::kTransparent;
 
-  return MakeRGBA(
-      clampTo<int>(round(red / alpha)), clampTo<int>(round(green / alpha)),
-      clampTo<int>(round(blue / alpha)), clampTo<int>(round(alpha)));
+  return Color::FromRGBA(
+      ClampTo<int>(round(red / alpha)), ClampTo<int>(round(green / alpha)),
+      ClampTo<int>(round(blue / alpha)), ClampTo<int>(round(alpha)));
 }
 
 class InheritedColorChecker
@@ -194,10 +243,10 @@ InterpolationValue CSSColorInterpolationType::MaybeConvertNeutral(
 }
 
 InterpolationValue CSSColorInterpolationType::MaybeConvertInitial(
-    const StyleResolverState&,
+    const StyleResolverState& state,
     ConversionCheckers& conversion_checkers) const {
-  OptionalStyleColor initial_color =
-      ColorPropertyFunctions::GetInitialColor(CssProperty());
+  OptionalStyleColor initial_color = ColorPropertyFunctions::GetInitialColor(
+      CssProperty(), state.GetDocument().GetStyleResolver().InitialStyle());
   if (initial_color.IsNull())
     return nullptr;
   return ConvertStyleColorPair(initial_color.Access(), initial_color.Access());
@@ -294,7 +343,7 @@ const CSSValue* CSSColorInterpolationType::CreateCSSValue(
     const StyleResolverState& state) const {
   const auto& color_pair = To<InterpolableList>(interpolable_value);
   Color color = ResolveInterpolableColor(*color_pair.Get(kUnvisited), state);
-  return cssvalue::CSSColorValue::Create(color.Rgb());
+  return cssvalue::CSSColor::Create(color);
 }
 
 void CSSColorInterpolationType::Composite(

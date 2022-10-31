@@ -23,15 +23,23 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_ASCII_FAST_PATH_H_
 
 #include <stdint.h>
+#include <limits>
 
+#include "base/check_op.h"
 #include "base/compiler_specific.h"
+#include "base/dcheck_is_on.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/ascii_ctype.h"
-#include "third_party/blink/renderer/platform/wtf/text/unicode.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_uchar.h"
+#include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
-#if defined(OS_MACOSX) && defined(ARCH_CPU_X86_FAMILY)
+#if defined(ARCH_CPU_X86_FAMILY)
 #include <emmintrin.h>
+
+#if !BUILDFLAG(IS_MAC)
+#include "third_party/blink/renderer/platform/wtf/wtf_export.h"
+#endif
 #endif
 
 namespace WTF {
@@ -75,38 +83,31 @@ inline bool IsAllASCII(MachineWord word) {
   return !(word & NonASCIIMask<sizeof(MachineWord), CharacterType>::Value());
 }
 
-// Note: This function assume the input is likely all ASCII, and
+struct ASCIIStringAttributes {
+  ASCIIStringAttributes(bool contains_only_ascii, bool is_lower_ascii)
+      : contains_only_ascii(contains_only_ascii),
+        is_lower_ascii(is_lower_ascii) {}
+  unsigned contains_only_ascii : 1;
+  unsigned is_lower_ascii : 1;
+};
+
+// Note: This function assumes the input is likely all ASCII, and
 // does not leave early if it is not the case.
 template <typename CharacterType>
-ALWAYS_INLINE bool CharactersAreAllASCII(const CharacterType* characters,
-                                         size_t length) {
+ALWAYS_INLINE ASCIIStringAttributes
+CharacterAttributes(const CharacterType* characters, size_t length) {
   DCHECK_GT(length, 0u);
-  MachineWord all_char_bits = 0;
-  const CharacterType* end = characters + length;
 
-  // Prologue: align the input.
-  while (!IsAlignedToMachineWord(characters) && characters != end) {
-    all_char_bits |= *characters;
-    ++characters;
+  // Performance note: This loop will not vectorize properly in -Oz. Ensure
+  // the calling code is built with -O2.
+  CharacterType all_char_bits = 0;
+  bool contains_upper_case = false;
+  for (size_t i = 0; i < length; i++) {
+    all_char_bits |= characters[i];
+    contains_upper_case |= IsASCIIUpper(characters[i]);
   }
 
-  // Compare the values of CPU word size.
-  const CharacterType* word_end = AlignToMachineWord(end);
-  const size_t kLoopIncrement = sizeof(MachineWord) / sizeof(CharacterType);
-  while (characters < word_end) {
-    all_char_bits |= *(reinterpret_cast_ptr<const MachineWord*>(characters));
-    characters += kLoopIncrement;
-  }
-
-  // Process the remaining bytes.
-  while (characters != end) {
-    all_char_bits |= *characters;
-    ++characters;
-  }
-
-  MachineWord non_ascii_bit_mask =
-      NonASCIIMask<sizeof(MachineWord), CharacterType>::Value();
-  return !(all_char_bits & non_ascii_bit_mask);
+  return ASCIIStringAttributes(IsASCII(all_char_bits), !contains_upper_case);
 }
 
 template <typename CharacterType>
@@ -191,10 +192,26 @@ ALWAYS_INLINE typename Allocator::ResultStringType ConvertASCIICase(
   return new_impl;
 }
 
+#if !BUILDFLAG(IS_MAC) && defined(ARCH_CPU_X86_FAMILY)
+// Controls whether CopyLCharsFromUCharSource() uses intrinsics. This is backed
+// by a feature, but a variable is used as this code is performance sensitive.
+WTF_EXPORT extern bool g_enable_sse_path_for_copy_lchars;
+#endif
+
 inline void CopyLCharsFromUCharSource(LChar* destination,
                                       const UChar* source,
                                       size_t length) {
-#if defined(OS_MACOSX) && defined(ARCH_CPU_X86_FAMILY)
+#if defined(ARCH_CPU_X86_FAMILY)
+#if !BUILDFLAG(IS_MAC)
+  if (!g_enable_sse_path_for_copy_lchars) {
+    for (size_t i = 0; i < length; ++i) {
+      DCHECK(!(source[i] & 0xff00));
+      destination[i] = static_cast<LChar>(source[i]);
+    }
+    return;
+  }
+#endif
+
   const uintptr_t kMemoryAccessSize =
       16;  // Memory accesses on 16 byte (128 bit) alignment
   const uintptr_t kMemoryAccessMask = kMemoryAccessSize - 1;

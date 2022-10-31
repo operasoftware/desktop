@@ -449,6 +449,11 @@ output file already exists.
 Set number of times input stream shall be looped. Loop 0 means no loop,
 loop -1 means infinite loop.
 
+@item -recast_media (@emph{global})
+Allow forcing a decoder of a different media type than the one
+detected or designated by the demuxer. Useful for decoding media
+data muxed as data streams.
+
 @item -c[:@var{stream_specifier}] @var{codec} (@emph{input/output,per-stream})
 @itemx -codec[:@var{stream_specifier}] @var{codec} (@emph{input/output,per-stream})
 Select an encoder (when used before an output file) or a decoder (when used
@@ -513,6 +518,21 @@ see @ref{time duration syntax,,the Time duration section in the ffmpeg-utils(1) 
 Like the @code{-ss} option but relative to the "end of file". That is negative
 values are earlier in the file, 0 is at EOF.
 
+@item -isync @var{input_index} (@emph{input})
+Assign an input as a sync source.
+
+This will take the difference between the start times of the target and reference inputs and
+offset the timestamps of the target file by that difference. The source timestamps of the two
+inputs should derive from the same clock source for expected results. If @code{copyts} is set
+then @code{start_at_zero} must also be set. If either of the inputs has no starting timestamp
+then no sync adjustment is made.
+
+Acceptable values are those that refer to a valid ffmpeg input index. If the sync reference is
+the target index itself or @var{-1}, then no adjustment is made to target timestamps. A sync
+reference may not itself be synced to any other input.
+
+Default value is @var{-1}.
+
 @item -itsoffset @var{offset} (@emph{input})
 Set the input time offset.
 
@@ -555,27 +575,22 @@ ffmpeg -i INPUT -metadata:s:a:0 language=eng OUTPUT
 @item -disposition[:stream_specifier] @var{value} (@emph{output,per-stream})
 Sets the disposition for a stream.
 
-This option overrides the disposition copied from the input stream. It is also
-possible to delete the disposition by setting it to 0.
+By default, the disposition is copied from the input stream, unless the output
+stream this option applies to is fed by a complex filtergraph - in that case the
+disposition is unset by default.
 
-The following dispositions are recognized:
-@table @option
-@item default
-@item dub
-@item original
-@item comment
-@item lyrics
-@item karaoke
-@item forced
-@item hearing_impaired
-@item visual_impaired
-@item clean_effects
-@item attached_pic
-@item captions
-@item descriptions
-@item dependent
-@item metadata
-@end table
+@var{value} is a sequence of items separated by '+' or '-'. The first item may
+also be prefixed with '+' or '-', in which case this option modifies the default
+value. Otherwise (the first item is not prefixed) this options overrides the
+default value. A '+' prefix adds the given disposition, '-' removes it. It is
+also possible to clear the disposition by setting it to 0.
+
+If no @code{-disposition} options were specified for an output file, ffmpeg will
+automatically set the 'default' disposition on the first stream of each type,
+when there are multiple streams of this type in the output file and no stream of
+that type is already marked as default.
+
+The @code{-dispositions} option lists the known dispositions.
 
 For example, to make the second audio stream the default stream:
 @example
@@ -616,6 +631,102 @@ they do not conflict with the standard, as in:
 @example
 ffmpeg -i myfile.avi -target vcd -bf 2 /tmp/vcd.mpg
 @end example
+
+The parameters set for each target are as follows.
+
+@strong{VCD}
+@example
+@var{pal}:
+-f vcd -muxrate 1411200 -muxpreload 0.44 -packetsize 2324
+-s 352x288 -r 25
+-codec:v mpeg1video -g 15 -b:v 1150k -maxrate:v 1150k -minrate:v 1150k -bufsize:v 327680
+-ar 44100 -ac 2
+-codec:a mp2 -b:a 224k
+
+@var{ntsc}:
+-f vcd -muxrate 1411200 -muxpreload 0.44 -packetsize 2324
+-s 352x240 -r 30000/1001
+-codec:v mpeg1video -g 18 -b:v 1150k -maxrate:v 1150k -minrate:v 1150k -bufsize:v 327680
+-ar 44100 -ac 2
+-codec:a mp2 -b:a 224k
+
+@var{film}:
+-f vcd -muxrate 1411200 -muxpreload 0.44 -packetsize 2324
+-s 352x240 -r 24000/1001
+-codec:v mpeg1video -g 18 -b:v 1150k -maxrate:v 1150k -minrate:v 1150k -bufsize:v 327680
+-ar 44100 -ac 2
+-codec:a mp2 -b:a 224k
+@end example
+
+@strong{SVCD}
+@example
+@var{pal}:
+-f svcd -packetsize 2324
+-s 480x576 -pix_fmt yuv420p -r 25
+-codec:v mpeg2video -g 15 -b:v 2040k -maxrate:v 2516k -minrate:v 0 -bufsize:v 1835008 -scan_offset 1
+-ar 44100
+-codec:a mp2 -b:a 224k
+
+@var{ntsc}:
+-f svcd -packetsize 2324
+-s 480x480 -pix_fmt yuv420p -r 30000/1001
+-codec:v mpeg2video -g 18 -b:v 2040k -maxrate:v 2516k -minrate:v 0 -bufsize:v 1835008 -scan_offset 1
+-ar 44100
+-codec:a mp2 -b:a 224k
+
+@var{film}:
+-f svcd -packetsize 2324
+-s 480x480 -pix_fmt yuv420p -r 24000/1001
+-codec:v mpeg2video -g 18 -b:v 2040k -maxrate:v 2516k -minrate:v 0 -bufsize:v 1835008 -scan_offset 1
+-ar 44100
+-codec:a mp2 -b:a 224k
+@end example
+
+@strong{DVD}
+@example
+@var{pal}:
+-f dvd -muxrate 10080k -packetsize 2048
+-s 720x576 -pix_fmt yuv420p -r 25
+-codec:v mpeg2video -g 15 -b:v 6000k -maxrate:v 9000k -minrate:v 0 -bufsize:v 1835008
+-ar 48000
+-codec:a ac3 -b:a 448k
+
+@var{ntsc}:
+-f dvd -muxrate 10080k -packetsize 2048
+-s 720x480 -pix_fmt yuv420p -r 30000/1001
+-codec:v mpeg2video -g 18 -b:v 6000k -maxrate:v 9000k -minrate:v 0 -bufsize:v 1835008
+-ar 48000
+-codec:a ac3 -b:a 448k
+
+@var{film}:
+-f dvd -muxrate 10080k -packetsize 2048
+-s 720x480 -pix_fmt yuv420p -r 24000/1001
+-codec:v mpeg2video -g 18 -b:v 6000k -maxrate:v 9000k -minrate:v 0 -bufsize:v 1835008
+-ar 48000
+-codec:a ac3 -b:a 448k
+@end example
+
+@strong{DV}
+@example
+@var{pal}:
+-f dv
+-s 720x576 -pix_fmt yuv420p -r 25
+-ar 48000 -ac 2
+
+@var{ntsc}:
+-f dv
+-s 720x480 -pix_fmt yuv411p -r 30000/1001
+-ar 48000 -ac 2
+
+@var{film}:
+-f dv
+-s 720x480 -pix_fmt yuv411p -r 24000/1001
+-ar 48000 -ac 2
+@end example
+The @code{dv50} target is identical to the @code{dv} target except that the pixel format set is @code{yuv422p} for all three standards.
+
+Any user-set value for a parameter above will override the target preset value. In that case, the output may
+not comply with the target standard.
 
 @item -dn (@emph{input/output})
 As an input option, blocks all data streams of a file from being filtered or
@@ -663,6 +774,16 @@ This option is similar to @option{-filter}, the only difference is that its
 argument is the name of the file from which a filtergraph description is to be
 read.
 
+@item -reinit_filter[:@var{stream_specifier}] @var{integer} (@emph{input,per-stream})
+This boolean option determines if the filtergraph(s) to which this stream is fed gets
+reinitialized when input frame parameters change mid-stream. This option is enabled by
+default as most video and all audio filters cannot handle deviation in input frame properties.
+Upon reinitialization, existing filter state is lost, like e.g. the frame count @code{n}
+reference available in some filters. Any frames buffered at time of reinitialization are lost.
+The properties where a change triggers reinitialization are,
+for video, frame resolution or pixel format;
+for audio, sample format, sample rate, channel count or channel layout.
+
 @item -filter_threads @var{nb_threads} (@emph{global})
 Defines how many threads are used to process a filter pipeline. Each pipeline
 will produce a thread pool with this many threads available for parallel processing.
@@ -675,13 +796,18 @@ Specify the preset for matching stream(s).
 Print encoding progress/statistics. It is on by default, to explicitly
 disable it you need to specify @code{-nostats}.
 
+@item -stats_period @var{time} (@emph{global})
+Set period at which encoding progress/statistics are updated. Default is 0.5 seconds.
+
 @item -progress @var{url} (@emph{global})
 Send program-friendly progress information to @var{url}.
 
-Progress information is written approximately every second and at the end of
+Progress information is written periodically and at the end of
 the encoding process. It is made of "@var{key}=@var{value}" lines. @var{key}
 consists of only alphanumeric characters. The last key of a sequence of
 progress information is always "progress".
+
+The update period is set using @code{-stats_period}.
 
 @anchor{stdin option}
 @item -stdin
@@ -734,10 +860,6 @@ ffmpeg -dump_attachment:t "" -i INPUT
 Technical note -- attachments are implemented as codec extradata, so this
 option can actually be used to extract extradata from any stream, not just
 attachments.
-
-@item -noautorotate
-Disable automatically rotating video based on file metadata.
-
 @end table
 
 @section Video Options
@@ -757,6 +879,13 @@ If in doubt use @option{-framerate} instead of the input option @option{-r}.
 
 As an output option, duplicate or drop input frames to achieve constant output
 frame rate @var{fps}.
+
+@item -fpsmax[:@var{stream_specifier}] @var{fps} (@emph{output,per-stream})
+Set maximum frame rate (Hz value, fraction or abbreviation).
+
+Clamps output frame rate when output framerate is auto-set and is higher than this value.
+Useful in batch processing or when input framerate is wrongly detected as very high.
+It cannot be set together with @code{-r}. It is ignored during streamcopy.
 
 @item -s[:@var{stream_specifier}] @var{size} (@emph{input/output,per-stream})
 Set frame size.
@@ -819,6 +948,18 @@ Create the filtergraph specified by @var{filtergraph} and use it to
 filter the stream.
 
 This is an alias for @code{-filter:v}, see the @ref{filter_option,,-filter option}.
+
+@item -autorotate
+Automatically rotate the video according to file metadata. Enabled by
+default, use @option{-noautorotate} to disable it.
+
+@item -autoscale
+Automatically scale the video according to the resolution of first frame.
+Enabled by default, use @option{-noautoscale} to disable it. When autoscale is
+disabled, all output frames of filter graph might not be in the same resolution
+and may be inadequate for some encoder/muxer. Therefore, it is not recommended
+to disable it unless you really know what you are doing.
+Disable autoscale at your own risk.
 @end table
 
 @section Advanced Video options
@@ -848,8 +989,8 @@ factor if negative.
 Force interlacing support in encoder (MPEG-2 and MPEG-4 only).
 Use this option if your input file is interlaced and you want
 to keep the interlaced format for minimum losses.
-The alternative is to deinterlace the input stream with
-@option{-deinterlace}, but deinterlacing introduces losses.
+The alternative is to deinterlace the input stream by use of a filter
+such as @code{yadif} or @code{bwdif}, but deinterlacing introduces losses.
 @item -psnr
 Calculate PSNR of compressed frames.
 @item -vstats
@@ -880,6 +1021,7 @@ Deprecated see -bsf
 @item -force_key_frames[:@var{stream_specifier}] @var{time}[,@var{time}...] (@emph{output,per-stream})
 @item -force_key_frames[:@var{stream_specifier}] expr:@var{expr} (@emph{output,per-stream})
 @item -force_key_frames[:@var{stream_specifier}] source (@emph{output,per-stream})
+@item -force_key_frames[:@var{stream_specifier}] source_no_drop (@emph{output,per-stream})
 
 @var{force_key_frames} can take arguments of the following form:
 
@@ -941,6 +1083,12 @@ starting from second 13:
 If the argument is @code{source}, ffmpeg will force a key frame if
 the current frame being encoded is marked as a key frame in its source.
 
+@item source_no_drop
+If the argument is @code{source_no_drop}, ffmpeg will force a key frame if
+the current frame being encoded is marked as a key frame in its source.
+In cases where this particular source frame has to be dropped,
+enforce the next available frame to become a key frame instead.
+
 @end table
 
 Note that forcing too many keyframes is very harmful for the lookahead
@@ -963,8 +1111,26 @@ device type:
 @item cuda
 @var{device} is the number of the CUDA device.
 
+The following options are recognized:
+@table @option
+@item primary_ctx
+If set to 1, uses the primary device context instead of creating a new one.
+@end table
+
+Examples:
+@table @emph
+@item -init_hw_device cuda:1
+Choose the second device on the system.
+
+@item -init_hw_device cuda:0,primary_ctx=1
+Choose the first device and use the primary device context.
+@end table
+
 @item dxva2
 @var{device} is the number of the Direct3D 9 display adapter.
+
+@item d3d11va
+@var{device} is the number of the Direct3D 11 display adapter.
 
 @item vaapi
 @var{device} is either an X11 display name or a DRM render node.
@@ -989,8 +1155,20 @@ If not specified, it will attempt to open the default X11 display (@emph{$DISPLA
 @end table
 If not specified, @samp{auto_any} is used.
 (Note that it may be easier to achieve the desired result for QSV by creating the
-platform-appropriate subdevice (@samp{dxva2} or @samp{vaapi}) and then deriving a
+platform-appropriate subdevice (@samp{dxva2} or @samp{d3d11va} or @samp{vaapi}) and then deriving a
 QSV device from that.)
+
+Alternatively, @samp{child_device_type} helps to choose platform-appropriate subdevice type.
+On Windows @samp{d3d11va} is used as default subdevice type.
+
+Examples:
+@table @emph
+@item -init_hw_device qsv:hw,child_device_type=d3d11va
+Choose the GPU subdevice with type @samp{d3d11va} and create QSV device with @samp{MFX_IMPL_HARDWARE}.
+
+@item -init_hw_device qsv:hw,child_device_type=dxva2
+Choose the GPU subdevice with type @samp{dxva2} and create QSV device with @samp{MFX_IMPL_HARDWARE}.
+@end table
 
 @item opencl
 @var{device} selects the platform and device as @emph{platform_index.device_index}.
@@ -1034,6 +1212,18 @@ If @var{device} is an integer, it selects the device by its index in a
 system-dependent list of devices.  If @var{device} is any other string, it
 selects the first device with a name containing that string as a substring.
 
+The following options are recognized:
+@table @option
+@item debug
+If set to 1, enables the validation layer, if installed.
+@item linear_images
+If set to 1, images allocated by the hwcontext will be linear and locally mappable.
+@item instance_extensions
+A plus separated list of additional instance extensions to enable.
+@item device_extensions
+A plus separated list of additional device extensions to enable.
+@end table
+
 Examples:
 @table @emph
 @item -init_hw_device vulkan:1
@@ -1041,6 +1231,9 @@ Choose the second device on the system.
 
 @item -init_hw_device vulkan:RADV
 Choose the first device with a name containing the string @emph{RADV}.
+
+@item -init_hw_device vulkan:0,instance_extensions=VK_KHR_wayland_surface+VK_KHR_xcb_surface
+Choose the first device and enable the Wayland and XCB instance extensions.
 @end table
 
 @end table
@@ -1079,6 +1272,9 @@ Use VDPAU (Video Decode and Presentation API for Unix) hardware acceleration.
 @item dxva2
 Use DXVA2 (DirectX Video Acceleration) hardware acceleration.
 
+@item d3d11va
+Use D3D11VA (DirectX Video Acceleration) hardware acceleration.
+
 @item vaapi
 Use VAAPI (Video Acceleration API) hardware acceleration.
 
@@ -1112,7 +1308,9 @@ by name, or it can create a new device as if
 were called immediately before.
 
 @item -hwaccels
-List all hardware acceleration methods supported in this build of ffmpeg.
+List all hardware acceleration components enabled in this build of ffmpeg.
+Actual runtime availability depends on the hardware and its suitable driver
+being installed.
 
 @end table
 
@@ -1420,33 +1618,44 @@ Exit after ffmpeg has been running for @var{duration} seconds in CPU user time.
 Dump each input packet to stderr.
 @item -hex (@emph{global})
 When dumping packets, also dump the payload.
+@item -readrate @var{speed} (@emph{input})
+Limit input read speed.
+
+Its value is a floating-point positive number which represents the maximum duration of
+media, in seconds, that should be ingested in one second of wallclock time.
+Default value is zero and represents no imposed limitation on speed of ingestion.
+Value @code{1} represents real-time speed and is equivalent to @code{-re}.
+
+Mainly used to simulate a capture device or live input stream (e.g. when reading from a file).
+Should not be used with a low value when input is an actual capture device or live stream as
+it may cause packet loss.
+
+It is useful for when flow speed of output packets is important, such as live streaming.
 @item -re (@emph{input})
-Read input at native frame rate. Mainly used to simulate a grab device,
-or live input stream (e.g. when reading from a file). Should not be used
-with actual grab devices or live input streams (where it can cause packet
-loss).
-By default @command{ffmpeg} attempts to read the input(s) as fast as possible.
-This option will slow down the reading of the input(s) to the native frame rate
-of the input(s). It is useful for real-time output (e.g. live streaming).
-@item -vsync @var{parameter}
-Video sync method.
-For compatibility reasons old values can be specified as numbers.
-Newly added values will have to be specified as strings always.
+Read input at native frame rate. This is equivalent to setting @code{-readrate 1}.
+@item -vsync @var{parameter} (@emph{global})
+@itemx -fps_mode[:@var{stream_specifier}] @var{parameter} (@emph{output,per-stream})
+Set video sync method / framerate mode. vsync is applied to all output video streams
+but can be overridden for a stream by setting fps_mode. vsync is deprecated and will be
+removed in the future.
+
+For compatibility reasons some of the values for vsync can be specified as numbers (shown
+in parentheses in the following table).
 
 @table @option
-@item 0, passthrough
+@item passthrough (0)
 Each frame is passed with its timestamp from the demuxer to the muxer.
-@item 1, cfr
+@item cfr (1)
 Frames will be duplicated and dropped to achieve exactly the requested
 constant frame rate.
-@item 2, vfr
+@item vfr (2)
 Frames are passed through with their timestamp or dropped so as to
 prevent 2 frames from having the same timestamp.
 @item drop
 As passthrough but destroys all timestamps, making the muxer generate
 fresh timestamps based on frame-rate.
-@item -1, auto
-Chooses between 1 and 2 depending on muxer capabilities. This is the
+@item auto (-1)
+Chooses between cfr and vfr depending on muxer capabilities. This is the
 default method.
 @end table
 
@@ -1476,6 +1685,17 @@ For example, in the case that the format option @option{avoid_negative_ts}
 is enabled.
 
 This option has been deprecated. Use the @code{aresample} audio filter instead.
+
+@item -adrift_threshold @var{time}
+Set the minimum difference between timestamps and audio data (in seconds) to trigger
+adding/dropping samples to make it match the timestamps. This option effectively is
+a threshold to select between hard (add/drop) and soft (squeeze/stretch) compensation.
+@code{-async} must be set to a positive value.
+
+@item -apad @var{parameters} (@emph{output,per-stream})
+Pad the output audio stream(s). This is the same as applying @code{-af apad}.
+Argument is a string of filter parameters composed the same as with the @code{apad} filter.
+@code{-shortest} must be set for this output for the option to take effect.
 
 @item -copyts
 Do not process input timestamps, but keep their values without trying
@@ -1544,7 +1764,23 @@ Default value is 0.
 @item -bitexact (@emph{input/output})
 Enable bitexact mode for (de)muxer and (de/en)coder
 @item -shortest (@emph{output})
-Finish encoding when the shortest input stream ends.
+Finish encoding when the shortest output stream ends.
+
+Note that this option may require buffering frames, which introduces extra
+latency. The maximum amount of this latency may be controlled with the
+@code{-shortest_buf_duration} option.
+
+@item -shortest_buf_duration @var{duration} (@emph{output})
+The @code{-shortest} option may require buffering potentially large amounts
+of data when at least one of the streams is "sparse" (i.e. has large gaps
+between frames – this is typically the case for subtitles).
+
+This option controls the maximum duration of buffered frames in seconds.
+Larger values may allow the @code{-shortest} option to produce more accurate
+results, but increase memory use and latency.
+
+The default value is 10 seconds.
+
 @item -dts_delta_threshold
 Timestamp discontinuity delta threshold.
 @item -dts_error_threshold @var{seconds}
@@ -1631,6 +1867,22 @@ graph will be added to the output file automatically, so we can simply write
 ffmpeg -i video.mkv -i image.png -filter_complex 'overlay' out.mkv
 @end example
 
+As a special exception, you can use a bitmap subtitle stream as input: it
+will be converted into a video with the same size as the largest video in
+the file, or 720x576 if no video is present. Note that this is an
+experimental and temporary solution. It will be removed once libavfilter has
+proper support for subtitles.
+
+For example, to hardcode subtitles on top of a DVB-T recording stored in
+MPEG-TS format, delaying the subtitles by 1 second:
+@example
+ffmpeg -i input.ts -filter_complex \
+  '[#0x2ef] setpts=PTS+1/TB [sub] ; [#0x2d0] [sub] overlay' \
+  -sn -map '#0x2dc' output.mkv
+@end example
+(0x2d0, 0x2dc and 0x2ef are the MPEG-TS PIDs of respectively the video,
+audio and subtitles streams; 0:0, 0:3 and 0:7 would have worked too)
+
 To generate 5 seconds of pure red video using lavfi @code{color} source:
 @example
 ffmpeg -filter_complex 'color=c=red' -t 5 out.mkv
@@ -1663,11 +1915,15 @@ to the @option{-ss} option is considered an actual timestamp, and is not
 offset by the start time of the file. This matters only for files which do
 not start from timestamp 0, such as transport streams.
 
-@item -thread_queue_size @var{size} (@emph{input})
-This option sets the maximum number of queued packets when reading from the
-file or device. With low latency / high rate live streams, packets may be
-discarded if they are not read in a timely manner; raising this value can
-avoid it.
+@item -thread_queue_size @var{size} (@emph{input/output})
+For input, this option sets the maximum number of queued packets when reading
+from the file or device. With low latency / high rate live streams, packets may
+be discarded if they are not read in a timely manner; setting this value can
+force ffmpeg to use a separate input thread and read packets as soon as they
+arrive. By default ffmpeg only does this if multiple inputs are specified.
+
+For output, this option specified the maximum number of packets that may be
+queued to each muxing thread.
 
 @item -sdp_file @var{file} (@emph{global})
 Print sdp information for an output stream to @var{file}.
@@ -1706,7 +1962,14 @@ Stop and abort on various conditions. The following flags are available:
 @table @option
 @item empty_output
 No packets were passed to the muxer, the output is empty.
+@item empty_output_stream
+No packets were passed to the muxer in some of the output streams.
 @end table
+
+@item -max_error_rate (@emph{global})
+Set fraction of decoding frame failures across all inputs which when crossed
+ffmpeg will return exit code 69. Crossing this threshold does not terminate
+processing. Range is a floating-point number between 0 to 1. Default is 2/3.
 
 @item -xerror (@emph{global})
 Stop and exit on error
@@ -1720,23 +1983,29 @@ this buffer, in packets, for the matching output stream.
 The default value of this option should be high enough for most uses, so only
 touch this option if you are sure that you need it.
 
+@item -muxing_queue_data_threshold @var{bytes} (@emph{output,per-stream})
+This is a minimum threshold until which the muxing queue size is not taken into
+account. Defaults to 50 megabytes per stream, and is based on the overall size
+of packets passed to the muxer.
+
+@item -auto_conversion_filters (@emph{global})
+Enable automatically inserting format conversion filters in all filter
+graphs, including those defined by @option{-vf}, @option{-af},
+@option{-filter_complex} and @option{-lavfi}. If filter format negotiation
+requires a conversion, the initialization of the filters will fail.
+Conversions can still be performed by inserting the relevant conversion
+filter (scale, aresample) in the graph.
+On by default, to explicitly disable it you need to specify
+@code{-noauto_conversion_filters}.
+
+@item -bits_per_raw_sample[:@var{stream_specifier}] @var{value} (@emph{output,per-stream})
+Declare the number of bits per raw sample in the given output stream to be
+@var{value}. Note that this option sets the information provided to the
+encoder/muxer, it does not change the stream to conform to this value. Setting
+values that do not match the stream properties may result in encoding failures
+or invalid output files.
+
 @end table
-
-As a special exception, you can use a bitmap subtitle stream as input: it
-will be converted into a video with the same size as the largest video in
-the file, or 720x576 if no video is present. Note that this is an
-experimental and temporary solution. It will be removed once libavfilter has
-proper support for subtitles.
-
-For example, to hardcode subtitles on top of a DVB-T recording stored in
-MPEG-TS format, delaying the subtitles by 1 second:
-@example
-ffmpeg -i input.ts -filter_complex \
-  '[#0x2ef] setpts=PTS+1/TB [sub] ; [#0x2d0] [sub] overlay' \
-  -sn -map '#0x2dc' output.mkv
-@end example
-(0x2d0, 0x2dc and 0x2ef are the MPEG-TS PIDs of respectively the video,
-audio and subtitles streams; 0:0, 0:3 and 0:7 would have worked too)
 
 @section Preset files
 A preset file contains a sequence of @var{option}=@var{value} pairs,
@@ -2014,6 +2283,7 @@ ffmpeg -i src.ext -lmax 21*QP2LAMBDA dst.ext
 @ifset config-avfilter
 @include filters.texi
 @end ifset
+@include general_contents.texi
 @end ifset
 
 @chapter See Also

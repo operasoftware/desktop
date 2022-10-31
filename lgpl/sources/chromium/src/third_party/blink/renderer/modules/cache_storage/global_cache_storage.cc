@@ -9,7 +9,7 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/modules/cache_storage/cache_storage.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
@@ -21,8 +21,6 @@ template <typename T>
 class GlobalCacheStorageImpl final
     : public GarbageCollected<GlobalCacheStorageImpl<T>>,
       public Supplement<T> {
-  USING_GARBAGE_COLLECTED_MIXIN(GlobalCacheStorageImpl);
-
  public:
   static const char kSupplementName[];
 
@@ -37,13 +35,13 @@ class GlobalCacheStorageImpl final
     return *supplement;
   }
 
-  GlobalCacheStorageImpl() = default;
-  ~GlobalCacheStorageImpl() {}
+  GlobalCacheStorageImpl() : Supplement<T>(nullptr) {}
+  ~GlobalCacheStorageImpl() = default;
 
   CacheStorage* Caches(T& fetching_scope, ExceptionState& exception_state) {
     ExecutionContext* context = fetching_scope.GetExecutionContext();
     if (!context->GetSecurityOrigin()->CanAccessCacheStorage()) {
-      if (context->GetSecurityContext().IsSandboxed(
+      if (context->IsSandboxed(
               network::mojom::blink::WebSandboxFlags::kOrigin)) {
         exception_state.ThrowSecurityError(
             "Cache storage is disabled because the context is sandboxed and "

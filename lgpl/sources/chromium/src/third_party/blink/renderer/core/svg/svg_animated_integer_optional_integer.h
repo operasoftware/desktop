@@ -33,7 +33,7 @@
 
 #include "third_party/blink/renderer/core/svg/svg_animated_integer.h"
 #include "third_party/blink/renderer/core/svg/svg_integer_optional_integer.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -46,8 +46,6 @@ namespace blink {
 class SVGAnimatedIntegerOptionalInteger
     : public GarbageCollected<SVGAnimatedIntegerOptionalInteger>,
       public SVGAnimatedPropertyCommon<SVGIntegerOptionalInteger> {
-  USING_GARBAGE_COLLECTED_MIXIN(SVGAnimatedIntegerOptionalInteger);
-
  public:
   SVGAnimatedIntegerOptionalInteger(SVGElement* context_element,
                                     const QualifiedName& attribute_name,

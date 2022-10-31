@@ -2,12 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
+#include "third_party/blink/public/web/web_view.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
-#include "third_party/blink/renderer/core/frame/web_frame_widget_base.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/policy_container.h"
 #include "third_party/blink/renderer/core/html/html_anchor_element.h"
 #include "third_party/blink/renderer/core/page/chrome_client_impl.h"
+#include "third_party/blink/renderer/core/testing/mock_policy_container_host.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
@@ -15,13 +22,27 @@
 
 namespace blink {
 
+namespace {
+
+class UserAgentOverrideWebFrameClient
+    : public frame_test_helpers::TestWebFrameClient {
+ public:
+  UserAgentOverrideWebFrameClient() = default;
+
+  WebString UserAgentOverride(const WebURL&) override {
+    return WebString("foo");
+  }
+};
+
+}  // namespace
+
 class FrameLoaderSimTest : public SimTest {
  public:
   FrameLoaderSimTest() = default;
 
   void SetUp() override {
     SimTest::SetUp();
-    WebView().MainFrameWidgetBase()->UpdateAllLifecyclePhases(
+    WebView().MainFrameViewWidget()->UpdateAllLifecyclePhases(
         DocumentUpdateReason::kTest);
   }
 };
@@ -72,7 +93,8 @@ TEST_F(FrameLoaderSimTest, LoadEventProgressBeforeUnloadCanceled) {
 
   // We'll only allow canceling a beforeunload if there's a sticky user
   // activation present so simulate a user gesture.
-  frame_b->NotifyUserActivationInLocalTree();
+  LocalFrame::NotifyUserActivation(
+      frame_b, mojom::UserActivationNotificationType::kTest);
 
   auto& chrome_client =
       To<ChromeClientImpl>(WebView().GetPage()->GetChromeClient());
@@ -106,6 +128,79 @@ TEST_F(FrameLoaderSimTest, LoadEventProgressBeforeUnloadCanceled) {
     EXPECT_TRUE(frame_b->GetDocument()->BeforeUnloadStarted());
     EXPECT_TRUE(frame_c->GetDocument()->BeforeUnloadStarted());
   }
+}
+
+class FrameLoaderTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    web_view_helper_.Initialize();
+    url_test_helpers::RegisterMockedURLLoad(
+        url_test_helpers::ToKURL("https://example.com/foo.html"),
+        test::CoreTestDataPath("foo.html"));
+  }
+
+  void TearDown() override {
+    url_test_helpers::UnregisterAllURLsAndClearMemoryCache();
+  }
+
+  frame_test_helpers::WebViewHelper web_view_helper_;
+};
+
+TEST_F(FrameLoaderTest, PolicyContainerIsStoredOnCommitNavigation) {
+  WebViewImpl* web_view_impl = web_view_helper_.Initialize();
+
+  const KURL& url = KURL(NullURL(), "https://www.example.com/bar.html");
+  std::unique_ptr<WebNavigationParams> params =
+      WebNavigationParams::CreateWithHTMLBufferForTesting(
+          SharedBuffer::Create(), url);
+  MockPolicyContainerHost mock_policy_container_host;
+  params->policy_container = std::make_unique<WebPolicyContainer>(
+      WebPolicyContainerPolicies{
+          network::mojom::CrossOriginEmbedderPolicyValue::kNone,
+          network::mojom::ReferrerPolicy::kAlways,
+          WebVector<WebContentSecurityPolicy>(),
+      },
+      mock_policy_container_host.BindNewEndpointAndPassDedicatedRemote());
+  LocalFrame* local_frame =
+      To<LocalFrame>(web_view_impl->GetPage()->MainFrame());
+  local_frame->Loader().CommitNavigation(std::move(params), nullptr);
+
+  EXPECT_EQ(*mojom::blink::PolicyContainerPolicies::New(
+                network::mojom::CrossOriginEmbedderPolicyValue::kNone,
+                network::mojom::ReferrerPolicy::kAlways,
+                Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
+                /*anonymous=*/false, network::mojom::WebSandboxFlags::kNone),
+            local_frame->DomWindow()->GetPolicyContainer()->GetPolicies());
+}
+
+class UserAgentOverrideFrameLoaderTest : public FrameLoaderTest {
+ public:
+  void SetUp() override {
+    FrameLoaderTest::SetUp();
+    scoped_feature_list_.InitAndEnableFeature(
+        blink::features::kUserAgentOverrideExperiment);
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+TEST_F(UserAgentOverrideFrameLoaderTest, UserAgentOverrideIframeNavigation) {
+  frame_test_helpers::WebViewHelper web_view_helper;
+  UserAgentOverrideWebFrameClient client;
+  WebViewImpl* web_view = web_view_helper.Initialize(&client);
+
+  frame_test_helpers::LoadHTMLString(
+      web_view->MainFrameImpl(),
+      R"HTML(
+      <!DOCTYPE html>
+      <iframe src="foo.html"></iframe>
+  )HTML",
+      url_test_helpers::ToKURL("https://example.com/"));
+
+  // Manually reset ro avoid UAF
+  web_view_helper.Reset();
+  // Test passes if there's no crash.
 }
 
 }  // namespace blink

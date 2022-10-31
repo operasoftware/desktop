@@ -6,13 +6,16 @@
 
 #include <utility>
 
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/push_messaging/push_messaging_status.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/modules/push_messaging/push_error.h"
 #include "third_party/blink/renderer/modules/push_messaging/push_messaging_utils.h"
 #include "third_party/blink/renderer/modules/push_messaging/push_subscription.h"
 #include "third_party/blink/renderer/modules/push_messaging/push_subscription_options.h"
+#include "third_party/blink/renderer/modules/push_messaging/push_type_converter.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -44,8 +47,10 @@ PushProvider* PushProvider::From(ServiceWorkerRegistration* registration) {
 // static
 mojom::blink::PushMessaging* PushProvider::GetPushMessagingRemote() {
   if (!push_messaging_manager_.is_bound()) {
-    Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
-        push_messaging_manager_.BindNewPipeAndPassReceiver(
+    GetSupplementable()
+        ->GetExecutionContext()
+        ->GetBrowserInterfaceBroker()
+        .GetInterface(push_messaging_manager_.BindNewPipeAndPassReceiver(
             GetSupplementable()->GetExecutionContext()->GetTaskRunner(
                 TaskType::kMiscPlatformAPI)));
   }
@@ -60,13 +65,13 @@ void PushProvider::Subscribe(
   DCHECK(callbacks);
 
   mojom::blink::PushSubscriptionOptionsPtr content_options_ptr =
-      ConvertSubscriptionOptionPointer(options);
+      mojo::ConvertTo<mojom::blink::PushSubscriptionOptionsPtr>(options);
 
   GetPushMessagingRemote()->Subscribe(
       GetSupplementable()->RegistrationId(), std::move(content_options_ptr),
       user_gesture,
       WTF::Bind(&PushProvider::DidSubscribe, WrapPersistent(this),
-                WTF::Passed(std::move(callbacks))));
+                std::move(callbacks)));
 }
 
 void PushProvider::DidSubscribe(
@@ -98,7 +103,7 @@ void PushProvider::Unsubscribe(
   GetPushMessagingRemote()->Unsubscribe(
       GetSupplementable()->RegistrationId(),
       WTF::Bind(&PushProvider::DidUnsubscribe, WrapPersistent(this),
-                WTF::Passed(std::move(callbacks))));
+                std::move(callbacks)));
 }
 
 void PushProvider::DidUnsubscribe(
@@ -123,7 +128,7 @@ void PushProvider::GetSubscription(
   GetPushMessagingRemote()->GetSubscription(
       GetSupplementable()->RegistrationId(),
       WTF::Bind(&PushProvider::DidGetSubscription, WrapPersistent(this),
-                WTF::Passed(std::move(callbacks))));
+                std::move(callbacks)));
 }
 
 void PushProvider::Trace(Visitor* visitor) const {

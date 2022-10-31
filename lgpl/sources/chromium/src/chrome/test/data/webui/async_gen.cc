@@ -5,7 +5,7 @@
 #include "chrome/test/data/webui/async_gen.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/values.h"
 #include "content/public/browser/web_ui.h"
 
@@ -20,9 +20,9 @@ WebUIBrowserAsyncGenTest::AsyncWebUIMessageHandler::
     ~AsyncWebUIMessageHandler() {}
 
 void WebUIBrowserAsyncGenTest::AsyncWebUIMessageHandler::HandleCallJS(
-    const base::ListValue* list_value) {
-  std::string call_js;
-  ASSERT_TRUE(list_value->GetString(0, &call_js));
+    const base::Value::List& list_value) {
+  ASSERT_TRUE(0u < list_value.size() && list_value[0].is_string());
+  std::string call_js = list_value[0].GetString();
   web_ui()->CallJavascriptFunctionUnsafe(call_js);
 }
 

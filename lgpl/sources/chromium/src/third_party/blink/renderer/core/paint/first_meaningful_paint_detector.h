@@ -5,11 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_FIRST_MEANINGFUL_PAINT_DETECTOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_FIRST_MEANINGFUL_PAINT_DETECTOR_H_
 
-#include "base/macros.h"
-#include "third_party/blink/public/web/web_swap_result.h"
+#include "base/time/time.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/paint/paint_event.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace base {
 class TickClock;
@@ -31,16 +31,23 @@ class CORE_EXPORT FirstMeaningfulPaintDetector
   static FirstMeaningfulPaintDetector& From(Document&);
 
   explicit FirstMeaningfulPaintDetector(PaintTiming*);
+  FirstMeaningfulPaintDetector(const FirstMeaningfulPaintDetector&) = delete;
+  FirstMeaningfulPaintDetector& operator=(const FirstMeaningfulPaintDetector&) =
+      delete;
   virtual ~FirstMeaningfulPaintDetector() = default;
 
   void MarkNextPaintAsMeaningfulIfNeeded(const LayoutObjectCounter&,
                                          double contents_height_before_layout,
                                          double contents_height_after_layout,
                                          int visible_height);
+  void MarkNextPaintAsMeaningfulForTesting() {
+    next_paint_is_meaningful_ = true;
+  }
+
   void NotifyInputEvent();
   void NotifyPaint();
-  void ReportSwapTime(PaintEvent, WebSwapResult, base::TimeTicks);
-  void NotifyFirstContentfulPaint(base::TimeTicks swap_stamp);
+  void ReportPresentationTime(PaintEvent, base::TimeTicks);
+  void NotifyFirstContentfulPaint(base::TimeTicks presentation_time);
   void OnNetwork2Quiet();
   bool SeenFirstMeaningfulPaint() const;
 
@@ -56,14 +63,14 @@ class CORE_EXPORT FirstMeaningfulPaintDetector
 
   enum DeferFirstMeaningfulPaint {
     kDoNotDefer,
-    kDeferOutstandingSwapPromises,
+    kDeferOutstandingPresentationPromises,
     kDeferFirstContentfulPaintNotSet
   };
 
   Document* GetDocument();
   int ActiveConnections();
-  void RegisterNotifySwapTime(PaintEvent);
-  void SetFirstMeaningfulPaint(base::TimeTicks swap_stamp);
+  void RegisterNotifyPresentationTime(PaintEvent);
+  void SetFirstMeaningfulPaint(base::TimeTicks presentation_time);
 
   bool next_paint_is_meaningful_ = false;
   HadUserInput had_user_input_ = kNoUserInput;
@@ -72,18 +79,17 @@ class CORE_EXPORT FirstMeaningfulPaintDetector
 
   Member<PaintTiming> paint_timing_;
   base::TimeTicks provisional_first_meaningful_paint_;
-  base::TimeTicks provisional_first_meaningful_paint_swap_;
+  base::TimeTicks provisional_first_meaningful_paint_presentation_;
   double max_significance_so_far_ = 0.0;
   double accumulated_significance_while_having_blank_text_ = 0.0;
   unsigned prev_layout_object_count_ = 0;
   bool seen_first_meaningful_paint_candidate_ = false;
   bool network_quiet_reached_ = false;
   base::TimeTicks first_meaningful_paint_;
-  unsigned outstanding_swap_promise_count_ = 0;
+  unsigned outstanding_presentation_promise_count_ = 0;
   DeferFirstMeaningfulPaint defer_first_meaningful_paint_ = kDoNotDefer;
-  DISALLOW_COPY_AND_ASSIGN(FirstMeaningfulPaintDetector);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_FIRST_MEANINGFUL_PAINT_DETECTOR_H_

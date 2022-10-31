@@ -12,7 +12,7 @@ namespace blink {
 WebMouseEvent SyntheticWebMouseEventBuilder::Build(
     blink::WebInputEvent::Type type) {
   return WebMouseEvent(type, WebInputEvent::kNoModifiers,
-                       WebInputEvent::GetStaticTimeStampForTests());
+                       ui::EventTimeForNow());
 }
 
 WebMouseEvent SyntheticWebMouseEventBuilder::Build(
@@ -22,8 +22,7 @@ WebMouseEvent SyntheticWebMouseEventBuilder::Build(
     int modifiers,
     blink::WebPointerProperties::PointerType pointer_type) {
   DCHECK(WebInputEvent::IsMouseEventType(type));
-  WebMouseEvent result(type, modifiers,
-                       WebInputEvent::GetStaticTimeStampForTests());
+  WebMouseEvent result(type, modifiers, ui::EventTimeForNow());
   result.SetPositionInWidget(window_x, window_y);
   result.SetPositionInScreen(window_x, window_y);
   result.SetModifiers(modifiers);
@@ -35,8 +34,7 @@ WebMouseEvent SyntheticWebMouseEventBuilder::Build(
 WebMouseWheelEvent SyntheticWebMouseWheelEventBuilder::Build(
     WebMouseWheelEvent::Phase phase) {
   WebMouseWheelEvent result(WebInputEvent::Type::kMouseWheel,
-                            WebInputEvent::kNoModifiers,
-                            WebInputEvent::GetStaticTimeStampForTests());
+                            WebInputEvent::kNoModifiers, ui::EventTimeForNow());
   result.phase = phase;
   result.event_action =
       WebMouseWheelEvent::GetPlatformSpecificDefaultEventAction(result);
@@ -63,7 +61,7 @@ WebMouseWheelEvent SyntheticWebMouseWheelEventBuilder::Build(
     int modifiers,
     ui::ScrollGranularity delta_units) {
   WebMouseWheelEvent result(WebInputEvent::Type::kMouseWheel, modifiers,
-                            WebInputEvent::GetStaticTimeStampForTests());
+                            ui::EventTimeForNow());
   result.SetPositionInScreen(global_x, global_y);
   result.SetPositionInWidget(x, y);
   result.delta_units = delta_units;
@@ -84,9 +82,7 @@ WebGestureEvent SyntheticWebGestureEventBuilder::Build(
     blink::WebGestureDevice source_device,
     int modifiers) {
   DCHECK(WebInputEvent::IsGestureEventType(type));
-  WebGestureEvent result(type, modifiers,
-                         WebInputEvent::GetStaticTimeStampForTests(),
-                         source_device);
+  WebGestureEvent result(type, modifiers, ui::EventTimeForNow(), source_device);
   if (type == WebInputEvent::Type::kGestureTap ||
       type == WebInputEvent::Type::kGestureTapUnconfirmed ||
       type == WebInputEvent::Type::kGestureDoubleTap) {
@@ -152,7 +148,7 @@ WebGestureEvent SyntheticWebGestureEventBuilder::BuildFling(
 
 SyntheticWebTouchEvent::SyntheticWebTouchEvent() : WebTouchEvent() {
   unique_touch_event_id = ui::GetNextTouchEventId();
-  SetTimestamp(WebInputEvent::GetStaticTimeStampForTests());
+  SetTimestamp(ui::EventTimeForNow());
   pointer_id_ = 0;
 }
 
@@ -190,7 +186,10 @@ int SyntheticWebTouchEvent::PressPoint(float x,
                                        float radius_x,
                                        float radius_y,
                                        float rotation_angle,
-                                       float force) {
+                                       float force,
+                                       float tangential_pressure,
+                                       int tilt_x,
+                                       int tilt_y) {
   int index = FirstFreeIndex();
   if (index == -1)
     return -1;
@@ -203,7 +202,10 @@ int SyntheticWebTouchEvent::PressPoint(float x,
   point.radius_y = radius_y;
   point.rotation_angle = rotation_angle;
   point.force = force;
-  point.tilt_x = point.tilt_y = 0;
+  point.tilt_x = tilt_x;
+  point.tilt_y = tilt_y;
+  point.twist = 0;
+  point.tangential_pressure = tangential_pressure;
   point.pointer_type = blink::WebPointerProperties::PointerType::kTouch;
   ++touches_length;
   SetType(WebInputEvent::Type::kTouchStart);
@@ -217,7 +219,10 @@ void SyntheticWebTouchEvent::MovePoint(int index,
                                        float radius_x,
                                        float radius_y,
                                        float rotation_angle,
-                                       float force) {
+                                       float force,
+                                       float tangential_pressure,
+                                       int tilt_x,
+                                       int tilt_y) {
   CHECK_GE(index, 0);
   CHECK_LT(index, kTouchesLengthCap);
   // Always set this bit to avoid otherwise unexpected touchmove suppression.
@@ -231,6 +236,10 @@ void SyntheticWebTouchEvent::MovePoint(int index,
   point.radius_y = radius_y;
   point.rotation_angle = rotation_angle;
   point.force = force;
+  point.tilt_x = tilt_x;
+  point.tilt_y = tilt_y;
+  point.twist = 0;
+  point.tangential_pressure = tangential_pressure;
   SetType(WebInputEvent::Type::kTouchMove);
   dispatch_type = WebInputEvent::DispatchType::kBlocking;
 }

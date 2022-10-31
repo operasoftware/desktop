@@ -1,7 +1,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.68)
-AC_INIT([Liblouis], [3.12.0], [liblouis-liblouisxml@freelists.org], [liblouis], [http://www.liblouis.org])
+AC_INIT([Liblouis], [3.22.0], [liblouis-liblouisxml@freelists.org], [liblouis], [http://www.liblouis.org])
 AC_CONFIG_SRCDIR([liblouis/lou_backTranslateString.c])
 AM_CONFIG_HEADER(liblouis/config.h)
 
@@ -10,8 +10,7 @@ AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([-Wall dist-zip])
 
 # Checks for programs.
-# Try to compile using C99
-AC_PROG_CC_C99
+AC_PROG_CC
 
 # gnulib for the library
 gl_EARLY
@@ -78,7 +77,7 @@ LIBLOUIS_CURRENT=20
 
 # increment any time the source changes; set to 0 if you increment
 # CURRENT
-LIBLOUIS_REVISION=0
+LIBLOUIS_REVISION=10
 
 # increment if any interfaces have been added; set to 0 if any
 # interfaces have been changed or removed. removal has precedence over
@@ -116,8 +115,9 @@ done
 # define an additional recursive make target to format the sources.
 # Also check if clang-format is installed
 AM_EXTRA_RECURSIVE_TARGETS([format-sources])
-AC_CHECK_PROG([SOURCE_FORMATTER], [clang-format], [clang-format])
-AM_CONDITIONAL([HAVE_SOURCE_FORMATTER], [test x$SOURCE_FORMATTER = xclang-format])
+# prefer version 9 of clang-format as it is part of any release since ubuntu 20.04
+AC_CHECK_PROGS([SOURCE_FORMATTER], [clang-format-9 clang-format])
+AM_CONDITIONAL([HAVE_SOURCE_FORMATTER], [test x$SOURCE_FORMATTER = xclang-format -o x$SOURCE_FORMATTER = xclang-format-9])
 
 # GNU help2man creates man pages from --help output; in many cases,
 # this is sufficient, and obviates the need to maintain man pages
@@ -155,8 +155,22 @@ else
 fi
 AM_CONDITIONAL([HAVE_MAKEINFO_5], [test x$have_makeinfo_5 = xtrue])
 
+# Check if the user wants to enable macros.
+# Macros are an experimental feature and need to be enabled
+# explicitely. They are a helpful tool for refactoring, but for now we
+# don't want to expose it to users yet.
+AC_ARG_ENABLE([macros],
+  [AS_HELP_STRING([--enable-macros], [enable macros @<:@default=no@:>@])],
+  [enable_macros=$enableval],
+  [])
+
+if test "x$enable_macros" == xyes; then
+   AC_DEFINE([ENABLE_MACROS],[1],[Enable macros])
+fi
+AM_CONDITIONAL([ENABLE_MACROS], [test "x$enable_macros" = xyes])
+
 AC_ARG_ENABLE(ucs4,
-              AC_HELP_STRING(--enable-ucs4, Enable 4 byte-wide characters),
+              AC_HELP_STRING(--enable-ucs4, enable 4 byte-wide characters),
               [AC_DEFINE([WIDECHARS_ARE_UCS4], [1], [Define if widechars are ucs4])],
               [enable_ucs4=no])
 
@@ -202,6 +216,7 @@ AC_CONFIG_FILES([
 	tests/resolve_table.h
 	tests/tables/Makefile
 	tests/tables/emphclass/Makefile
+	tests/tables/attribute/Makefile
 	tests/tables/moreTables/Makefile
 	tests/tables/resolve_table/Makefile
 	tests/tables/resolve_table/dir_1/Makefile

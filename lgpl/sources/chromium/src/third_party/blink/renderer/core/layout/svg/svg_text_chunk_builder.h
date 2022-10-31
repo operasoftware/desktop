@@ -20,7 +20,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_SVG_SVG_TEXT_CHUNK_BUILDER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_SVG_SVG_TEXT_CHUNK_BUILDER_H_
 
-#include "base/macros.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -45,11 +45,14 @@ class SVGTextChunkBuilder {
 
  public:
   SVGTextChunkBuilder();
+  SVGTextChunkBuilder(const SVGTextChunkBuilder&) = delete;
+  SVGTextChunkBuilder& operator=(const SVGTextChunkBuilder&) = delete;
 
-  void ProcessTextChunks(const Vector<SVGInlineTextBox*>&);
+  void ProcessTextChunks(const HeapVector<Member<SVGInlineTextBox>>&);
 
  protected:
-  typedef Vector<SVGInlineTextBox*>::const_iterator BoxListConstIterator;
+  typedef HeapVector<Member<SVGInlineTextBox>>::const_iterator
+      BoxListConstIterator;
 
   virtual void HandleTextChunk(BoxListConstIterator box_start,
                                BoxListConstIterator box_end);
@@ -65,8 +68,6 @@ class SVGTextChunkBuilder {
   void ProcessTextAnchorCorrection(bool is_vertical_text,
                                    float text_anchor_shift,
                                    Vector<SVGTextFragment>&);
-
-  DISALLOW_COPY_AND_ASSIGN(SVGTextChunkBuilder);
 };
 
 class SVGTextPathChunkBuilder final : public SVGTextChunkBuilder {
@@ -74,6 +75,8 @@ class SVGTextPathChunkBuilder final : public SVGTextChunkBuilder {
 
  public:
   SVGTextPathChunkBuilder();
+  SVGTextPathChunkBuilder(const SVGTextPathChunkBuilder&) = delete;
+  SVGTextPathChunkBuilder& operator=(const SVGTextPathChunkBuilder&) = delete;
 
   float TotalLength() const { return total_length_; }
   unsigned TotalCharacters() const { return total_characters_; }
@@ -84,8 +87,6 @@ class SVGTextPathChunkBuilder final : public SVGTextChunkBuilder {
 
   float total_length_;
   unsigned total_characters_;
-
-  DISALLOW_COPY_AND_ASSIGN(SVGTextPathChunkBuilder);
 };
 
 // Compute the "shift" induced by the 'text-anchor' property.
@@ -93,4 +94,4 @@ float CalculateTextAnchorShift(const ComputedStyle&, float length);
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_SVG_SVG_TEXT_CHUNK_BUILDER_H_

@@ -31,6 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_RANGE_INPUT_TYPE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_RANGE_INPUT_TYPE_H_
 
+#include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
 #include "third_party/blink/renderer/core/html/forms/input_type.h"
 #include "third_party/blink/renderer/core/html/forms/input_type_view.h"
 
@@ -40,13 +41,12 @@ class ExceptionState;
 class SliderThumbElement;
 
 class RangeInputType final : public InputType, public InputTypeView {
-  USING_GARBAGE_COLLECTED_MIXIN(RangeInputType);
-
  public:
   explicit RangeInputType(HTMLInputElement&);
 
   void Trace(Visitor*) const override;
   using InputType::GetElement;
+  bool TypeMismatchFor(const String&) const;
 
  private:
   InputTypeView* CreateView() override;
@@ -57,19 +57,16 @@ class RangeInputType final : public InputType, public InputTypeView {
   void SetValueAsDouble(double,
                         TextFieldEventBehavior,
                         ExceptionState&) const override;
-  bool TypeMismatchFor(const String&) const override;
   bool SupportsRequired() const override;
   StepRange CreateStepRange(AnyStepHandling) const override;
-  bool IsSteppable() const override;
   void HandleMouseDownEvent(MouseEvent&) override;
   void HandleKeydownEvent(KeyboardEvent&) override;
-  bool TypeShouldForceLegacyLayout() const override;
   LayoutObject* CreateLayoutObject(const ComputedStyle&,
                                    LegacyLayout) const override;
   void CreateShadowSubtree() override;
   Decimal ParseToNumber(const String&, const Decimal&) const override;
   String Serialize(const Decimal&) const override;
-  void AccessKeyAction(bool send_mouse_events) override;
+  void AccessKeyAction(SimulatedClickCreationScope creation_scope) override;
   void SanitizeValueInResponseToMinOrMaxAttributeChange() override;
   void StepAttributeChanged() override;
   void WarnIfValueIsInvalid(const String&) const override;
@@ -85,12 +82,20 @@ class RangeInputType final : public InputType, public InputTypeView {
   void UpdateTickMarkValues();
 
   // InputTypeView function:
+  ControlPart AutoAppearance() const override;
   void UpdateView() override;
   void ValueAttributeChanged() override;
   bool IsDraggedSlider() const override;
 
   bool tick_mark_values_dirty_;
   Vector<Decimal> tick_mark_values_;
+};
+
+template <>
+struct DowncastTraits<RangeInputType> {
+  static bool AllowFrom(const InputType& type) {
+    return type.IsRangeInputType();
+  }
 };
 
 }  // namespace blink

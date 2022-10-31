@@ -9,6 +9,18 @@
 #include "third_party/webrtc/api/sctp_transport_interface.h"
 
 namespace blink {
+namespace {
+
+Vector<webrtc::RtpHeaderExtensionCapability> GetHeaderExtensionsNegotiated(
+    const webrtc::RtpTransceiverInterface* webrtc_transceiver) {
+  auto std_extensions = webrtc_transceiver->HeaderExtensionsNegotiated();
+  Vector<webrtc::RtpHeaderExtensionCapability> extensions;
+  std::move(std_extensions.begin(), std_extensions.end(),
+            std::back_inserter(extensions));
+  return extensions;
+}
+
+}  // namespace
 
 TransceiverStateSurfacer::TransceiverStateSurfacer(
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
@@ -75,7 +87,7 @@ void TransceiverStateSurfacer::Initialize(
 
   for (auto& webrtc_transceiver : webrtc_transceivers) {
     // Create the sender state.
-    base::Optional<blink::RtpSenderState> sender_state;
+    absl::optional<blink::RtpSenderState> sender_state;
     auto webrtc_sender = webrtc_transceiver->sender();
     if (webrtc_sender) {
       std::unique_ptr<blink::WebRtcMediaStreamTrackAdapterMap::AdapterRef>
@@ -87,16 +99,16 @@ void TransceiverStateSurfacer::Initialize(
         // adapters on the signaling thread for initialization on the main
         // thread or wait for Onion Souping to simplify this.
         // https://crbug.com/787254
-        sender_track_ref =
-            track_adapter_map->GetLocalTrackAdapter(webrtc_sender->track());
+        sender_track_ref = track_adapter_map->GetLocalTrackAdapter(
+            webrtc_sender->track().get());
         CHECK(sender_track_ref);
       }
       sender_state = blink::RtpSenderState(
-          main_task_runner_, signaling_task_runner_, webrtc_sender.get(),
+          main_task_runner_, signaling_task_runner_, webrtc_sender,
           std::move(sender_track_ref), webrtc_sender->stream_ids());
     }
     // Create the receiver state.
-    base::Optional<blink::RtpReceiverState> receiver_state;
+    absl::optional<blink::RtpReceiverState> receiver_state;
     auto webrtc_receiver = webrtc_transceiver->receiver();
     if (webrtc_receiver) {
       DCHECK(webrtc_receiver->track());
@@ -112,14 +124,16 @@ void TransceiverStateSurfacer::Initialize(
           main_task_runner_, signaling_task_runner_, webrtc_receiver.get(),
           std::move(receiver_track_ref), std::move(receiver_stream_ids));
     }
+
     // Create the transceiver state.
-    transceiver_states_.push_back(blink::RtpTransceiverState(
+    transceiver_states_.emplace_back(
         main_task_runner_, signaling_task_runner_, webrtc_transceiver.get(),
         std::move(sender_state), std::move(receiver_state),
-        blink::ToBaseOptional(webrtc_transceiver->mid()),
-        webrtc_transceiver->stopped(), webrtc_transceiver->direction(),
-        blink::ToBaseOptional(webrtc_transceiver->current_direction()),
-        blink::ToBaseOptional(webrtc_transceiver->fired_direction())));
+        blink::ToAbslOptional(webrtc_transceiver->mid()),
+        webrtc_transceiver->direction(),
+        blink::ToAbslOptional(webrtc_transceiver->current_direction()),
+        blink::ToAbslOptional(webrtc_transceiver->fired_direction()),
+        GetHeaderExtensionsNegotiated(webrtc_transceiver.get()));
   }
   is_initialized_ = true;
 }
@@ -147,7 +161,7 @@ SurfaceSenderStateOnly::SurfaceSenderStateOnly(
   DCHECK(sender_);
 }
 
-SurfaceSenderStateOnly::~SurfaceSenderStateOnly() {}
+SurfaceSenderStateOnly::~SurfaceSenderStateOnly() = default;
 
 cricket::MediaType SurfaceSenderStateOnly::media_type() const {
   return sender_->media_type();
@@ -171,6 +185,10 @@ bool SurfaceSenderStateOnly::stopped() const {
   return false;
 }
 
+bool SurfaceSenderStateOnly::stopping() const {
+  return false;
+}
+
 webrtc::RtpTransceiverDirection SurfaceSenderStateOnly::direction() const {
   return webrtc::RtpTransceiverDirection::kSendOnly;
 }
@@ -187,6 +205,33 @@ SurfaceSenderStateOnly::current_direction() const {
 
 void SurfaceSenderStateOnly::Stop() {
   NOTIMPLEMENTED();
+}
+
+webrtc::RTCError SurfaceSenderStateOnly::SetCodecPreferences(
+    rtc::ArrayView<webrtc::RtpCodecCapability>) {
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
+  return {};
+}
+
+std::vector<webrtc::RtpCodecCapability>
+SurfaceSenderStateOnly::codec_preferences() const {
+  return {};
+}
+
+std::vector<webrtc::RtpHeaderExtensionCapability>
+SurfaceSenderStateOnly::HeaderExtensionsToOffer() const {
+  return {};
+}
+
+webrtc::RTCError SurfaceSenderStateOnly::SetOfferedRtpHeaderExtensions(
+    rtc::ArrayView<const webrtc::RtpHeaderExtensionCapability>
+        header_extensions_to_offer) {
+  return webrtc::RTCError(webrtc::RTCErrorType::UNSUPPORTED_OPERATION);
+}
+
+std::vector<webrtc::RtpHeaderExtensionCapability>
+SurfaceSenderStateOnly::HeaderExtensionsNegotiated() const {
+  return {};
 }
 
 SurfaceReceiverStateOnly::SurfaceReceiverStateOnly(
@@ -219,6 +264,10 @@ bool SurfaceReceiverStateOnly::stopped() const {
   return false;
 }
 
+bool SurfaceReceiverStateOnly::stopping() const {
+  return false;
+}
+
 webrtc::RtpTransceiverDirection SurfaceReceiverStateOnly::direction() const {
   return webrtc::RtpTransceiverDirection::kRecvOnly;
 }
@@ -235,6 +284,33 @@ SurfaceReceiverStateOnly::current_direction() const {
 
 void SurfaceReceiverStateOnly::Stop() {
   NOTIMPLEMENTED();
+}
+
+webrtc::RTCError SurfaceReceiverStateOnly::SetCodecPreferences(
+    rtc::ArrayView<webrtc::RtpCodecCapability>) {
+  RTC_DCHECK_NOTREACHED() << "Not implemented";
+  return {};
+}
+
+std::vector<webrtc::RtpCodecCapability>
+SurfaceReceiverStateOnly::codec_preferences() const {
+  return {};
+}
+
+std::vector<webrtc::RtpHeaderExtensionCapability>
+SurfaceReceiverStateOnly::HeaderExtensionsToOffer() const {
+  return {};
+}
+
+webrtc::RTCError SurfaceReceiverStateOnly::SetOfferedRtpHeaderExtensions(
+    rtc::ArrayView<const webrtc::RtpHeaderExtensionCapability>
+        header_extensions_to_offer) {
+  return webrtc::RTCError(webrtc::RTCErrorType::UNSUPPORTED_OPERATION);
+}
+
+std::vector<webrtc::RtpHeaderExtensionCapability>
+SurfaceReceiverStateOnly::HeaderExtensionsNegotiated() const {
+  return {};
 }
 
 }  // namespace blink

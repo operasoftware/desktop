@@ -7,10 +7,10 @@
 
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
+#include "third_party/blink/renderer/platform/wtf/text/unicode.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
 namespace blink {
@@ -34,6 +34,18 @@ class PLATFORM_EXPORT Hyphenation : public RefCounted<Hyphenation> {
 
   static const unsigned kMinimumPrefixLength = 2;
   static const unsigned kMinimumSuffixLength = 2;
+
+ protected:
+  void Initialize(const AtomicString& locale);
+
+  bool ShouldHyphenateWord(const StringView& word) const {
+    if (word.IsEmpty())
+      return false;
+    // Avoid hyphenating capitalized words.
+    return hyphenate_capitalized_word_ || !WTF::unicode::IsUpper(word[0]);
+  }
+
+  bool hyphenate_capitalized_word_ = false;
 
  private:
   friend class LayoutLocale;

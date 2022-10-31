@@ -33,43 +33,54 @@
 
 #include <algorithm>
 
+#include "base/containers/contains.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/time/default_clock.h"
 #include "base/time/default_tick_clock.h"
-#include "third_party/blink/public/mojom/timing/worker_timing_container.mojom-blink-forward.h"
+#include "base/time/tick_clock.h"
+#include "base/time/time.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/permissions_policy/document_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
-#include "third_party/blink/renderer/bindings/core/v8/string_or_performance_measure_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_performance_mark_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_performance_measure_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_profiler_init_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_double_string.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_performancemeasureoptions_string.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_timing.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/event_target_names.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/document_load_timing.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
+#include "third_party/blink/renderer/core/probe/core_probes.h"
+#include "third_party/blink/renderer/core/timing/back_forward_cache_restoration.h"
+#include "third_party/blink/renderer/core/timing/background_tracing_helper.h"
 #include "third_party/blink/renderer/core/timing/largest_contentful_paint.h"
 #include "third_party/blink/renderer/core/timing/layout_shift.h"
-#include "third_party/blink/renderer/core/timing/measure_memory/measure_memory_delegate.h"
+#include "third_party/blink/renderer/core/timing/measure_memory/measure_memory_controller.h"
 #include "third_party/blink/renderer/core/timing/performance_element_timing.h"
+#include "third_party/blink/renderer/core/timing/performance_entry.h"
 #include "third_party/blink/renderer/core/timing/performance_event_timing.h"
 #include "third_party/blink/renderer/core/timing/performance_long_task_timing.h"
 #include "third_party/blink/renderer/core/timing/performance_mark.h"
 #include "third_party/blink/renderer/core/timing/performance_measure.h"
 #include "third_party/blink/renderer/core/timing/performance_observer.h"
 #include "third_party/blink/renderer/core/timing/performance_resource_timing.h"
+#include "third_party/blink/renderer/core/timing/performance_server_timing.h"
 #include "third_party/blink/renderer/core/timing/performance_user_timing.h"
 #include "third_party/blink/renderer/core/timing/profiler.h"
 #include "third_party/blink/renderer/core/timing/profiler_group.h"
 #include "third_party/blink/renderer/core/timing/time_clamper.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_timing.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
@@ -78,10 +89,15 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
+#include "v8/include/v8-metrics.h"
 
 namespace blink {
 
 namespace {
+
+// LongTask API can be a source of many events. Filter on Performance object
+// level before reporting to UKM to smooth out recorded events over all pages.
+constexpr size_t kLongTaskUkmSampleInterval = 100;
 
 const SecurityOrigin* GetSecurityOrigin(ExecutionContext* context) {
   if (context)
@@ -94,6 +110,37 @@ bool IsMeasureOptionsEmpty(const PerformanceMeasureOptions& options) {
          !options.hasDuration();
 }
 
+void RecordLongTaskUkm(ExecutionContext* execution_context,
+                       base::TimeDelta start_time,
+                       base::TimeDelta duration) {
+  v8::metrics::LongTaskStats stats =
+      v8::metrics::LongTaskStats::Get(execution_context->GetIsolate());
+  // TODO(cbruni, 1275056): Filter out stats without v8_execute_us.
+  ukm::builders::PerformanceAPI_LongTask(execution_context->UkmSourceID())
+      .SetStartTime(start_time.InMilliseconds())
+      .SetDuration(duration.InMicroseconds())
+      .SetDuration_V8_GC(stats.gc_full_atomic_wall_clock_duration_us +
+                         stats.gc_full_incremental_wall_clock_duration_us +
+                         stats.gc_young_wall_clock_duration_us)
+      .SetDuration_V8_GC_Full_Atomic(
+          stats.gc_full_atomic_wall_clock_duration_us)
+      .SetDuration_V8_GC_Full_Incremental(
+          stats.gc_full_incremental_wall_clock_duration_us)
+      .SetDuration_V8_GC_Young(stats.gc_young_wall_clock_duration_us)
+      .SetDuration_V8_Execute(stats.v8_execute_us)
+      .Record(execution_context->UkmRecorder());
+}
+
+PerformanceEntry::EntryType kDroppableEntryTypes[] = {
+    PerformanceEntry::kResource,
+    PerformanceEntry::kLongTask,
+    PerformanceEntry::kElement,
+    PerformanceEntry::kEvent,
+    PerformanceEntry::kLayoutShift,
+    PerformanceEntry::kLargestContentfulPaint,
+    PerformanceEntry::kBackForwardCacheRestoration,
+};
+
 }  // namespace
 
 using PerformanceObserverVector = HeapVector<Member<PerformanceObserver>>;
@@ -104,16 +151,22 @@ constexpr size_t kDefaultElementTimingBufferSize = 150;
 constexpr size_t kDefaultLayoutShiftBufferSize = 150;
 constexpr size_t kDefaultLargestContenfulPaintSize = 150;
 constexpr size_t kDefaultLongTaskBufferSize = 200;
+constexpr size_t kDefaultBackForwardCacheRestorationBufferSize = 200;
 
 Performance::Performance(
     base::TimeTicks time_origin,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+    bool cross_origin_isolated_capability,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    ExecutionContext* context)
     : resource_timing_buffer_size_limit_(kDefaultResourceTimingBufferSize),
+      back_forward_cache_restoration_buffer_size_limit_(
+          kDefaultBackForwardCacheRestorationBufferSize),
       event_timing_buffer_max_size_(kDefaultEventTimingBufferSize),
       element_timing_buffer_max_size_(kDefaultElementTimingBufferSize),
       user_timing_(nullptr),
       time_origin_(time_origin),
       tick_clock_(base::DefaultTickClock::GetInstance()),
+      cross_origin_isolated_capability_(cross_origin_isolated_capability),
       observer_filter_options_(PerformanceEntry::kInvalid),
       task_runner_(std::move(task_runner)),
       deliver_observations_timer_(task_runner_,
@@ -123,9 +176,16 @@ Performance::Performance(
           task_runner_,
           this,
           &Performance::FireResourceTimingBufferFull) {
-  unix_at_zero_monotonic_ = ConvertSecondsToDOMHighResTimeStamp(
-      base::DefaultClock::GetInstance()->Now().ToDoubleT() -
-      tick_clock_->NowTicks().since_origin().InSecondsF());
+  // |context| may be null in tests.
+  if (context) {
+    background_tracing_helper_ =
+        MakeGarbageCollected<BackgroundTracingHelper>(context);
+  }
+  // Initialize the map of dropped entry types only with those which could be
+  // dropped (saves some unnecessary 0s).
+  for (const auto type : kDroppableEntryTypes) {
+    dropped_entries_count_map_.insert(type, 0);
+  }
 }
 
 Performance::~Performance() = default;
@@ -142,7 +202,7 @@ PerformanceNavigation* Performance::navigation() const {
   return nullptr;
 }
 
-MemoryInfo* Performance::memory() const {
+MemoryInfo* Performance::memory(ScriptState*) const {
   return nullptr;
 }
 
@@ -150,62 +210,17 @@ EventCounts* Performance::eventCounts() {
   return nullptr;
 }
 
-namespace {
-
-bool IsMeasureMemoryAvailable(ScriptState* script_state) {
-  // TODO(ulan): We should check for window.crossOriginIsolated when it ships.
-  // Until then we enable the API only for processes locked to a site
-  // similar to the precise mode of the legacy performance.memory API.
-  if (!Platform::Current()->IsLockedToSite()) {
-    return false;
-  }
-  // The window.crossOriginIsolated will be true only for the top-level frame.
-  // Until the flag is available we check for the top-level condition manually.
-  LocalDOMWindow* window = LocalDOMWindow::From(script_state);
-  if (!window) {
-    return false;
-  }
-  LocalFrame* local_frame = window->GetFrame();
-  if (!local_frame || !local_frame->IsMainFrame()) {
-    return false;
-  }
-  return true;
-}
-
-}  // anonymous namespace
-
-ScriptPromise Performance::measureMemory(
+ScriptPromise Performance::measureUserAgentSpecificMemory(
     ScriptState* script_state,
     ExceptionState& exception_state) const {
-  if (!IsMeasureMemoryAvailable(script_state)) {
-    exception_state.ThrowSecurityError(
-        "performance.measureMemory is not available in this context");
-    return ScriptPromise();
-  }
-  v8::Isolate* isolate = script_state->GetIsolate();
-  v8::TryCatch try_catch(isolate);
-  v8::Local<v8::Context> context = script_state->GetContext();
-  v8::Local<v8::Promise::Resolver> promise_resolver;
-  if (!v8::Promise::Resolver::New(context).ToLocal(&promise_resolver)) {
-    exception_state.RethrowV8Exception(try_catch.Exception());
-    return ScriptPromise();
-  }
-  v8::MeasureMemoryExecution execution =
-      RuntimeEnabledFeatures::ForceEagerMeasureMemoryEnabled(
-          ExecutionContext::From(script_state))
-          ? v8::MeasureMemoryExecution::kEager
-          : v8::MeasureMemoryExecution::kDefault;
-
-  isolate->MeasureMemory(std::make_unique<MeasureMemoryDelegate>(
-                             isolate, context, promise_resolver),
-                         execution);
-  return ScriptPromise(script_state, promise_resolver->GetPromise());
+  return MeasureMemoryController::StartMeasurement(script_state,
+                                                   exception_state);
 }
 
 DOMHighResTimeStamp Performance::timeOrigin() const {
   DCHECK(!time_origin_.is_null());
-  return unix_at_zero_monotonic_ +
-         ConvertTimeTicksToDOMHighResTimeStamp(time_origin_);
+  return ClampTimeResolution(time_origin_ - base::TimeTicks::UnixEpoch(),
+                             cross_origin_isolated_capability_);
 }
 
 PerformanceEntryVector Performance::getEntries() {
@@ -230,6 +245,9 @@ PerformanceEntryVector Performance::getEntries() {
     entries.push_back(first_paint_timing_);
   if (first_contentful_paint_timing_)
     entries.push_back(first_contentful_paint_timing_);
+
+  if (RuntimeEnabledFeatures::NavigationIdEnabled())
+    entries.AppendVector(back_forward_cache_restoration_buffer_);
 
   std::sort(entries.begin(), entries.end(),
             PerformanceEntry::StartTimeCompareLessThan);
@@ -264,6 +282,7 @@ PerformanceEntryVector Performance::getEntriesByTypeInternal(
   PerformanceEntryVector entries;
   switch (type) {
     case PerformanceEntry::kResource:
+      UseCounter::Count(GetExecutionContext(), WebFeature::kResourceTiming);
       for (const auto& resource : resource_timing_buffer_)
         entries.push_back(resource);
       break;
@@ -286,6 +305,7 @@ PerformanceEntryVector Performance::getEntriesByTypeInternal(
         entries.push_back(first_input_timing_);
       break;
     case PerformanceEntry::kNavigation:
+      UseCounter::Count(GetExecutionContext(), WebFeature::kNavigationTimingL2);
       if (!navigation_timing_)
         navigation_timing_ = CreateNavigationTimingInstance();
       if (navigation_timing_)
@@ -320,6 +340,13 @@ PerformanceEntryVector Performance::getEntriesByTypeInternal(
       break;
     case PerformanceEntry::kLargestContentfulPaint:
       entries.AppendVector(largest_contentful_paint_buffer_);
+      break;
+    case PerformanceEntry::kVisibilityState:
+      entries.AppendVector(visibility_state_buffer_);
+      break;
+    case PerformanceEntry::kBackForwardCacheRestoration:
+      if (RuntimeEnabledFeatures::NavigationIdEnabled())
+        entries.AppendVector(back_forward_cache_restoration_buffer_);
       break;
     case PerformanceEntry::kInvalid:
       break;
@@ -398,6 +425,11 @@ void Performance::setResourceTimingBufferSize(unsigned size) {
   resource_timing_buffer_size_limit_ = size;
 }
 
+void Performance::setBackForwardCacheRestorationBufferSizeForTest(
+    unsigned size) {
+  back_forward_cache_restoration_buffer_size_limit_ = size;
+}
+
 bool Performance::PassesTimingAllowCheck(
     const ResourceResponse& response,
     const ResourceResponse& next_response,
@@ -418,22 +450,24 @@ bool Performance::PassesTimingAllowCheck(
 
   const AtomicString& timing_allow_origin_string =
       response.HttpHeaderField(http_names::kTimingAllowOrigin);
-  if (timing_allow_origin_string.IsEmpty())
+  network::mojom::blink::TimingAllowOriginPtr tao =
+      ParseTimingAllowOrigin(timing_allow_origin_string);
+
+  if (!tao)
     return false;
 
-  const String& security_origin = initiator_security_origin.ToString();
-  CommaDelimitedHeaderSet tao_headers;
-  ParseCommaDelimitedHeader(timing_allow_origin_string, tao_headers);
-  if (tao_headers.size() == 1u) {
-    if (*tao_headers.begin() == "*") {
-      UseCounter::Count(context, WebFeature::kStarInTimingAllowOrigin);
-      return true;
-    } else {
-      UseCounter::Count(context, WebFeature::kSingleOriginInTimingAllowOrigin);
-    }
-  } else if (tao_headers.size() > 1u) {
+  if (tao->which() == network::mojom::blink::TimingAllowOrigin::Tag::kAll) {
+    UseCounter::Count(context, WebFeature::kStarInTimingAllowOrigin);
+    return true;
+  }
+
+  const Vector<String>& timing_allowed_origins = tao->get_serialized_origins();
+  if (timing_allowed_origins.size() == 1) {
+    UseCounter::Count(context, WebFeature::kSingleOriginInTimingAllowOrigin);
+  } else if (timing_allowed_origins.size() > 1u) {
     UseCounter::Count(context, WebFeature::kMultipleOriginsInTimingAllowOrigin);
   }
+
   bool is_next_resource_same_origin = true;
   // Only do the origin check if |next_response| is not equal to |response|.
   if (&next_response != &response) {
@@ -443,25 +477,17 @@ bool Performance::PassesTimingAllowCheck(
   }
   if (!is_same_origin && !is_next_resource_same_origin)
     *tainted_origin_flag = true;
-  bool contains_security_origin = false;
-  for (const String& header : tao_headers) {
-    if (header == "*")
+  // We already checked if 'star' is present, so fail if tainted origin flag is
+  // set.
+  if (*tainted_origin_flag)
+    return false;
+
+  const String& serialized_origin = initiator_security_origin.ToString();
+  for (const String& timing_allowed_origin : timing_allowed_origins) {
+    if (serialized_origin == timing_allowed_origin)
       return true;
-
-    if (header == security_origin)
-      contains_security_origin = true;
   }
-
-  // If the tainted origin flag is set and the header contains the origin, this
-  // means that this method currently passes the check but once we implement the
-  // tainted origin flag properly then it will fail the check. Record this in a
-  // UseCounter to track how many webpages contain resources where the new check
-  // would fail.
-  if (*tainted_origin_flag && contains_security_origin) {
-    UseCounter::Count(context,
-                      WebFeature::kResourceTimingTaintedOriginFlagFail);
-  }
-  return contains_security_origin;
+  return false;
 }
 
 bool Performance::AllowsTimingRedirect(
@@ -497,15 +523,14 @@ void Performance::GenerateAndAddResourceTiming(
   const SecurityOrigin* security_origin = GetSecurityOrigin(context);
   if (!security_origin)
     return;
-  // |info| is taken const-ref but this can make destructive changes to
-  // WorkerTimingContainer on |info| when a page is controlled by a service
-  // worker.
   AddResourceTiming(
       GenerateResourceTiming(*security_origin, info, *context),
       !initiator_type.IsNull() ? initiator_type : info.InitiatorType(),
-      info.TakeWorkerTimingReceiver(), context);
+      context);
 }
 
+// Please keep this function in sync with ObjectNavigationFallbackBodyLoader's
+// GenerateResourceTiming() helper.
 mojom::blink::ResourceTimingInfoPtr Performance::GenerateResourceTiming(
     const SecurityOrigin& destination_origin,
     const ResourceTimingInfo& info,
@@ -531,18 +556,13 @@ mojom::blink::ResourceTimingInfoPtr Performance::GenerateResourceTiming(
   result->context_type = info.ContextType();
   result->request_destination = info.RequestDestination();
 
-  bool response_tainting_not_basic = false;
-  bool tainted_origin_flag = false;
-  result->allow_timing_details = PassesTimingAllowCheck(
-      final_response, final_response, destination_origin,
-      &context_for_use_counter, &response_tainting_not_basic,
-      &tainted_origin_flag);
+  result->allow_timing_details =
+      AllowsTimingRedirect(info.RedirectChain(), final_response,
+                           destination_origin, &context_for_use_counter);
 
   const Vector<ResourceResponse>& redirect_chain = info.RedirectChain();
   if (!redirect_chain.IsEmpty()) {
-    result->allow_redirect_details =
-        AllowsTimingRedirect(redirect_chain, final_response, destination_origin,
-                             &context_for_use_counter);
+    result->allow_redirect_details = result->allow_timing_details;
 
     // TODO(https://crbug.com/817691): is |last_chained_timing| being null a bug
     // or is this if statement reasonable?
@@ -553,27 +573,19 @@ mojom::blink::ResourceTimingInfoPtr Performance::GenerateResourceTiming(
       result->allow_redirect_details = false;
       result->last_redirect_end_time = base::TimeTicks();
     }
-    if (!result->allow_redirect_details) {
-      // TODO(https://crbug.com/817691): There was previously a DCHECK that
-      // |final_timing| is non-null. However, it clearly can be null: removing
-      // this check caused https://crbug.com/803811. Figure out how this can
-      // happen so test coverage can be added.
-      if (ResourceLoadTiming* final_timing =
-              final_response.GetResourceLoadTiming()) {
-        result->start_time = final_timing->RequestTime();
-      }
-    }
   } else {
     result->allow_redirect_details = false;
     result->last_redirect_end_time = base::TimeTicks();
   }
 
-  result->transfer_size = info.TransferSize();
+  result->cache_state = info.CacheState();
   result->encoded_body_size = final_response.EncodedBodyLength();
   result->decoded_body_size = final_response.DecodedBodyLength();
   result->did_reuse_connection = final_response.ConnectionReused();
-  result->is_secure_context =
-      SecurityOrigin::IsSecure(final_response.ResponseUrl());
+  // Use SecurityOrigin::Create to handle cases like blob:https://.
+  result->is_secure_transport = base::Contains(
+      url::GetSecureSchemes(),
+      SecurityOrigin::Create(final_response.ResponseUrl())->Protocol().Ascii());
   result->allow_negative_values = info.NegativeAllowed();
 
   if (result->allow_timing_details) {
@@ -585,17 +597,16 @@ mojom::blink::ResourceTimingInfoPtr Performance::GenerateResourceTiming(
                       WebFeature::kPerformanceServerTiming);
   }
 
+  result->render_blocking_status = info.RenderBlockingStatus();
+
   return result;
 }
 
-void Performance::AddResourceTiming(
-    mojom::blink::ResourceTimingInfoPtr info,
-    const AtomicString& initiator_type,
-    mojo::PendingReceiver<mojom::blink::WorkerTimingContainer>
-        worker_timing_receiver,
-    ExecutionContext* context) {
+void Performance::AddResourceTiming(mojom::blink::ResourceTimingInfoPtr info,
+                                    const AtomicString& initiator_type,
+                                    ExecutionContext* context) {
   auto* entry = MakeGarbageCollected<PerformanceResourceTiming>(
-      *info, time_origin_, initiator_type, std::move(worker_timing_receiver),
+      *info, time_origin_, cross_origin_isolated_capability_, initiator_type,
       context);
   NotifyObserversOfEntry(*entry);
   // https://w3c.github.io/resource-timing/#dfn-add-a-performanceresourcetiming-entry
@@ -604,12 +615,31 @@ void Performance::AddResourceTiming(
     resource_timing_buffer_.push_back(entry);
     return;
   }
+  // The Resource Timing entries have a special processing model in which there
+  // is a secondary buffer but getting those entries requires handling the
+  // buffer full event, and the PerformanceObserver with buffered flag only
+  // receives the entries from the primary buffer, so it's ok to increase
+  // the dropped entries count here.
+  ++(dropped_entries_count_map_.find(PerformanceEntry::kResource)->value);
   if (!resource_timing_buffer_full_event_pending_) {
     resource_timing_buffer_full_event_pending_ = true;
     resource_timing_buffer_full_timer_.StartOneShot(base::TimeDelta(),
                                                     FROM_HERE);
   }
   resource_timing_secondary_buffer_.push_back(entry);
+}
+
+void Performance::AddResourceTimingWithUnparsedServerTiming(
+    mojom::blink::ResourceTimingInfoPtr info,
+    const String& server_timing_value,
+    const AtomicString& initiator_type,
+    ExecutionContext* context) {
+  if (info->allow_timing_details) {
+    info->server_timing =
+        PerformanceServerTiming::ParseServerTimingFromHeaderValueToMojo(
+            server_timing_value);
+  }
+  AddResourceTiming(std::move(info), initiator_type, context);
 }
 
 // Called after loadEventEnd happens.
@@ -660,25 +690,37 @@ void Performance::FireResourceTimingBufferFull(TimerBase*) {
 void Performance::AddElementTimingBuffer(PerformanceElementTiming& entry) {
   if (!IsElementTimingBufferFull()) {
     element_timing_buffer_.push_back(&entry);
+  } else {
+    ++(dropped_entries_count_map_.find(PerformanceEntry::kElement)->value);
   }
 }
 
 void Performance::AddEventTimingBuffer(PerformanceEventTiming& entry) {
-  DCHECK(RuntimeEnabledFeatures::EventTimingEnabled(GetExecutionContext()));
   if (!IsEventTimingBufferFull()) {
     event_timing_buffer_.push_back(&entry);
+  } else {
+    ++(dropped_entries_count_map_.find(PerformanceEntry::kEvent)->value);
   }
 }
 
 void Performance::AddLayoutShiftBuffer(LayoutShift& entry) {
-  if (layout_shift_buffer_.size() < kDefaultLayoutShiftBufferSize)
+  probe::PerformanceEntryAdded(GetExecutionContext(), &entry);
+  if (layout_shift_buffer_.size() < kDefaultLayoutShiftBufferSize) {
     layout_shift_buffer_.push_back(&entry);
+  } else {
+    ++(dropped_entries_count_map_.find(PerformanceEntry::kLayoutShift)->value);
+  }
 }
 
 void Performance::AddLargestContentfulPaint(LargestContentfulPaint* entry) {
+  probe::PerformanceEntryAdded(GetExecutionContext(), entry);
   if (largest_contentful_paint_buffer_.size() <
       kDefaultLargestContenfulPaintSize) {
     largest_contentful_paint_buffer_.push_back(entry);
+  } else {
+    ++(dropped_entries_count_map_
+           .find(PerformanceEntry::kLargestContentfulPaint)
+           ->value);
   }
 }
 
@@ -694,7 +736,8 @@ void Performance::AddFirstContentfulPaintTiming(base::TimeTicks start_time) {
 void Performance::AddPaintTiming(PerformancePaintTiming::PaintType type,
                                  base::TimeTicks start_time) {
   PerformanceEntry* entry = MakeGarbageCollected<PerformancePaintTiming>(
-      type, MonotonicTimeToDOMHighResTimeStamp(start_time));
+      type, MonotonicTimeToDOMHighResTimeStamp(start_time),
+      PerformanceEntry::GetNavigationId(GetExecutionContext()));
   // Always buffer First Paint & First Contentful Paint.
   if (type == PerformancePaintTiming::PaintType::kFirstPaint)
     first_paint_timing_ = entry;
@@ -712,21 +755,51 @@ void Performance::AddLongTaskTiming(base::TimeTicks start_time,
                                     base::TimeTicks end_time,
                                     const AtomicString& name,
                                     const AtomicString& container_type,
-                                    const String& container_src,
-                                    const String& container_id,
-                                    const String& container_name) {
-  if (!HasObserverFor(PerformanceEntry::kLongTask))
-    return;
+                                    const AtomicString& container_src,
+                                    const AtomicString& container_id,
+                                    const AtomicString& container_name) {
+  double dom_high_res_start_time =
+      MonotonicTimeToDOMHighResTimeStamp(start_time);
 
-  UseCounter::Count(GetExecutionContext(), WebFeature::kLongTaskObserver);
+  ExecutionContext* execution_context = GetExecutionContext();
   auto* entry = MakeGarbageCollected<PerformanceLongTaskTiming>(
-      MonotonicTimeToDOMHighResTimeStamp(start_time),
-      MonotonicTimeToDOMHighResTimeStamp(end_time), name, container_type,
-      container_src, container_id, container_name);
+      dom_high_res_start_time,
+      // Convert the delta between start and end times to an int to reduce the
+      // granularity of the duration to 1 ms.
+      static_cast<int>(MonotonicTimeToDOMHighResTimeStamp(end_time) -
+                       dom_high_res_start_time),
+      name, container_type, container_src, container_id, container_name,
+      PerformanceEntry::GetNavigationId(execution_context));
   if (longtask_buffer_.size() < kDefaultLongTaskBufferSize) {
     longtask_buffer_.push_back(entry);
   } else {
-    UseCounter::Count(GetExecutionContext(), WebFeature::kLongTaskBufferFull);
+    ++(dropped_entries_count_map_.find(PerformanceEntry::kLongTask)->value);
+    UseCounter::Count(execution_context, WebFeature::kLongTaskBufferFull);
+  }
+  if ((++long_task_counter_ % kLongTaskUkmSampleInterval) == 0) {
+    RecordLongTaskUkm(execution_context,
+                      base::Milliseconds(dom_high_res_start_time),
+                      end_time - start_time);
+  }
+  NotifyObserversOfEntry(*entry);
+}
+
+void Performance::AddBackForwardCacheRestoration(
+    base::TimeTicks start_time,
+    base::TimeTicks pageshow_start_time,
+    base::TimeTicks pageshow_end_time) {
+  auto* entry = MakeGarbageCollected<BackForwardCacheRestoration>(
+      MonotonicTimeToDOMHighResTimeStamp(start_time),
+      MonotonicTimeToDOMHighResTimeStamp(pageshow_start_time),
+      MonotonicTimeToDOMHighResTimeStamp(pageshow_end_time),
+      PerformanceEntry::GetNavigationId(GetExecutionContext()));
+  if (back_forward_cache_restoration_buffer_.size() <
+      back_forward_cache_restoration_buffer_size_limit_) {
+    back_forward_cache_restoration_buffer_.push_back(entry);
+  } else {
+    ++(dropped_entries_count_map_
+           .find(PerformanceEntry::kBackForwardCacheRestoration)
+           ->value);
   }
   NotifyObserversOfEntry(*entry);
 }
@@ -741,6 +814,12 @@ PerformanceMark* Performance::mark(ScriptState* script_state,
                                    const AtomicString& mark_name,
                                    PerformanceMarkOptions* mark_options,
                                    ExceptionState& exception_state) {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(const AtomicString, mark_fully_loaded,
+                                  ("mark_fully_loaded"));
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(const AtomicString, mark_fully_visible,
+                                  ("mark_fully_visible"));
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(const AtomicString, mark_interactive,
+                                  ("mark_interactive"));
   if (mark_options &&
       (mark_options->hasStartTime() || mark_options->hasDetail())) {
     UseCounter::Count(GetExecutionContext(), WebFeature::kUserTimingL3);
@@ -748,7 +827,37 @@ PerformanceMark* Performance::mark(ScriptState* script_state,
   PerformanceMark* performance_mark = PerformanceMark::Create(
       script_state, mark_name, mark_options, exception_state);
   if (performance_mark) {
+    background_tracing_helper_->MaybeEmitBackgroundTracingPerformanceMarkEvent(
+        *performance_mark);
     GetUserTiming().AddMarkToPerformanceTimeline(*performance_mark);
+    if (mark_name == mark_fully_loaded) {
+      if (LocalDOMWindow* window = LocalDOMWindow::From(script_state)) {
+        window->GetFrame()
+            ->Loader()
+            .GetDocumentLoader()
+            ->GetTiming()
+            .SetUserTimingMarkFullyLoaded(
+                base::Milliseconds(performance_mark->startTime()));
+      }
+    } else if (mark_name == mark_fully_visible) {
+      if (LocalDOMWindow* window = LocalDOMWindow::From(script_state)) {
+        window->GetFrame()
+            ->Loader()
+            .GetDocumentLoader()
+            ->GetTiming()
+            .SetUserTimingMarkFullyVisible(
+                base::Milliseconds(performance_mark->startTime()));
+      }
+    } else if (mark_name == mark_interactive) {
+      if (LocalDOMWindow* window = LocalDOMWindow::From(script_state)) {
+        window->GetFrame()
+            ->Loader()
+            .GetDocumentLoader()
+            ->GetTiming()
+            .SetUserTimingMarkInteractive(
+                base::Milliseconds(performance_mark->startTime()));
+      }
+    }
     NotifyObserversOfEntry(*performance_mark);
   }
   return performance_mark;
@@ -763,30 +872,27 @@ PerformanceMeasure* Performance::measure(ScriptState* script_state,
                                          ExceptionState& exception_state) {
   // When |startOrOptions| is not provided, it's assumed to be an empty
   // dictionary.
-  return MeasureInternal(
-      script_state, measure_name,
-      StringOrPerformanceMeasureOptions::FromPerformanceMeasureOptions(
-          PerformanceMeasureOptions::Create()),
-      base::nullopt, exception_state);
+  return MeasureInternal(script_state, measure_name, nullptr, absl::nullopt,
+                         exception_state);
 }
 
 PerformanceMeasure* Performance::measure(
     ScriptState* script_state,
     const AtomicString& measure_name,
-    const StringOrPerformanceMeasureOptions& start_or_options,
+    const V8UnionPerformanceMeasureOptionsOrString* start_or_options,
     ExceptionState& exception_state) {
   return MeasureInternal(script_state, measure_name, start_or_options,
-                         base::nullopt, exception_state);
+                         absl::nullopt, exception_state);
 }
 
 PerformanceMeasure* Performance::measure(
     ScriptState* script_state,
     const AtomicString& measure_name,
-    const StringOrPerformanceMeasureOptions& start_or_options,
+    const V8UnionPerformanceMeasureOptionsOrString* start_or_options,
     const String& end,
     ExceptionState& exception_state) {
   return MeasureInternal(script_state, measure_name, start_or_options,
-                         base::Optional<String>(end), exception_state);
+                         absl::optional<String>(end), exception_state);
 }
 
 // |MeasureInternal| exists to unify the arguments from different
@@ -803,19 +909,18 @@ PerformanceMeasure* Performance::measure(
 //  - If an options dictionary contains neither a 'start' nor an 'end' field.
 //  - If an options dictionary contains all of 'start', 'duration' and 'end'.
 //
-// |end_mark| will be base::nullopt unless the `performance.measure()` overload
+// |end_mark| will be absl::nullopt unless the `performance.measure()` overload
 // specified an end mark.
 PerformanceMeasure* Performance::MeasureInternal(
     ScriptState* script_state,
     const AtomicString& measure_name,
-    const StringOrPerformanceMeasureOptions& start_or_options,
-    base::Optional<String> end_mark,
+    const V8UnionPerformanceMeasureOptionsOrString* start_or_options,
+    absl::optional<String> end_mark,
     ExceptionState& exception_state) {
-  DCHECK(!start_or_options.IsNull());
   // An empty option is treated with no difference as null, undefined.
-  if (start_or_options.IsPerformanceMeasureOptions() &&
+  if (start_or_options && start_or_options->IsPerformanceMeasureOptions() &&
       !IsMeasureOptionsEmpty(
-          *start_or_options.GetAsPerformanceMeasureOptions())) {
+          *start_or_options->GetAsPerformanceMeasureOptions())) {
     UseCounter::Count(GetExecutionContext(), WebFeature::kUserTimingL3);
     // measure("name", { start, end }, *)
     if (end_mark) {
@@ -825,7 +930,7 @@ PerformanceMeasure* Performance::MeasureInternal(
       return nullptr;
     }
     const PerformanceMeasureOptions* options =
-        start_or_options.GetAsPerformanceMeasureOptions();
+        start_or_options->GetAsPerformanceMeasureOptions();
     if (!options->hasStart() && !options->hasEnd()) {
       exception_state.ThrowTypeError(
           "If a non-empty PerformanceMeasureOptions object was passed, at "
@@ -841,18 +946,12 @@ PerformanceMeasure* Performance::MeasureInternal(
       return nullptr;
     }
 
-    base::Optional<StringOrDouble> start;
-    if (options->hasStart()) {
-      start = options->start();
-    }
-    base::Optional<double> duration;
+    V8UnionDoubleOrString* start = options->getStartOr(nullptr);
+    absl::optional<double> duration;
     if (options->hasDuration()) {
       duration = options->duration();
     }
-    base::Optional<StringOrDouble> end;
-    if (options->hasEnd()) {
-      end = options->end();
-    }
+    V8UnionDoubleOrString* end = options->getEndOr(nullptr);
 
     return MeasureWithDetail(
         script_state, measure_name, start, duration, end,
@@ -861,18 +960,19 @@ PerformanceMeasure* Performance::MeasureInternal(
   }
 
   // measure("name", "mark1", *)
-  base::Optional<StringOrDouble> start;
-  if (start_or_options.IsString()) {
-    start = StringOrDouble::FromString(start_or_options.GetAsString());
+  V8UnionDoubleOrString* start = nullptr;
+  if (start_or_options && start_or_options->IsString()) {
+    start = MakeGarbageCollected<V8UnionDoubleOrString>(
+        start_or_options->GetAsString());
   }
   // We let |end_mark| behave the same whether it's empty, undefined or null
   // in JS, as long as |end_mark| is null in C++.
-  base::Optional<StringOrDouble> end;
+  V8UnionDoubleOrString* end = nullptr;
   if (end_mark) {
-    end = StringOrDouble::FromString(*end_mark);
+    end = MakeGarbageCollected<V8UnionDoubleOrString>(*end_mark);
   }
   return MeasureWithDetail(script_state, measure_name, start,
-                           /* duration = */ base::nullopt, end,
+                           /* duration = */ absl::nullopt, end,
                            ScriptValue::CreateNull(script_state->GetIsolate()),
                            exception_state);
 }
@@ -880,9 +980,9 @@ PerformanceMeasure* Performance::MeasureInternal(
 PerformanceMeasure* Performance::MeasureWithDetail(
     ScriptState* script_state,
     const AtomicString& measure_name,
-    const base::Optional<StringOrDouble>& start,
-    const base::Optional<double>& duration,
-    const base::Optional<StringOrDouble>& end,
+    const V8UnionDoubleOrString* start,
+    const absl::optional<double>& duration,
+    const V8UnionDoubleOrString* end,
     const ScriptValue& detail,
     ExceptionState& exception_state) {
   PerformanceMeasure* performance_measure =
@@ -895,31 +995,6 @@ PerformanceMeasure* Performance::MeasureWithDetail(
 
 void Performance::clearMeasures(const AtomicString& measure_name) {
   GetUserTiming().ClearMeasures(measure_name);
-}
-
-ScriptPromise Performance::profile(ScriptState* script_state,
-                                   const ProfilerInitOptions* options,
-                                   ExceptionState& exception_state) {
-  DCHECK(RuntimeEnabledFeatures::ExperimentalJSProfilerEnabled(
-      ExecutionContext::From(script_state)));
-
-  // The JS Self-Profiling origin trial currently requires site isolation.
-  if (!Platform::Current()->IsLockedToSite()) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kNotSupportedError,
-        "performance.profile() requires site-per-process (crbug.com/956688)");
-    return ScriptPromise();
-  }
-
-  auto* profiler_group = ProfilerGroup::From(script_state->GetIsolate());
-  DCHECK(profiler_group);
-
-  auto* profiler = profiler_group->CreateProfiler(
-      script_state, *options, time_origin_, exception_state);
-  if (exception_state.HadException())
-    return ScriptPromise();
-
-  return ScriptPromise::Cast(script_state, ToV8(profiler, script_state));
 }
 
 void Performance::RegisterPerformanceObserver(PerformanceObserver& observer) {
@@ -941,8 +1016,6 @@ void Performance::UpdatePerformanceObserverFilterOptions() {
 }
 
 void Performance::NotifyObserversOfEntry(PerformanceEntry& entry) const {
-  DCHECK(entry.EntryTypeEnum() != PerformanceEntry::kEvent ||
-         RuntimeEnabledFeatures::EventTimingEnabled(GetExecutionContext()));
   bool observer_found = false;
   for (auto& observer : observers_) {
     if (observer->FilterOptions() & entry.EntryTypeEnum() &&
@@ -980,52 +1053,75 @@ void Performance::SuspendObserver(PerformanceObserver& observer) {
 void Performance::DeliverObservationsTimerFired(TimerBase*) {
   decltype(active_observers_) observers;
   active_observers_.Swap(observers);
-  for (const auto& observer : observers)
-    observer->Deliver();
+  for (const auto& observer : observers) {
+    observer->Deliver(observer->RequiresDroppedEntries()
+                          ? absl::optional<int>(GetDroppedEntriesForTypes(
+                                observer->FilterOptions()))
+                          : absl::nullopt);
+  }
+}
+
+int Performance::GetDroppedEntriesForTypes(PerformanceEntryTypeMask types) {
+  int dropped_count = 0;
+  for (const auto type : kDroppableEntryTypes) {
+    if (types & type)
+      dropped_count += dropped_entries_count_map_.at(type);
+  }
+  return dropped_count;
 }
 
 // static
-double Performance::ClampTimeResolution(double time_seconds) {
+DOMHighResTimeStamp Performance::ClampTimeResolution(
+    base::TimeDelta time,
+    bool cross_origin_isolated_capability) {
   DEFINE_THREAD_SAFE_STATIC_LOCAL(TimeClamper, clamper, ());
-  return clamper.ClampTimeResolution(time_seconds);
+  return clamper.ClampTimeResolution(time, cross_origin_isolated_capability)
+      .InMillisecondsF();
 }
 
 // static
 DOMHighResTimeStamp Performance::MonotonicTimeToDOMHighResTimeStamp(
     base::TimeTicks time_origin,
     base::TimeTicks monotonic_time,
-    bool allow_negative_value) {
+    bool allow_negative_value,
+    bool cross_origin_isolated_capability) {
   // Avoid exposing raw platform timestamps.
   if (monotonic_time.is_null() || time_origin.is_null())
     return 0.0;
 
-  double clamped_time_in_seconds =
-      ClampTimeResolution(monotonic_time.since_origin().InSecondsF()) -
-      ClampTimeResolution(time_origin.since_origin().InSecondsF());
-  if (clamped_time_in_seconds < 0 && !allow_negative_value)
+  DOMHighResTimeStamp clamped_time =
+      ClampTimeResolution(monotonic_time.since_origin(),
+                          cross_origin_isolated_capability) -
+      ClampTimeResolution(time_origin.since_origin(),
+                          cross_origin_isolated_capability);
+  if (clamped_time < 0 && !allow_negative_value)
     return 0.0;
-  return ConvertSecondsToDOMHighResTimeStamp(clamped_time_in_seconds);
+  return clamped_time;
 }
 
 // static
 base::TimeDelta Performance::MonotonicTimeToTimeDelta(
     base::TimeTicks time_origin,
     base::TimeTicks monotonic_time,
-    bool allow_negative_value) {
-  return base::TimeDelta::FromMillisecondsD(MonotonicTimeToDOMHighResTimeStamp(
-      time_origin, monotonic_time, allow_negative_value));
+    bool allow_negative_value,
+    bool cross_origin_isolated_capability) {
+  return base::Milliseconds(MonotonicTimeToDOMHighResTimeStamp(
+      time_origin, monotonic_time, allow_negative_value,
+      cross_origin_isolated_capability));
 }
 
 DOMHighResTimeStamp Performance::MonotonicTimeToDOMHighResTimeStamp(
     base::TimeTicks monotonic_time) const {
   return MonotonicTimeToDOMHighResTimeStamp(time_origin_, monotonic_time,
-                                            false /* allow_negative_value */);
+                                            false /* allow_negative_value */,
+                                            cross_origin_isolated_capability_);
 }
 
 base::TimeDelta Performance::MonotonicTimeToTimeDelta(
     base::TimeTicks monotonic_time) const {
   return MonotonicTimeToTimeDelta(time_origin_, monotonic_time,
-                                  false /* allow_negative_value */);
+                                  false /* allow_negative_value */,
+                                  cross_origin_isolated_capability_);
 }
 
 DOMHighResTimeStamp Performance::now() const {
@@ -1064,6 +1160,8 @@ void Performance::Trace(Visitor* visitor) const {
   visitor->Trace(layout_shift_buffer_);
   visitor->Trace(largest_contentful_paint_buffer_);
   visitor->Trace(longtask_buffer_);
+  visitor->Trace(visibility_state_buffer_);
+  visitor->Trace(back_forward_cache_restoration_buffer_);
   visitor->Trace(navigation_timing_);
   visitor->Trace(user_timing_);
   visitor->Trace(first_paint_timing_);
@@ -1072,16 +1170,14 @@ void Performance::Trace(Visitor* visitor) const {
   visitor->Trace(observers_);
   visitor->Trace(active_observers_);
   visitor->Trace(suspended_observers_);
+  visitor->Trace(deliver_observations_timer_);
+  visitor->Trace(resource_timing_buffer_full_timer_);
+  visitor->Trace(background_tracing_helper_);
   EventTargetWithInlineData::Trace(visitor);
 }
 
-void Performance::SetClocksForTesting(const base::Clock* clock,
-                                      const base::TickClock* tick_clock) {
+void Performance::SetTickClockForTesting(const base::TickClock* tick_clock) {
   tick_clock_ = tick_clock;
-  // Recompute |unix_at_zero_monotonic_|.
-  unix_at_zero_monotonic_ = ConvertSecondsToDOMHighResTimeStamp(
-      clock->Now().ToDoubleT() -
-      tick_clock_->NowTicks().since_origin().InSecondsF());
 }
 
 void Performance::ResetTimeOriginForTesting(base::TimeTicks time_origin) {

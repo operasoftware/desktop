@@ -4,7 +4,9 @@
 
 #include "third_party/blink/renderer/platform/loader/fetch/source_keyed_cached_metadata_handler.h"
 
-#include "base/bit_cast.h"
+#include <type_traits>
+
+#include "base/metrics/histogram_functions.h"
 #include "third_party/blink/renderer/platform/crypto.h"
 #include "third_party/blink/renderer/platform/loader/fetch/cached_metadata.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hasher.h"
@@ -26,31 +28,35 @@ class SourceKeyedCachedMetadataHandler::SingleKeyHandler final
   SingleKeyHandler(SourceKeyedCachedMetadataHandler* parent, Key key)
       : parent_(parent), key_(key) {}
 
-  void SetCachedMetadata(uint32_t data_type_id,
+  void SetCachedMetadata(CodeCacheHost* code_cache_host,
+                         uint32_t data_type_id,
                          const uint8_t* data,
                          size_t size) override {
     DCHECK(!parent_->cached_metadata_map_.Contains(key_));
     parent_->cached_metadata_map_.insert(
         key_, CachedMetadata::Create(data_type_id, data, size));
     if (!disable_send_to_platform_for_testing_)
-      parent_->SendToPlatform();
+      parent_->SendToPlatform(code_cache_host);
   }
 
-  void ClearCachedMetadata(ClearCacheType cache_type) override {
+  void ClearCachedMetadata(CodeCacheHost* code_cache_host,
+                           ClearCacheType cache_type) override {
     if (cache_type == kDiscardLocally)
       return;
     parent_->cached_metadata_map_.erase(key_);
     if (cache_type == CachedMetadataHandler::kClearPersistentStorage)
-      parent_->SendToPlatform();
+      parent_->SendToPlatform(code_cache_host);
   }
 
   scoped_refptr<CachedMetadata> GetCachedMetadata(
-      uint32_t data_type_id) const override {
-    scoped_refptr<CachedMetadata> cached_metadata =
-        parent_->cached_metadata_map_.at(key_);
-    if (!cached_metadata || cached_metadata->DataTypeID() != data_type_id)
+      uint32_t data_type_id,
+      GetCachedMetadataBehavior behavior = kCrashIfUnchecked) const override {
+    const auto it = parent_->cached_metadata_map_.find(key_);
+    if (it == parent_->cached_metadata_map_.end() ||
+        it->value->DataTypeID() != data_type_id) {
       return nullptr;
-    return cached_metadata;
+    }
+    return it->value;
   }
 
   String Encoding() const override { return parent_->Encoding(); }
@@ -69,23 +75,15 @@ class SourceKeyedCachedMetadataHandler::SingleKeyHandler final
     return 0;
   }
 
+  void DidUseCodeCache() override { parent_->did_use_code_cache_ = true; }
+
+  void WillProduceCodeCache() override {
+    parent_->will_generate_code_cache_ = true;
+  }
+
  private:
   Member<SourceKeyedCachedMetadataHandler> parent_;
   Key key_;
-};
-
-class SourceKeyedCachedMetadataHandler::KeyHash {
-  STATIC_ONLY(KeyHash);
-
- public:
-  static unsigned GetHash(const Key& key) {
-    return StringHasher::ComputeHash(key.data(),
-                                     static_cast<uint32_t>(key.size()));
-  }
-
-  static bool Equal(const Key& a, const Key& b) { return a == b; }
-
-  static const bool safe_to_compare_to_empty_or_deleted = true;
 };
 
 SingleCachedMetadataHandler* SourceKeyedCachedMetadataHandler::HandlerForSource(
@@ -105,12 +103,13 @@ SingleCachedMetadataHandler* SourceKeyedCachedMetadataHandler::HandlerForSource(
 }
 
 void SourceKeyedCachedMetadataHandler::ClearCachedMetadata(
+    CodeCacheHost* code_cache_host,
     CachedMetadataHandler::ClearCacheType cache_type) {
   if (cache_type == kDiscardLocally)
     return;
   cached_metadata_map_.clear();
   if (cache_type == CachedMetadataHandler::kClearPersistentStorage)
-    SendToPlatform();
+    SendToPlatform(code_cache_host);
 }
 
 String SourceKeyedCachedMetadataHandler::Encoding() const {
@@ -153,8 +152,7 @@ namespace {
 // but without the risk of undefined behaviour.
 template <typename T>
 T ReadVal(const uint8_t* data) {
-  static_assert(base::is_trivially_copyable<T>::value,
-                "ReadVal requires the value type to be copyable");
+  static_assert(std::is_trivially_copyable_v<T>);
   T ret;
   memcpy(&ret, data, sizeof(T));
   return ret;
@@ -163,13 +161,11 @@ T ReadVal(const uint8_t* data) {
 
 void SourceKeyedCachedMetadataHandler::SetSerializedCachedMetadata(
     mojo_base::BigBuffer data_buffer) {
+  // NOTE: Loading of the cache is async. This may be invoked after state has
+  // been set.
+
   const uint8_t* data = data_buffer.data();
   size_t size = data_buffer.size();
-
-  // We only expect to receive cached metadata from the platform once. If this
-  // triggers, it indicates an efficiency problem which is most likely
-  // unexpected in code designed to improve performance.
-  DCHECK(cached_metadata_map_.IsEmpty());
 
   // Ensure we have a marker.
   if (size < sizeof(uint32_t))
@@ -190,10 +186,14 @@ void SourceKeyedCachedMetadataHandler::SetSerializedCachedMetadata(
   data += sizeof(int);
   size -= sizeof(int);
 
+  // Make a copy of existing entries. Only add ones from `data_buffer` that
+  // do not already existed. If the data is successfully processed, the map
+  // is swapped at the end.
+  CachedMetadataMap result = cached_metadata_map_;
+
   for (int i = 0; i < num_entries; ++i) {
     // Ensure we have an entry key and size.
     if (size < kKeySize + sizeof(size_t)) {
-      cached_metadata_map_.clear();
       return;
     }
 
@@ -207,14 +207,17 @@ void SourceKeyedCachedMetadataHandler::SetSerializedCachedMetadata(
 
     // Ensure we have enough data for this entry.
     if (size < entry_size) {
-      cached_metadata_map_.clear();
       return;
     }
 
-    if (scoped_refptr<CachedMetadata> deserialized_entry =
-            CachedMetadata::CreateFromSerializedData(data, entry_size)) {
-      // Only insert the deserialized entry if it deserialized correctly.
-      cached_metadata_map_.insert(key, std::move(deserialized_entry));
+    if (!result.Contains(key)) {
+      if (scoped_refptr<CachedMetadata> deserialized_entry =
+              CachedMetadata::CreateFromSerializedData(data, entry_size)) {
+        // Only insert the deserialized entry if it deserialized correctly and
+        // it isn't already present (because loading is async, the key may have
+        // already been inserted).
+        result.insert(key, std::move(deserialized_entry));
+      }
     }
     data += entry_size;
     size -= entry_size;
@@ -222,16 +225,26 @@ void SourceKeyedCachedMetadataHandler::SetSerializedCachedMetadata(
 
   // Ensure we have no more data.
   if (size > 0) {
-    cached_metadata_map_.clear();
+    return;
   }
+
+  std::swap(result, cached_metadata_map_);
 }
 
-void SourceKeyedCachedMetadataHandler::SendToPlatform() {
+void SourceKeyedCachedMetadataHandler::LogUsageMetrics() {
+  base::UmaHistogramBoolean("V8.InlineCodeCache.UsedPreviouslyGeneratedCache",
+                            did_use_code_cache_);
+  base::UmaHistogramBoolean("V8.InlineCodeCache.WillGenerateCache",
+                            will_generate_code_cache_);
+}
+
+void SourceKeyedCachedMetadataHandler::SendToPlatform(
+    CodeCacheHost* code_cache_host) {
   if (!sender_)
     return;
 
   if (cached_metadata_map_.IsEmpty()) {
-    sender_->Send(nullptr, 0);
+    sender_->Send(code_cache_host, nullptr, 0);
   } else {
     Vector<uint8_t> serialized_data;
     uint32_t marker = CachedMetadataHandler::kSourceKeyedMap;
@@ -244,10 +257,12 @@ void SourceKeyedCachedMetadataHandler::SendToPlatform() {
       base::span<const uint8_t> data = metadata.value->SerializedData();
       size_t entry_size = data.size();
       serialized_data.Append(reinterpret_cast<const uint8_t*>(&entry_size),
-                             sizeof(entry_size));
-      serialized_data.Append(data.data(), data.size());
+                             static_cast<wtf_size_t>(sizeof(entry_size)));
+      serialized_data.Append(data.data(),
+                             base::checked_cast<wtf_size_t>(data.size()));
     }
-    sender_->Send(serialized_data.data(), serialized_data.size());
+    sender_->Send(code_cache_host, serialized_data.data(),
+                  serialized_data.size());
   }
 }
 

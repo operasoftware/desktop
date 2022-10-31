@@ -6,22 +6,26 @@
 
 #include <memory>
 
+#include "base/auto_reset.h"
 #include "base/metrics/histogram_macros.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy_feature.mojom-blink.h"
-#include "third_party/blink/public/mojom/feature_policy/policy_value.mojom-blink.h"
+#include "third_party/blink/public/common/permissions_policy/policy_value.h"
+#include "third_party/blink/public/mojom/permissions_policy/document_policy_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/policy_value.mojom-blink.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_info.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_observer.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
-#include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/bitmap_image.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
 #include "third_party/blink/renderer/platform/network/mime/mime_type_registry.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "ui/gfx/geometry/size.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -31,8 +35,6 @@ namespace {
 class NullImageResourceInfo final
     : public GarbageCollected<NullImageResourceInfo>,
       public ImageResourceInfo {
-  USING_GARBAGE_COLLECTED_MIXIN(NullImageResourceInfo);
-
  public:
   NullImageResourceInfo() = default;
 
@@ -50,8 +52,8 @@ class NullImageResourceInfo final
     return true;
   }
   bool HasCacheControlNoStoreHeader() const override { return false; }
-  base::Optional<ResourceError> GetResourceError() const override {
-    return base::nullopt;
+  absl::optional<ResourceError> GetResourceError() const override {
+    return absl::nullopt;
   }
 
   void SetDecodedSize(size_t) override {}
@@ -65,6 +67,10 @@ class NullImageResourceInfo final
   void LoadDeferredImage(ResourceFetcher* fetcher) override {}
 
   bool IsAdResource() const override { return false; }
+
+  const HashSet<String>* GetUnsupportedImageMimeTypes() const override {
+    return nullptr;
+  }
 
   const KURL url_;
   const ResourceResponse response_;
@@ -107,7 +113,10 @@ void ImageResourceContent::SetImageResourceInfo(ImageResourceInfo* info) {
 
 void ImageResourceContent::Trace(Visitor* visitor) const {
   visitor->Trace(info_);
+  visitor->Trace(observers_);
+  visitor->Trace(finished_observers_);
   ImageObserver::Trace(visitor);
+  MediaTiming::Trace(visitor);
 }
 
 void ImageResourceContent::HandleObserverFinished(
@@ -143,7 +152,7 @@ void ImageResourceContent::AddObserver(ImageResourceObserver* observer) {
     observer->ImageChanged(this, CanDeferInvalidation::kNo);
   }
 
-  if (IsLoaded() && observers_.Contains(observer))
+  if (IsSufficientContentLoadedForPaint() && observers_.Contains(observer))
     HandleObserverFinished(observer);
 }
 
@@ -162,9 +171,13 @@ void ImageResourceContent::RemoveObserver(ImageResourceObserver* observer) {
     DCHECK(it != finished_observers_.end());
     fully_erased = finished_observers_.erase(it);
   }
-  info_->DidRemoveClientOrObserver();
+  DidRemoveObserver();
   if (fully_erased)
     observer->NotifyImageFullyRemoved(this);
+}
+
+void ImageResourceContent::DidRemoveObserver() {
+  info_->DidRemoveClientOrObserver();
 }
 
 static void PriorityFromObserver(const ImageResourceObserver* observer,
@@ -222,38 +235,47 @@ blink::Image* ImageResourceContent::GetImage() const {
   return image_.get();
 }
 
-IntSize ImageResourceContent::IntrinsicSize(
+gfx::Size ImageResourceContent::IntrinsicSize(
     RespectImageOrientationEnum should_respect_image_orientation) const {
   if (!image_)
-    return IntSize();
-  return image_->Size(should_respect_image_orientation);
+    return gfx::Size();
+  RespectImageOrientationEnum respect_orientation =
+      ForceOrientationIfNecessary(should_respect_image_orientation);
+  return image_->Size(respect_orientation);
+}
+
+RespectImageOrientationEnum ImageResourceContent::ForceOrientationIfNecessary(
+    RespectImageOrientationEnum default_orientation) const {
+  if (image_ && image_->IsBitmapImage() && !IsAccessAllowed())
+    return kRespectImageOrientation;
+  return default_orientation;
 }
 
 void ImageResourceContent::NotifyObservers(
     NotifyFinishOption notifying_finish_option,
     CanDeferInvalidation defer) {
   {
-    Vector<ImageResourceObserver*> finished_observers_as_vector;
+    HeapVector<Member<ImageResourceObserver>> finished_observers_as_vector;
     {
       ProhibitAddRemoveObserverInScope prohibit_add_remove_observer_in_scope(
           this);
-      finished_observers_as_vector = finished_observers_.AsVector();
+      CopyToVector(finished_observers_, finished_observers_as_vector);
     }
 
-    for (auto* observer : finished_observers_as_vector) {
+    for (ImageResourceObserver* observer : finished_observers_as_vector) {
       if (finished_observers_.Contains(observer))
         observer->ImageChanged(this, defer);
     }
   }
   {
-    Vector<ImageResourceObserver*> observers_as_vector;
+    HeapVector<Member<ImageResourceObserver>> observers_as_vector;
     {
       ProhibitAddRemoveObserverInScope prohibit_add_remove_observer_in_scope(
           this);
-      observers_as_vector = observers_.AsVector();
+      CopyToVector(observers_, observers_as_vector);
     }
 
-    for (auto* observer : observers_as_vector) {
+    for (ImageResourceObserver* observer : observers_as_vector) {
       if (observers_.Contains(observer)) {
         observer->ImageChanged(this, defer);
         if (notifying_finish_option == kShouldNotifyFinish &&
@@ -287,7 +309,7 @@ scoped_refptr<Image> ImageResourceContent::CreateImage(bool is_multipart) {
 void ImageResourceContent::ClearImage() {
   if (!image_)
     return;
-  int64_t length = image_->Data() ? image_->Data()->size() : 0;
+  int64_t length = image_->HasData() ? image_->DataSize() : 0;
   v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(-length);
 
   // If our Image has an observer, it's always us so we need to clear the back
@@ -409,6 +431,16 @@ ImageResourceContent::UpdateImageResult ImageResourceContent::UpdateImage(
       if (size_available_ == Image::kSizeUnavailable && !all_data_received)
         return UpdateImageResult::kNoDecodeError;
 
+      if (image_ && info_->GetUnsupportedImageMimeTypes()) {
+        // Filename extension is set by the image decoder based on the actual
+        // image content.
+        String file_extension = image_->FilenameExtension();
+        if (info_->GetUnsupportedImageMimeTypes()->Contains(
+                String("image/" + file_extension))) {
+          return UpdateImageResult::kShouldDecodeError;
+        }
+      }
+
       // As per spec, zero intrinsic size SVG is a valid image so do not
       // consider such an image as DecodeError.
       // https://www.w3.org/TR/SVG/struct.html#SVGElementWidthAttribute
@@ -454,50 +486,64 @@ ImageDecoder::CompressionFormat ImageResourceContent::GetCompressionFormat()
                                             GetResponse().HttpContentType());
 }
 
+uint64_t ImageResourceContent::ContentSizeForEntropy() const {
+  int64_t resource_length = GetResponse().ExpectedContentLength();
+  if (resource_length <= 0) {
+    if (image_ && image_->HasData()) {
+      // WPT and LayoutTests server returns -1 or 0 for the content length.
+      resource_length = image_->DataSize();
+    } else {
+      resource_length = 0;
+    }
+  }
+  return resource_length;
+}
+
 bool ImageResourceContent::IsAcceptableCompressionRatio(
     ExecutionContext& context) {
   if (!image_)
     return true;
 
-  uint64_t pixels = image_->Size().Area();
+  uint64_t pixels = image_->Size().Area64();
   if (!pixels)
     return true;
-
-  double resource_length =
-      static_cast<double>(GetResponse().ExpectedContentLength());
-  if (resource_length <= 0 && image_->Data()) {
-    // WPT and LayoutTests server returns -1 or 0 for the content length.
-    resource_length = static_cast<double>(image_->Data()->size());
-  }
 
   // Calculate the image's compression ratio (in bytes per pixel) with both 1k
   // and 10k overhead. The constant overhead allowance is provided to allow room
   // for headers and to account for small images (which are harder to compress).
-  double compression_ratio_1k = (resource_length - 1024) / pixels;
-  double compression_ratio_10k = (resource_length - 10240) / pixels;
+  double raw_bpp = static_cast<double>(ContentSizeForEntropy()) / pixels;
+  double compression_ratio_1k = raw_bpp - (1024 / pixels);
+  double compression_ratio_10k = raw_bpp - (10240 / pixels);
 
   ImageDecoder::CompressionFormat compression_format = GetCompressionFormat();
 
   // Pass image url to reporting API.
   const String& image_url = Url().GetString();
 
+  const char* message_format =
+      "Image bpp (byte per pixel) exceeds max value set in %s.";
+
   if (compression_format == ImageDecoder::kLossyFormat) {
     // Enforce the lossy image policy.
     return context.IsFeatureEnabled(
-        mojom::blink::DocumentPolicyFeature::kUnoptimizedLossyImages,
-        PolicyValue(compression_ratio_1k), ReportOptions::kReportOnFailure,
-        g_empty_string, image_url);
+        mojom::blink::DocumentPolicyFeature::kLossyImagesMaxBpp,
+        PolicyValue::CreateDecDouble(compression_ratio_1k),
+        ReportOptions::kReportOnFailure,
+        String::Format(message_format, "lossy-images-max-bpp"), image_url);
   }
   if (compression_format == ImageDecoder::kLosslessFormat) {
     // Enforce the lossless image policy.
     bool enabled_by_10k_policy = context.IsFeatureEnabled(
-        mojom::blink::DocumentPolicyFeature::kUnoptimizedLosslessImages,
-        PolicyValue(compression_ratio_10k), ReportOptions::kReportOnFailure,
-        g_empty_string, image_url);
+        mojom::blink::DocumentPolicyFeature::kLosslessImagesMaxBpp,
+        PolicyValue::CreateDecDouble(compression_ratio_10k),
+        ReportOptions::kReportOnFailure,
+        String::Format(message_format, "lossless-images-max-bpp"), image_url);
     bool enabled_by_1k_policy = context.IsFeatureEnabled(
-        mojom::blink::DocumentPolicyFeature::kUnoptimizedLosslessImagesStrict,
-        PolicyValue(compression_ratio_1k), ReportOptions::kReportOnFailure,
-        g_empty_string, image_url);
+        mojom::blink::DocumentPolicyFeature::kLosslessImagesStrictMaxBpp,
+        PolicyValue::CreateDecDouble(compression_ratio_1k),
+        ReportOptions::kReportOnFailure,
+        String::Format(message_format, "lossless-images-strict-max-bpp"),
+        image_url);
     return enabled_by_10k_policy && enabled_by_1k_policy;
   }
 
@@ -535,7 +581,8 @@ void ImageResourceContent::UpdateImageAnimationPolicy() {
   if (!image_)
     return;
 
-  ImageAnimationPolicy new_policy = kImageAnimationPolicyAllowed;
+  mojom::blink::ImageAnimationPolicy new_policy =
+      mojom::blink::ImageAnimationPolicy::kImageAnimationPolicyAllowed;
   {
     ProhibitAddRemoveObserverInScope prohibit_add_remove_observer_in_scope(
         this);
@@ -558,7 +605,7 @@ void ImageResourceContent::Changed(const blink::Image* image) {
   NotifyObservers(kDoNotNotifyFinish, CanDeferInvalidation::kYes);
 }
 
-bool ImageResourceContent::IsAccessAllowed() {
+bool ImageResourceContent::IsAccessAllowed() const {
   return info_->IsAccessAllowed(
       GetImage()->CurrentFrameHasSingleSecurityOrigin()
           ? ImageResourceInfo::kHasSingleSecurityOrigin
@@ -570,6 +617,10 @@ void ImageResourceContent::EmulateLoadStartedForInspector(
     const KURL& url,
     const AtomicString& initiator_name) {
   info_->EmulateLoadStartedForInspector(fetcher, url, initiator_name);
+}
+
+bool ImageResourceContent::IsSufficientContentLoadedForPaint() const {
+  return IsLoaded();
 }
 
 bool ImageResourceContent::IsLoaded() const {
@@ -593,7 +644,19 @@ ResourceStatus ImageResourceContent::GetContentStatus() const {
   return content_status_;
 }
 
-// TODO(hiroshige): Consider removing the following methods, or stoping
+bool ImageResourceContent::IsAnimatedImage() const {
+  return image_ && !image_->IsNull() && image_->MaybeAnimated();
+}
+
+bool ImageResourceContent::IsPaintedFirstFrame() const {
+  return IsAnimatedImage() && image_->CurrentFrameIsComplete();
+}
+
+bool ImageResourceContent::TimingAllowPassed() const {
+  return GetResponse().TimingAllowPassed();
+}
+
+// TODO(hiroshige): Consider removing the following methods, or stopping
 // redirecting to ImageResource.
 const KURL& ImageResourceContent::Url() const {
   return info_->Url();
@@ -619,7 +682,7 @@ const ResourceResponse& ImageResourceContent::GetResponse() const {
   return info_->GetResponse();
 }
 
-base::Optional<ResourceError> ImageResourceContent::GetResourceError() const {
+absl::optional<ResourceError> ImageResourceContent::GetResourceError() const {
   return info_->GetResourceError();
 }
 
@@ -633,6 +696,11 @@ void ImageResourceContent::LoadDeferredImage(ResourceFetcher* fetcher) {
 
 bool ImageResourceContent::IsAdResource() const {
   return info_->IsAdResource();
+}
+
+void ImageResourceContent::RecordDecodedImageType(UseCounter* use_counter) {
+  if (auto* bitmap_image = DynamicTo<BitmapImage>(image_.get()))
+    bitmap_image->RecordDecodedImageType(use_counter);
 }
 
 }  // namespace blink

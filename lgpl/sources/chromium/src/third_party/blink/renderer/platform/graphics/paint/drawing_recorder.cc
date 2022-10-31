@@ -5,31 +5,20 @@
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
-#if DCHECK_IS_ON()
-static bool g_list_modification_check_disabled = false;
-DisableListModificationCheck::DisableListModificationCheck()
-    : disabler_(&g_list_modification_check_disabled, true) {}
-#endif
-
 DrawingRecorder::DrawingRecorder(GraphicsContext& context,
                                  const DisplayItemClient& display_item_client,
-                                 DisplayItem::Type display_item_type)
+                                 DisplayItem::Type display_item_type,
+                                 const gfx::Rect& visual_rect)
     : context_(context),
       client_(display_item_client),
-      type_(display_item_type)
-#if DCHECK_IS_ON()
-      ,
-      initial_display_item_list_size_(
-          context_.GetPaintController().NewDisplayItemList().size())
-#endif
-{
+      type_(display_item_type),
+      visual_rect_(visual_rect) {
   // Must check DrawingRecorder::UseCachedDrawingIfPossible before creating the
   // DrawingRecorder.
   DCHECK(RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled() ||
@@ -39,9 +28,9 @@ DrawingRecorder::DrawingRecorder(GraphicsContext& context,
   DCHECK(DisplayItem::IsDrawingType(display_item_type));
 
   context.SetInDrawingRecorder(true);
-  context.BeginRecording(FloatRect());
+  context.BeginRecording(gfx::RectF());
 
-  if (context.Printing()) {
+  if (context.NeedsDOMNodeId()) {
     DOMNodeId dom_node_id = display_item_client.OwnerNodeId();
     if (dom_node_id != kInvalidDOMNodeId) {
       dom_node_id_to_restore_ = context.GetDOMNodeId();
@@ -51,20 +40,15 @@ DrawingRecorder::DrawingRecorder(GraphicsContext& context,
 }
 
 DrawingRecorder::~DrawingRecorder() {
-  if (context_.Printing() && dom_node_id_to_restore_)
+  if (dom_node_id_to_restore_)
     context_.SetDOMNodeId(dom_node_id_to_restore_.value());
 
   context_.SetInDrawingRecorder(false);
 
-#if DCHECK_IS_ON()
-  if (!g_list_modification_check_disabled) {
-    DCHECK(initial_display_item_list_size_ ==
-           context_.GetPaintController().NewDisplayItemList().size());
-  }
-#endif
-
   context_.GetPaintController().CreateAndAppend<DrawingDisplayItem>(
-      client_, type_, context_.EndRecording());
+      client_, type_, visual_rect_, context_.EndRecording(),
+      client_.VisualRectOutsetForRasterEffects(),
+      client_.GetPaintInvalidationReason());
 }
 
 }  // namespace blink

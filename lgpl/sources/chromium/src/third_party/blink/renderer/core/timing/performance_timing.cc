@@ -39,7 +39,6 @@
 #include "third_party/blink/renderer/core/inspector/identifiers_factory.h"
 #include "third_party/blink/renderer/core/loader/document_load_timing.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
-#include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/loader/interactive_detector.h"
 #include "third_party/blink/renderer/core/paint/image_paint_timing_detector.h"
 #include "third_party/blink/renderer/core/paint/paint_timing.h"
@@ -52,18 +51,21 @@
 // Legacy support for NT1(https://www.w3.org/TR/navigation-timing/).
 namespace blink {
 
-static uint64_t ToIntegerMilliseconds(base::TimeDelta duration) {
+static uint64_t ToIntegerMilliseconds(base::TimeDelta duration,
+                                      bool cross_origin_isolated_capability) {
   // TODO(npm): add histograms to understand when/why |duration| is sometimes
   // negative.
   // TODO(crbug.com/1063989): stop clamping when it is not needed (i.e. for
   // methods which do not expose the timestamp to a web perf API).
-  double clamped_seconds =
-      Performance::ClampTimeResolution(duration.InSecondsF());
-  return static_cast<uint64_t>(clamped_seconds * 1000.0);
+  return static_cast<uint64_t>(Performance::ClampTimeResolution(
+      duration, cross_origin_isolated_capability));
 }
 
-PerformanceTiming::PerformanceTiming(LocalFrame* frame)
-    : ExecutionContextClient(frame) {}
+PerformanceTiming::PerformanceTiming(ExecutionContext* context)
+    : ExecutionContextClient(context) {
+  cross_origin_isolated_capability_ =
+      context && context->CrossOriginIsolatedCapability();
+}
 
 uint64_t PerformanceTiming::navigationStart() const {
   DocumentLoadTiming* timing = GetDocumentLoadTiming();
@@ -87,7 +89,7 @@ uint64_t PerformanceTiming::unloadEventStart() const {
     return 0;
 
   if (timing->HasCrossOriginRedirect() ||
-      !timing->HasSameOriginAsPreviousDocument())
+      !timing->CanRequestFromPreviousDocument())
     return 0;
 
   return MonotonicTimeToIntegerMilliseconds(timing->UnloadEventStart());
@@ -99,7 +101,7 @@ uint64_t PerformanceTiming::unloadEventEnd() const {
     return 0;
 
   if (timing->HasCrossOriginRedirect() ||
-      !timing->HasSameOriginAsPreviousDocument())
+      !timing->CanRequestFromPreviousDocument())
     return 0;
 
   return MonotonicTimeToIntegerMilliseconds(timing->UnloadEventEnd());
@@ -339,18 +341,29 @@ PerformanceTiming::BackForwardCacheRestore() const {
       load_timing->BackForwardCacheRestoreNavigationStarts();
   WTF::Vector<base::TimeTicks> first_paints =
       paint_timing->FirstPaintsAfterBackForwardCacheRestore();
-  WTF::Vector<base::Optional<base::TimeDelta>> first_input_delays =
+  WTF::Vector<std::array<
+      base::TimeTicks,
+      WebPerformance::
+          kRequestAnimationFramesToRecordAfterBackForwardCacheRestore>>
+      request_animation_frames =
+          paint_timing->RequestAnimationFramesAfterBackForwardCacheRestore();
+  WTF::Vector<absl::optional<base::TimeDelta>> first_input_delays =
       interactive_detector->GetFirstInputDelaysAfterBackForwardCacheRestore();
   DCHECK_EQ(navigation_starts.size(), first_paints.size());
+  DCHECK_EQ(navigation_starts.size(), request_animation_frames.size());
   DCHECK_EQ(navigation_starts.size(), first_input_delays.size());
 
   WTF::Vector<BackForwardCacheRestoreTiming> restore_timings(
       navigation_starts.size());
-  for (size_t i = 0; i < restore_timings.size(); i++) {
+  for (wtf_size_t i = 0; i < restore_timings.size(); i++) {
     restore_timings[i].navigation_start =
         MonotonicTimeToIntegerMilliseconds(navigation_starts[i]);
     restore_timings[i].first_paint =
         MonotonicTimeToIntegerMilliseconds(first_paints[i]);
+    for (wtf_size_t j = 0; j < request_animation_frames[i].size(); j++) {
+      restore_timings[i].request_animation_frames[j] =
+          MonotonicTimeToIntegerMilliseconds(request_animation_frames[i][j]);
+    }
     restore_timings[i].first_input_delay = first_input_delays[i];
   }
   return restore_timings;
@@ -378,6 +391,16 @@ uint64_t PerformanceTiming::FirstContentfulPaint() const {
     return 0;
 
   return MonotonicTimeToIntegerMilliseconds(timing->FirstContentfulPaint());
+}
+
+base::TimeTicks
+PerformanceTiming::FirstContentfulPaintRenderedButNotPresentedAsMonotonicTime()
+    const {
+  const PaintTiming* timing = GetPaintTiming();
+  if (!timing)
+    return base::TimeTicks();
+
+  return timing->FirstContentfulPaintRenderedButNotPresentedAsMonotonicTime();
 }
 
 base::TimeTicks PerformanceTiming::FirstContentfulPaintAsMonotonicTime() const {
@@ -422,6 +445,24 @@ uint64_t PerformanceTiming::LargestImagePaintSize() const {
   return paint_timing_detector->LargestImagePaintSize();
 }
 
+blink::LargestContentfulPaintType
+PerformanceTiming::LargestContentfulPaintType() const {
+  PaintTimingDetector* paint_timing_detector = GetPaintTimingDetector();
+  // TODO(iclelland) Add a test for this condition
+  if (!paint_timing_detector) {
+    return blink::LargestContentfulPaintType::kNone;
+  }
+  return paint_timing_detector->LargestContentfulPaintType();
+}
+
+double PerformanceTiming::LargestContentfulPaintImageBPP() const {
+  PaintTimingDetector* paint_timing_detector = GetPaintTimingDetector();
+  if (!paint_timing_detector) {
+    return 0.0;
+  }
+  return paint_timing_detector->LargestContentfulPaintImageBPP();
+}
+
 uint64_t PerformanceTiming::LargestTextPaint() const {
   PaintTimingDetector* paint_timing_detector = GetPaintTimingDetector();
   if (!paint_timing_detector)
@@ -439,38 +480,13 @@ uint64_t PerformanceTiming::LargestTextPaintSize() const {
   return paint_timing_detector->LargestTextPaintSize();
 }
 
-uint64_t PerformanceTiming::ExperimentalLargestImagePaint() const {
+base::TimeTicks PerformanceTiming::LargestContentfulPaintAsMonotonicTime()
+    const {
   PaintTimingDetector* paint_timing_detector = GetPaintTimingDetector();
   if (!paint_timing_detector)
-    return 0;
+    return base::TimeTicks();
 
-  return MonotonicTimeToIntegerMilliseconds(
-      paint_timing_detector->ExperimentalLargestImagePaint());
-}
-
-uint64_t PerformanceTiming::ExperimentalLargestImagePaintSize() const {
-  PaintTimingDetector* paint_timing_detector = GetPaintTimingDetector();
-  if (!paint_timing_detector)
-    return 0;
-
-  return paint_timing_detector->ExperimentalLargestImagePaintSize();
-}
-
-uint64_t PerformanceTiming::ExperimentalLargestTextPaint() const {
-  PaintTimingDetector* paint_timing_detector = GetPaintTimingDetector();
-  if (!paint_timing_detector)
-    return 0;
-
-  return MonotonicTimeToIntegerMilliseconds(
-      paint_timing_detector->ExperimentalLargestTextPaint());
-}
-
-uint64_t PerformanceTiming::ExperimentalLargestTextPaintSize() const {
-  PaintTimingDetector* paint_timing_detector = GetPaintTimingDetector();
-  if (!paint_timing_detector)
-    return 0;
-
-  return paint_timing_detector->ExperimentalLargestTextPaintSize();
+  return paint_timing_detector->LargestContentfulPaint();
 }
 
 uint64_t PerformanceTiming::FirstEligibleToPaint() const {
@@ -490,63 +506,72 @@ uint64_t PerformanceTiming::FirstInputOrScrollNotifiedTimestamp() const {
       paint_timing_detector->FirstInputOrScrollNotifiedTimestamp());
 }
 
-base::Optional<base::TimeDelta> PerformanceTiming::FirstInputDelay() const {
+absl::optional<base::TimeDelta> PerformanceTiming::FirstInputDelay() const {
   const InteractiveDetector* interactive_detector = GetInteractiveDetector();
   if (!interactive_detector)
-    return base::nullopt;
+    return absl::nullopt;
 
   return interactive_detector->GetFirstInputDelay();
 }
 
-base::Optional<base::TimeDelta> PerformanceTiming::FirstInputTimestamp() const {
+absl::optional<base::TimeDelta> PerformanceTiming::FirstInputTimestamp() const {
   const InteractiveDetector* interactive_detector = GetInteractiveDetector();
   if (!interactive_detector)
-    return base::nullopt;
+    return absl::nullopt;
 
   return MonotonicTimeToPseudoWallTime(
       interactive_detector->GetFirstInputTimestamp());
 }
 
-base::Optional<base::TimeDelta> PerformanceTiming::LongestInputDelay() const {
+absl::optional<base::TimeTicks>
+PerformanceTiming::FirstInputTimestampAsMonotonicTime() const {
   const InteractiveDetector* interactive_detector = GetInteractiveDetector();
   if (!interactive_detector)
-    return base::nullopt;
+    return absl::nullopt;
+
+  return interactive_detector->GetFirstInputTimestamp();
+}
+
+absl::optional<base::TimeDelta> PerformanceTiming::LongestInputDelay() const {
+  const InteractiveDetector* interactive_detector = GetInteractiveDetector();
+  if (!interactive_detector)
+    return absl::nullopt;
 
   return interactive_detector->GetLongestInputDelay();
 }
 
-base::Optional<base::TimeDelta> PerformanceTiming::LongestInputTimestamp()
+absl::optional<base::TimeDelta> PerformanceTiming::LongestInputTimestamp()
     const {
   const InteractiveDetector* interactive_detector = GetInteractiveDetector();
   if (!interactive_detector)
-    return base::nullopt;
+    return absl::nullopt;
 
   return MonotonicTimeToPseudoWallTime(
       interactive_detector->GetLongestInputTimestamp());
 }
 
-base::Optional<base::TimeDelta> PerformanceTiming::FirstInputProcessingTime()
+absl::optional<base::TimeDelta> PerformanceTiming::FirstInputProcessingTime()
     const {
   const InteractiveDetector* interactive_detector = GetInteractiveDetector();
   if (!interactive_detector)
-    return base::nullopt;
+    return absl::nullopt;
 
   return interactive_detector->GetFirstInputProcessingTime();
 }
 
-base::Optional<base::TimeDelta> PerformanceTiming::FirstScrollDelay() const {
+absl::optional<base::TimeDelta> PerformanceTiming::FirstScrollDelay() const {
   const InteractiveDetector* interactive_detector = GetInteractiveDetector();
   if (!interactive_detector)
-    return base::nullopt;
+    return absl::nullopt;
 
   return interactive_detector->GetFirstScrollDelay();
 }
 
-base::Optional<base::TimeDelta> PerformanceTiming::FirstScrollTimestamp()
+absl::optional<base::TimeDelta> PerformanceTiming::FirstScrollTimestamp()
     const {
   const InteractiveDetector* interactive_detector = GetInteractiveDetector();
   if (!interactive_detector)
-    return base::nullopt;
+    return absl::nullopt;
 
   return MonotonicTimeToPseudoWallTime(
       interactive_detector->GetFirstScrollTimestamp());
@@ -573,7 +598,8 @@ uint64_t PerformanceTiming::ParseBlockedOnScriptLoadDuration() const {
   if (!timing)
     return 0;
 
-  return ToIntegerMilliseconds(timing->ParserBlockedOnScriptLoadDuration());
+  return ToIntegerMilliseconds(timing->ParserBlockedOnScriptLoadDuration(),
+                               cross_origin_isolated_capability_);
 }
 
 uint64_t PerformanceTiming::ParseBlockedOnScriptLoadFromDocumentWriteDuration()
@@ -583,7 +609,8 @@ uint64_t PerformanceTiming::ParseBlockedOnScriptLoadFromDocumentWriteDuration()
     return 0;
 
   return ToIntegerMilliseconds(
-      timing->ParserBlockedOnScriptLoadFromDocumentWriteDuration());
+      timing->ParserBlockedOnScriptLoadFromDocumentWriteDuration(),
+      cross_origin_isolated_capability_);
 }
 
 uint64_t PerformanceTiming::ParseBlockedOnScriptExecutionDuration() const {
@@ -591,8 +618,8 @@ uint64_t PerformanceTiming::ParseBlockedOnScriptExecutionDuration() const {
   if (!timing)
     return 0;
 
-  return ToIntegerMilliseconds(
-      timing->ParserBlockedOnScriptExecutionDuration());
+  return ToIntegerMilliseconds(timing->ParserBlockedOnScriptExecutionDuration(),
+                               cross_origin_isolated_capability_);
 }
 
 uint64_t
@@ -603,56 +630,104 @@ PerformanceTiming::ParseBlockedOnScriptExecutionFromDocumentWriteDuration()
     return 0;
 
   return ToIntegerMilliseconds(
-      timing->ParserBlockedOnScriptExecutionFromDocumentWriteDuration());
+      timing->ParserBlockedOnScriptExecutionFromDocumentWriteDuration(),
+      cross_origin_isolated_capability_);
 }
 
-base::Optional<base::TimeTicks> PerformanceTiming::LastPortalActivatedPaint()
+absl::optional<base::TimeTicks> PerformanceTiming::LastPortalActivatedPaint()
     const {
   const PaintTiming* timing = GetPaintTiming();
   if (!timing)
-    return base::nullopt;
+    return absl::nullopt;
 
   return timing->LastPortalActivatedPaint();
 }
 
-DocumentLoader* PerformanceTiming::GetDocumentLoader() const {
-  if (!GetFrame())
-    return nullptr;
+absl::optional<base::TimeDelta> PerformanceTiming::PrerenderActivationStart()
+    const {
+  DocumentLoadTiming* timing = GetDocumentLoadTiming();
+  if (!timing)
+    return absl::nullopt;
 
-  return GetFrame()->Loader().GetDocumentLoader();
+  base::TimeTicks activation_start = timing->ActivationStart();
+  if (activation_start.is_null())
+    return absl::nullopt;
+
+  return timing->MonotonicTimeToZeroBasedDocumentTime(activation_start);
+}
+
+absl::optional<base::TimeTicks> PerformanceTiming::UnloadStart() const {
+  DocumentLoadTiming* timing = GetDocumentLoadTiming();
+  if (!timing)
+    return absl::nullopt;
+
+  return timing->UnloadEventStart();
+}
+
+absl::optional<base::TimeTicks> PerformanceTiming::UnloadEnd() const {
+  DocumentLoadTiming* timing = GetDocumentLoadTiming();
+  if (!timing)
+    return absl::nullopt;
+
+  return timing->UnloadEventEnd();
+}
+
+absl::optional<base::TimeTicks> PerformanceTiming::CommitNavigationEnd() const {
+  DocumentLoadTiming* timing = GetDocumentLoadTiming();
+  if (!timing)
+    return absl::nullopt;
+
+  return timing->CommitNavigationEnd();
+}
+
+absl::optional<base::TimeDelta> PerformanceTiming::UserTimingMarkFullyLoaded()
+    const {
+  DocumentLoadTiming* timing = GetDocumentLoadTiming();
+  if (!timing)
+    return absl::nullopt;
+
+  return timing->UserTimingMarkFullyLoaded();
+}
+
+absl::optional<base::TimeDelta> PerformanceTiming::UserTimingMarkFullyVisible()
+    const {
+  DocumentLoadTiming* timing = GetDocumentLoadTiming();
+  if (!timing)
+    return absl::nullopt;
+
+  return timing->UserTimingMarkFullyVisible();
+}
+
+absl::optional<base::TimeDelta> PerformanceTiming::UserTimingMarkInteractive()
+    const {
+  DocumentLoadTiming* timing = GetDocumentLoadTiming();
+  if (!timing)
+    return absl::nullopt;
+
+  return timing->UserTimingMarkInteractive();
+}
+
+DocumentLoader* PerformanceTiming::GetDocumentLoader() const {
+  return DomWindow() ? DomWindow()->GetFrame()->Loader().GetDocumentLoader()
+                     : nullptr;
 }
 
 const DocumentTiming* PerformanceTiming::GetDocumentTiming() const {
-  if (!GetFrame())
+  if (!DomWindow() || !DomWindow()->document())
     return nullptr;
-
-  Document* document = GetFrame()->GetDocument();
-  if (!document)
-    return nullptr;
-
-  return &document->GetTiming();
+  return &DomWindow()->document()->GetTiming();
 }
 
 const PaintTiming* PerformanceTiming::GetPaintTiming() const {
-  if (!GetFrame())
+  if (!DomWindow() || !DomWindow()->document())
     return nullptr;
-
-  Document* document = GetFrame()->GetDocument();
-  if (!document)
-    return nullptr;
-
-  return &PaintTiming::From(*document);
+  return &PaintTiming::From(*DomWindow()->document());
 }
 
 const DocumentParserTiming* PerformanceTiming::GetDocumentParserTiming() const {
-  if (!GetFrame())
+  if (!DomWindow() || !DomWindow()->document())
     return nullptr;
-
-  Document* document = GetFrame()->GetDocument();
-  if (!document)
-    return nullptr;
-
-  return &DocumentParserTiming::From(*document);
+  return &DocumentParserTiming::From(*DomWindow()->document());
 }
 
 DocumentLoadTiming* PerformanceTiming::GetDocumentLoadTiming() const {
@@ -672,36 +747,26 @@ ResourceLoadTiming* PerformanceTiming::GetResourceLoadTiming() const {
 }
 
 InteractiveDetector* PerformanceTiming::GetInteractiveDetector() const {
-  if (!GetFrame())
+  if (!DomWindow() || !DomWindow()->document())
     return nullptr;
-
-  Document* document = GetFrame()->GetDocument();
-  if (!document)
-    return nullptr;
-
-  return InteractiveDetector::From(*document);
+  return InteractiveDetector::From(*DomWindow()->document());
 }
 
 PaintTimingDetector* PerformanceTiming::GetPaintTimingDetector() const {
-  if (!GetFrame())
+  if (!DomWindow())
     return nullptr;
-
-  LocalFrameView* view = GetFrame()->View();
-  if (!view)
-    return nullptr;
-
-  return &view->GetPaintTimingDetector();
+  return &DomWindow()->GetFrame()->View()->GetPaintTimingDetector();
 }
 
-base::Optional<base::TimeDelta>
+absl::optional<base::TimeDelta>
 PerformanceTiming::MonotonicTimeToPseudoWallTime(
-    const base::Optional<base::TimeTicks>& time) const {
+    const absl::optional<base::TimeTicks>& time) const {
   if (!time.has_value())
-    return base::nullopt;
+    return absl::nullopt;
 
   const DocumentLoadTiming* timing = GetDocumentLoadTiming();
   if (!timing)
-    return base::nullopt;
+    return absl::nullopt;
 
   return timing->MonotonicTimeToPseudoWallTime(*time);
 }
@@ -711,6 +776,38 @@ std::unique_ptr<TracedValue> PerformanceTiming::GetNavigationTracingData() {
   data->SetString("navigationId",
                   IdentifiersFactory::LoaderId(GetDocumentLoader()));
   return data;
+}
+
+// static
+bool PerformanceTiming::IsAttributeName(const AtomicString& name) {
+  return GetAttributeMapping().Contains(name);
+}
+
+uint64_t PerformanceTiming::GetNamedAttribute(const AtomicString& name) const {
+  DCHECK(IsAttributeName(name)) << "The string passed as parameter must be an "
+                                   "attribute of performance.timing";
+  PerformanceTimingGetter fn = GetAttributeMapping().at(name);
+  return (this->*fn)();
+}
+
+ScriptValue PerformanceTiming::toJSONForBinding(
+    ScriptState* script_state) const {
+  V8ObjectBuilder result(script_state);
+  for (const auto& name_attribute_pair : GetAttributeMapping()) {
+    result.AddNumber(name_attribute_pair.key,
+                     (this->*(name_attribute_pair.value))());
+  }
+  return result.GetScriptValue();
+}
+
+uint64_t PerformanceTiming::MonotonicTimeToIntegerMilliseconds(
+    base::TimeTicks time) const {
+  const DocumentLoadTiming* timing = GetDocumentLoadTiming();
+  if (!timing)
+    return 0;
+
+  return ToIntegerMilliseconds(timing->MonotonicTimeToPseudoWallTime(time),
+                               cross_origin_isolated_capability_);
 }
 
 // static
@@ -745,25 +842,6 @@ PerformanceTiming::GetAttributeMapping() {
     };
   }
   return *map;
-}
-
-ScriptValue PerformanceTiming::toJSONForBinding(
-    ScriptState* script_state) const {
-  V8ObjectBuilder result(script_state);
-  for (const auto& name_attribute_pair : GetAttributeMapping()) {
-    result.AddNumber(name_attribute_pair.key,
-                     (this->*(name_attribute_pair.value))());
-  }
-  return result.GetScriptValue();
-}
-
-uint64_t PerformanceTiming::MonotonicTimeToIntegerMilliseconds(
-    base::TimeTicks time) const {
-  const DocumentLoadTiming* timing = GetDocumentLoadTiming();
-  if (!timing)
-    return 0;
-
-  return ToIntegerMilliseconds(timing->MonotonicTimeToPseudoWallTime(time));
 }
 
 void PerformanceTiming::Trace(Visitor* visitor) const {

@@ -37,11 +37,9 @@ class MockWebAudioDevice : public WebAudioDevice {
 class TestPlatform : public TestingPlatformSupport {
  public:
   std::unique_ptr<WebAudioDevice> CreateAudioDevice(
-      unsigned number_of_input_channels,
-      unsigned number_of_channels,
+      unsigned number_of_output_channels,
       const WebAudioLatencyHint& latency_hint,
-      WebAudioDevice::RenderCallback*,
-      const WebString& device_id) override {
+      WebAudioDevice::RenderCallback*) override {
     return std::make_unique<MockWebAudioDevice>(AudioHardwareSampleRate(),
                                                 AudioHardwareBufferSize());
   }
@@ -60,19 +58,21 @@ class AudioCallback : public blink::AudioIOCallback {
     frames_processed_ += frames_to_process;
   }
 
-  AudioCallback() : frames_processed_(0) {}
-  int frames_processed_;
+  AudioCallback() = default;
+  int frames_processed_ = 0;
 };
 
-void CountWASamplesProcessedForRate(base::Optional<float> sample_rate) {
+void CountWASamplesProcessedForRate(absl::optional<float> sample_rate) {
   WebAudioLatencyHint latency_hint(WebAudioLatencyHint::kCategoryInteractive);
   AudioCallback callback;
 
   const int channel_count = Platform::Current()->AudioHardwareOutputChannels();
   const size_t request_frames = Platform::Current()->AudioHardwareBufferSize();
 
+  // TODO(https://crbug.com/988121) Replace 128 with the appropriate
+  // AudioContextRenderSizeHintCategory.
   scoped_refptr<AudioDestination> destination = AudioDestination::Create(
-      callback, channel_count, latency_hint, sample_rate);
+      callback, channel_count, latency_hint, sample_rate, 128);
   destination->Start();
 
   Vector<float> channels[channel_count];
@@ -88,8 +88,8 @@ void CountWASamplesProcessedForRate(base::Optional<float> sample_rate) {
                 Platform::Current()->AudioHardwareSampleRate());
   int expected_frames_processed =
       std::ceil(exact_frames_required /
-                static_cast<double>(audio_utilities::kRenderQuantumFrames)) *
-      audio_utilities::kRenderQuantumFrames;
+                static_cast<double>(destination->RenderQuantumFrames())) *
+      destination->RenderQuantumFrames();
 
   EXPECT_EQ(expected_frames_processed, callback.frames_processed_);
 }
@@ -97,7 +97,7 @@ void CountWASamplesProcessedForRate(base::Optional<float> sample_rate) {
 TEST(AudioDestinationTest, ResamplingTest) {
   ScopedTestingPlatformSupport<TestPlatform> platform;
 
-  CountWASamplesProcessedForRate(base::Optional<float>());
+  CountWASamplesProcessedForRate(absl::optional<float>());
   CountWASamplesProcessedForRate(8000);
   CountWASamplesProcessedForRate(24000);
   CountWASamplesProcessedForRate(44100);

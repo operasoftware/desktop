@@ -7,6 +7,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/location_report_body.h"
 
 namespace blink {
@@ -21,14 +22,7 @@ class CORE_EXPORT DocumentPolicyViolationReportBody
       const String& message,
       const String& disposition,
       // URL of the resource that violated the document policy.
-      const String& resource_url)
-      : LocationReportBody(resource_url),
-        feature_id_(feature_id),
-        message_("Document policy violation: " +
-                 (message.IsEmpty()
-                      ? feature_id + " is not allowed in this document."
-                      : message)),
-        disposition_(disposition) {}
+      const String& resource_url);
 
   const String& featureId() const { return feature_id_; }
   const String& disposition() const { return disposition_; }
@@ -37,6 +31,8 @@ class CORE_EXPORT DocumentPolicyViolationReportBody
   void BuildJSONValue(V8ObjectBuilder& builder) const override;
 
   ~DocumentPolicyViolationReportBody() override = default;
+
+  unsigned MatchId() const override;
 
  private:
   const String feature_id_;

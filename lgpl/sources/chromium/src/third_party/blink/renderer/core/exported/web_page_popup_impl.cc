@@ -32,13 +32,16 @@
 #include <memory>
 
 #include "cc/animation/animation_host.h"
+#include "cc/animation/animation_timeline.h"
+#include "cc/base/features.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/trees/ukm_manager.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/input/input_handler.mojom-blink.h"
-#include "third_party/blink/public/platform/scheduler/web_render_widget_scheduling_state.h"
-#include "third_party/blink/public/platform/web_float_rect.h"
 #include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache_base.h"
+#include "third_party/blink/renderer/core/css/media_feature_overrides.h"
 #include "third_party/blink/renderer/core/dom/context_features.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatch_forbidden_scope.h"
@@ -52,9 +55,10 @@
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/local_frame_ukm_aggregator.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/frame/screen_metrics_emulator.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
-#include "third_party/blink/renderer/core/frame/web_frame_widget_base.h"
+#include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
@@ -63,27 +67,101 @@
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/page/page_animator.h"
 #include "third_party/blink/renderer/core/page/page_popup_client.h"
 #include "third_party/blink/renderer/core/page/page_popup_controller.h"
-#include "third_party/blink/renderer/platform/animation/compositor_animation_timeline.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/keyboard_codes.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/web_test_support.h"
+#include "third_party/blink/renderer/platform/widget/frame_widget.h"
+#include "third_party/blink/renderer/platform/widget/input/input_metrics.h"
+#include "third_party/blink/renderer/platform/widget/input/widget_input_handler_manager.h"
 #include "third_party/blink/renderer/platform/widget/widget_base.h"
 
 namespace blink {
+namespace {
+ScrollableArea* ToScrollableArea(Node* node) {
+  DCHECK(node);
+  LayoutBox* scrolling_box = node->GetLayoutBox();
+  if (auto* element = DynamicTo<Element>(node))
+    scrolling_box = element->GetLayoutBoxForScrolling();
+  return scrolling_box ? scrolling_box->GetScrollableArea() : nullptr;
+}
+
+bool CanScroll(Node* node) {
+  if (!node)
+    return false;
+  return ToScrollableArea(node);
+}
+
+Node* FindFirstScroller(Node* event_target) {
+  DCHECK(event_target);
+  Node* cur_node = nullptr;
+  bool found = false;
+  LayoutBox* cur_box = event_target->GetLayoutObject()
+                           ? event_target->GetLayoutObject()->EnclosingBox()
+                           : nullptr;
+  while (cur_box) {
+    cur_node = cur_box->GetNode();
+    if (CanScroll(cur_node)) {
+      found = true;
+      break;
+    }
+    cur_box = cur_box->ContainingBlock();
+  }
+  if (found && cur_node)
+    return cur_node;
+  return nullptr;
+}
+
+Page* CreatePage(ChromeClient& chrome_client, WebViewImpl& opener_web_view) {
+  Settings& main_settings = opener_web_view.GetPage()->GetSettings();
+  Page* page = Page::CreateNonOrdinary(
+      chrome_client,
+      opener_web_view.GetPage()->GetPageScheduler()->GetAgentGroupScheduler());
+  page->GetSettings().SetAcceleratedCompositingEnabled(true);
+  page->GetSettings().SetScriptEnabled(true);
+  page->GetSettings().SetAllowScriptsToCloseWindows(true);
+  page->GetSettings().SetMinimumFontSize(main_settings.GetMinimumFontSize());
+  page->GetSettings().SetMinimumLogicalFontSize(
+      main_settings.GetMinimumLogicalFontSize());
+  page->GetSettings().SetScrollAnimatorEnabled(
+      main_settings.GetScrollAnimatorEnabled());
+  page->GetSettings().SetAvailablePointerTypes(
+      main_settings.GetAvailablePointerTypes());
+  page->GetSettings().SetPrimaryPointerType(
+      main_settings.GetPrimaryPointerType());
+  page->GetSettings().SetPreferredColorScheme(
+      main_settings.GetPreferredColorScheme());
+  page->GetSettings().SetForceDarkModeEnabled(
+      main_settings.GetForceDarkModeEnabled());
+
+  const MediaFeatureOverrides* media_feature_overrides =
+      opener_web_view.GetPage()->GetMediaFeatureOverrides();
+  if (media_feature_overrides &&
+      media_feature_overrides->GetPreferredColorScheme().has_value()) {
+    page->SetMediaFeatureOverride(
+        "prefers-color-scheme",
+        media_feature_overrides->GetPreferredColorScheme().value() ==
+                mojom::blink::PreferredColorScheme::kDark
+            ? "dark"
+            : "light");
+  }
+  return page;
+}
+
+}  // namespace
 
 class PagePopupChromeClient final : public EmptyChromeClient {
  public:
   explicit PagePopupChromeClient(WebPagePopupImpl* popup) : popup_(popup) {}
 
-  void SetWindowRect(const IntRect& rect, LocalFrame&) override {
+  void SetWindowRect(const gfx::Rect& rect, LocalFrame&) override {
     popup_->SetWindowRect(rect);
   }
 
@@ -96,27 +174,24 @@ class PagePopupChromeClient final : public EmptyChromeClient {
     popup_->ClosePopup();
   }
 
-  IntRect RootWindowRect(LocalFrame&) override {
+  gfx::Rect RootWindowRect(LocalFrame&) override {
     // There is only one frame/widget in a WebPagePopup, so we can ignore the
     // param.
     return popup_->WindowRectInScreen();
   }
 
-  IntRect ViewportToScreen(const IntRect& rect,
-                           const LocalFrameView*) const override {
-    WebRect rect_in_screen(rect);
-    WebRect window_rect = popup_->WindowRectInScreen();
-    popup_->WidgetClient()->ConvertViewportToWindow(&rect_in_screen);
-    rect_in_screen.x += window_rect.x;
-    rect_in_screen.y += window_rect.y;
-    return rect_in_screen;
+  gfx::Rect ViewportToScreen(const gfx::Rect& rect,
+                             const LocalFrameView*) const override {
+    gfx::Rect window_rect = popup_->WindowRectInScreen();
+    gfx::Rect rect_in_dips =
+        popup_->widget_base_->BlinkSpaceToEnclosedDIPs(rect);
+    rect_in_dips.Offset(window_rect.x(), window_rect.y());
+    return rect_in_dips;
   }
 
   float WindowToViewportScalar(LocalFrame*,
                                const float scalar_value) const override {
-    WebFloatRect viewport_rect(0, 0, scalar_value, 0);
-    popup_->WidgetClient()->ConvertWindowToViewport(&viewport_rect);
-    return viewport_rect.width;
+    return popup_->widget_base_->DIPsToBlinkSpace(scalar_value);
   }
 
   void AddMessageToConsole(LocalFrame*,
@@ -127,63 +202,57 @@ class PagePopupChromeClient final : public EmptyChromeClient {
                            const String&,
                            const String&) override {
 #ifndef NDEBUG
-    fprintf(stderr, "CONSOLE MESSSAGE:%u: %s\n", line_number,
+    fprintf(stderr, "CONSOLE MESSAGE:%u: %s\n", line_number,
             message.Utf8().c_str());
 #endif
   }
 
   void ScheduleAnimation(const LocalFrameView*,
-                         base::TimeDelta = base::TimeDelta()) override {
-    if (WebTestSupport::IsRunningWebTest()) {
-      // In single threaded web tests, the main frame's WebWidgetClient
-      // (provided by WebViewTestProxy or WebWidgetTestProxy) runs the composite
-      // step for the current popup. We don't run popup tests with a compositor
-      // thread.
-      WebLocalFrameImpl* web_frame = popup_->web_view_->MainFrameImpl();
-      WebWidgetClient* widget_client = nullptr;
+                         base::TimeDelta delay = base::TimeDelta()) override {
+    // Destroying/removing the popup's content can be seen as a mutation that
+    // ends up calling ScheduleAnimation(). Since the popup is going away, we
+    // do not wish to actually do anything.
+    if (popup_->closing_)
+      return;
 
-      if (web_frame) {
-        widget_client = web_frame->FrameWidgetImpl()->Client();
-      } else {
-        // We'll enter this case for a popup in an out-of-proc iframe.
-        // Get the WidgetClient for the frame of the popup's owner element,
-        // instead of the WebView's MainFrame.
-        Element& popup_owner_element = popup_->popup_client_->OwnerElement();
-        WebLocalFrameImpl* web_local_frame_impl = WebLocalFrameImpl::FromFrame(
-            popup_owner_element.GetDocument().GetFrame());
-        widget_client = web_local_frame_impl->FrameWidgetImpl()->Client();
+    // When the renderer has a compositor thread we need to follow the
+    // normal code path.
+    if (WebTestSupport::IsRunningWebTest() && !Thread::CompositorThread()) {
+      // In single-threaded web tests, the owner frame tree runs the composite
+      // step for the popup. Popup widgets don't run any composite step on their
+      // own. And we don't run popup tests with a compositor thread, so no need
+      // to check for that.
+      Document& opener_document =
+          popup_->popup_client_->OwnerElement().GetDocument();
+      if (Page* page = opener_document.GetPage()) {
+        page->GetChromeClient().ScheduleAnimation(
+            opener_document.GetFrame()->View(), delay);
       }
-
-      widget_client->ScheduleAnimation();
       return;
     }
-    popup_->WidgetClient()->ScheduleAnimation();
+    popup_->widget_base_->RequestAnimationAfterDelay(delay);
   }
 
-  void AttachCompositorAnimationTimeline(CompositorAnimationTimeline* timeline,
-                                         LocalFrame*) override {
-    popup_->widget_base_->AnimationHost()->AddAnimationTimeline(
-        timeline->GetAnimationTimeline());
+  cc::AnimationHost* GetCompositorAnimationHost(LocalFrame&) const override {
+    return popup_->widget_base_->AnimationHost();
   }
 
-  void DetachCompositorAnimationTimeline(CompositorAnimationTimeline* timeline,
-                                         LocalFrame*) override {
-    popup_->widget_base_->AnimationHost()->RemoveAnimationTimeline(
-        timeline->GetAnimationTimeline());
+  cc::AnimationTimeline* GetScrollAnimationTimeline(
+      LocalFrame&) const override {
+    return popup_->widget_base_->ScrollAnimationTimeline();
   }
 
-  WebScreenInfo GetScreenInfo(LocalFrame&) const override {
+  const display::ScreenInfo& GetScreenInfo(LocalFrame&) const override {
     // LocalFrame is ignored since there is only 1 frame in a popup.
-    return popup_->WidgetClient()->GetScreenInfo();
+    return popup_->GetScreenInfo();
   }
 
-  WebViewImpl* GetWebView() const override { return popup_->web_view_; }
-
-  IntSize MinimumWindowSize() const override { return IntSize(0, 0); }
-
-  void SetCursor(const ui::Cursor& cursor, LocalFrame* local_frame) override {
-    popup_->WidgetClient()->DidChangeCursor(cursor);
+  const display::ScreenInfos& GetScreenInfos(LocalFrame&) const override {
+    // LocalFrame is ignored since there is only 1 frame in a popup.
+    return popup_->GetScreenInfos();
   }
+
+  gfx::Size MinimumWindowSize() const override { return gfx::Size(0, 0); }
 
   void SetEventListenerProperties(
       LocalFrame* frame,
@@ -191,13 +260,6 @@ class PagePopupChromeClient final : public EmptyChromeClient {
       cc::EventListenerProperties properties) override {
     // WebPagePopup always routes input to main thread (set up in RenderWidget),
     // so no need to update listener properties.
-  }
-  cc::EventListenerProperties EventListenerProperties(
-      LocalFrame*,
-      cc::EventListenerClass event_class) const override {
-    // WebPagePopup always routes input to main thread (set up in RenderWidget),
-    // so no need to update listener properties.
-    return cc::EventListenerProperties::kNone;
   }
 
   void SetHasScrollEventHandlers(LocalFrame* frame,
@@ -215,10 +277,21 @@ class PagePopupChromeClient final : public EmptyChromeClient {
     popup_->SetRootLayer(layer.get());
   }
 
-  void SetToolTip(LocalFrame&,
-                  const String& tooltip_text,
-                  TextDirection dir) override {
-    popup_->widget_base_->SetToolTipText(tooltip_text, dir);
+  void UpdateTooltipUnderCursor(LocalFrame&,
+                                const String& tooltip_text,
+                                TextDirection dir) override {
+    popup_->widget_base_->UpdateTooltipUnderCursor(tooltip_text, dir);
+  }
+
+  void UpdateTooltipFromKeyboard(LocalFrame&,
+                                 const String& tooltip_text,
+                                 TextDirection dir,
+                                 const gfx::Rect& bounds) override {
+    popup_->widget_base_->UpdateTooltipFromKeyboard(tooltip_text, dir, bounds);
+  }
+
+  void ClearKeyboardTriggeredTooltip(LocalFrame&) override {
+    popup_->widget_base_->ClearKeyboardTriggeredTooltip();
   }
 
   void InjectGestureScrollEvent(LocalFrame& local_frame,
@@ -249,70 +322,50 @@ bool PagePopupFeaturesClient::IsEnabled(Document*,
 // WebPagePopupImpl ----------------------------------------------------------
 
 WebPagePopupImpl::WebPagePopupImpl(
-    WebPagePopupClient* client,
+    CrossVariantMojoAssociatedRemote<mojom::blink::PopupWidgetHostInterfaceBase>
+        popup_widget_host,
     CrossVariantMojoAssociatedRemote<mojom::blink::WidgetHostInterfaceBase>
         widget_host,
     CrossVariantMojoAssociatedReceiver<mojom::blink::WidgetInterfaceBase>
-        widget)
-    : web_page_popup_client_(client),
-      widget_base_(std::make_unique<WidgetBase>(this,
-                                                std::move(widget_host),
-                                                std::move(widget))) {
-  DCHECK(client);
-}
-
-WebPagePopupImpl::~WebPagePopupImpl() {
-  DCHECK(!page_);
-}
-
-void WebPagePopupImpl::Initialize(WebViewImpl* web_view,
-                                  PagePopupClient* popup_client) {
-  DCHECK(web_view);
-  DCHECK(popup_client);
-  web_view_ = web_view;
-  popup_client_ = popup_client;
-
-  Page::PageClients page_clients;
-  FillWithEmptyClients(page_clients);
-  chrome_client_ = MakeGarbageCollected<PagePopupChromeClient>(this);
-  page_clients.chrome_client = chrome_client_.Get();
-
-  Settings& main_settings = web_view_->GetPage()->GetSettings();
-  page_ = Page::CreateNonOrdinary(page_clients);
-  page_->GetSettings().SetAcceleratedCompositingEnabled(true);
-  page_->GetSettings().SetScriptEnabled(true);
-  page_->GetSettings().SetAllowScriptsToCloseWindows(true);
-  page_->GetSettings().SetMinimumFontSize(main_settings.GetMinimumFontSize());
-  page_->GetSettings().SetMinimumLogicalFontSize(
-      main_settings.GetMinimumLogicalFontSize());
-  page_->GetSettings().SetScrollAnimatorEnabled(
-      main_settings.GetScrollAnimatorEnabled());
-  page_->GetSettings().SetAvailablePointerTypes(
-      main_settings.GetAvailablePointerTypes());
-  page_->GetSettings().SetPrimaryPointerType(
-      main_settings.GetPrimaryPointerType());
-
-  // The style can be out-of-date if e.g. a key event handler modified the
-  // OwnerElement()'s style before the default handler started opening the
-  // popup. If the key handler forced a style update the style may be up-to-date
-  // and null.
-  // Note that if there's a key event handler which changes the color-scheme
-  // between the key is pressed and the popup is opened, the color-scheme of the
-  // form element and its popup may not match.
-  // If we think it's important to have an up-to-date style here, we need to run
-  // an UpdateStyleAndLayoutTree() before opening the popup in the various
-  // default event handlers.
-  if (const auto* style = popup_client_->OwnerElement().GetComputedStyle()) {
-    page_->GetSettings().SetPreferredColorScheme(
-        style->UsedColorScheme() == WebColorScheme::kDark
-            ? PreferredColorScheme::kDark
-            : PreferredColorScheme::kLight);
+        widget,
+    WebViewImpl* opener_web_view,
+    scheduler::WebAgentGroupScheduler& agent_group_scheduler,
+    const display::ScreenInfos& screen_infos,
+    PagePopupClient* popup_client)
+    : opener_web_view_(opener_web_view),
+      chrome_client_(MakeGarbageCollected<PagePopupChromeClient>(this)),
+      local_frame_client_(MakeGarbageCollected<EmptyLocalFrameClient>()),
+      page_(CreatePage(*chrome_client_, *opener_web_view)),
+      popup_client_(popup_client),
+      popup_widget_host_(std::move(popup_widget_host)),
+      widget_base_(std::make_unique<WidgetBase>(
+          /*widget_base_client=*/this,
+          std::move(widget_host),
+          std::move(widget),
+          agent_group_scheduler.DefaultTaskRunner(),
+          /*hidden=*/false,
+          /*never_composited=*/false,
+          /*is_embedded=*/false,
+          /*is_for_scalable_page=*/true)) {
+  DCHECK(popup_client_);
+  popup_widget_host_.set_disconnect_handler(WTF::Bind(
+      &WebPagePopupImpl::WidgetHostDisconnected, WTF::Unretained(this)));
+  if (auto* widget = opener_web_view->MainFrameViewWidget()) {
+    if (auto* device_emulator = widget->DeviceEmulator()) {
+      opener_widget_screen_origin_ = device_emulator->ViewRectOrigin();
+      opener_original_widget_screen_origin_ =
+          device_emulator->original_view_rect().origin();
+      opener_emulator_scale_ = device_emulator->scale();
+    }
   }
+
+  InitializeCompositing(agent_group_scheduler, screen_infos,
+                        /*settings=*/nullptr);
+
+  popup_client_->AdjustSettings(page_->GetSettings());
   popup_client_->CreatePagePopupController(*page_, *this);
 
   ProvideContextFeaturesTo(*page_, std::make_unique<PagePopupFeaturesClient>());
-  DEFINE_STATIC_LOCAL(Persistent<LocalFrameClient>, empty_local_frame_client,
-                      (MakeGarbageCollected<EmptyLocalFrameClient>()));
 
   // Creating new WindowAgentFactory because page popup content is owned by the
   // user agent and should be isolated from the main frame. However, if we are a
@@ -325,8 +378,10 @@ void WebPagePopupImpl::Initialize(WebViewImpl* web_view,
   }
 
   auto* frame = MakeGarbageCollected<LocalFrame>(
-      empty_local_frame_client, *page_,
-      /* FrameOwner* */ nullptr, base::UnguessableToken::Create(),
+      local_frame_client_, *page_,
+      /* FrameOwner* */ nullptr, /* Frame* parent */ nullptr,
+      /* Frame* previous_sibling */ nullptr,
+      FrameInsertType::kInsertInConstructor, LocalFrameToken(),
       window_agent_factory,
       /* InterfaceRegistry* */ nullptr);
   frame->SetPagePopupOwner(popup_client_->OwnerElement());
@@ -344,19 +399,18 @@ void WebPagePopupImpl::Initialize(WebViewImpl* web_view,
         owner_settings->GetAllowUniversalAccessFromFileURLs());
   }
 
-  frame->Init();
+  // TODO(https://crbug.com/1355751) Initialize `storage_key`.
+  frame->Init(/*opener=*/nullptr, /*policy_container=*/nullptr, StorageKey());
   frame->View()->SetParentVisible(true);
   frame->View()->SetSelfVisible(true);
 
   DCHECK(frame->DomWindow());
   DCHECK_EQ(popup_client_->OwnerElement().GetDocument().ExistingAXObjectCache(),
             frame->GetDocument()->ExistingAXObjectCache());
-  if (AXObjectCache* cache = frame->GetDocument()->ExistingAXObjectCache()) {
-    cache->InitializePopup(frame->GetDocument());
+  if (AXObjectCache* cache = frame->GetDocument()->ExistingAXObjectCache())
     cache->ChildrenChanged(&popup_client_->OwnerElement());
-  }
 
-  page_->AnimationHostInitialized(*widget_base_->AnimationHost(), nullptr);
+  page_->DidInitializeCompositing(*widget_base_->AnimationHost());
 
   scoped_refptr<SharedBuffer> data = SharedBuffer::Create();
   popup_client_->WriteDocument(data.get());
@@ -365,24 +419,45 @@ void WebPagePopupImpl::Initialize(WebViewImpl* web_view,
 
   popup_owner_client_rect_ =
       popup_client_->OwnerElement().getBoundingClientRect();
-  WidgetClient()->Show(WebNavigationPolicy());
+  popup_widget_host_->ShowPopup(
+      initial_rect_, GetAnchorRectInScreen(),
+      WTF::Bind(&WebPagePopupImpl::DidShowPopup, WTF::Unretained(this)));
+  should_defer_setting_window_rect_ = false;
+  widget_base_->SetPendingWindowRect(initial_rect_);
+
   SetFocus(true);
 }
 
-cc::LayerTreeHost* WebPagePopupImpl::InitializeCompositing(
-    cc::TaskGraphRunner* task_graph_runner,
-    const cc::LayerTreeSettings& settings,
-    std::unique_ptr<cc::UkmRecorderFactory> ukm_recorder_factory) {
-  // Careful Initialize() is called after InitializeCompositing, so don't do
-  // much work here.
-  widget_base_->InitializeCompositing(task_graph_runner, settings,
-                                      std::move(ukm_recorder_factory));
-  return widget_base_->LayerTreeHost();
+WebPagePopupImpl::~WebPagePopupImpl() {
+  // Ensure DestroyPage was called.
+  DCHECK(!page_);
 }
 
-scheduler::WebRenderWidgetSchedulingState*
-WebPagePopupImpl::RendererWidgetSchedulingState() {
-  return widget_base_->RendererWidgetSchedulingState();
+void WebPagePopupImpl::DidShowPopup() {
+  if (!widget_base_)
+    return;
+  widget_base_->AckPendingWindowRect();
+}
+
+void WebPagePopupImpl::DidSetBounds() {
+  if (!widget_base_)
+    return;
+  widget_base_->AckPendingWindowRect();
+}
+
+void WebPagePopupImpl::InitializeCompositing(
+    scheduler::WebAgentGroupScheduler& agent_group_scheduler,
+    const display::ScreenInfos& screen_infos,
+    const cc::LayerTreeSettings* settings) {
+  // Careful Initialize() is called after InitializeCompositing, so don't do
+  // much work here.
+  widget_base_->InitializeCompositing(*page_->GetPageScheduler(), screen_infos,
+                                      settings,
+                                      /*frame_widget_input_handler=*/nullptr);
+  cc::LayerTreeDebugState debug_state =
+      widget_base_->LayerTreeHost()->GetDebugState();
+  debug_state.TurnOffHudInfoDisplay();
+  widget_base_->LayerTreeHost()->SetDebugState(debug_state);
 }
 
 void WebPagePopupImpl::SetCursor(const ui::Cursor& cursor) {
@@ -397,18 +472,14 @@ void WebPagePopupImpl::SetHandlingInputEvent(bool handling) {
   widget_base_->input_handler().set_handling_input_event(handling);
 }
 
-void WebPagePopupImpl::ProcessInputEventSynchronously(
-    const WebCoalescedInputEvent& event,
-    HandledEventCallback callback) {
-  widget_base_->input_handler().HandleInputEvent(event, std::move(callback));
+void WebPagePopupImpl::ProcessInputEventSynchronouslyForTesting(
+    const WebCoalescedInputEvent& event) {
+  widget_base_->input_handler().HandleInputEvent(event, nullptr,
+                                                 base::DoNothing());
 }
 
 void WebPagePopupImpl::UpdateTextInputState() {
   widget_base_->UpdateTextInputState();
-}
-
-void WebPagePopupImpl::UpdateCompositionInfo() {
-  widget_base_->UpdateCompositionInfo(/*immediate_request=*/false);
 }
 
 void WebPagePopupImpl::UpdateSelectionBounds() {
@@ -419,21 +490,64 @@ void WebPagePopupImpl::ShowVirtualKeyboard() {
   widget_base_->ShowVirtualKeyboard();
 }
 
-void WebPagePopupImpl::ForceTextInputStateUpdate() {
-  widget_base_->ForceTextInputStateUpdate();
-}
-
-void WebPagePopupImpl::RequestCompositionUpdates(bool immediate_request,
-                                                 bool monitor_updates) {
-  widget_base_->RequestCompositionUpdates(immediate_request, monitor_updates);
-}
-
 void WebPagePopupImpl::SetFocus(bool focus) {
-  widget_base_->SetFocus(focus);
+  widget_base_->SetFocus(focus
+                             ? mojom::blink::FocusState::kFocused
+                             : mojom::blink::FocusState::kNotFocusedAndActive);
 }
 
 bool WebPagePopupImpl::HasFocus() {
   return widget_base_->has_focus();
+}
+
+void WebPagePopupImpl::FlushInputProcessedCallback() {
+  widget_base_->FlushInputProcessedCallback();
+}
+
+void WebPagePopupImpl::CancelCompositionForPepper() {
+  widget_base_->CancelCompositionForPepper();
+}
+
+void WebPagePopupImpl::ApplyVisualProperties(
+    const VisualProperties& visual_properties) {
+  widget_base_->UpdateVisualProperties(visual_properties);
+}
+
+const display::ScreenInfo& WebPagePopupImpl::GetScreenInfo() {
+  return widget_base_->GetScreenInfo();
+}
+
+const display::ScreenInfos& WebPagePopupImpl::GetScreenInfos() {
+  return widget_base_->screen_infos();
+}
+
+const display::ScreenInfo& WebPagePopupImpl::GetOriginalScreenInfo() {
+  return widget_base_->GetScreenInfo();
+}
+
+const display::ScreenInfos& WebPagePopupImpl::GetOriginalScreenInfos() {
+  return widget_base_->screen_infos();
+}
+
+gfx::Rect WebPagePopupImpl::WindowRect() {
+  return widget_base_->WindowRect();
+}
+
+gfx::Rect WebPagePopupImpl::ViewRect() {
+  return widget_base_->ViewRect();
+}
+
+void WebPagePopupImpl::SetScreenRects(const gfx::Rect& widget_screen_rect,
+                                      const gfx::Rect& window_screen_rect) {
+  widget_base_->SetScreenRects(widget_screen_rect, window_screen_rect);
+}
+
+gfx::Size WebPagePopupImpl::VisibleViewportSizeInDIPs() {
+  return widget_base_->VisibleViewportSizeInDIPs();
+}
+
+bool WebPagePopupImpl::IsHidden() const {
+  return widget_base_->is_hidden();
 }
 
 void WebPagePopupImpl::SetCompositorVisible(bool visible) {
@@ -462,7 +576,7 @@ void WebPagePopupImpl::Update() {
 }
 
 void WebPagePopupImpl::DestroyPage() {
-  page_->WillCloseAnimationHost(nullptr);
+  page_->WillStopCompositing();
   page_->WillBeDestroyed();
   page_.Clear();
 }
@@ -480,23 +594,38 @@ AXObject* WebPagePopupImpl::RootAXObject() {
   return To<AXObjectCacheBase>(cache)->GetOrCreate(document->GetLayoutView());
 }
 
-void WebPagePopupImpl::SetWindowRect(const IntRect& rect_in_screen) {
-  if (!closing_) {
-    IntRect owner_window_rect_in_screen = OwnerWindowRectInScreen();
+void WebPagePopupImpl::SetWindowRect(const gfx::Rect& rect_in_screen) {
+  if (ShouldCheckPopupPositionForTelemetry()) {
+    gfx::Rect owner_window_rect_in_screen = OwnerWindowRectInScreen();
     Document& document = popup_client_->OwnerElement().GetDocument();
     if (owner_window_rect_in_screen.Contains(rect_in_screen)) {
       UseCounter::Count(document,
                         WebFeature::kPopupDoesNotExceedOwnerWindowBounds);
     } else {
       WebFeature feature =
-          document.GetFrame()->IsMainFrame()
+          document.GetFrame()->IsOutermostMainFrame()
               ? WebFeature::kPopupExceedsOwnerWindowBounds
               : WebFeature::kPopupExceedsOwnerWindowBoundsForIframe;
       UseCounter::Count(document, feature);
     }
   }
 
-  WidgetClient()->SetWindowRect(rect_in_screen);
+  gfx::Rect window_rect = rect_in_screen;
+
+  // Popups aren't emulated, but the WidgetScreenRect and WindowScreenRect
+  // given to them are. When they set the WindowScreenRect it is based on those
+  // emulated values, so we reverse the emulation.
+  if (opener_emulator_scale_)
+    EmulatedToScreenRect(window_rect);
+
+  if (!should_defer_setting_window_rect_) {
+    widget_base_->SetPendingWindowRect(window_rect);
+    popup_widget_host_->SetPopupBounds(
+        window_rect,
+        WTF::Bind(&WebPagePopupImpl::DidSetBounds, WTF::Unretained(this)));
+  } else {
+    initial_rect_ = window_rect;
+  }
 }
 
 void WebPagePopupImpl::SetRootLayer(scoped_refptr<cc::Layer> layer) {
@@ -512,37 +641,25 @@ void WebPagePopupImpl::SetSuppressFrameRequestsWorkaroundFor704763Only(
       suppress_frame_requests);
 }
 
-void WebPagePopupImpl::RequestNewLayerTreeFrameSink(
-    LayerTreeFrameSinkCallback callback) {
-  WidgetClient()->RequestNewLayerTreeFrameSink(std::move(callback));
-}
-
-void WebPagePopupImpl::RecordTimeToFirstActivePaint(base::TimeDelta duration) {
-  WidgetClient()->RecordTimeToFirstActivePaint(duration);
-}
-
 void WebPagePopupImpl::UpdateLifecycle(WebLifecycleUpdate requested_update,
                                        DocumentUpdateReason reason) {
   if (!page_)
     return;
   // Popups always update their lifecycle in the context of the containing
   // document's lifecycle, so explicitly override the reason.
-  PageWidgetDelegate::UpdateLifecycle(*page_, MainFrame(), requested_update,
-                                      DocumentUpdateReason::kPagePopup);
+  page_->UpdateLifecycle(MainFrame(), requested_update,
+                         DocumentUpdateReason::kPagePopup);
 }
 
-void WebPagePopupImpl::Resize(const WebSize& new_size_in_viewport) {
-  WebRect new_size(0, 0, new_size_in_viewport.width,
-                   new_size_in_viewport.height);
-  WidgetClient()->ConvertViewportToWindow(&new_size);
-
-  WebRect window_rect = WindowRectInScreen();
+void WebPagePopupImpl::Resize(const gfx::Size& new_size_in_viewport) {
+  gfx::Size new_size_in_dips =
+      widget_base_->BlinkSpaceToFlooredDIPs(new_size_in_viewport);
+  gfx::Rect window_rect_in_dips = WindowRectInScreen();
 
   // TODO(bokan): We should only call into this if the bounds actually changed
   // but this reveals a bug in Aura. crbug.com/633140.
-  window_rect.width = new_size.width;
-  window_rect.height = new_size.height;
-  SetWindowRect(window_rect);
+  window_rect_in_dips.set_size(new_size_in_dips);
+  SetWindowRect(window_rect_in_dips);
 
   if (page_) {
     MainFrame().View()->Resize(new_size_in_viewport);
@@ -555,6 +672,11 @@ WebInputEventResult WebPagePopupImpl::HandleKeyEvent(
   if (closing_)
     return WebInputEventResult::kNotHandled;
 
+  if (suppress_next_keypress_event_) {
+    suppress_next_keypress_event_ = false;
+    return WebInputEventResult::kHandledSuppressed;
+  }
+
   if (WebInputEvent::Type::kRawKeyDown == event.GetType()) {
     Element* focused_element = FocusedElement();
     if (event.windows_key_code == VKEY_TAB && focused_element &&
@@ -564,7 +686,14 @@ WebInputEventResult WebPagePopupImpl::HandleKeyEvent(
       suppress_next_keypress_event_ = true;
     }
   }
+  LocalFrame::NotifyUserActivation(
+      popup_client_->OwnerElement().GetDocument().GetFrame(),
+      mojom::blink::UserActivationNotificationType::kInteraction);
   return MainFrame().GetEventHandler().KeyEvent(event);
+}
+
+cc::LayerTreeHost* WebPagePopupImpl::LayerTreeHostForTesting() {
+  return widget_base_->LayerTreeHost();
 }
 
 void WebPagePopupImpl::BeginMainFrame(base::TimeTicks last_frame_time) {
@@ -572,50 +701,19 @@ void WebPagePopupImpl::BeginMainFrame(base::TimeTicks last_frame_time) {
     return;
   // FIXME: This should use lastFrameTimeMonotonic but doing so
   // breaks tests.
-  PageWidgetDelegate::Animate(*page_, base::TimeTicks::Now());
+  page_->Animate(base::TimeTicks::Now());
 }
 
-void WebPagePopupImpl::DispatchRafAlignedInput(base::TimeTicks frame_time) {
-  WidgetClient()->DispatchRafAlignedInput(frame_time);
-}
+void WebPagePopupImpl::WillHandleGestureEvent(const WebGestureEvent& event,
+                                              bool* suppress) {}
 
-bool WebPagePopupImpl::WillHandleGestureEvent(const WebGestureEvent& event) {
-  return WidgetClient()->WillHandleGestureEvent(event);
-}
-
-bool WebPagePopupImpl::WillHandleMouseEvent(const WebMouseEvent& event) {
-  return WidgetClient()->WillHandleMouseEvent(event);
-}
+void WebPagePopupImpl::WillHandleMouseEvent(const WebMouseEvent& event) {}
 
 void WebPagePopupImpl::ObserveGestureEventAndResult(
     const WebGestureEvent& gesture_event,
     const gfx::Vector2dF& unused_delta,
     const cc::OverscrollBehavior& overscroll_behavior,
     bool event_processed) {
-  WidgetClient()->DidHandleGestureScrollEvent(
-      gesture_event, unused_delta, overscroll_behavior, event_processed);
-}
-
-void WebPagePopupImpl::QueueSyntheticEvent(
-    std::unique_ptr<blink::WebCoalescedInputEvent> event) {
-  WidgetClient()->QueueSyntheticEvent(std::move(event));
-}
-
-void WebPagePopupImpl::GetWidgetInputHandler(
-    mojo::PendingReceiver<mojom::blink::WidgetInputHandler> request,
-    mojo::PendingRemote<mojom::blink::WidgetInputHandlerHost> host) {
-  WidgetClient()->GetWidgetInputHandler(std::move(request), std::move(host));
-}
-
-bool WebPagePopupImpl::HasCurrentImeGuard(
-    bool request_to_show_virtual_keyboard) {
-  return WidgetClient()->HasCurrentImeGuard(request_to_show_virtual_keyboard);
-}
-
-void WebPagePopupImpl::SendCompositionRangeChanged(
-    const gfx::Range& range,
-    const std::vector<gfx::Rect>& character_bounds) {
-  WidgetClient()->SendCompositionRangeChanged(range, character_bounds);
 }
 
 WebInputEventResult WebPagePopupImpl::HandleCharEvent(
@@ -638,9 +736,42 @@ WebInputEventResult WebPagePopupImpl::HandleGestureEvent(
       Cancel();
       return WebInputEventResult::kNotHandled;
     }
+    LocalFrame::NotifyUserActivation(
+        popup_client_->OwnerElement().GetDocument().GetFrame(),
+        mojom::blink::UserActivationNotificationType::kInteraction);
     CheckScreenPointInOwnerWindowAndCount(
         event.PositionInScreen(),
         WebFeature::kPopupGestureTapExceedsOwnerWindowBounds);
+  }
+  if (base::FeatureList::IsEnabled(::features::kScrollUnification)) {
+    if (event.GetType() == WebInputEvent::Type::kGestureScrollBegin) {
+      HitTestLocation locationScroll(event.PositionInWidget());
+      HitTestResult resultScroll =
+          MainFrame().GetEventHandler().HitTestResultAtLocation(locationScroll);
+      scrollable_node_ = FindFirstScroller(resultScroll.InnerNode());
+      RecordScrollReasonsMetric(
+          event.SourceDevice(),
+          cc::MainThreadScrollingReason::kPopupNoThreadedInput);
+      return WebInputEventResult::kHandledSystem;
+    }
+    if (event.GetType() == WebInputEvent::Type::kGestureScrollUpdate) {
+      if (!scrollable_node_)
+        return WebInputEventResult::kNotHandled;
+
+      ScrollableArea* scrollable = ToScrollableArea(scrollable_node_);
+
+      if (!scrollable)
+        return WebInputEventResult::kNotHandled;
+      ScrollOffset scroll_offset(-event.data.scroll_update.delta_x,
+                                 -event.data.scroll_update.delta_y);
+      scrollable->UserScroll(event.data.scroll_update.delta_units,
+                             scroll_offset, ScrollableArea::ScrollCallback());
+      return WebInputEventResult::kHandledSystem;
+    }
+    if (event.GetType() == WebInputEvent::Type::kGestureScrollEnd) {
+      scrollable_node_ = nullptr;
+      return WebInputEventResult::kHandledSystem;
+    }
   }
   WebGestureEvent scaled_event =
       TransformWebGestureEvent(MainFrame().View(), event);
@@ -651,10 +782,13 @@ void WebPagePopupImpl::HandleMouseDown(LocalFrame& main_frame,
                                        const WebMouseEvent& event) {
   if (IsViewportPointInWindow(event.PositionInWidget().x(),
                               event.PositionInWidget().y())) {
+    LocalFrame::NotifyUserActivation(
+        popup_client_->OwnerElement().GetDocument().GetFrame(),
+        mojom::blink::UserActivationNotificationType::kInteraction);
     CheckScreenPointInOwnerWindowAndCount(
         event.PositionInScreen(),
         WebFeature::kPopupMouseDownExceedsOwnerWindowBounds);
-    PageWidgetEventHandler::HandleMouseDown(main_frame, event);
+    WidgetEventHandler::HandleMouseDown(main_frame, event);
   } else {
     Cancel();
   }
@@ -668,7 +802,7 @@ WebInputEventResult WebPagePopupImpl::HandleMouseWheel(
     CheckScreenPointInOwnerWindowAndCount(
         event.PositionInScreen(),
         WebFeature::kPopupMouseWheelExceedsOwnerWindowBounds);
-    return PageWidgetEventHandler::HandleMouseWheel(main_frame, event);
+    return WidgetEventHandler::HandleMouseWheel(main_frame, event);
   }
   Cancel();
   return WebInputEventResult::kNotHandled;
@@ -696,28 +830,41 @@ Element* WebPagePopupImpl::FocusedElement() const {
 }
 
 bool WebPagePopupImpl::IsViewportPointInWindow(int x, int y) {
-  WebRect point_in_window(x, y, 0, 0);
-  WidgetClient()->ConvertViewportToWindow(&point_in_window);
-  WebRect window_rect = WindowRectInScreen();
-  return IntRect(0, 0, window_rect.width, window_rect.height)
-      .Contains(IntPoint(point_in_window.x, point_in_window.y));
+  gfx::Point point_in_dips =
+      widget_base_->BlinkSpaceToFlooredDIPs(gfx::Point(x, y));
+  gfx::Rect window_rect = WindowRectInScreen();
+  return gfx::Rect(window_rect.size()).Contains(point_in_dips);
+}
+
+bool WebPagePopupImpl::ShouldCheckPopupPositionForTelemetry() const {
+  // Avoid doing any telemetry work when the popup is closing or the
+  // owner element is not shown anymore.
+  return !closing_ && popup_client_->OwnerElement().GetDocument().View();
 }
 
 void WebPagePopupImpl::CheckScreenPointInOwnerWindowAndCount(
     const gfx::PointF& point_in_screen,
     WebFeature feature) const {
-  if (closing_)
+  if (!ShouldCheckPopupPositionForTelemetry())
     return;
 
-  IntRect owner_window_rect = OwnerWindowRectInScreen();
+  gfx::Rect owner_window_rect = OwnerWindowRectInScreen();
   if (!owner_window_rect.Contains(point_in_screen.x(), point_in_screen.y()))
     UseCounter::Count(popup_client_->OwnerElement().GetDocument(), feature);
 }
 
-IntRect WebPagePopupImpl::OwnerWindowRectInScreen() const {
+gfx::Rect WebPagePopupImpl::OwnerWindowRectInScreen() const {
   LocalFrameView* view = popup_client_->OwnerElement().GetDocument().View();
-  IntRect frame_rect = view->FrameRect();
+  DCHECK(view);
+  gfx::Rect frame_rect = view->FrameRect();
   return view->FrameToScreen(frame_rect);
+}
+
+gfx::Rect WebPagePopupImpl::GetAnchorRectInScreen() const {
+  LocalFrameView* view = popup_client_->OwnerElement().GetDocument().View();
+  DCHECK(view);
+  return popup_client_->GetChromeClient().ViewportToScreen(
+      popup_client_->OwnerElement().VisibleBoundsInVisualViewport(), view);
 }
 
 WebInputEventResult WebPagePopupImpl::DispatchBufferedTouchEvents() {
@@ -731,30 +878,62 @@ WebInputEventResult WebPagePopupImpl::HandleInputEvent(
   if (closing_)
     return WebInputEventResult::kNotHandled;
   DCHECK(!WebInputEvent::IsTouchEventType(event.Event().GetType()));
-  return PageWidgetDelegate::HandleInputEvent(*this, event, &MainFrame());
+  return WidgetEventHandler::HandleInputEvent(event, &MainFrame());
 }
 
-void WebPagePopupImpl::FocusChanged(bool enable) {
+void WebPagePopupImpl::FocusChanged(mojom::blink::FocusState focus_state) {
   if (!page_)
     return;
-  if (enable)
-    page_->GetFocusController().SetActive(true);
-  page_->GetFocusController().SetFocused(enable);
-  WidgetClient()->FocusChanged(enable);
+  page_->GetFocusController().SetActive(
+      focus_state == mojom::blink::FocusState::kFocused ||
+      focus_state == mojom::blink::FocusState::kNotFocusedAndActive);
+  page_->GetFocusController().SetFocused(focus_state ==
+                                         mojom::blink::FocusState::kFocused);
 }
 
-WebURL WebPagePopupImpl::GetURLForDebugTrace() {
+void WebPagePopupImpl::ScheduleAnimation() {
+  widget_base_->LayerTreeHost()->SetNeedsAnimate();
+}
+
+void WebPagePopupImpl::UpdateVisualProperties(
+    const VisualProperties& visual_properties) {
+  widget_base_->UpdateSurfaceAndScreenInfo(
+      visual_properties.local_surface_id.value_or(viz::LocalSurfaceId()),
+      visual_properties.compositor_viewport_pixel_rect,
+      visual_properties.screen_infos);
+  widget_base_->SetVisibleViewportSizeInDIPs(
+      visual_properties.visible_viewport_size);
+
+  // TODO(crbug.com/1155388): Popups are a single "global" object that don't
+  // inherit the scale factor of the frame containing the corresponding element
+  // so compositing_scale_factor is always 1 and has no effect.
+  float combined_scale_factor = visual_properties.page_scale_factor *
+                                visual_properties.compositing_scale_factor;
+  widget_base_->LayerTreeHost()->SetExternalPageScaleFactor(
+      combined_scale_factor, visual_properties.is_pinch_gesture_active);
+
+  Resize(widget_base_->DIPsToCeiledBlinkSpace(visual_properties.new_size));
+}
+
+gfx::Rect WebPagePopupImpl::ViewportVisibleRect() {
+  return widget_base_->CompositorViewportRect();
+}
+
+KURL WebPagePopupImpl::GetURLForDebugTrace() {
   if (!page_)
     return {};
-  WebFrame* main_frame = web_view_->MainFrame();
+  WebFrame* main_frame = opener_web_view_->MainFrame();
   if (main_frame->IsWebLocalFrame())
     return main_frame->ToWebLocalFrame()->GetDocument().Url();
   return {};
 }
 
-void WebPagePopupImpl::Close(
-    scoped_refptr<base::SingleThreadTaskRunner> cleanup_runner,
-    base::OnceCallback<void()> cleanup_task) {
+void WebPagePopupImpl::WidgetHostDisconnected() {
+  Close();
+  // Careful, this is now destroyed.
+}
+
+void WebPagePopupImpl::Close() {
   // If the popup is closed from the renderer via Cancel(), then ClosePopup()
   // has already run on another stack, and destroyed |page_|. If the popup is
   // closed from the browser via IPC to RenderWidget, then we come here first
@@ -767,9 +946,11 @@ void WebPagePopupImpl::Close(
     Cancel();
   }
 
-  widget_base_->Shutdown(std::move(cleanup_runner), std::move(cleanup_task));
+  // TODO(dtapuska): WidgetBase shutdown should happen before Page is
+  // disposed if the PageScheduler get used more. See crbug.com/1340914
+  // for a crash.
+  widget_base_->Shutdown();
   widget_base_.reset();
-  web_page_popup_client_ = nullptr;
 
   // Self-delete on Close().
   Release();
@@ -784,24 +965,23 @@ void WebPagePopupImpl::ClosePopup() {
 
   // If the popup is closed from the renderer via Cancel(), then we want to
   // initiate closing immediately here, but send a request for completing the
-  // close process through the browser via ClosePopupWidgetSoon(), which will
-  // close the RenderWidget and come back to this class to Close().
-  // If |closing_| is already true, then the browser initiated the close on its
-  // own, via IPC to the RenderWidget, which means ClosePopup() is being run
-  // inside the same stack, and does not need to request the browser to close
-  // the RenderWidget.
+  // close process through the browser via PopupWidgetHost::RequestClosePopup(),
+  // which will disconnect the channel come back to this class to
+  // WidgetHostDisconnected(). If |closing_| is already true, then the browser
+  // initiated the close on its own, via WidgetHostDisconnected IPC, which means
+  // ClosePopup() is being run inside the same stack, and does not need to
+  // request the browser to close the widget.
   const bool running_inside_close = closing_;
   if (!running_inside_close) {
     // Bounce through the browser to get it to close the RenderWidget, which
     // will Close() this object too. Only if we're not currently already
-    // responding to the browser closing us though.
-    web_page_popup_client_->ClosePopupWidgetSoon();
+    // responding to the browser closing us though. We don't need to do a post
+    // task like WebViewImpl::CloseWindowSoon does because we shouldn't be
+    // executing javascript influencing this popup widget.
+    popup_widget_host_->RequestClosePopup();
   }
 
   closing_ = true;
-
-  if (AXObjectCache* cache = MainFrame().GetDocument()->ExistingAXObjectCache())
-    cache->DisposePopup(MainFrame().GetDocument());
 
   {
     // This function can be called in EventDispatchForbiddenScope for the main
@@ -822,26 +1002,15 @@ void WebPagePopupImpl::ClosePopup() {
   // owner of itself. Note however that WebViewImpl may briefly extend the
   // lifetime of this object since it owns a reference, but it should only be
   // to call HasSamePopupClient().
-  web_view_->CleanupPagePopup();
+  opener_web_view_->CleanupPagePopup();
 }
 
 LocalDOMWindow* WebPagePopupImpl::Window() {
   return MainFrame().DomWindow();
 }
 
-gfx::Point WebPagePopupImpl::PositionRelativeToOwner() {
-  WebRect root_window_rect = WindowRectInScreen();
-  WebRect window_rect = WindowRectInScreen();
-  return gfx::Point(window_rect.x - root_window_rect.x,
-                    window_rect.y - root_window_rect.y);
-}
-
 WebDocument WebPagePopupImpl::GetDocument() {
   return WebDocument(MainFrame().GetDocument());
-}
-
-WebPagePopupClient* WebPagePopupImpl::GetClientForTesting() const {
-  return web_page_popup_client_;
 }
 
 void WebPagePopupImpl::Cancel() {
@@ -849,37 +1018,71 @@ void WebPagePopupImpl::Cancel() {
     popup_client_->CancelPopup();
 }
 
-WebRect WebPagePopupImpl::WindowRectInScreen() const {
-  return WidgetClient()->WindowRect();
+gfx::Rect WebPagePopupImpl::WindowRectInScreen() const {
+  return widget_base_->WindowRect();
 }
 
 void WebPagePopupImpl::InjectGestureScrollEvent(
     WebGestureDevice device,
     const gfx::Vector2dF& delta,
-    ScrollGranularity granularity,
+    ui::ScrollGranularity granularity,
     cc::ElementId scrollable_area_element_id,
     WebInputEvent::Type injected_type) {
   widget_base_->input_handler().InjectGestureScrollEvent(
       device, delta, granularity, scrollable_area_element_id, injected_type);
 }
 
+void WebPagePopupImpl::ScreenRectToEmulated(gfx::Rect& screen_rect) {
+  if (!opener_emulator_scale_)
+    return;
+  screen_rect.set_x(
+      opener_widget_screen_origin_.x() +
+      (screen_rect.x() - opener_original_widget_screen_origin_.x()) /
+          opener_emulator_scale_);
+  screen_rect.set_y(
+      opener_widget_screen_origin_.y() +
+      (screen_rect.y() - opener_original_widget_screen_origin_.y()) /
+          opener_emulator_scale_);
+}
+
+void WebPagePopupImpl::EmulatedToScreenRect(gfx::Rect& screen_rect) {
+  if (!opener_emulator_scale_)
+    return;
+  screen_rect.set_x(opener_original_widget_screen_origin_.x() +
+                    (screen_rect.x() - opener_widget_screen_origin_.x()) *
+                        opener_emulator_scale_);
+  screen_rect.set_y(opener_original_widget_screen_origin_.y() +
+                    (screen_rect.y() - opener_widget_screen_origin_.y()) *
+                        opener_emulator_scale_);
+}
+
+std::unique_ptr<cc::LayerTreeFrameSink>
+WebPagePopupImpl::AllocateNewLayerTreeFrameSink() {
+  return nullptr;
+}
+
 // WebPagePopup ----------------------------------------------------------------
 
-WebPagePopup* WebPagePopup::Create(
-    WebPagePopupClient* client,
+WebPagePopupImpl* WebPagePopupImpl::Create(
+    CrossVariantMojoAssociatedRemote<mojom::blink::PopupWidgetHostInterfaceBase>
+        popup_widget_host,
     CrossVariantMojoAssociatedRemote<mojom::blink::WidgetHostInterfaceBase>
         widget_host,
     CrossVariantMojoAssociatedReceiver<mojom::blink::WidgetInterfaceBase>
-        widget) {
-  CHECK(client);
+        widget,
+    WebViewImpl* opener_webview,
+    scheduler::WebAgentGroupScheduler& agent_group_scheduler,
+    const display::ScreenInfos& screen_infos,
+    PagePopupClient* popup_client) {
   // A WebPagePopupImpl instance usually has two references.
   //  - One owned by the instance itself. It represents the visible widget.
   //  - One owned by a WebViewImpl. It's released when the WebViewImpl ask the
   //    WebPagePopupImpl to close.
   // We need them because the closing operation is asynchronous and the widget
   // can be closed while the WebViewImpl is unaware of it.
-  auto popup = base::AdoptRef(
-      new WebPagePopupImpl(client, std::move(widget_host), std::move(widget)));
+  auto popup = base::AdoptRef(new WebPagePopupImpl(
+      std::move(popup_widget_host), std::move(widget_host), std::move(widget),
+      opener_webview, agent_group_scheduler, screen_infos, popup_client));
   popup->AddRef();
   return popup.get();
 }

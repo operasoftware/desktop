@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/modules/encryptedmedia/html_media_element_encrypted_media.h"
 
-#include "base/macros.h"
 #include "media/base/eme_constants.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
@@ -21,7 +20,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/content_decryption_module_result.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -35,6 +34,10 @@ class SetMediaKeysHandler : public ScriptPromiseResolver {
   static ScriptPromise Create(ScriptState*, HTMLMediaElement&, MediaKeys*);
 
   SetMediaKeysHandler(ScriptState*, HTMLMediaElement&, MediaKeys*);
+
+  SetMediaKeysHandler(const SetMediaKeysHandler&) = delete;
+  SetMediaKeysHandler& operator=(const SetMediaKeysHandler&) = delete;
+
   ~SetMediaKeysHandler() override;
 
   void Trace(Visitor*) const override;
@@ -55,9 +58,7 @@ class SetMediaKeysHandler : public ScriptPromiseResolver {
   Member<HTMLMediaElement> element_;
   Member<MediaKeys> new_media_keys_;
   bool made_reservation_;
-  TaskRunnerTimer<SetMediaKeysHandler> timer_;
-
-  DISALLOW_COPY_AND_ASSIGN(SetMediaKeysHandler);
+  HeapTaskRunnerTimer<SetMediaKeysHandler> timer_;
 };
 
 typedef base::OnceCallback<void()> SuccessCallback;
@@ -323,6 +324,7 @@ void SetMediaKeysHandler::SetFailed(ExceptionCode code,
 void SetMediaKeysHandler::Trace(Visitor* visitor) const {
   visitor->Trace(element_);
   visitor->Trace(new_media_keys_);
+  visitor->Trace(timer_);
   ScriptPromiseResolver::Trace(visitor);
 }
 
@@ -332,7 +334,7 @@ const char HTMLMediaElementEncryptedMedia::kSupplementName[] =
 
 HTMLMediaElementEncryptedMedia::HTMLMediaElementEncryptedMedia(
     HTMLMediaElement& element)
-    : media_element_(&element),
+    : Supplement(element),
       is_waiting_for_key_(false),
       is_attaching_media_keys_(false) {}
 
@@ -414,13 +416,13 @@ void HTMLMediaElementEncryptedMedia::Encrypted(
   DVLOG(EME_LOG_LEVEL) << __func__;
 
   Event* event;
-  if (media_element_->IsMediaDataCorsSameOrigin()) {
+  if (GetSupplementable()->IsMediaDataCorsSameOrigin()) {
     event = CreateEncryptedEvent(init_data_type, init_data, init_data_length);
   } else {
     // Current page is not allowed to see content from the media file,
     // so don't return the initData. However, they still get an event.
     event = CreateEncryptedEvent(media::EmeInitDataType::UNKNOWN, nullptr, 0);
-    media_element_->GetExecutionContext()->AddConsoleMessage(
+    GetSupplementable()->GetExecutionContext()->AddConsoleMessage(
         MakeGarbageCollected<ConsoleMessage>(
             mojom::ConsoleMessageSource::kJavaScript,
             mojom::ConsoleMessageLevel::kWarning,
@@ -431,8 +433,8 @@ void HTMLMediaElementEncryptedMedia::Encrypted(
             "response are CORS-same-origin."));
   }
 
-  event->SetTarget(media_element_);
-  media_element_->ScheduleEvent(event);
+  event->SetTarget(GetSupplementable());
+  GetSupplementable()->ScheduleEvent(event);
 }
 
 void HTMLMediaElementEncryptedMedia::DidBlockPlaybackWaitingForKey() {
@@ -448,8 +450,8 @@ void HTMLMediaElementEncryptedMedia::DidBlockPlaybackWaitingForKey() {
   //    to fire a simple event named waitingforkey at the media element.
   if (!is_waiting_for_key_) {
     Event* event = Event::Create(event_type_names::kWaitingforkey);
-    event->SetTarget(media_element_);
-    media_element_->ScheduleEvent(event);
+    event->SetTarget(GetSupplementable());
+    GetSupplementable()->ScheduleEvent(event);
   }
 
   // 3. Set the media element's waiting for key value to true.
@@ -474,7 +476,6 @@ HTMLMediaElementEncryptedMedia::ContentDecryptionModule() {
 }
 
 void HTMLMediaElementEncryptedMedia::Trace(Visitor* visitor) const {
-  visitor->Trace(media_element_);
   visitor->Trace(media_keys_);
   Supplement<HTMLMediaElement>::Trace(visitor);
 }

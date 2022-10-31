@@ -2,8 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import {ConsentStatus, CrSettingsPrefs, DspHotwordState, GoogleAssistantBrowserProxyImpl, Router, routes} from 'chrome://os-settings/chromeos/os_settings.js';
+import {getDeepActiveElement} from 'chrome://resources/js/util.m.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {waitAfterNextRender} from 'chrome://test/test_util.js';
+
+import {assertEquals, assertFalse, assertTrue} from '../../chai_assert.js';
+import {TestBrowserProxy} from '../../test_browser_proxy.js';
+
 /**
- * @implements {settings.GoogleAssistantBrowserProxy}
+ * @implements {GoogleAssistantBrowserProxy}
  */
 class TestGoogleAssistantBrowserProxy extends TestBrowserProxy {
   constructor() {
@@ -41,13 +49,12 @@ suite('GoogleAssistantHandler', function() {
     loadTimeData.overrideValues({
       isAssistantAllowed: true,
       hotwordDspAvailable: true,
-      quickAnswersAvailable: true,
     });
   });
 
   setup(function() {
     browserProxy = new TestGoogleAssistantBrowserProxy();
-    settings.GoogleAssistantBrowserProxyImpl.instance_ = browserProxy;
+    GoogleAssistantBrowserProxyImpl.setInstanceForTesting(browserProxy);
 
     PolymerTest.clearBody();
 
@@ -66,81 +73,51 @@ suite('GoogleAssistantHandler', function() {
   });
 
   test('toggleAssistant', function() {
-    Polymer.dom.flush();
-    const button = page.$$('#google-assistant-enable');
+    flush();
+    const button = page.shadowRoot.querySelector('#google-assistant-enable');
     assertTrue(!!button);
     assertFalse(button.disabled);
     assertFalse(button.checked);
 
     // Tap the enable toggle button and ensure the state becomes enabled.
     button.click();
-    Polymer.dom.flush();
+    flush();
     assertTrue(button.checked);
   });
 
   test('toggleAssistantContext', function() {
-    let button = page.$$('#google-assistant-context-enable');
+    let button =
+        page.shadowRoot.querySelector('#google-assistant-context-enable');
     assertFalse(!!button);
     page.setPrefValue('settings.voice_interaction.enabled', true);
     page.setPrefValue('settings.voice_interaction.context.enabled', false);
-    Polymer.dom.flush();
-    button = page.$$('#google-assistant-context-enable');
+    flush();
+    button = page.shadowRoot.querySelector('#google-assistant-context-enable');
     assertTrue(!!button);
     assertFalse(button.disabled);
     assertFalse(button.checked);
 
     button.click();
-    Polymer.dom.flush();
+    flush();
     assertTrue(button.checked);
     assertTrue(
         page.getPref('settings.voice_interaction.context.enabled.value'));
   });
 
-  test('toggleAssistantQuickAnswers', function() {
-    let button = page.$$('#google-assistant-quick-answers-enable');
-    assertFalse(!!button);
-    page.setPrefValue('settings.voice_interaction.enabled', true);
-    page.setPrefValue('settings.voice_interaction.context.enabled', true);
-    page.setPrefValue(
-        'settings.voice_interaction.quick_answers.enabled', false);
-    Polymer.dom.flush();
-    button = page.$$('#google-assistant-quick-answers-enable');
-    assertTrue(!!button);
-    assertFalse(button.disabled);
-    assertFalse(button.checked);
-
-    button.click();
-    Polymer.dom.flush();
-    assertTrue(button.checked);
-    assertTrue(
-        page.getPref('settings.voice_interaction.quick_answers.enabled.value'));
-  });
-
-  test('quickAnswersSettingVisibility', function() {
-    let dropdown = page.$$('#quick-answers-container');
-    assertFalse(!!dropdown);
-
-    page.setPrefValue('settings.voice_interaction.enabled', true);
-    page.setPrefValue('settings.voice_interaction.context.enabled', true);
-    Polymer.dom.flush();
-
-    dropdown = page.$$('#quick-answers-container');
-    assertTrue(!!dropdown);
-  });
-
   test('toggleAssistantHotword', function() {
-    let button = page.$$('#google-assistant-hotword-enable');
+    let button =
+        page.shadowRoot.querySelector('#google-assistant-hotword-enable');
     assertFalse(!!button);
     page.setPrefValue('settings.voice_interaction.enabled', true);
     page.setPrefValue('settings.voice_interaction.hotword.enabled', false);
-    Polymer.dom.flush();
-    button = page.$$('#google-assistant-hotword-enable');
+    flush();
+    button = page.shadowRoot.querySelector('#google-assistant-hotword-enable');
     assertTrue(!!button);
     assertFalse(button.disabled);
     assertFalse(button.checked);
 
     button.click();
-    Polymer.dom.flush();
+    flush();
     assertTrue(button.checked);
     assertTrue(
         page.getPref('settings.voice_interaction.hotword.enabled.value'));
@@ -148,234 +125,171 @@ suite('GoogleAssistantHandler', function() {
   });
 
   test('hotwordToggleVisibility', function() {
-    let button = page.$$('#google-assistant-hotword-enable');
+    let button =
+        page.shadowRoot.querySelector('#google-assistant-hotword-enable');
     assertFalse(!!button);
 
     page.setPrefValue('settings.voice_interaction.enabled', true);
-    Polymer.dom.flush();
+    flush();
 
-    button = page.$$('#google-assistant-hotword-enable');
+    button = page.shadowRoot.querySelector('#google-assistant-hotword-enable');
     assertTrue(!!button);
-    assertFalse(button.hasAttribute('hidden'));
   });
 
-  test('hotwordToggleEnabled', function() {
-    let button = page.$$('#google-assistant-hotword-enable');
-    let indicator = page.$$('#hotword-policy-pref-indicator');
-    assertFalse(!!button);
-    assertFalse(!!indicator);
-
+  test('hotwordToggleDisabledForChildUser', function() {
     page.setPrefValue('settings.voice_interaction.enabled', true);
-
-    page.set('prefs.settings.voice_interaction.hotword.enabled', {
-      enforcement: chrome.settingsPrivate.Enforcement.RECOMMENDED,
-      value: true,
-    });
-
-    Polymer.dom.flush();
-    button = page.$$('#dsp-hotword-state');
-    indicator = page.$$('#hotword-policy-pref-indicator');
-    assertTrue(!!button);
-    assertFalse(!!indicator);
-    assertFalse(button.hasAttribute('disabled'));
-  });
-
-  test('hotwordToggleDisabled', function() {
-    let button = page.$$('#google-assistant-hotword-enable');
-    let indicator = page.$$('#hotword-policy-pref-indicator');
-    assertFalse(!!button);
-    assertFalse(!!indicator);
-
-    page.setPrefValue('settings.voice_interaction.enabled', true);
-
     page.set('prefs.settings.voice_interaction.hotword.enabled', {
       enforcement: chrome.settingsPrivate.Enforcement.ENFORCED,
-      value: true,
+      controlledBy: chrome.settingsPrivate.ControlledBy.CHILD_RESTRICTION,
+      value: false,
     });
 
-    Polymer.dom.flush();
-    button = page.$$('#dsp-hotword-state');
-    indicator = page.$$('#hotword-policy-pref-indicator');
+    flush();
+    const button =
+        page.shadowRoot.querySelector('#google-assistant-hotword-enable');
+    const indicator =
+        page.shadowRoot.querySelector('#google-assistant-hotword-enable')
+            .shadowRoot.querySelector('cr-policy-pref-indicator');
     assertTrue(!!button);
     assertTrue(!!indicator);
-    assertTrue(button.hasAttribute('disabled'));
+    assertTrue(button.disabled);
   });
 
   test('tapOnRetrainVoiceModel', function() {
-    let button = page.$$('#retrain-voice-model');
+    let button = page.shadowRoot.querySelector('#retrain-voice-model');
     assertFalse(!!button);
     page.setPrefValue('settings.voice_interaction.enabled', true);
     page.setPrefValue('settings.voice_interaction.hotword.enabled', true);
     page.setPrefValue(
         'settings.voice_interaction.activity_control.consent_status',
         ConsentStatus.kActivityControlAccepted);
-    Polymer.dom.flush();
-    button = page.$$('#retrain-voice-model');
+    flush();
+    button = page.shadowRoot.querySelector('#retrain-voice-model');
     assertTrue(!!button);
 
     button.click();
-    Polymer.dom.flush();
+    flush();
     return browserProxy.whenCalled('retrainAssistantVoiceModel');
   });
 
   test('retrainButtonVisibility', function() {
-    let button = page.$$('#retrain-voice-model');
+    let button = page.shadowRoot.querySelector('#retrain-voice-model');
     assertFalse(!!button);
     page.setPrefValue('settings.voice_interaction.enabled', true);
-    Polymer.dom.flush();
-    button = page.$$('#retrain-voice-model');
-    assertFalse(!!button);
-
-    // Hotword enabled.
-    // Activity control consent not granted.
-    // Button should not be shown.
-    page.setPrefValue('settings.voice_interaction.hotword.enabled', true);
-    page.setPrefValue(
-        'settings.voice_interaction.activity_control.consent_status',
-        ConsentStatus.kUnauthorized);
-    Polymer.dom.flush();
-    button = page.$$('#retrain-voice-model');
+    flush();
+    button = page.shadowRoot.querySelector('#retrain-voice-model');
     assertFalse(!!button);
 
     // Hotword disabled.
-    // Activity control consent granted.
     // Button should not be shown.
     page.setPrefValue('settings.voice_interaction.hotword.enabled', false);
-    page.setPrefValue(
-        'settings.voice_interaction.activity_control.consent_status',
-        ConsentStatus.kActivityControlAccepted);
-    Polymer.dom.flush();
-    button = page.$$('#retrain-voice-model');
+    flush();
+    button = page.shadowRoot.querySelector('#retrain-voice-model');
     assertFalse(!!button);
 
     // Hotword enabled.
-    // Activity control consent granted.
     // Button should be shown.
+    page.setPrefValue('settings.voice_interaction.hotword.enabled', true);
+    flush();
+    button = page.shadowRoot.querySelector('#retrain-voice-model');
+    assertTrue(!!button);
+  });
+
+  test('Deep link to retrain voice model', async () => {
+    page.setPrefValue('settings.voice_interaction.enabled', true);
     page.setPrefValue('settings.voice_interaction.hotword.enabled', true);
     page.setPrefValue(
         'settings.voice_interaction.activity_control.consent_status',
         ConsentStatus.kActivityControlAccepted);
-    Polymer.dom.flush();
-    button = page.$$('#retrain-voice-model');
-    assertTrue(!!button);
+    flush();
+
+    const params = new URLSearchParams();
+    params.append('settingId', '607');
+    Router.getInstance().navigateTo(routes.GOOGLE_ASSISTANT, params);
+
+    const deepLinkElement =
+        page.shadowRoot.querySelector('#retrain-voice-model')
+            .shadowRoot.querySelector('cr-button');
+    await waitAfterNextRender(deepLinkElement);
+    assertEquals(
+        deepLinkElement, getDeepActiveElement(),
+        'Retrain model button should be focused for settingId=607.');
   });
 
   test('toggleAssistantNotification', function() {
-    let button = page.$$('#google-assistant-notification-enable');
+    let button =
+        page.shadowRoot.querySelector('#google-assistant-notification-enable');
     assertFalse(!!button);
     page.setPrefValue('settings.voice_interaction.enabled', true);
     page.setPrefValue('settings.voice_interaction.notification.enabled', false);
-    Polymer.dom.flush();
-    button = page.$$('#google-assistant-notification-enable');
+    flush();
+    button =
+        page.shadowRoot.querySelector('#google-assistant-notification-enable');
     assertTrue(!!button);
     assertFalse(button.disabled);
     assertFalse(button.checked);
 
     button.click();
-    Polymer.dom.flush();
+    flush();
     assertTrue(button.checked);
     assertTrue(
         page.getPref('settings.voice_interaction.notification.enabled.value'));
   });
 
   test('toggleAssistantLaunchWithMicOpen', function() {
-    let button = page.$$('#google-assistant-launch-with-mic-open');
+    let button =
+        page.shadowRoot.querySelector('#google-assistant-launch-with-mic-open');
     assertFalse(!!button);
     page.setPrefValue('settings.voice_interaction.enabled', true);
     page.setPrefValue('settings.voice_interaction.launch_with_mic_open', false);
-    Polymer.dom.flush();
-    button = page.$$('#google-assistant-launch-with-mic-open');
+    flush();
+    button =
+        page.shadowRoot.querySelector('#google-assistant-launch-with-mic-open');
     assertTrue(!!button);
     assertFalse(button.disabled);
     assertFalse(button.checked);
 
     button.click();
-    Polymer.dom.flush();
+    flush();
     assertTrue(button.checked);
     assertTrue(
         page.getPref('settings.voice_interaction.launch_with_mic_open.value'));
   });
 
   test('tapOnAssistantSettings', function() {
-    let button = page.$$('#google-assistant-settings');
+    let button = page.shadowRoot.querySelector('#google-assistant-settings');
     assertFalse(!!button);
     page.setPrefValue('settings.voice_interaction.enabled', true);
-    Polymer.dom.flush();
-    button = page.$$('#google-assistant-settings');
+    flush();
+    button = page.shadowRoot.querySelector('#google-assistant-settings');
     assertTrue(!!button);
 
     button.click();
-    Polymer.dom.flush();
+    flush();
     return browserProxy.whenCalled('showGoogleAssistantSettings');
   });
 
-  test('dspHotwordDropdownEnabled', function() {
-    let dropdown = page.$$('#dsp-hotword-state');
-    assertFalse(!!dropdown);
-
-    page.setPrefValue('settings.voice_interaction.enabled', true);
-
-    page.set('prefs.settings.voice_interaction.hotword.enabled', {
-      enforcement: chrome.settingsPrivate.Enforcement.RECOMMENDED,
-      value: true,
-    });
-
-    Polymer.dom.flush();
-    dropdown = page.$$('#dsp-hotword-state');
-    assertTrue(!!dropdown);
-    assertFalse(dropdown.hasAttribute('disabled'));
-  });
-
-  test('dspHotwordDropdownDisabled', function() {
-    let dropdown = page.$$('#dsp-hotword-state');
-    assertFalse(!!dropdown);
-
-    page.setPrefValue('settings.voice_interaction.enabled', true);
-
-    page.set('prefs.settings.voice_interaction.hotword.enabled', {
-      enforcement: chrome.settingsPrivate.Enforcement.ENFORCED,
-      value: true,
-    });
-
-    Polymer.dom.flush();
-    dropdown = page.$$('#dsp-hotword-state');
-    assertTrue(!!dropdown);
-    assertTrue(dropdown.hasAttribute('disabled'));
-  });
-
-  test('dspHotwordDropdownVisibility', function() {
-    let dropdown = page.$$('#dsp-hotword-container');
-    assertFalse(!!dropdown);
-
-    page.setPrefValue('settings.voice_interaction.enabled', true);
-    Polymer.dom.flush();
-
-    dropdown = page.$$('#dsp-hotword-container');
-    assertTrue(!!dropdown);
-    assertTrue(dropdown.hasAttribute('hidden'));
-  });
-
   test('assistantDisabledByPolicy', function() {
-    let button = page.$$('#google-assistant-enable');
+    let button = page.shadowRoot.querySelector('#google-assistant-enable');
     assertTrue(!!button);
     assertFalse(button.disabled);
     assertFalse(button.checked);
     page.setPrefValue('settings.voice_interaction.enabled', true);
-    Polymer.dom.flush();
-    button = page.$$('#google-assistant-enable');
+    flush();
+    button = page.shadowRoot.querySelector('#google-assistant-enable');
     assertTrue(!!button);
     assertFalse(button.disabled);
     assertTrue(button.checked);
 
     page.setPrefValue('settings.assistant.disabled_by_policy', true);
-    Polymer.dom.flush();
+    flush();
     assertTrue(!!button);
     assertTrue(button.disabled);
     assertFalse(button.checked);
   });
 });
 
-suite('GoogleAssistantHandlerWihtNoDspHotword', function() {
+suite('GoogleAssistantHandlerWithNoDspHotword', function() {
   /** @type {SettingsGoogleAssistantPageElement} */
   let page = null;
 
@@ -391,7 +305,7 @@ suite('GoogleAssistantHandlerWihtNoDspHotword', function() {
 
   setup(function() {
     browserProxy = new TestGoogleAssistantBrowserProxy();
-    settings.GoogleAssistantBrowserProxyImpl.instance_ = browserProxy;
+    GoogleAssistantBrowserProxyImpl.setInstanceForTesting(browserProxy);
 
     PolymerTest.clearBody();
 
@@ -402,6 +316,7 @@ suite('GoogleAssistantHandlerWihtNoDspHotword', function() {
       page = document.createElement('settings-google-assistant-page');
       page.prefs = prefElement.prefs;
       document.body.appendChild(page);
+      flush();
     });
   });
 
@@ -416,62 +331,117 @@ suite('GoogleAssistantHandlerWihtNoDspHotword', function() {
   function selectValue(select, value) {
     select.value = value;
     select.dispatchEvent(new CustomEvent('change'));
-    Polymer.dom.flush();
+    flush();
   }
 
-  test('hotwordToggleVisibilityWihtNoDspHotword', function() {
-    let button = page.$$('#google-assistant-hotword-enable');
-    assertFalse(!!button);
+  test('hotwordToggleVisibilityWithNoDspHotword', function() {
+    let toggle =
+        page.shadowRoot.querySelector('#google-assistant-hotword-enable');
+    assertFalse(!!toggle);
 
     page.setPrefValue('settings.voice_interaction.enabled', true);
-    Polymer.dom.flush();
+    flush();
 
-    button = page.$$('#google-assistant-hotword-enable');
-    assertTrue(!!button);
-    assertTrue(button.hasAttribute('hidden'));
+    toggle = page.shadowRoot.querySelector('#google-assistant-hotword-enable');
+    assertFalse(!!toggle);
   });
 
-  test('dspHotwordDropdownVisibilityWihtNoDspHotword', function() {
-    let container = page.$$('#dsp-hotword-container');
+  test('dspHotwordDropdownVisibilityWithNoDspHotword', function() {
+    let container = page.shadowRoot.querySelector('#dsp-hotword-container');
     assertFalse(!!container);
 
     page.setPrefValue('settings.voice_interaction.enabled', true);
-    loadTimeData.overrideValues({
-      hotwordDspAvailable: true,
-    });
-    Polymer.dom.flush();
+    flush();
 
-    container = page.$$('#dsp-hotword-container');
-    assertFalse(container.hasAttribute('hidden'));
+    container = page.shadowRoot.querySelector('#dsp-hotword-container');
+    assertTrue(!!container);
+  });
+
+  test('dspHotwordDropdownIndicatorEnabled', function() {
+    let indicator =
+        page.shadowRoot.querySelector('#hotword-policy-pref-indicator');
+    assertFalse(!!indicator);
+
+    page.setPrefValue('settings.voice_interaction.enabled', true);
+    page.set('prefs.settings.voice_interaction.hotword.enabled', {
+      enforcement: chrome.settingsPrivate.Enforcement.RECOMMENDED,
+      value: true,
+    });
+
+    flush();
+    const dropdown = page.shadowRoot.querySelector('#dsp-hotword-state');
+    indicator = page.shadowRoot.querySelector('#hotword-policy-pref-indicator');
+    assertTrue(!!dropdown);
+    assertFalse(!!indicator);
+    assertFalse(dropdown.hasAttribute('disabled'));
+  });
+
+  test('dspHotwordDropdownIndicatorDisabled', function() {
+    let indicator =
+        page.shadowRoot.querySelector('#hotword-policy-pref-indicator');
+    assertFalse(!!indicator);
+
+    page.setPrefValue('settings.voice_interaction.enabled', true);
+    page.set('prefs.settings.voice_interaction.hotword.enabled', {
+      enforcement: chrome.settingsPrivate.Enforcement.ENFORCED,
+      value: true,
+    });
+
+    flush();
+    const dropdown = page.shadowRoot.querySelector('#dsp-hotword-state');
+    indicator = page.shadowRoot.querySelector('#hotword-policy-pref-indicator');
+    assertTrue(!!dropdown);
+    assertTrue(!!indicator);
+    assertTrue(dropdown.hasAttribute('disabled'));
+  });
+
+  test('dspHotwordDropdownDisabledForChildUser', function() {
+    let indicator =
+        page.shadowRoot.querySelector('#hotword-policy-pref-indicator');
+    assertFalse(!!indicator);
+
+    page.setPrefValue('settings.voice_interaction.enabled', true);
+    page.set('prefs.settings.voice_interaction.hotword.enabled', {
+      enforcement: chrome.settingsPrivate.Enforcement.ENFORCED,
+      controlledBy: chrome.settingsPrivate.ControlledBy.CHILD_RESTRICTION,
+      value: false,
+    });
+
+    flush();
+    const dropdown = page.shadowRoot.querySelector('#dsp-hotword-state');
+    indicator = page.shadowRoot.querySelector('#hotword-policy-pref-indicator');
+    assertTrue(!!dropdown);
+    assertTrue(!!indicator);
+    assertTrue(dropdown.disabled);
   });
 
   test('dspHotwordDropdownSelection', function() {
-    let dropdown = page.$$('#dsp-hotword-state');
+    let dropdown = page.shadowRoot.querySelector('#dsp-hotword-state');
     assertFalse(!!dropdown);
 
     page.setPrefValue('settings.voice_interaction.enabled', true);
-    Polymer.dom.flush();
+    flush();
 
-    dropdown = page.$$('#dsp-hotword-state');
+    dropdown = page.shadowRoot.querySelector('#dsp-hotword-state');
     assertTrue(!!dropdown);
     assertFalse(dropdown.disabled);
 
     selectValue(dropdown, DspHotwordState.DEFAULT_ON);
-    Polymer.dom.flush();
+    flush();
     assertTrue(
         page.getPref('settings.voice_interaction.hotword.enabled.value'));
     assertFalse(
         page.getPref('settings.voice_interaction.hotword.always_on.value'));
 
     selectValue(dropdown, DspHotwordState.ALWAYS_ON);
-    Polymer.dom.flush();
+    flush();
     assertTrue(
         page.getPref('settings.voice_interaction.hotword.enabled.value'));
     assertTrue(
         page.getPref('settings.voice_interaction.hotword.always_on.value'));
 
     selectValue(dropdown, DspHotwordState.OFF);
-    Polymer.dom.flush();
+    flush();
     assertFalse(
         page.getPref('settings.voice_interaction.hotword.enabled.value'));
     assertFalse(
@@ -479,65 +449,65 @@ suite('GoogleAssistantHandlerWihtNoDspHotword', function() {
   });
 
   test('dspHotwordDropdownStatus', function() {
-    let dropdown = page.$$('#dsp-hotword-state');
+    let dropdown = page.shadowRoot.querySelector('#dsp-hotword-state');
     assertFalse(!!dropdown);
 
     page.setPrefValue('settings.voice_interaction.enabled', true);
-    Polymer.dom.flush();
+    flush();
 
-    dropdown = page.$$('#dsp-hotword-state');
+    dropdown = page.shadowRoot.querySelector('#dsp-hotword-state');
     assertTrue(!!dropdown);
     assertFalse(dropdown.disabled);
 
     page.setPrefValue('settings.voice_interaction.hotword.enabled', true);
     page.setPrefValue('settings.voice_interaction.hotword.always_on', false);
-    Polymer.dom.flush();
+    flush();
     assertEquals(Number(dropdown.value), DspHotwordState.DEFAULT_ON);
 
     page.setPrefValue('settings.voice_interaction.hotword.enabled', true);
     page.setPrefValue('settings.voice_interaction.hotword.always_on', true);
-    Polymer.dom.flush();
+    flush();
     assertEquals(Number(dropdown.value), DspHotwordState.ALWAYS_ON);
 
     page.setPrefValue('settings.voice_interaction.hotword.enabled', false);
     page.setPrefValue('settings.voice_interaction.hotword.always_on', false);
-    Polymer.dom.flush();
+    flush();
     assertEquals(Number(dropdown.value), DspHotwordState.OFF);
   });
 
   test('dspHotwordDropdownDefaultOnSync', function() {
-    let dropdown = page.$$('#dsp-hotword-state');
+    let dropdown = page.shadowRoot.querySelector('#dsp-hotword-state');
     assertFalse(!!dropdown);
 
     page.setPrefValue('settings.voice_interaction.enabled', true);
-    Polymer.dom.flush();
+    flush();
 
-    dropdown = page.$$('#dsp-hotword-state');
+    dropdown = page.shadowRoot.querySelector('#dsp-hotword-state');
     assertTrue(!!dropdown);
     assertFalse(dropdown.disabled);
     selectValue(dropdown, DspHotwordState.OFF);
-    Polymer.dom.flush();
+    flush();
 
     selectValue(dropdown, DspHotwordState.DEFAULT_ON);
-    Polymer.dom.flush();
+    flush();
     return browserProxy.whenCalled('syncVoiceModelStatus');
   });
 
   test('dspHotwordDropdownAlwaysOnSync', function() {
-    let dropdown = page.$$('#dsp-hotword-state');
+    let dropdown = page.shadowRoot.querySelector('#dsp-hotword-state');
     assertFalse(!!dropdown);
 
     page.setPrefValue('settings.voice_interaction.enabled', true);
-    Polymer.dom.flush();
+    flush();
 
-    dropdown = page.$$('#dsp-hotword-state');
+    dropdown = page.shadowRoot.querySelector('#dsp-hotword-state');
     assertTrue(!!dropdown);
     assertFalse(dropdown.disabled);
     selectValue(dropdown, DspHotwordState.OFF);
-    Polymer.dom.flush();
+    flush();
 
     selectValue(dropdown, DspHotwordState.ALWAYS_ON);
-    Polymer.dom.flush();
+    flush();
     return browserProxy.whenCalled('syncVoiceModelStatus');
   });
 });

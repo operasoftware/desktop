@@ -18,12 +18,11 @@ class ExecutionContext;
 class LocalDOMWindow;
 class ScriptValue;
 class SecurityOrigin;
-class WindowPostMessageOptions;
+class PostMessageOptions;
 
 class CORE_EXPORT PortalHost : public EventTargetWithInlineData,
                                public Supplement<LocalDOMWindow> {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(PortalHost);
 
  public:
   explicit PortalHost(LocalDOMWindow& window);
@@ -44,12 +43,7 @@ class CORE_EXPORT PortalHost : public EventTargetWithInlineData,
   // idl implementation
   void postMessage(ScriptState* script_state,
                    const ScriptValue& message,
-                   const String& target_origin,
-                   HeapVector<ScriptValue>& transfer,
-                   ExceptionState& exception_state);
-  void postMessage(ScriptState* script_state,
-                   const ScriptValue& message,
-                   const WindowPostMessageOptions* options,
+                   const PostMessageOptions* options,
                    ExceptionState& exception_state);
   EventListener* onmessage();
   void setOnmessage(EventListener* listener);
@@ -57,8 +51,7 @@ class CORE_EXPORT PortalHost : public EventTargetWithInlineData,
   void setOnmessageerror(EventListener* listener);
 
   void ReceiveMessage(BlinkTransferableMessage message,
-                      scoped_refptr<const SecurityOrigin> source_origin,
-                      scoped_refptr<const SecurityOrigin> target_origin);
+                      scoped_refptr<const SecurityOrigin> source_origin);
 
  private:
   mojom::blink::PortalHost& GetPortalHostInterface();

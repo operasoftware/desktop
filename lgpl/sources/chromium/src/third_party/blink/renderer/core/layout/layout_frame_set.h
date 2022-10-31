@@ -23,57 +23,27 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_FRAME_SET_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_FRAME_SET_H_
 
-#include "base/macros.h"
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 
 namespace blink {
 
 class HTMLDimension;
 class HTMLFrameSetElement;
-class MouseEvent;
-
-enum FrameEdge {
-  kLeftFrameEdge,
-  kRightFrameEdge,
-  kTopFrameEdge,
-  kBottomFrameEdge
-};
-
-struct FrameEdgeInfo {
-  STACK_ALLOCATED();
-
- public:
-  FrameEdgeInfo(bool prevent_resize = false, bool allow_border = true)
-      : prevent_resize_(4), allow_border_(4) {
-    prevent_resize_.Fill(prevent_resize);
-    allow_border_.Fill(allow_border);
-  }
-
-  bool PreventResize(FrameEdge edge) const { return prevent_resize_[edge]; }
-  bool AllowBorder(FrameEdge edge) const { return allow_border_[edge]; }
-
-  void SetPreventResize(FrameEdge edge, bool prevent_resize) {
-    prevent_resize_[edge] = prevent_resize;
-  }
-  void SetAllowBorder(FrameEdge edge, bool allow_border) {
-    allow_border_[edge] = allow_border;
-  }
-
- private:
-  Vector<bool> prevent_resize_;
-  Vector<bool> allow_border_;
-};
 
 class LayoutFrameSet final : public LayoutBox {
  public:
-  LayoutFrameSet(HTMLFrameSetElement*);
+  explicit LayoutFrameSet(Element*);
   ~LayoutFrameSet() override;
+  void Trace(Visitor*) const override;
 
   LayoutObject* FirstChild() const {
+    NOT_DESTROYED();
     DCHECK_EQ(Children(), VirtualChildren());
     return Children()->FirstChild();
   }
   LayoutObject* LastChild() const {
+    NOT_DESTROYED();
     DCHECK_EQ(Children(), VirtualChildren());
     return Children()->LastChild();
   }
@@ -82,15 +52,14 @@ class LayoutFrameSet final : public LayoutBox {
   void SlowFirstChild() const = delete;
   void SlowLastChild() const = delete;
 
-  const LayoutObjectChildList* Children() const { return &children_; }
-  LayoutObjectChildList* Children() { return &children_; }
-
-  FrameEdgeInfo EdgeInfo() const;
-
-  bool UserResize(const MouseEvent&);
-
-  bool CanResizeRow(const IntPoint&) const;
-  bool CanResizeColumn(const IntPoint&) const;
+  const LayoutObjectChildList* Children() const {
+    NOT_DESTROYED();
+    return &children_;
+  }
+  LayoutObjectChildList* Children() {
+    NOT_DESTROYED();
+    return &children_;
+  }
 
   void NotifyFrameEdgeInfoChanged();
   HTMLFrameSetElement* FrameSet() const;
@@ -99,70 +68,83 @@ class LayoutFrameSet final : public LayoutBox {
     DISALLOW_NEW();
 
    public:
-    GridAxis();
+    GridAxis() = default;
+    GridAxis(const GridAxis&) = delete;
+    GridAxis& operator=(const GridAxis&) = delete;
+
     void Resize(int);
 
-    Vector<int> sizes_;
-    Vector<int> deltas_;
-    Vector<bool> prevent_resize_;
+    Vector<LayoutUnit> sizes_;
+    // A copy of HTMLFrameSetElement::allow_border_*.  It's helpful
+    // because this information is used at the paint stage.
     Vector<bool> allow_border_;
-    int split_being_resized_;
-    int split_resize_offset_;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(GridAxis);
   };
 
-  const GridAxis& Rows() const { return rows_; }
-  const GridAxis& Columns() const { return cols_; }
+  const GridAxis& Rows() const {
+    NOT_DESTROYED();
+    return rows_;
+  }
+  const GridAxis& Columns() const {
+    NOT_DESTROYED();
+    return cols_;
+  }
 
-  const char* GetName() const override { return "LayoutFrameSet"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutFrameSet";
+  }
 
  private:
-  static const int kNoSplit = -1;
-
-  LayoutObjectChildList* VirtualChildren() override { return Children(); }
+  LayoutObjectChildList* VirtualChildren() override {
+    NOT_DESTROYED();
+    return Children();
+  }
   const LayoutObjectChildList* VirtualChildren() const override {
+    NOT_DESTROYED();
     return Children();
   }
 
   bool IsOfType(LayoutObjectType type) const override {
+    NOT_DESTROYED();
     return type == kLayoutObjectFrameSet || LayoutBox::IsOfType(type);
   }
 
   void UpdateLayout() override;
   void Paint(const PaintInfo&) const override;
 
-  MinMaxSizes PreferredLogicalWidths() const override { return MinMaxSizes(); }
-  MinMaxSizes ComputeIntrinsicLogicalWidths() const final {
+  MinMaxSizes PreferredLogicalWidths() const override {
+    NOT_DESTROYED();
     return MinMaxSizes();
+  }
+  MinMaxSizes ComputeIntrinsicLogicalWidths() const final {
+    NOT_DESTROYED();
+    MinMaxSizes sizes;
+    LayoutUnit scrollbar_thickness = ComputeLogicalScrollbars().InlineSum();
+    sizes += BorderAndPaddingLogicalWidth() + scrollbar_thickness;
+    return sizes;
   }
 
   bool IsChildAllowed(LayoutObject*, const ComputedStyle&) const override;
   CursorDirective GetCursor(const PhysicalOffset&, ui::Cursor&) const override;
 
-  void SetIsResizing(bool);
-
-  void LayOutAxis(GridAxis&, const Vector<HTMLDimension>&, int available_space);
-  void ComputeEdgeInfo();
-  void FillFromEdgeInfo(const FrameEdgeInfo&, int r, int c);
+  void LayOutAxis(GridAxis&,
+                  const Vector<HTMLDimension>&,
+                  const Vector<int>& deltas,
+                  int available_space);
   void PositionFrames();
-
-  int SplitPosition(const GridAxis&, int split) const;
-  int HitTestSplit(const GridAxis&, int position) const;
-
-  void StartResizing(GridAxis&, int position);
-  void ContinueResizing(GridAxis&, int position);
 
   LayoutObjectChildList children_;
 
   GridAxis rows_;
   GridAxis cols_;
-
-  bool is_resizing_;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutFrameSet, IsFrameSet());
+template <>
+struct DowncastTraits<LayoutFrameSet> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsFrameSet();
+  }
+};
 
 }  // namespace blink
 

@@ -6,31 +6,31 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_XR_XR_VIEWER_POSE_H_
 
 #include "third_party/blink/renderer/modules/xr/xr_pose.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 
 namespace blink {
 
-class XRSession;
+class XRFrame;
 class XRView;
 
 class XRViewerPose final : public XRPose {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  XRViewerPose(XRSession*, const TransformationMatrix&);
+  explicit XRViewerPose(XRFrame*,
+                        const TransformationMatrix&,
+                        const TransformationMatrix&,
+                        bool emulated_position);
   ~XRViewerPose() override = default;
 
   const HeapVector<Member<XRView>>& views() const { return views_; }
-  const HeapVector<Member<XRView>>& cameraViews() const {
-    return camera_views_;
-  }
 
   void Trace(Visitor*) const override;
 
  private:
   HeapVector<Member<XRView>> views_;
-  HeapVector<Member<XRView>> camera_views_;
 };
 
 }  // namespace blink

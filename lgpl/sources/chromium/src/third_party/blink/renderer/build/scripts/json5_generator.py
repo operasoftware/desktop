@@ -293,7 +293,7 @@ class Writer(object):
 
         # Only write the file if the contents have changed. This allows ninja to
         # skip rebuilding targets which depend on the output.
-        with open(path, "a+") as output_file:
+        with open(path, "a+", newline='') as output_file:
             output_file.seek(0)
             if output_file.read() != contents:
                 output_file.truncate(0)
@@ -332,9 +332,16 @@ class Maker(object):
 
         parser.add_argument("--gperf", default="gperf")
         parser.add_argument("--output_dir", default=os.getcwd())
+        parser.add_argument("--generate_tag_enum",
+                            default=False,
+                            action='store_true')
         args = parser.parse_args()
 
-        writer = self._writer_class(args.files, args.output_dir)
+        if args.generate_tag_enum:
+            writer = self._writer_class(args.files, args.output_dir,
+                                        args.generate_tag_enum)
+        else:
+            writer = self._writer_class(args.files, args.output_dir)
         writer.set_gperf_path(args.gperf)
         writer.write_files(args.output_dir)
         writer.cleanup_files(args.output_dir)

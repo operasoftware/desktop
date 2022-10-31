@@ -10,20 +10,22 @@
 #include "third_party/blink/renderer/core/accessibility/blink_ax_event_intent.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "ui/accessibility/ax_enums.mojom-blink.h"
+#include "ui/accessibility/ax_mode.h"
 
 namespace blink {
 
 using ScopedBlinkAXEventIntentTest = RenderingTest;
 
 TEST_F(ScopedBlinkAXEventIntentTest, SingleIntent) {
-  AXContext ax_context(GetDocument());
+  AXContext ax_context(GetDocument(), ui::kAXModeComplete);
   AXObjectCache* cache = GetDocument().ExistingAXObjectCache();
   ASSERT_NE(nullptr, cache);
 
   {
     ScopedBlinkAXEventIntent scoped_intent(
-        {ax::mojom::blink::Command::kCut,
+        {ax::mojom::blink::Command::kExtendSelection,
          ax::mojom::blink::TextBoundary::kWordEnd,
          ax::mojom::blink::MoveDirection::kForward},
         &GetDocument());
@@ -37,16 +39,16 @@ TEST_F(ScopedBlinkAXEventIntentTest, SingleIntent) {
 }
 
 TEST_F(ScopedBlinkAXEventIntentTest, MultipleIdenticalIntents) {
-  AXContext ax_context(GetDocument());
+  AXContext ax_context(GetDocument(), ui::kAXModeComplete);
   AXObjectCache* cache = GetDocument().ExistingAXObjectCache();
   ASSERT_NE(nullptr, cache);
 
   {
     ScopedBlinkAXEventIntent scoped_intent(
-        {{ax::mojom::blink::Command::kCut,
+        {{ax::mojom::blink::Command::kExtendSelection,
           ax::mojom::blink::TextBoundary::kWordEnd,
           ax::mojom::blink::MoveDirection::kForward},
-         {ax::mojom::blink::Command::kCut,
+         {ax::mojom::blink::Command::kExtendSelection,
           ax::mojom::blink::TextBoundary::kWordEnd,
           ax::mojom::blink::MoveDirection::kForward}},
         &GetDocument());
@@ -62,22 +64,20 @@ TEST_F(ScopedBlinkAXEventIntentTest, MultipleIdenticalIntents) {
 }
 
 TEST_F(ScopedBlinkAXEventIntentTest, NestedIndividualIntents) {
-  AXContext ax_context(GetDocument());
+  AXContext ax_context(GetDocument(), ui::kAXModeComplete);
   AXObjectCache* cache = GetDocument().ExistingAXObjectCache();
   ASSERT_NE(nullptr, cache);
 
   {
     ScopedBlinkAXEventIntent scoped_intent1(
-        {ax::mojom::blink::Command::kType,
-         ax::mojom::blink::TextBoundary::kCharacter,
-         ax::mojom::blink::MoveDirection::kForward},
+        {ax::mojom::blink::Command::kInsert,
+         ax::mojom::blink::InputEventType::kInsertText},
         &GetDocument());
 
     {
       ScopedBlinkAXEventIntent scoped_intent2(
-          {ax::mojom::blink::Command::kCut,
-           ax::mojom::blink::TextBoundary::kWordEnd,
-           ax::mojom::blink::MoveDirection::kForward},
+          {ax::mojom::blink::Command::kDelete,
+           ax::mojom::blink::InputEventType::kDeleteWordBackward},
           &GetDocument());
 
       EXPECT_TRUE(
@@ -102,15 +102,14 @@ TEST_F(ScopedBlinkAXEventIntentTest, NestedIndividualIntents) {
 }
 
 TEST_F(ScopedBlinkAXEventIntentTest, NestedMultipleIntents) {
-  AXContext ax_context(GetDocument());
+  AXContext ax_context(GetDocument(), ui::kAXModeComplete);
   AXObjectCache* cache = GetDocument().ExistingAXObjectCache();
   ASSERT_NE(nullptr, cache);
 
   {
     ScopedBlinkAXEventIntent scoped_intent1(
-        {{ax::mojom::blink::Command::kType,
-          ax::mojom::blink::TextBoundary::kCharacter,
-          ax::mojom::blink::MoveDirection::kForward},
+        {{ax::mojom::blink::Command::kInsert,
+          ax::mojom::blink::InputEventType::kInsertText},
          {ax::mojom::blink::Command::kSetSelection,
           ax::mojom::blink::TextBoundary::kWordEnd,
           ax::mojom::blink::MoveDirection::kForward}},
@@ -118,12 +117,9 @@ TEST_F(ScopedBlinkAXEventIntentTest, NestedMultipleIntents) {
 
     {
       ScopedBlinkAXEventIntent scoped_intent2(
-          {{ax::mojom::blink::Command::kCut,
-            ax::mojom::blink::TextBoundary::kWordEnd,
-            ax::mojom::blink::MoveDirection::kForward},
-           {ax::mojom::blink::Command::kClearSelection,
-            ax::mojom::blink::TextBoundary::kWordEnd,
-            ax::mojom::blink::MoveDirection::kForward}},
+          {{ax::mojom::blink::Command::kDelete,
+            ax::mojom::blink::InputEventType::kDeleteWordForward},
+           BlinkAXEventIntent{ax::mojom::blink::Command::kClearSelection}},
           &GetDocument());
 
       EXPECT_TRUE(
@@ -160,23 +156,21 @@ TEST_F(ScopedBlinkAXEventIntentTest, NestedMultipleIntents) {
 }
 
 TEST_F(ScopedBlinkAXEventIntentTest, NestedIdenticalIntents) {
-  AXContext ax_context(GetDocument());
+  AXContext ax_context(GetDocument(), ui::kAXModeComplete);
   AXObjectCache* cache = GetDocument().ExistingAXObjectCache();
   ASSERT_NE(nullptr, cache);
 
   {
     ScopedBlinkAXEventIntent scoped_intent1(
-        {ax::mojom::blink::Command::kType,
-         ax::mojom::blink::TextBoundary::kCharacter,
-         ax::mojom::blink::MoveDirection::kForward},
+        {ax::mojom::blink::Command::kInsert,
+         ax::mojom::blink::InputEventType::kInsertText},
         &GetDocument());
 
     {
       // Create a second, identical intent.
       ScopedBlinkAXEventIntent scoped_intent2(
-          {ax::mojom::blink::Command::kType,
-           ax::mojom::blink::TextBoundary::kCharacter,
-           ax::mojom::blink::MoveDirection::kForward},
+          {ax::mojom::blink::Command::kInsert,
+           ax::mojom::blink::InputEventType::kInsertText},
           &GetDocument());
 
       EXPECT_TRUE(

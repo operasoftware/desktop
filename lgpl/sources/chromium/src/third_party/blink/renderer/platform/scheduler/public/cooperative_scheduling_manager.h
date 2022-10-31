@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_PUBLIC_COOPERATIVE_SCHEDULING_MANAGER_H_
 
 #include "base/time/tick_clock.h"
+#include "base/time/time.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
@@ -36,6 +37,9 @@ class PLATFORM_EXPORT CooperativeSchedulingManager {
   static CooperativeSchedulingManager* Instance();
 
   CooperativeSchedulingManager();
+  CooperativeSchedulingManager(const CooperativeSchedulingManager&) = delete;
+  CooperativeSchedulingManager& operator=(const CooperativeSchedulingManager&) =
+      delete;
   virtual ~CooperativeSchedulingManager() = default;
 
   // Returns true if reentry is allowed in the current C++ stack.
@@ -65,8 +69,6 @@ class PLATFORM_EXPORT CooperativeSchedulingManager {
   base::TimeTicks wait_until_;
   const base::TickClock* clock_;
   bool feature_enabled_ = true;
-
-  DISALLOW_COPY_AND_ASSIGN(CooperativeSchedulingManager);
 };
 
 inline void CooperativeSchedulingManager::Safepoint() {

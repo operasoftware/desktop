@@ -10,17 +10,13 @@
 namespace blink {
 
 class LayoutNGTableRowInterface;
-class LayoutNGTableCellInterface;
-class LayoutTableSection;
 class LayoutObject;
 
 // Abstract class defining table section methods.
 // Used for Legacy/NG interoperability.
 class LayoutNGTableSectionInterface {
  public:
-  virtual const LayoutTableSection* ToLayoutTableSection() const = 0;
   virtual const LayoutObject* ToLayoutObject() const = 0;
-  virtual LayoutObject* ToMutableLayoutObject() = 0;
   virtual LayoutNGTableInterface* TableInterface() const = 0;
   // TODO(crbug.com/1081425) Existing methods can be used by NG, should be
   // removed. Single caller is MarkBoxForRelayoutAfterSplit.
@@ -34,9 +30,6 @@ class LayoutNGTableSectionInterface {
   virtual unsigned NumEffectiveColumns() const = 0;
   virtual LayoutNGTableRowInterface* FirstRowInterface() const = 0;
   virtual LayoutNGTableRowInterface* LastRowInterface() const = 0;
-  virtual const LayoutNGTableCellInterface* PrimaryCellInterfaceAt(
-      unsigned row,
-      unsigned effective_column) const = 0;
 };
 
 template <>

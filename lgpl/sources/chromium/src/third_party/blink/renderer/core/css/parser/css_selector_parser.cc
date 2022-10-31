@@ -6,49 +6,92 @@
 #include "third_party/blink/renderer/core/css/parser/css_selector_parser.h"
 
 #include <memory>
+#include "base/auto_reset.h"
 #include "base/numerics/safe_conversions.h"
 #include "third_party/blink/renderer/core/css/css_selector_list.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_observer.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_stream.h"
+#include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/dom/pseudo_element.h"
+#include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
+static void RecordUsageAndDeprecationsOneSelector(
+    const CSSSelector* selector,
+    const CSSParserContext* context);
+
+namespace {
+
+CSSParserTokenRange ConsumeNestedArgument(CSSParserTokenRange& range) {
+  const CSSParserToken& first = range.Peek();
+  while (!range.AtEnd() && range.Peek().GetType() != kCommaToken) {
+    const CSSParserToken& token = range.Peek();
+    if (token.GetBlockType() == CSSParserToken::kBlockStart) {
+      range.ConsumeBlock();
+      continue;
+    }
+    range.Consume();
+  }
+  return range.MakeSubRange(&first, &range.Peek());
+}
+
+bool AtEndIgnoringWhitespace(CSSParserTokenRange range) {
+  range.ConsumeWhitespace();
+  return range.AtEnd();
+}
+
+}  // namespace
+
 // static
-CSSSelectorList CSSSelectorParser::ParseSelector(
+CSSSelectorVector CSSSelectorParser::ParseSelector(
     CSSParserTokenRange range,
     const CSSParserContext* context,
     StyleSheetContents* style_sheet) {
   CSSSelectorParser parser(context, style_sheet);
   range.ConsumeWhitespace();
-  CSSSelectorList result = parser.ConsumeComplexSelectorList(range);
+  CSSSelectorVector result = parser.ConsumeComplexSelectorList(range);
   if (!range.AtEnd())
-    return CSSSelectorList();
+    return {};
 
   parser.RecordUsageAndDeprecations(result);
-
-  if (result.RequiresExpansion())
-    return result.TransformForListExpansion();
   return result;
 }
 
 // static
-CSSSelectorList CSSSelectorParser::ConsumeSelector(
+CSSSelectorVector CSSSelectorParser::ConsumeSelector(
     CSSParserTokenStream& stream,
     const CSSParserContext* context,
     StyleSheetContents* style_sheet,
     CSSParserObserver* observer) {
   CSSSelectorParser parser(context, style_sheet);
   stream.ConsumeWhitespace();
-  CSSSelectorList result = parser.ConsumeComplexSelectorList(stream, observer);
+  CSSSelectorVector result =
+      parser.ConsumeComplexSelectorList(stream, observer);
   parser.RecordUsageAndDeprecations(result);
+  return result;
+}
 
-  if (result.RequiresExpansion())
-    return result.TransformForListExpansion();
+// static
+absl::optional<CSSSelectorList> CSSSelectorParser::ParseScopeBoundary(
+    CSSParserTokenRange range,
+    const CSSParserContext* context,
+    StyleSheetContents* style_sheet) {
+  CSSSelectorParser parser(context, style_sheet);
+  DisallowPseudoElementsScope disallow_pseudo_elements(&parser);
+
+  range.ConsumeWhitespace();
+  CSSSelectorList result = parser.ConsumeForgivingComplexSelectorList(range);
+  if (!range.AtEnd())
+    return absl::nullopt;
+  for (const CSSSelector* current = result.First(); current;
+       current = current->TagHistory()) {
+    RecordUsageAndDeprecationsOneSelector(current, context);
+  }
   return result;
 }
 
@@ -72,31 +115,31 @@ CSSSelectorParser::CSSSelectorParser(const CSSParserContext* context,
                                      StyleSheetContents* style_sheet)
     : context_(context), style_sheet_(style_sheet) {}
 
-CSSSelectorList CSSSelectorParser::ConsumeComplexSelectorList(
+CSSSelectorVector CSSSelectorParser::ConsumeComplexSelectorList(
     CSSParserTokenRange& range) {
-  Vector<std::unique_ptr<CSSParserSelector>> selector_list;
+  CSSSelectorVector selector_list;
   std::unique_ptr<CSSParserSelector> selector = ConsumeComplexSelector(range);
   if (!selector)
-    return CSSSelectorList();
+    return {};
   selector_list.push_back(std::move(selector));
   while (!range.AtEnd() && range.Peek().GetType() == kCommaToken) {
     range.ConsumeIncludingWhitespace();
     selector = ConsumeComplexSelector(range);
     if (!selector)
-      return CSSSelectorList();
+      return {};
     selector_list.push_back(std::move(selector));
   }
 
   if (failed_parsing_)
-    return CSSSelectorList();
+    return {};
 
-  return CSSSelectorList::AdoptSelectorVector(selector_list);
+  return selector_list;
 }
 
-CSSSelectorList CSSSelectorParser::ConsumeComplexSelectorList(
+CSSSelectorVector CSSSelectorParser::ConsumeComplexSelectorList(
     CSSParserTokenStream& stream,
     CSSParserObserver* observer) {
-  Vector<std::unique_ptr<CSSParserSelector>> selector_list;
+  CSSSelectorVector selector_list;
 
   while (true) {
     const wtf_size_t selector_offset_start = stream.LookAheadOffset();
@@ -105,12 +148,12 @@ CSSSelectorList CSSSelectorParser::ConsumeComplexSelectorList(
     const wtf_size_t selector_offset_end = stream.LookAheadOffset();
 
     if (stream.UncheckedAtEnd())
-      return CSSSelectorList();
+      return {};
 
     std::unique_ptr<CSSParserSelector> selector =
         ConsumeComplexSelector(complex_selector);
     if (!selector || failed_parsing_ || !complex_selector.AtEnd())
-      return CSSSelectorList();
+      return {};
 
     if (observer)
       observer->ObserveSelector(selector_offset_start, selector_offset_end);
@@ -123,12 +166,12 @@ CSSSelectorList CSSSelectorParser::ConsumeComplexSelectorList(
     stream.ConsumeIncludingWhitespace();
   }
 
-  return CSSSelectorList::AdoptSelectorVector(selector_list);
+  return selector_list;
 }
 
 CSSSelectorList CSSSelectorParser::ConsumeCompoundSelectorList(
     CSSParserTokenRange& range) {
-  Vector<std::unique_ptr<CSSParserSelector>> selector_list;
+  CSSSelectorVector selector_list;
   std::unique_ptr<CSSParserSelector> selector = ConsumeCompoundSelector(range);
   range.ConsumeWhitespace();
   if (!selector)
@@ -149,20 +192,113 @@ CSSSelectorList CSSSelectorParser::ConsumeCompoundSelectorList(
   return CSSSelectorList::AdoptSelectorVector(selector_list);
 }
 
+CSSSelectorList CSSSelectorParser::ConsumeNestedSelectorList(
+    CSSParserTokenRange& range) {
+  if (inside_compound_pseudo_)
+    return ConsumeCompoundSelectorList(range);
+  CSSSelectorVector result = ConsumeComplexSelectorList(range);
+  if (result.IsEmpty())
+    return {};
+  return CSSSelectorList::AdoptSelectorVector(result);
+}
+
+CSSSelectorList CSSSelectorParser::ConsumeForgivingNestedSelectorList(
+    CSSParserTokenRange& range) {
+  if (inside_compound_pseudo_)
+    return ConsumeForgivingCompoundSelectorList(range);
+  return ConsumeForgivingComplexSelectorList(range);
+}
+
+CSSSelectorList CSSSelectorParser::ConsumeForgivingComplexSelectorList(
+    CSSParserTokenRange& range) {
+  CSSSelectorVector selector_list;
+
+  while (!range.AtEnd()) {
+    base::AutoReset<bool> reset_failure(&failed_parsing_, false);
+    CSSParserTokenRange argument = ConsumeNestedArgument(range);
+    std::unique_ptr<CSSParserSelector> selector =
+        ConsumeComplexSelector(argument);
+    if (selector && !failed_parsing_ && argument.AtEnd())
+      selector_list.push_back(std::move(selector));
+    if (range.Peek().GetType() != kCommaToken)
+      break;
+    range.ConsumeIncludingWhitespace();
+  }
+
+  if (selector_list.IsEmpty())
+    return CSSSelectorList();
+
+  return CSSSelectorList::AdoptSelectorVector(selector_list);
+}
+
+CSSSelectorList CSSSelectorParser::ConsumeForgivingCompoundSelectorList(
+    CSSParserTokenRange& range) {
+  CSSSelectorVector selector_list;
+
+  while (!range.AtEnd()) {
+    base::AutoReset<bool> reset_failure(&failed_parsing_, false);
+    CSSParserTokenRange argument = ConsumeNestedArgument(range);
+    std::unique_ptr<CSSParserSelector> selector =
+        ConsumeCompoundSelector(argument);
+    argument.ConsumeWhitespace();
+    if (selector && !failed_parsing_ && argument.AtEnd())
+      selector_list.push_back(std::move(selector));
+    if (range.Peek().GetType() != kCommaToken)
+      break;
+    range.ConsumeIncludingWhitespace();
+  }
+
+  if (selector_list.IsEmpty())
+    return CSSSelectorList();
+
+  return CSSSelectorList::AdoptSelectorVector(selector_list);
+}
+
+CSSSelectorList CSSSelectorParser::ConsumeForgivingRelativeSelectorList(
+    CSSParserTokenRange& range) {
+  CSSSelectorVector selector_list;
+
+  while (!range.AtEnd()) {
+    base::AutoReset<bool> reset_failure(&failed_parsing_, false);
+    CSSParserTokenRange argument = ConsumeNestedArgument(range);
+    std::unique_ptr<CSSParserSelector> selector =
+        ConsumeRelativeSelector(argument);
+    if (selector && !failed_parsing_ && argument.AtEnd())
+      selector_list.push_back(std::move(selector));
+    if (range.Peek().GetType() != kCommaToken)
+      break;
+    range.ConsumeIncludingWhitespace();
+  }
+
+  // :has() is not allowed in the pseudos accepting only compound selectors, or
+  // not allowed after pseudo elements.
+  // (e.g. '::slotted(:has(.a))', '::part(foo):has(:hover)')
+  if (inside_compound_pseudo_ ||
+      restricting_pseudo_element_ != CSSSelector::kPseudoUnknown) {
+    return CSSSelectorList();
+  }
+
+  if (selector_list.IsEmpty()) {
+    // TODO(blee@igalia.com) Workaround to make :has() unforgiving to avoid
+    // JQuery :has() issue: https://github.com/w3c/csswg-drafts/issues/7676
+    // Should not fail with empty selector_list
+    failed_parsing_ = true;
+
+    return CSSSelectorList();
+  }
+
+  return CSSSelectorList::AdoptSelectorVector(selector_list);
+}
+
 namespace {
 
 enum CompoundSelectorFlags {
   kHasPseudoElementForRightmostCompound = 1 << 0,
-  kHasContentPseudoElement = 1 << 1
 };
 
 unsigned ExtractCompoundFlags(const CSSParserSelector& simple_selector,
                               CSSParserMode parser_mode) {
   if (simple_selector.Match() != CSSSelector::kPseudoElement)
-    return 0;
-  if (simple_selector.GetPseudoType() == CSSSelector::kPseudoContent)
-    return kHasContentPseudoElement;
-  if (simple_selector.GetPseudoType() == CSSSelector::kPseudoShadow)
     return 0;
   // We don't restrict what follows custom ::-webkit-* pseudo elements in UA
   // sheets. We currently use selectors in mediaControls.css like this:
@@ -177,6 +313,41 @@ unsigned ExtractCompoundFlags(const CSSParserSelector& simple_selector,
 
 }  // namespace
 
+std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeRelativeSelector(
+    CSSParserTokenRange& range) {
+  std::unique_ptr<CSSParserSelector> selector =
+      std::make_unique<CSSParserSelector>();
+  selector->SetMatch(CSSSelector::kPseudoClass);
+  selector->UpdatePseudoType("-internal-relative-anchor", *context_,
+                             false /*has_arguments*/, context_->Mode());
+  DCHECK_EQ(selector->GetPseudoType(), CSSSelector::kPseudoRelativeAnchor);
+
+  CSSSelector::RelationType combinator = ConsumeCombinator(range);
+  switch (combinator) {
+    case CSSSelector::kSubSelector:
+    case CSSSelector::kDescendant:
+      combinator = CSSSelector::kRelativeDescendant;
+      break;
+    case CSSSelector::kChild:
+      combinator = CSSSelector::kRelativeChild;
+      break;
+    case CSSSelector::kDirectAdjacent:
+      combinator = CSSSelector::kRelativeDirectAdjacent;
+      break;
+    case CSSSelector::kIndirectAdjacent:
+      combinator = CSSSelector::kRelativeIndirectAdjacent;
+      break;
+    default:
+      NOTREACHED();
+      return nullptr;
+  }
+
+  unsigned previous_compound_flags = 0;
+
+  return ConsumePartialComplexSelector(range, combinator, std::move(selector),
+                                       previous_compound_flags);
+}
+
 std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeComplexSelector(
     CSSParserTokenRange& range) {
   std::unique_ptr<CSSParserSelector> selector = ConsumeCompoundSelector(range);
@@ -189,7 +360,25 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeComplexSelector(
        simple && !previous_compound_flags; simple = simple->TagHistory())
     previous_compound_flags |= ExtractCompoundFlags(*simple, context_->Mode());
 
-  while (CSSSelector::RelationType combinator = ConsumeCombinator(range)) {
+  if (CSSSelector::RelationType combinator = ConsumeCombinator(range)) {
+    if (is_inside_has_argument_ &&
+        is_inside_logical_combination_in_has_argument_) {
+      found_complex_logical_combinations_in_has_argument_ = true;
+    }
+    return ConsumePartialComplexSelector(range, combinator, std::move(selector),
+                                         previous_compound_flags);
+  }
+
+  return selector;
+}
+
+std::unique_ptr<CSSParserSelector>
+CSSSelectorParser::ConsumePartialComplexSelector(
+    CSSParserTokenRange& range,
+    CSSSelector::RelationType& combinator,
+    std::unique_ptr<CSSParserSelector> selector,
+    unsigned& previous_compound_flags) {
+  do {
     std::unique_ptr<CSSParserSelector> next_selector =
         ConsumeCompoundSelector(range);
     if (!next_selector)
@@ -204,15 +393,111 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeComplexSelector(
       compound_flags |= ExtractCompoundFlags(*end, context_->Mode());
     }
     end->SetRelation(combinator);
-    if (previous_compound_flags & kHasContentPseudoElement)
-      end->SetRelationIsAffectedByPseudoContent();
     previous_compound_flags = compound_flags;
     end->SetTagHistory(std::move(selector));
 
     selector = std::move(next_selector);
-  }
+  } while ((combinator = ConsumeCombinator(range)));
 
   return selector;
+}
+
+// static
+CSSSelector::PseudoType CSSSelectorParser::ParsePseudoType(
+    const AtomicString& name,
+    bool has_arguments,
+    const Document* document) {
+  CSSSelector::PseudoType pseudo_type =
+      CSSSelector::NameToPseudoType(name, has_arguments, document);
+
+  if (!RuntimeEnabledFeatures::WebKitScrollbarStylingEnabled()) {
+    // Don't convert ::-webkit-scrollbar into webkit custom element pseudos -
+    // they should just be treated as unknown pseudos and not have the ability
+    // to style shadow/custom elements.
+    if (pseudo_type == CSSSelector::kPseudoResizer ||
+        pseudo_type == CSSSelector::kPseudoScrollbar ||
+        pseudo_type == CSSSelector::kPseudoScrollbarCorner ||
+        pseudo_type == CSSSelector::kPseudoScrollbarButton ||
+        pseudo_type == CSSSelector::kPseudoScrollbarThumb ||
+        pseudo_type == CSSSelector::kPseudoScrollbarTrack ||
+        pseudo_type == CSSSelector::kPseudoScrollbarTrackPiece) {
+      return CSSSelector::kPseudoUnknown;
+    }
+  }
+
+  if (pseudo_type != CSSSelector::PseudoType::kPseudoUnknown)
+    return pseudo_type;
+
+  if (name.StartsWith("-webkit-"))
+    return CSSSelector::PseudoType::kPseudoWebKitCustomElement;
+  if (name.StartsWith("-internal-"))
+    return CSSSelector::PseudoType::kPseudoBlinkInternalElement;
+  if (name.StartsWith("--"))
+    return CSSSelector::PseudoType::kPseudoState;
+
+  return CSSSelector::PseudoType::kPseudoUnknown;
+}
+
+// static
+PseudoId CSSSelectorParser::ParsePseudoElement(const String& selector_string,
+                                               const Node* parent) {
+  CSSTokenizer tokenizer(selector_string);
+  const auto tokens = tokenizer.TokenizeToEOF();
+  CSSParserTokenRange range(tokens);
+
+  int number_of_colons = 0;
+  while (!range.AtEnd() && range.Peek().GetType() == kColonToken) {
+    number_of_colons++;
+    range.Consume();
+  }
+
+  // TODO(crbug.com/1197620): allowing 0 or 1 preceding colons is not aligned
+  // with specs.
+  if (!range.AtEnd() && number_of_colons <= 2 &&
+      (range.Peek().GetType() == kIdentToken ||
+       range.Peek().GetType() == kFunctionToken)) {
+    CSSParserToken selector_name_token = range.Consume();
+    PseudoId pseudo_id = CSSSelector::GetPseudoId(
+        ParsePseudoType(selector_name_token.Value().ToAtomicString(),
+                        selector_name_token.GetType() == kFunctionToken,
+                        parent ? &parent->GetDocument() : nullptr));
+
+    if (PseudoElement::IsWebExposed(pseudo_id, parent) &&
+        ((PseudoElementHasArguments(pseudo_id) &&
+          range.Peek(0).GetType() == kIdentToken &&
+          range.Peek(1).GetType() == kRightParenthesisToken &&
+          range.Peek(2).GetType() == kEOFToken) ||
+         range.Peek().GetType() == kEOFToken)) {
+      return pseudo_id;
+    }
+  }
+
+  return kPseudoIdNone;
+}
+
+// static
+AtomicString CSSSelectorParser::ParsePseudoElementArgument(
+    const String& selector_string) {
+  CSSTokenizer tokenizer(selector_string);
+  const auto tokens = tokenizer.TokenizeToEOF();
+  CSSParserTokenRange range(tokens);
+
+  int number_of_colons = 0;
+  while (!range.AtEnd() && range.Peek().GetType() == kColonToken) {
+    number_of_colons++;
+    range.Consume();
+  }
+
+  // TODO(crbug.com/1197620): allowing 0 or 1 preceding colons is not aligned
+  // with specs.
+  if (number_of_colons > 2 || range.Peek(0).GetType() != kFunctionToken ||
+      range.Peek(1).GetType() != kIdentToken ||
+      range.Peek(2).GetType() != kRightParenthesisToken ||
+      range.Peek(3).GetType() != kEOFToken) {
+    return g_null_atom;
+  }
+
+  return range.Peek(1).Value().ToAtomicString();
 }
 
 namespace {
@@ -272,6 +557,7 @@ bool IsPseudoClassValidAfterPseudoElement(
              pseudo_class == CSSSelector::kPseudoState;
     case CSSSelector::kPseudoWebKitCustomElement:
     case CSSSelector::kPseudoBlinkInternalElement:
+    case CSSSelector::kPseudoFileSelectorButton:
       return IsUserActionPseudoClass(pseudo_class);
     default:
       return false;
@@ -290,8 +576,6 @@ bool IsSimpleSelectorValidAfterPseudoElement(
           RuntimeEnabledFeatures::CSSMarkerNestedPseudoElementEnabled())
         return true;
       break;
-    case CSSSelector::kPseudoContent:
-      return simple_selector.Match() != CSSSelector::kPseudoElement;
     case CSSSelector::kPseudoSlotted:
       return simple_selector.IsTreeAbidingPseudoElement();
     case CSSSelector::kPseudoPart:
@@ -304,48 +588,58 @@ bool IsSimpleSelectorValidAfterPseudoElement(
   if (simple_selector.Match() != CSSSelector::kPseudoClass)
     return false;
   CSSSelector::PseudoType pseudo = simple_selector.GetPseudoType();
-  if (pseudo == CSSSelector::kPseudoNot) {
-    DCHECK(simple_selector.SelectorList());
-    DCHECK(simple_selector.SelectorList()->First());
-    DCHECK(!simple_selector.SelectorList()->First()->TagHistory());
-    pseudo = simple_selector.SelectorList()->First()->GetPseudoType();
+  switch (pseudo) {
+    case CSSSelector::kPseudoIs:
+    case CSSSelector::kPseudoWhere:
+    case CSSSelector::kPseudoNot:
+    case CSSSelector::kPseudoHas:
+      // These pseudo-classes are themselves always valid.
+      // CSSSelectorParser::restricting_pseudo_element_ ensures that invalid
+      // nested selectors will be dropped if they are invalid according to
+      // this function.
+      return true;
+    default:
+      break;
   }
   return IsPseudoClassValidAfterPseudoElement(pseudo, compound_pseudo_element);
+}
+
+bool IsPseudoClassValidWithinHasArgument(CSSParserSelector& selector) {
+  DCHECK_EQ(selector.Match(), CSSSelector::kPseudoClass);
+  switch (selector.GetPseudoType()) {
+    // Limited nested :has() to avoid increasing :has() invalidation complexity.
+    case CSSSelector::kPseudoHas:
+      return false;
+    default:
+      return true;
+  }
 }
 
 }  // namespace
 
 std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeCompoundSelector(
     CSSParserTokenRange& range) {
+  base::AutoReset<CSSSelector::PseudoType> reset_restricting(
+      &restricting_pseudo_element_, restricting_pseudo_element_);
+
   std::unique_ptr<CSSParserSelector> compound_selector;
   AtomicString namespace_prefix;
   AtomicString element_name;
-  CSSSelector::PseudoType compound_pseudo_element = CSSSelector::kPseudoUnknown;
   const bool has_q_name = ConsumeName(range, element_name, namespace_prefix);
   if (!has_q_name) {
     compound_selector = ConsumeSimpleSelector(range);
     if (!compound_selector)
       return nullptr;
     if (compound_selector->Match() == CSSSelector::kPseudoElement)
-      compound_pseudo_element = compound_selector->GetPseudoType();
+      restricting_pseudo_element_ = compound_selector->GetPseudoType();
   }
   if (context_->IsHTMLDocument())
     element_name = element_name.LowerASCII();
 
   while (std::unique_ptr<CSSParserSelector> simple_selector =
              ConsumeSimpleSelector(range)) {
-    // TODO(futhark@chromium.org): crbug.com/578131
-    // The UASheetMode check is a work-around to allow this selector in
-    // mediaControls(New).css:
-    // video::-webkit-media-text-track-region-container.scrolling
-    if (context_->Mode() != kUASheetMode &&
-        !IsSimpleSelectorValidAfterPseudoElement(*simple_selector.get(),
-                                                 compound_pseudo_element)) {
-      failed_parsing_ = true;
-      return nullptr;
-    }
     if (simple_selector->Match() == CSSSelector::kPseudoElement)
-      compound_pseudo_element = simple_selector->GetPseudoType();
+      restricting_pseudo_element_ = simple_selector->GetPseudoType();
 
     if (compound_selector)
       compound_selector = AddSimpleSelectorToCompound(
@@ -353,6 +647,19 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeCompoundSelector(
     else
       compound_selector = std::move(simple_selector);
   }
+
+  // While inside a nested selector like :is(), the default namespace shall
+  // be ignored when [1]:
+  //
+  // - The compound selector represents the subject [2], and
+  // - The compound selector does not contain a type/universal selector.
+  //
+  // [1] https://drafts.csswg.org/selectors/#matches
+  // [2] https://drafts.csswg.org/selectors/#selector-subject
+  base::AutoReset<bool> ignore_namespace(
+      &ignore_default_namespace_,
+      ignore_default_namespace_ || (resist_default_namespace_ && !has_q_name &&
+                                    AtEndIgnoringWhitespace(range)));
 
   if (!compound_selector) {
     AtomicString namespace_uri = DetermineNamespace(namespace_prefix);
@@ -392,8 +699,15 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeSimpleSelector(
     selector = ConsumePseudo(range);
   else
     return nullptr;
-  if (!selector)
+  // TODO(futhark@chromium.org): crbug.com/578131
+  // The UASheetMode check is a work-around to allow this selector in
+  // mediaControls(New).css:
+  // video::-webkit-media-text-track-region-container.scrolling
+  if (!selector || (context_->Mode() != kUASheetMode &&
+                    !IsSimpleSelectorValidAfterPseudoElement(
+                        *selector.get(), restricting_pseudo_element_))) {
     failed_parsing_ = true;
+  }
   return selector;
 }
 
@@ -451,7 +765,7 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeId(
       std::make_unique<CSSParserSelector>();
   selector->SetMatch(CSSSelector::kId);
   AtomicString value = range.Consume().Value().ToAtomicString();
-  selector->SetValue(value, IsQuirksModeBehavior(context_->MatchMode()));
+  selector->SetValue(value, IsQuirksModeBehavior(context_->Mode()));
   context_->Count(WebFeature::kHasIDClassTagAttribute);
   return selector;
 }
@@ -467,7 +781,7 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeClass(
       std::make_unique<CSSParserSelector>();
   selector->SetMatch(CSSSelector::kClass);
   AtomicString value = range.Consume().Value().ToAtomicString();
-  selector->SetValue(value, IsQuirksModeBehavior(context_->MatchMode()));
+  selector->SetValue(value, IsQuirksModeBehavior(context_->Mode()));
   context_->Count(WebFeature::kHasIDClassTagAttribute);
   return selector;
 }
@@ -502,7 +816,8 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumeAttribute(
       std::make_unique<CSSParserSelector>();
 
   if (block.AtEnd()) {
-    selector->SetAttribute(qualified_name, CSSSelector::kCaseSensitive);
+    selector->SetAttribute(qualified_name,
+                           CSSSelector::AttributeMatchType::kCaseSensitive);
     selector->SetMatch(CSSSelector::kAttributeSet);
     context_->Count(WebFeature::kHasIDClassTagAttribute);
     return selector;
@@ -543,7 +858,7 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumePseudo(
   selector->SetMatch(colons == 1 ? CSSSelector::kPseudoClass
                                  : CSSSelector::kPseudoElement);
 
-  AtomicString value = token.Value().ToAtomicString().LowerASCII();
+  AtomicString value = token.Value().ToAtomicString();
   bool has_arguments = token.GetType() == kFunctionToken;
   selector->UpdatePseudoType(value, *context_, has_arguments, context_->Mode());
 
@@ -554,19 +869,24 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumePseudo(
         context_->Count(WebFeature::kHasBeforeOrAfterPseudoElement);
         break;
       case CSSSelector::kPseudoMarker:
-        if (context_->Mode() != kUASheetMode) {
+        if (context_->Mode() != kUASheetMode)
           context_->Count(WebFeature::kHasMarkerPseudoElement);
-          if (!RuntimeEnabledFeatures::CSSMarkerPseudoElementEnabled())
-            return nullptr;
-        }
         break;
-      default:;
+      default:
+        break;
     }
   }
 
   if (selector->Match() == CSSSelector::kPseudoElement &&
       disallow_pseudo_elements_)
     return nullptr;
+
+  if (is_inside_has_argument_) {
+    DCHECK(disallow_pseudo_elements_);
+    if (!IsPseudoClassValidWithinHasArgument(*selector))
+      return nullptr;
+    found_pseudo_in_has_argument_ = true;
+  }
 
   if (token.GetType() == kIdentToken) {
     range.Consume();
@@ -582,29 +902,31 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumePseudo(
 
   switch (selector->GetPseudoType()) {
     case CSSSelector::kPseudoIs: {
-      if (!RuntimeEnabledFeatures::CSSPseudoIsEnabled())
-        break;
-
       DisallowPseudoElementsScope scope(this);
+      base::AutoReset<bool> resist_namespace(&resist_default_namespace_, true);
+      base::AutoReset<bool> is_inside_logical_combination_in_has_argument(
+          &is_inside_logical_combination_in_has_argument_,
+          is_inside_has_argument_);
 
       std::unique_ptr<CSSSelectorList> selector_list =
           std::make_unique<CSSSelectorList>();
-      *selector_list = ConsumeComplexSelectorList(block);
-      if (!selector_list->IsValid() || !block.AtEnd())
+      *selector_list = ConsumeForgivingNestedSelectorList(block);
+      if (!block.AtEnd())
         return nullptr;
       selector->SetSelectorList(std::move(selector_list));
       return selector;
     }
     case CSSSelector::kPseudoWhere: {
-      if (!RuntimeEnabledFeatures::CSSPseudoWhereEnabled())
-        break;
-
       DisallowPseudoElementsScope scope(this);
+      base::AutoReset<bool> resist_namespace(&resist_default_namespace_, true);
+      base::AutoReset<bool> is_inside_logical_combination_in_has_argument(
+          &is_inside_logical_combination_in_has_argument_,
+          is_inside_has_argument_);
 
       std::unique_ptr<CSSSelectorList> selector_list =
           std::make_unique<CSSSelectorList>();
-      *selector_list = ConsumeComplexSelectorList(block);
-      if (!selector_list->IsValid() || !block.AtEnd())
+      *selector_list = ConsumeForgivingNestedSelectorList(block);
+      if (!block.AtEnd())
         return nullptr;
       selector->SetSelectorList(std::move(selector_list));
       return selector;
@@ -614,28 +936,79 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumePseudo(
     case CSSSelector::kPseudoAny:
     case CSSSelector::kPseudoCue: {
       DisallowPseudoElementsScope scope(this);
+      base::AutoReset<bool> inside_compound(&inside_compound_pseudo_, true);
+      base::AutoReset<bool> ignore_namespace(
+          &ignore_default_namespace_,
+          ignore_default_namespace_ ||
+              selector->GetPseudoType() == CSSSelector::kPseudoCue);
 
       std::unique_ptr<CSSSelectorList> selector_list =
           std::make_unique<CSSSelectorList>();
       *selector_list = ConsumeCompoundSelectorList(block);
-      if (!selector_list->IsValid() || !block.AtEnd() ||
-          selector_list->HasPseudoIs() || selector_list->HasPseudoWhere())
+      if (!selector_list->IsValid() || !block.AtEnd())
         return nullptr;
+
+      if (!selector_list->HasOneSelector()) {
+        if (selector->GetPseudoType() == CSSSelector::kPseudoHost)
+          return nullptr;
+        if (selector->GetPseudoType() == CSSSelector::kPseudoHostContext)
+          return nullptr;
+      }
+
       selector->SetSelectorList(std::move(selector_list));
       return selector;
     }
-    case CSSSelector::kPseudoNot: {
-      std::unique_ptr<CSSParserSelector> inner_selector =
-          ConsumeCompoundSelector(block);
-      block.ConsumeWhitespace();
-      if (!inner_selector || !inner_selector->IsSimple() || !block.AtEnd())
+    case CSSSelector::kPseudoHas: {
+      if (!RuntimeEnabledFeatures::CSSPseudoHasEnabled())
         return nullptr;
-      Vector<std::unique_ptr<CSSParserSelector>> selector_vector;
-      selector_vector.push_back(std::move(inner_selector));
-      selector->AdoptSelectorVector(selector_vector);
+
+      DisallowPseudoElementsScope scope(this);
+      base::AutoReset<bool> resist_namespace(&resist_default_namespace_, true);
+
+      base::AutoReset<bool> is_inside_has_argument(&is_inside_has_argument_,
+                                                   true);
+      base::AutoReset<bool> found_pseudo_in_has_argument(
+          &found_pseudo_in_has_argument_, false);
+      base::AutoReset<bool> found_complex_logical_combinations_in_has_argument(
+          &found_complex_logical_combinations_in_has_argument_, false);
+
+      std::unique_ptr<CSSSelectorList> selector_list =
+          std::make_unique<CSSSelectorList>();
+      *selector_list = ConsumeForgivingRelativeSelectorList(block);
+
+      // TODO(blee@igalia.com) Workaround to make :has() unforgiving to avoid
+      // JQuery :has() issue: https://github.com/w3c/csswg-drafts/issues/7676
+      // Should not check IsValid().
+      if (!selector_list->IsValid())
+        return nullptr;
+
+      if (!block.AtEnd())
+        return nullptr;
+
+      selector->SetSelectorList(std::move(selector_list));
+      if (found_pseudo_in_has_argument_)
+        selector->SetContainsPseudoInsideHasPseudoClass();
+      if (found_complex_logical_combinations_in_has_argument_)
+        selector->SetContainsComplexLogicalCombinationsInsideHasPseudoClass();
       return selector;
     }
-    case CSSSelector::kPseudoState: {
+    case CSSSelector::kPseudoNot: {
+      DisallowPseudoElementsScope scope(this);
+      base::AutoReset<bool> resist_namespace(&resist_default_namespace_, true);
+      base::AutoReset<bool> is_inside_logical_combination_in_has_argument(
+          &is_inside_logical_combination_in_has_argument_,
+          is_inside_has_argument_);
+
+      std::unique_ptr<CSSSelectorList> selector_list =
+          std::make_unique<CSSSelectorList>();
+      *selector_list = ConsumeNestedSelectorList(block);
+      if (!selector_list->IsValid() || !block.AtEnd())
+        return nullptr;
+
+      selector->SetSelectorList(std::move(selector_list));
+      return selector;
+    }
+    case CSSSelector::kPseudoDir: {
       const CSSParserToken& ident = block.ConsumeIncludingWhitespace();
       if (ident.GetType() != kIdentToken || !block.AtEnd())
         return nullptr;
@@ -653,17 +1026,36 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumePseudo(
       selector->SetPartNames(std::make_unique<Vector<AtomicString>>(parts));
       return selector;
     }
+    case CSSSelector::kPseudoPageTransitionContainer:
+    case CSSSelector::kPseudoPageTransitionImageWrapper:
+    case CSSSelector::kPseudoPageTransitionOutgoingImage:
+    case CSSSelector::kPseudoPageTransitionIncomingImage: {
+      const CSSParserToken& ident = block.ConsumeIncludingWhitespace();
+      if (!block.AtEnd())
+        return nullptr;
+
+      absl::optional<AtomicString> argument;
+      if (ident.GetType() == kIdentToken)
+        argument = ident.Value().ToAtomicString();
+      else if (ident.GetType() == kDelimiterToken && ident.Delimiter() == '*')
+        argument = CSSSelector::UniversalSelectorAtom();
+
+      if (!argument)
+        return nullptr;
+
+      selector->SetArgument(*argument);
+      return selector;
+    }
     case CSSSelector::kPseudoSlotted: {
       DisallowPseudoElementsScope scope(this);
+      base::AutoReset<bool> inside_compound(&inside_compound_pseudo_, true);
 
       std::unique_ptr<CSSParserSelector> inner_selector =
           ConsumeCompoundSelector(block);
       block.ConsumeWhitespace();
-      if (!inner_selector || !block.AtEnd() ||
-          inner_selector->GetPseudoType() == CSSSelector::kPseudoIs ||
-          inner_selector->GetPseudoType() == CSSSelector::kPseudoWhere)
+      if (!inner_selector || !block.AtEnd())
         return nullptr;
-      Vector<std::unique_ptr<CSSParserSelector>> selector_vector;
+      CSSSelectorVector selector_vector;
       selector_vector.push_back(std::move(inner_selector));
       selector->AdoptSelectorVector(selector_vector);
       return selector;
@@ -687,6 +1079,47 @@ std::unique_ptr<CSSParserSelector> CSSSelectorParser::ConsumePseudo(
       if (!block.AtEnd())
         return nullptr;
       selector->SetNth(ab.first, ab.second);
+      return selector;
+    }
+    case CSSSelector::kPseudoHighlight: {
+      const CSSParserToken& ident = block.ConsumeIncludingWhitespace();
+      if (ident.GetType() != kIdentToken || !block.AtEnd())
+        return nullptr;
+      selector->SetArgument(ident.Value().ToAtomicString());
+      return selector;
+    }
+    case CSSSelector::kPseudoToggle: {
+      using State = ToggleRoot::State;
+
+      const CSSParserToken& name = block.ConsumeIncludingWhitespace();
+      if (name.GetType() != kIdentToken ||
+          !css_parsing_utils::IsCustomIdent(name.Id())) {
+        return nullptr;
+      }
+      std::unique_ptr<State> value;
+      if (!block.AtEnd()) {
+        const CSSParserToken& value_token = block.ConsumeIncludingWhitespace();
+        switch (value_token.GetType()) {
+          case kIdentToken:
+            if (!css_parsing_utils::IsCustomIdent(value_token.Id()))
+              return nullptr;
+            value =
+                std::make_unique<State>(value_token.Value().ToAtomicString());
+            break;
+          case kNumberToken:
+            if (value_token.GetNumericValueType() != kIntegerValueType ||
+                value_token.NumericValue() < 0) {
+              return nullptr;
+            }
+            value = std::make_unique<State>(value_token.NumericValue());
+            break;
+          default:
+            return nullptr;
+        }
+      }
+      if (!block.AtEnd())
+        return nullptr;
+      selector->SetToggle(name.Value().ToAtomicString(), std::move(value));
       return selector;
     }
     default:
@@ -720,20 +1153,6 @@ CSSSelector::RelationType CSSSelectorParser::ConsumeCombinator(
       range.ConsumeIncludingWhitespace();
       return CSSSelector::kChild;
 
-    case '/': {
-      // Match /deep/
-      range.Consume();
-      const CSSParserToken& ident = range.Consume();
-      if (ident.GetType() != kIdentToken ||
-          !EqualIgnoringASCIICase(ident.Value(), "deep"))
-        failed_parsing_ = true;
-      const CSSParserToken& slash = range.ConsumeIncludingWhitespace();
-      if (slash.GetType() != kDelimiterToken || slash.Delimiter() != '/')
-        failed_parsing_ = true;
-      return context_->IsLiveProfile() ? CSSSelector::kShadowDeepAsDescendant
-                                       : CSSSelector::kShadowDeep;
-    }
-
     default:
       break;
   }
@@ -757,7 +1176,7 @@ CSSSelector::MatchType CSSSelectorParser::ConsumeAttributeMatch(
     case kDelimiterToken:
       if (token.Delimiter() == '=')
         return CSSSelector::kAttributeExact;
-      FALLTHROUGH;
+      [[fallthrough]];
     default:
       failed_parsing_ = true;
       return CSSSelector::kAttributeExact;
@@ -767,12 +1186,15 @@ CSSSelector::MatchType CSSSelectorParser::ConsumeAttributeMatch(
 CSSSelector::AttributeMatchType CSSSelectorParser::ConsumeAttributeFlags(
     CSSParserTokenRange& range) {
   if (range.Peek().GetType() != kIdentToken)
-    return CSSSelector::kCaseSensitive;
+    return CSSSelector::AttributeMatchType::kCaseSensitive;
   const CSSParserToken& flag = range.ConsumeIncludingWhitespace();
   if (EqualIgnoringASCIICase(flag.Value(), "i"))
-    return CSSSelector::kCaseInsensitive;
+    return CSSSelector::AttributeMatchType::kCaseInsensitive;
+  else if (EqualIgnoringASCIICase(flag.Value(), "s") &&
+           RuntimeEnabledFeatures::CSSCaseSensitiveSelectorEnabled())
+    return CSSSelector::AttributeMatchType::kCaseSensitiveAlways;
   failed_parsing_ = true;
-  return CSSSelector::kCaseSensitive;
+  return CSSSelector::AttributeMatchType::kCaseSensitive;
 }
 
 bool CSSSelectorParser::ConsumeANPlusB(CSSParserTokenRange& range,
@@ -780,7 +1202,7 @@ bool CSSSelectorParser::ConsumeANPlusB(CSSParserTokenRange& range,
   const CSSParserToken& token = range.Consume();
   if (token.GetType() == kNumberToken &&
       token.GetNumericValueType() == kIntegerValueType) {
-    result = std::make_pair(0, clampTo<int>(token.NumericValue()));
+    result = std::make_pair(0, ClampTo<int>(token.NumericValue()));
     return true;
   }
   if (token.GetType() == kIdentToken) {
@@ -804,7 +1226,7 @@ bool CSSSelectorParser::ConsumeANPlusB(CSSParserTokenRange& range,
     n_string = range.Consume().Value().ToString();
   } else if (token.GetType() == kDimensionToken &&
              token.GetNumericValueType() == kIntegerValueType) {
-    result.first = clampTo<int>(token.NumericValue());
+    result.first = ClampTo<int>(token.NumericValue());
     n_string = token.Value().ToString();
   } else if (token.GetType() == kIdentToken) {
     if (token.Value()[0] == '-') {
@@ -851,7 +1273,7 @@ bool CSSSelectorParser::ConsumeANPlusB(CSSParserTokenRange& range,
     return false;
   if ((b.GetNumericSign() == kNoSign) == (sign == kNoSign))
     return false;
-  result.second = clampTo<int>(b.NumericValue());
+  result.second = ClampTo<int>(b.NumericValue());
   if (sign == kMinusSign) {
     // Negating minimum integer returns itself, instead return max integer.
     if (UNLIKELY(result.second == std::numeric_limits<int>::min()))
@@ -863,7 +1285,7 @@ bool CSSSelectorParser::ConsumeANPlusB(CSSParserTokenRange& range,
 }
 
 const AtomicString& CSSSelectorParser::DefaultNamespace() const {
-  if (!style_sheet_)
+  if (!style_sheet_ || ignore_default_namespace_)
     return g_star_atom;
   return style_sheet_->DefaultNamespace();
 }
@@ -1034,7 +1456,6 @@ WebFeature FeatureForWebKitCustomPseudoElement(const AtomicString& name) {
        WebFeature::kCSSSelectorWebkitDatetimeEditWeekField},
       {"-webkit-datetime-edit-year-field",
        WebFeature::kCSSSelectorWebkitDatetimeEditYearField},
-      {"-webkit-details-marker", WebFeature::kCSSSelectorWebkitDetailsMarker},
       {"-webkit-file-upload-button",
        WebFeature::kCSSSelectorWebkitFileUploadButton},
       {"-webkit-inner-spin-button",
@@ -1115,104 +1536,108 @@ WebFeature FeatureForWebKitCustomPseudoElement(const AtomicString& name) {
 
 }  // namespace
 
+static void RecordUsageAndDeprecationsOneSelector(
+    const CSSSelector* selector,
+    const CSSParserContext* context) {
+  WebFeature feature = WebFeature::kNumberOfFeatures;
+  switch (selector->GetPseudoType()) {
+    case CSSSelector::kPseudoAny:
+      feature = WebFeature::kCSSSelectorPseudoAny;
+      break;
+    case CSSSelector::kPseudoIs:
+      feature = WebFeature::kCSSSelectorPseudoIs;
+      break;
+    case CSSSelector::kPseudoFocusVisible:
+      DCHECK(RuntimeEnabledFeatures::CSSFocusVisibleEnabled());
+      feature = WebFeature::kCSSSelectorPseudoFocusVisible;
+      break;
+    case CSSSelector::kPseudoFocus:
+      feature = WebFeature::kCSSSelectorPseudoFocus;
+      break;
+    case CSSSelector::kPseudoAnyLink:
+      feature = WebFeature::kCSSSelectorPseudoAnyLink;
+      break;
+    case CSSSelector::kPseudoWebkitAnyLink:
+      feature = WebFeature::kCSSSelectorPseudoWebkitAnyLink;
+      break;
+    case CSSSelector::kPseudoWhere:
+      feature = WebFeature::kCSSSelectorPseudoWhere;
+      break;
+    case CSSSelector::kPseudoDefined:
+      feature = WebFeature::kCSSSelectorPseudoDefined;
+      break;
+    case CSSSelector::kPseudoSlotted:
+      feature = WebFeature::kCSSSelectorPseudoSlotted;
+      break;
+    case CSSSelector::kPseudoHost:
+      feature = WebFeature::kCSSSelectorPseudoHost;
+      break;
+    case CSSSelector::kPseudoHostContext:
+      feature = WebFeature::kCSSSelectorPseudoHostContext;
+      break;
+    case CSSSelector::kPseudoFullScreenAncestor:
+      feature = WebFeature::kCSSSelectorPseudoFullScreenAncestor;
+      break;
+    case CSSSelector::kPseudoFullScreen:
+      feature = WebFeature::kCSSSelectorPseudoFullScreen;
+      break;
+    case CSSSelector::kPseudoListBox:
+      feature = WebFeature::kCSSSelectorInternalPseudoListBox;
+      break;
+    case CSSSelector::kPseudoWebKitCustomElement:
+      feature = FeatureForWebKitCustomPseudoElement(selector->Value());
+      break;
+    case CSSSelector::kPseudoSpatialNavigationFocus:
+      feature = WebFeature::kCSSSelectorInternalPseudoSpatialNavigationFocus;
+      break;
+    case CSSSelector::kPseudoReadOnly:
+      feature = WebFeature::kCSSSelectorPseudoReadOnly;
+      break;
+    case CSSSelector::kPseudoReadWrite:
+      feature = WebFeature::kCSSSelectorPseudoReadWrite;
+      break;
+    case CSSSelector::kPseudoDir:
+      DCHECK(RuntimeEnabledFeatures::CSSPseudoDirEnabled());
+      feature = WebFeature::kCSSSelectorPseudoDir;
+      break;
+    case CSSSelector::kPseudoHas:
+      DCHECK(RuntimeEnabledFeatures::CSSPseudoHasEnabled());
+      if (context->IsLiveProfile())
+        feature = WebFeature::kCSSSelectorPseudoHasInLiveProfile;
+      else
+        feature = WebFeature::kCSSSelectorPseudoHasInSnapshotProfile;
+      break;
+    default:
+      break;
+  }
+  if (feature != WebFeature::kNumberOfFeatures) {
+    if (Deprecation::IsDeprecated(feature)) {
+      context->CountDeprecation(feature);
+    } else {
+      context->Count(feature);
+    }
+  }
+  if (selector->Relation() == CSSSelector::kIndirectAdjacent)
+    context->Count(WebFeature::kCSSSelectorIndirectAdjacent);
+  if (selector->SelectorList()) {
+    for (const CSSSelector* current = selector->SelectorList()->First();
+         current; current = current->TagHistory()) {
+      RecordUsageAndDeprecationsOneSelector(current, context);
+    }
+  }
+}
+
 void CSSSelectorParser::RecordUsageAndDeprecations(
-    const CSSSelectorList& selector_list) {
+    const CSSSelectorVector& selector_vector) {
   if (!context_->IsUseCounterRecordingEnabled())
     return;
+  if (context_->Mode() == kUASheetMode)
+    return;
 
-  for (const CSSSelector* selector = selector_list.FirstForCSSOM(); selector;
-       selector = CSSSelectorList::Next(*selector)) {
-    for (const CSSSelector* current = selector; current;
+  for (const std::unique_ptr<CSSParserSelector>& selector : selector_vector) {
+    for (const CSSParserSelector* current = selector.get(); current;
          current = current->TagHistory()) {
-      WebFeature feature = WebFeature::kNumberOfFeatures;
-      switch (current->GetPseudoType()) {
-        case CSSSelector::kPseudoAny:
-          feature = WebFeature::kCSSSelectorPseudoAny;
-          break;
-        case CSSSelector::kPseudoIs:
-          DCHECK(RuntimeEnabledFeatures::CSSPseudoIsEnabled());
-          feature = WebFeature::kCSSSelectorPseudoIs;
-          break;
-        case CSSSelector::kPseudoFocusVisible:
-          DCHECK(RuntimeEnabledFeatures::CSSFocusVisibleEnabled());
-          if (context_->Mode() != kUASheetMode)
-            feature = WebFeature::kCSSSelectorPseudoFocusVisible;
-          break;
-        case CSSSelector::kPseudoFocus:
-          if (context_->Mode() != kUASheetMode)
-            feature = WebFeature::kCSSSelectorPseudoFocus;
-          break;
-        case CSSSelector::kPseudoAnyLink:
-          feature = WebFeature::kCSSSelectorPseudoAnyLink;
-          break;
-        case CSSSelector::kPseudoWebkitAnyLink:
-          feature = WebFeature::kCSSSelectorPseudoWebkitAnyLink;
-          break;
-        case CSSSelector::kPseudoWhere:
-          DCHECK(RuntimeEnabledFeatures::CSSPseudoWhereEnabled());
-          feature = WebFeature::kCSSSelectorPseudoWhere;
-          break;
-        case CSSSelector::kPseudoUnresolved:
-          DCHECK(context_->CustomElementsV0Enabled());
-          feature = WebFeature::kCSSSelectorPseudoUnresolved;
-          break;
-        case CSSSelector::kPseudoDefined:
-          feature = WebFeature::kCSSSelectorPseudoDefined;
-          break;
-        case CSSSelector::kPseudoSlotted:
-          feature = WebFeature::kCSSSelectorPseudoSlotted;
-          break;
-        case CSSSelector::kPseudoContent:
-          feature = WebFeature::kCSSSelectorPseudoContent;
-          break;
-        case CSSSelector::kPseudoHost:
-          feature = WebFeature::kCSSSelectorPseudoHost;
-          break;
-        case CSSSelector::kPseudoHostContext:
-          feature = WebFeature::kCSSSelectorPseudoHostContext;
-          break;
-        case CSSSelector::kPseudoFullScreenAncestor:
-          feature = WebFeature::kCSSSelectorPseudoFullScreenAncestor;
-          break;
-        case CSSSelector::kPseudoFullScreen:
-          feature = WebFeature::kCSSSelectorPseudoFullScreen;
-          break;
-        case CSSSelector::kPseudoListBox:
-          if (context_->Mode() != kUASheetMode)
-            feature = WebFeature::kCSSSelectorInternalPseudoListBox;
-          break;
-        case CSSSelector::kPseudoWebKitCustomElement:
-          if (context_->Mode() != kUASheetMode)
-            feature = FeatureForWebKitCustomPseudoElement(current->Value());
-          break;
-        case CSSSelector::kPseudoSpatialNavigationFocus:
-          if (context_->Mode() != kUASheetMode) {
-            feature =
-                WebFeature::kCSSSelectorInternalPseudoSpatialNavigationFocus;
-          }
-          break;
-        case CSSSelector::kPseudoReadOnly:
-          if (context_->Mode() != kUASheetMode)
-            feature = WebFeature::kCSSSelectorPseudoReadOnly;
-          break;
-        case CSSSelector::kPseudoReadWrite:
-          if (context_->Mode() != kUASheetMode)
-            feature = WebFeature::kCSSSelectorPseudoReadWrite;
-          break;
-        default:
-          break;
-      }
-      if (feature != WebFeature::kNumberOfFeatures) {
-        if (!Deprecation::DeprecationMessage(feature).IsEmpty()) {
-          context_->CountDeprecation(feature);
-        } else {
-          context_->Count(feature);
-        }
-      }
-      if (current->Relation() == CSSSelector::kIndirectAdjacent)
-        context_->Count(WebFeature::kCSSSelectorIndirectAdjacent);
-      if (current->SelectorList())
-        RecordUsageAndDeprecations(*current->SelectorList());
+      RecordUsageAndDeprecationsOneSelector(current->GetSelector(), context_);
     }
   }
 }

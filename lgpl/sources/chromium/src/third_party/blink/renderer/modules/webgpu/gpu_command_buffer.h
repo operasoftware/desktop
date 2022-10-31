@@ -15,10 +15,15 @@ class GPUCommandBuffer : public DawnObject<WGPUCommandBuffer> {
  public:
   explicit GPUCommandBuffer(GPUDevice* device,
                             WGPUCommandBuffer command_buffer);
-  ~GPUCommandBuffer() override;
+
+  GPUCommandBuffer(const GPUCommandBuffer&) = delete;
+  GPUCommandBuffer& operator=(const GPUCommandBuffer&) = delete;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(GPUCommandBuffer);
+  void setLabelImpl(const String& value) override {
+    std::string utf8_label = value.Utf8();
+    GetProcs().commandBufferSetLabel(GetHandle(), utf8_label.c_str());
+  }
 };
 
 }  // namespace blink

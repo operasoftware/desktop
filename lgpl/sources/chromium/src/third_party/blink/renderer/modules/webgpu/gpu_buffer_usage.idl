@@ -6,8 +6,9 @@
 
 typedef [EnforceRange] unsigned long GPUBufferUsageFlags;
 [
-    Exposed(Window WebGPU, Worker WebGPU)
-] interface GPUBufferUsage {
+    Exposed(Window WebGPU, DedicatedWorker WebGPU),
+    SecureContext
+] namespace GPUBufferUsage {
     const unsigned long MAP_READ = 1;
     const unsigned long MAP_WRITE = 2;
     const unsigned long COPY_SRC = 4;
@@ -17,4 +18,5 @@ typedef [EnforceRange] unsigned long GPUBufferUsageFlags;
     const unsigned long UNIFORM = 64;
     const unsigned long STORAGE = 128;
     const unsigned long INDIRECT = 256;
+    const unsigned long QUERY_RESOLVE = 512;
 };

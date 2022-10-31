@@ -74,7 +74,7 @@ struct FillLayerMethods {
 
 }  // namespace
 
-ValueRange LengthListPropertyFunctions::GetValueRange(
+Length::ValueRange LengthListPropertyFunctions::GetValueRange(
     const CSSProperty& property) {
   switch (property.PropertyID()) {
     case CSSPropertyID::kBackgroundPositionX:
@@ -86,26 +86,26 @@ ValueRange LengthListPropertyFunctions::GetValueRange(
     case CSSPropertyID::kTransformOrigin:
     case CSSPropertyID::kWebkitMaskPositionX:
     case CSSPropertyID::kWebkitMaskPositionY:
-      return kValueRangeAll;
+      return Length::ValueRange::kAll;
 
     case CSSPropertyID::kBorderBottomLeftRadius:
     case CSSPropertyID::kBorderBottomRightRadius:
     case CSSPropertyID::kBorderTopLeftRadius:
     case CSSPropertyID::kBorderTopRightRadius:
     case CSSPropertyID::kStrokeDasharray:
-    case CSSPropertyID::kContainIntrinsicSize:
-      return kValueRangeNonNegative;
+      return Length::ValueRange::kNonNegative;
 
     default:
       NOTREACHED();
-      return kValueRangeAll;
+      return Length::ValueRange::kAll;
   }
 }
 
 bool LengthListPropertyFunctions::GetInitialLengthList(
     const CSSProperty& property,
+    const ComputedStyle& initial_style,
     Vector<Length>& result) {
-  return GetLengthList(property, ComputedStyle::InitialStyle(), result);
+  return GetLengthList(property, initial_style, result);
 }
 
 static bool AppendToVector(const LengthPoint& point, Vector<Length>& result) {
@@ -158,8 +158,6 @@ bool LengthListPropertyFunctions::GetLengthList(const CSSProperty& property,
       return AppendToVector(style.BorderTopRightRadius(), result);
     case CSSPropertyID::kTransformOrigin:
       return AppendToVector(style.GetTransformOrigin(), result);
-    case CSSPropertyID::kContainIntrinsicSize:
-      return AppendToVector(style.ContainIntrinsicSize(), result);
 
     case CSSPropertyID::kBackgroundPositionX:
     case CSSPropertyID::kBackgroundPositionY:
@@ -238,9 +236,6 @@ void LengthListPropertyFunctions::SetLengthList(const CSSProperty& property,
       return;
     case CSSPropertyID::kBorderTopRightRadius:
       style.SetBorderTopRightRadius(SizeFromVector(length_list));
-      return;
-    case CSSPropertyID::kContainIntrinsicSize:
-      style.SetContainIntrinsicSize(SizeFromVector(length_list));
       return;
 
     case CSSPropertyID::kTransformOrigin:

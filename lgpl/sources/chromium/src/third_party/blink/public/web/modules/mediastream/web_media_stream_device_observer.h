@@ -14,6 +14,10 @@
 
 namespace blink {
 
+namespace mojom::blink {
+class StreamDevicesSet;
+}
+
 class MediaStreamDeviceObserver;
 class WebLocalFrame;
 
@@ -29,13 +33,20 @@ class BLINK_MODULES_EXPORT WebMediaStreamDeviceObserver {
   using OnDeviceChangedCb =
       base::RepeatingCallback<void(const MediaStreamDevice& old_device,
                                    const MediaStreamDevice& new_device)>;
-  void AddStream(const WebString& label,
-                 const MediaStreamDevices& audio_devices,
-                 const MediaStreamDevices& video_devices,
-                 OnDeviceStoppedCb on_device_stopped_cb,
-                 OnDeviceChangedCb on_device_changed_cb);
+  using OnDeviceRequestStateChangeCb = base::RepeatingCallback<void(
+      const MediaStreamDevice& device,
+      const mojom::MediaStreamStateChange new_state)>;
+  using OnDeviceCaptureHandleChangeCb =
+      base::RepeatingCallback<void(const MediaStreamDevice& device)>;
+  void AddStreams(
+      const WebString& label,
+      const mojom::blink::StreamDevicesSet& stream_devices_set,
+      OnDeviceStoppedCb on_device_stopped_cb,
+      OnDeviceChangedCb on_device_changed_cb,
+      OnDeviceRequestStateChangeCb on_device_request_state_change_cb,
+      OnDeviceCaptureHandleChangeCb on_device_capture_handle_change_cb);
   void AddStream(const WebString& label, const MediaStreamDevice& device);
-  bool RemoveStream(const WebString& label);
+  bool RemoveStreams(const WebString& label);
   void RemoveStreamDevice(const MediaStreamDevice& device);
 
   // Get the video session_id given a label. The label identifies a stream.

@@ -22,8 +22,8 @@ WebUIBrowserAsyncGenTest.prototype = {
 
   /** @inheritDoc */
   tearDown: function() {
-    expectFalse(this.tornDown);
-    expectFalse(this.running);
+    assertFalse(this.tornDown);
+    assertFalse(this.running);
     this.tornDown = true;
     chrome.send('tearDown');
     testing.Test.prototype.tearDown.call(this);
@@ -108,76 +108,56 @@ TEST_F('WebUIBrowserAsyncGenTest', 'TestContinue', function() {
 
 // Test that runAllActionsAsync can be called with multiple functions, and with
 // bound, saved, or mixed arguments.
-TEST_F('WebUIBrowserAsyncGenTest', 'TestRunAllActionsAsyncMock', function() {
-  this.makeAndRegisterMockHandler([
-    'testBoundArgs',
-    'testSavedArgs',
-    'testMixedArgs',
-  ]);
-  // Bind some arguments.
-  var var1, var2;
-  this.mockHandler.expects(once()).testBoundArgs().will(
-      runAllActionsAsync(WhenTestDone.DEFAULT, callFunction(function(args) {
-                           var1 = args[0];
-                         }, ['val1']), callFunction(function(args) {
-                           var2 = args[0];
-                         }, ['val2'])));
-
+TEST_F('WebUIBrowserAsyncGenTest', 'TestRunAllActionsAsync', function() {
   // Receive some saved arguments.
   var var3, var4;
   var savedArgs = new SaveMockArguments();
   var savedArgs2 = new SaveMockArguments();
-  this.mockHandler.expects(once())
-      .testSavedArgs(savedArgs.match(savedArgs2.match(eq(['passedVal1']))))
-      .will(runAllActionsAsync(
-          WhenTestDone.DEFAULT,
-          callFunctionWithSavedArgs(savedArgs, function(args) {
-            var3 = args[0];
-          }), callFunctionWithSavedArgs(savedArgs2, function(args) {
-            var4 = args[0];
-          })));
+  function testSavedArgs(sendArg) {
+    const action1 = callFunctionWithSavedArgs(savedArgs, function(args) {
+      var3 = args[0];
+    }, sendArg);
+    const action2 = callFunctionWithSavedArgs(savedArgs2, function(args) {
+      var4 = args[0];
+    }, sendArg);
+    runAllActionsAsync(WhenTestDone.DEFAULT, action1, action2).invoke();
+  }
 
   // Receive some saved arguments and some bound arguments.
   var var5, var6, var7, var8;
-  this.mockHandler.expects(once())
-      .testMixedArgs(savedArgs.match(savedArgs2.match(eq('passedVal2'))))
-      .will(runAllActionsAsync(
-          WhenTestDone.DEFAULT,
-          callFunctionWithSavedArgs(
-              savedArgs,
-              function(passedArgs, boundArgs) {
-                var5 = passedArgs[0];
-                var6 = boundArgs[0];
-              },
-              ['val6']),
-          callFunctionWithSavedArgs(
-              savedArgs2, function(passedArgs, boundArgs) {
-                var7 = passedArgs[0];
-                var8 = boundArgs[0];
-              }, ['val8'])));
+  function testMixedArgs(sendArg) {
+    const action1 =
+        callFunctionWithSavedArgs(savedArgs, function(passedArgs, boundArgs) {
+          var5 = passedArgs[0];
+          var6 = boundArgs[0];
+        }, sendArg, ['val6']);
+    const action2 =
+        callFunctionWithSavedArgs(savedArgs2, function(passedArgs, boundArgs) {
+          var7 = passedArgs[0];
+          var8 = boundArgs[0];
+        }, sendArg, ['val8']);
+    runAllActionsAsync(WhenTestDone.DEFAULT, action1, action2).invoke();
+  }
 
   // Send the cases to the mocked handler & tell the C++ handler to continue2.
-  continueTest = this.continueTest(WhenTestDone.ASSERT, function() {
-    chrome.send('testBoundArgs');
-    chrome.send('testSavedArgs', ['passedVal1']);
-    chrome.send('testMixedArgs', ['passedVal2']);
-    chrome.send('callJS', ['continueTest2']);
+  window.continueTest = this.continueTest(WhenTestDone.ASSERT, function() {
+    testSavedArgs(['passedVal1']);
+    testMixedArgs(['passedVal2']);
+    setTimeout(window.continueTest2, 0);
   });
 
   // Check expectations after mocks have been called.
-  continueTest2 = this.continueTest(WhenTestDone.ALWAYS, function() {
-    expectEquals('val1', var1);
-    expectEquals('val2', var2);
-    expectEquals('passedVal1', var3);
-    expectEquals('passedVal1', var4);
-    expectEquals('passedVal2', var5);
-    expectEquals('val6', var6);
-    expectEquals('passedVal2', var7);
-    expectEquals('val8', var8);
+  window.continueTest2 = this.continueTest(WhenTestDone.ALWAYS, function() {
+    assertEquals('passedVal1', var3);
+    assertEquals('passedVal1', var4);
+    assertEquals('passedVal2', var5);
+    assertEquals('val6', var6);
+    assertEquals('passedVal2', var7);
+    assertEquals('val8', var8);
   });
 
   // Kick off the tests asynchronously.
-  chrome.send('callJS', ['continueTest']);
+  setTimeout(window.continueTest, 0);
 });
 
 /**
@@ -225,7 +205,7 @@ WebUIBrowserAsyncGenDeferredTest.prototype = {
   /** @inheritDoc */
   setUp: function() {
     continueTest = this.continueTest(WhenTestDone.DEFAULT, function() {
-      expectFalse(this.ranTest_);
+      assertFalse(this.ranTest_);
       chrome.send('callJS', ['deferRunTest']);
     });
     chrome.send('callJS', ['continueTest']);
@@ -233,7 +213,7 @@ WebUIBrowserAsyncGenDeferredTest.prototype = {
 
   /** @inheritDoc */
   tearDown: function() {
-    expectTrue(this.ranTest_);
+    assertTrue(this.ranTest_);
     WebUIBrowserAsyncGenTest.prototype.tearDown.call(this);
   },
 };

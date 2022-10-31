@@ -11,12 +11,6 @@
 
 #include "device/vr/public/mojom/vr_service.mojom-blink.h"
 
-namespace jumbo_fix {
-const char* kCannotCancelHitTestSource =
-    "Hit test source could not be canceled. Ensure that it was not already "
-    "canceled.";
-}
-
 namespace blink {
 
 XRTransientInputHitTestSource::XRTransientInputHitTestSource(
@@ -31,9 +25,11 @@ uint64_t XRTransientInputHitTestSource::id() const {
 }
 
 void XRTransientInputHitTestSource::cancel(ExceptionState& exception_state) {
+  DVLOG(2) << __func__;
+
   if (!xr_session_->RemoveHitTestSource(this)) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
-                                      jumbo_fix::kCannotCancelHitTestSource);
+                                      XRSession::kCannotCancelHitTestSource);
   }
 }
 
@@ -41,8 +37,9 @@ void XRTransientInputHitTestSource::Update(
     const HashMap<uint32_t, Vector<device::mojom::blink::XRHitResultPtr>>&
         hit_test_results,
     XRInputSourceArray* input_source_array) {
-  // TODO: Be smarter about the update - it's possible to add new resulst /
-  // remove the ones that were removed & update the ones that are being changed.
+  // TODO(bialpio): Be smarter about the update. It's possible to add new
+  // results or remove the ones that were removed & update the ones that are
+  // being changed.
   current_frame_results_.clear();
 
   // If we don't know anything about input sources, we won't be able to

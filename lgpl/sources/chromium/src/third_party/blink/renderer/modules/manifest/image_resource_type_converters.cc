@@ -7,7 +7,6 @@
 #include "third_party/blink/public/common/mime_util/mime_util.h"
 #include "third_party/blink/public/mojom/manifest/manifest.mojom-blink.h"
 #include "third_party/blink/public/platform/web_icon_sizes_parser.h"
-#include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_image_resource.h"
@@ -21,7 +20,6 @@ namespace mojo {
 namespace {
 
 using Purpose = blink::mojom::blink::ManifestImageResource::Purpose;
-using blink::WebSize;
 using blink::WebString;
 using blink::WebVector;
 
@@ -63,8 +61,8 @@ WTF::Vector<Purpose> ParsePurpose(const WTF::String& purpose) {
     Purpose purpose_enum;
     if (lowercase_purpose == "any") {
       purpose_enum = Purpose::ANY;
-    } else if (lowercase_purpose == "badge") {
-      purpose_enum = Purpose::BADGE;
+    } else if (lowercase_purpose == "monochrome") {
+      purpose_enum = Purpose::MONOCHROME;
     } else if (lowercase_purpose == "maskable") {
       purpose_enum = Purpose::MASKABLE;
     } else {
@@ -106,7 +104,12 @@ blink::mojom::blink::ManifestImageResourcePtr TypeConverter<
     image_resource_ptr->sizes = ParseSizes(image_resource->sizes());
   if (image_resource->hasPurpose())
     image_resource_ptr->purpose = ParsePurpose(image_resource->purpose());
-  image_resource_ptr->type = ParseType(image_resource->type());
+
+  if (image_resource->hasType())
+    image_resource_ptr->type = ParseType(image_resource->type());
+  else
+    image_resource_ptr->type = "";
+
   return image_resource_ptr;
 }
 
@@ -117,32 +120,36 @@ namespace blink {
 Manifest::ImageResource ConvertManifestImageResource(
     const ManifestImageResource* icon) {
   Manifest::ImageResource manifest_icon;
-  manifest_icon.src = blink::KURL(icon->src());
-  manifest_icon.type = WebString(mojo::ParseType(icon->type())).Utf16();
+  manifest_icon.src = GURL(icon->src().Utf8());
+  if (icon->hasType())
+    manifest_icon.type = WebString(mojo::ParseType(icon->type())).Utf16();
 
   // Parse 'purpose'
-  const auto purposes = mojo::ParsePurpose(icon->purpose());
-  // ParsePurpose() would've weeded out any purposes that're not ANY or BADGE.
-  for (auto purpose : purposes) {
-    switch (purpose) {
-      case mojo::Purpose::ANY:
-        manifest_icon.purpose.emplace_back(
-            Manifest::ImageResource::Purpose::ANY);
-        break;
-      case mojo::Purpose::BADGE:
-        manifest_icon.purpose.emplace_back(
-            Manifest::ImageResource::Purpose::BADGE);
-        break;
-      case mojo::Purpose::MASKABLE:
-        manifest_icon.purpose.emplace_back(
-            Manifest::ImageResource::Purpose::MASKABLE);
-        break;
+  if (icon->hasPurpose()) {
+    // ParsePurpose() would've weeded out any purposes that're not ANY or
+    // MONOCHROME.
+    for (auto purpose : mojo::ParsePurpose(icon->purpose())) {
+      switch (purpose) {
+        case mojo::Purpose::ANY:
+          manifest_icon.purpose.emplace_back(
+              mojom::ManifestImageResource_Purpose::ANY);
+          break;
+        case mojo::Purpose::MONOCHROME:
+          manifest_icon.purpose.emplace_back(
+              mojom::ManifestImageResource_Purpose::MONOCHROME);
+          break;
+        case mojo::Purpose::MASKABLE:
+          manifest_icon.purpose.emplace_back(
+              mojom::ManifestImageResource_Purpose::MASKABLE);
+          break;
+      }
     }
   }
   // Parse 'sizes'.
-  WTF::Vector<gfx::Size> sizes = mojo::ParseSizes(icon->sizes());
-  for (const auto& size : sizes) {
-    manifest_icon.sizes.emplace_back(size);
+  if (icon->hasSizes()) {
+    for (const auto& size : mojo::ParseSizes(icon->sizes())) {
+      manifest_icon.sizes.emplace_back(size);
+    }
   }
 
   return manifest_icon;

@@ -23,13 +23,12 @@
 
 #include "third_party/blink/renderer/core/css/style_element.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 class SVGStyleElement final : public SVGElement, public StyleElement {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(SVGStyleElement);
 
  public:
   SVGStyleElement(Document&, const CreateElementFlags);
@@ -69,9 +68,11 @@ class SVGStyleElement final : public SVGElement, public StyleElement {
   }
   void NotifyLoadedSheetAndAllCriticalSubresources(
       LoadedSheetErrorStatus) override;
-  void StartLoadingDynamicSheet() override {
-    StyleElement::StartLoadingDynamicSheet(GetDocument());
+  void SetToPendingState() override {
+    StyleElement::SetToPendingState(GetDocument(), *this);
   }
+
+  bool IsSameObject(const Node& node) const override { return this == &node; }
 };
 
 }  // namespace blink

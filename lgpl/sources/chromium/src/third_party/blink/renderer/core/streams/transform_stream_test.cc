@@ -11,12 +11,13 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_tester.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_extras_test_utils.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_iterator_result_value.h"
 #include "third_party/blink/renderer/core/streams/readable_stream.h"
+#include "third_party/blink/renderer/core/streams/test_utils.h"
 #include "third_party/blink/renderer/core/streams/transform_stream_default_controller.h"
 #include "third_party/blink/renderer/core/streams/transform_stream_transformer.h"
 #include "third_party/blink/renderer/core/streams/writable_stream.h"
@@ -39,7 +40,7 @@ using ::testing::Return;
 
 class TransformStreamTest : public ::testing::Test {
  public:
-  TransformStreamTest() {}
+  TransformStreamTest() = default;
 
   TransformStream* Stream() const { return stream_; }
 
@@ -57,16 +58,18 @@ class TransformStreamTest : public ::testing::Test {
     ReadableStream* readable = Stream()->Readable();
     WritableStream* writable = Stream()->Writable();
     v8::Local<v8::Object> global = script_state->GetContext()->Global();
-    EXPECT_TRUE(global
-                    ->Set(scope.GetContext(),
-                          V8String(scope.GetIsolate(), "readable"),
-                          ToV8(readable, script_state))
-                    .IsJust());
-    EXPECT_TRUE(global
-                    ->Set(scope.GetContext(),
-                          V8String(scope.GetIsolate(), "writable"),
-                          ToV8(writable, script_state))
-                    .IsJust());
+    EXPECT_TRUE(
+        global
+            ->Set(scope.GetContext(), V8String(scope.GetIsolate(), "readable"),
+                  ToV8Traits<ReadableStream>::ToV8(script_state, readable)
+                      .ToLocalChecked())
+            .IsJust());
+    EXPECT_TRUE(
+        global
+            ->Set(scope.GetContext(), V8String(scope.GetIsolate(), "writable"),
+                  ToV8Traits<WritableStream>::ToV8(script_state, writable)
+                      .ToLocalChecked())
+            .IsJust());
   }
 
  private:
@@ -264,7 +267,8 @@ TEST_F(TransformStreamTest, EnqueueFromTransform) {
                         "writer.write('a');\n");
 
   ReadableStream* readable = Stream()->Readable();
-  auto* reader = readable->getReader(script_state, ASSERT_NO_EXCEPTION);
+  auto* reader =
+      readable->GetDefaultReaderForTesting(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester tester(script_state,
                              reader->read(script_state, ASSERT_NO_EXCEPTION));
   tester.WaitUntilSettled();
@@ -298,7 +302,8 @@ TEST_F(TransformStreamTest, EnqueueFromFlush) {
                         "writer.close();\n");
 
   ReadableStream* readable = Stream()->Readable();
-  auto* reader = readable->getReader(script_state, ASSERT_NO_EXCEPTION);
+  auto* reader =
+      readable->GetDefaultReaderForTesting(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester tester(script_state,
                              reader->read(script_state, ASSERT_NO_EXCEPTION));
   tester.WaitUntilSettled();
@@ -334,7 +339,8 @@ TEST_F(TransformStreamTest, ThrowFromTransform) {
                             "writer.write('a');\n");
 
   ReadableStream* readable = Stream()->Readable();
-  auto* reader = readable->getReader(script_state, ASSERT_NO_EXCEPTION);
+  auto* reader =
+      readable->GetDefaultReaderForTesting(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester read_tester(
       script_state, reader->read(script_state, ASSERT_NO_EXCEPTION));
   read_tester.WaitUntilSettled();
@@ -372,7 +378,8 @@ TEST_F(TransformStreamTest, ThrowFromFlush) {
                             "writer.close();\n");
 
   ReadableStream* readable = Stream()->Readable();
-  auto* reader = readable->getReader(script_state, ASSERT_NO_EXCEPTION);
+  auto* reader =
+      readable->GetDefaultReaderForTesting(script_state, ASSERT_NO_EXCEPTION);
   ScriptPromiseTester read_tester(
       script_state, reader->read(script_state, ASSERT_NO_EXCEPTION));
   read_tester.WaitUntilSettled();
@@ -444,7 +451,7 @@ TEST_F(TransformStreamTest, WaitInTransform) {
   // Need to read to relieve backpressure.
   Stream()
       ->Readable()
-      ->getReader(script_state, ASSERT_NO_EXCEPTION)
+      ->GetDefaultReaderForTesting(script_state, ASSERT_NO_EXCEPTION)
       ->read(script_state, ASSERT_NO_EXCEPTION);
 
   ScriptPromiseTester write_tester(script_state,
@@ -502,7 +509,7 @@ TEST_F(TransformStreamTest, WaitInFlush) {
   // Need to read to relieve backpressure.
   Stream()
       ->Readable()
-      ->getReader(script_state, ASSERT_NO_EXCEPTION)
+      ->GetDefaultReaderForTesting(script_state, ASSERT_NO_EXCEPTION)
       ->read(script_state, ASSERT_NO_EXCEPTION);
 
   ScriptPromiseTester close_tester(script_state,

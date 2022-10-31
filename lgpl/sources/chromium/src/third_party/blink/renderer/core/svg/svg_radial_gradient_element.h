@@ -21,11 +21,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_RADIAL_GRADIENT_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_RADIAL_GRADIENT_ELEMENT_H_
 
-#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
 #include "third_party/blink/renderer/core/svg/svg_gradient_element.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
+
+class SVGAnimatedLength;
 
 struct RadialGradientAttributes;
 
@@ -47,7 +48,7 @@ class SVGRadialGradientElement final : public SVGGradientElement {
   void Trace(Visitor*) const override;
 
  private:
-  void SvgAttributeChanged(const QualifiedName&) override;
+  void SvgAttributeChanged(const SvgAttributeChangedParams&) override;
 
   LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 

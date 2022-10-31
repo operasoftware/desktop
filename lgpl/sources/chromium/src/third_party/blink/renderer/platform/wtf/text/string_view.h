@@ -5,21 +5,30 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_STRING_VIEW_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_STRING_VIEW_H_
 
+#include <cstring>
+#include <type_traits>
+
+#include "base/containers/span.h"
+#include "base/dcheck_is_on.h"
+#include "base/numerics/safe_conversions.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/get_ptr.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_impl.h"
+
 #if DCHECK_IS_ON()
 #include "base/memory/scoped_refptr.h"
 #endif
-#include <cstring>
-#include "base/containers/span.h"
-#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
-#include "third_party/blink/renderer/platform/wtf/text/string_impl.h"
-#include "third_party/blink/renderer/platform/wtf/text/unicode.h"
 
 namespace WTF {
 
 class AtomicString;
 class String;
+
+enum UTF8ConversionMode {
+  kLenientUTF8Conversion,
+  kStrictUTF8Conversion,
+  kStrictUTF8ConversionReplacingUnpairedSurrogatesWithFFFD
+};
 
 // A string like object that wraps either an 8bit or 16bit byte sequence
 // and keeps track of the length and the type, it does NOT own the bytes.
@@ -116,7 +125,7 @@ class WTF_EXPORT StringView {
       : StringView(reinterpret_cast<const LChar*>(chars), length) {}
   StringView(const LChar* chars)
       : StringView(chars,
-                   chars ? SafeCast<unsigned>(
+                   chars ? base::checked_cast<unsigned>(
                                strlen(reinterpret_cast<const char*>(chars)))
                          : 0) {}
   StringView(const char* chars)
@@ -126,8 +135,6 @@ class WTF_EXPORT StringView {
   StringView(const UChar* chars, unsigned length)
       : impl_(StringImpl::empty16_bit_), bytes_(chars), length_(length) {}
   StringView(const UChar* chars);
-  StringView(const char16_t* chars)
-      : StringView(reinterpret_cast<const UChar*>(chars)) {}
 
 #if DCHECK_IS_ON()
   ~StringView();
@@ -143,14 +150,22 @@ class WTF_EXPORT StringView {
     return impl_->Is8Bit();
   }
 
+  [[nodiscard]] std::string Utf8(
+      UTF8ConversionMode mode = kLenientUTF8Conversion) const;
+
   bool IsAtomic() const { return SharedImpl() && SharedImpl()->IsAtomic(); }
 
   bool IsLowerASCII() const {
-    if (Is8Bit()) {
+    if (StringImpl* impl = SharedImpl())
+      return impl->IsLowerASCII();
+    if (Is8Bit())
       return WTF::IsLowerASCII(Characters8(), length());
-    }
     return WTF::IsLowerASCII(Characters16(), length());
   }
+
+  bool ContainsOnlyASCIIOrEmpty() const;
+
+  bool SubstringContainsOnlyWhitespaceOrEmpty(unsigned from, unsigned to) const;
 
   void Clear();
 
@@ -181,14 +196,11 @@ class WTF_EXPORT StringView {
     return {static_cast<const UChar*>(bytes_), length_};
   }
 
-  UChar32 CodepointAt(unsigned i) const {
-    SECURITY_DCHECK(i < length());
-    if (Is8Bit())
-      return (*this)[i];
-    UChar32 codepoint;
-    U16_GET(Characters16(), 0, i, length(), codepoint);
-    return codepoint;
-  }
+  UChar32 CodepointAt(unsigned i) const;
+
+  // Returns i+2 if a pair of [i] and [i+1] is a valid surrogate pair.
+  // Returns i+1 otherwise.
+  unsigned NextCodePointOffset(unsigned i) const;
 
   const void* Bytes() const { return bytes_; }
 
@@ -357,4 +369,4 @@ using WTF::EqualIgnoringASCIICase;
 using WTF::DeprecatedEqualIgnoringCase;
 using WTF::IsAllSpecialCharacters;
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_STRING_VIEW_H_

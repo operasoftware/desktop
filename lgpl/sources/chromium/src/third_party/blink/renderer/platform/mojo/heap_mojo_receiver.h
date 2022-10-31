@@ -5,11 +5,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_MOJO_HEAP_MOJO_RECEIVER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_MOJO_HEAP_MOJO_RECEIVER_H_
 
+#include "base/gtest_prod_util.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "third_party/blink/renderer/platform/context_lifecycle_observer.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/mojo/features.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
+#include "third_party/blink/renderer/platform/mojo/mojo_binding_context.h"
 
 namespace blink {
 
@@ -54,8 +56,8 @@ class HeapMojoReceiver {
     wrapper_->receiver().set_disconnect_with_reason_handler(
         std::move(error_handler));
   }
-  mojo::PendingRemote<Interface> BindNewPipeAndPassRemote(
-      scoped_refptr<base::SequencedTaskRunner> task_runner) WARN_UNUSED_RESULT {
+  [[nodiscard]] mojo::PendingRemote<Interface> BindNewPipeAndPassRemote(
+      scoped_refptr<base::SequencedTaskRunner> task_runner) {
     DCHECK(task_runner);
     return wrapper_->receiver().BindNewPipeAndPassRemote(
         std::move(task_runner));
@@ -69,6 +71,9 @@ class HeapMojoReceiver {
   bool WaitForIncomingCall() {
     return wrapper_->receiver().WaitForIncomingCall();
   }
+  void SetFilter(std::unique_ptr<mojo::MessageFilter> filter) {
+    wrapper_->receiver().SetFilter(std::move(filter));
+  }
 
   void Trace(Visitor* visitor) const { visitor->Trace(wrapper_); }
 
@@ -80,7 +85,6 @@ class HeapMojoReceiver {
   class Wrapper final : public GarbageCollected<Wrapper>,
                         public ContextLifecycleObserver {
     USING_PRE_FINALIZER(Wrapper, Dispose);
-    USING_GARBAGE_COLLECTED_MIXIN(Wrapper);
 
    public:
     Wrapper(Owner* owner, ContextLifecycleNotifier* notifier)
@@ -99,9 +103,7 @@ class HeapMojoReceiver {
 
     // ContextLifecycleObserver methods
     void ContextDestroyed() override {
-      if (Mode == HeapMojoWrapperMode::kWithContextObserver ||
-          (Mode == HeapMojoWrapperMode::kWithoutContextObserver &&
-           base::FeatureList::IsEnabled(kHeapMojoUseContextObserver)))
+      if (Mode == HeapMojoWrapperMode::kWithContextObserver)
         receiver_.reset();
     }
 

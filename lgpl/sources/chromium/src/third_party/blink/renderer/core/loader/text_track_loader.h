@@ -27,7 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_TEXT_TRACK_LOADER_H_
 
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_parser.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/cross_origin_attribute_value.h"
 #include "third_party/blink/renderer/platform/loader/fetch/raw_resource.h"
 
@@ -47,8 +47,6 @@ class TextTrackLoaderClient : public GarbageCollectedMixin {
 class TextTrackLoader final : public GarbageCollected<TextTrackLoader>,
                               public RawResourceClient,
                               private VTTParserClient {
-  USING_GARBAGE_COLLECTED_MIXIN(TextTrackLoader);
-
  public:
   TextTrackLoader(TextTrackLoaderClient&, Document&);
   ~TextTrackLoader() override;
@@ -83,11 +81,11 @@ class TextTrackLoader final : public GarbageCollected<TextTrackLoader>,
   Member<VTTParser> cue_parser_;
   // FIXME: Remove this pointer and get the Document from m_client.
   Member<Document> document_;
-  TaskRunnerTimer<TextTrackLoader> cue_load_timer_;
+  HeapTaskRunnerTimer<TextTrackLoader> cue_load_timer_;
   State state_;
   bool new_cues_available_;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_TEXT_TRACK_LOADER_H_

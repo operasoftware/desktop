@@ -24,15 +24,17 @@ void ManifestFetcher::Start(LocalDOMWindow& window,
   callback_ = std::move(callback);
 
   ResourceRequest request(url_);
-  request.SetRequestContext(mojom::RequestContextType::MANIFEST);
+  request.SetRequestContext(mojom::blink::RequestContextType::MANIFEST);
+  request.SetRequestDestination(network::mojom::RequestDestination::kManifest);
   request.SetMode(network::mojom::RequestMode::kCors);
+  request.SetTargetAddressSpace(network::mojom::IPAddressSpace::kUnknown);
   // See https://w3c.github.io/manifest/. Use "include" when use_credentials is
   // true, and "omit" otherwise.
   request.SetCredentialsMode(use_credentials
                                  ? network::mojom::CredentialsMode::kInclude
                                  : network::mojom::CredentialsMode::kOmit);
 
-  ResourceLoaderOptions resource_loader_options;
+  ResourceLoaderOptions resource_loader_options(window.GetCurrentWorld());
   resource_loader_options.data_buffering_policy = kDoNotBufferData;
 
   loader_ = MakeGarbageCollected<ThreadableLoader>(
@@ -77,7 +79,7 @@ void ManifestFetcher::DidFinishLoading(uint64_t) {
   data_.Clear();
 }
 
-void ManifestFetcher::DidFail(const ResourceError& error) {
+void ManifestFetcher::DidFail(uint64_t, const ResourceError& error) {
   if (!callback_)
     return;
 
@@ -86,8 +88,8 @@ void ManifestFetcher::DidFail(const ResourceError& error) {
   std::move(callback_).Run(response_, String());
 }
 
-void ManifestFetcher::DidFailRedirectCheck() {
-  DidFail(ResourceError::Failure(NullURL()));
+void ManifestFetcher::DidFailRedirectCheck(uint64_t identifier) {
+  DidFail(identifier, ResourceError::Failure(NullURL()));
 }
 
 void ManifestFetcher::Trace(Visitor* visitor) const {

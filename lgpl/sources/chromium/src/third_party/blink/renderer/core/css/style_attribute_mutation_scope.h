@@ -38,6 +38,9 @@ class StyleAttributeMutationScope {
 
  public:
   StyleAttributeMutationScope(AbstractPropertySetCSSStyleDeclaration*);
+  StyleAttributeMutationScope(const StyleAttributeMutationScope&) = delete;
+  StyleAttributeMutationScope& operator=(const StyleAttributeMutationScope&) =
+      delete;
 
   ~StyleAttributeMutationScope();
 
@@ -54,9 +57,8 @@ class StyleAttributeMutationScope {
   MutationObserverInterestGroup* mutation_recipients_ = nullptr;
   MutationRecord* mutation_ = nullptr;
   AtomicString old_value_;
-  DISALLOW_COPY_AND_ASSIGN(StyleAttributeMutationScope);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_ATTRIBUTE_MUTATION_SCOPE_H_

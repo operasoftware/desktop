@@ -32,6 +32,7 @@
 #include "third_party/blink/renderer/core/editing/commands/move_commands.h"
 
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
+#include "third_party/blink/renderer/core/dom/focus_params.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/editing/editing_behavior.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
@@ -58,13 +59,13 @@ unsigned MoveCommands::VerticalScrollDistance(LocalFrame& frame) {
   LayoutObject* const layout_object = focused_element->GetLayoutObject();
   if (!layout_object || !layout_object->IsBox())
     return 0;
-  LayoutBox& layout_box = ToLayoutBox(*layout_object);
+  auto& layout_box = To<LayoutBox>(*layout_object);
   const ComputedStyle* const style = layout_box.Style();
   if (!style)
     return 0;
   if (!(style->OverflowY() == EOverflow::kScroll ||
         style->OverflowY() == EOverflow::kAuto ||
-        HasEditableStyle(*focused_element) || frame.IsCaretBrowsingEnabled()))
+        IsEditable(*focused_element) || frame.IsCaretBrowsingEnabled()))
     return 0;
   const ScrollableArea& scrollable_area = *frame.View()->LayoutViewport();
   const int height = std::min<int>(layout_box.ClientHeight().ToInt(),
@@ -138,7 +139,7 @@ void MoveCommands::UpdateFocusForCaretBrowsing(LocalFrame& frame) {
     return;
 
   const ComputedStyle* style = node->GetComputedStyle();
-  if (!style || style->UserModify() != EUserModify::kReadOnly)
+  if (!style || style->UsedUserModify() != EUserModify::kReadOnly)
     return;
 
   Element* new_focused_element = nullptr;

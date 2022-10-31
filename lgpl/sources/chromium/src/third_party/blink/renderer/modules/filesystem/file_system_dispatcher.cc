@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "build/build_config.h"
+#include "components/services/filesystem/public/mojom/types.mojom-blink.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/file_path_conversion.h"
@@ -422,11 +423,16 @@ void FileSystemDispatcher::Cancel(int request_id_to_cancel,
     std::move(callback).Run(base::File::FILE_ERROR_INVALID_OPERATION);
     return;
   }
-  cancellable_operations_.find(request_id_to_cancel)
-      ->value->Value()
-      ->Cancel(WTF::Bind(&FileSystemDispatcher::DidCancel,
-                         WrapWeakPersistent(this), std::move(callback),
-                         request_id_to_cancel));
+  auto& remote =
+      cancellable_operations_.find(request_id_to_cancel)->value->Value();
+  if (!remote.is_bound()) {
+    RemoveOperationRemote(request_id_to_cancel);
+    std::move(callback).Run(base::File::FILE_ERROR_INVALID_OPERATION);
+    return;
+  }
+  remote->Cancel(WTF::Bind(&FileSystemDispatcher::DidCancel,
+                           WrapWeakPersistent(this), std::move(callback),
+                           request_id_to_cancel));
 }
 
 void FileSystemDispatcher::CreateSnapshotFile(

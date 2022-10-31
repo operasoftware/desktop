@@ -9,6 +9,7 @@
 #include "third_party/blink/public/common/messaging/string_message_codec.h"
 #include "third_party/blink/public/common/messaging/transferable_message.h"
 #include "third_party/blink/public/common/messaging/transferable_message_mojom_traits.h"
+#include "third_party/blink/public/mojom/blob/blob.mojom.h"
 #include "third_party/blink/public/mojom/messaging/transferable_message.mojom.h"
 
 namespace blink {
@@ -19,7 +20,7 @@ WebMessagePort::Message& WebMessagePort::Message::operator=(Message&&) =
     default;
 WebMessagePort::Message::~Message() = default;
 
-WebMessagePort::Message::Message(const base::string16& data) : data(data) {}
+WebMessagePort::Message::Message(const std::u16string& data) : data(data) {}
 
 WebMessagePort::Message::Message(std::vector<WebMessagePort> ports)
     : ports(std::move(ports)) {}
@@ -28,11 +29,11 @@ WebMessagePort::Message::Message(WebMessagePort&& port) {
   ports.emplace_back(std::move(port));
 }
 
-WebMessagePort::Message::Message(const base::string16& data,
+WebMessagePort::Message::Message(const std::u16string& data,
                                  std::vector<WebMessagePort> ports)
     : data(data), ports(std::move(ports)) {}
 
-WebMessagePort::Message::Message(const base::string16& data,
+WebMessagePort::Message::Message(const std::u16string& data,
                                  WebMessagePort port)
     : data(data) {
   ports.emplace_back(std::move(port));
@@ -40,8 +41,9 @@ WebMessagePort::Message::Message(const base::string16& data,
 
 WebMessagePort::MessageReceiver::MessageReceiver() = default;
 WebMessagePort::MessageReceiver::~MessageReceiver() = default;
+
 bool WebMessagePort::MessageReceiver::OnMessage(Message) {
-  return true;
+  return false;
 }
 
 WebMessagePort::WebMessagePort() = default;
@@ -51,6 +53,7 @@ WebMessagePort::WebMessagePort(WebMessagePort&& other) {
 }
 
 WebMessagePort& WebMessagePort::operator=(WebMessagePort&& other) {
+  CloseIfNecessary();
   Take(std::move(other));
   return *this;
 }
@@ -64,6 +67,14 @@ std::pair<WebMessagePort, WebMessagePort> WebMessagePort::CreatePair() {
   MessagePortDescriptorPair port_pair;
   return std::make_pair(WebMessagePort(port_pair.TakePort0()),
                         WebMessagePort(port_pair.TakePort1()));
+}
+
+// static
+WebMessagePort WebMessagePort::Create(MessagePortDescriptor port) {
+  DCHECK(port.IsValid());
+  DCHECK(!port.IsEntangled());
+
+  return WebMessagePort(std::move(port));
 }
 
 void WebMessagePort::SetReceiver(
@@ -141,11 +152,8 @@ bool WebMessagePort::PostMessage(Message&& message) {
   // Build the message.
   // TODO(chrisha): Finally kill off MessagePortChannel, once
   // MessagePortDescriptor more thoroughly plays that role.
-  blink::TransferableMessage transferable_message;
-  transferable_message.owned_encoded_message =
-      blink::EncodeStringMessage(message.data);
-  transferable_message.encoded_message =
-      transferable_message.owned_encoded_message;
+  blink::TransferableMessage transferable_message =
+      blink::EncodeWebMessagePayload(WebMessagePayload(message.data));
   transferable_message.ports =
       blink::MessagePortChannel::CreateFromHandles(std::move(ports));
 
@@ -217,8 +225,14 @@ bool WebMessagePort::Accept(mojo::Message* mojo_message) {
 
   // Decode the string portion of the message.
   Message message;
-  if (!blink::DecodeStringMessage(transferable_message.encoded_message,
-                                  &message.data)) {
+  absl::optional<WebMessagePayload> optional_payload =
+      blink::DecodeToWebMessagePayload(transferable_message);
+  if (!optional_payload)
+    return false;
+  auto& payload = optional_payload.value();
+  if (auto* str = absl::get_if<std::u16string>(&payload)) {
+    message.data = std::move(*str);
+  } else {
     return false;
   }
 

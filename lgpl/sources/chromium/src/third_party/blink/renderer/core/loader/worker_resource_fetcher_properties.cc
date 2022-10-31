@@ -38,6 +38,10 @@ bool WorkerResourceFetcherProperties::IsPaused() const {
   return global_scope_->IsContextPaused();
 }
 
+LoaderFreezeMode WorkerResourceFetcherProperties::FreezeMode() const {
+  return global_scope_->GetLoaderFreezeMode();
+}
+
 const KURL& WorkerResourceFetcherProperties::WebBundlePhysicalUrl() const {
   return NullURL();
 }

@@ -6,6 +6,6 @@
 
 dictionary GPUExtent3DDict {
     required GPUIntegerCoordinate width;
-    required GPUIntegerCoordinate height;
-    required GPUIntegerCoordinate depth;
+    GPUIntegerCoordinate height = 1;
+    GPUIntegerCoordinate depthOrArrayLayers = 1;
 };

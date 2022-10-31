@@ -7,14 +7,20 @@
 #include <utility>
 
 #include "base/metrics/histogram_macros.h"
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
+#include "third_party/blink/public/common/privacy_budget/identifiable_surface.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_request_usvstring.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_cache_query_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_image_resource.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/fetch/request.h"
 #include "third_party/blink/renderer/core/fetch/response.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/modules/background_fetch/background_fetch_bridge.h"
 #include "third_party/blink/renderer/modules/background_fetch/background_fetch_record.h"
 #include "third_party/blink/renderer/modules/cache_storage/cache.h"
@@ -22,8 +28,8 @@
 #include "third_party/blink/renderer/modules/service_worker/service_worker_registration.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -68,11 +74,6 @@ void BackgroundFetchRegistration::OnProgress(
   result_ = result;
   failure_reason_ = failure_reason;
 
-  ExecutionContext* context = GetExecutionContext();
-  if (!context || context->IsContextDestroyed())
-    return;
-
-  DCHECK(context->IsContextThread());
   DispatchEvent(*Event::Create(event_type_names::kProgress));
 }
 
@@ -143,43 +144,43 @@ ScriptPromise BackgroundFetchRegistration::abort(ScriptState* script_state) {
 
 ScriptPromise BackgroundFetchRegistration::match(
     ScriptState* script_state,
-    const RequestOrUSVString& request,
+    const V8RequestInfo* request,
     const CacheQueryOptions* options,
     ExceptionState& exception_state) {
-  return MatchImpl(
-      script_state, base::make_optional<RequestOrUSVString>(request),
-      mojom::blink::CacheQueryOptions::From(options), exception_state,
-      /* match_all = */ false);
+  return MatchImpl(script_state, request,
+                   mojom::blink::CacheQueryOptions::From(options),
+                   exception_state,
+                   /* match_all = */ false);
 }
 
 ScriptPromise BackgroundFetchRegistration::matchAll(
     ScriptState* script_state,
     ExceptionState& exception_state) {
-  return MatchImpl(script_state, /* request = */ base::nullopt,
+  return MatchImpl(script_state, /* request = */ nullptr,
                    /* cache_query_options = */ nullptr, exception_state,
                    /* match_all = */ true);
 }
 
 ScriptPromise BackgroundFetchRegistration::matchAll(
     ScriptState* script_state,
-    const RequestOrUSVString& request,
+    const V8RequestInfo* request,
     const CacheQueryOptions* options,
     ExceptionState& exception_state) {
-  return MatchImpl(
-      script_state, base::make_optional<RequestOrUSVString>(request),
-      mojom::blink::CacheQueryOptions::From(options), exception_state,
-      /* match_all = */ true);
+  return MatchImpl(script_state, request,
+                   mojom::blink::CacheQueryOptions::From(options),
+                   exception_state,
+                   /* match_all = */ true);
 }
 
 ScriptPromise BackgroundFetchRegistration::MatchImpl(
     ScriptState* script_state,
-    base::Optional<RequestOrUSVString> request,
+    const V8RequestInfo* request,
     mojom::blink::CacheQueryOptionsPtr cache_query_options,
     ExceptionState& exception_state,
     bool match_all) {
   DCHECK(script_state);
   UMA_HISTOGRAM_BOOLEAN("BackgroundFetch.MatchCalledFromDocumentScope",
-                        ExecutionContext::From(script_state)->IsDocument());
+                        LocalDOMWindow::From(script_state));
   UMA_HISTOGRAM_BOOLEAN("BackgroundFetch.MatchCalledWhenFetchIsIncomplete",
                         result_ == mojom::BackgroundFetchResult::UNSET);
 
@@ -196,15 +197,19 @@ ScriptPromise BackgroundFetchRegistration::MatchImpl(
 
   // Convert |request| to mojom::blink::FetchAPIRequestPtr.
   mojom::blink::FetchAPIRequestPtr request_to_match;
-  if (request.has_value()) {
-    if (request->IsRequest()) {
-      request_to_match = request->GetAsRequest()->CreateFetchAPIRequest();
-    } else {
-      Request* new_request = Request::Create(
-          script_state, request->GetAsUSVString(), exception_state);
-      if (exception_state.HadException())
-        return ScriptPromise();
-      request_to_match = new_request->CreateFetchAPIRequest();
+  if (request) {
+    switch (request->GetContentType()) {
+      case V8RequestInfo::ContentType::kRequest:
+        request_to_match = request->GetAsRequest()->CreateFetchAPIRequest();
+        break;
+      case V8RequestInfo::ContentType::kUSVString: {
+        Request* new_request = Request::Create(
+            script_state, request->GetAsUSVString(), exception_state);
+        if (exception_state.HadException())
+          return ScriptPromise();
+        request_to_match = new_request->CreateFetchAPIRequest();
+        break;
+      }
     }
   }
 
@@ -335,6 +340,15 @@ const String BackgroundFetchRegistration::result() const {
 }
 
 const String BackgroundFetchRegistration::failureReason() const {
+  blink::IdentifiabilityMetricBuilder(GetExecutionContext()->UkmSourceID())
+      .Add(
+          blink::IdentifiableSurface::FromTypeAndToken(
+              blink::IdentifiableSurface::Type::kWebFeature,
+              WebFeature::
+                  kV8BackgroundFetchRegistration_FailureReason_AttributeGetter),
+          failure_reason_ ==
+              mojom::BackgroundFetchFailureReason::QUOTA_EXCEEDED)
+      .Record(GetExecutionContext()->UkmRecorder());
   switch (failure_reason_) {
     case mojom::BackgroundFetchFailureReason::NONE:
       return "";

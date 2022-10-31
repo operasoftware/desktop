@@ -1,10 +1,13 @@
 #-index-name: Lithuanian, 8-dot
 #-display-name: Lithuanian 8-dot braille
 
-#+locale:lt
+#+language:lt
 #+type:literary
 #+contraction:no
 #+dots:8
+# Marked as "direction:both" by Bue Vester-Andersen
+# as tests run both forward and backward
+#+direction:both
 
 # TODO: Please correct the metadata above. It is not meant to be
 # accurate nor complete. It hasn't been verified by the table

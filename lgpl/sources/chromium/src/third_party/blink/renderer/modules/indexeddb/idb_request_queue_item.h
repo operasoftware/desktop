@@ -5,16 +5,21 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_INDEXEDDB_IDB_REQUEST_QUEUE_ITEM_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_INDEXEDDB_IDB_REQUEST_QUEUE_ITEM_H_
 
+#include <cstdint>
 #include <memory>
 
 #include "base/callback.h"
+#include "base/dcheck_is_on.h"
+#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-blink.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
 class DOMException;
+class IDBDatabaseGetAllResultSinkImpl;
 class IDBKey;
 class IDBRequest;
 class IDBRequestLoader;
@@ -65,6 +70,10 @@ class IDBRequestQueueItem {
                       bool attach_loader,
                       base::OnceClosure on_result_load_complete);
   IDBRequestQueueItem(IDBRequest*,
+                      Vector<Vector<std::unique_ptr<IDBValue>>>,
+                      bool attach_loader,
+                      base::OnceClosure on_result_load_complete);
+  IDBRequestQueueItem(IDBRequest*,
                       std::unique_ptr<IDBKey>,
                       std::unique_ptr<IDBKey> primary_key,
                       std::unique_ptr<IDBValue>,
@@ -77,6 +86,13 @@ class IDBRequestQueueItem {
                       std::unique_ptr<IDBValue>,
                       bool attach_loader,
                       base::OnceClosure on_result_load_complete);
+  // Asynchronous fetching of multiple results.
+  IDBRequestQueueItem(
+      IDBRequest*,
+      bool key_only,
+      mojo::PendingReceiver<mojom::blink::IDBDatabaseGetAllResultSink> receiver,
+      base::OnceClosure on_result_load_complete);
+
   ~IDBRequestQueueItem();
 
   // False if this result still requires post-processing.
@@ -111,6 +127,8 @@ class IDBRequestQueueItem {
   void OnResultLoadComplete(DOMException* error);
 
  private:
+  friend class IDBDatabaseGetAllResultSinkImpl;
+
   // The IDBRequest callback that will be called for this result.
   enum ResponseType {
     kCanceled,
@@ -121,6 +139,7 @@ class IDBRequestQueueItem {
     kKeyPrimaryKeyValue,
     kValue,
     kValueArray,
+    kValueArrayArray,
     kVoid,
   };
 
@@ -145,8 +164,14 @@ class IDBRequestQueueItem {
   // All the values that will be passed back to the IDBRequest.
   Vector<std::unique_ptr<IDBValue>> values_;
 
+  // Intermediate array to reconstruct all_values_ after IDBRequestLoader.
+  Vector<wtf_size_t> all_values_size_info_;
+
   // The cursor argument to the IDBRequest callback.
   std::unique_ptr<WebIDBCursor> cursor_;
+
+  // Asynchronous result collection for get all.
+  std::unique_ptr<IDBDatabaseGetAllResultSinkImpl> get_all_sink_;
 
   // Performs post-processing on this result.
   //
@@ -165,6 +190,9 @@ class IDBRequestQueueItem {
 
   // False if this result still requires post-processing.
   bool ready_;
+
+  // True iff this result has started loading.
+  bool started_loading_ = false;
 
 #if DCHECK_IS_ON()
   // True if the appropriate EnqueueResponse() method was called in IDBRequest.

@@ -7,10 +7,11 @@
 
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_param_descriptor.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet_processor_definition.h"
+#include "third_party/blink/renderer/platform/bindings/enumeration_base.h"
 
 namespace blink {
 
-// A class for shallow repackage of |AudioParamDescriptor|. This is created only
+// A class for shallow repackage of AudioParamDescriptor. This is created only
 // when requested when the synchronization between AudioWorkletMessagingProxy
 // and AudioWorkletGlobalScope.
 class CrossThreadAudioParamInfo {
@@ -18,11 +19,11 @@ class CrossThreadAudioParamInfo {
 
  public:
   explicit CrossThreadAudioParamInfo(const AudioParamDescriptor* descriptor)
-      : automation_rate_(descriptor->automationRate().IsolatedCopy()),
+      : automation_rate_(IDLEnumAsString(descriptor->automationRate())),
         default_value_(descriptor->defaultValue()),
         max_value_(descriptor->maxValue()),
         min_value_(descriptor->minValue()),
-        name_(descriptor->name().IsolatedCopy()) {}
+        name_(descriptor->name()) {}
 
   const String& AutomationRate() const { return automation_rate_; }
   float DefaultValue() const { return default_value_; }
@@ -38,7 +39,7 @@ class CrossThreadAudioParamInfo {
   const String name_;
 };
 
-// A class for shallow repackage of |AudioWorkletProcessorDefinition|. This is
+// A class for shallow repackage of AudioWorkletProcessorDefinition. This is
 // created only when requested when the synchronization between
 // AudioWorkletMessagingProxy and AudioWorkletGlobalScope.
 class CrossThreadAudioWorkletProcessorInfo {
@@ -47,7 +48,7 @@ class CrossThreadAudioWorkletProcessorInfo {
  public:
   explicit CrossThreadAudioWorkletProcessorInfo(
       const AudioWorkletProcessorDefinition& definition)
-      : name_(definition.GetName().IsolatedCopy()) {
+      : name_(definition.GetName()) {
     // To avoid unnecessary reallocations of the vector.
     param_info_list_.ReserveInitialCapacity(
         definition.GetAudioParamDescriptorNames().size());

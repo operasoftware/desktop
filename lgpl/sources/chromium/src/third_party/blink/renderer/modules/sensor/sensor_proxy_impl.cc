@@ -34,6 +34,7 @@ SensorProxyImpl::~SensorProxyImpl() {}
 void SensorProxyImpl::Trace(Visitor* visitor) const {
   visitor->Trace(sensor_remote_);
   visitor->Trace(client_receiver_);
+  visitor->Trace(polling_timer_);
   SensorProxy::Trace(visitor);
 }
 
@@ -41,15 +42,15 @@ void SensorProxyImpl::Initialize() {
   if (state_ != kUninitialized)
     return;
 
-  if (!sensor_provider()) {
+  if (!sensor_provider_proxy()) {
     HandleSensorError();
     return;
   }
 
   state_ = kInitializing;
-  auto callback =
-      WTF::Bind(&SensorProxyImpl::OnSensorCreated, WrapWeakPersistent(this));
-  sensor_provider()->GetSensor(type_, std::move(callback));
+  sensor_provider_proxy()->GetSensor(
+      type_,
+      WTF::Bind(&SensorProxyImpl::OnSensorCreated, WrapWeakPersistent(this)));
 }
 
 void SensorProxyImpl::AddConfiguration(
@@ -65,7 +66,8 @@ void SensorProxyImpl::RemoveConfiguration(
     device::mojom::blink::SensorConfigurationPtr configuration) {
   DCHECK(IsInitialized());
   RemoveActiveFrequency(configuration->frequency);
-  sensor_remote_->RemoveConfiguration(std::move(configuration));
+  if (sensor_remote_.is_bound())
+    sensor_remote_->RemoveConfiguration(std::move(configuration));
 }
 
 double SensorProxyImpl::GetDefaultFrequency() const {
@@ -79,7 +81,7 @@ std::pair<double, double> SensorProxyImpl::GetFrequencyLimits() const {
 }
 
 void SensorProxyImpl::Suspend() {
-  if (suspended_)
+  if (suspended_ || !sensor_remote_.is_bound())
     return;
 
   sensor_remote_->Suspend();
@@ -88,7 +90,7 @@ void SensorProxyImpl::Suspend() {
 }
 
 void SensorProxyImpl::Resume() {
-  if (!suspended_)
+  if (!suspended_ || !sensor_remote_.is_bound())
     return;
 
   sensor_remote_->Resume();
@@ -137,8 +139,6 @@ void SensorProxyImpl::ReportError(DOMExceptionCode code,
   reading_ = device::SensorReading();
   UpdatePollingStatus();
 
-  // The m_sensor.reset() will release all callbacks and its bound parameters,
-  // therefore, handleSensorError accepts messages by value.
   sensor_remote_.reset();
   shared_buffer_reader_.reset();
   default_frequency_ = 0.0;
@@ -226,9 +226,8 @@ void SensorProxyImpl::UpdatePollingStatus() {
   if (ShouldProcessReadings()) {
     // TODO(crbug/721297) : We need to find out an algorithm for resulting
     // polling frequency.
-    polling_timer_.StartRepeating(
-        base::TimeDelta::FromSecondsD(1 / active_frequencies_.back()),
-        FROM_HERE);
+    polling_timer_.StartRepeating(base::Seconds(1 / active_frequencies_.back()),
+                                  FROM_HERE);
   } else {
     polling_timer_.Stop();
   }

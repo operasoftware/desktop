@@ -20,12 +20,14 @@
 
 #include "third_party/blink/renderer/core/svg/svg_path_element.h"
 
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_path.h"
 #include "third_party/blink/renderer/core/svg/svg_mpath_element.h"
 #include "third_party/blink/renderer/core/svg/svg_path_query.h"
 #include "third_party/blink/renderer/core/svg/svg_path_utilities.h"
 #include "third_party/blink/renderer/core/svg/svg_point_tear_off.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -47,9 +49,8 @@ Path SVGPathElement::AttributePath() const {
 }
 
 const StylePath* SVGPathElement::GetStylePath() const {
-  if (LayoutObject* layout_object = GetLayoutObject()) {
-    const StylePath* style_path = layout_object->StyleRef().SvgStyle().D();
-    if (style_path)
+  if (const ComputedStyle* style = GetComputedStyle()) {
+    if (const StylePath* style_path = style->D())
       return style_path;
     return StylePath::EmptyPath();
   }
@@ -58,6 +59,10 @@ const StylePath* SVGPathElement::GetStylePath() const {
 
 float SVGPathElement::ComputePathLength() const {
   return GetStylePath()->length();
+}
+
+const SVGPathByteStream& SVGPathElement::PathByteStream() const {
+  return GetStylePath()->ByteStream();
 }
 
 Path SVGPathElement::AsPath() const {
@@ -70,10 +75,21 @@ float SVGPathElement::getTotalLength(ExceptionState& exception_state) {
   return SVGPathQuery(PathByteStream()).GetTotalLength();
 }
 
-SVGPointTearOff* SVGPathElement::getPointAtLength(float length) {
+SVGPointTearOff* SVGPathElement::getPointAtLength(
+    float length,
+    ExceptionState& exception_state) {
   GetDocument().UpdateStyleAndLayoutForNode(this,
                                             DocumentUpdateReason::kJavaScript);
-  SVGPathQuery path_query(PathByteStream());
+
+  EnsureComputedStyle();
+  const SVGPathByteStream& byte_stream = PathByteStream();
+  if (byte_stream.IsEmpty()) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      "The element's path is empty.");
+    return nullptr;
+  }
+
+  SVGPathQuery path_query(byte_stream);
   if (length < 0) {
     length = 0;
   } else {
@@ -81,18 +97,20 @@ SVGPointTearOff* SVGPathElement::getPointAtLength(float length) {
     if (length > computed_length)
       length = computed_length;
   }
-  FloatPoint point = path_query.GetPointAtLength(length);
+  gfx::PointF point = path_query.GetPointAtLength(length);
   return SVGPointTearOff::CreateDetached(point);
 }
 
-void SVGPathElement::SvgAttributeChanged(const QualifiedName& attr_name) {
+void SVGPathElement::SvgAttributeChanged(
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kDAttr) {
     InvalidateMPathDependencies();
     GeometryPresentationAttributeChanged(attr_name);
     return;
   }
 
-  SVGGeometryElement::SvgAttributeChanged(attr_name);
+  SVGGeometryElement::SvgAttributeChanged(params);
 }
 
 void SVGPathElement::CollectStyleForPresentationAttribute(
@@ -137,9 +155,9 @@ void SVGPathElement::RemovedFrom(ContainerNode& root_parent) {
   InvalidateMPathDependencies();
 }
 
-FloatRect SVGPathElement::GetBBox() {
+gfx::RectF SVGPathElement::GetBBox() {
   // We want the exact bounds.
-  return SVGPathElement::AsPath().BoundingRect();
+  return SVGPathElement::AsPath().TightBoundingRect();
 }
 
 }  // namespace blink

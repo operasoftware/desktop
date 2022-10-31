@@ -7,13 +7,16 @@
 #include "base/synchronization/waitable_event.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/unpacked_serialized_script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
-#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/core/workers/worker_thread_test_helper.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/to_v8.h"
+#include "third_party/blink/renderer/platform/heap/thread_state.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
 
 namespace blink {
 
@@ -26,7 +29,7 @@ TEST(SerializedScriptValueThreadedTest,
   // Start a worker.
   WorkerReportingProxy proxy;
   WorkerThreadForTest worker_thread(proxy);
-  worker_thread.StartWithSourceCode(scope.GetDocument().GetSecurityOrigin(),
+  worker_thread.StartWithSourceCode(scope.GetWindow().GetSecurityOrigin(),
                                     "/* no worker script */");
 
   // Create a serialized script value that contains transferred array buffer
@@ -39,7 +42,8 @@ TEST(SerializedScriptValueThreadedTest,
   scoped_refptr<SerializedScriptValue> serialized =
       SerializedScriptValue::Serialize(
           scope.GetIsolate(),
-          ToV8(array_buffer, scope.GetContext()->Global(), scope.GetIsolate()),
+          ToV8Traits<DOMArrayBuffer>::ToV8(scope.GetScriptState(), array_buffer)
+              .ToLocalChecked(),
           options, ASSERT_NO_EXCEPTION);
   EXPECT_TRUE(serialized);
   EXPECT_TRUE(array_buffer->IsDetached());

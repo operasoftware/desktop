@@ -6,14 +6,11 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_MANIFEST_MANIFEST_MANAGER_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
-#include "third_party/blink/public/common/manifest/manifest.h"
 #include "third_party/blink/public/mojom/manifest/manifest.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/manifest/manifest_manager.mojom-blink.h"
 #include "third_party/blink/public/web/web_manifest_manager.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver_set.h"
@@ -36,14 +33,16 @@ class MODULES_EXPORT ManifestManager
       public Supplement<LocalDOMWindow>,
       public mojom::blink::ManifestManager,
       public ExecutionContextLifecycleObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(ManifestManager);
-
  public:
   static const char kSupplementName[];
 
   static ManifestManager* From(LocalDOMWindow&);
 
   explicit ManifestManager(LocalDOMWindow&);
+
+  ManifestManager(const ManifestManager&) = delete;
+  ManifestManager& operator=(const ManifestManager&) = delete;
+
   ~ManifestManager() override;
 
   void DidChangeManifest();
@@ -65,7 +64,7 @@ class MODULES_EXPORT ManifestManager
   void Trace(Visitor*) const override;
 
  private:
-  enum ResolveState { ResolveStateSuccess, ResolveStateFailure };
+  enum class ResolveState { kSuccess, kFailure };
 
   using InternalRequestManifestCallback =
       base::OnceCallback<void(const KURL&,
@@ -81,6 +80,7 @@ class MODULES_EXPORT ManifestManager
   void OnManifestFetchComplete(const KURL& document_url,
                                const ResourceResponse& response,
                                const String& data);
+  void RecordMetrics(const mojom::blink::Manifest& manifest);
   void ResolveCallbacks(ResolveState state);
 
   void BindReceiver(
@@ -113,8 +113,6 @@ class MODULES_EXPORT ManifestManager
 
   HeapMojoReceiverSet<mojom::blink::ManifestManager, ManifestManager>
       receivers_;
-
-  DISALLOW_COPY_AND_ASSIGN(ManifestManager);
 };
 
 }  // namespace blink

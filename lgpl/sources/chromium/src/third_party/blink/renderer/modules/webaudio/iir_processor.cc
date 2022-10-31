@@ -11,10 +11,13 @@ namespace blink {
 
 IIRProcessor::IIRProcessor(float sample_rate,
                            uint32_t number_of_channels,
+                           unsigned render_quantum_frames,
                            const Vector<double>& feedforward_coef,
                            const Vector<double>& feedback_coef,
                            bool is_filter_stable)
-    : AudioDSPKernelProcessor(sample_rate, number_of_channels),
+    : AudioDSPKernelProcessor(sample_rate,
+                              number_of_channels,
+                              render_quantum_frames),
       is_filter_stable_(is_filter_stable) {
   unsigned feedback_length = feedback_coef.size();
   unsigned feedforward_length = feedforward_coef.size();
@@ -42,11 +45,13 @@ IIRProcessor::IIRProcessor(float sample_rate,
     // Thus, the feedback and feedforward coefficients need to be scaled by
     // 1/a[0].
     float scale = feedback_coef[0];
-    for (unsigned k = 1; k < feedback_length; ++k)
+    for (unsigned k = 1; k < feedback_length; ++k) {
       feedback_[k] /= scale;
+    }
 
-    for (unsigned k = 0; k < feedforward_length; ++k)
+    for (unsigned k = 0; k < feedforward_length; ++k) {
       feedforward_[k] /= scale;
+    }
 
     // The IIRFilter checks to make sure this coefficient is 1, so make it so.
     feedback_[0] = 1;
@@ -56,8 +61,9 @@ IIRProcessor::IIRProcessor(float sample_rate,
 }
 
 IIRProcessor::~IIRProcessor() {
-  if (IsInitialized())
+  if (IsInitialized()) {
     Uninitialize();
+  }
 }
 
 std::unique_ptr<AudioDSPKernel> IIRProcessor::CreateKernel() {
@@ -74,10 +80,11 @@ void IIRProcessor::Process(const AudioBus* source,
 
   // For each channel of our input, process using the corresponding IIRDSPKernel
   // into the output channel.
-  for (unsigned i = 0; i < kernels_.size(); ++i)
+  for (unsigned i = 0; i < kernels_.size(); ++i) {
     kernels_[i]->Process(source->Channel(i)->Data(),
                          destination->Channel(i)->MutableData(),
                          frames_to_process);
+  }
 }
 
 void IIRProcessor::GetFrequencyResponse(int n_frequencies,

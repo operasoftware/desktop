@@ -30,16 +30,18 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_DOM_SELECTION_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_DOM_SELECTION_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
 
 class ExceptionState;
+class FrameSelection;
 class Node;
 class Range;
 class SetSelectionOptions;
@@ -48,7 +50,6 @@ class TreeScope;
 class CORE_EXPORT DOMSelection final : public ScriptWrappable,
                                        public ExecutionContextClient {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(DOMSelection);
 
  public:
   explicit DOMSelection(const TreeScope*);
@@ -103,6 +104,7 @@ class CORE_EXPORT DOMSelection final : public ScriptWrappable,
   void Trace(Visitor*) const override;
 
  private:
+  FrameSelection& Selection() const;
   bool IsAvailable() const;
 
   void UpdateFrameSelection(const SelectionInDOMTree&,

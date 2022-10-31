@@ -45,15 +45,17 @@
 
     [MeasureAs=EventComposed] readonly attribute boolean composed;
 
-    [Unforgeable] readonly attribute boolean isTrusted;
+    [LegacyUnforgeable] readonly attribute boolean isTrusted;
 
     [CallWith=ScriptState] readonly attribute DOMHighResTimeStamp timeStamp;
 
     [Measure] void initEvent(DOMString type, optional boolean bubbles = false, optional boolean cancelable = false);
 
-    // Non-standard APIs
     [MeasureAs=EventSrcElement] readonly attribute EventTarget srcElement;
     [MeasureAs=EventReturnValue, CallWith=ScriptState, ImplementedAs=legacyReturnValue] attribute boolean returnValue;
     [MeasureAs=EventCancelBubble, CallWith=ScriptState] attribute boolean cancelBubble;
-    [MeasureAs=EventPath, CallWith=ScriptState] readonly attribute object path;
+
+    // Non-standard APIs
+    [MeasureAs=EventPath, CallWith=ScriptState, RuntimeEnabled=EventPath]
+    readonly attribute object path;
 };

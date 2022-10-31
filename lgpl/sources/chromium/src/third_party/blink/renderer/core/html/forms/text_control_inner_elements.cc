@@ -26,7 +26,9 @@
 
 #include "third_party/blink/renderer/core/html/forms/text_control_inner_elements.h"
 
+#include "third_party/blink/public/common/input/web_pointer_properties.h"
 #include "third_party/blink/renderer/core/css/resolver/style_adjuster.h"
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
@@ -35,21 +37,22 @@
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/html_names.h"
-#include "third_party/blink/renderer/core/layout/layout_text_control_single_line.h"
+#include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 
 namespace blink {
 
 EditingViewPortElement::EditingViewPortElement(Document& document)
     : HTMLDivElement(document) {
   SetHasCustomStyleCallbacks();
-  setAttribute(html_names::kIdAttr, shadow_element_names::EditingViewPort());
+  setAttribute(html_names::kIdAttr, shadow_element_names::kIdEditingViewPort);
 }
 
-scoped_refptr<ComputedStyle>
-EditingViewPortElement::CustomStyleForLayoutObject() {
+scoped_refptr<ComputedStyle> EditingViewPortElement::CustomStyleForLayoutObject(
+    const StyleRecalcContext&) {
   // FXIME: Move these styles to html.css.
 
-  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style =
+      GetDocument().GetStyleResolver().CreateComputedStyle();
   style->InheritFrom(OwnerShadowHost()->ComputedStyleRef());
 
   style->SetFlexGrow(1);
@@ -119,13 +122,15 @@ void TextControlInnerEditorElement::FocusChanged() {
 }
 
 LayoutObject* TextControlInnerEditorElement::CreateLayoutObject(
-    const ComputedStyle&,
-    LegacyLayout) {
-  return new LayoutTextControlInnerEditor(this);
+    const ComputedStyle& style,
+    LegacyLayout legacy) {
+  return LayoutObjectFactory::CreateTextControlInnerEditor(*this, style,
+                                                           legacy);
 }
 
 scoped_refptr<ComputedStyle>
-TextControlInnerEditorElement::CustomStyleForLayoutObject() {
+TextControlInnerEditorElement::CustomStyleForLayoutObject(
+    const StyleRecalcContext&) {
   scoped_refptr<ComputedStyle> inner_editor_style = CreateInnerEditorStyle();
   // Using StyleAdjuster::adjustComputedStyle updates unwanted style. We'd like
   // to apply only editing-related and alignment-related.
@@ -140,11 +145,15 @@ TextControlInnerEditorElement::CreateInnerEditorStyle() const {
   Element* host = OwnerShadowHost();
   DCHECK(host);
   const ComputedStyle& start_style = host->ComputedStyleRef();
-  scoped_refptr<ComputedStyle> text_block_style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> text_block_style =
+      GetDocument().GetStyleResolver().CreateComputedStyle();
   text_block_style->InheritFrom(start_style);
   // The inner block, if present, always has its direction set to LTR,
   // so we need to inherit the direction and unicode-bidi style from the
   // element.
+  // TODO(https://crbug.com/1101564): The custom inheritance done here means we
+  // need to mark for style recalc inside style recalc. See the workaround in
+  // LayoutTextControl::StyleDidChange.
   text_block_style->SetDirection(start_style.Direction());
   text_block_style->SetUnicodeBidi(start_style.GetUnicodeBidi());
   text_block_style->SetUserSelect(EUserSelect::kText);
@@ -190,11 +199,17 @@ TextControlInnerEditorElement::CreateInnerEditorStyle() const {
     text_block_style->SetOverflowX(EOverflow::kScroll);
     // overflow-y:visible doesn't work because overflow-x:scroll makes a layer.
     text_block_style->SetOverflowY(EOverflow::kScroll);
-    scoped_refptr<ComputedStyle> no_scrollbar_style = ComputedStyle::Create();
+    scoped_refptr<ComputedStyle> no_scrollbar_style =
+        GetDocument().GetStyleResolver().CreateComputedStyle();
     no_scrollbar_style->SetStyleType(kPseudoIdScrollbar);
     no_scrollbar_style->SetDisplay(EDisplay::kNone);
-    text_block_style->AddCachedPseudoElementStyle(no_scrollbar_style);
+    text_block_style->AddCachedPseudoElementStyle(
+        no_scrollbar_style, kPseudoIdScrollbar, g_null_atom);
     text_block_style->SetHasPseudoElementStyle(kPseudoIdScrollbar);
+
+    text_block_style->SetDisplay(EDisplay::kFlowRoot);
+    if (parentNode()->IsShadowRoot())
+      text_block_style->SetAlignSelfBlockCenter(true);
   }
 
   return text_block_style;
@@ -206,7 +221,7 @@ SearchFieldCancelButtonElement::SearchFieldCancelButtonElement(
     Document& document)
     : HTMLDivElement(document) {
   SetShadowPseudoId(AtomicString("-webkit-search-cancel-button"));
-  setAttribute(html_names::kIdAttr, shadow_element_names::SearchClearButton());
+  setAttribute(html_names::kIdAttr, shadow_element_names::kIdSearchClearButton);
 }
 
 void SearchFieldCancelButtonElement::DefaultEventHandler(Event& event) {
@@ -246,7 +261,7 @@ PasswordRevealButtonElement::PasswordRevealButtonElement(Document& document)
     : HTMLDivElement(document) {
   SetShadowPseudoId(AtomicString("-internal-reveal"));
   setAttribute(html_names::kIdAttr,
-               shadow_element_names::PasswordRevealButton());
+               shadow_element_names::kIdPasswordRevealButton);
 }
 
 void PasswordRevealButtonElement::DefaultEventHandler(Event& event) {

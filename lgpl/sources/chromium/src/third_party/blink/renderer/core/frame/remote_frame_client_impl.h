@@ -5,12 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REMOTE_FRAME_CLIENT_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REMOTE_FRAME_CLIENT_IMPL_H_
 
-#include "third_party/blink/public/mojom/input/focus_type.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/frame/remote_frame_client.h"
-
-namespace cc {
-class PaintCanvas;
-}
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 class WebRemoteFrameImpl;
@@ -24,29 +20,17 @@ class RemoteFrameClientImpl final : public RemoteFrameClient {
   // FrameClient overrides:
   bool InShadowTree() const override;
   void Detached(FrameDetachType) override;
-  Frame* Opener() const override;
-  Frame* Parent() const override;
-  Frame* Top() const override;
-  Frame* NextSibling() const override;
-  Frame* FirstChild() const override;
-  base::UnguessableToken GetDevToolsFrameToken() const override;
 
   // RemoteFrameClient overrides:
-  void Navigate(const ResourceRequest&,
-                blink::WebLocalFrame* initiator_frame,
-                bool should_replace_current_entry,
-                bool is_opener_navigation,
-                bool prevent_sandboxed_download,
-                bool initiator_frame_is_ad,
-                mojo::PendingRemote<mojom::blink::BlobURLToken>,
-                const base::Optional<WebImpression>& impression) override;
+  void CreateRemoteChild(
+      const RemoteFrameToken& token,
+      const absl::optional<FrameToken>& opener_frame_token,
+      mojom::blink::TreeScopeType tree_scope_type,
+      mojom::blink::FrameReplicationStatePtr replication_state,
+      const base::UnguessableToken& devtools_frame_token,
+      mojom::blink::RemoteFrameInterfacesFromBrowserPtr remote_frame_interfaces)
+      override;
   unsigned BackForwardLength() override;
-  void FrameRectsChanged(const IntRect& local_frame_rect,
-                         const IntRect& screen_space_rect) override;
-  void UpdateRemoteViewportIntersection(
-      const ViewportIntersectionState& intersection_state) override;
-  uint32_t Print(const IntRect&, cc::PaintCanvas*) const override;
-  AssociatedInterfaceProvider* GetRemoteAssociatedInterfaces() override;
 
   WebRemoteFrameImpl* GetWebFrame() const { return web_frame_; }
 

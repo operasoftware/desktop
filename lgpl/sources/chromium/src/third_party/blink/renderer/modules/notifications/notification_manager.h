@@ -5,7 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_NOTIFICATIONS_NOTIFICATION_MANAGER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_NOTIFICATIONS_NOTIFICATION_MANAGER_H_
 
-#include "base/macros.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/mojom/notifications/notification_service.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
@@ -28,14 +27,16 @@ class ScriptState;
 // TODO(peter): Make the NotificationManager responsible for resource loading.
 class NotificationManager final : public GarbageCollected<NotificationManager>,
                                   public Supplement<ExecutionContext> {
-  USING_GARBAGE_COLLECTED_MIXIN(NotificationManager);
-
  public:
   static const char kSupplementName[];
 
   static NotificationManager* From(ExecutionContext* context);
 
   explicit NotificationManager(ExecutionContext& context);
+
+  NotificationManager(const NotificationManager&) = delete;
+  NotificationManager& operator=(const NotificationManager&) = delete;
+
   ~NotificationManager();
 
   // Returns the notification permission status of the current origin. This
@@ -104,14 +105,8 @@ class NotificationManager final : public GarbageCollected<NotificationManager>,
   void OnNotificationServiceConnectionError();
   void OnPermissionServiceConnectionError();
 
-  HeapMojoRemote<mojom::blink::NotificationService,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      notification_service_;
-  HeapMojoRemote<mojom::blink::PermissionService,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      permission_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(NotificationManager);
+  HeapMojoRemote<mojom::blink::NotificationService> notification_service_;
+  HeapMojoRemote<mojom::blink::PermissionService> permission_service_;
 };
 
 }  // namespace blink

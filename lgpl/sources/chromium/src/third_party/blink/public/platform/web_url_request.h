@@ -32,10 +32,11 @@
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_URL_REQUEST_H_
 
 #include <memory>
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "base/unguessable_token.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "ui/base/page_transition_types.h"
 
@@ -68,6 +69,7 @@ enum class RequestContextFrameType : int32_t;
 class ResourceRequest;
 class WebHTTPBody;
 class WebHTTPHeaderVisitor;
+class WebURLRequestExtraData;
 class WebSecurityOrigin;
 class WebString;
 class WebURL;
@@ -85,93 +87,6 @@ class WebURLRequest {
     kVeryHigh,
     kLowest = kVeryLow,
     kHighest = kVeryHigh,
-  };
-
-  typedef int PreviewsState;
-
-  // The Previews types which determines whether to request a Preview version of
-  // the resource.
-  enum PreviewsTypes {
-    kPreviewsUnspecified = 0,  // Let the browser process decide whether or
-                               // not to request Preview types.
-    kServerLoFiOn_DEPRECATED =
-        1 << 0,  // Request a Lo-Fi version of the resource
-                 // from the server. Deprecated and should not be used.
-    kClientLoFiOn = 1 << 1,          // Request a Lo-Fi version of the resource
-                                     // from the client.
-    kClientLoFiAutoReload = 1 << 2,  // Request the original version of the
-                                     // resource after a decoding error occurred
-                                     // when attempting to use Client Lo-Fi.
-    kServerLitePageOn = 1 << 3,      // Request a Lite Page version of the
-                                     // resource from the server.
-    kPreviewsNoTransform = 1 << 4,   // Explicitly forbid Previews
-                                     // transformations.
-    kPreviewsOff = 1 << 5,  // Request a normal (non-Preview) version of
-                            // the resource. Server transformations may
-                            // still happen if the page is heavy.
-    kNoScriptOn = 1 << 6,   // Request that script be disabled for page load.
-    kResourceLoadingHintsOn = 1 << 7,  // Request that resource loading hints be
-                                       // used during pageload.
-    kOfflinePageOn = 1 << 8,
-    kLitePageRedirectOn_DEPRECATED =
-        1 << 9,  // Allow the browser to redirect the resource
-                 // to a Lite Page server. Deprecated and should not be used.
-    kDeferAllScriptOn = 1 << 10,  // Request that script execution be deferred
-                                  // until parsing completes.
-    kSubresourceRedirectOn =
-        1 << 11,  // Allow the subresources in the page to be redirected
-                  // to serve better optimized resources.
-    kPreviewsStateLast = kSubresourceRedirectOn
-  };
-
-  class ExtraData : public base::RefCounted<ExtraData> {
-   public:
-    void set_render_frame_id(int render_frame_id) {
-      render_frame_id_ = render_frame_id;
-    }
-    void set_is_main_frame(bool is_main_frame) {
-      is_main_frame_ = is_main_frame;
-    }
-    ui::PageTransition transition_type() const { return transition_type_; }
-    void set_transition_type(ui::PageTransition transition_type) {
-      transition_type_ = transition_type;
-    }
-
-    // The request is for a prefetch-only client (i.e. running NoStatePrefetch)
-    // and should use LOAD_PREFETCH network flags.
-    bool is_for_no_state_prefetch() const { return is_for_no_state_prefetch_; }
-    void set_is_for_no_state_prefetch(bool prefetch) {
-      is_for_no_state_prefetch_ = prefetch;
-    }
-
-    // true if the request originated from within a service worker e.g. due to
-    // a fetch() in the service worker script.
-    void set_originated_from_service_worker(
-        bool originated_from_service_worker) {
-      originated_from_service_worker_ = originated_from_service_worker;
-    }
-
-    // Determines whether SameSite cookies will be attached to the request
-    // even when the request looks cross-site.
-    bool force_ignore_site_for_cookies() const {
-      return force_ignore_site_for_cookies_;
-    }
-    void set_force_ignore_site_for_cookies(bool attach) {
-      force_ignore_site_for_cookies_ = attach;
-    }
-
-   protected:
-    friend class base::RefCounted<ExtraData>;
-    virtual ~ExtraData() = default;
-
-    BLINK_PLATFORM_EXPORT ExtraData();
-
-    int render_frame_id_;
-    bool is_main_frame_ = false;
-    ui::PageTransition transition_type_ = ui::PAGE_TRANSITION_LINK;
-    bool is_for_no_state_prefetch_ = false;
-    bool originated_from_service_worker_ = false;
-    bool force_ignore_site_for_cookies_ = false;
   };
 
   BLINK_PLATFORM_EXPORT ~WebURLRequest();
@@ -192,7 +107,7 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT const net::SiteForCookies& SiteForCookies() const;
   BLINK_PLATFORM_EXPORT void SetSiteForCookies(const net::SiteForCookies&);
 
-  BLINK_PLATFORM_EXPORT base::Optional<WebSecurityOrigin> TopFrameOrigin()
+  BLINK_PLATFORM_EXPORT absl::optional<WebSecurityOrigin> TopFrameOrigin()
       const;
   BLINK_PLATFORM_EXPORT void SetTopFrameOrigin(const WebSecurityOrigin&);
 
@@ -217,6 +132,10 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT WebString HttpMethod() const;
   BLINK_PLATFORM_EXPORT void SetHttpMethod(const WebString&);
 
+  BLINK_PLATFORM_EXPORT WebString HttpContentType() const;
+
+  BLINK_PLATFORM_EXPORT bool IsFormSubmission() const;
+
   BLINK_PLATFORM_EXPORT WebString HttpHeaderField(const WebString& name) const;
   // It's not possible to set the referrer header using this method. Use
   // SetReferrerString instead.
@@ -237,11 +156,6 @@ class WebURLRequest {
   // has a body.
   BLINK_PLATFORM_EXPORT bool ReportUploadProgress() const;
   BLINK_PLATFORM_EXPORT void SetReportUploadProgress(bool);
-
-  // Controls whether actual headers sent and received for request are
-  // collected and reported.
-  BLINK_PLATFORM_EXPORT bool ReportRawHeaders() const;
-  BLINK_PLATFORM_EXPORT void SetReportRawHeaders(bool);
 
   BLINK_PLATFORM_EXPORT mojom::RequestContextType GetRequestContext() const;
   BLINK_PLATFORM_EXPORT void SetRequestContext(mojom::RequestContextType);
@@ -266,6 +180,8 @@ class WebURLRequest {
   // True if the request was user initiated.
   BLINK_PLATFORM_EXPORT bool HasUserGesture() const;
   BLINK_PLATFORM_EXPORT void SetHasUserGesture(bool);
+
+  BLINK_PLATFORM_EXPORT bool HasTextFragmentToken() const;
 
   // A consumer controlled value intended to be used to identify the
   // requestor.
@@ -299,6 +215,10 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT network::mojom::RequestMode GetMode() const;
   BLINK_PLATFORM_EXPORT void SetMode(network::mojom::RequestMode);
 
+  // True if the request is for a favicon.
+  BLINK_PLATFORM_EXPORT bool GetFavicon() const;
+  BLINK_PLATFORM_EXPORT void SetFavicon(bool);
+
   // The credentials mode which will be passed to the ServiceWorker.
   BLINK_PLATFORM_EXPORT network::mojom::CredentialsMode GetCredentialsMode()
       const;
@@ -313,20 +233,16 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT WebString GetFetchIntegrity() const;
   BLINK_PLATFORM_EXPORT void SetFetchIntegrity(const WebString&);
 
-  // The PreviewsState which determines whether to request a Preview version of
-  // the resource. The PreviewsState is a bitmask of potentially several
-  // Previews optimizations.
-  BLINK_PLATFORM_EXPORT PreviewsState GetPreviewsState() const;
-  BLINK_PLATFORM_EXPORT void SetPreviewsState(PreviewsState);
-
   // Extra data associated with the underlying resource request. Resource
   // requests can be copied. If non-null, each copy of a resource requests
   // holds a pointer to the extra data, and the extra data pointer will be
   // deleted when the last resource request is destroyed. Setting the extra
   // data pointer will cause the underlying resource request to be
   // dissociated from any existing non-null extra data pointer.
-  BLINK_PLATFORM_EXPORT const scoped_refptr<ExtraData>& GetExtraData() const;
-  BLINK_PLATFORM_EXPORT void SetExtraData(scoped_refptr<ExtraData>);
+  BLINK_PLATFORM_EXPORT const scoped_refptr<WebURLRequestExtraData>&
+  GetURLRequestExtraData() const;
+  BLINK_PLATFORM_EXPORT void SetURLRequestExtraData(
+      scoped_refptr<WebURLRequestExtraData>);
 
   // The request is downloaded to the network cache, but not rendered or
   // executed.
@@ -336,15 +252,12 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT Priority GetPriority() const;
   BLINK_PLATFORM_EXPORT void SetPriority(Priority);
 
-  // https://wicg.github.io/cors-rfc1918/#external-request
-  BLINK_PLATFORM_EXPORT bool IsExternalRequest() const;
-
   BLINK_PLATFORM_EXPORT network::mojom::CorsPreflightPolicy
   GetCorsPreflightPolicy() const;
 
   // If this request was created from an anchor with a download attribute, this
   // is the value provided there.
-  BLINK_PLATFORM_EXPORT base::Optional<WebString> GetSuggestedFilename() const;
+  BLINK_PLATFORM_EXPORT absl::optional<WebString> GetSuggestedFilename() const;
 
   // Returns true if this request is tagged as an ad. This is done using various
   // heuristics so it is not expected to be 100% accurate.
@@ -364,7 +277,7 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT bool IsRevalidating() const;
 
   // Returns the DevTools ID to throttle the network request.
-  BLINK_PLATFORM_EXPORT const base::Optional<base::UnguessableToken>&
+  BLINK_PLATFORM_EXPORT const absl::optional<base::UnguessableToken>&
   GetDevToolsToken() const;
 
   // Remembers 'X-Requested-With' header value. Blink should not set this header
@@ -383,7 +296,7 @@ class WebURLRequest {
   BLINK_PLATFORM_EXPORT const base::UnguessableToken& GetFetchWindowId() const;
   BLINK_PLATFORM_EXPORT void SetFetchWindowId(const base::UnguessableToken&);
 
-  BLINK_PLATFORM_EXPORT base::Optional<WebString> GetDevToolsId() const;
+  BLINK_PLATFORM_EXPORT absl::optional<WebString> GetDevToolsId() const;
 
   BLINK_PLATFORM_EXPORT int GetLoadFlagsForWebUrlRequest() const;
 
@@ -391,12 +304,16 @@ class WebURLRequest {
 
   BLINK_PLATFORM_EXPORT bool IsSignedExchangePrefetchCacheEnabled() const;
 
-  BLINK_PLATFORM_EXPORT base::Optional<base::UnguessableToken>
+  BLINK_PLATFORM_EXPORT absl::optional<base::UnguessableToken>
   RecursivePrefetchToken() const;
 
   // Specifies a Trust Tokens protocol operation to execute alongside the
   // request's load (https://github.com/wicg/trust-token-api).
   BLINK_PLATFORM_EXPORT network::OptionalTrustTokenParams TrustTokenParams()
+      const;
+
+  BLINK_PLATFORM_EXPORT absl::optional<WebURL> WebBundleUrl() const;
+  BLINK_PLATFORM_EXPORT absl::optional<base::UnguessableToken> WebBundleToken()
       const;
 
 #if INSIDE_BLINK
@@ -416,9 +333,9 @@ class WebURLRequest {
   std::unique_ptr<ResourceRequest> owned_resource_request_;
 
   // Should never be null.
-  ResourceRequest* resource_request_;
+  raw_ptr<ResourceRequest> resource_request_;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_URL_REQUEST_H_

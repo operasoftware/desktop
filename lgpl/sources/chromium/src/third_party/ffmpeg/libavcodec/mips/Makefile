@@ -1,3 +1,7 @@
+ARCH_HEADERS                               = aacsbr_mips.h aacpsy_mips.h   \
+                                             cabac.h compute_antialias_fixed.h \
+                                             compute_antialias_float.h     \
+
 MIPSFPU-OBJS-$(CONFIG_AMRNB_DECODER)      += mips/acelp_filters_mips.o     \
                                              mips/celp_filters_mips.o      \
                                              mips/celp_math_mips.o         \
@@ -57,7 +61,8 @@ MSA-OBJS-$(CONFIG_VP8_DECODER)            += mips/vp8_mc_msa.o             \
                                              mips/vp8_lpf_msa.o
 MSA-OBJS-$(CONFIG_VP3DSP)                 += mips/vp3dsp_idct_msa.o
 MSA-OBJS-$(CONFIG_H264DSP)                += mips/h264dsp_msa.o            \
-                                             mips/h264idct_msa.o
+                                             mips/h264idct_msa.o           \
+                                             mips/h264_deblock_msa.o
 MSA-OBJS-$(CONFIG_H264QPEL)               += mips/h264qpel_msa.o
 MSA-OBJS-$(CONFIG_H264CHROMA)             += mips/h264chroma_msa.o
 MSA-OBJS-$(CONFIG_H264PRED)               += mips/h264pred_msa.o
@@ -71,6 +76,8 @@ MSA-OBJS-$(CONFIG_IDCTDSP)                += mips/idctdsp_msa.o           \
 MSA-OBJS-$(CONFIG_MPEGVIDEO)              += mips/mpegvideo_msa.o
 MSA-OBJS-$(CONFIG_MPEGVIDEOENC)           += mips/mpegvideoencdsp_msa.o
 MSA-OBJS-$(CONFIG_ME_CMP)                 += mips/me_cmp_msa.o
+MSA-OBJS-$(CONFIG_VC1_DECODER)            += mips/vc1dsp_msa.o
+
 MMI-OBJS                                  += mips/constants.o
 MMI-OBJS-$(CONFIG_H264DSP)                += mips/h264dsp_mmi.o
 MMI-OBJS-$(CONFIG_H264CHROMA)             += mips/h264chroma_mmi.o
@@ -89,4 +96,3 @@ MMI-OBJS-$(CONFIG_WMV2DSP)                += mips/wmv2dsp_mmi.o
 MMI-OBJS-$(CONFIG_HEVC_DECODER)           += mips/hevcdsp_mmi.o
 MMI-OBJS-$(CONFIG_VP3DSP)                 += mips/vp3dsp_idct_mmi.o
 MMI-OBJS-$(CONFIG_VP9_DECODER)            += mips/vp9_mc_mmi.o
-MSA-OBJS-$(CONFIG_VC1_DECODER)            += mips/vc1dsp_msa.o

@@ -1,8 +1,8 @@
 display: unicode-without-blank.dis
 table:
-  locale: de
+  language: de
   type: computer
-  grade: 0
+  dots: 8
   __assert-match: de-de-comp8.ctb
 tests:
   # standard definitions from Eurobraille

@@ -25,13 +25,16 @@
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_selector.h"
 
 namespace blink {
 
 class CSSParserContext;
+class CSSParserSelector;
+
+// See css_selector_parser.h.
+using CSSSelectorVector = Vector<std::unique_ptr<CSSParserSelector>>;
 
 class CORE_EXPORT CSSParserSelector {
   USING_FAST_MALLOC(CSSParserSelector);
@@ -39,11 +42,17 @@ class CORE_EXPORT CSSParserSelector {
  public:
   CSSParserSelector();
   explicit CSSParserSelector(const QualifiedName&, bool is_implicit = false);
+  CSSParserSelector(const CSSParserSelector&) = delete;
+  CSSParserSelector& operator=(const CSSParserSelector&) = delete;
   ~CSSParserSelector();
 
+  // Note that on ReleaseSelector() or GetSelector(), you get that single
+  // selector only, not its entire tag history (so TagHistory() will not
+  // make sense until it's put into a CSSSelectorVector).
   std::unique_ptr<CSSSelector> ReleaseSelector() {
     return std::move(selector_);
   }
+  const CSSSelector* GetSelector() const { return selector_.get(); }
 
   CSSSelector::RelationType Relation() const { return selector_->Relation(); }
   void SetValue(const AtomicString& value, bool match_lower_case = false) {
@@ -63,11 +72,9 @@ class CORE_EXPORT CSSParserSelector {
     selector_->SetRelation(value);
   }
   void SetForPage() { selector_->SetForPage(); }
-  void SetRelationIsAffectedByPseudoContent() {
-    selector_->SetRelationIsAffectedByPseudoContent();
-  }
-  bool RelationIsAffectedByPseudoContent() const {
-    return selector_->RelationIsAffectedByPseudoContent();
+  void SetToggle(const AtomicString& name,
+                 std::unique_ptr<ToggleRoot::State>&& value) {
+    selector_->SetToggle(name, std::move(value));
   }
 
   void UpdatePseudoType(const AtomicString& value,
@@ -76,14 +83,15 @@ class CORE_EXPORT CSSParserSelector {
                         CSSParserMode mode) const {
     selector_->UpdatePseudoType(value, context, has_arguments, mode);
   }
-  void UpdatePseudoPage(const AtomicString& value) {
-    selector_->UpdatePseudoPage(value);
+  void UpdatePseudoPage(const AtomicString& value, const Document* document) {
+    selector_->UpdatePseudoPage(value, document);
   }
 
-  void AdoptSelectorVector(
-      Vector<std::unique_ptr<CSSParserSelector>>& selector_vector);
+  void AdoptSelectorVector(CSSSelectorVector& selector_vector);
   void SetSelectorList(std::unique_ptr<CSSSelectorList>);
   void SetAtomics(std::unique_ptr<CSSSelectorList>);
+  void SetContainsPseudoInsideHasPseudoClass();
+  void SetContainsComplexLogicalCombinationsInsideHasPseudoClass();
 
   bool IsHostPseudoSelector() const;
 
@@ -106,8 +114,6 @@ class CORE_EXPORT CSSParserSelector {
   CSSSelector::RelationType GetImplicitShadowCombinatorForMatching() const;
   bool NeedsImplicitShadowCombinatorForMatching() const;
 
-  bool IsSimple() const;
-
   CSSParserSelector* TagHistory() const { return tag_history_.get(); }
   void SetTagHistory(std::unique_ptr<CSSParserSelector> selector) {
     tag_history_ = std::move(selector);
@@ -121,9 +127,8 @@ class CORE_EXPORT CSSParserSelector {
  private:
   std::unique_ptr<CSSSelector> selector_;
   std::unique_ptr<CSSParserSelector> tag_history_;
-  DISALLOW_COPY_AND_ASSIGN(CSSParserSelector);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PARSER_CSS_PARSER_SELECTOR_H_

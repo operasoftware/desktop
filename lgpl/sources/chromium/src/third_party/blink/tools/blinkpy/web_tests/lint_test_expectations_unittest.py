@@ -26,16 +26,20 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import StringIO
 import optparse
+import textwrap
 import unittest
 
 from blinkpy.common import exit_codes
 from blinkpy.common.host_mock import MockHost
+from blinkpy.common.path_finder import PathFinder
 from blinkpy.common.system.log_testing import LoggingTestCase
 from blinkpy.web_tests import lint_test_expectations
+from blinkpy.web_tests.port.android import PRODUCTS_TO_EXPECTATION_FILE_PATHS
 from blinkpy.web_tests.port.base import VirtualTestSuite
-from blinkpy.web_tests.port.test import WEB_TEST_DIR
+from blinkpy.web_tests.port.test import MOCK_WEB_TESTS
+
+from six import StringIO
 
 
 class FakePort(object):
@@ -81,6 +85,9 @@ class FakePort(object):
     def web_tests_dir(self):
         return '/fake-port-base-directory/web_tests'
 
+    def tests(self,_):
+        return set()
+
 
 class FakeFactory(object):
     def __init__(self, host, ports):
@@ -97,31 +104,24 @@ class FakeFactory(object):
 
 
 class LintTest(LoggingTestCase):
-    def test_all_configurations(self):
-        host = MockHost()
-        host.ports_parsed = []
-        host.port_factory = FakeFactory(
-            host,
-            (FakePort(host, 'a', 'path-to-a'), FakePort(
-                host, 'b', 'path-to-b'), FakePort(host, 'b-win', 'path-to-b')))
-
-        options = optparse.Values({
-            'platform': 'a',
-            'additional_expectations': []
-        })
-        failures, warnings = lint_test_expectations.lint(host, options)
-        self.assertEqual(failures, [])
-        self.assertEqual(warnings, [])
-        self.assertEqual(host.ports_parsed, ['a', 'b', 'b-win'])
-
-    @unittest.skip(
-        'crbug.com/986447, re-enable after merging crrev.com/c/1918294')
     def test_lint_test_files(self):
         options = optparse.Values({
             'additional_expectations': [],
             'platform': 'test-mac-mac10.10'
         })
         host = MockHost()
+        path_finder = PathFinder(host.filesystem)
+        host.filesystem.write_text_file(
+            path_finder.path_from_web_tests('TestExpectations'),
+            textwrap.dedent("""\
+                            # results: [ Pass Failure ]
+                            passes/text.html [ Pass ]
+                            failures/flaky/text.html [ Failure Pass ]
+                            """))
+        host.filesystem.write_text_file(
+            path_finder.path_from_web_tests('NeverFixTests'), '')
+        host.filesystem.write_text_file(
+            path_finder.path_from_web_tests('VirtualTestSuites'), '[]')
 
         host.port_factory.all_port_names = lambda platform=None: [platform]
 
@@ -140,14 +140,14 @@ class LintTest(LoggingTestCase):
         port = host.port_factory.get(options.platform, options=options)
         port.expectations_dict = lambda: {'foo': '-- syntax error1', 'bar': '-- syntax error2'}
 
-        host.port_factory.get = lambda platform, options=None: port
+        host.port_factory.get = lambda platform=None, options=None: port
         host.port_factory.all_port_names = lambda platform=None: [port.name()]
 
         failures, warnings = lint_test_expectations.lint(host, options)
         self.assertTrue(failures)
         self.assertEqual(warnings, [])
 
-        all_logs = ''.join(self.logMessages())
+        all_logs = ''.join(failures)
         self.assertIn('foo', all_logs)
         self.assertIn('bar', all_logs)
 
@@ -162,16 +162,17 @@ class LintTest(LoggingTestCase):
         port = host.port_factory.get(options.platform, options=options)
         port.expectations_dict = lambda: {}
 
-        host.port_factory.get = lambda platform, options=None: port
+        host.port_factory.get = lambda platform=None, options=None: port
         host.port_factory.all_port_names = lambda platform=None: [port.name()]
-        host.filesystem.write_text_file(WEB_TEST_DIR + '/LeakExpectations',
-                                        '-- syntax error')
+        host.filesystem.write_text_file(
+            host.filesystem.join(MOCK_WEB_TESTS, 'LeakExpectations'),
+            '-- syntax error')
 
         failures, warnings = lint_test_expectations.lint(host, options)
         self.assertTrue(failures)
         self.assertEqual(warnings, [])
 
-        all_logs = ''.join(self.logMessages())
+        all_logs = ''.join(failures)
         self.assertIn('LeakExpectations', all_logs)
 
     def test_lint_flag_specific_expectation_errors(self):
@@ -185,14 +186,14 @@ class LintTest(LoggingTestCase):
         port = host.port_factory.get(options.platform, options=options)
         port.expectations_dict = lambda: {'flag-specific': 'does/not/exist', 'noproblem': ''}
 
-        host.port_factory.get = lambda platform, options=None: port
+        host.port_factory.get = lambda platform=None, options=None: port
         host.port_factory.all_port_names = lambda platform=None: [port.name()]
 
         failures, warnings = lint_test_expectations.lint(host, options)
         self.assertTrue(failures)
         self.assertEqual(warnings, [])
 
-        all_logs = ''.join(self.logMessages())
+        all_logs = ''.join(failures)
         self.assertIn('flag-specific', all_logs)
         self.assertIn('does/not/exist', all_logs)
         self.assertNotIn('noproblem', all_logs)
@@ -214,17 +215,17 @@ class LintTest(LoggingTestCase):
         port.expectations_dict = lambda: {
             'testexpectations': test_expectations}
 
-        host.port_factory.get = lambda platform, options=None: port
+        host.port_factory.get = lambda platform=None, options=None: port
         host.port_factory.all_port_names = lambda platform=None: [port.name()]
 
         failures, warnings = lint_test_expectations.lint(host, options)
         self.assertTrue(failures)
         self.assertEqual(warnings, [])
 
-        all_logs = ''.join(self.logMessages())
+        all_logs = ''.join(failures)
         self.assertIn('conflict', all_logs)
 
-    def test_lint_exsistence(self):
+    def test_lint_existence(self):
         options = optparse.Values({
             'additional_expectations': [],
             'platform': 'test',
@@ -251,7 +252,7 @@ class LintTest(LoggingTestCase):
             'testexpectations': test_expectations
         }
         port.virtual_test_suites = lambda: [
-            VirtualTestSuite(prefix='foo', bases=['test2'], args=['--foo'])
+            VirtualTestSuite(prefix='foo', platforms=['Linux', 'Mac', 'Win'], bases=['test2'], args=['--foo'])
         ]
         host.filesystem.write_text_file(
             host.filesystem.join(port.web_tests_dir(), 'test2', 'foo.html'),
@@ -263,7 +264,7 @@ class LintTest(LoggingTestCase):
             host.filesystem.join(port.web_tests_dir(), 'virtual', 'foo',
                                  'README.md'), 'foo')
 
-        host.port_factory.get = lambda platform, options=None: port
+        host.port_factory.get = lambda platform=None, options=None: port
         host.port_factory.all_port_names = lambda platform=None: [port.name()]
 
         failures, warnings = lint_test_expectations.lint(host, options)
@@ -279,9 +280,28 @@ class LintTest(LoggingTestCase):
             'virtual/bar/*',
             'virtual/bar/test2/foo.html',
         ]
-        for i in range(len(failures)):
-            self.assertIn('Test does not exist', failures[i])
-            self.assertIn(expected_non_existence[i], failures[i])
+        for pattern, failure in zip(expected_non_existence, failures):
+            self.assertIn('Test does not exist: %s' % pattern, failure)
+
+    def test_only_wpt_in_android_override_files(self):
+        options = optparse.Values({
+            'additional_expectations': [],
+            'platform': 'test',
+            'debug_rwt_logging': False
+        })
+        host = MockHost()
+        port = host.port_factory.get(options.platform, options=options)
+        raw_expectations = ('# results: [ Failure ]\n'
+                            'external/wpt/test.html [ Failure ]\n'
+                            'non-wpt/test.html [ Failure ]\n')
+        for path in PRODUCTS_TO_EXPECTATION_FILE_PATHS.values():
+            host.filesystem.write_text_file(path, raw_expectations)
+        host.port_factory.get = lambda platform=None, options=None: port
+        host.port_factory.all_port_names = lambda platform=None: [port.name()]
+        port.test_exists = lambda _: True
+        port.tests = lambda _: {'external/wpt/test.html', 'non-wpt/test.html'}
+        failures, _ = lint_test_expectations.lint(host, options)
+        self.assertTrue(all('is for a non WPT test' in f for f in failures))
 
     def test_lint_globs(self):
         options = optparse.Values({
@@ -301,14 +321,14 @@ class LintTest(LoggingTestCase):
         host.filesystem.maybe_make_directory(
             host.filesystem.join(port.web_tests_dir(), 'test2'))
 
-        host.port_factory.get = lambda platform, options=None: port
+        host.port_factory.get = lambda platform=None, options=None: port
         host.port_factory.all_port_names = lambda platform=None: [port.name()]
 
         failures, warnings = lint_test_expectations.lint(host, options)
         self.assertTrue(failures)
         self.assertEqual(warnings, [])
 
-        all_logs = ''.join(self.logMessages())
+        all_logs = ''.join(failures)
         self.assertIn('directory', all_logs)
 
     def test_virtual_test_redundant_expectation(self):
@@ -321,7 +341,11 @@ class LintTest(LoggingTestCase):
 
         port = host.port_factory.get(options.platform, options=options)
         port.virtual_test_suites = lambda: [
-            VirtualTestSuite(prefix='foo', bases=['test'], args=['--foo'])
+            VirtualTestSuite(
+                prefix='foo',
+                platforms=['Linux', 'Mac', 'Win'],
+                bases=['test', 'external/wpt'],
+                args=['--foo'])
         ]
         test_expectations = (
             '# tags: [ mac win ]\n'
@@ -332,12 +356,19 @@ class LintTest(LoggingTestCase):
             '[ win ] virtual/foo/test/test1.html [ Failure ]\n'
             '[ mac release ] virtual/foo/test/test1.html [ Pass ]\n'
             'test/test2.html [ Failure ]\n'
-            'crbug.com/1234 virtual/foo/test/test2.html [ Failure ]')
+            'crbug.com/1234 virtual/foo/test/test2.html [ Failure ]\n'
+            'test/subtest/test2.html [ Failure ]\n'
+            'virtual/foo/test/subtest/* [ Pass ]\n'
+            'virtual/foo/test/subtest/test2.html [ Failure ]\n'
+            'external/wpt/wpt.html [ Failure ]\n'
+            # TODO(crbug.com/1080691): This is redundant with the above one, but
+            # for now we intentially ignore it.
+            'virtual/foo/external/wpt/wpt.html [ Failure ]\n')
         port.expectations_dict = lambda: {
             'testexpectations': test_expectations
         }
         port.test_exists = lambda test: True
-        host.port_factory.get = lambda platform, options=None: port
+        host.port_factory.get = lambda platform=None, options=None: port
         host.port_factory.all_port_names = lambda platform=None: [port.name()]
 
         failures, warnings = lint_test_expectations.lint(host, options)
@@ -357,7 +388,10 @@ class LintTest(LoggingTestCase):
         port = host.port_factory.get(options.platform, options=options)
         port.virtual_test_suites = lambda: [
             VirtualTestSuite(
-                prefix='foo', bases=['test', 'test1'], args=['--foo'])
+                prefix='foo',
+                platforms=['Linux', 'Mac', 'Win'],
+                bases=['test', 'test1'],
+                args=['--foo'])
         ]
         test_expectations = ('# tags: [ mac win ]\n'
                              '# results: [ Skip Pass ]\n'
@@ -372,7 +406,7 @@ class LintTest(LoggingTestCase):
                              'virtual/foo/test1/* [ Pass ]\n')
         port.expectations_dict = lambda: {'NeverFixTests': test_expectations}
         port.test_exists = lambda test: True
-        host.port_factory.get = lambda platform, options=None: port
+        host.port_factory.get = lambda platform=None, options=None: port
         host.port_factory.all_port_names = lambda platform=None: [port.name()]
 
         failures, warnings = lint_test_expectations.lint(host, options)
@@ -383,6 +417,47 @@ class LintTest(LoggingTestCase):
         self.assertRegexpMatches(failures[1], ':8 .*must override')
         self.assertRegexpMatches(failures[2], ':9 Only one of')
         self.assertRegexpMatches(failures[3], ':11 .*must override')
+
+    def test_lint_stable_webexposed_disabled(self):
+        options = optparse.Values({
+            'additional_expectations': [],
+            'platform': 'test',
+            'debug_rwt_logging': False
+        })
+        host = MockHost()
+
+        port = host.port_factory.get(options.platform, options=options)
+        port.virtual_test_suites = lambda: [
+            VirtualTestSuite(prefix='stable',
+                             platforms=['Linux', 'Mac', 'Win'],
+                             bases=['test', 'webexposed'],
+                             args=['--foo'])
+        ]
+        test_expectations = (
+            '# tags: [ mac win ]\n'
+            '# results: [ Skip Pass Failure ]\n'
+            'test/* [ Skip ]\n'
+            '[ mac ] webexposed/* [ Skip ]\n'
+            'test/sub/* [ Pass ]\n'
+            'test/test1.html [ Pass ]\n'
+            'webexposed/foo/* [ Pass ]\n'
+            'webexposed/test2.html [ Failure ]\n'
+            'virtual/test/test/* [ Failure ]\n'
+            'virtual/test/foo.html [ Pass ]\n'
+            'virtual/stable/webexposed/test1/* [ Pass ]\n'
+            'virtual/stable/webexposed/test2/* [ Skip ]\n'
+            'virtual/stable/webexposed/api.html [ Pass Failure ]\n')
+        port.expectations_dict = lambda: {
+            'TestExpectations': test_expectations
+        }
+        port.test_exists = lambda test: True
+        host.port_factory.get = lambda platform=None, options=None: port
+        host.port_factory.all_port_names = lambda platform=None: [port.name()]
+
+        (fail1, fail2), warnings = lint_test_expectations.lint(host, options)
+        self.assertRegexpMatches(fail1, '.*virtual/stable/webexposed/test2/.*')
+        self.assertRegexpMatches(fail2,
+                                 r'.*virtual/stable/webexposed/api\.html.*')
 
 
 class CheckVirtualSuiteTest(unittest.TestCase):
@@ -397,25 +472,27 @@ class CheckVirtualSuiteTest(unittest.TestCase):
 
     def test_check_virtual_test_suites_readme(self):
         self.port.virtual_test_suites = lambda: [
-            VirtualTestSuite(prefix='foo', bases=['test'], args=['--foo']),
-            VirtualTestSuite(prefix='bar', bases=['test'], args=['--bar']), ]
-        self.host.filesystem.maybe_make_directory(WEB_TEST_DIR + '/test')
+            VirtualTestSuite(prefix='foo', platforms=['Linux', 'Mac', 'Win'], bases=['test'], args=['--foo']),
+            VirtualTestSuite(prefix='bar', platforms=['Linux', 'Mac', 'Win'], bases=['test'], args=['--bar']), ]
+        fs = self.host.filesystem
+        fs.maybe_make_directory(fs.join(MOCK_WEB_TESTS, 'test'))
 
         res = lint_test_expectations.check_virtual_test_suites(
             self.host, self.options)
         self.assertEqual(len(res), 2)
 
-        self.host.filesystem.files[WEB_TEST_DIR +
-                                   '/virtual/foo/README.md'] = ''
-        self.host.filesystem.files[WEB_TEST_DIR +
-                                   '/virtual/bar/test/README.txt'] = ''
+        fs.write_text_file(
+            fs.join(MOCK_WEB_TESTS, 'virtual', 'foo', 'README.md'), '')
+        fs.write_text_file(
+            fs.join(MOCK_WEB_TESTS, 'virtual', 'bar', 'test', 'README.txt'),
+            '')
         res = lint_test_expectations.check_virtual_test_suites(
             self.host, self.options)
         self.assertFalse(res)
 
     def test_check_virtual_test_suites_redundant(self):
         self.port.virtual_test_suites = lambda: [
-            VirtualTestSuite(prefix='foo', bases=['test/sub', 'test'], args=['--foo']),
+            VirtualTestSuite(prefix='foo', platforms=['Linux', 'Mac', 'Win'], bases=['test/sub', 'test'], args=['--foo']),
         ]
 
         self.host.filesystem.exists = lambda _: True
@@ -426,7 +503,7 @@ class CheckVirtualSuiteTest(unittest.TestCase):
 
     def test_check_virtual_test_suites_non_redundant(self):
         self.port.virtual_test_suites = lambda: [
-            VirtualTestSuite(prefix='foo', bases=['test_a', 'test'], args=['--foo']),
+            VirtualTestSuite(prefix='foo', platforms=['Linux', 'Mac', 'Win'], bases=['test_a', 'test'], args=['--foo']),
         ]
 
         self.host.filesystem.exists = lambda _: True
@@ -437,13 +514,17 @@ class CheckVirtualSuiteTest(unittest.TestCase):
 
     def test_check_virtual_test_suites_non_existent_base(self):
         self.port.virtual_test_suites = lambda: [
-            VirtualTestSuite(prefix='foo', bases=['base1', 'base2', 'base3.html'], args=['-foo']),
+            VirtualTestSuite(prefix='foo',
+                             platforms=['Linux', 'Mac', 'Win'],
+                             bases=['base1', 'base2', 'base3.html'],
+                             args=['-foo']),
         ]
 
-        self.host.filesystem.maybe_make_directory(WEB_TEST_DIR + '/base1')
-        self.host.filesystem.files[WEB_TEST_DIR + '/base3.html'] = ''
-        self.host.filesystem.files[WEB_TEST_DIR +
-                                   '/virtual/foo/README.md'] = ''
+        fs = self.host.filesystem
+        fs.maybe_make_directory(fs.join(MOCK_WEB_TESTS, 'base1'))
+        fs.write_text_file(fs.join(MOCK_WEB_TESTS, 'base3.html'), '')
+        fs.write_text_file(
+            fs.join(MOCK_WEB_TESTS, 'virtual', 'foo', 'README.md'), '')
         res = lint_test_expectations.check_virtual_test_suites(
             self.host, self.options)
         self.assertEqual(len(res), 1)
@@ -454,11 +535,14 @@ class MainTest(unittest.TestCase):
         self.orig_lint_fn = lint_test_expectations.lint
         self.orig_check_fn = lint_test_expectations.check_virtual_test_suites
         lint_test_expectations.check_virtual_test_suites = lambda host, options: []
-        self.stderr = StringIO.StringIO()
+        self.orig_check_smoke = lint_test_expectations.check_smoke_tests
+        lint_test_expectations.check_smoke_tests = lambda host, options: []
+        self.stderr = StringIO()
 
     def tearDown(self):
         lint_test_expectations.lint = self.orig_lint_fn
         lint_test_expectations.check_virtual_test_suites = self.orig_check_fn
+        lint_test_expectations.check_smoke_tests = self.orig_check_smoke
 
     def test_success(self):
         lint_test_expectations.lint = lambda host, options: ([], [])
@@ -470,22 +554,38 @@ class MainTest(unittest.TestCase):
         lint_test_expectations.lint = lambda host, options: ([],
                                                              ['test warning'])
         res = lint_test_expectations.main(['--platform', 'test'], self.stderr)
-        self.assertEqual('Lint succeeded with warnings.',
-                         self.stderr.getvalue().strip())
+        self.assertEqual(
+            textwrap.dedent("""\
+                test warning
+
+                Lint succeeded with warnings.
+                """), self.stderr.getvalue())
         self.assertEqual(res, 2)
 
     def test_failure(self):
         lint_test_expectations.lint = lambda host, options: (['test failure'],
                                                              [])
         res = lint_test_expectations.main(['--platform', 'test'], self.stderr)
-        self.assertEqual('Lint failed.', self.stderr.getvalue().strip())
+        self.assertEqual(
+            textwrap.dedent("""\
+                test failure
+
+                Lint failed.
+                """), self.stderr.getvalue())
         self.assertEqual(res, 1)
 
-    def test_failure_with_warning(self):
-        lint_test_expectations.lint = lambda host, options: (['test failure'],
-                                                             ['test warning'])
+    def test_failures_with_warnings(self):
+        lint_test_expectations.lint = lambda host, options: (
+            ['test failure', 'test failure'], ['test warning', 'test warning'])
         res = lint_test_expectations.main(['--platform', 'test'], self.stderr)
-        self.assertEqual('Lint failed.', self.stderr.getvalue().strip())
+        self.assertEqual(
+            textwrap.dedent("""\
+                test failure
+
+                test warning
+
+                Lint failed.
+                """), self.stderr.getvalue())
         self.assertEqual(res, 1)
 
     def test_interrupt(self):

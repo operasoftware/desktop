@@ -45,30 +45,34 @@ class LayoutRubyBase : public LayoutBlockFlow {
   static LayoutRubyBase* CreateAnonymous(Document*,
                                          const LayoutRubyRun& ruby_run);
 
-  const char* GetName() const override { return "LayoutRubyBase"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutRubyBase";
+  }
 
   bool IsOfType(LayoutObjectType type) const override {
+    NOT_DESTROYED();
     return type == kLayoutObjectRubyBase || LayoutBlockFlow::IsOfType(type);
   }
 
   bool IsChildAllowed(LayoutObject*, const ComputedStyle&) const override;
 
- private:
   // The argument must be nullptr. It's necessary for the LayoutNGMixin
   // constructor.
-  explicit LayoutRubyBase(Element*);
+  explicit LayoutRubyBase(ContainerNode*);
 
+ private:
   ETextAlign TextAlignmentForLine(bool ends_with_soft_break) const override;
   void AdjustInlineDirectionLineBounds(
       unsigned expansion_opportunity_count,
       LayoutUnit& logical_left,
       LayoutUnit& logical_width) const override;
 
-  void MoveChildren(LayoutRubyBase* to_base,
+  void MoveChildren(LayoutRubyBase& to_base,
                     LayoutObject* before_child = nullptr);
-  void MoveInlineChildren(LayoutRubyBase* to_base,
+  void MoveInlineChildren(LayoutRubyBase& to_base,
                           LayoutObject* before_child = nullptr);
-  void MoveBlockChildren(LayoutRubyBase* to_base,
+  void MoveBlockChildren(LayoutRubyBase& to_base,
                          LayoutObject* before_child = nullptr);
 
   friend class LayoutNGMixin<LayoutRubyBase>;
@@ -76,7 +80,12 @@ class LayoutRubyBase : public LayoutBlockFlow {
   friend class LayoutRubyRun;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutRubyBase, IsRubyBase());
+template <>
+struct DowncastTraits<LayoutRubyBase> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsRubyBase();
+  }
+};
 
 }  // namespace blink
 

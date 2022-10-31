@@ -1,8 +1,7 @@
-#!tools/lou_checkyaml
-
 # A collection of tests related to whether or not it is needed to
 # define characters and braille cells (in character definition rules)
 # in order to be able to use them in other rules.
+# See also https://github.com/liblouis/liblouis/issues/332.
 
 # A cell in a multi-cell character definition does not need to be defined in its own character definition.
 # It works as long as there is a display rule to display the cell in the output...
@@ -35,12 +34,14 @@ tests:
 # It works as long as there is a display rule to display the cell in the output...
 table: |
   display x 2
-  uplow Aa 1
+  lowercase a 1
+  base uppercase A a
   begcapsword 2
 # ... or as long as the cell does not end up in output.
 table: |
   sign x 3
-  uplow Aa 1
+  lowercase a 1
+  base uppercase A a
   begcapsword 2
   noback pass2 @2 @3
   nofor pass2 @3 @2
@@ -51,7 +52,8 @@ tests:
 # If a cell ends up in the output and can not be displayed, it results in an error.
 # FIXME: use the expectedError flag (https://github.com/liblouis/liblouis/issues/875)
 # table: |
-#   uplow Aa 1
+#   lowercase a 1
+#   base uppercase A a
 #   begcapsword 2
 # flags: {testmode: forward}
 # tests:
@@ -73,7 +75,7 @@ table: |
   sign a 1
   sign b 2
   sign c 3
-  class foo a
+  attribute foo a
   swapcd bar b 3
   noback context %foo @3
   noback context %bar %bar
@@ -87,7 +89,7 @@ tests:
 # A character that is assigned to a class does not need to be previously defined in a character definition rule.
 table: |
   display x 1
-  class foo a
+  attribute foo a
   noback context %foo @1
 flags: {testmode: forward}
 tests:
@@ -108,17 +110,17 @@ tests:
 # It works as long as there is a display rule to display the cell in the output...
 table: |
   display x 2
-  always a 2-2
+  always abc 2
 # ... or as long as the cell does not end up in output.
 table: |
   sign x 3
-  always a 2-2
+  always abc 2
   noback pass2 @2 @3
   nofor pass2 @3 @2
 flags: {testmode: bothDirections}
 tests:
-  - - a
-    - xx
+  - - abc
+    - x
 # If a cell ends up in the output and can not be displayed, it results in an error.
 # FIXME: use the expectedError flag (https://github.com/liblouis/liblouis/issues/875)
 # table: |
@@ -127,3 +129,13 @@ tests:
 # tests:
 #   - - a
 #     - " "
+
+# It does not matter whether the first character of the always rule is given an attribute or not (regression test for #1116)
+table: |
+  display x 2
+  attribute foo a
+  always abc 2
+flags: {testmode: bothDirections}
+tests:
+  - - abc
+    - x

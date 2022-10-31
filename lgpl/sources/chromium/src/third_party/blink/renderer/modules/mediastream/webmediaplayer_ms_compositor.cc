@@ -9,23 +9,28 @@
 #include <utility>
 
 #include "base/hash/hash.h"
-#include "base/single_thread_task_runner.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/task/bind_post_task.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "cc/paint/skia_paint_canvas.h"
 #include "media/base/bind_to_current_loop.h"
+#include "media/base/media_switches.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
-#include "media/filters/video_renderer_algorithm.h"
 #include "media/renderers/paint_canvas_video_renderer.h"
 #include "services/viz/public/cpp/gpu/context_provider_command_buffer.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_video_frame_submitter.h"
 #include "third_party/blink/public/web/modules/mediastream/webmediaplayer_ms.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_media.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/libyuv/include/libyuv/convert.h"
 #include "third_party/libyuv/include/libyuv/planar_functions.h"
@@ -35,8 +40,8 @@
 namespace WTF {
 
 template <typename T>
-struct CrossThreadCopier<base::Optional<T>>
-    : public CrossThreadCopierPassThrough<base::Optional<T>> {
+struct CrossThreadCopier<absl::optional<T>>
+    : public CrossThreadCopierPassThrough<absl::optional<T>> {
   STATIC_ONLY(CrossThreadCopier);
 };
 
@@ -54,14 +59,11 @@ scoped_refptr<media::VideoFrame> CopyFrame(
   if (frame->HasTextures()) {
     DCHECK(frame->format() == media::PIXEL_FORMAT_ARGB ||
            frame->format() == media::PIXEL_FORMAT_XRGB ||
+           frame->format() == media::PIXEL_FORMAT_ABGR ||
+           frame->format() == media::PIXEL_FORMAT_XBGR ||
            frame->format() == media::PIXEL_FORMAT_I420 ||
            frame->format() == media::PIXEL_FORMAT_NV12);
-    new_frame = media::VideoFrame::CreateFrame(
-        media::PIXEL_FORMAT_I420, frame->coded_size(), frame->visible_rect(),
-        frame->natural_size(), frame->timestamp());
-
-    auto* const provider =
-        Platform::Current()->SharedMainThreadContextProvider();
+    auto provider = Platform::Current()->SharedMainThreadContextProvider();
     if (!provider) {
       // Return a black frame (yuv = {0, 0x80, 0x80}).
       return media::VideoFrame::CreateColorFrame(
@@ -74,52 +76,67 @@ scoped_refptr<media::VideoFrame> CopyFrame(
     cc::SkiaPaintCanvas paint_canvas(bitmap);
 
     DCHECK(provider->RasterInterface());
-    video_renderer->Copy(frame.get(), &paint_canvas, provider);
+    video_renderer->Copy(frame.get(), &paint_canvas, provider.get());
 
-    SkPixmap pixmap;
-    const bool result = bitmap.peekPixels(&pixmap);
-    DCHECK(result) << "Error trying to access SkBitmap's pixels";
-
-#if SK_PMCOLOR_BYTE_ORDER(R, G, B, A)
-    const uint32_t source_pixel_format = libyuv::FOURCC_ABGR;
-#else
-    const uint32_t source_pixel_format = libyuv::FOURCC_ARGB;
-#endif
-    libyuv::ConvertToI420(static_cast<const uint8_t*>(pixmap.addr(0, 0)),
-                          pixmap.computeByteSize(),
-                          new_frame->visible_data(media::VideoFrame::kYPlane),
-                          new_frame->stride(media::VideoFrame::kYPlane),
-                          new_frame->visible_data(media::VideoFrame::kUPlane),
-                          new_frame->stride(media::VideoFrame::kUPlane),
-                          new_frame->visible_data(media::VideoFrame::kVPlane),
-                          new_frame->stride(media::VideoFrame::kVPlane),
-                          0 /* crop_x */, 0 /* crop_y */, pixmap.width(),
-                          pixmap.height(), new_frame->visible_rect().width(),
-                          new_frame->visible_rect().height(), libyuv::kRotate0,
-                          source_pixel_format);
+    bitmap.setImmutable();
+    new_frame =
+        media::CreateFromSkImage(bitmap.asImage(), frame->visible_rect(),
+                                 frame->natural_size(), frame->timestamp());
+    if (!new_frame) {
+      return media::VideoFrame::CreateColorFrame(
+          frame->visible_rect().size(), 0u, 0x80, 0x80, frame->timestamp());
+    }
   } else {
     DCHECK(frame->IsMappable());
-    DCHECK(frame->format() == media::PIXEL_FORMAT_I420A ||
-           frame->format() == media::PIXEL_FORMAT_I420);
+    if (frame->format() != media::PIXEL_FORMAT_I420A &&
+        frame->format() != media::PIXEL_FORMAT_I420 &&
+        frame->format() != media::PIXEL_FORMAT_NV12 &&
+        frame->format() != media::PIXEL_FORMAT_ARGB) {
+      DLOG(WARNING) << frame->format() << " is not supported.";
+      return media::VideoFrame::CreateColorFrame(
+          frame->visible_rect().size(), 0u, 0x80, 0x80, frame->timestamp());
+    }
+
     const gfx::Size& coded_size = frame->coded_size();
     new_frame = media::VideoFrame::CreateFrame(
-        media::IsOpaque(frame->format()) ? media::PIXEL_FORMAT_I420
-                                         : media::PIXEL_FORMAT_I420A,
-        coded_size, frame->visible_rect(), frame->natural_size(),
-        frame->timestamp());
-    libyuv::I420Copy(frame->data(media::VideoFrame::kYPlane),
-                     frame->stride(media::VideoFrame::kYPlane),
-                     frame->data(media::VideoFrame::kUPlane),
-                     frame->stride(media::VideoFrame::kUPlane),
-                     frame->data(media::VideoFrame::kVPlane),
-                     frame->stride(media::VideoFrame::kVPlane),
-                     new_frame->data(media::VideoFrame::kYPlane),
-                     new_frame->stride(media::VideoFrame::kYPlane),
-                     new_frame->data(media::VideoFrame::kUPlane),
-                     new_frame->stride(media::VideoFrame::kUPlane),
-                     new_frame->data(media::VideoFrame::kVPlane),
-                     new_frame->stride(media::VideoFrame::kVPlane),
-                     coded_size.width(), coded_size.height());
+        frame->format(), coded_size, frame->visible_rect(),
+        frame->natural_size(), frame->timestamp());
+    if (!new_frame) {
+      return media::VideoFrame::CreateColorFrame(
+          frame->visible_rect().size(), 0u, 0x80, 0x80, frame->timestamp());
+    }
+
+    if (frame->format() == media::PIXEL_FORMAT_NV12) {
+      libyuv::NV12Copy(frame->data(media::VideoFrame::kYPlane),
+                       frame->stride(media::VideoFrame::kYPlane),
+                       frame->data(media::VideoFrame::kUVPlane),
+                       frame->stride(media::VideoFrame::kUVPlane),
+                       new_frame->data(media::VideoFrame::kYPlane),
+                       new_frame->stride(media::VideoFrame::kYPlane),
+                       new_frame->data(media::VideoFrame::kUVPlane),
+                       new_frame->stride(media::VideoFrame::kUVPlane),
+                       coded_size.width(), coded_size.height());
+    } else if (frame->format() == media::PIXEL_FORMAT_ARGB) {
+      libyuv::ARGBCopy(frame->data(media::VideoFrame::kARGBPlane),
+                       frame->stride(media::VideoFrame::kARGBPlane),
+                       new_frame->data(media::VideoFrame::kARGBPlane),
+                       new_frame->stride(media::VideoFrame::kARGBPlane),
+                       coded_size.width(), coded_size.height());
+    } else {
+      libyuv::I420Copy(frame->data(media::VideoFrame::kYPlane),
+                       frame->stride(media::VideoFrame::kYPlane),
+                       frame->data(media::VideoFrame::kUPlane),
+                       frame->stride(media::VideoFrame::kUPlane),
+                       frame->data(media::VideoFrame::kVPlane),
+                       frame->stride(media::VideoFrame::kVPlane),
+                       new_frame->data(media::VideoFrame::kYPlane),
+                       new_frame->stride(media::VideoFrame::kYPlane),
+                       new_frame->data(media::VideoFrame::kUPlane),
+                       new_frame->stride(media::VideoFrame::kUPlane),
+                       new_frame->data(media::VideoFrame::kVPlane),
+                       new_frame->stride(media::VideoFrame::kVPlane),
+                       coded_size.width(), coded_size.height());
+    }
     if (frame->format() == media::PIXEL_FORMAT_I420A) {
       libyuv::CopyPlane(frame->data(media::VideoFrame::kAPlane),
                         frame->stride(media::VideoFrame::kAPlane),
@@ -130,9 +147,32 @@ scoped_refptr<media::VideoFrame> CopyFrame(
   }
 
   // Transfer metadata keys.
-  new_frame->metadata()->MergeMetadataFrom(frame->metadata());
+  new_frame->metadata().MergeMetadataFrom(frame->metadata());
   return new_frame;
 }
+
+gfx::Size RotationAdjustedSize(media::VideoRotation rotation,
+                               const gfx::Size& size) {
+  if (rotation == media::VIDEO_ROTATION_90 ||
+      rotation == media::VIDEO_ROTATION_270) {
+    return gfx::Size(size.height(), size.width());
+  }
+
+  return size;
+}
+
+// Returns the UMA histogram prefix for the decoded frame metrics reported from
+// the file.
+std::string UmaPrefix() {
+  return "Media.WebMediaPlayerCompositor";
+}
+
+// UpdateCurrentFrame() callbacks can stop when the tab is hidden or the page
+// area containing the video frame is scrolled out of view. Maximum allowed
+// delay in the callbacks which will drop all the pending decoder output frames
+// and reset the frame queue.
+constexpr base::TimeDelta kMaximumVsyncDelayForLowLatencyRenderer =
+    base::Milliseconds(50);
 
 }  // anonymous namespace
 
@@ -142,7 +182,7 @@ WebMediaPlayerMSCompositor::WebMediaPlayerMSCompositor(
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
     MediaStreamDescriptor* media_stream_descriptor,
     std::unique_ptr<WebVideoFrameSubmitter> submitter,
-    WebMediaPlayer::SurfaceLayerMode surface_layer_mode,
+    bool use_surface_layer,
     const base::WeakPtr<WebMediaPlayerMS>& player)
     : video_frame_compositor_task_runner_(video_frame_compositor_task_runner),
       io_task_runner_(io_task_runner),
@@ -150,19 +190,19 @@ WebMediaPlayerMSCompositor::WebMediaPlayerMSCompositor(
       player_(player),
       video_frame_provider_client_(nullptr),
       current_frame_rendered_(false),
-      last_render_length_(base::TimeDelta::FromSecondsD(1.0 / 60.0)),
+      last_render_length_(base::Seconds(1.0 / 60.0)),
       total_frame_count_(0),
       dropped_frame_count_(0),
       stopped_(true),
       render_started_(!stopped_) {
-  if (surface_layer_mode != WebMediaPlayer::SurfaceLayerMode::kNever) {
+  if (use_surface_layer) {
     submitter_ = std::move(submitter);
 
     PostCrossThreadTask(
         *video_frame_compositor_task_runner_, FROM_HERE,
         CrossThreadBindOnce(&WebMediaPlayerMSCompositor::InitializeSubmitter,
                             weak_ptr_factory_.GetWeakPtr()));
-    update_submission_state_callback_ = media::BindToLoop(
+    update_submission_state_callback_ = base::BindPostTask(
         video_frame_compositor_task_runner_,
         ConvertToBaseRepeatingCallback(CrossThreadBindRepeating(
             &WebMediaPlayerMSCompositor::SetIsSurfaceVisible,
@@ -174,15 +214,15 @@ WebMediaPlayerMSCompositor::WebMediaPlayerMSCompositor(
     video_components = media_stream_descriptor->VideoComponents();
 
   const bool remote_video =
-      video_components.size() && video_components[0]->Source()->Remote();
+      video_components.size() && video_components[0]->Remote();
 
   if (remote_video && Platform::Current()->RTCSmoothnessAlgorithmEnabled()) {
     base::AutoLock auto_lock(current_frame_lock_);
-    rendering_frame_buffer_.reset(new media::VideoRendererAlgorithm(
+    rendering_frame_buffer_ = std::make_unique<VideoRendererAlgorithmWrapper>(
         ConvertToBaseRepeatingCallback(CrossThreadBindRepeating(
             &WebMediaPlayerMSCompositor::MapTimestampsToRenderTimeTicks,
             CrossThreadUnretained(this))),
-        &media_log_));
+        &media_log_);
   }
 
   // Just for logging purpose.
@@ -225,16 +265,19 @@ void WebMediaPlayerMSCompositor::InitializeSubmitter() {
   submitter_->Initialize(this, /* is_media_stream = */ true);
 }
 
-void WebMediaPlayerMSCompositor::SetIsSurfaceVisible(bool state) {
+void WebMediaPlayerMSCompositor::SetIsSurfaceVisible(
+    bool state,
+    base::WaitableEvent* done_event) {
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
   submitter_->SetIsSurfaceVisible(state);
+  if (done_event)
+    done_event->Signal();
 }
 
 // TODO(https://crbug/879424): Rename, since it really doesn't enable
 // submission. Do this along with the VideoFrameSubmitter refactor.
 void WebMediaPlayerMSCompositor::EnableSubmission(
     const viz::SurfaceId& id,
-    base::TimeTicks local_surface_id_allocation_time,
     media::VideoTransformation transformation,
     bool force_submit) {
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
@@ -245,9 +288,9 @@ void WebMediaPlayerMSCompositor::EnableSubmission(
     video_frame_provider_client_->StopUsingProvider();
   }
 
-  submitter_->SetRotation(transformation.rotation);
+  submitter_->SetTransform(transformation);
   submitter_->SetForceSubmit(force_submit);
-  submitter_->EnableSubmission(id, local_surface_id_allocation_time);
+  submitter_->EnableSubmission(id);
   video_frame_provider_client_ = submitter_.get();
 
   if (!stopped_)
@@ -269,6 +312,11 @@ void WebMediaPlayerMSCompositor::SetForceBeginFrames(bool enable) {
   submitter_->SetForceBeginFrames(enable);
 }
 
+WebMediaPlayerMSCompositor::Metadata WebMediaPlayerMSCompositor::GetMetadata() {
+  base::AutoLock auto_lock(current_frame_lock_);
+  return current_metadata_;
+}
+
 void WebMediaPlayerMSCompositor::SetForceSubmit(bool force_submit) {
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
   submitter_->SetForceSubmit(force_submit);
@@ -278,18 +326,6 @@ void WebMediaPlayerMSCompositor::SetIsPageVisible(bool is_visible) {
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
   if (submitter_)
     submitter_->SetIsPageVisible(is_visible);
-}
-
-gfx::Size WebMediaPlayerMSCompositor::GetCurrentSize() {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  base::AutoLock auto_lock(current_frame_lock_);
-  return current_frame_ ? current_frame_->natural_size() : gfx::Size();
-}
-
-base::TimeDelta WebMediaPlayerMSCompositor::GetCurrentTime() {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  base::AutoLock auto_lock(current_frame_lock_);
-  return current_frame_.get() ? current_frame_->timestamp() : base::TimeDelta();
 }
 
 size_t WebMediaPlayerMSCompositor::total_frame_count() {
@@ -317,40 +353,102 @@ void WebMediaPlayerMSCompositor::SetVideoFrameProviderClient(
     video_frame_provider_client_->StartRendering();
 }
 
+void WebMediaPlayerMSCompositor::RecordFrameDecodedStats(
+    absl::optional<base::TimeTicks> frame_received_time,
+    absl::optional<base::TimeDelta> frame_processing_time,
+    absl::optional<uint32_t> frame_rtp_timestamp) {
+  DCHECK(io_task_runner_->BelongsToCurrentThread());
+  if (frame_received_time && last_enqueued_frame_receive_time_) {
+    base::TimeDelta frame_receive_time_delta =
+        *frame_received_time - *last_enqueued_frame_receive_time_;
+    LOCAL_HISTOGRAM_TIMES(UmaPrefix() + ".FrameReceivedTimeDelta",
+                          frame_receive_time_delta);
+  }
+  last_enqueued_frame_receive_time_ = frame_received_time;
+
+  auto now = base::TimeTicks::Now();
+  if (last_enqueued_frame_decoded_time_) {
+    base::TimeDelta frame_decoded_time_delta =
+        now - *last_enqueued_frame_decoded_time_;
+    LOCAL_HISTOGRAM_TIMES(UmaPrefix() + ".FrameDecodedTimeDelta",
+                          frame_decoded_time_delta);
+  }
+  last_enqueued_frame_decoded_time_ = now;
+
+  if (frame_processing_time) {
+    LOCAL_HISTOGRAM_TIMES(UmaPrefix() + ".DecodeDuration",
+                          frame_processing_time.value());
+  }
+
+  if (frame_rtp_timestamp && last_enqueued_frame_rtp_timestamp_) {
+    LOCAL_HISTOGRAM_COUNTS_10000(
+        UmaPrefix() + ".FrameDecodedRtpTimestampDelta",
+        *frame_rtp_timestamp - *last_enqueued_frame_rtp_timestamp_);
+  }
+  last_enqueued_frame_rtp_timestamp_ = frame_rtp_timestamp;
+}
+
+void WebMediaPlayerMSCompositor::SetMetadata() {
+  DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
+  current_frame_lock_.AssertAcquired();
+  current_metadata_.natural_size = current_frame_->natural_size();
+  current_metadata_.video_transform =
+      current_frame_->metadata().transformation.value_or(
+          media::kNoTransformation);
+}
+
 void WebMediaPlayerMSCompositor::EnqueueFrame(
-    scoped_refptr<media::VideoFrame> frame) {
+    scoped_refptr<media::VideoFrame> frame,
+    bool is_copy) {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
   base::AutoLock auto_lock(current_frame_lock_);
   TRACE_EVENT_INSTANT1("media", "WebMediaPlayerMSCompositor::EnqueueFrame",
                        TRACE_EVENT_SCOPE_THREAD, "Timestamp",
                        frame->timestamp().InMicroseconds());
   ++total_frame_count_;
+  ++frame_enqueued_since_last_vsync_;
+  absl::optional<uint32_t> enqueue_frame_rtp_timestamp;
+  if (frame->metadata().rtp_timestamp) {
+    enqueue_frame_rtp_timestamp =
+        static_cast<uint32_t>(frame->metadata().rtp_timestamp.value());
+  }
+  RecordFrameDecodedStats(frame->metadata().receive_time,
+                          frame->metadata().processing_time,
+                          enqueue_frame_rtp_timestamp);
 
   // With algorithm off, just let |current_frame_| hold the incoming |frame|.
   if (!rendering_frame_buffer_) {
-    RenderWithoutAlgorithm(std::move(frame));
+    RenderWithoutAlgorithm(std::move(frame), is_copy);
     return;
   }
 
   // This is a signal frame saying that the stream is stopped.
-  if (frame->metadata()->end_of_stream) {
+  if (frame->metadata().end_of_stream) {
     rendering_frame_buffer_.reset();
-    RenderWithoutAlgorithm(std::move(frame));
+    RenderWithoutAlgorithm(std::move(frame), is_copy);
     return;
   }
 
-  // If we detect a bad frame without |render_time|, we switch off algorithm,
-  // because without |render_time|, algorithm cannot work.
-  // In general, this should not happen.
-  if (!frame->metadata()->reference_time.has_value()) {
+  // If we detect a bad frame without |reference_time|, we switch off algorithm,
+  // because without |reference_time|, algorithm cannot work.
+  // |reference_time| is not set for low-latency video streams and are therefore
+  // rendered without algorithm, unless |maximum_composition_delay_in_frames| is
+  // set in which case a dedicated low-latency algorithm is switched on. Please
+  // note that this is an experimental feature that is only active if certain
+  // experimental parameters are specified in WebRTC. See crbug.com/1138888 for
+  // more information.
+  if (!frame->metadata().reference_time.has_value() &&
+      !frame->metadata().maximum_composition_delay_in_frames) {
     DLOG(WARNING)
         << "Incoming VideoFrames have no reference_time, switching off super "
            "sophisticated rendering algorithm";
     rendering_frame_buffer_.reset();
-    RenderWithoutAlgorithm(std::move(frame));
+    RenderWithoutAlgorithm(std::move(frame), is_copy);
     return;
   }
-  base::TimeTicks render_time = *frame->metadata()->reference_time;
+  base::TimeTicks render_time = frame->metadata().reference_time
+                                    ? *frame->metadata().reference_time
+                                    : base::TimeTicks();
 
   // The code below handles the case where UpdateCurrentFrame() callbacks stop.
   // These callbacks can stop when the tab is hidden or the page area containing
@@ -358,18 +456,25 @@ void WebMediaPlayerMSCompositor::EnqueueFrame(
   // Since some hardware decoders only have a limited number of output frames,
   // we must aggressively release frames in this case.
   const base::TimeTicks now = base::TimeTicks::Now();
-  if (now > last_deadline_max_) {
+  const base::TimeDelta vsync_delay = now - last_deadline_max_;
+  base::TimeDelta maximum_vsync_delay_for_renderer_reset;
+  if (frame->metadata().maximum_composition_delay_in_frames) {
+    maximum_vsync_delay_for_renderer_reset =
+        kMaximumVsyncDelayForLowLatencyRenderer;
+  }
+  if (vsync_delay > maximum_vsync_delay_for_renderer_reset) {
     // Note: the frame in |rendering_frame_buffer_| with lowest index is the
     // same as |current_frame_|. Function SetCurrentFrame() handles whether
     // to increase |dropped_frame_count_| for that frame, so here we should
     // increase |dropped_frame_count_| by the count of all other frames.
     dropped_frame_count_ += rendering_frame_buffer_->frames_queued() - 1;
     rendering_frame_buffer_->Reset();
-    timestamps_to_clock_times_.clear();
-    RenderWithoutAlgorithm(frame);
+    pending_frames_info_.clear();
+    RenderWithoutAlgorithm(frame, is_copy);
   }
 
-  timestamps_to_clock_times_[frame->timestamp()] = render_time;
+  pending_frames_info_.push_back(PendingFrameInfo{
+      frame->unique_id(), frame->timestamp(), render_time, is_copy});
   rendering_frame_buffer_->EnqueueFrame(std::move(frame));
 }
 
@@ -397,13 +502,13 @@ bool WebMediaPlayerMSCompositor::UpdateCurrentFrame(
 #endif  // DCHECK_IS_ON()
     if (tracing_or_dcheck_enabled) {
       base::TimeTicks render_time =
-          current_frame_->metadata()->reference_time.value_or(
-              base::TimeTicks());
-      if (!current_frame_->metadata()->reference_time.has_value()) {
-        DCHECK(!rendering_frame_buffer_)
-            << "VideoFrames need REFERENCE_TIME to use "
-               "sophisticated video rendering algorithm.";
-      }
+          current_frame_->metadata().reference_time.value_or(base::TimeTicks());
+      DCHECK(current_frame_->metadata().reference_time.has_value() ||
+             !rendering_frame_buffer_ ||
+             (rendering_frame_buffer_ &&
+              !rendering_frame_buffer_->NeedsReferenceTime()))
+          << "VideoFrames need REFERENCE_TIME to use "
+             "sophisticated video rendering algorithm.";
       TRACE_EVENT_END2("media", "UpdateCurrentFrame", "Ideal Render Instant",
                        render_time.ToInternalValue(), "Serial", serial_);
     }
@@ -420,6 +525,9 @@ bool WebMediaPlayerMSCompositor::HasCurrentFrame() {
 scoped_refptr<media::VideoFrame> WebMediaPlayerMSCompositor::GetCurrentFrame() {
   DVLOG(3) << __func__;
   base::AutoLock auto_lock(current_frame_lock_);
+  if (!current_frame_)
+    return nullptr;
+
   TRACE_EVENT_INSTANT1("media", "WebMediaPlayerMSCompositor::GetCurrentFrame",
                        TRACE_EVENT_SCOPE_THREAD, "Timestamp",
                        current_frame_->timestamp().InMicroseconds());
@@ -429,19 +537,65 @@ scoped_refptr<media::VideoFrame> WebMediaPlayerMSCompositor::GetCurrentFrame() {
   return current_frame_;
 }
 
+void WebMediaPlayerMSCompositor::RecordFrameDisplayedStats(
+    base::TimeTicks frame_displayed_time) {
+  DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
+  if (last_presented_frame_display_time_) {
+    base::TimeDelta presentation_timestamp_delta =
+        frame_displayed_time - *last_presented_frame_display_time_;
+    LOCAL_HISTOGRAM_TIMES(UmaPrefix() + ".FramePresentationDelta",
+                          presentation_timestamp_delta);
+  }
+  last_presented_frame_display_time_ = frame_displayed_time;
+
+  if (current_frame_rtp_timestamp_ && last_presented_frame_rtp_timestamp_) {
+    int32_t rtp_timestamp_delta =
+        *current_frame_rtp_timestamp_ - *last_presented_frame_rtp_timestamp_;
+    LOCAL_HISTOGRAM_COUNTS_10000(UmaPrefix() + ".MediaTimelineDelta",
+                                 rtp_timestamp_delta);
+  }
+  last_presented_frame_rtp_timestamp_ = current_frame_rtp_timestamp_;
+
+  if (current_frame_receive_time_) {
+    base::TimeDelta frame_receive_to_display =
+        frame_displayed_time - *current_frame_receive_time_;
+    LOCAL_HISTOGRAM_TIMES(UmaPrefix() + ".FrameReceivedToDisplayedTime",
+                          frame_receive_to_display);
+  }
+}
+
 void WebMediaPlayerMSCompositor::PutCurrentFrame() {
   DVLOG(3) << __func__;
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
   current_frame_rendered_ = true;
+  RecordFrameDisplayedStats(base::TimeTicks::Now());
 }
 
 base::TimeDelta WebMediaPlayerMSCompositor::GetPreferredRenderInterval() {
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
   if (!rendering_frame_buffer_) {
+    DCHECK_GE(last_render_length_, base::TimeDelta());
     return last_render_length_;
-  } else {
-    return rendering_frame_buffer_->average_frame_duration();
   }
+
+  DCHECK_GE(rendering_frame_buffer_->average_frame_duration(),
+            base::TimeDelta());
+  return rendering_frame_buffer_->average_frame_duration();
+}
+
+void WebMediaPlayerMSCompositor::OnContextLost() {
+  DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
+  // current_frame_'s resource in the context has been lost, so current_frame_
+  // is not valid any more. current_frame_ should be reset. Now the compositor
+  // has no concept of resetting current_frame_, so a black frame is set.
+  base::AutoLock auto_lock(current_frame_lock_);
+  if (!current_frame_ || (!current_frame_->HasTextures() &&
+                          !current_frame_->HasGpuMemoryBuffer())) {
+    return;
+  }
+  scoped_refptr<media::VideoFrame> black_frame =
+      media::VideoFrame::CreateBlackFrame(current_frame_->natural_size());
+  SetCurrentFrame(std::move(black_frame), false, absl::nullopt);
 }
 
 void WebMediaPlayerMSCompositor::StartRendering() {
@@ -493,8 +647,13 @@ bool WebMediaPlayerMSCompositor::MapTimestampsToRenderTimeTicks(
          io_task_runner_->BelongsToCurrentThread());
 #endif
   for (const base::TimeDelta& timestamp : timestamps) {
-    DCHECK(timestamps_to_clock_times_.count(timestamp));
-    wall_clock_times->push_back(timestamps_to_clock_times_[timestamp]);
+    auto* it =
+        std::find_if(pending_frames_info_.begin(), pending_frames_info_.end(),
+                     [&timestamp](PendingFrameInfo& info) {
+                       return info.timestamp == timestamp;
+                     });
+    DCHECK(it != pending_frames_info_.end());
+    wall_clock_times->push_back(it->reference_time);
   }
   return true;
 }
@@ -519,35 +678,48 @@ void WebMediaPlayerMSCompositor::RenderUsingAlgorithm(
   if (!frame || frame == current_frame_)
     return;
 
-  const base::TimeDelta timestamp = frame->timestamp();
-  SetCurrentFrame(std::move(frame), deadline_min);
+  // Walk |pending_frames_info_| to find |is_copy| value for the frame, while
+  // also erasing old elements.
+  bool is_copy = false;
+  for (auto* it = pending_frames_info_.begin();
+       it != pending_frames_info_.end();) {
+    if (it->unique_id == frame->unique_id())
+      is_copy = it->is_copy;
 
-  const auto& end = timestamps_to_clock_times_.end();
-  const auto& begin = timestamps_to_clock_times_.begin();
-  auto iterator = begin;
-  while (iterator != end && iterator->first < timestamp)
-    ++iterator;
-  timestamps_to_clock_times_.erase(begin, iterator);
+    // Erase info for the older frames.
+    if (it->timestamp < frame->timestamp()) {
+      it = pending_frames_info_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  SetCurrentFrame(std::move(frame), is_copy, deadline_min);
 }
 
 void WebMediaPlayerMSCompositor::RenderWithoutAlgorithm(
-    scoped_refptr<media::VideoFrame> frame) {
+    scoped_refptr<media::VideoFrame> frame,
+    bool is_copy) {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
   PostCrossThreadTask(
       *video_frame_compositor_task_runner_, FROM_HERE,
       CrossThreadBindOnce(
           &WebMediaPlayerMSCompositor::RenderWithoutAlgorithmOnCompositor,
-          WrapRefCounted(this), std::move(frame)));
+          WrapRefCounted(this), std::move(frame), is_copy));
 }
 
 void WebMediaPlayerMSCompositor::RenderWithoutAlgorithmOnCompositor(
-    scoped_refptr<media::VideoFrame> frame) {
+    scoped_refptr<media::VideoFrame> frame,
+    bool is_copy) {
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
   {
     base::AutoLock auto_lock(current_frame_lock_);
-    if (current_frame_)
+    // Last timestamp in the stream might not have timestamp.
+    if (current_frame_ && !frame->timestamp().is_zero() &&
+        frame->timestamp() > current_frame_->timestamp()) {
       last_render_length_ = frame->timestamp() - current_frame_->timestamp();
-    SetCurrentFrame(std::move(frame), base::nullopt);
+    }
+    SetCurrentFrame(std::move(frame), is_copy, absl::nullopt);
   }
   if (video_frame_provider_client_)
     video_frame_provider_client_->DidReceiveFrame();
@@ -555,7 +727,8 @@ void WebMediaPlayerMSCompositor::RenderWithoutAlgorithmOnCompositor(
 
 void WebMediaPlayerMSCompositor::SetCurrentFrame(
     scoped_refptr<media::VideoFrame> frame,
-    base::Optional<base::TimeTicks> expected_display_time) {
+    bool is_copy,
+    absl::optional<base::TimeTicks> expected_display_time) {
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
   current_frame_lock_.AssertAcquired();
   TRACE_EVENT_INSTANT1("media", "WebMediaPlayerMSCompositor::SetCurrentFrame",
@@ -571,31 +744,43 @@ void WebMediaPlayerMSCompositor::SetCurrentFrame(
   bool is_first_frame = true;
   bool has_frame_size_changed = false;
 
-  base::Optional<media::VideoRotation> new_rotation =
-      frame->metadata()->rotation.value_or(media::VIDEO_ROTATION_0);
+  absl::optional<media::VideoTransformation> new_transform =
+      media::kNoTransformation;
+  if (frame->metadata().transformation)
+    new_transform = frame->metadata().transformation;
 
-  base::Optional<bool> new_opacity;
+  absl::optional<bool> new_opacity;
   new_opacity = media::IsOpaque(frame->format());
 
   if (current_frame_) {
     // We have a current frame, so determine what has changed.
     is_first_frame = false;
 
-    media::VideoRotation current_video_rotation =
-        current_frame_->metadata()->rotation.value_or(media::VIDEO_ROTATION_0);
+    auto current_video_transform =
+        current_frame_->metadata().transformation.value_or(
+            media::kNoTransformation);
+    has_frame_size_changed =
+        RotationAdjustedSize(new_transform->rotation, frame->natural_size()) !=
+        RotationAdjustedSize(current_video_transform.rotation,
+                             current_frame_->natural_size());
 
-    if (current_video_rotation == *new_rotation) {
-      new_rotation.reset();
-    }
+    if (current_video_transform == *new_transform)
+      new_transform.reset();
 
     if (*new_opacity == media::IsOpaque(current_frame_->format()))
       new_opacity.reset();
-
-    has_frame_size_changed =
-        frame->natural_size() != current_frame_->natural_size();
   }
 
   current_frame_ = std::move(frame);
+  current_frame_is_copy_ = is_copy;
+  SetMetadata();
+
+  current_frame_receive_time_ = current_frame_->metadata().receive_time;
+  current_frame_rtp_timestamp_ = static_cast<uint32_t>(
+      current_frame_->metadata().rtp_timestamp.value_or(0));
+  LOCAL_HISTOGRAM_COUNTS_100(UmaPrefix() + ".DecoderThroughput",
+                             frame_enqueued_since_last_vsync_);
+  frame_enqueued_since_last_vsync_ = 0;
 
   // TODO(https://crbug.com/1050755): Improve the accuracy of these fields when
   // we only use RenderWithoutAlgorithm.
@@ -621,32 +806,32 @@ void WebMediaPlayerMSCompositor::SetCurrentFrame(
       *video_frame_compositor_task_runner_, FROM_HERE,
       CrossThreadBindOnce(&WebMediaPlayerMSCompositor::CheckForFrameChanges,
                           WrapRefCounted(this), is_first_frame,
-                          has_frame_size_changed, std::move(new_rotation),
+                          has_frame_size_changed, std::move(new_transform),
                           std::move(new_opacity)));
 }
 
 void WebMediaPlayerMSCompositor::CheckForFrameChanges(
     bool is_first_frame,
     bool has_frame_size_changed,
-    base::Optional<media::VideoRotation> new_frame_rotation,
-    base::Optional<bool> new_frame_opacity) {
+    absl::optional<media::VideoTransformation> new_frame_transform,
+    absl::optional<bool> new_frame_opacity) {
   DCHECK(video_frame_compositor_task_runner_->BelongsToCurrentThread());
 
   if (is_first_frame) {
     PostCrossThreadTask(
         *main_task_runner_, FROM_HERE,
         CrossThreadBindOnce(&WebMediaPlayerMS::OnFirstFrameReceived, player_,
-                            *new_frame_rotation, *new_frame_opacity));
+                            *new_frame_transform, *new_frame_opacity));
     return;
   }
 
-  if (new_frame_rotation.has_value()) {
+  if (new_frame_transform.has_value()) {
     PostCrossThreadTask(
         *main_task_runner_, FROM_HERE,
-        CrossThreadBindOnce(&WebMediaPlayerMS::OnRotationChanged, player_,
-                            *new_frame_rotation));
+        CrossThreadBindOnce(&WebMediaPlayerMS::OnTransformChanged, player_,
+                            *new_frame_transform));
     if (submitter_)
-      submitter_->SetRotation(*new_frame_rotation);
+      submitter_->SetTransform(*new_frame_transform);
   }
   if (new_frame_opacity.has_value()) {
     PostCrossThreadTask(*main_task_runner_, FROM_HERE,
@@ -657,10 +842,10 @@ void WebMediaPlayerMSCompositor::CheckForFrameChanges(
     PostCrossThreadTask(
         *main_task_runner_, FROM_HERE,
         CrossThreadBindOnce(&WebMediaPlayerMS::TriggerResize, player_));
+    PostCrossThreadTask(
+        *main_task_runner_, FROM_HERE,
+        CrossThreadBindOnce(&WebMediaPlayerMS::ResetCanvasCache, player_));
   }
-  PostCrossThreadTask(
-      *main_task_runner_, FROM_HERE,
-      CrossThreadBindOnce(&WebMediaPlayerMS::ResetCanvasCache, player_));
 }
 
 void WebMediaPlayerMSCompositor::StartRenderingInternal() {
@@ -701,7 +886,7 @@ void WebMediaPlayerMSCompositor::ReplaceCurrentFrameWithACopyInternal() {
   scoped_refptr<media::VideoFrame> current_frame_ref;
   {
     base::AutoLock auto_lock(current_frame_lock_);
-    if (!current_frame_ || !player_)
+    if (!current_frame_ || !player_ || current_frame_is_copy_)
       return;
     current_frame_ref = current_frame_;
   }
@@ -715,8 +900,10 @@ void WebMediaPlayerMSCompositor::ReplaceCurrentFrameWithACopyInternal() {
   // |current_frame_| hasn't been changed.
   {
     base::AutoLock auto_lock(current_frame_lock_);
-    if (current_frame_ == current_frame_ref)
+    if (current_frame_ == current_frame_ref) {
       current_frame_ = std::move(copied_frame);
+      current_frame_is_copy_ = true;
+    }
   }
 }
 
@@ -728,11 +915,11 @@ void WebMediaPlayerMSCompositor::SetAlgorithmEnabledForTesting(
   }
 
   if (!rendering_frame_buffer_) {
-    rendering_frame_buffer_.reset(new media::VideoRendererAlgorithm(
+    rendering_frame_buffer_ = std::make_unique<VideoRendererAlgorithmWrapper>(
         WTF::BindRepeating(
             &WebMediaPlayerMSCompositor::MapTimestampsToRenderTimeTicks,
             WTF::Unretained(this)),
-        &media_log_));
+        &media_log_);
   }
 }
 
@@ -758,6 +945,9 @@ WebMediaPlayerMSCompositor::GetLastPresentedFrameMetadata() {
     frame_metadata->average_frame_duration = last_preferred_render_interval_;
     frame_metadata->rendering_interval = last_render_length_;
   }
+
+  if (base::FeatureList::IsEnabled(media::kKeepRvfcFrameAlive))
+    frame_metadata->frame = last_frame;
 
   frame_metadata->width = last_frame->visible_rect().width();
   frame_metadata->height = last_frame->visible_rect().height();

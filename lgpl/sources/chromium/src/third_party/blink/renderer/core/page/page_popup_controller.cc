@@ -32,6 +32,7 @@
 
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/strings/grit/blink_strings.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/page_popup.h"
 #include "third_party/blink/renderer/core/page/page_popup_client.h"
@@ -48,7 +49,7 @@ PagePopupController* PagePopupController::From(Page& page) {
 PagePopupController::PagePopupController(Page& page,
                                          PagePopup& popup,
                                          PagePopupClient* client)
-    : popup_(popup), popup_client_(client) {
+    : Supplement(page), popup_(popup), popup_client_(client) {
   DCHECK(client);
   ProvideTo(page, this);
 }
@@ -111,7 +112,7 @@ void PagePopupController::ClearPagePopupClient() {
 }
 
 void PagePopupController::setWindowRect(int x, int y, int width, int height) {
-  popup_.SetWindowRect(IntRect(x, y, width, height));
+  popup_.SetWindowRect(gfx::Rect(x, y, width, height));
 }
 
 void PagePopupController::Trace(Visitor* visitor) const {

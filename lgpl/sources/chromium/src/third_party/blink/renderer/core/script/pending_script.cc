@@ -25,17 +25,26 @@
 
 #include "third_party/blink/renderer/core/script/pending_script.h"
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/script/script_type.mojom-shared.h"
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_parser_timing.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/loader/render_blocking_resource_manager.h"
 #include "third_party/blink/renderer/core/script/ignore_destructive_write_count_incrementer.h"
 #include "third_party/blink/renderer/core/script/script_element_base.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/task_attribution_tracker.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
+
+#if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
+#include "third_party/blink/renderer/core/frame/script_tracker.h"
+#endif
 
 namespace blink {
 
@@ -78,6 +87,9 @@ void PendingScript::Dispose() {
 
   DisposeInternal();
   element_ = nullptr;
+#if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
+  generating_script_info_ = nullptr;
+#endif
 }
 
 void PendingScript::WatchForLoad(PendingScriptClient* client) {
@@ -128,7 +140,7 @@ void PendingScript::MarkParserBlockingLoadStartTime() {
 }
 
 // <specdef href="https://html.spec.whatwg.org/C/#execute-the-script-block">
-void PendingScript::ExecuteScriptBlock(const KURL& document_url) {
+void PendingScript::ExecuteScriptBlock() {
   TRACE_EVENT0("blink", "PendingScript::ExecuteScriptBlock");
   ExecutionContext* context = element_->GetExecutionContext();
   if (!context) {
@@ -136,7 +148,8 @@ void PendingScript::ExecuteScriptBlock(const KURL& document_url) {
     return;
   }
 
-  if (!To<LocalDOMWindow>(context)->GetFrame()) {
+  LocalFrame* frame = To<LocalDOMWindow>(context)->GetFrame();
+  if (!frame) {
     Dispose();
     return;
   }
@@ -154,8 +167,22 @@ void PendingScript::ExecuteScriptBlock(const KURL& document_url) {
     return;
   }
 
-  Script* script = GetSource(document_url);
+  std::unique_ptr<scheduler::TaskAttributionTracker::TaskScope>
+      task_attribution_scope;
+  if (ScriptState* script_state = ToScriptStateForMainWorld(frame)) {
+    DCHECK(ThreadScheduler::Current());
+    if (auto* tracker =
+            ThreadScheduler::Current()->GetTaskAttributionTracker()) {
+      task_attribution_scope =
+          tracker->CreateTaskScope(script_state, absl::nullopt);
+    }
+  }
 
+  Script* script = GetSource();
+
+#if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
+  const ScriptInfo* generating_script_info = generating_script_info_;
+#endif
   const bool was_canceled = WasCanceled();
   const bool is_external = IsExternal();
   const bool created_during_document_write = WasCreatedDuringDocumentWrite();
@@ -167,9 +194,13 @@ void PendingScript::ExecuteScriptBlock(const KURL& document_url) {
 
   // ExecuteScriptBlockInternal() is split just in order to prevent accidential
   // access to |this| after Dispose().
-  ExecuteScriptBlockInternal(
-      script, element, was_canceled, is_external, created_during_document_write,
-      parser_blocking_load_start_time, is_controlled_by_script_runner);
+  ExecuteScriptBlockInternal(script, element, was_canceled, is_external,
+                             created_during_document_write,
+                             parser_blocking_load_start_time,
+#if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
+                             generating_script_info,
+#endif
+                             is_controlled_by_script_runner);
 }
 
 // <specdef href="https://html.spec.whatwg.org/C/#execute-the-script-block">
@@ -180,10 +211,19 @@ void PendingScript::ExecuteScriptBlockInternal(
     bool is_external,
     bool created_during_document_write,
     base::TimeTicks parser_blocking_load_start_time,
+#if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
+    const ScriptInfo* generating_script_info,
+#endif
     bool is_controlled_by_script_runner) {
   Document& element_document = element->GetDocument();
   Document* context_document =
       To<LocalDOMWindow>(element_document.GetExecutionContext())->document();
+
+  // Unblock rendering on scriptElement.
+  if (element_document.GetRenderBlockingResourceManager()) {
+    element_document.GetRenderBlockingResourceManager()->RemovePendingScript(
+        *element);
+  }
 
   // <spec step="2">If the script's script is null, fire an event named error at
   // the element, and return.</spec>
@@ -224,6 +264,16 @@ void PendingScript::ExecuteScriptBlockInternal(
     IgnoreDestructiveWriteCountIncrementer incrementer(
         needs_increment ? context_document : nullptr);
 
+#if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
+    // Push information about any 'generating' script onto the script tracker
+    // dependency stack.
+    absl::optional<GeneratingScriptScope> generating_script_scope;
+    if (generating_script_info) {
+      generating_script_scope.emplace(context_document->GetFrame(),
+                                      *generating_script_info);
+    }
+#endif  // BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
+
     // <spec step="4.A.1">Let old script element be the value to which the
     // script element's node document's currentScript object was most recently
     // set.</spec>
@@ -246,7 +296,7 @@ void PendingScript::ExecuteScriptBlockInternal(
     // <spec step="4.B.1">Assert: The script element's node document's
     // currentScript attribute is null.</spec>
     ScriptElementBase* current_script = nullptr;
-    if (script->GetScriptType() == mojom::ScriptType::kClassic)
+    if (script->GetScriptType() == mojom::blink::ScriptType::kClassic)
       current_script = element;
     context_document->PushCurrentScript(current_script);
 
@@ -261,8 +311,7 @@ void PendingScript::ExecuteScriptBlockInternal(
     //
     // <spec step="4.B.2">Run the module script given by the script's
     // script.</spec>
-    script->RunScript(context_document->GetFrame(),
-                      element_document.GetSecurityOrigin());
+    script->RunScript(context_document->domWindow());
 
     // <spec step="4.A.4">Set the script element's node document's currentScript
     // attribute to old script element.</spec>
@@ -293,6 +342,9 @@ void PendingScript::ExecuteScriptBlockInternal(
 
 void PendingScript::Trace(Visitor* visitor) const {
   visitor->Trace(element_);
+#if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
+  visitor->Trace(generating_script_info_);
+#endif
   visitor->Trace(client_);
   visitor->Trace(original_execution_context_);
   visitor->Trace(original_element_document_);
@@ -313,6 +365,7 @@ bool PendingScript::IsControlledByScriptRunner() const {
 
     case ScriptSchedulingType::kInOrder:
     case ScriptSchedulingType::kAsync:
+    case ScriptSchedulingType::kForceInOrder:
       return true;
   }
   NOTREACHED();

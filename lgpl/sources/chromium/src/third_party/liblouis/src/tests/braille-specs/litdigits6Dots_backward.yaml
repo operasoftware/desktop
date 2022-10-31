@@ -2,36 +2,33 @@ display: unicode-without-blank.dis
 
 # Tests for tables that use literary 6 dots notation for numbers, e.g. [⠼⠁, 1]
 table:
-  locale: en
+  language: en
   grade: 1
   system: ueb
   __assert-match: en-ueb-g1.ctb
 table:
-  locale: en-US
+  language: en
+  region: en-US
   grade: 1
   __assert-match: en-us-g1.ctb
 table:
-  locale: fi
+  language: fi
   type: literary
   __assert-match: fi.utb
 table:
-  locale: nl
+  language: nl
   grade: 0
   __assert-match: nl.tbl # nl-NL-g0.utb
 table:
-  locale: nl-BE
-  grade: 0
-  __assert-match: nl_BE.tbl # nl-BE-g0.utb
-table:
-  locale: pl
-  grade: 1
+  language: pl
+  type: literary
   __assert-match: pl.tbl # Pl-Pl-g1.utb
 table:
-  locale: sr
+  language: sr
   grade: 1
   __assert-match: sr.tbl # sr-g1.ctb
 table:
-  locale: sv
+  language: sv
   grade: 1
   __assert-match: sv.tbl # Se-Se-g1.utb
 flags: {testmode: backward}
@@ -46,7 +43,7 @@ tests:
 # LV uses different letter definitions,
 # so run separately.
 table:
-  locale: lv
+  language: lv
   grade: 1
   __assert-match: lv.tbl # Lv-Lv-g1.utb
 flags: {testmode: backward}
@@ -61,7 +58,7 @@ tests:
 # pt-pt-g1.utb passes digits test, but fails
 # the small letters test.
 table:
-  locale: pt
+  language: pt
   grade: 1
   __assert-match: pt-pt-g1.utb
 flags: {testmode: backward}
@@ -69,8 +66,6 @@ tests:
   - - Lowercase letters
     - ⠁ ⠃ ⠉ ⠙ ⠑ ⠋ ⠛ ⠓ ⠊ ⠚ ⠅ ⠇ ⠍ ⠝ ⠕ ⠏ ⠟ ⠗ ⠎ ⠞ ⠥ ⠧ ⠺ ⠭ ⠽ ⠵
     - a b c d e f g h i j k l m n o p q r s t u v w x y z
-    - xfail: true
-    # Actual output: 'a b c d e f g h i j k l m n > p q r s t u v w x y z'
   - - Single digits
     - ⠼⠁ ⠼⠃ ⠼⠉ ⠼⠙ ⠼⠑ ⠼⠋ ⠼⠛ ⠼⠓ ⠼⠊ ⠼⠚
     - 1 2 3 4 5 6 7 8 9 0

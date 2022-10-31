@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -59,6 +60,8 @@ class SuffixTree {
   SuffixTree(const String& text, unsigned depth) : depth_(depth), leaf_(true) {
     Build(text);
   }
+  SuffixTree(const SuffixTree&) = delete;
+  SuffixTree& operator=(const SuffixTree&) = delete;
 
   bool MightContain(const String& query) {
     Node* current = &root_;
@@ -78,6 +81,8 @@ class SuffixTree {
 
    public:
     Node(bool is_leaf = false) : is_leaf_(is_leaf) {}
+    Node(const Node&) = delete;
+    Node& operator=(const Node&) = delete;
 
     ~Node() {
       for (const auto& pair : children_) {
@@ -110,8 +115,6 @@ class SuffixTree {
     // TODO(tsepez): convert to base::flat_map when allowed in blink.
     Vector<std::pair<int, Node*>> children_;
     const bool is_leaf_;
-
-    DISALLOW_COPY_AND_ASSIGN(Node);
   };
 
   void Build(const String& text) {
@@ -135,8 +138,6 @@ class SuffixTree {
   // (there can be a lot of these), we alias all the leaves to this "static"
   // leaf node.
   Node leaf_;
-
-  DISALLOW_COPY_AND_ASSIGN(SuffixTree);
 };
 
 }  // namespace blink

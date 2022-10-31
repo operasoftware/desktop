@@ -5,14 +5,20 @@
 #include "third_party/blink/renderer/core/input/pointer_event_manager.h"
 
 #include <limits>
+#include <memory>
 
+#include "base/test/scoped_feature_list.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
+#include "third_party/blink/renderer/core/pointer_type_names.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "ui/base/ui_base_features.h"
 
 namespace blink {
 
@@ -20,23 +26,29 @@ namespace {
 class CheckPointerEventListenerCallback final : public NativeEventListener {
  public:
   void Invoke(ExecutionContext*, Event* event) override {
-    const String pointer_type = ((PointerEvent*)event)->pointerType();
-    if (pointer_type == "mouse")
-      mouse_event_received_count_++;
-    else if (pointer_type == "touch")
-      touch_event_received_count_++;
-    else if (pointer_type == "pen")
-      pen_event_received_count_++;
+    num_events_received_++;
+
+    const String pointer_type =
+        static_cast<PointerEvent*>(event)->pointerType();
+    if (pointer_type == pointer_type_names::kMouse)
+      num_type_mouse_received_++;
+    else if (pointer_type == pointer_type_names::kTouch)
+      num_type_touch_received_++;
+    else if (pointer_type == pointer_type_names::kPen)
+      num_type_pen_received_++;
   }
 
-  int mouseEventCount() const { return mouse_event_received_count_; }
-  int touchEventCount() const { return touch_event_received_count_; }
-  int penEventCount() const { return pen_event_received_count_; }
+  int numEventsReceived() const { return num_events_received_; }
+
+  int numTypeMouseReceived() const { return num_type_mouse_received_; }
+  int numTypeTouchReceived() const { return num_type_touch_received_; }
+  int numTypePenReceived() const { return num_type_pen_received_; }
 
  private:
-  int mouse_event_received_count_ = 0;
-  int touch_event_received_count_ = 0;
-  int pen_event_received_count_ = 0;
+  int num_events_received_ = 0;
+  int num_type_mouse_received_ = 0;
+  int num_type_touch_received_ = 0;
+  int num_type_pen_received_ = 0;
 };
 
 class PointerEventCoordinateListenerCallback final
@@ -47,7 +59,7 @@ class PointerEventCoordinateListenerCallback final
   }
 
   void Invoke(ExecutionContext*, Event* event) override {
-    const PointerEvent* pointer_event = (PointerEvent*)event;
+    const PointerEvent* pointer_event = static_cast<PointerEvent*>(event);
     last_client_x_ = pointer_event->clientX();
     last_client_y_ = pointer_event->clientY();
     last_page_x_ = pointer_event->pageX();
@@ -79,22 +91,25 @@ class PointerEventManagerTest : public SimTest {
   EventHandler& GetEventHandler() {
     return GetDocument().GetFrame()->GetEventHandler();
   }
-  WebPointerEvent CreateTestPointerEvent(
+  std::unique_ptr<WebPointerEvent> CreateTestPointerEvent(
       WebInputEvent::Type type,
       WebPointerProperties::PointerType pointer_type,
-      gfx::PointF position_in_widget = gfx::PointF(100, 100),
-      gfx::PointF position_in_screen = gfx::PointF(100, 100),
-      int movement_x = 0,
-      int movement_y = 0,
+      PointerId id = 1) {
+    return CreateTestPointerEvent(type, pointer_type, id, gfx::PointF(100, 100),
+                                  gfx::PointF(100, 100), 0, 0, 1, 1);
+  }
+  std::unique_ptr<WebPointerEvent> CreateTestPointerEvent(
+      WebInputEvent::Type type,
+      WebPointerProperties::PointerType pointer_type,
+      gfx::PointF position_in_widget,
+      gfx::PointF position_in_screen,
+      int movement_x,
+      int movement_y,
       float width = 1,
       float height = 1) {
-    WebPointerEvent event(
-        type,
-        WebPointerProperties(
-            1, pointer_type, WebPointerProperties::Button::kLeft,
-            position_in_widget, position_in_screen, movement_x, movement_y),
-        width, height);
-    return event;
+    return CreateTestPointerEvent(type, pointer_type, 1, position_in_widget,
+                                  position_in_screen, movement_x, movement_y,
+                                  width, height);
   }
   WebMouseEvent CreateTestMouseEvent(WebInputEvent::Type type,
                                      const gfx::PointF& coordinates) {
@@ -105,10 +120,29 @@ class PointerEventManagerTest : public SimTest {
     event.SetFrameScale(1);
     return event;
   }
+
+ private:
+  std::unique_ptr<WebPointerEvent> CreateTestPointerEvent(
+      WebInputEvent::Type type,
+      WebPointerProperties::PointerType pointer_type,
+      PointerId id,
+      gfx::PointF position_in_widget,
+      gfx::PointF position_in_screen,
+      int movement_x,
+      int movement_y,
+      float width,
+      float height) {
+    return std::make_unique<WebPointerEvent>(
+        type,
+        WebPointerProperties(
+            id, pointer_type, WebPointerProperties::Button::kLeft,
+            position_in_widget, position_in_screen, movement_x, movement_y),
+        width, height);
+  }
 };
 
 TEST_F(PointerEventManagerTest, HasPointerCapture) {
-  WebView().MainFrameWidget()->Resize(WebSize(400, 400));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(
@@ -150,7 +184,7 @@ TEST_F(PointerEventManagerTest, HasPointerCapture) {
 }
 
 TEST_F(PointerEventManagerTest, PointerCancelsOfAllTypes) {
-  WebView().MainFrameWidget()->Resize(WebSize(400, 400));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(
@@ -163,53 +197,90 @@ TEST_F(PointerEventManagerTest, PointerCancelsOfAllTypes) {
 
   WebView().MainFrameWidget()->HandleInputEvent(WebCoalescedInputEvent(
       CreateTestPointerEvent(WebInputEvent::Type::kPointerDown,
-                             WebPointerProperties::PointerType::kTouch)
-          .Clone(),
+                             WebPointerProperties::PointerType::kTouch),
       {}, {}, ui::LatencyInfo()));
 
   WebView().MainFrameWidget()->HandleInputEvent(WebCoalescedInputEvent(
       CreateTestPointerEvent(WebInputEvent::Type::kPointerDown,
-                             WebPointerProperties::PointerType::kPen)
-          .Clone(),
+                             WebPointerProperties::PointerType::kPen),
       {}, {}, ui::LatencyInfo()));
 
   GetEventHandler().HandleMousePressEvent(CreateTestMouseEvent(
       WebInputEvent::Type::kMouseDown, gfx::PointF(100, 100)));
 
-  ASSERT_EQ(callback->mouseEventCount(), 0);
-  ASSERT_EQ(callback->touchEventCount(), 0);
-  ASSERT_EQ(callback->penEventCount(), 0);
+  ASSERT_EQ(callback->numTypeMouseReceived(), 0);
+  ASSERT_EQ(callback->numTypeTouchReceived(), 0);
+  ASSERT_EQ(callback->numTypePenReceived(), 0);
 
   WebView().MainFrameWidget()->HandleInputEvent(WebCoalescedInputEvent(
       CreateTestPointerEvent(WebInputEvent::Type::kPointerCausedUaAction,
-                             WebPointerProperties::PointerType::kPen)
-          .Clone(),
+                             WebPointerProperties::PointerType::kPen),
       {}, {}, ui::LatencyInfo()));
-  ASSERT_EQ(callback->mouseEventCount(), 0);
-  ASSERT_EQ(callback->touchEventCount(), 1);
-  ASSERT_EQ(callback->penEventCount(), 1);
+  ASSERT_EQ(callback->numTypeMouseReceived(), 0);
+  ASSERT_EQ(callback->numTypeTouchReceived(), 1);
+  ASSERT_EQ(callback->numTypePenReceived(), 1);
 
   WebView().MainFrameWidget()->HandleInputEvent(WebCoalescedInputEvent(
       CreateTestPointerEvent(WebInputEvent::Type::kPointerCausedUaAction,
-                             WebPointerProperties::PointerType::kTouch)
-          .Clone(),
+                             WebPointerProperties::PointerType::kTouch),
       {}, {}, ui::LatencyInfo()));
-  ASSERT_EQ(callback->mouseEventCount(), 0);
-  ASSERT_EQ(callback->touchEventCount(), 1);
-  ASSERT_EQ(callback->penEventCount(), 1);
+  ASSERT_EQ(callback->numTypeMouseReceived(), 0);
+  ASSERT_EQ(callback->numTypeTouchReceived(), 1);
+  ASSERT_EQ(callback->numTypePenReceived(), 1);
 
   GetEventHandler().HandleMouseMoveEvent(
       CreateTestMouseEvent(WebInputEvent::Type::kMouseMove,
                            gfx::PointF(200, 200)),
       Vector<WebMouseEvent>(), Vector<WebMouseEvent>());
 
-  ASSERT_EQ(callback->mouseEventCount(), 1);
-  ASSERT_EQ(callback->touchEventCount(), 1);
-  ASSERT_EQ(callback->penEventCount(), 1);
+  ASSERT_EQ(callback->numTypeMouseReceived(), 1);
+  ASSERT_EQ(callback->numTypeTouchReceived(), 1);
+  ASSERT_EQ(callback->numTypePenReceived(), 1);
+}
+
+TEST_F(PointerEventManagerTest, PointerCancelForNonExistentid) {
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      "<body style='padding: 0px; width: 400px; height: 400px;'>"
+      "<div draggable='true' style='width: 150px; height: 150px;'></div>"
+      "</body>");
+  auto* callback = MakeGarbageCollected<CheckPointerEventListenerCallback>();
+  GetDocument().body()->addEventListener(event_type_names::kPointercancel,
+                                         callback);
+
+  WebView().MainFrameWidget()->HandleInputEvent(WebCoalescedInputEvent(
+      CreateTestPointerEvent(WebInputEvent::Type::kPointerCancel,
+                             WebPointerProperties::PointerType::kTouch, 100),
+      {}, {}, ui::LatencyInfo()));
+
+  ASSERT_EQ(callback->numEventsReceived(), 0);
+
+  WebView().MainFrameWidget()->HandleInputEvent(WebCoalescedInputEvent(
+      CreateTestPointerEvent(WebInputEvent::Type::kPointerDown,
+                             WebPointerProperties::PointerType::kTouch, 100),
+      {}, {}, ui::LatencyInfo()));
+
+  ASSERT_EQ(callback->numEventsReceived(), 0);
+
+  WebView().MainFrameWidget()->HandleInputEvent(WebCoalescedInputEvent(
+      CreateTestPointerEvent(WebInputEvent::Type::kPointerCancel,
+                             WebPointerProperties::PointerType::kTouch, 100),
+      {}, {}, ui::LatencyInfo()));
+
+  ASSERT_EQ(callback->numEventsReceived(), 1);
+
+  WebView().MainFrameWidget()->HandleInputEvent(WebCoalescedInputEvent(
+      CreateTestPointerEvent(WebInputEvent::Type::kPointerCancel,
+                             WebPointerProperties::PointerType::kTouch, 200),
+      {}, {}, ui::LatencyInfo()));
+
+  ASSERT_EQ(callback->numEventsReceived(), 1);
 }
 
 TEST_F(PointerEventManagerTest, PointerEventCoordinates) {
-  WebView().MainFrameWidget()->Resize(WebSize(400, 400));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(
@@ -225,8 +296,7 @@ TEST_F(PointerEventManagerTest, PointerEventCoordinates) {
       CreateTestPointerEvent(WebInputEvent::Type::kPointerDown,
                              WebPointerProperties::PointerType::kTouch,
                              gfx::PointF(150, 200), gfx::PointF(100, 50), 10,
-                             10, 16, 24)
-          .Clone(),
+                             10, 16, 24),
       {}, {}, ui::LatencyInfo()));
 
   ASSERT_EQ(callback->last_client_x_, 75);
@@ -242,7 +312,7 @@ TEST_F(PointerEventManagerTest, PointerEventCoordinates) {
 }
 
 TEST_F(PointerEventManagerTest, PointerEventMovements) {
-  WebView().MainFrameWidget()->Resize(WebSize(400, 400));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(
@@ -261,8 +331,7 @@ TEST_F(PointerEventManagerTest, PointerEventMovements) {
         CreateTestPointerEvent(WebInputEvent::Type::kPointerMove,
                                WebPointerProperties::PointerType::kMouse,
                                gfx::PointF(150, 210), gfx::PointF(100, 50), 10,
-                               10)
-            .Clone(),
+                               10),
         {}, {}, ui::LatencyInfo()));
     // The first pointermove event has movement_x/y 0.
     ASSERT_EQ(callback->last_screen_x_, 100);
@@ -274,8 +343,7 @@ TEST_F(PointerEventManagerTest, PointerEventMovements) {
         CreateTestPointerEvent(WebInputEvent::Type::kPointerMove,
                                WebPointerProperties::PointerType::kMouse,
                                gfx::PointF(150, 200), gfx::PointF(132, 29), 10,
-                               10)
-            .Clone(),
+                               10),
         {}, {}, ui::LatencyInfo()));
     // pointermove event movement = event.screenX/Y - last_event.screenX/Y.
     ASSERT_EQ(callback->last_screen_x_, 132);
@@ -287,8 +355,7 @@ TEST_F(PointerEventManagerTest, PointerEventMovements) {
         CreateTestPointerEvent(WebInputEvent::Type::kPointerMove,
                                WebPointerProperties::PointerType::kMouse,
                                gfx::PointF(150, 210), gfx::PointF(113.8, 32.7),
-                               10, 10)
-            .Clone(),
+                               10, 10),
         {}, {}, ui::LatencyInfo()));
     // fractional screen coordinates result in fractional movement.
     ASSERT_FLOAT_EQ(callback->last_screen_x_, 113.8);
@@ -306,8 +373,7 @@ TEST_F(PointerEventManagerTest, PointerEventMovements) {
         CreateTestPointerEvent(WebInputEvent::Type::kPointerMove,
                                WebPointerProperties::PointerType::kMouse,
                                gfx::PointF(150, 210), gfx::PointF(100, 16.25),
-                               1024, -8765)
-            .Clone(),
+                               1024, -8765),
         {}, {}, ui::LatencyInfo()));
     ASSERT_EQ(callback->last_screen_x_, 100);
     ASSERT_EQ(callback->last_screen_y_, 16.25);
@@ -318,7 +384,7 @@ TEST_F(PointerEventManagerTest, PointerEventMovements) {
 
 // Test that we are not losing fractions when truncating movements.
 TEST_F(PointerEventManagerTest, PointerEventSmallFractionMovements) {
-  WebView().MainFrameWidget()->Resize(WebSize(400, 400));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(
@@ -332,36 +398,37 @@ TEST_F(PointerEventManagerTest, PointerEventSmallFractionMovements) {
   // Turn on the flag for test.
   ScopedConsolidatedMovementXYForTest scoped_feature(true);
 
-  WebPointerEvent pointer_event = CreateTestPointerEvent(
+  std::unique_ptr<WebPointerEvent> pointer_event = CreateTestPointerEvent(
       WebInputEvent::Type::kPointerMove,
       WebPointerProperties::PointerType::kMouse, gfx::PointF(150, 210),
       gfx::PointF(113.8, 32.7), 0, 0);
+  ASSERT_NE(nullptr, pointer_event);
   WebView().MainFrameWidget()->HandleInputEvent(
-      WebCoalescedInputEvent(pointer_event, ui::LatencyInfo()));
+      WebCoalescedInputEvent(pointer_event->Clone(), ui::LatencyInfo()));
   ASSERT_FLOAT_EQ(callback->last_movement_x_, 0);
   ASSERT_FLOAT_EQ(callback->last_movement_y_, 0);
 
-  pointer_event.SetPositionInScreen(113.4, 32.9);
+  pointer_event->SetPositionInScreen(113.4, 32.9);
   WebView().MainFrameWidget()->HandleInputEvent(
-      WebCoalescedInputEvent(pointer_event, ui::LatencyInfo()));
+      WebCoalescedInputEvent(pointer_event->Clone(), ui::LatencyInfo()));
   ASSERT_FLOAT_EQ(callback->last_movement_x_, 0);
   ASSERT_FLOAT_EQ(callback->last_movement_y_, 0);
 
-  pointer_event.SetPositionInScreen(113.0, 33.1);
+  pointer_event->SetPositionInScreen(113.0, 33.1);
   WebView().MainFrameWidget()->HandleInputEvent(
-      WebCoalescedInputEvent(pointer_event, ui::LatencyInfo()));
+      WebCoalescedInputEvent(pointer_event->Clone(), ui::LatencyInfo()));
   ASSERT_FLOAT_EQ(callback->last_movement_x_, 0);
   ASSERT_FLOAT_EQ(callback->last_movement_y_, 1);
 
-  pointer_event.SetPositionInScreen(112.6, 33.3);
+  pointer_event->SetPositionInScreen(112.6, 33.3);
   WebView().MainFrameWidget()->HandleInputEvent(
-      WebCoalescedInputEvent(pointer_event, ui::LatencyInfo()));
+      WebCoalescedInputEvent(std::move(pointer_event), ui::LatencyInfo()));
   ASSERT_FLOAT_EQ(callback->last_movement_x_, -1);
   ASSERT_FLOAT_EQ(callback->last_movement_y_, 0);
 }
 
 TEST_F(PointerEventManagerTest, PointerRawUpdateMovements) {
-  WebView().MainFrameWidget()->Resize(WebSize(400, 400));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(
@@ -381,8 +448,7 @@ TEST_F(PointerEventManagerTest, PointerRawUpdateMovements) {
       CreateTestPointerEvent(WebInputEvent::Type::kPointerRawUpdate,
                              WebPointerProperties::PointerType::kMouse,
                              gfx::PointF(150, 210), gfx::PointF(100, 50), 10,
-                             10)
-          .Clone(),
+                             10),
       {}, {}, ui::LatencyInfo()));
   // The first pointerrawupdate event has movement_x/y 0.
   ASSERT_EQ(callback->last_screen_x_, 100);
@@ -394,8 +460,7 @@ TEST_F(PointerEventManagerTest, PointerRawUpdateMovements) {
       CreateTestPointerEvent(WebInputEvent::Type::kPointerRawUpdate,
                              WebPointerProperties::PointerType::kMouse,
                              gfx::PointF(150, 200), gfx::PointF(132, 29), 10,
-                             10)
-          .Clone(),
+                             10),
       {}, {}, ui::LatencyInfo()));
   // pointerrawupdate event movement = event.screenX/Y - last_event.screenX/Y.
   ASSERT_EQ(callback->last_screen_x_, 132);
@@ -407,8 +472,7 @@ TEST_F(PointerEventManagerTest, PointerRawUpdateMovements) {
       CreateTestPointerEvent(WebInputEvent::Type::kPointerMove,
                              WebPointerProperties::PointerType::kMouse,
                              gfx::PointF(150, 200), gfx::PointF(144, 30), 10,
-                             10)
-          .Clone(),
+                             10),
       {}, {}, ui::LatencyInfo()));
   // First pointermove, have 0 movements.
   ASSERT_EQ(callback->last_screen_x_, 144);
@@ -420,8 +484,7 @@ TEST_F(PointerEventManagerTest, PointerRawUpdateMovements) {
       CreateTestPointerEvent(WebInputEvent::Type::kPointerRawUpdate,
                              WebPointerProperties::PointerType::kMouse,
                              gfx::PointF(150, 200), gfx::PointF(142, 32), 10,
-                             10)
-          .Clone(),
+                             10),
       {}, {}, ui::LatencyInfo()));
   // pointerrawupdate event's movement is independent from pointermoves.
   ASSERT_EQ(callback->last_screen_x_, 142);
@@ -430,8 +493,68 @@ TEST_F(PointerEventManagerTest, PointerRawUpdateMovements) {
   ASSERT_EQ(callback->last_movement_y_, 3);
 }
 
+TEST_F(PointerEventManagerTest, PointerRawUpdateWithRelativeMotionEvent) {
+  ScopedConsolidatedMovementXYForTest scoped_feature(true);
+
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      "<body style='padding:0px; width:400px; height:400px;'></body>");
+
+  PointerEventCoordinateListenerCallback* callback =
+      PointerEventCoordinateListenerCallback::Create();
+  GetDocument().body()->addEventListener(event_type_names::kPointerrawupdate,
+                                         callback);
+
+  // Initial movement_x/y are both 0.
+  WebView().MainFrameWidget()->HandleInputEvent(WebCoalescedInputEvent(
+      CreateTestPointerEvent(WebInputEvent::Type::kPointerRawUpdate,
+                             WebPointerProperties::PointerType::kMouse,
+                             gfx::PointF(350, 350), gfx::PointF(350, 350), 10,
+                             10),
+      {}, {}, ui::LatencyInfo()));
+  ASSERT_EQ(callback->last_movement_x_, 0);
+  ASSERT_EQ(callback->last_movement_y_, 0);
+
+  // After moving the mouse by (+40,+20), movement_x/y have same deltas.
+  WebView().MainFrameWidget()->HandleInputEvent(WebCoalescedInputEvent(
+      CreateTestPointerEvent(WebInputEvent::Type::kPointerRawUpdate,
+                             WebPointerProperties::PointerType::kMouse,
+                             gfx::PointF(390, 370), gfx::PointF(390, 370), 10,
+                             10),
+      {}, {}, ui::LatencyInfo()));
+  ASSERT_EQ(callback->last_movement_x_, 40);
+  ASSERT_EQ(callback->last_movement_y_, 20);
+
+  // A relative motion event to pull the mouse pointer back towards the center
+  // is not exposed to JS, so the event handler is not called and the cached
+  // coordinates remain unchanged.
+  std::unique_ptr<WebInputEvent> synthetic_event = CreateTestPointerEvent(
+      WebInputEvent::Type::kPointerRawUpdate,
+      WebPointerProperties::PointerType::kMouse, gfx::PointF(200, 200),
+      gfx::PointF(200, 200), 10, 10);
+  synthetic_event->SetModifiers(WebInputEvent::Modifiers::kRelativeMotionEvent);
+  WebView().MainFrameWidget()->HandleInputEvent(WebCoalescedInputEvent(
+      std::move(synthetic_event), {}, {}, ui::LatencyInfo()));
+  ASSERT_EQ(callback->last_movement_x_, 40);
+  ASSERT_EQ(callback->last_movement_y_, 20);
+
+  // After moving the mouse by (+15,-10) from the last unexposed event,
+  // movement_x/y have deltas from the last event, not the deltas from the last
+  // exposed event.
+  WebView().MainFrameWidget()->HandleInputEvent(WebCoalescedInputEvent(
+      CreateTestPointerEvent(WebInputEvent::Type::kPointerRawUpdate,
+                             WebPointerProperties::PointerType::kMouse,
+                             gfx::PointF(215, 190), gfx::PointF(215, 190), 10,
+                             10),
+      {}, {}, ui::LatencyInfo()));
+  ASSERT_EQ(callback->last_movement_x_, 15);
+  ASSERT_EQ(callback->last_movement_y_, -10);
+}
+
 TEST_F(PointerEventManagerTest, PointerUnadjustedMovement) {
-  WebView().MainFrameWidget()->Resize(WebSize(400, 400));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
   request.Complete(
@@ -442,13 +565,14 @@ TEST_F(PointerEventManagerTest, PointerUnadjustedMovement) {
   GetDocument().body()->addEventListener(event_type_names::kPointermove,
                                          callback);
 
-  WebPointerEvent event = CreateTestPointerEvent(
+  std::unique_ptr<WebPointerEvent> event = CreateTestPointerEvent(
       WebInputEvent::Type::kPointerMove,
       WebPointerProperties::PointerType::kMouse, gfx::PointF(150, 210),
       gfx::PointF(100, 50), 120, -321);
-  event.is_raw_movement_event = true;
+  ASSERT_NE(nullptr, event);
+  event->is_raw_movement_event = true;
   WebView().MainFrameWidget()->HandleInputEvent(
-      WebCoalescedInputEvent(event.Clone(), {}, {}, ui::LatencyInfo()));
+      WebCoalescedInputEvent(std::move(event), {}, {}, ui::LatencyInfo()));
 
   // If is_raw_movement_event is true, PE use the raw movement value from
   // movement_x/y.
@@ -456,6 +580,220 @@ TEST_F(PointerEventManagerTest, PointerUnadjustedMovement) {
   ASSERT_EQ(callback->last_screen_y_, 50);
   ASSERT_EQ(callback->last_movement_x_, 120);
   ASSERT_EQ(callback->last_movement_y_, -321);
+}
+
+using PanAction = blink::mojom::PanAction;
+
+class PanActionWidgetInputHandlerHost
+    : public frame_test_helpers::TestWidgetInputHandlerHost {
+ public:
+  void SetPanAction(PanAction pan_action) override { pan_action_ = pan_action; }
+
+  void ResetPanAction() { pan_action_ = PanAction::kNone; }
+
+  PanAction pan_action() const { return pan_action_; }
+
+ private:
+  PanAction pan_action_ = PanAction::kNone;
+};
+
+class PanActionTrackingWebFrameWidget : public SimWebFrameWidget {
+ public:
+  template <typename... Args>
+  explicit PanActionTrackingWebFrameWidget(Args&&... args)
+      : SimWebFrameWidget(std::forward<Args>(args)...) {}
+
+  // frame_test_helpers::TestWebFrameWidget overrides.
+  frame_test_helpers::TestWidgetInputHandlerHost* GetInputHandlerHost()
+      override {
+    return &input_handler_host_;
+  }
+
+  void ResetPanAction() { input_handler_host_.ResetPanAction(); }
+
+  PanAction LastPanAction() { return input_handler_host_.pan_action(); }
+
+ private:
+  PanActionWidgetInputHandlerHost input_handler_host_;
+};
+
+class PanActionPointerEventTest : public PointerEventManagerTest {
+ public:
+  PanActionPointerEventTest() {
+    feature_list_.InitWithFeatures({blink::features::kStylusWritingToInput},
+                                   {});
+  }
+
+  SimWebFrameWidget* CreateSimWebFrameWidget(
+      base::PassKey<WebLocalFrame> pass_key,
+      CrossVariantMojoAssociatedRemote<
+          mojom::blink::FrameWidgetHostInterfaceBase> frame_widget_host,
+      CrossVariantMojoAssociatedReceiver<mojom::blink::FrameWidgetInterfaceBase>
+          frame_widget,
+      CrossVariantMojoAssociatedRemote<mojom::blink::WidgetHostInterfaceBase>
+          widget_host,
+      CrossVariantMojoAssociatedReceiver<mojom::blink::WidgetInterfaceBase>
+          widget,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      const viz::FrameSinkId& frame_sink_id,
+      bool hidden,
+      bool never_composited,
+      bool is_for_child_local_root,
+      bool is_for_nested_main_frame,
+      bool is_for_scalable_page,
+      SimCompositor* compositor) override {
+    return MakeGarbageCollected<PanActionTrackingWebFrameWidget>(
+        compositor, pass_key, std::move(frame_widget_host),
+        std::move(frame_widget), std::move(widget_host), std::move(widget),
+        std::move(task_runner), frame_sink_id, hidden, never_composited,
+        is_for_child_local_root, is_for_nested_main_frame,
+        is_for_scalable_page);
+  }
+
+ protected:
+  // Sets inner HTML and runs document lifecycle.
+  void SetBodyInnerHTML(const String& body_content) {
+    GetDocument().body()->setInnerHTML(body_content, ASSERT_NO_EXCEPTION);
+    WebView().MainFrameWidget()->UpdateLifecycle(WebLifecycleUpdate::kAll,
+                                                 DocumentUpdateReason::kTest);
+  }
+
+  PanActionTrackingWebFrameWidget* GetWidget() {
+    return static_cast<PanActionTrackingWebFrameWidget*>(
+        WebView().MainFrameWidget());
+  }
+
+  WebMouseEvent CreateTestMouseMoveEvent(
+      WebPointerProperties::PointerType pointer_type,
+      const gfx::PointF& coordinates) {
+    WebMouseEvent event(WebInputEvent::Type::kMouseMove, coordinates,
+                        coordinates, WebPointerProperties::Button::kNoButton,
+                        /* click_count */ 0, /* modifiers */ 0,
+                        WebInputEvent::GetStaticTimeStampForTests());
+    event.pointer_type = pointer_type;
+    return event;
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+TEST_F(PanActionPointerEventTest, PanActionStylusWritable) {
+  ScopedStylusHandwritingForTest stylus_handwriting(true);
+  GetDocument().SetBaseURLOverride(KURL("http://test.com"));
+  SetBodyInnerHTML(R"HTML(
+    <input type=text style='width: 100px; height: 100px;'>
+  )HTML");
+
+  PanActionTrackingWebFrameWidget* widget = GetWidget();
+
+  // Pan action to be stylus writable for contenteditable with pointer as kPen.
+  ASSERT_EQ(widget->LastPanAction(), PanAction::kNone);
+  GetEventHandler().HandleMouseMoveEvent(
+      CreateTestMouseMoveEvent(WebPointerProperties::PointerType::kPen,
+                               gfx::PointF(50, 50)),
+      Vector<WebMouseEvent>(), Vector<WebMouseEvent>());
+  test::RunPendingTasks();
+  ASSERT_EQ(widget->LastPanAction(), PanAction::kStylusWritable);
+
+  // Pan action is not stylus writable when pointer type is kMouse.
+  GetEventHandler().HandleMouseMoveEvent(
+      CreateTestMouseMoveEvent(WebPointerProperties::PointerType::kMouse,
+                               gfx::PointF(50, 50)),
+      Vector<WebMouseEvent>(), Vector<WebMouseEvent>());
+  test::RunPendingTasks();
+  ASSERT_NE(widget->LastPanAction(), PanAction::kStylusWritable);
+
+  // Pan action is stylus writable when pointer type is kEraser.
+  GetEventHandler().HandleMouseMoveEvent(
+      CreateTestMouseMoveEvent(WebPointerProperties::PointerType::kEraser,
+                               gfx::PointF(50, 50)),
+      Vector<WebMouseEvent>(), Vector<WebMouseEvent>());
+  test::RunPendingTasks();
+  ASSERT_EQ(widget->LastPanAction(), PanAction::kStylusWritable);
+}
+
+TEST_F(PanActionPointerEventTest, PanActionMoveCursor) {
+  ScopedStylusHandwritingForTest stylus_handwriting(true);
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeatures({::features::kSwipeToMoveCursor}, {});
+  if (!::features::IsSwipeToMoveCursorEnabled())
+    return;
+
+  GetDocument().SetBaseURLOverride(KURL("http://test.com"));
+  SetBodyInnerHTML(R"HTML(
+    <input type=password style='width: 100px; height: 100px;'>
+  )HTML");
+
+  // Pan action is expected to be kMoveCursorOrScroll for password inputs.
+  PanActionTrackingWebFrameWidget* widget = GetWidget();
+  ASSERT_EQ(widget->LastPanAction(), PanAction::kNone);
+  GetEventHandler().HandleMouseMoveEvent(
+      CreateTestMouseMoveEvent(WebPointerProperties::PointerType::kPen,
+                               gfx::PointF(50, 50)),
+      Vector<WebMouseEvent>(), Vector<WebMouseEvent>());
+  test::RunPendingTasks();
+  ASSERT_EQ(widget->LastPanAction(), PanAction::kMoveCursorOrScroll);
+}
+
+TEST_F(PanActionPointerEventTest, PanActionNoneAndScroll) {
+  ScopedStylusHandwritingForTest stylus_handwriting(true);
+  GetDocument().SetBaseURLOverride(KURL("http://test.com"));
+  SetBodyInnerHTML(R"HTML(
+    <div id='target' style='width: 100px; height: 100px; touch-action: none'/>
+  )HTML");
+
+  PanActionTrackingWebFrameWidget* widget = GetWidget();
+
+  // Pan action set to kNone when touch action does not allow panning.
+  ASSERT_EQ(widget->LastPanAction(), PanAction::kNone);
+  GetEventHandler().HandleMouseMoveEvent(
+      CreateTestMouseMoveEvent(WebPointerProperties::PointerType::kPen,
+                               gfx::PointF(50, 50)),
+      Vector<WebMouseEvent>(), Vector<WebMouseEvent>());
+  test::RunPendingTasks();
+  ASSERT_EQ(widget->LastPanAction(), PanAction::kNone);
+
+  // Pan action to be scroll when element under pointer allows panning but does
+  // not allow both swipe to move cursor and stylus writing.
+  Element* target = GetDocument().getElementById("target");
+  target->setAttribute(html_names::kStyleAttr, "touch-action: pan");
+  widget->UpdateLifecycle(WebLifecycleUpdate::kAll,
+                          DocumentUpdateReason::kTest);
+  GetEventHandler().HandleMouseMoveEvent(
+      CreateTestMouseMoveEvent(WebPointerProperties::PointerType::kPen,
+                               gfx::PointF(50, 50)),
+      Vector<WebMouseEvent>(), Vector<WebMouseEvent>());
+  test::RunPendingTasks();
+  ASSERT_EQ(widget->LastPanAction(), PanAction::kScroll);
+}
+
+TEST_F(PanActionPointerEventTest, PanActionNotSetWhenTouchActive) {
+  ScopedStylusHandwritingForTest stylus_handwriting(true);
+  GetDocument().SetBaseURLOverride(KURL("http://test.com"));
+  SetBodyInnerHTML(R"HTML(
+    <input type=text style='width: 100px; height: 100px;'>
+  )HTML");
+
+  std::unique_ptr<WebPointerEvent> event =
+      CreateTestPointerEvent(WebInputEvent::Type::kPointerDown,
+                             WebPointerProperties::PointerType::kPen,
+                             gfx::PointF(50, 50), gfx::PointF(50, 50), 1, 1);
+  PanActionTrackingWebFrameWidget* widget = GetWidget();
+
+  // Send pointer down before move.
+  widget->HandleInputEvent(
+      WebCoalescedInputEvent(std::move(event), {}, {}, ui::LatencyInfo()));
+  test::RunPendingTasks();
+  ASSERT_EQ(widget->LastPanAction(), PanAction::kNone);
+
+  // Pan action is not updated when touch is active.
+  GetEventHandler().HandleMouseMoveEvent(
+      CreateTestMouseMoveEvent(WebPointerProperties::PointerType::kPen,
+                               gfx::PointF(50, 50)),
+      Vector<WebMouseEvent>(), Vector<WebMouseEvent>());
+  test::RunPendingTasks();
+  ASSERT_EQ(widget->LastPanAction(), PanAction::kNone);
 }
 
 }  // namespace blink

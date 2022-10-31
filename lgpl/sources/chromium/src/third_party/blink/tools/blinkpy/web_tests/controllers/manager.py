@@ -36,11 +36,17 @@ including crash logs and mismatches with expectations.
 The Manager object has a constructor and one main method called run.
 """
 
+import fnmatch
 import json
 import logging
+import os
 import random
+import signal
 import sys
 import time
+import traceback
+
+from six.moves import range
 
 from blinkpy.common import exit_codes
 from blinkpy.common import path_finder
@@ -93,10 +99,10 @@ class Manager(object):
         self._finder = WebTestFinder(self._port, self._options)
         self._path_finder = PathFinder(port.host.filesystem)
 
-        sink = CreateTestResultSink(self._port)
+        self._sink = CreateTestResultSink(self._port)
         self._runner = WebTestRunner(self._options, self._port, self._printer,
                                      self._results_directory,
-                                     self._test_is_slow, sink)
+                                     self._test_is_slow, self._sink)
 
     def run(self, args):
         """Runs the tests and return a RunDetails object with the results."""
@@ -113,12 +119,17 @@ class Manager(object):
                 exit_code=exit_codes.NO_TESTS_EXIT_STATUS)
 
         test_names = self._finder.split_into_chunks(all_test_names)
-
         if self._options.order == 'natural':
             test_names.sort(key=self._port.test_key)
         elif self._options.order == 'random':
             test_names.sort()
             random.Random(self._options.seed).shuffle(test_names)
+        elif self._options.order == 'none':
+            # Restore the test order to user specified order.
+            # base.tests() may change the order as it returns tests in the
+            # real, external/wpt, virtual order.
+            if paths:
+                test_names = self._restore_order(paths, test_names)
 
         if not self._options.no_expectations:
             self._printer.write_update('Parsing expectations ...')
@@ -157,6 +168,17 @@ class Manager(object):
         should_retry_failures = self._options.num_retries > 0
 
         try:
+            if not self._port.host.platform.is_win():
+                _pid = os.getpid()
+                def sighandler(signum, frame):
+                    self._printer.write_update("Received SIGTERM in %d" % os.getpid())
+                    message = ''.join(traceback.format_stack(frame))
+                    self._printer.write_update(message)
+                    if os.getpid() == _pid:
+                        os.killpg(os.getpgrp(), signal.SIGINT)
+                    else:
+                        os.kill(os.getpid(), signal.SIGINT)
+                signal.signal(signal.SIGTERM, sighandler)
             self._start_servers(tests_to_run)
             if self._options.watch:
                 run_results = self._run_test_loop(tests_to_run, tests_to_skip)
@@ -165,6 +187,7 @@ class Manager(object):
                                                   should_retry_failures)
             initial_results, all_retry_results = run_results
         finally:
+            _log.info("Finally stop servers and clean up")
             self._stop_servers()
             self._clean_up_run()
 
@@ -188,6 +211,8 @@ class Manager(object):
             initial_results,
             all_retry_results,
             only_include_failing=True)
+        run_histories = test_run_results.test_run_histories(
+            self._port, self._expectations, initial_results, all_retry_results)
 
         exit_code = summarized_failing_results['num_regressions']
         if exit_code > exit_codes.MAX_FAILURES_EXIT_STATUS:
@@ -198,7 +223,7 @@ class Manager(object):
         if not self._options.dry_run:
             self._write_json_files(summarized_full_results,
                                    summarized_failing_results, initial_results,
-                                   running_all_tests)
+                                   running_all_tests, run_histories)
 
             self._upload_json_files()
 
@@ -248,8 +273,8 @@ class Manager(object):
 
     def _run_test_once(self, tests_to_run, tests_to_skip,
                        should_retry_failures):
-        num_workers = self._port.num_workers(
-            int(self._options.child_processes))
+        num_workers = int(
+            self._port.num_workers(int(self._options.child_processes)))
 
         initial_results = self._run_tests(
             tests_to_run, tests_to_skip, self._options.repeat_each,
@@ -263,7 +288,7 @@ class Manager(object):
         tests_to_retry = self._tests_to_retry(initial_results)
         all_retry_results = []
         if should_retry_failures and tests_to_retry:
-            for retry_attempt in xrange(1, self._options.num_retries + 1):
+            for retry_attempt in range(1, self._options.num_retries + 1):
                 if not tests_to_retry:
                     break
 
@@ -286,10 +311,20 @@ class Manager(object):
                 tests_to_retry = self._tests_to_retry(retry_results)
         return (initial_results, all_retry_results)
 
+    def _restore_order(self, paths, test_names):
+        original_test_names = list(test_names)
+        test_names = []
+        for path in paths:
+            for test in original_test_names:
+                if test.startswith(path) or fnmatch.fnmatch(test, path):
+                    test_names.append(test)
+        test_names += list(set(original_test_names) - set(test_names))
+        return test_names
+
     def _collect_tests(self, args):
         return self._finder.find_tests(
             args,
-            test_list=self._options.test_list,
+            filter_files=self._options.test_list,
             fastest_percentile=self._options.fastest,
             filters=self._options.isolated_script_test_filter)
 
@@ -324,8 +359,8 @@ class Manager(object):
     def _test_input_for_file(self, test_file, retry_attempt):
         return TestInput(
             test_file,
-            self._options.slow_time_out_ms
-            if self._test_is_slow(test_file) else self._options.time_out_ms,
+            self._options.slow_timeout_ms
+            if self._test_is_slow(test_file) else self._options.timeout_ms,
             self._test_requires_lock(test_file),
             retry_attempt=retry_attempt)
 
@@ -336,7 +371,7 @@ class Manager(object):
         Perf tests are locked because heavy load caused by running other
         tests in parallel might cause some of them to time out.
         """
-        return self._is_http_test(test_file) or self._is_perf_test(test_file)
+        return self._is_perf_test(test_file)
 
     def _test_is_slow(self, test_file):
         if not self._expectations:
@@ -347,7 +382,7 @@ class Manager(object):
 
     def _needs_servers(self, test_names):
         return any(
-            self._test_requires_lock(test_name) for test_name in test_names)
+            self._is_http_test(test_name) for test_name in test_names)
 
     def _rename_results_folder(self):
         try:
@@ -434,9 +469,9 @@ class Manager(object):
                    retry_attempt=0):
 
         test_inputs = []
-        for _ in xrange(iterations):
+        for _ in range(iterations):
             for test in tests_to_run:
-                for _ in xrange(repeat_each):
+                for _ in range(repeat_each):
                     test_inputs.append(
                         self._test_input_for_file(test, retry_attempt))
         return self._runner.run_tests(self._expectations, test_inputs,
@@ -483,6 +518,9 @@ class Manager(object):
         sys.stderr.flush()
         _log.debug('Cleaning up port')
         self._port.clean_up_test_run()
+        if self._sink:
+            _log.debug('Closing sink')
+            self._sink.close()
 
     def _look_for_new_crash_logs(self, run_results, start_time):
         """Looks for and writes new crash logs, at the end of the test run.
@@ -503,7 +541,7 @@ class Manager(object):
         test_failures.AbstractTestResultType.result_directory = self._results_directory
         test_failures.AbstractTestResultType.filesystem = self._filesystem
 
-        for test, result in run_results.unexpected_results_by_name.iteritems():
+        for test, result in run_results.unexpected_results_by_name.items():
             if result.type != ResultType.Crash:
                 continue
             for failure in result.failures:
@@ -516,7 +554,7 @@ class Manager(object):
 
         sample_files = self._port.look_for_new_samples(crashed_processes,
                                                        start_time) or {}
-        for test, sample_file in sample_files.iteritems():
+        for test, sample_file in sample_files.items():
             test_failures.AbstractTestResultType.test_name = test
             test_result = run_results.unexpected_results_by_name[test]
             artifact_relative_path = self._port.output_filename(
@@ -535,7 +573,7 @@ class Manager(object):
 
         new_crash_logs = self._port.look_for_new_crash_logs(
             crashed_processes, start_time) or {}
-        for test, (crash_log, crash_site) in new_crash_logs.iteritems():
+        for test, (crash_log, crash_site) in new_crash_logs.items():
             test_failures.AbstractTestResultType.test_name = test
             failure.crash_log = crash_log
             failure.has_log = self._port.output_contains_sanitizer_messages(
@@ -576,7 +614,7 @@ class Manager(object):
 
     def _write_json_files(self, summarized_full_results,
                           summarized_failing_results, initial_results,
-                          running_all_tests):
+                          running_all_tests, run_histories):
         _log.debug("Writing JSON files in %s.", self._artifacts_directory)
 
         # FIXME: Upload stats.json to the server and delete times_ms.
@@ -612,14 +650,14 @@ class Manager(object):
             summarized_full_results,
             full_results_jsonp_path,
             callback='ADD_FULL_RESULTS')
-        full_results_path = self._filesystem.join(self._artifacts_directory,
-                                                  'failing_results.json')
+        failing_results_path = self._filesystem.join(self._artifacts_directory,
+                                                     'failing_results.json')
         # We write failing_results.json out as jsonp because we need to load it
         # from a file url for results.html and Chromium doesn't allow that.
         json_results_generator.write_json(
             self._filesystem,
             summarized_failing_results,
-            full_results_path,
+            failing_results_path,
             callback='ADD_RESULTS')
 
         # Write out the JSON files suitable for other tools to process.
@@ -635,6 +673,10 @@ class Manager(object):
             json_results_generator.write_json(self._filesystem,
                                               summarized_full_results,
                                               self._options.json_test_results)
+        if self._options.write_run_histories_to:
+            json_results_generator.write_json(
+                self._filesystem, run_histories,
+                self._options.write_run_histories_to)
 
         _log.debug('Finished writing JSON files.')
 
@@ -680,7 +722,8 @@ class Manager(object):
 
     def _copy_results_html_file(self, destination_dir, filename):
         """Copies a file from the template directory to the results directory."""
-        template_dir = self._path_finder.path_from_web_tests('fast', 'harness')
+        template_dir = self._path_finder.path_from_blink_tools(
+            'blinkpy', 'web_tests')
         source_path = self._filesystem.join(template_dir, filename)
         destination_path = self._filesystem.join(destination_dir, filename)
         # Note that the results.html template file won't exist when
@@ -703,6 +746,6 @@ class Manager(object):
                                 int(result.total_run_time * 1000))
                 }
         stats_trie = {}
-        for name, value in stats.iteritems():
+        for name, value in stats.items():
             json_results_generator.add_path_to_trie(name, value, stats_trie)
         return stats_trie

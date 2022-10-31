@@ -18,9 +18,7 @@
 namespace blink {
 
 namespace internal {
-
-extern bool IsExplicitlyRegisteredForTiming(const LayoutObject* layout_object);
-
+extern bool IsExplicitlyRegisteredForTiming(const LayoutObject& layout_object);
 }
 
 class ImageElementTimingTest : public testing::Test,
@@ -30,7 +28,7 @@ class ImageElementTimingTest : public testing::Test,
     web_view_helper_.Initialize();
     frame_test_helpers::LoadFrame(
         web_view_helper_.GetWebView()->MainFrameImpl(), "about:blank");
-    WebURL base_url_ = url_test_helpers::ToKURL("http://www.test.com/");
+    base_url_ = url_test_helpers::ToKURL("http://www.test.com/");
     // Enable compositing on the page.
     web_view_helper_.GetWebView()
         ->GetPage()
@@ -44,7 +42,7 @@ class ImageElementTimingTest : public testing::Test,
   // the LayoutImage.
   LayoutImage* SetImageResource(const char* id, int width, int height) {
     ImageResourceContent* content = CreateImageForTest(width, height);
-    if (auto* layout_image = ToLayoutImageOrNull(GetLayoutObjectById(id))) {
+    if (auto* layout_image = DynamicTo<LayoutImage>(GetLayoutObjectById(id))) {
       layout_image->ImageResource()->SetImageResource(content);
       return layout_image;
     }
@@ -54,7 +52,8 @@ class ImageElementTimingTest : public testing::Test,
   // Similar to above but for a LayoutSVGImage.
   LayoutSVGImage* SetSVGImageResource(const char* id, int width, int height) {
     ImageResourceContent* content = CreateImageForTest(width, height);
-    if (auto* layout_image = ToLayoutSVGImageOrNull(GetLayoutObjectById(id))) {
+    if (auto* layout_image =
+            DynamicTo<LayoutSVGImage>(GetLayoutObjectById(id))) {
       layout_image->ImageResource()->SetImageResource(content);
       return layout_image;
     }
@@ -89,7 +88,7 @@ class ImageElementTimingTest : public testing::Test,
         ->MainFrameImpl()
         ->GetFrame()
         ->View()
-        ->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+        ->UpdateAllLifecyclePhasesForTest();
   }
 
   frame_test_helpers::WebViewHelper web_view_helper_;
@@ -125,25 +124,25 @@ TEST_P(ImageElementTimingTest, TestIsExplicitlyRegisteredForTiming) {
       base_url_);
 
   LayoutObject* without_attribute = GetLayoutObjectById("missing-attribute");
-  bool actual = internal::IsExplicitlyRegisteredForTiming(without_attribute);
+  bool actual = internal::IsExplicitlyRegisteredForTiming(*without_attribute);
   EXPECT_FALSE(actual) << "Nodes without an 'elementtiming' attribute should "
                           "not be explicitly registered.";
 
   LayoutObject* with_undefined_attribute =
       GetLayoutObjectById("unset-attribute");
-  actual = internal::IsExplicitlyRegisteredForTiming(with_undefined_attribute);
+  actual = internal::IsExplicitlyRegisteredForTiming(*with_undefined_attribute);
   EXPECT_TRUE(actual) << "Nodes with undefined 'elementtiming' attribute "
                          "should be explicitly registered.";
 
   LayoutObject* with_empty_attribute = GetLayoutObjectById("empty-attribute");
-  actual = internal::IsExplicitlyRegisteredForTiming(with_empty_attribute);
+  actual = internal::IsExplicitlyRegisteredForTiming(*with_empty_attribute);
   EXPECT_TRUE(actual) << "Nodes with an empty 'elementtiming' attribute "
                          "should be explicitly registered.";
 
   LayoutObject* with_explicit_element_timing =
       GetLayoutObjectById("valid-attribute");
   actual =
-      internal::IsExplicitlyRegisteredForTiming(with_explicit_element_timing);
+      internal::IsExplicitlyRegisteredForTiming(*with_explicit_element_timing);
   EXPECT_TRUE(actual) << "Nodes with a non-empty 'elementtiming' attribute "
                          "should be explicitly registered.";
 }

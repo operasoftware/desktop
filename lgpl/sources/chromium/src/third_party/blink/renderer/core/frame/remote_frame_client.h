@@ -5,53 +5,36 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REMOTE_FRAME_CLIENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REMOTE_FRAME_CLIENT_H_
 
-#include "base/optional.h"
 #include "cc/paint/paint_canvas.h"
-#include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink-forward.h"
-#include "third_party/blink/public/platform/viewport_intersection_state.h"
-#include "third_party/blink/public/platform/web_impression.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
+#include "third_party/blink/public/mojom/frame/frame_replication_state.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/frame/remote_frame.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/frame/tree_scope_type.mojom-blink-forward.h"
 #include "third_party/blink/public/web/web_frame_load_type.h"
 #include "third_party/blink/renderer/core/frame/frame_client.h"
 #include "third_party/blink/renderer/core/frame/frame_types.h"
 #include "third_party/blink/renderer/platform/graphics/touch_action.h"
 
-namespace cc {
-class PaintCanvas;
-}
-
 namespace blink {
-class AssociatedInterfaceProvider;
-class IntRect;
-class ResourceRequest;
-class WebLocalFrame;
 
 class RemoteFrameClient : public FrameClient {
  public:
   ~RemoteFrameClient() override = default;
 
-  virtual void Navigate(const ResourceRequest&,
-                        blink::WebLocalFrame* initiator_frame,
-                        bool should_replace_current_entry,
-                        bool is_opener_navigation,
-                        bool initiator_frame_has_download_sandbox_flag,
-                        bool initiator_frame_is_ad,
-                        mojo::PendingRemote<mojom::blink::BlobURLToken>,
-                        const base::Optional<WebImpression>& impression) = 0;
   unsigned BackForwardLength() override = 0;
 
-  // Forwards a change to the rects of a remote frame. |local_frame_rect| is the
-  // size of the frame in its parent's coordinate space prior to applying CSS
-  // transforms. |screen_space_rect| is in the screen's coordinate space, after
-  // CSS transforms are applied.
-  virtual void FrameRectsChanged(const IntRect& local_frame_rect,
-                                 const IntRect& screen_space_rect) = 0;
-
-  virtual void UpdateRemoteViewportIntersection(
-      const ViewportIntersectionState& intersection_state) = 0;
-
-  virtual uint32_t Print(const IntRect&, cc::PaintCanvas*) const = 0;
-
-  virtual AssociatedInterfaceProvider* GetRemoteAssociatedInterfaces() = 0;
+  // Create a new RemoteFrame child. This needs to be a client API
+  // so that the appropriate WebRemoteFrameImpl is created first before
+  // the core frame. In the future we should only create a WebRemoteFrame
+  // when we pass a RemoteFrame handle outside of blink.
+  virtual void CreateRemoteChild(
+      const RemoteFrameToken& token,
+      const absl::optional<FrameToken>& opener_frame_token,
+      mojom::blink::TreeScopeType tree_scope_type,
+      mojom::blink::FrameReplicationStatePtr replication_state,
+      const base::UnguessableToken& devtools_frame_token,
+      mojom::blink::RemoteFrameInterfacesFromBrowserPtr
+          remote_frame_interfaces) = 0;
 };
 
 }  // namespace blink

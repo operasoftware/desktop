@@ -20,8 +20,12 @@
 *.swp
 *.ver
 *.version
+*.metal.air
+*.metallib
+*.metallib.c
 *.ptx
 *.ptx.c
+*.ptx.gz
 *_g
 \#*
 .\#*
@@ -32,8 +36,8 @@
 /ffprobe
 /config.asm
 /config.h
+/config_components.h
 /coverage.info
-/avversion.h
 /lcov/
 /src
 /mapfile

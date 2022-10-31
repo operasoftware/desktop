@@ -5,13 +5,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PARSER_CSS_PARSER_CONTEXT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PARSER_CSS_PARSER_CONTEXT_H_
 
+#include "base/auto_reset.h"
+#include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_resource_fetch_restriction.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_mode.h"
-#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/web_feature_forward.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer.h"
@@ -21,8 +23,10 @@ namespace blink {
 
 class CSSStyleSheet;
 class Document;
+class ExecutionContext;
 class StyleRuleKeyframe;
 class StyleSheetContents;
+enum class SecureContextMode;
 
 class CORE_EXPORT CSSParserContext final
     : public GarbageCollected<CSSParserContext> {
@@ -40,21 +44,27 @@ class CORE_EXPORT CSSParserContext final
   explicit CSSParserContext(const CSSParserContext* other,
                             const Document* use_counter_document = nullptr);
 
+  // Creates a context with most of its constructor attributes provided by
+  // copying from |other|, except that the remaining constructor arguments take
+  // precedence over the corresponding characteristics of |other|. This is
+  // useful for initializing @imported sheets' contexts, which inherit most of
+  // their characteristics from their parents.
   CSSParserContext(const CSSParserContext* other,
                    const KURL& base_url_override,
                    bool origin_clean,
-                   network::mojom::ReferrerPolicy referrer_policy_override,
+                   const Referrer& referrer,
                    const WTF::TextEncoding& charset_override,
                    const Document* use_counter_document);
   CSSParserContext(CSSParserMode,
                    SecureContextMode,
                    SelectorProfile = kLiveProfile,
                    const Document* use_counter_document = nullptr);
-  CSSParserContext(const Document&);
+  explicit CSSParserContext(const Document&);
+  CSSParserContext(const Document&, const KURL& base_url_override);
   CSSParserContext(const Document&,
                    const KURL& base_url_override,
                    bool origin_clean,
-                   network::mojom::ReferrerPolicy referrer_policy_override,
+                   const Referrer& referrer,
                    const WTF::TextEncoding& charset = WTF::TextEncoding(),
                    SelectorProfile = kLiveProfile,
                    ResourceFetchRestriction resource_fetch_restriction =
@@ -67,13 +77,12 @@ class CORE_EXPORT CSSParserContext final
                    bool origin_clean,
                    const WTF::TextEncoding& charset,
                    CSSParserMode,
-                   CSSParserMode match_mode,
                    SelectorProfile,
-                   const Referrer&,
+                   const Referrer& referrer,
                    bool is_html_document,
                    bool use_legacy_background_size_shorthand_behavior,
                    SecureContextMode,
-                   network::mojom::CSPDisposition,
+                   scoped_refptr<const DOMWrapperWorld> world,
                    const Document* use_counter_document,
                    ResourceFetchRestriction resource_fetch_restriction);
 
@@ -83,7 +92,6 @@ class CORE_EXPORT CSSParserContext final
   }
 
   CSSParserMode Mode() const { return mode_; }
-  CSSParserMode MatchMode() const { return match_mode_; }
   const KURL& BaseURL() const { return base_url_; }
   const WTF::TextEncoding& Charset() const { return charset_; }
   const Referrer& GetReferrer() const { return referrer_; }
@@ -125,8 +133,8 @@ class CORE_EXPORT CSSParserContext final
   const Document* GetDocument() const;
   const ExecutionContext* GetExecutionContext() const;
 
-  network::mojom::CSPDisposition ShouldCheckContentSecurityPolicy() const {
-    return should_check_content_security_policy_;
+  const scoped_refptr<const DOMWrapperWorld>& JavascriptWorld() const {
+    return world_;
   }
 
   // TODO(ekaramad): We currently only report @keyframes violations. We need to
@@ -134,9 +142,6 @@ class CORE_EXPORT CSSParserContext final
   // TODO(ekaramad): We should provide a source location in the violation
   // report (https://crbug.com/906150, ).
   void ReportLayoutAnimationsViolationIfNeeded(const StyleRuleKeyframe&) const;
-
-  // TODO(yoichio): Remove when CustomElementsV0 is removed. crrev.com/660759.
-  bool CustomElementsV0Enabled() const;
 
   bool IsForMarkupSanitization() const;
 
@@ -163,14 +168,13 @@ class CORE_EXPORT CSSParserContext final
 
   KURL base_url_;
 
-  network::mojom::CSPDisposition should_check_content_security_policy_;
+  scoped_refptr<const DOMWrapperWorld> world_;
 
   // If true, allows reading and modifying of the CSS rules.
   // https://drafts.csswg.org/cssom/#concept-css-style-sheet-origin-clean-flag
   const bool origin_clean_;
 
   CSSParserMode mode_;
-  CSSParserMode match_mode_;
   SelectorProfile profile_ = kLiveProfile;
   Referrer referrer_;
 

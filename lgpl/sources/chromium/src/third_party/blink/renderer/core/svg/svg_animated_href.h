@@ -9,8 +9,6 @@
 
 namespace blink {
 
-class StringOrTrustedScriptURL;
-
 // This is an "access wrapper" for the 'href' attribute. The object
 // itself holds the value for 'href' in the null/default NS and wraps
 // one for 'href' in the XLink NS. Both objects are added to an
@@ -26,8 +24,9 @@ class SVGAnimatedHref final : public SVGAnimatedString {
   SVGString* CurrentValue();
   const SVGString* CurrentValue() const;
 
-  void baseVal(StringOrTrustedScriptURL&) override;
-  void setBaseVal(const StringOrTrustedScriptURL&, ExceptionState&) override;
+  V8UnionStringOrTrustedScriptURL* baseVal() override;
+  void setBaseVal(const V8UnionStringOrTrustedScriptURL* value,
+                  ExceptionState& exception_state) override;
   String animVal() override;
 
   bool IsSpecified() const {

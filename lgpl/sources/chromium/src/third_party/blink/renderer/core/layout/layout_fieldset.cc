@@ -26,13 +26,13 @@
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/html/forms/html_legend_element.h"
 #include "third_party/blink/renderer/core/paint/fieldset_painter.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
 LayoutFieldset::LayoutFieldset(Element* element) : LayoutBlockFlow(element) {}
 
 MinMaxSizes LayoutFieldset::PreferredLogicalWidths() const {
+  NOT_DESTROYED();
   MinMaxSizes sizes = LayoutBlockFlow::PreferredLogicalWidths();
   // Size-contained elements don't consider their contents for preferred sizing.
   if (ShouldApplySizeContainment())
@@ -59,6 +59,7 @@ MinMaxSizes LayoutFieldset::PreferredLogicalWidths() const {
 
 LayoutObject* LayoutFieldset::LayoutSpecialExcludedChild(bool relayout_children,
                                                          SubtreeLayoutScope&) {
+  NOT_DESTROYED();
   LayoutBox* legend = FindInFlowLegend();
   if (legend) {
     LayoutRect old_legend_frame_rect = legend->FrameRect();
@@ -142,27 +143,10 @@ LayoutObject* LayoutFieldset::LayoutSpecialExcludedChild(bool relayout_children,
 
 LayoutBox* LayoutFieldset::FindInFlowLegend(const LayoutBlock& fieldset) {
   DCHECK(fieldset.IsFieldset() || fieldset.IsLayoutNGFieldset());
-  const LayoutBlock* parent = &fieldset;
-  if (RuntimeEnabledFeatures::LayoutNGFieldsetEnabled()) {
-    if (fieldset.IsLayoutNGFieldset()) {
-      // If there is a rendered legend, it will be found inside the anonymous
-      // fieldset wrapper.
-      parent = To<LayoutBlock>(fieldset.FirstChild());
-      if (!parent)
-        return nullptr;
-      // If the anonymous fieldset wrapper is a multi-column, the rendered
-      // legend will be found inside the multi-column flow thread.
-      if (parent->FirstChild() && parent->FirstChild()->IsLayoutFlowThread())
-        parent = To<LayoutBlock>(parent->FirstChild());
-    }
-  }
-  for (LayoutObject* legend = parent->FirstChild(); legend;
+  for (LayoutObject* legend = fieldset.FirstChild(); legend;
        legend = legend->NextSibling()) {
-    if (legend->IsFloatingOrOutOfFlowPositioned())
-      continue;
-
-    if (legend->IsHTMLLegendElement())
-      return ToLayoutBox(legend);
+    if (legend->IsRenderedLegendCandidate())
+      return To<LayoutBox>(legend);
   }
   return nullptr;
 }
@@ -170,16 +154,19 @@ LayoutBox* LayoutFieldset::FindInFlowLegend(const LayoutBlock& fieldset) {
 void LayoutFieldset::PaintBoxDecorationBackground(
     const PaintInfo& paint_info,
     const PhysicalOffset& paint_offset) const {
+  NOT_DESTROYED();
   FieldsetPainter(*this).PaintBoxDecorationBackground(paint_info, paint_offset);
 }
 
 void LayoutFieldset::PaintMask(const PaintInfo& paint_info,
                                const PhysicalOffset& paint_offset) const {
+  NOT_DESTROYED();
   FieldsetPainter(*this).PaintMask(paint_info, paint_offset);
 }
 
 bool LayoutFieldset::BackgroundIsKnownToBeOpaqueInRect(
     const PhysicalRect& local_rect) const {
+  NOT_DESTROYED();
   // If the field set has a legend, then it probably does not completely fill
   // its background.
   if (FindInFlowLegend())

@@ -27,6 +27,7 @@
 
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node_rare_data.h"
+#include "third_party/blink/renderer/core/html/custom/element_internals.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
@@ -56,7 +57,7 @@ static inline HTMLInputElement* ToRadioButtonInputElement(Element& element) {
   if (!input_element)
     return nullptr;
   if (input_element->type() != input_type_names::kRadio ||
-      input_element->value().IsEmpty())
+      input_element->Value().IsEmpty())
     return nullptr;
   return input_element;
 }
@@ -67,9 +68,9 @@ String RadioNodeList::value() const {
   unsigned length = this->length();
   for (unsigned i = 0; i < length; ++i) {
     const HTMLInputElement* input_element = ToRadioButtonInputElement(*item(i));
-    if (!input_element || !input_element->checked())
+    if (!input_element || !input_element->Checked())
       continue;
-    return input_element->value();
+    return input_element->Value();
   }
   return String();
 }
@@ -80,9 +81,9 @@ void RadioNodeList::setValue(const String& value) {
   unsigned length = this->length();
   for (unsigned i = 0; i < length; ++i) {
     HTMLInputElement* input_element = ToRadioButtonInputElement(*item(i));
-    if (!input_element || input_element->value() != value)
+    if (!input_element || input_element->Value() != value)
       continue;
-    input_element->setChecked(true);
+    input_element->SetChecked(true);
     return;
   }
 }
@@ -90,20 +91,6 @@ void RadioNodeList::setValue(const String& value) {
 bool RadioNodeList::MatchesByIdOrName(const Element& test_element) const {
   return test_element.GetIdAttribute() == name_ ||
          test_element.GetNameAttribute() == name_;
-}
-
-bool RadioNodeList::CheckElementMatchesRadioNodeListFilter(
-    const Element& test_element) const {
-  DCHECK(!ShouldOnlyMatchImgElements());
-  DCHECK(IsA<HTMLObjectElement>(test_element) ||
-         test_element.IsFormControlElement());
-  if (IsA<HTMLFormElement>(ownerNode())) {
-    auto* form_element = To<HTMLElement>(test_element).formOwner();
-    if (!form_element || form_element != ownerNode())
-      return false;
-  }
-
-  return MatchesByIdOrName(test_element);
 }
 
 bool RadioNodeList::ElementMatches(const Element& element) const {
@@ -117,16 +104,27 @@ bool RadioNodeList::ElementMatches(const Element& element) const {
 
     return MatchesByIdOrName(element);
   }
-
-  if (!IsA<HTMLObjectElement>(element) && !element.IsFormControlElement())
+  auto* html_element = DynamicTo<HTMLElement>(element);
+  bool is_form_associated =
+      html_element && html_element->IsFormAssociatedCustomElement();
+  if (!IsA<HTMLObjectElement>(element) && !element.IsFormControlElement() &&
+      !is_form_associated) {
     return false;
+  }
 
   auto* html_input_element = DynamicTo<HTMLInputElement>(&element);
   if (html_input_element &&
-      html_input_element->type() == input_type_names::kImage)
+      html_input_element->type() == input_type_names::kImage) {
     return false;
+  }
 
-  return CheckElementMatchesRadioNodeListFilter(element);
+  if (IsA<HTMLFormElement>(ownerNode())) {
+    auto* form_element = html_element->formOwner();
+    if (!form_element || form_element != ownerNode())
+      return false;
+  }
+
+  return MatchesByIdOrName(element);
 }
 
 }  // namespace blink

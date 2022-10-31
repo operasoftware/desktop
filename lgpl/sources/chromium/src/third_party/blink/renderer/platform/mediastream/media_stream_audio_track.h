@@ -9,12 +9,11 @@
 
 #include "base/atomicops.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
-#include "third_party/blink/public/platform/modules/mediastream/web_platform_media_stream_track.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_deliverer.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_track_platform.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 
 namespace blink {
@@ -27,10 +26,11 @@ class MediaStreamComponent;
 // MediaStreamAudioSource to one or more WebMediaStreamAudioSinks. An instance
 // of this class is owned by MediaStreamComponent/WebMediaStreamTrack, and
 // clients should use From() to gain access to a MediaStreamAudioTrack.
-class PLATFORM_EXPORT MediaStreamAudioTrack
-    : public WebPlatformMediaStreamTrack {
+class PLATFORM_EXPORT MediaStreamAudioTrack : public MediaStreamTrackPlatform {
  public:
   explicit MediaStreamAudioTrack(bool is_local_track);
+  MediaStreamAudioTrack(const MediaStreamAudioTrack&) = delete;
+  MediaStreamAudioTrack& operator=(const MediaStreamAudioTrack&) = delete;
 
   ~MediaStreamAudioTrack() override;
 
@@ -71,6 +71,12 @@ class PLATFORM_EXPORT MediaStreamAudioTrack
   void SetContentHint(
       WebMediaStreamTrack::ContentHintType content_hint) override;
 
+  // Returns the maximum number of channels preferred by any sink connected to
+  // this track.
+  int NumPreferredChannels() const;
+
+  bool IsEnabled() const;
+
   // Returns a unique class identifier. Some subclasses override and use this
   // method to provide safe down-casting to their type.
   virtual void* GetClassIdentifier() const;
@@ -95,6 +101,10 @@ class PLATFORM_EXPORT MediaStreamAudioTrack
   // be delivered to the sinks instead of the content of |audio_bus|.
   void OnData(const media::AudioBus& audio_bus, base::TimeTicks reference_time);
 
+  MediaStreamTrackPlatform::StreamType Type() const override {
+    return MediaStreamTrackPlatform::StreamType::kAudio;
+  };
+
  private:
   // In debug builds, check that all methods that could cause object graph
   // or data flow changes are being called on the main thread.
@@ -118,8 +128,6 @@ class PLATFORM_EXPORT MediaStreamAudioTrack
 
   // Provides weak pointers that are valid until Stop() is called.
   base::WeakPtrFactory<MediaStreamAudioTrack> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MediaStreamAudioTrack);
 };
 
 }  // namespace blink

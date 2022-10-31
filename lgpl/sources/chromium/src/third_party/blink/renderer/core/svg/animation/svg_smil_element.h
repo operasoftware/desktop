@@ -32,8 +32,8 @@
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_tests.h"
 #include "third_party/blink/renderer/core/svg_names.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -77,14 +77,12 @@ class CORE_EXPORT SMILInstanceTimeList {
 
 // This class implements SMIL interval timing model as needed for SVG animation.
 class CORE_EXPORT SVGSMILElement : public SVGElement, public SVGTests {
-  USING_GARBAGE_COLLECTED_MIXIN(SVGSMILElement);
-
  public:
   SVGSMILElement(const QualifiedName&, Document&);
   ~SVGSMILElement() override;
 
   void ParseAttribute(const AttributeModificationParams&) override;
-  void SvgAttributeChanged(const QualifiedName&) override;
+  void SvgAttributeChanged(const SvgAttributeChangedParams&) override;
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void RemovedFrom(ContainerNode&) override;
 
@@ -169,6 +167,9 @@ class CORE_EXPORT SVGSMILElement : public SVGElement, public SVGTests {
 
  private:
   bool IsPresentationAttribute(const QualifiedName&) const override;
+
+  void AddedEventListener(const AtomicString& event_type,
+                          RegisteredEventListener&) final;
 
   void BuildPendingResource() override;
   void ClearResourceAndEventBaseReferences();

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/html/html_image_fallback_helper.h"
 
+#include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/element_rare_data.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/text.h"
@@ -16,7 +17,7 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -151,29 +152,38 @@ void HTMLImageFallbackHelper::CustomStyleForAltText(Element& element,
   if (!fallback.HasContentElements())
     return;
 
+  // TODO(crbug.com/953707):
+  // This method is called during style recalc, and it is generally not allowed
+  // to mark nodes style dirty during recalc. The code below modifies inline
+  // style in the UA shadow tree below based on the computed style for the image
+  // element. As part of that we mark elements in the shadow tree style dirty.
+  // The scope object here is to allow that and avoid DCHECK failures which
+  // would otherwise have been triggered.
+  StyleEngine::AllowMarkStyleDirtyFromRecalcScope scope(
+      element.GetDocument().GetStyleEngine());
+
   if (element.GetDocument().InQuirksMode()) {
     // Mimic the behaviour of the image host by setting symmetric dimensions if
     // only one dimension is specified.
-    if (new_style.Width().IsSpecifiedOrIntrinsic() &&
-        new_style.Height().IsAuto())
+    if (!new_style.Width().IsAuto() && new_style.Height().IsAuto())
       new_style.SetHeight(new_style.Width());
-    else if (new_style.Height().IsSpecifiedOrIntrinsic() &&
-             new_style.Width().IsAuto())
+    else if (!new_style.Height().IsAuto() && new_style.Width().IsAuto())
       new_style.SetWidth(new_style.Height());
-    if (new_style.Width().IsSpecifiedOrIntrinsic() &&
-        new_style.Height().IsSpecifiedOrIntrinsic()) {
+
+    if (!new_style.Width().IsAuto() && !new_style.Height().IsAuto())
       fallback.AlignToBaseline();
-    }
   }
 
-  bool image_has_intrinsic_dimensions =
-      new_style.Width().IsSpecifiedOrIntrinsic() &&
-      new_style.Height().IsSpecifiedOrIntrinsic();
-  bool image_has_no_alt_attribute =
+  bool has_intrinsic_dimensions =
+      !new_style.Width().IsAuto() && !new_style.Height().IsAuto();
+  bool has_dimensions_from_ar =
+      !new_style.AspectRatio().IsAuto() &&
+      (!new_style.Width().IsAuto() || !new_style.Height().IsAuto());
+  bool has_no_alt_attribute =
       element.getAttribute(html_names::kAltAttr).IsEmpty();
   bool treat_as_replaced =
-      image_has_intrinsic_dimensions &&
-      (element.GetDocument().InQuirksMode() || image_has_no_alt_attribute);
+      (has_intrinsic_dimensions || has_dimensions_from_ar) &&
+      (element.GetDocument().InQuirksMode() || has_no_alt_attribute);
   if (treat_as_replaced) {
     // https://html.spec.whatwg.org/C/#images-3:
     // "If the element does not represent an image, but the element already has
@@ -199,6 +209,8 @@ void HTMLImageFallbackHelper::CustomStyleForAltText(Element& element,
     if (new_style.Display() == EDisplay::kInline) {
       new_style.SetWidth(Length());
       new_style.SetHeight(Length());
+      new_style.SetAspectRatio(
+          ComputedStyleInitialValues::InitialAspectRatio());
     }
     if (ElementRepresentsNothing(element)) {
       // "If the element is an img element that represents nothing and the user

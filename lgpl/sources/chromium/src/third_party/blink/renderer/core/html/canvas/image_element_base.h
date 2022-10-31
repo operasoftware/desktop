@@ -26,21 +26,23 @@ class CORE_EXPORT ImageElementBase : public CanvasImageSource,
   // base for both elements.
   static Image::ImageDecodingMode ParseImageDecodingMode(const AtomicString&);
 
-  IntSize BitmapSourceSize() const override;
+  gfx::Size BitmapSourceSize() const override;
   ScriptPromise CreateImageBitmap(ScriptState*,
-                                  base::Optional<IntRect>,
+                                  absl::optional<gfx::Rect>,
                                   const ImageBitmapOptions*,
                                   ExceptionState&) override;
 
-  scoped_refptr<Image> GetSourceImageForCanvas(SourceImageStatus*,
-                                               const FloatSize&) override;
+  scoped_refptr<Image> GetSourceImageForCanvas(
+      SourceImageStatus*,
+      const gfx::SizeF&,
+      const AlphaDisposition alpha_disposition = kPremultiplyAlpha) override;
 
   bool WouldTaintOrigin() const override;
 
-  FloatSize ElementSize(const FloatSize& default_object_size,
-                        const RespectImageOrientationEnum) const override;
-  FloatSize DefaultDestinationSize(
-      const FloatSize& default_object_size,
+  gfx::SizeF ElementSize(const gfx::SizeF& default_object_size,
+                         const RespectImageOrientationEnum) const override;
+  gfx::SizeF DefaultDestinationSize(
+      const gfx::SizeF& default_object_size,
       const RespectImageOrientationEnum) const override;
 
   bool IsAccelerated() const override;
@@ -59,11 +61,6 @@ class CORE_EXPORT ImageElementBase : public CanvasImageSource,
   // given the PaintImage::Id that will be used to paint it.
   // Used with HTMLImageElement and SVGImageElement types.
   Image::ImageDecodingMode GetDecodingModeForPainting(PaintImage::Id);
-
-  // Return the image orientation setting from the layout object, if available.
-  // In the absence of a layout object, kRespectImageOrientation will be
-  // returned.
-  RespectImageOrientationEnum RespectImageOrientation() const;
 
  protected:
   Image::ImageDecodingMode decoding_mode_ =

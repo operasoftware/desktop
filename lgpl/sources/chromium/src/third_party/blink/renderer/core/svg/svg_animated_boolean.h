@@ -34,14 +34,13 @@
 #include "third_party/blink/renderer/core/svg/properties/svg_animated_property.h"
 #include "third_party/blink/renderer/core/svg/svg_boolean.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 class SVGAnimatedBoolean final : public ScriptWrappable,
                                  public SVGAnimatedProperty<SVGBoolean> {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(SVGAnimatedBoolean);
 
  public:
   SVGAnimatedBoolean(SVGElement* context_element,

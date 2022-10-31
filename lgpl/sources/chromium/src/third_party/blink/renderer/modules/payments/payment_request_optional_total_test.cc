@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/modules/payments/payment_request.h"
 
-#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/payments/payment_request.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
@@ -12,25 +11,16 @@
 #include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/modules/payments/payment_test_helper.h"
 #include "third_party/blink/renderer/platform/bindings/exception_code.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 
 namespace blink {
 namespace {
 
-class MockPaymentProvider : public payments::mojom::blink::PaymentRequest {
+class MockPaymentProvider2 : public payments::mojom::blink::PaymentRequest {
  public:
   // mojom::PaymentRequest
-#if defined(OS_ANDROID)
-  void Init(
-      mojo::PendingRemote<payments::mojom::blink::PaymentRequestClient> client,
-      WTF::Vector<payments::mojom::blink::PaymentMethodDataPtr> method_data,
-      payments::mojom::blink::PaymentDetailsPtr details,
-      payments::mojom::blink::PaymentOptionsPtr options,
-      bool google_pay_bridge_eligible) override {
-    details_ = std::move(details);
-  }
-#else
   void Init(
       mojo::PendingRemote<payments::mojom::blink::PaymentRequestClient> client,
       WTF::Vector<payments::mojom::blink::PaymentMethodDataPtr> method_data,
@@ -38,11 +28,8 @@ class MockPaymentProvider : public payments::mojom::blink::PaymentRequest {
       payments::mojom::blink::PaymentOptionsPtr options) override {
     details_ = std::move(details);
   }
-#endif
 
-  void Show(bool is_user_gesture, bool wait_for_updated_details) override {
-    NOTREACHED();
-  }
+  void Show(bool wait_for_updated_details) override { NOTREACHED(); }
   void Retry(
       payments::mojom::blink::PaymentValidationErrorsPtr errors) override {
     NOTREACHED();
@@ -57,7 +44,7 @@ class MockPaymentProvider : public payments::mojom::blink::PaymentRequest {
     NOTREACHED();
   }
   void CanMakePayment() override { NOTREACHED(); }
-  void HasEnrolledInstrument(bool per_method_quota) override { NOTREACHED(); }
+  void HasEnrolledInstrument() override { NOTREACHED(); }
 
   mojo::PendingRemote<payments::mojom::blink::PaymentRequest>
   CreatePendingRemoteAndBind() {
@@ -78,10 +65,10 @@ class MockPaymentProvider : public payments::mojom::blink::PaymentRequest {
 class PaymentRequestOptionalTotalTest : public testing::Test {
  public:
   void SetUp() override {
-    payment_provider_ = std::make_unique<MockPaymentProvider>();
+    payment_provider_ = std::make_unique<MockPaymentProvider2>();
   }
 
-  std::unique_ptr<MockPaymentProvider> payment_provider_;
+  std::unique_ptr<MockPaymentProvider2> payment_provider_;
   ScopedTestingPlatformSupport<TestingPlatformSupport> platform_;
 };
 
@@ -89,7 +76,7 @@ class PaymentRequestOptionalTotalTest : public testing::Test {
 // methods. Total is required in this scenario.
 TEST_F(PaymentRequestOptionalTotalTest,
        AppStoreBillingFlagEnabledTotalIsRequiredWhenMixMethods) {
-  RuntimeEnabledFeatures::SetDigitalGoodsEnabled(true);
+  ScopedDigitalGoodsForTest digital_goods(true);
 
   PaymentRequestV8TestingScope scope;
   // Intentionally leaves the total of details unset.
@@ -114,7 +101,7 @@ TEST_F(PaymentRequestOptionalTotalTest,
 // app-store billing methods, total is required.
 TEST_F(PaymentRequestOptionalTotalTest,
        AppStoreBillingFlagDisabledTotalIsRequiredWhenMixMethods) {
-  RuntimeEnabledFeatures::SetDigitalGoodsEnabled(false);
+  ScopedDigitalGoodsForTest digital_goods(false);
 
   PaymentRequestV8TestingScope scope;
   // Intentionally leaves the total of details unset.
@@ -137,7 +124,7 @@ TEST_F(PaymentRequestOptionalTotalTest,
 // when only requesting app-store billing methods.
 TEST_F(PaymentRequestOptionalTotalTest,
        AppStoreBillingFlagEnabledTotalGetPlaceHolder) {
-  RuntimeEnabledFeatures::SetDigitalGoodsEnabled(true);
+  ScopedDigitalGoodsForTest digital_goods(true);
 
   PaymentRequestV8TestingScope scope;
   // Intentionally leaves the total of details unset.
@@ -160,7 +147,7 @@ TEST_F(PaymentRequestOptionalTotalTest,
 // When the DigitalGoods flag is disabled: undefined total is rejected.
 TEST_F(PaymentRequestOptionalTotalTest,
        AppStoreBillingFlagDisabledTotalGetRejected) {
-  RuntimeEnabledFeatures::SetDigitalGoodsEnabled(false);
+  ScopedDigitalGoodsForTest digital_goods(false);
 
   PaymentRequestV8TestingScope scope;
   // Intentionally leaves the total of details unset.
@@ -186,7 +173,7 @@ TEST_F(PaymentRequestOptionalTotalTest,
 // requesting app-store billing methods.
 TEST_F(PaymentRequestOptionalTotalTest,
        AppStoreBillingFlagEnabledTotalGetOverridden) {
-  RuntimeEnabledFeatures::SetDigitalGoodsEnabled(true);
+  ScopedDigitalGoodsForTest digital_goods(true);
 
   PaymentRequestV8TestingScope scope;
   PaymentDetailsInit* details = PaymentDetailsInit::Create();
@@ -212,7 +199,7 @@ TEST_F(PaymentRequestOptionalTotalTest,
 // only requesting app-store billing methods.
 TEST_F(PaymentRequestOptionalTotalTest,
        AppStoreBillingFlagDisabledTotalNotGetOverridden) {
-  RuntimeEnabledFeatures::SetDigitalGoodsEnabled(false);
+  ScopedDigitalGoodsForTest digital_goods(false);
 
   PaymentRequestV8TestingScope scope;
   PaymentDetailsInit* details = PaymentDetailsInit::Create();

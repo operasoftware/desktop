@@ -31,6 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_EMAIL_INPUT_TYPE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_EMAIL_INPUT_TYPE_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/forms/base_text_input_type.h"
 
 namespace blink {
@@ -44,12 +45,13 @@ class EmailInputType final : public BaseTextInputType {
                                                        const String&);
   CORE_EXPORT static bool IsValidEmailAddress(const ScriptRegexp&,
                                               const String&);
-  CORE_EXPORT static std::unique_ptr<ScriptRegexp> CreateEmailRegexp();
+  CORE_EXPORT static ScriptRegexp* CreateEmailRegexp();
+
+  bool TypeMismatchFor(const String&) const;
 
  private:
   void CountUsage() override;
   const AtomicString& FormControlType() const override;
-  bool TypeMismatchFor(const String&) const override;
   bool TypeMismatch() const override;
   String TypeMismatchText() const override;
   bool SupportsSelectionAPI() const override;
@@ -57,13 +59,17 @@ class EmailInputType final : public BaseTextInputType {
   String ConvertFromVisibleValue(const String&) const override;
   String VisibleValue() const override;
 
-  ScriptRegexp& EnsureEmailRegexp() const;
   String ConvertEmailAddressToUnicode(const String&) const;
   String FindInvalidAddress(const String&) const;
+};
 
-  mutable std::unique_ptr<ScriptRegexp> email_regexp_;
+template <>
+struct DowncastTraits<EmailInputType> {
+  static bool AllowFrom(const InputType& type) {
+    return type.IsEmailInputType();
+  }
 };
 
 }  // namespace blink
 
-#endif  // ButtonInputType_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_EMAIL_INPUT_TYPE_H_

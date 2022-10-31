@@ -7,9 +7,9 @@
 #include "services/device/public/cpp/generic_sensor/sensor_traits.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/modules/sensor/sensor_reading_remapper.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 namespace blink {
@@ -35,7 +35,8 @@ void SensorProxyInspectorImpl::Initialize() {
   auto callback = WTF::Bind(&SensorProxyInspectorImpl::OnSensorCreated,
                             WrapWeakPersistent(this));
 
-  Thread::Current()->GetTaskRunner()->PostTask(FROM_HERE, std::move(callback));
+  Thread::Current()->GetDeprecatedTaskRunner()->PostTask(FROM_HERE,
+                                                         std::move(callback));
 }
 
 void SensorProxyInspectorImpl::AddConfiguration(

@@ -5,9 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_MOJO_TEST_MOJO_INTERFACE_INTERCEPTOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_MOJO_TEST_MOJO_INTERFACE_INTERCEPTOR_H_
 
-#include "base/util/type_safety/strong_alias.h"
+#include "base/types/strong_alias.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_mojo_interface_interceptor_scope.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
@@ -30,17 +31,17 @@ class MojoInterfaceInterceptor final
       public ActiveScriptWrappable<MojoInterfaceInterceptor>,
       public ExecutionContextLifecycleObserver {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(MojoInterfaceInterceptor);
 
  public:
+  using Scope = V8MojoInterfaceInterceptorScope;
   static MojoInterfaceInterceptor* Create(ExecutionContext*,
                                           const String& interface_name,
-                                          const String& scope,
+                                          const Scope& scope,
                                           ExceptionState&);
 
   MojoInterfaceInterceptor(ExecutionContext*,
                            const String& interface_name,
-                           bool process_scope);
+                           Scope::Enum scope);
   ~MojoInterfaceInterceptor() override;
 
   void start(ExceptionState&);
@@ -66,7 +67,7 @@ class MojoInterfaceInterceptor final
 
   const String interface_name_;
   bool started_ = false;
-  bool process_scope_ = false;
+  Scope::Enum scope_ = Scope::Enum::kContext;
 };
 
 }  // namespace blink

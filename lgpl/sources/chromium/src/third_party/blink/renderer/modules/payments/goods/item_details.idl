@@ -2,12 +2,27 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// TODO(crbug.com/1061503): Add more fields from
-// https://github.com/WICG/digital-goods/blob/master/explainer.md
-// as the discussions settle.
+// https://github.com/WICG/digital-goods/blob/main/explainer.md
 dictionary ItemDetails {
-  DOMString itemId;
-  DOMString title;
+  required DOMString itemId;
+  required DOMString title;
+  required PaymentCurrencyAmount price;
+  [RuntimeEnabled=DigitalGoodsV2_1]
+  ItemType type;
   DOMString description;
-  PaymentCurrencyAmount price;
+  [RuntimeEnabled=DigitalGoodsV2_1]
+  sequence<DOMString> iconURLs;
+  // Periods are specified as ISO 8601 durations.
+  // https://en.wikipedia.org/wiki/ISO_8601#Durations
+  DOMString subscriptionPeriod;
+  DOMString freeTrialPeriod;
+  PaymentCurrencyAmount introductoryPrice;
+  DOMString introductoryPricePeriod;
+  [EnforceRange, RuntimeEnabled=DigitalGoodsV2_1]
+  unsigned long long introductoryPriceCycles;
+};
+
+enum ItemType {
+  "product",
+  "subscription",
 };

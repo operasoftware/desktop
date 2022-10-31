@@ -6,16 +6,28 @@
 
 [
   Exposed=DedicatedWorker,
-  RuntimeEnabled=NativeIO,
+  RuntimeEnabled=StorageFoundationAPI,
   SecureContext
 ] interface NativeIOFileSync {
   void close();
+
   [
     RaisesException
-  ] unsigned long long read([AllowShared] ArrayBufferView buffer,
+  ] unsigned long long getLength();
+
+  [
+    RaisesException
+  ] void setLength(unsigned long long length);
+
+  [
+    CallWith=ScriptState, RaisesException, MeasureAs=StorageFoundationReadSync
+  ] NativeIOReadResult read(ArrayBufferView buffer,
                             unsigned long long file_offset);
   [
-    RaisesException
-  ] unsigned long long write([AllowShared] ArrayBufferView buffer,
+    CallWith=ScriptState, RaisesException, MeasureAs=StorageFoundationWriteSync
+  ] NativeIOWriteResult write(ArrayBufferView buffer,
                              unsigned long long file_offset);
+  [
+    RaisesException, MeasureAs=StorageFoundationFlushSync
+  ] void flush();
 };

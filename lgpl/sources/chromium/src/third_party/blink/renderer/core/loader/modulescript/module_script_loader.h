@@ -5,13 +5,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_MODULESCRIPT_MODULE_SCRIPT_LOADER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_MODULESCRIPT_MODULE_SCRIPT_LOADER_H_
 
-#include "base/macros.h"
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_creation_params.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetch_request.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetcher.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
 namespace blink {
@@ -33,8 +33,6 @@ enum class ModuleGraphLevel;
 class CORE_EXPORT ModuleScriptLoader final
     : public GarbageCollected<ModuleScriptLoader>,
       public ModuleScriptFetcher::Client {
-  USING_GARBAGE_COLLECTED_MIXIN(ModuleScriptLoader);
-
   enum class State {
     kInitial,
     // FetchParameters is being processed, and ModuleScriptLoader hasn't
@@ -49,6 +47,8 @@ class CORE_EXPORT ModuleScriptLoader final
                      const ScriptFetchOptions&,
                      ModuleScriptLoaderRegistry*,
                      ModuleScriptLoaderClient*);
+  ModuleScriptLoader(const ModuleScriptLoader&) = delete;
+  ModuleScriptLoader& operator=(const ModuleScriptLoader&) = delete;
   ~ModuleScriptLoader();
 
   static void Fetch(const ModuleScriptFetchRequest&,
@@ -60,8 +60,8 @@ class CORE_EXPORT ModuleScriptLoader final
                     ModuleScriptLoaderClient*);
 
   // Implements ModuleScriptFetcher::Client.
-  void NotifyFetchFinished(
-      const base::Optional<ModuleScriptCreationParams>&,
+  void NotifyFetchFinishedSuccess(const ModuleScriptCreationParams&) override;
+  void NotifyFetchFinishedError(
       const HeapVector<Member<ConsoleMessage>>& error_messages) override;
 
   bool IsInitialState() const { return state_ == State::kInitial; }
@@ -79,10 +79,10 @@ class CORE_EXPORT ModuleScriptLoader final
 
   void AdvanceState(State new_state);
 
-  using PassKey = util::PassKey<ModuleScriptLoader>;
+  using PassKey = base::PassKey<ModuleScriptLoader>;
   // PassKey should be private and cannot be accessed from outside, but allow
   // accessing only from friend classes for testing.
-  static util::PassKey<ModuleScriptLoader> CreatePassKeyForTests() {
+  static base::PassKey<ModuleScriptLoader> CreatePassKeyForTests() {
     return PassKey();
   }
 
@@ -100,10 +100,8 @@ class CORE_EXPORT ModuleScriptLoader final
 #if DCHECK_IS_ON()
   KURL url_;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(ModuleScriptLoader);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_MODULESCRIPT_MODULE_SCRIPT_LOADER_H_

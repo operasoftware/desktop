@@ -27,32 +27,42 @@
 
 #include <algorithm>
 #include <memory>
+
+#include "base/callback.h"
+#include "base/numerics/safe_conversions.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 #include "third_party/blink/renderer/platform/wtf/dynamic_annotations.h"
 #include "third_party/blink/renderer/platform/wtf/leak_annotations.h"
+#include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 #include "third_party/blink/renderer/platform/wtf/static_constructors.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_table.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
+#include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_to_number.h"
+#include "third_party/blink/renderer/platform/wtf/text/unicode.h"
+#include "third_party/blink/renderer/platform/wtf/text/unicode_string.h"
 
 using std::numeric_limits;
 
 namespace WTF {
 
-// As of Jan 2017, StringImpl needs 2 * sizeof(int) + 29 bits of data, and
-// sizeof(ThreadRestrictionVerifier) is 16 bytes. Thus, in DCHECK mode the
-// class may be padded to 32 bytes.
+namespace {
+
+struct SameSizeAsStringImpl {
 #if DCHECK_IS_ON()
-static_assert(sizeof(StringImpl) <= 8 * sizeof(int),
-              "StringImpl should stay small");
-#else
-static_assert(sizeof(StringImpl) <= 3 * sizeof(int),
-              "StringImpl should stay small");
+  ThreadRestrictionVerifier verifier;
+  unsigned int ref_count_change_count;
 #endif
+  int fields[3];
+};
+
+ASSERT_SIZE(StringImpl, SameSizeAsStringImpl);
+
+}  // namespace
 
 void* StringImpl::operator new(size_t size) {
   DCHECK_EQ(size, sizeof(StringImpl));
@@ -65,33 +75,39 @@ void StringImpl::operator delete(void* ptr) {
 
 inline StringImpl::~StringImpl() {
   DCHECK(!IsStatic());
-
-  if (IsAtomic())
-    AtomicStringTable::Instance().Remove(this);
 }
 
-void StringImpl::DestroyIfNotStatic() const {
-  if (!IsStatic())
+void StringImpl::DestroyIfNeeded() const {
+  if (hash_and_flags_.load(std::memory_order_acquire) & kIsAtomic) {
+    // TODO: Remove const_cast
+    if (AtomicStringTable::Instance().ReleaseAndRemoveIfNeeded(
+            const_cast<StringImpl*>(this))) {
+      delete this;
+    } else {
+      // AtomicStringTable::Add() revived this before we started really
+      // killing it.
+    }
+  } else {
+    // This is not necessary but TSAN bots don't like the load in the
+    // caller to have relaxed memory order. Adding this check here instead
+    // of changing the load memory order to minimize perf impact.
+    int ref_count = ref_count_.load(std::memory_order_acquire);
+    DCHECK_EQ(ref_count, 1);
     delete this;
+  }
 }
 
-void StringImpl::UpdateContainsOnlyASCIIOrEmpty() const {
-  contains_only_ascii_ = Is8Bit()
-                             ? CharactersAreAllASCII(Characters8(), length())
-                             : CharactersAreAllASCII(Characters16(), length());
-  needs_ascii_check_ = false;
-}
-
-bool StringImpl::IsSafeToSendToAnotherThread() const {
-  if (IsStatic())
-    return true;
-  // AtomicStrings are not safe to send between threads as ~StringImpl()
-  // will try to remove them from the wrong AtomicStringTable.
-  if (IsAtomic())
-    return false;
-  if (HasOneRef())
-    return true;
-  return false;
+unsigned StringImpl::ComputeASCIIFlags() const {
+  ASCIIStringAttributes ascii_attributes =
+      Is8Bit() ? CharacterAttributes(Characters8(), length())
+               : CharacterAttributes(Characters16(), length());
+  uint32_t new_flags = ASCIIStringAttributesToFlags(ascii_attributes);
+  const uint32_t previous_flags =
+      hash_and_flags_.fetch_or(new_flags, std::memory_order_relaxed);
+  static constexpr uint32_t mask =
+      kAsciiPropertyCheckDone | kContainsOnlyAscii | kIsLowerAscii;
+  DCHECK((previous_flags & mask) == 0 || (previous_flags & mask) == new_flags);
+  return new_flags;
 }
 
 #if DCHECK_IS_ON()
@@ -248,6 +264,21 @@ scoped_refptr<StringImpl> StringImpl::Create(const LChar* characters,
   return string;
 }
 
+scoped_refptr<StringImpl> StringImpl::Create(
+    const LChar* characters,
+    wtf_size_t length,
+    ASCIIStringAttributes ascii_attributes) {
+  scoped_refptr<StringImpl> ret = Create(characters, length);
+  if (length) {
+    // If length is 0 then `ret` is empty_ and should not have its
+    // attributes calculated or changed.
+    uint32_t new_flags = ASCIIStringAttributesToFlags(ascii_attributes);
+    ret->hash_and_flags_.fetch_or(new_flags, std::memory_order_relaxed);
+  }
+
+  return ret;
+}
+
 scoped_refptr<StringImpl> StringImpl::Create8BitIfPossible(
     const UChar* characters,
     wtf_size_t length) {
@@ -270,7 +301,7 @@ scoped_refptr<StringImpl> StringImpl::Create(const LChar* string) {
   if (!string)
     return empty_;
   size_t length = strlen(reinterpret_cast<const char*>(string));
-  return Create(string, SafeCast<wtf_size_t>(length));
+  return Create(string, base::checked_cast<wtf_size_t>(length));
 }
 
 bool StringImpl::ContainsOnlyWhitespaceOrEmpty() {
@@ -752,6 +783,26 @@ wtf_size_t StringImpl::Find(CharacterMatchFunctionPtr match_function,
   if (Is8Bit())
     return WTF::Find(Characters8(), length_, match_function, start);
   return WTF::Find(Characters16(), length_, match_function, start);
+}
+
+wtf_size_t StringImpl::Find(base::RepeatingCallback<bool(UChar)> match_callback,
+                            wtf_size_t index) const {
+  if (Is8Bit()) {
+    const LChar* characters8 = Characters8();
+    while (index < length_) {
+      if (match_callback.Run(characters8[index]))
+        return index;
+      ++index;
+    }
+    return kNotFound;
+  }
+  const UChar* characters16 = Characters16();
+  while (index < length_) {
+    if (match_callback.Run(characters16[index]))
+      return index;
+    ++index;
+  }
+  return kNotFound;
 }
 
 template <typename SearchCharacterType, typename MatchCharacterType>
@@ -1653,15 +1704,14 @@ int CodeUnitCompareIgnoringASCIICase(wtf_size_t l1,
   return (l1 > l2) ? 1 : -1;
 }
 
+template <typename CharacterType>
 int CodeUnitCompareIgnoringASCIICase(const StringImpl* string1,
-                                     const LChar* string2) {
-  wtf_size_t length1 = string1 ? string1->length() : 0;
-  wtf_size_t length2 = SafeCast<wtf_size_t>(
-      string2 ? strlen(reinterpret_cast<const char*>(string2)) : 0);
-
+                                     const CharacterType* string2,
+                                     wtf_size_t length2) {
   if (!string1)
     return length2 > 0 ? -1 : 0;
 
+  wtf_size_t length1 = string1->length();
   if (!string2)
     return length1 > 0 ? 1 : 0;
 
@@ -1671,6 +1721,23 @@ int CodeUnitCompareIgnoringASCIICase(const StringImpl* string1,
   }
   return CodeUnitCompareIgnoringASCIICase(length1, length2,
                                           string1->Characters16(), string2);
+}
+
+int CodeUnitCompareIgnoringASCIICase(const StringImpl* string1,
+                                     const LChar* string2) {
+  return CodeUnitCompareIgnoringASCIICase(
+      string1, string2,
+      string2 ? strlen(reinterpret_cast<const char*>(string2)) : 0);
+}
+
+int CodeUnitCompareIgnoringASCIICase(const StringImpl* string1,
+                                     const StringImpl* string2) {
+  if (!string2)
+    return string1 && string1->length() > 0 ? 1 : 0;
+  return VisitCharacters(
+      *string2, [string1](const auto* chars, wtf_size_t length) {
+        return CodeUnitCompareIgnoringASCIICase(string1, chars, length);
+      });
 }
 
 }  // namespace WTF

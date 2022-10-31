@@ -28,6 +28,14 @@
       interfaceName: "MathMLRowElement",
     },
     {
+      name: "mroot",
+      interfaceName: "MathMLRadicalElement",
+    },
+    {
+      name: "msqrt",
+      interfaceName: "MathMLRadicalElement",
+    },
+    {
       name: "merror",
       interfaceName: "MathMLRowElement",
     },
@@ -52,16 +60,28 @@
       interfaceName: "MathMLScriptsElement",
     },
     {
+      name: "mmultiscripts",
+      interfaceName: "MathMLScriptsElement",
+    },
+    {
+      name: "mprescripts",
+      interfaceName: "MathMLRowElement",
+    },
+    {
       name: "mi",
-      interfaceName: "MathMLElement",
+      interfaceName: "MathMLTokenElement",
     },
     {
       name: "mn",
-      interfaceName: "MathMLElement",
+      interfaceName: "MathMLTokenElement",
     },
     {
       name: "mo",
-      interfaceName: "MathMLElement",
+      interfaceName: "MathMLOperatorElement",
+    },
+    {
+      name: "mpadded",
+      interfaceName: "MathMLPaddedElement",
     },
     {
       name: "mphantom",
@@ -73,7 +93,7 @@
     },
     {
       name: "ms",
-      interfaceName: "MathMLElement",
+      interfaceName: "MathMLTokenElement",
     },
     {
       name: "mspace",
@@ -84,8 +104,20 @@
       interfaceName: "MathMLRowElement",
     },
     {
-      name: "mtext",
+      name: "mtable",
       interfaceName: "MathMLElement",
+    },
+    {
+      name: "mtd",
+      interfaceName: "MathMLElement",
+    },
+    {
+      name: "mtr",
+      interfaceName: "MathMLElement",
+    },
+    {
+      name: "mtext",
+      interfaceName: "MathMLTokenElement",
     },
     {
       name: "mover",
@@ -101,6 +133,10 @@
     },
     {
       name: "semantics",
+      interfaceName: "MathMLRowElement",
+    },
+    {
+      name: "none",
       interfaceName: "MathMLRowElement",
     },
   ]

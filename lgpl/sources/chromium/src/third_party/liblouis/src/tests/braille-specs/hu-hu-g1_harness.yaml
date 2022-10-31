@@ -3,7 +3,7 @@ display: |
   display 9 9
   display a a
 table:
-  locale: hu
+  language: hu
   grade: 1
   __assert-match: hu.tbl # hu-hu-g1.ctb
 tests:
@@ -149,6 +149,7 @@ tests:
   - [Diósszilágyi, ⠨⠙⠊⠪⠎⠱⠊⠇⠈⠹⠊]
   - [dinamikusszökőkút, ⠙⠊⠝⠁⠍⠊⠅⠥⠎⠱⠟⠅⠻⠅⠬⠞]
   - [dinoszaurusszerű, ⠙⠊⠝⠕⠱⠁⠥⠗⠥⠱⠱⠑⠗⠾]
+  - [dinoszauruszszerű, ⠙⠊⠝⠕⠱⠁⠥⠗⠥⠱⠱⠑⠗⠾]
   - [disszertáció, ⠙⠊⠱⠱⠑⠗⠞⠈⠉⠊⠪]
   - [dizájnnyelv, ⠙⠊⠣⠈⠚⠝⠫⠑⠇⠧]
   - [dizájnnyaklánc, ⠙⠊⠣⠈⠚⠝⠫⠁⠅⠇⠈⠝⠉]
@@ -1191,6 +1192,8 @@ tests:
   - [A hu_list fájl nem létezik., ⠨⠁ ⠓⠥⠠⠤⠇⠊⠎⠞ ⠋⠈⠚⠇ ⠝⠑⠍ ⠇⠡⠞⠑⠣⠊⠅⠄]
   - ['Az e-mail címem: akarmi@akarmi.hu.', ⠨⠁⠣ ⠑⠤⠍⠁⠊⠇ ⠉⠌⠍⠑⠍⠒ ⠁⠅⠁⠗⠍⠊⠘⠁⠅⠁⠗⠍⠊⠄⠓⠥⠄]
   - ['56%', ⠼⠑⠋⠼⠚⠴]
+  - ["56%-a", ⠼⠑⠋⠼⠚⠴⠤⠁]
+  - ["56%-ban", ⠼⠑⠋⠼⠚⠴⠤⠃⠁⠝]
   - ["kukássztrájk", ⠅⠥⠅⠈⠎⠱⠞⠗⠈⠚⠅]
   - ["hasszorítóval", ⠓⠁⠎⠱⠕⠗⠌⠞⠪⠧⠁⠇]
   - ["1944-ben", ⠼⠁⠊⠙⠙⠤⠃⠑⠝]
@@ -1198,6 +1201,17 @@ tests:
   - ["május 1-ei", ⠍⠈⠚⠥⠎ ⠼⠁⠤⠑⠊]
   - ["június 2-ai", ⠚⠬⠝⠊⠥⠎ ⠼⠃⠤⠁⠊]
   - ["augusztus 20-i", ⠁⠥⠛⠥⠱⠞⠥⠎ ⠼⠃⠚⠤⠊]
+  - ["#", ⠿]
+  - ["$", ⠐⠙]
+  - ["&", ⠐⠯]
+  - [\\, ⠐⠡]
+  - ["`", ⠐⠉]
+  - ["^", ⠐⠋]
+  - ["|", ⠐⠛]
+  - ["~", ⠐⠞]
+  - ["kosarassztár", ⠅⠕⠎⠁⠗⠁⠎⠱⠞⠈⠗]
+  - ["oltásszakértő", ⠕⠇⠞⠈⠎⠱⠁⠅⠡⠗⠞⠻]
+  - ["oltásszkeptikusok", ⠕⠇⠞⠈⠎⠱⠅⠑⠏⠞⠊⠅⠥⠎⠕⠅]
   - - bombázásszimulátor
     - ⠃⠕⠍⠃⠈⠣⠈⠎⠱⠊⠍⠥⠇⠈⠞⠕⠗
     - mode: [compbrlAtCursor]

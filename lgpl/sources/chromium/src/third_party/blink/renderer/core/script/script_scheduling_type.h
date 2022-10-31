@@ -9,21 +9,20 @@ namespace blink {
 
 // Type of <script>'s scheduling.
 //
-// In the spec, this is determined which clause of Step 25 of
-// https://html.spec.whatwg.org/C/#prepare-a-script
-// is taken.
+// This is determined by Steps 31-32 of
+// https://html.spec.whatwg.org/C/#prepare-the-script-element.
 //
 // The enum values are used in histograms and thus do not change existing
 // enum values when modifying.
 enum class ScriptSchedulingType {
-  // Because the sheduling type is determined slightly after PendingScript
+  // Because the scheduling type is determined slightly after PendingScript
   // creation, it is set to kNotSet before ScriptLoader::TakePendingScript()
   // is called. kNotSet should not be observed.
   kNotSet,
 
   // Deferred scripts controlled by HTMLParserScriptRunner.
   //
-  // Spec: 1st Clause.
+  // Spec: Step 31.4.
   //
   // Examples:
   // - <script defer> (parser inserted)
@@ -32,7 +31,7 @@ enum class ScriptSchedulingType {
 
   // Parser-blocking external scripts controlled by XML/HTMLParserScriptRunner.
   //
-  // Spec: 2nd Clause.
+  // Spec: Step 31.5.
   //
   // Examples:
   // - <script> (parser inserted)
@@ -40,12 +39,12 @@ enum class ScriptSchedulingType {
 
   // Parser-blocking inline scripts controlled by XML/HTMLParserScriptRunner.
   //
-  // Spec: 5th Clause.
+  // Spec: Step 32.2.
   kParserBlockingInline,
 
   // In-order scripts controlled by ScriptRunner.
   //
-  // Spec: 3rd Clause.
+  // Spec: Step 31.3.
   //
   // Examples (either classic or module):
   // - Dynamically inserted <script>s with s.async = false
@@ -53,7 +52,7 @@ enum class ScriptSchedulingType {
 
   // Async scripts controlled by ScriptRunner.
   //
-  // Spec: 4nd Clause.
+  // Spec: Step 31.2.
   //
   // Examples (either classic or module):
   // - <script async> and <script async defer> (parser inserted)
@@ -61,20 +60,25 @@ enum class ScriptSchedulingType {
   // - Dynamically inserted <script>s with s.async = true
   kAsync,
 
-  // Inline <script> executed immediately within prepare-a-script.
+  // Inline <script> executed immediately within prepare-the-script-element.
+  // Spec: Step 32.3.
   kImmediate,
 
   // Force deferred scripts controlled by HTMLParserScriptRunner.
   // These are otherwise parser-blocking scripts that are being forced to
-  // execute after parsing completes (due to a ForceDeferScriptIntervention).
+  // execute after parsing completes (due to ForceDeferScriptIntervention).
   //
   // Spec: not yet spec'ed. https://crbug.com/976061
-  kForceDefer
-};
+  kForceDefer,
 
-static const int kLastScriptSchedulingType =
-    static_cast<int>(ScriptSchedulingType::kImmediate);
+  // Force in-order scripts controlled by ScriptRunner.
+  //
+  // Spec: not yet spec'ed. https://crbug.com/1344772
+  kForceInOrder,
+
+  kMaxValue = kForceInOrder,
+};
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_SCRIPT_SCRIPT_SCHEDULING_TYPE_H_

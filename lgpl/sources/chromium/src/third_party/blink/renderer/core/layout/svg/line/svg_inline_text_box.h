@@ -27,7 +27,7 @@
 
 namespace blink {
 
-class TextMarkerBase;
+class DocumentMarker;
 
 class SVGInlineTextBox final : public InlineTextBox {
  public:
@@ -44,7 +44,7 @@ class SVGInlineTextBox final : public InlineTextBox {
   LayoutUnit PositionForOffset(int offset) const override;
 
   void Paint(const PaintInfo&,
-             const LayoutPoint&,
+             const PhysicalOffset&,
              LayoutUnit line_top,
              LayoutUnit line_bottom) const override;
   LayoutRect LocalSelectionRect(
@@ -57,7 +57,7 @@ class SVGInlineTextBox final : public InlineTextBox {
                                                    int& end_position) const;
 
   // Calculate the bounding rect of all text fragments.
-  FloatRect CalculateBoundaries() const;
+  gfx::RectF CalculateBoundaries() const;
 
   void ClearTextFragments() { text_fragments_.clear(); }
   Vector<SVGTextFragment>& TextFragments() { return text_fragments_; }
@@ -73,27 +73,27 @@ class SVGInlineTextBox final : public InlineTextBox {
   }
 
   int OffsetForPositionInFragment(const SVGTextFragment&, float position) const;
-  FloatRect SelectionRectForTextFragment(const SVGTextFragment&,
-                                         int fragment_start_position,
-                                         int fragment_end_position,
-                                         const ComputedStyle&) const;
+  gfx::RectF SelectionRectForTextFragment(const SVGTextFragment&,
+                                          int fragment_start_position,
+                                          int fragment_end_position,
+                                          const ComputedStyle&) const;
   TextRun ConstructTextRun(const ComputedStyle&, const SVGTextFragment&) const;
 
  private:
-  void PaintDocumentMarker(GraphicsContext&,
-                           const LayoutPoint&,
+  void PaintDocumentMarker(const PaintInfo&,
+                           const PhysicalOffset&,
                            const DocumentMarker&,
                            const ComputedStyle&,
                            const Font&,
                            bool) const final;
   void PaintTextMarkerForeground(const PaintInfo&,
-                                 const LayoutPoint&,
-                                 const TextMarkerBase&,
+                                 const PhysicalOffset&,
+                                 const DocumentMarker&,
                                  const ComputedStyle&,
                                  const Font&) const final;
   void PaintTextMarkerBackground(const PaintInfo&,
-                                 const LayoutPoint&,
-                                 const TextMarkerBase&,
+                                 const PhysicalOffset&,
+                                 const DocumentMarker&,
                                  const ComputedStyle&,
                                  const Font&) const final;
 

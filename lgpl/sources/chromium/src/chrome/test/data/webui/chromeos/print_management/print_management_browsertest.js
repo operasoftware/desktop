@@ -8,7 +8,6 @@
 
 GEN_INCLUDE(['//chrome/test/data/webui/polymer_browser_test_base.js']);
 
-GEN('#include "chromeos/constants/chromeos_features.h"');
 GEN('#include "content/public/test/browser_test.h"');
 
 /**
@@ -21,20 +20,7 @@ PrintManagementBrowserTest.prototype = {
   __proto__: PolymerTest.prototype,
 
   browsePreload: 'chrome://print-management/test_loader.html?module=chromeos/' +
-      'print_management/print_management_test.js',
-
-  extraLibraries: [
-    '//third_party/mocha/mocha.js',
-    '//chrome/test/data/webui/mocha_adapter.js',
-    '//ui/webui/resources/js/assert.js',
-    '//ui/webui/resources/js/promise_resolver.js',
-  ],
-
-  featureList: {
-    enabled: [
-      'chromeos::features::kPrintJobManagementApp',
-    ]
-  },
+      'print_management/print_management_test.js&host=test',
 };
 
 TEST_F('PrintManagementBrowserTest', 'All', function() {

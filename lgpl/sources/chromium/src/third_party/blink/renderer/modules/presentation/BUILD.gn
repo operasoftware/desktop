@@ -6,8 +6,6 @@ import("//third_party/blink/renderer/modules/modules.gni")
 
 blink_modules_sources("presentation") {
   sources = [
-    "navigator_presentation.cc",
-    "navigator_presentation.h",
     "presentation.cc",
     "presentation.h",
     "presentation_availability.cc",
@@ -37,4 +35,11 @@ blink_modules_sources("presentation") {
     "presentation_request.cc",
     "presentation_request.h",
   ]
+  if (is_android) {
+    sources += [
+      "presentation_metrics.cc",
+      "presentation_metrics.h",
+    ]
+    deps = [ "//services/metrics/public/cpp:ukm_builders" ]
+  }
 }

@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_MATHML_MATHML_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_MATHML_MATHML_ELEMENT_H_
 
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/mathml_names.h"
@@ -30,6 +30,13 @@ class CORE_EXPORT MathMLElement : public Element {
     return HasLocalName(name.LocalName());
   }
 
+  bool IsMathMLElement() const =
+      delete;  // This will catch anyone doing an unnecessary check.
+  bool IsStyledElement() const =
+      delete;  // This will catch anyone doing an unnecessary check.
+
+  virtual bool IsGroupingElement() const { return false; }
+
  protected:
   bool IsPresentationAttribute(const QualifiedName&) const override;
   void CollectStyleForPresentationAttribute(
@@ -37,16 +44,19 @@ class CORE_EXPORT MathMLElement : public Element {
       const AtomicString&,
       MutableCSSPropertyValueSet*) override;
 
-  base::Optional<Length> AddMathLengthToComputedStyle(
-      ComputedStyle&,
+  enum class AllowPercentages { kYes, kNo };
+  absl::optional<Length> AddMathLengthToComputedStyle(
       const CSSToLengthConversionData&,
-      const QualifiedName&);
+      const QualifiedName&,
+      AllowPercentages allow_percentages = AllowPercentages::kYes);
 
- private:
-  void ParseAttribute(const AttributeModificationParams&) final;
+  void ParseAttribute(const AttributeModificationParams&) override;
 
-  bool IsMathMLElement() const =
-      delete;  // This will catch anyone doing an unnecessary check.
+  // https://w3c.github.io/mathml-core/#dfn-boolean
+  absl::optional<bool> BooleanAttribute(const QualifiedName& name) const;
+
+  LayoutObject* CreateLayoutObject(const ComputedStyle&,
+                                   LegacyLayout legacy) override;
 };
 
 template <typename T>

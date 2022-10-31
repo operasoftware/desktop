@@ -21,15 +21,17 @@ void SVGTextPainter::Paint(const PaintInfo& paint_info) {
   PaintInfo block_info(paint_info);
   if (const auto* properties =
           layout_svg_text_.FirstFragment().PaintProperties()) {
+    // TODO(https://crbug.com/1278452): Also consider Translate, Rotate,
+    // Scale, and Offset, probably via a single transform operation to
+    // FirstFragment().PreTransform().
     if (const auto* transform = properties->Transform())
       block_info.TransformCullRect(*transform);
   }
-  ScopedSVGTransformState transform_state(
-      block_info, layout_svg_text_,
-      layout_svg_text_.LocalToSVGParentTransform());
+  ScopedSVGTransformState transform_state(block_info, layout_svg_text_);
 
   if (block_info.phase == PaintPhase::kForeground)
     SVGModelObjectPainter::RecordHitTestData(layout_svg_text_, block_info);
+  SVGModelObjectPainter::RecordRegionCaptureData(layout_svg_text_, block_info);
 
   BlockPainter(layout_svg_text_).Paint(block_info);
 

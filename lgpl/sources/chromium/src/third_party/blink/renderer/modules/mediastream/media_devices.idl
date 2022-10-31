@@ -18,7 +18,7 @@
     enumerateDevices();
     MediaTrackSupportedConstraints getSupportedConstraints();
     [
-      CallWith = ScriptState, RaisesException, MeasureAs = GetUserMediaPromise
+      CallWith = ScriptState, RaisesException, HighEntropy, MeasureAs = GetUserMediaPromise
     ] Promise<MediaStream>
     getUserMedia(optional MediaStreamConstraints constraints = {});
 
@@ -28,4 +28,17 @@
       MeasureAs = GetDisplayMedia
     ] Promise<MediaStream>
     getDisplayMedia(optional MediaStreamConstraints constraints = {});
+
+    [
+      RuntimeEnabled = GetDisplayMediaSet, CallWith = ScriptState, RaisesException
+    ] Promise<sequence<MediaStream>>
+    getDisplayMediaSet(optional MediaStreamConstraints constraints = {});
+
+    // https://w3c.github.io/mediacapture-handle/identity/
+    // Allows an application APP to opt-in to exposing certain information to
+    // applications which end up capturing APP.
+    [
+      RuntimeEnabled = CaptureHandle, CallWith = ScriptState, RaisesException
+    ] void
+    setCaptureHandleConfig(optional CaptureHandleConfig config = {});
 };

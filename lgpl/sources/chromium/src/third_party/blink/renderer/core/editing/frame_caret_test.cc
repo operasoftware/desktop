@@ -4,10 +4,12 @@
 
 #include "third_party/blink/renderer/core/editing/frame_caret.h"
 
+#include "build/build_config.h"
 #include "third_party/blink/renderer/core/editing/commands/typing_command.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/editing/testing/editing_test_base.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
@@ -19,61 +21,62 @@ namespace blink {
 
 class FrameCaretTest : public EditingTestBase {
  public:
-  FrameCaretTest() : was_running_web_test_(WebTestSupport::IsRunningWebTest()) {
-    // The caret blink timer doesn't work if IsRunningWebTest() because
-    // LayoutTheme::CaretBlinkInterval() returns 0.
-    WebTestSupport::SetIsRunningWebTest(false);
-  }
-  ~FrameCaretTest() override {
-    WebTestSupport::SetIsRunningWebTest(was_running_web_test_);
+  static bool ShouldShowCaret(const FrameCaret& caret) {
+    return caret.ShouldShowCaret();
   }
 
-  static bool ShouldBlinkCaret(const FrameCaret& caret) {
-    return caret.ShouldBlinkCaret();
+  static bool IsVisibleIfActive(const FrameCaret& caret) {
+    return caret.IsVisibleIfActive();
   }
 
  private:
-  const bool was_running_web_test_;
+  // The caret blink timer doesn't work if IsRunningWebTest() because
+  // LayoutTheme::CaretBlinkInterval() returns 0.
+  ScopedWebTestMode web_test_mode_{false};
 };
 
-TEST_F(FrameCaretTest, BlinkAfterTyping) {
+#if BUILDFLAG(IS_MAC) && defined(ARCH_CPU_ARM64)
+// https://crbug.com/1222649
+#define MAYBE_BlinkAfterTyping DISABLED_BlinkAfterTyping
+#else
+#define MAYBE_BlinkAfterTyping BlinkAfterTyping
+#endif
+TEST_F(FrameCaretTest, MAYBE_BlinkAfterTyping) {
   FrameCaret& caret = Selection().FrameCaretForTesting();
   scoped_refptr<scheduler::FakeTaskRunner> task_runner =
       base::MakeRefCounted<scheduler::FakeTaskRunner>();
   task_runner->SetTime(0);
-  caret.RecreateCaretBlinkTimerForTesting(task_runner.get());
+  caret.RecreateCaretBlinkTimerForTesting(task_runner.get(),
+                                          task_runner->GetMockTickClock());
   const double kInterval = 10;
-  LayoutTheme::GetTheme().SetCaretBlinkInterval(
-      base::TimeDelta::FromSecondsD(kInterval));
+  LayoutTheme::GetTheme().SetCaretBlinkInterval(base::Seconds(kInterval));
   GetDocument().GetPage()->GetFocusController().SetActive(true);
   GetDocument().GetPage()->GetFocusController().SetFocused(true);
   GetDocument().body()->setInnerHTML("<textarea>");
   auto* editor = To<Element>(GetDocument().body()->firstChild());
-  editor->focus();
+  editor->Focus();
   UpdateAllLifecyclePhasesForTest();
 
   EXPECT_TRUE(caret.IsActive());
-  EXPECT_FALSE(caret.ShouldShowBlockCursor());
-  EXPECT_TRUE(caret.ShouldPaintCaretForTesting())
+  EXPECT_TRUE(IsVisibleIfActive(caret))
       << "Initially a caret should be in visible cycle.";
 
   task_runner->AdvanceTimeAndRun(kInterval);
-  EXPECT_FALSE(caret.ShouldPaintCaretForTesting())
-      << "The caret blinks normally.";
+  EXPECT_FALSE(IsVisibleIfActive(caret)) << "The caret blinks normally.";
 
   TypingCommand::InsertLineBreak(GetDocument());
   UpdateAllLifecyclePhasesForTest();
-  EXPECT_TRUE(caret.ShouldPaintCaretForTesting())
+  EXPECT_TRUE(IsVisibleIfActive(caret))
       << "The caret should be in visible cycle just after a typing command.";
 
   task_runner->AdvanceTimeAndRun(kInterval - 1);
   UpdateAllLifecyclePhasesForTest();
-  EXPECT_TRUE(caret.ShouldPaintCaretForTesting())
+  EXPECT_TRUE(IsVisibleIfActive(caret))
       << "The typing command reset the timer. The caret is still visible.";
 
   task_runner->AdvanceTimeAndRun(1);
   UpdateAllLifecyclePhasesForTest();
-  EXPECT_FALSE(caret.ShouldPaintCaretForTesting())
+  EXPECT_FALSE(IsVisibleIfActive(caret))
       << "The caret should blink after the typing command.";
 }
 
@@ -86,24 +89,24 @@ TEST_F(FrameCaretTest, ShouldNotBlinkWhenSelectionLooseFocus) {
       "<div id='input' contenteditable>foo</div>"
       "</div>");
   Element* input = GetDocument().QuerySelector("#input");
-  input->focus();
+  input->Focus();
   Element* outer = GetDocument().QuerySelector("#outer");
-  outer->focus();
+  outer->Focus();
   UpdateAllLifecyclePhasesForTest();
   const SelectionInDOMTree& selection = Selection().GetSelectionInDOMTree();
-  EXPECT_EQ(selection.Base(),
-            Position(input, PositionAnchorType::kBeforeChildren));
-  EXPECT_FALSE(ShouldBlinkCaret(caret));
+  EXPECT_EQ(selection.Base(), Position::FirstPositionInNode(*input));
+  EXPECT_FALSE(ShouldShowCaret(caret));
 }
 
 TEST_F(FrameCaretTest, ShouldBlinkCaretWhileCaretBrowsing) {
   FrameCaret& caret = Selection().FrameCaretForTesting();
   Selection().SetSelection(SetSelectionTextToBody("<div>a|b</div>"),
                            SetSelectionOptions());
-  Selection().SetCaretVisible(true);
-  EXPECT_FALSE(ShouldBlinkCaret(caret));
+  Selection().SetCaretEnabled(true);
+  EXPECT_FALSE(ShouldShowCaret(caret));
   GetDocument().GetFrame()->GetSettings()->SetCaretBrowsingEnabled(true);
-  EXPECT_TRUE(ShouldBlinkCaret(caret));
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_TRUE(ShouldShowCaret(caret));
 }
 
 }  // namespace blink

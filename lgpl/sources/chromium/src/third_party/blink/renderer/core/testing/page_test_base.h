@@ -21,9 +21,14 @@ class TickClock;
 
 namespace blink {
 
+class AnimationClock;
 class BrowserInterfaceBrokerProxy;
 class Document;
+class FrameSelection;
+class LayoutObject;
 class LocalFrame;
+class PendingAnimations;
+class StyleEngine;
 
 class PageTestBase : public testing::Test, public ScopedMockOverlayScrollbars {
   USING_FAST_MALLOC(PageTestBase);
@@ -59,8 +64,8 @@ class PageTestBase : public testing::Test, public ScopedMockOverlayScrollbars {
 
   using FrameSettingOverrideFunction = void (*)(Settings&);
 
-  void SetUp(IntSize);
-  void SetupPageWithClients(Page::PageClients* = nullptr,
+  void SetUp(gfx::Size);
+  void SetupPageWithClients(ChromeClient* = nullptr,
                             LocalFrameClient* = nullptr,
                             FrameSettingOverrideFunction = nullptr);
   // TODO(shanmuga.m@samsung.com): These two function to be unified.
@@ -96,8 +101,13 @@ class PageTestBase : public testing::Test, public ScopedMockOverlayScrollbars {
   // See external/wpt/css/fonts/ahem/README for more about the 'Ahem' font.
   static void LoadAhem(LocalFrame&);
 
+  static void LoadNoto(LocalFrame&);
+
+  static std::string ToSimpleLayoutTree(const LayoutObject& layout_object);
+
  protected:
   void LoadAhem();
+  void LoadNoto();
   void EnablePlatform();
 
   // Used by subclasses to provide a different tick clock. At the moment is only

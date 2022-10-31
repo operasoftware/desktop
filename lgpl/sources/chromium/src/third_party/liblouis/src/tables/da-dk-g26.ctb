@@ -1,6 +1,6 @@
 # Liblouis: Danish table for 6 dots grade 2 forward and backward translation 
 #
-#  Copyright (C) 2014-2017, Bue Vester-Andersen <bue@vester-andersen.dk>
+#  Copyright (C) 2014-2020, Bue Vester-Andersen <bue@vester-andersen.dk>
 #
 #  This file is part of liblouis.
 #
@@ -18,7 +18,7 @@
 #  License along with liblouis. If not, see
 #  <http://www.gnu.org/licenses/>.
 #
-# Version: Bue Vester-Andersen, 170604
+# Version: Bue Vester-Andersen, 200302
 
 ### Table Metadata
 
@@ -26,7 +26,7 @@
 #-index-name: Danish, contracted, 6-dot
 #-display-name: Danish 6-dot contracted braille
 
-#+locale: da
+#+language: da
 #+type: literary
 #+contraction: full
 #+grade: 2
@@ -65,45 +65,77 @@ punctuation / 34 SLASH
 punctuation : 25 COLON
 punctuation ; 23 SEMICOLON
 punctuation ? 26 QUESTION MARK
-uplow Aa 1
-uplow Bb 12
-uplow Cc 14
-uplow Dd 145
-uplow Ee 15
-uplow Ff 124
-uplow Gg 1245
-uplow Hh 125
-uplow Ii 24
-uplow Jj 245
-uplow Kk 13
-uplow Ll 123
-uplow Mm 134
-uplow Nn 1345
-uplow Oo 135
-uplow Pp 1234
-uplow Rr 1235
-uplow Ss 234
-uplow Tt 2345
-uplow Uu 136
-uplow Vv 1236
-uplow Yy 13456
+lowercase a 1
+lowercase b 12
+lowercase c 14
+lowercase d 145
+lowercase e 15
+lowercase f 124
+lowercase g 1245
+lowercase h 125
+lowercase i 24
+lowercase j 245
+lowercase k 13
+lowercase l 123
+lowercase m 134
+lowercase n 1345
+lowercase o 135
+lowercase p 1234
+lowercase r 1235
+lowercase s 234
+lowercase t 2345
+lowercase u 136
+lowercase v 1236
+lowercase y 13456
 
 #use 8 dots for the following chars to avoid conflict with indicators
-uplow Qq 123457
-uplow Ww 24567
-uplow Xx 13467
-uplow Zz 13567
+lowercase q 123457
+lowercase w 24567
+lowercase x 13467
+lowercase z 13567
 punctuation | 4568 VERTICAL LINE
 punctuation ~ 467 TILDE (changed by pass 2 to not conflict with indicators
-uplow \x00dc\x00fc 12567
+lowercase \x00fc 12567
 
 include digits6Dots.uti
 
 punctuation \x00a7 346 SECTION SIGN (0xa7)
 
-uplow \x00c5\x00e5 16 LATIN LETTER A WITH RING ABOVE
-uplow \x00c6\x00e6 345 LATIN LETTER AE
-uplow \x00d8\x00f8 246 LATIN LETTER O WITH STROKE
+lowercase \x00e5 16 LATIN LETTER A WITH RING ABOVE
+lowercase \x00e6 345 LATIN LETTER AE
+lowercase \x00f8 246 LATIN LETTER O WITH STROKE
+
+# Uppercase letters
+base uppercase A a
+base uppercase B b
+base uppercase C c
+base uppercase D d
+base uppercase E e
+base uppercase F f
+base uppercase G g
+base uppercase H h
+base uppercase I i
+base uppercase J j
+base uppercase K k
+base uppercase L l
+base uppercase M m
+base uppercase N n
+base uppercase O o
+base uppercase P p
+base uppercase R r
+base uppercase S s
+base uppercase T t
+base uppercase U u
+base uppercase V v
+base uppercase Y y
+base uppercase Q q
+base uppercase W w
+base uppercase X x
+base uppercase Z z
+base uppercase \x00dc \x00fc
+base uppercase \x00c5 \x00e5 LATIN LETTER A WITH RING ABOVE
+base uppercase \x00c6 \x00e6 LATIN LETTER AE
+base uppercase \x00d8 \x00f8 LATIN LETTER O WITH STROKE
 
 # cover all other Braille patterns
 include braille-patterns.cti
@@ -149,10 +181,7 @@ undefined 26
 
 letsign 6
 
-# No letsign before capital letters or letters with accents
-
-noletsign I\x0160\x0152\x017d\x0178\x00c0\x00c1\x00c2\x00c3\x00c7\x00c8\x00c9\x00ca\x00cb\x00cc\x00cd\x00ce\x00cf\x00d0\x00d1\x00d2\x00d3\x00d4\x00d5\x00d9\x00da\x00db\x00dc\x00dd\x00de\x008a\x008c\x008e
-noletsign i\x0161\x0153\x017e\x00ff\x00df\x00e0\x00e1\x00e2\x00e3\x00e7\x00e8\x00e9\x00ea\x00eb\x00ec\x00ed\x00ee\x00ef\x00f0\x00f1\x00f2\x00f3\x00f4\x00f5\x00f9\x00fa\x00fb\x00fd\x00fe\x009a\x009c
+noletsign Ii\x00df\x0149\x0152\x0153
 
 # Emphasis opcodes
 emphclass italic
@@ -161,18 +190,12 @@ emphclass bold
 
 begemphphrase italic 56
 endemphphrase italic after 56
-begemphword italic 56
-endemphword italic 56
 
 begemphphrase bold 56
 endemphphrase bold after 56
-begemphword bold 56
-endemphword bold 56
 
 begemphphrase underline 56
 endemphphrase underline after 56
-begemphword underline 56
-endemphword underline 56
 
 capsletter 46
 begcapsword 456
@@ -187,12 +210,12 @@ multind 6-3456 letsign numsign
 #class of none-space characters that demand double dashes
 # Used in context lines later.
 #must be the first class defined.
-class charsWDoubleDash .,?!/:"'() # class w
+attribute charsWDoubleDash .,?!/:"'() # class w
 
 ### Correct - forward translation
 
 # Chars that don't require a space before percent and permille:
-class charsBeforePercent "(\x201e\x0084\x201c\x0093\x201d\x0094\x00ab\x00bb #class x
+attribute charsBeforePercent "(\x201e\x0084\x201c\x0093\x201d\x0094\x00ab\x00bb #class x
 noback correct `["%"] *
 noback correct !$sx["%"] " %"
 noback correct `["\x2030"] *
@@ -201,19 +224,19 @@ noback correct `["\x0089"] *
 noback correct !$sx["\x0089"] " \x2030"
 
 # Chars to be treated like digits when switching back to letter mode
-class extraDigits \x00bc\x00bd\x00be
+attribute extraDigits \x00bc\x00bd\x00be
 
 #Use the "correct" opcode to convert chars that can't be back-translated
 # and make the table more simple.
 
 # Dashes
-class dashes \x2013\x2014\x0096\x0097\x00ad
+attribute dashes \x2013\x2014\x0096\x0097\x00ad
 noback correct %dashes "-"
 
-class quotes \x201e\x0084\x201c\x0093\x201d\x0094\x00ab\x00bb 
+attribute quotes \x201e\x0084\x201c\x0093\x201d\x0094\x00ab\x00bb 
 noback correct %quotes "\""
 
-class apostrophes `\x201a\x0082\x2039\x008b\x2018\x0091\x2019\x0092\x203a\x009b\x00b4
+attribute apostrophes `\x201a\x0082\x2039\x008b\x2018\x0091\x2019\x0092\x203a\x009b\x00b4
 noback correct %apostrophes "'"
 
 ### Correct - backward translation
@@ -239,9 +262,16 @@ noback correct $dy[]$l "\xf800\xf801"
 noback correct $dy$Spm.[]$l "\xf800\xf801"
 ### Pass 1 - Forward and backward
 
+# Remove space between § and numbers.
+noback begnum § 346
+begnum §\s 346
+begnum §§\s 346-346
+always §§ 346-346
+
 # Punctuations, math and numbers
 #midnum , 2
 #midnum . 3
+# the following rule is doubtful, but probably does not apply.
 #midnum - 36
 endnum - 36
 #midnum / 34
@@ -279,7 +309,7 @@ always (*) 236-35-356
 before punctuation before sign always ( 6-236
 
 # these characters must be separated from ")" by a letsign.
-class SepToRightpar Jj%'\x2030\x0089\x201a\x0082\x2039\x009b\x2018\x0091\x2019\x0092\x203a\x009b
+attribute SepToRightpar Jj%'\x2030\x0089\x201a\x0082\x2039\x009b\x2018\x0091\x2019\x0092\x203a\x009b
 after SepToRightpar always ) 6-356
 after punctuation after sign always ) 6-356
 
@@ -660,28 +690,28 @@ contraction vt
 word være 345
 
 #Part words
-nocross den 12346
-nocross der 23456
-nocross det 2346
-nocross de 1456
-nocross en 126
-nocross er 156
-nocross et 346
-nocross ge 12456
-#nocross hvor 34
-nocross hv 2456
-nocross ig 35
-nocross me 146
-nocross nd 12345
-nocross ne 1246
-nocross or 1346
-nocross re 12356
-nocross sk 123456
-nocross st 1356
-nocross te 1256
+nocross always den 12346
+nocross always der 23456
+nocross always det 2346
+nocross always de 1456
+nocross always en 126
+nocross always er 156
+nocross always et 346
+nocross always ge 12456
+#nocross always hvor 34
+nocross always hv 2456
+nocross always ig 35
+nocross always me 146
+nocross always nd 12345
+nocross always ne 1246
+nocross always or 1346
+nocross always re 12356
+nocross always sk 123456
+nocross always st 1356
+nocross always te 1256
 
 # Numsign/"ve", special case when back-translating
-noback nocross ve 3456
+noback nocross always ve 3456
 
 # Additional words containing "hvor"
 # these are made explicit in 6-dots to handle / better
@@ -708,7 +738,7 @@ word ihvorvel 24-34-3456-123
 nofor midendword ve 3456
 
 # nondigletters covers small letters from k + various part word contractions with dots 5 or 6. Necesary to ensure correct back-translation.
-class nondigletter klmnopqrstuvwxyzæøå\x017e\x00e0\x00e7\x00e8\x00e9\x00ea\x00eb\x00ee\x00ef\x00f4\x00f9\x00fb\x00fc\x283f\x2829\x282b\x2837
+attribute nondigletter klmnopqrstuvwxyzæøå\x017e\x00e0\x00e7\x00e8\x00e9\x00ea\x00eb\x00ee\x00ef\x00f4\x00f9\x00fb\x00fc\x283f\x2829\x282b\x2837
 nofor before nondigletter begword ve 3456
 nofor before nondigletter begword vea 3456-1
 nofor sufword veade 3456-1-1456
@@ -1057,6 +1087,7 @@ noback pass2 @13467 @6-1346
 noback pass2 @13567 @6-1356
 noback pass2 @12567 @6-1256
 
+noback pass2 @6-5 @5 # no letsign before letters with accent
 noback pass2 @6-46-5 @46-5 # no letsign before cap letters with accent
 noback pass2 @234f-123f-46-5 @46-5 # no letsign before cap letters with accent
 noback pass2 _$D[@6-46-6] *
@@ -1090,6 +1121,10 @@ noback pass2 @6-46 @46-6 # Ensure correct order
 
 # Ensure there is only one letsign
  noback pass3 @6-6 @6
+
+# Ensure there is only one emphasis sign
+noback pass3 @56-56 @56
+noback pass3 @56-56-56 @56
 
 
 ### Pass 3 - backward translation

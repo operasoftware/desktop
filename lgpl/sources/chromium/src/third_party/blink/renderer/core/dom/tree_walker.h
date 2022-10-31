@@ -27,7 +27,8 @@
 
 #include "third_party/blink/renderer/core/dom/node_iterator_base.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
@@ -35,7 +36,6 @@ class ExceptionState;
 
 class TreeWalker final : public ScriptWrappable, public NodeIteratorBase {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(TreeWalker);
 
  public:
   TreeWalker(Node*, unsigned what_to_show, V8NodeFilter*);

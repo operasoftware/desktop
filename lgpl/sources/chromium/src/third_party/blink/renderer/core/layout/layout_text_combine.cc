@@ -20,7 +20,6 @@
 
 #include "third_party/blink/renderer/core/layout/layout_text_combine.h"
 
-#include "base/stl_util.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 
 namespace blink {
@@ -36,6 +35,7 @@ LayoutTextCombine::LayoutTextCombine(Node* node,
 
 void LayoutTextCombine::StyleDidChange(StyleDifference diff,
                                        const ComputedStyle* old_style) {
+  NOT_DESTROYED();
   LayoutText::StyleDidChange(diff, old_style);
   UpdateIsCombined();
   if (!IsCombined())
@@ -47,6 +47,7 @@ void LayoutTextCombine::StyleDidChange(StyleDifference diff,
 }
 
 void LayoutTextCombine::TextDidChange() {
+  NOT_DESTROYED();
   LayoutText::TextDidChange();
 
   bool was_combined = IsCombined();
@@ -78,8 +79,9 @@ float LayoutTextCombine::Width(unsigned from,
                                LayoutUnit x_position,
                                TextDirection direction,
                                HashSet<const SimpleFontData*>* fallback_fonts,
-                               FloatRect* glyph_bounds,
+                               gfx::RectF* glyph_bounds,
                                float) const {
+  NOT_DESTROYED();
   if (!length)
     return 0;
 
@@ -103,9 +105,11 @@ void ScaleHorizontallyAndTranslate(GraphicsContext& context,
       offset_y));
 }
 
-void LayoutTextCombine::TransformToInlineCoordinates(GraphicsContext& context,
-                                                     const LayoutRect& box_rect,
-                                                     bool clip) const {
+void LayoutTextCombine::TransformToInlineCoordinates(
+    GraphicsContext& context,
+    const PhysicalRect& box_rect,
+    bool clip) const {
+  NOT_DESTROYED();
   DCHECK(is_combined_);
 
   // No transform needed if we don't have a font.
@@ -145,10 +149,11 @@ void LayoutTextCombine::TransformToInlineCoordinates(GraphicsContext& context,
   }
 
   if (clip)
-    context.Clip(FloatRect(box_rect.X(), box_rect.Y(), width, cell_height));
+    context.Clip(gfx::RectF(box_rect.X(), box_rect.Y(), width, cell_height));
 }
 
 void LayoutTextCombine::UpdateIsCombined() {
+  NOT_DESTROYED();
   // CSS3 spec says text-combine works only in vertical writing mode.
   is_combined_ = !StyleRef().IsHorizontalWritingMode()
                  // Nothing to combine.
@@ -156,6 +161,7 @@ void LayoutTextCombine::UpdateIsCombined() {
 }
 
 void LayoutTextCombine::UpdateFontStyleForCombinedText() {
+  NOT_DESTROYED();
   DCHECK(is_combined_);
 
   scoped_refptr<ComputedStyle> style = ComputedStyle::Clone(StyleRef());
@@ -166,8 +172,9 @@ void LayoutTextCombine::UpdateFontStyleForCombinedText() {
                                  *style, style->Direction());
   FontDescription description = style->GetFont().GetFontDescription();
   float em_width = description.ComputedSize();
-  if (!EnumHasFlags(style->TextDecorationsInEffect(),
-                    TextDecoration::kUnderline | TextDecoration::kOverline))
+  if (!EnumHasFlags(
+          style->TextDecorationsInEffect(),
+          TextDecorationLine::kUnderline | TextDecorationLine::kOverline))
     em_width *= kTextCombineMargin;
 
   // We are going to draw combined text horizontally.
@@ -185,7 +192,7 @@ void LayoutTextCombine::UpdateFontStyleForCombinedText() {
     // Need to try compressed glyphs.
     static const FontWidthVariant kWidthVariants[] = {kHalfWidth, kThirdWidth,
                                                       kQuarterWidth};
-    for (size_t i = 0; i < base::size(kWidthVariants); ++i) {
+    for (size_t i = 0; i < std::size(kWidthVariants); ++i) {
       description.SetWidthVariant(kWidthVariants[i]);
       Font compressed_font(description, font_selector);
       float run_width = compressed_font.Width(run);

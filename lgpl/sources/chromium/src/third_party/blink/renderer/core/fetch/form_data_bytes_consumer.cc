@@ -190,8 +190,8 @@ class DataPipeAndDataBytesConsumer final : public BytesConsumer {
 
         mojo::ScopedDataPipeProducerHandle pipe_producer_handle;
         mojo::ScopedDataPipeConsumerHandle pipe_consumer_handle;
-        MojoResult rv = mojo::CreateDataPipe(nullptr, &pipe_producer_handle,
-                                             &pipe_consumer_handle);
+        MojoResult rv = mojo::CreateDataPipe(nullptr, pipe_producer_handle,
+                                             pipe_consumer_handle);
         if (rv != MOJO_RESULT_OK) {
           return Result::kError;
         }
@@ -408,7 +408,8 @@ class ComplexFormDataBytesConsumer final : public BytesConsumer {
         case FormDataElement::kEncodedFile: {
           auto file_length = element.file_length_;
           if (file_length < 0) {
-            if (!GetFileSize(element.filename_, file_length)) {
+            if (!GetFileSize(element.filename_, *execution_context,
+                             file_length)) {
               form_data_ = nullptr;
               blob_bytes_consumer_ = BytesConsumer::CreateErrored(
                   Error("Cannot determine a file size"));
@@ -499,12 +500,12 @@ FormDataBytesConsumer::FormDataBytesConsumer(const String& string)
 FormDataBytesConsumer::FormDataBytesConsumer(DOMArrayBuffer* buffer)
     : FormDataBytesConsumer(
           buffer->Data(),
-          base::checked_cast<wtf_size_t>(buffer->ByteLengthAsSizeT())) {}
+          base::checked_cast<wtf_size_t>(buffer->ByteLength())) {}
 
 FormDataBytesConsumer::FormDataBytesConsumer(DOMArrayBufferView* view)
     : FormDataBytesConsumer(
           view->BaseAddress(),
-          base::checked_cast<wtf_size_t>(view->byteLengthAsSizeT())) {}
+          base::checked_cast<wtf_size_t>(view->byteLength())) {}
 
 FormDataBytesConsumer::FormDataBytesConsumer(const void* data, wtf_size_t size)
     : impl_(MakeGarbageCollected<SimpleFormDataBytesConsumer>(

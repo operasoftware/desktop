@@ -5,45 +5,49 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGPU_GPU_QUEUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGPU_GPU_QUEUE_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
 #include "third_party/blink/renderer/modules/webgpu/dawn_object.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 
 namespace blink {
 
-class CanvasColorParams;
-class DawnTextureFromImageBitmap;
 class ExceptionState;
 class GPUBuffer;
 class GPUCommandBuffer;
-class GPUFence;
-class GPUFenceDescriptor;
-class GPUImageBitmapCopyView;
-class GPUTextureCopyView;
+class GPUImageCopyExternalImage;
+class GPUImageCopyTexture;
+class GPUImageCopyTextureTagged;
+class GPUImageDataLayout;
+class ScriptPromiseResolver;
+class ScriptState;
 class StaticBitmapImage;
-class UnsignedLongEnforceRangeSequenceOrGPUExtent3DDict;
 
 class GPUQueue : public DawnObject<WGPUQueue> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   explicit GPUQueue(GPUDevice* device, WGPUQueue queue);
-  ~GPUQueue() override;
+
+  GPUQueue(const GPUQueue&) = delete;
+  GPUQueue& operator=(const GPUQueue&) = delete;
 
   // gpu_queue.idl
   void submit(const HeapVector<Member<GPUCommandBuffer>>& buffers);
-  void signal(GPUFence* fence, uint64_t signal_value);
-  GPUFence* createFence(const GPUFenceDescriptor* descriptor);
+  ScriptPromise onSubmittedWorkDone(ScriptState* script_state);
   void writeBuffer(GPUBuffer* buffer,
                    uint64_t buffer_offset,
                    const MaybeShared<DOMArrayBufferView>& data,
-                   uint64_t data_byte_offset,
+                   uint64_t data_element_offset,
                    ExceptionState& exception_state);
   void writeBuffer(GPUBuffer* buffer,
                    uint64_t buffer_offset,
                    const MaybeShared<DOMArrayBufferView>& data,
-                   uint64_t data_byte_offset,
-                   uint64_t byte_size,
+                   uint64_t data_element_offset,
+                   uint64_t data_element_count,
                    ExceptionState& exception_state);
   void writeBuffer(GPUBuffer* buffer,
                    uint64_t buffer_offset,
@@ -56,35 +60,51 @@ class GPUQueue : public DawnObject<WGPUQueue> {
                    uint64_t data_byte_offset,
                    uint64_t byte_size,
                    ExceptionState& exception_state);
+  void writeTexture(GPUImageCopyTexture* destination,
+                    const MaybeShared<DOMArrayBufferView>& data,
+                    GPUImageDataLayout* data_layout,
+                    const V8GPUExtent3D* write_size,
+                    ExceptionState& exception_state);
+  void writeTexture(GPUImageCopyTexture* destination,
+                    const DOMArrayBufferBase* data,
+                    GPUImageDataLayout* data_layout,
+                    const V8GPUExtent3D* write_size,
+                    ExceptionState& exception_state);
+  void copyExternalImageToTexture(GPUImageCopyExternalImage* copyImage,
+                                  GPUImageCopyTextureTagged* destination,
+                                  const V8GPUExtent3D* copySize,
+                                  ExceptionState& exception_state);
+
+ private:
+  void OnWorkDoneCallback(ScriptPromiseResolver* resolver,
+                          WGPUQueueWorkDoneStatus status);
+
+  bool UploadContentToTexture(StaticBitmapImage* image,
+                              const WGPUOrigin3D& origin,
+                              const WGPUExtent3D& copy_size,
+                              const WGPUImageCopyTexture& destination,
+                              bool dst_premultiplied_alpha,
+                              PredefinedColorSpace dst_color_space,
+                              bool flipY);
   void WriteBufferImpl(GPUBuffer* buffer,
                        uint64_t buffer_offset,
                        uint64_t data_byte_length,
                        const void* data_base_ptr,
                        unsigned data_bytes_per_element,
                        uint64_t data_byte_offset,
-                       base::Optional<uint64_t> byte_size,
+                       absl::optional<uint64_t> byte_size,
                        ExceptionState& exception_state);
-  void copyImageBitmapToTexture(
-      GPUImageBitmapCopyView* source,
-      GPUTextureCopyView* destination,
-      UnsignedLongEnforceRangeSequenceOrGPUExtent3DDict& copySize,
-      ExceptionState& exception_state);
+  void WriteTextureImpl(GPUImageCopyTexture* destination,
+                        const void* data,
+                        size_t dataSize,
+                        GPUImageDataLayout* data_layout,
+                        const V8GPUExtent3D* write_size,
+                        ExceptionState& exception_state);
 
- private:
-  bool CopyContentFromCPU(StaticBitmapImage* image,
-                          const CanvasColorParams& color_params,
-                          const WGPUOrigin3D& origin,
-                          const WGPUExtent3D& copy_size,
-                          const WGPUTextureCopyView& destination,
-                          const WGPUTextureFormat dest_texture_format);
-  bool CopyContentFromGPU(StaticBitmapImage* image,
-                          const WGPUOrigin3D& origin,
-                          const WGPUExtent3D& copy_size,
-                          const WGPUTextureCopyView& destination);
-
-  scoped_refptr<DawnTextureFromImageBitmap> produce_dawn_texture_handler_;
-
-  DISALLOW_COPY_AND_ASSIGN(GPUQueue);
+  void setLabelImpl(const String& value) override {
+    std::string utf8_label = value.Utf8();
+    GetProcs().queueSetLabel(GetHandle(), utf8_label.c_str());
+  }
 };
 
 }  // namespace blink

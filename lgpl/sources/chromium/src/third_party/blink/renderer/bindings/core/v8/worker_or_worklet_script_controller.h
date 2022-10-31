@@ -31,38 +31,31 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_WORKER_OR_WORKLET_SCRIPT_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_WORKER_OR_WORKLET_SCRIPT_CONTROLLER_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/bindings/core/v8/rejected_promises.h"
-#include "third_party/blink/renderer/bindings/core/v8/sanitize_script_errors.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_cache_options.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/text/text_position.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
-class ErrorEvent;
-class ExceptionState;
-class ScriptSourceCode;
+class KURL;
 class WorkerOrWorkletGlobalScope;
 
 class CORE_EXPORT WorkerOrWorkletScriptController final
     : public GarbageCollected<WorkerOrWorkletScriptController> {
  public:
   WorkerOrWorkletScriptController(WorkerOrWorkletGlobalScope*, v8::Isolate*);
+
+  WorkerOrWorkletScriptController(const WorkerOrWorkletScriptController&) =
+      delete;
+  WorkerOrWorkletScriptController& operator=(
+      const WorkerOrWorkletScriptController&) = delete;
+
   virtual ~WorkerOrWorkletScriptController();
   void Dispose();
 
   bool IsExecutionForbidden() const;
-
-  // Returns true if the evaluation completed with no uncaught exception.
-  bool Evaluate(const ScriptSourceCode&,
-                SanitizeScriptErrors sanitize_script_errors,
-                ErrorEvent** = nullptr,
-                V8CacheOptions = kV8CacheOptionsDefault);
 
   // Prevents future JavaScript execution.
   void ForbidExecution();
@@ -79,12 +72,12 @@ class CORE_EXPORT WorkerOrWorkletScriptController final
   // before Evaluate().
   void PrepareForEvaluation();
 
-  // Used by WorkerGlobalScope:
-  void RethrowExceptionFromImportedScript(ErrorEvent*, ExceptionState&);
   // Disables `eval()` on JavaScript. This must be called before Evaluate().
   void DisableEval(const String&);
 
-  // Used by Inspector agents:
+  // Disables wasm code generation. This must be called before Evaluate().
+  void SetWasmEvalErrorMessage(const String&);
+
   ScriptState* GetScriptState() { return script_state_; }
 
   // Used by V8 bindings:
@@ -102,18 +95,13 @@ class CORE_EXPORT WorkerOrWorkletScriptController final
   bool IsContextInitialized() const {
     return script_state_ && !!script_state_->PerContextData();
   }
-
-  ScriptValue EvaluateAndReturnValueForTest(const ScriptSourceCode&);
+  bool IsReadyToEvaluate() const { return is_ready_to_evaluate_; }
 
  private:
-  class ExecutionState;
-
   void DisableEvalInternal(const String& error_message);
 
-  // Evaluate a script file in the current execution environment.
-  ScriptValue EvaluateInternal(const ScriptSourceCode&,
-                               SanitizeScriptErrors,
-                               V8CacheOptions);
+  void SetWasmEvalErrorMessageInternal(const String& error_message);
+
   void DisposeContextIfNeeded();
 
   Member<WorkerOrWorkletGlobalScope> global_scope_;
@@ -128,21 +116,12 @@ class CORE_EXPORT WorkerOrWorkletScriptController final
 
   // Keeps the error message for `eval()` on JavaScript until Initialize().
   String disable_eval_pending_;
+  String disable_wasm_eval_pending_;
 
   bool is_ready_to_evaluate_ = false;
   bool execution_forbidden_ = false;
 
   scoped_refptr<RejectedPromises> rejected_promises_;
-
-  // |execution_state_| refers to a stack object that evaluate() allocates;
-  // evaluate() ensuring that the pointer reference to it is removed upon
-  // returning. Hence kept as a bare pointer here, and not a Persistent with
-  // Oilpan enabled; stack scanning will visit the object and
-  // trace its on-heap fields.
-  GC_PLUGIN_IGNORE("394615")
-  ExecutionState* execution_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(WorkerOrWorkletScriptController);
 };
 
 }  // namespace blink

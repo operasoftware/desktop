@@ -17,12 +17,12 @@ namespace blink {
 
 class ExecutionContext;
 class Report;
+class V8ReportingObserverCallback;
 
 class CORE_EXPORT ReportingObserver final
     : public ScriptWrappable,
       public ActiveScriptWrappable<ReportingObserver>,
       public ExecutionContextClient {
-  USING_GARBAGE_COLLECTED_MIXIN(ReportingObserver);
   DEFINE_WRAPPERTYPEINFO();
 
  public:

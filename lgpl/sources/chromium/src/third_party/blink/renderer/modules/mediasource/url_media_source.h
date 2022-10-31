@@ -36,16 +36,16 @@
 
 namespace blink {
 
-class MediaSourceImpl;
+class MediaSource;
 class ScriptState;
 
 class URLMediaSource {
   STATIC_ONLY(URLMediaSource);
 
  public:
-  static String createObjectURL(ScriptState*, MediaSourceImpl*);
+  static String createObjectURL(ScriptState*, MediaSource*);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASOURCE_URL_MEDIA_SOURCE_H_

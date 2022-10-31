@@ -30,7 +30,6 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_AUDIO_FFT_FRAME_H_
 
 #include <memory>
-
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/audio/audio_array.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
@@ -41,9 +40,9 @@
 #if defined(WTF_USE_WEBAUDIO_FFMPEG)
 struct RDFTContext;
 #elif defined(WTF_USE_WEBAUDIO_PFFFT)
-#include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/pffft/src/pffft.h"
-#elif defined(OS_MACOSX)
+#elif BUILDFLAG(IS_MAC)
 #include <Accelerate/Accelerate.h>
 #endif
 
@@ -60,15 +59,15 @@ class PLATFORM_EXPORT FFTFrame {
   // The constructors, destructor, and methods up to the CROSS-PLATFORM section
   // have platform-dependent implementations.
 
-  FFTFrame(unsigned fft_size);
+  explicit FFTFrame(unsigned fft_size);
   // creates a blank/empty frame for later use with createInterpolatedFrame()
   FFTFrame();
   FFTFrame(const FFTFrame& frame);
   ~FFTFrame();
 
   // Returns the smallest and largest supported FFT lengths.
-  static int MinFFTSize();
-  static int MaxFFTSize();
+  static unsigned MinFFTSize();
+  static unsigned MaxFFTSize();
 
   // Perform any initialization needed.  Must be called from the main thread.
   static void Initialize(float sample_rate);
@@ -100,7 +99,7 @@ class PLATFORM_EXPORT FFTFrame {
       const FFTFrame& frame2,
       double x);
   // zero-padding with dataSize <= fftSize
-  void DoPaddedFFT(const float* data, size_t data_size);
+  void DoPaddedFFT(const float* data, unsigned data_size);
   double ExtractAverageGroupDelay();
   void AddConstantGroupDelay(double sample_frame_delay);
   // multiplies ourself with frame : effectively operator*=()
@@ -113,8 +112,14 @@ class PLATFORM_EXPORT FFTFrame {
                                       const FFTFrame& frame2,
                                       double x);
 
-  unsigned fft_size_;
-  unsigned log2fft_size_;
+  unsigned fft_size_ = 0;
+
+  // When using PFFFT, this slot is not irrelevant and not used because PFFFT
+  // supports sizes that aren't a power of 2.
+  // TODO(https://crbug.com/988121) Look into whether Mac vDSP really needs
+  // this.
+  unsigned log2fft_size_ = 0;
+
   // These two arrays contain the transformed data.  Instead of a single array
   // of complex numbers, we split the complex data into an array of the real
   // part and the imaginary part.
@@ -144,7 +149,7 @@ class PLATFORM_EXPORT FFTFrame {
   AudioFloatArray real_data_;
   AudioFloatArray imag_data_;
 
-#if defined(OS_MACOSX) && !defined(WTF_USE_WEBAUDIO_PFFFT)
+#if BUILDFLAG(IS_MAC) && !defined(WTF_USE_WEBAUDIO_PFFFT)
   // Thin wrapper around FFTSetup so we can call the appropriate routines to
   // construct or release the FFTSetup objects.
   class FFTSetupDatum {
@@ -180,7 +185,7 @@ class PLATFORM_EXPORT FFTFrame {
   // routines to construct or release the PFFFT_Setup objects.
   class FFTSetup {
    public:
-    FFTSetup(unsigned fft_size);
+    explicit FFTSetup(unsigned fft_size);
     ~FFTSetup();
     PFFFT_Setup* GetSetup() const { return setup_; }
 
@@ -188,10 +193,10 @@ class PLATFORM_EXPORT FFTFrame {
     PFFFT_Setup* setup_;
   };
 
-  // Returns the vector that holds all of the possible FFTSetup objects.  This
+  // Returns the HashMap that holds all of the possible FFTSetup objects.  This
   // should be setup in the |Initialize()| method that is called when a context
   // is created.
-  static Vector<std::unique_ptr<FFTSetup>>& FFTSetups();
+  static HashMap<unsigned, std::unique_ptr<FFTSetup>>& FFTSetups();
 
   // Initialize an entry in FFTSetups for an FFT of order |fft_order|.  This can
   // be called from any thread, but if a new FFTSetup needs to be allocated,

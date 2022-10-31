@@ -17,6 +17,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/modules/service_worker/navigation_preload_manager.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
@@ -34,7 +35,6 @@ class ServiceWorkerRegistration final
       public Supplementable<ServiceWorkerRegistration>,
       public mojom::blink::ServiceWorkerRegistrationObject {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerRegistration);
   USING_PRE_FINALIZER(ServiceWorkerRegistration, Dispose);
 
  public:
@@ -107,6 +107,11 @@ class ServiceWorkerRegistration final
   void SetUpdateViaCache(
       mojom::blink::ServiceWorkerUpdateViaCache update_via_cache) override;
   void UpdateFound() override;
+
+  void UpdateInternal(
+      mojom::blink::FetchClientSettingsObjectPtr mojom_settings_object,
+      ScriptPromiseResolver* resolver);
+  void UnregisterInternal(ScriptPromiseResolver* resolver);
 
   Member<ServiceWorker> installing_;
   Member<ServiceWorker> waiting_;

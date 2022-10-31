@@ -4,10 +4,13 @@
 #-index-name: Spanish, contracted
 #-display-name: Spanish contracted braille
 #
-#+locale:es
+#+language:es
 #+type:literary
 #+contraction:full
 #+grade:2
+# Marked as "direction:forward" by Bue Vester-Andersen
+# as tests only run forward.
+#+direction:forward
 # -----------
 #
 #  Based on the Linux screenreader BRLTTY, copyright (C) 1999-2006 by
@@ -16,6 +19,22 @@
 #  Copyright (C) 2018 Juan Pablo Bello
 #
 #  Other contributors: Carlos Monge (providing sources), Bert Frees (aid in table development)
+#
+#  This file is part of liblouis.
+#
+#  liblouis is free software: you can redistribute it and/or modify it
+#  under the terms of the GNU Lesser General Public License as
+#  published by the Free Software Foundation, either version 2.1 of the
+#  License, or (at your option) any later version.
+#
+#  liblouis is distributed in the hope that it will be useful, but
+#  WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+#  Lesser General Public License for more details.
+#
+#  You should have received a copy of the GNU Lesser General Public
+#  License along with liblouis. If not, see
+#  <http://www.gnu.org/licenses/>.
 #
 #  Remarks: this table is largely based following the conventions as set in the ONCE
 #  international manual for contracted (abbreviated) Spanish grade 2 stenography manual
@@ -51,31 +70,14 @@
 #  the user may encounter in applying it to his or her work. So reporting of any of those
 #  is always encouraged.
 #
-#  This file is part of liblouis.
-#
-#  liblouis is free software: you can redistribute it and/or modify it
-#  under the terms of the GNU Lesser General Public License as
-#  published by the Free Software Foundation, either version 2.1 of the
-#  License, or (at your option) any later version.
-#
-#  liblouis is distributed in the hope that it will be useful, but
-#  WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-#  Lesser General Public License for more details.
-#
-#  You should have received a copy of the GNU Lesser General Public
-#  License along with liblouis. If not, see
-#  <http://www.gnu.org/licenses/>.
-#
 # ----------------------------------------------------------------------
-
 
 # Add virtual dot to k, w and x (see below). This overwrites the definitions from
 # es-g1.ctb. For the table to work these rules need to be defined before AND after the
 # include.
-uplow Kk 13b
-uplow Ww 2456b
-uplow Xx 1346b
+lowercase k 13b
+lowercase w 2456b
+lowercase x 1346b
 
 include es-g1.ctb
 
@@ -132,7 +134,7 @@ always tr 356a
 
 # Grouping all of these into a class.
 
-class contraction \xe000\xe001\xe002\xe003\xe004\xe005\xe006\xe007\xe008\xe009
+attribute contraction \xe000\xe001\xe002\xe003\xe004\xe005\xe006\xe007\xe008\xe009
 swapdd cancelcontraction 2a,23a,25a,256a,26a,35a,236a,2356a,235a,356a 1-12,12-1235,14-1235,145-1235,15-1345,24-1345,15-1235,1245-1235,1234-1235,2345-1235
 swapdd finalizecontraction 2a,23a,25a,256a,26a,35a,236a,2356a,235a,356a 2,23,25,256,26,35,236,2356,235,356
 
@@ -171,13 +173,13 @@ nocont x
 
 # To prefix the words with dot 5 we use a multi-pass implementation. First we add a virtual
 # dot to k, w and x so that they can be distinguished in pass2.
-uplow Kk 13b
-uplow Ww 2456b
-uplow Xx 1346b
+lowercase k 13b
+lowercase w 2456b
+lowercase x 1346b
 
 # Then we define a class and a swap set. The class is needed to make the negations work.
 # (does not work with only the swapdd rule: is this a bug?)
-class kwx kwx # this is the 2nd class defined in this table, so we can also use $x instead of %kwx
+attribute kwx kwx # this is the 2nd class defined in this table, so we can also use $x instead of %kwx
 # The swap set is needed for the rule that removes the virtual dots.
 swapdd kwx 13b,2456b,1346b 13,2456,1346
 # We are using the same name for both because we can.
@@ -809,13 +811,13 @@ word quién 5-12345-1345
 # go after consonants, not vowels.  For this a class definition is used to group all
 # consonants. Potential back translation issue here.
 
-class consonants BbCcDdFfGgHhJjKkLlMmNnPpQqRrSsTtVvWwXxYyZzÑñ
+attribute consonants BbCcDdFfGgHhJjKkLlMmNnPpQqRrSsTtVvWwXxYyZzÑñ
 after consonants always on 1346
 # same applies to ion
 after consonants always ion 3456
 # The u e contraction may never be used after the letter g, avoids confussion with u
 # diaeresis which is part of many words. More classes.
-class euvowels Gg
+attribute euvowels Gg
 after euvowels always eu 15-136
 after euvowels always EU 15-136
 
@@ -860,7 +862,7 @@ endword ucciones 136-3456-1246
 
 # Word beginnings may not be followed by vowels (to avoid confussion with punctuation
 # signs), including accented ones. More classes follow.
-class vowels AaEeIiOoUuÁáÉéÍíÓóÚúÜü
+attribute vowels AaEeIiOoUuÁáÉéÍíÓóÚúÜü
 
 # Setting the exceptions, though note that this will not work when back translating but it
 # willb e needed in a few cases.

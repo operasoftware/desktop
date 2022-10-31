@@ -5,14 +5,16 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_CUSTOM_CUSTOM_LAYOUT_SCOPE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_CUSTOM_CUSTOM_LAYOUT_SCOPE_H_
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/layout/ng/custom/custom_layout_work_task.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 // The work queue is a list of work tasks which will either produce fragment(s)
 // or intrinsic-size(s) for the custom-layout class.
-typedef Vector<CustomLayoutWorkTask, 4> CustomLayoutWorkQueue;
+typedef HeapVector<Member<CustomLayoutWorkTask>, 4> CustomLayoutWorkQueue;
 
 // This heap allocated class is used to indicate which custom-layout (heap)
 // objects are still valid.

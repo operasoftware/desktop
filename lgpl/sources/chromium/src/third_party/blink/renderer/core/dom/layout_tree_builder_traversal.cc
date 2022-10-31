@@ -26,6 +26,7 @@
 
 #include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
 
+#include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
@@ -46,39 +47,23 @@ static bool IsLayoutObjectReparented(const LayoutObject* layout_object) {
   return element->IsInTopLayer();
 }
 
-void LayoutTreeBuilderTraversal::ParentDetails::DidTraverseInsertionPoint(
-    const V0InsertionPoint* insertion_point) {
-  if (!insertion_point_) {
-    insertion_point_ = insertion_point;
-  }
-}
-
-inline static void AssertPseudoElementParent(
-    const PseudoElement& pseudo_element) {
-  DCHECK(pseudo_element.parentNode());
-  DCHECK(pseudo_element.parentNode()->CanParticipateInFlatTree());
-}
-
-ContainerNode* LayoutTreeBuilderTraversal::Parent(const Node& node,
-                                                  ParentDetails* details) {
+ContainerNode* LayoutTreeBuilderTraversal::Parent(const Node& node) {
   // TODO(hayato): Uncomment this once we can be sure
   // LayoutTreeBuilderTraversal::parent() is used only for a node which is
   // connected.
   // DCHECK(node.isConnected());
   if (auto* element = DynamicTo<PseudoElement>(node)) {
-    AssertPseudoElementParent(*element);
+    DCHECK(node.parentNode());
     return node.parentNode();
   }
-  return FlatTreeTraversal::Parent(node, details);
+  return FlatTreeTraversal::Parent(node);
 }
 
-ContainerNode* LayoutTreeBuilderTraversal::LayoutParent(
-    const Node& node,
-    ParentDetails* details) {
-  ContainerNode* parent = LayoutTreeBuilderTraversal::Parent(node, details);
+ContainerNode* LayoutTreeBuilderTraversal::LayoutParent(const Node& node) {
+  ContainerNode* parent = LayoutTreeBuilderTraversal::Parent(node);
 
   while (parent && HasDisplayContentsStyle(*parent))
-    parent = LayoutTreeBuilderTraversal::Parent(*parent, details);
+    parent = LayoutTreeBuilderTraversal::Parent(*parent);
 
   return parent;
 }
@@ -92,18 +77,18 @@ Node* LayoutTreeBuilderTraversal::NextSibling(const Node& node) {
   PseudoId pseudo_id = node.GetPseudoId();
   Element* parent_element;
   if (pseudo_id != kPseudoIdNone) {
-    AssertPseudoElementParent(To<PseudoElement>(node));
     parent_element = DynamicTo<Element>(*node.parentNode());
+    DCHECK(parent_element);
   }
   switch (pseudo_id) {
     case kPseudoIdMarker:
       if (Node* next = parent_element->GetPseudoElement(kPseudoIdBefore))
         return next;
-      FALLTHROUGH;
+      [[fallthrough]];
     case kPseudoIdBefore:
       if (Node* next = FlatTreeTraversal::FirstChild(*parent_element))
         return next;
-      FALLTHROUGH;
+      [[fallthrough]];
     case kPseudoIdNone:
       if (pseudo_id == kPseudoIdNone) {  // Not falling through
         if (Node* next = FlatTreeTraversal::NextSibling(node))
@@ -114,8 +99,39 @@ Node* LayoutTreeBuilderTraversal::NextSibling(const Node& node) {
       }
       if (Node* next = parent_element->GetPseudoElement(kPseudoIdAfter))
         return next;
-      FALLTHROUGH;
+      [[fallthrough]];
     case kPseudoIdAfter:
+      return nullptr;
+    case kPseudoIdPageTransition:
+      return nullptr;
+    case kPseudoIdPageTransitionContainer: {
+      auto* pseudo_element = DynamicTo<PseudoElement>(node);
+      DCHECK(pseudo_element);
+
+      // Iterate the list of IDs until we hit the entry for |node's| ID. The
+      // sibling is the next ID in the list which generates a pseudo element.
+      bool found = false;
+      for (const auto& document_transition_tag :
+           parent_element->GetDocument()
+               .GetStyleEngine()
+               .DocumentTransitionTags()) {
+        if (!found) {
+          if (document_transition_tag ==
+              pseudo_element->document_transition_tag())
+            found = true;
+          continue;
+        }
+
+        if (auto* sibling = parent_element->GetPseudoElement(
+                kPseudoIdPageTransitionContainer, document_transition_tag)) {
+          return sibling;
+        }
+      }
+      return nullptr;
+    }
+    case kPseudoIdPageTransitionImageWrapper:
+    case kPseudoIdPageTransitionOutgoingImage:
+    case kPseudoIdPageTransitionIncomingImage:
       return nullptr;
     default:
       NOTREACHED();
@@ -127,14 +143,14 @@ Node* LayoutTreeBuilderTraversal::PreviousSibling(const Node& node) {
   PseudoId pseudo_id = node.GetPseudoId();
   Element* parent_element;
   if (pseudo_id != kPseudoIdNone) {
-    AssertPseudoElementParent(To<PseudoElement>(node));
     parent_element = DynamicTo<Element>(*node.parentNode());
+    DCHECK(parent_element);
   }
   switch (pseudo_id) {
     case kPseudoIdAfter:
       if (Node* previous = FlatTreeTraversal::LastChild(*parent_element))
         return previous;
-      FALLTHROUGH;
+      [[fallthrough]];
     case kPseudoIdNone:
       if (pseudo_id == kPseudoIdNone) {  // Not falling through
         if (Node* previous = FlatTreeTraversal::PreviousSibling(node))
@@ -145,11 +161,11 @@ Node* LayoutTreeBuilderTraversal::PreviousSibling(const Node& node) {
       }
       if (Node* previous = parent_element->GetPseudoElement(kPseudoIdBefore))
         return previous;
-      FALLTHROUGH;
+      [[fallthrough]];
     case kPseudoIdBefore:
       if (Node* previous = parent_element->GetPseudoElement(kPseudoIdMarker))
         return previous;
-      FALLTHROUGH;
+      [[fallthrough]];
     case kPseudoIdMarker:
       return nullptr;
     default:

@@ -6,7 +6,10 @@
 
 #include <memory>
 
-#include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
+#include "base/check.h"
+#include "base/rand_util.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_evaluation_result.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_blob.h"
@@ -21,14 +24,25 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_node.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_node_list.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_trusted_html.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_trusted_script.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_trusted_script_url.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
+#include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/inspector/inspector_dom_debugger_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/inspector/v8_inspector_string.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
+#include "third_party/blink/renderer/core/script/classic_script.h"
+#include "third_party/blink/renderer/core/trustedtypes/trusted_html.h"
+#include "third_party/blink/renderer/core/trustedtypes/trusted_script.h"
+#include "third_party/blink/renderer/core/trustedtypes/trusted_script_url.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
+#include "third_party/blink/renderer/platform/bindings/v8_dom_wrapper.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
@@ -152,14 +166,165 @@ void ThreadDebugger::PromiseRejectionRevoked(v8::Local<v8::Context> context,
                                      ToV8InspectorStringView(message));
 }
 
-// TODO(mustaq): Fix the caller in v8/src.
+// TODO(mustaq): Is it tied to a specific user action? https://crbug.com/826293
 void ThreadDebugger::beginUserGesture() {
   auto* window = CurrentDOMWindow(isolate_);
-  LocalFrame::NotifyUserActivation(window ? window->GetFrame() : nullptr);
+  LocalFrame::NotifyUserActivation(
+      window ? window->GetFrame() : nullptr,
+      mojom::blink::UserActivationNotificationType::kDevTools);
 }
 
-// TODO(mustaq): Fix the caller in v8/src.
-void ThreadDebugger::endUserGesture() {}
+namespace {
+static const char kType[] = "type";
+static const char kValue[] = "value";
+
+v8::Local<v8::String> TypeStringKey(v8::Isolate* isolate_) {
+  return V8String(isolate_, kType);
+}
+v8::Local<v8::String> ValueStringKey(v8::Isolate* isolate_) {
+  return V8String(isolate_, kValue);
+}
+
+v8::Local<v8::Object> SerializeNodeToV8Object(Node* node,
+                                              v8::Isolate* isolate_,
+                                              int max_depth) {
+  static const char kAttributes[] = "attributes";
+  static const char kChildren[] = "children";
+  static const char kChildNodeCount[] = "childNodeCount";
+  static const char kLocalName[] = "localName";
+  static const char kNamespaceURI[] = "namespaceURI";
+  static const char kNode[] = "node";
+  static const char kNodeName[] = "nodeName";
+  static const char kNodeType[] = "nodeType";
+  static const char kNodeValue[] = "nodeValue";
+
+  Vector<v8::Local<v8::Name>> serialized_value_keys;
+  Vector<v8::Local<v8::Value>> serialized_value_values;
+  serialized_value_keys.push_back(V8String(isolate_, kNodeType));
+  serialized_value_values.push_back(
+      v8::Number::New(isolate_, node->getNodeType()));
+
+  serialized_value_keys.push_back(V8String(isolate_, kNodeValue));
+  serialized_value_values.push_back(V8String(isolate_, node->nodeValue()));
+
+  serialized_value_keys.push_back(V8String(isolate_, kNodeName));
+  serialized_value_values.push_back(V8String(isolate_, node->nodeValue()));
+
+  if (node->IsElementNode()) {
+    Element* element = To<Element>(node);
+
+    serialized_value_keys.push_back(V8String(isolate_, kLocalName));
+    serialized_value_values.push_back(V8String(isolate_, element->localName()));
+
+    serialized_value_keys.push_back(V8String(isolate_, kNamespaceURI));
+    serialized_value_values.push_back(
+        V8String(isolate_, element->namespaceURI()));
+
+    serialized_value_keys.push_back(V8String(isolate_, kChildNodeCount));
+    serialized_value_values.push_back(
+        v8::Number::New(isolate_, node->CountChildren()));
+
+    Vector<v8::Local<v8::Name>> node_attributes_keys;
+    Vector<v8::Local<v8::Value>> node_attributes_values;
+
+    for (const Attribute& attribute : element->Attributes()) {
+      node_attributes_keys.push_back(
+          V8String(isolate_, attribute.GetName().ToString()));
+      node_attributes_values.push_back(V8String(isolate_, attribute.Value()));
+    }
+
+    DCHECK(node_attributes_values.size() == node_attributes_keys.size());
+    v8::Local<v8::Object> node_attributes = v8::Object::New(
+        isolate_, v8::Null(isolate_), node_attributes_keys.data(),
+        node_attributes_values.data(), node_attributes_keys.size());
+
+    serialized_value_keys.push_back(V8String(isolate_, kAttributes));
+    serialized_value_values.push_back(node_attributes);
+  }
+
+  if (max_depth > 0) {
+    NodeList* child_nodes = node->childNodes();
+
+    v8::Local<v8::Array> children =
+        v8::Array::New(isolate_, child_nodes->length());
+
+    for (unsigned int i = 0; i < child_nodes->length(); i++) {
+      Node* child_node = child_nodes->item(i);
+      v8::Local<v8::Object> serialized_child_node =
+          SerializeNodeToV8Object(child_node, isolate_, max_depth - 1);
+
+      children
+          ->CreateDataProperty(isolate_->GetCurrentContext(), i,
+                               serialized_child_node)
+          .Check();
+    }
+    serialized_value_keys.push_back(V8String(isolate_, kChildren));
+    serialized_value_values.push_back(children);
+  }
+
+  DCHECK(serialized_value_values.size() == serialized_value_keys.size());
+
+  v8::Local<v8::Object> serialized_value = v8::Object::New(
+      isolate_, v8::Null(isolate_), serialized_value_keys.data(),
+      serialized_value_values.data(), serialized_value_keys.size());
+
+  Vector<v8::Local<v8::Name>> result_keys;
+  Vector<v8::Local<v8::Value>> result_values;
+
+  result_keys.push_back(TypeStringKey(isolate_));
+  result_values.push_back(V8String(isolate_, kNode));
+
+  result_keys.push_back(ValueStringKey(isolate_));
+  result_values.push_back(serialized_value);
+
+  return v8::Object::New(isolate_, v8::Null(isolate_), result_keys.data(),
+                         result_values.data(), result_keys.size());
+}
+
+std::unique_ptr<v8_inspector::WebDriverValue> SerializeNodeToWebDriverValue(
+    Node* node,
+    v8::Isolate* isolate_,
+    int max_depth) {
+  v8::Local<v8::Object> node_v8_object =
+      SerializeNodeToV8Object(node, isolate_, max_depth);
+
+  v8::Local<v8::Value> value_v8_object =
+      node_v8_object
+          ->Get(isolate_->GetCurrentContext(), ValueStringKey(isolate_))
+          .ToLocalChecked();
+
+  // Safely get `type` from object value.
+  v8::MaybeLocal<v8::Value> maybe_type_v8_value = node_v8_object->Get(
+      isolate_->GetCurrentContext(), TypeStringKey(isolate_));
+  DCHECK(!maybe_type_v8_value.IsEmpty());
+  v8::Local<v8::Value> type_v8_value = maybe_type_v8_value.ToLocalChecked();
+  DCHECK(type_v8_value->IsString());
+  v8::Local<v8::String> type_v8_string = type_v8_value.As<v8::String>();
+  String type_string = ToCoreString(type_v8_string);
+  StringView type_string_view = StringView(type_string);
+  std::unique_ptr<v8_inspector::StringBuffer> type_string_buffer =
+      ToV8InspectorStringBuffer(type_string_view);
+
+  return std::make_unique<v8_inspector::WebDriverValue>(
+      std::move(type_string_buffer), value_v8_object);
+}
+}  // namespace
+
+std::unique_ptr<v8_inspector::WebDriverValue>
+ThreadDebugger::serializeToWebDriverValue(v8::Local<v8::Value> v8_value,
+                                          int max_depth) {
+  // Serialize according to https://w3c.github.io/webdriver-bidi.
+  if (V8Node::HasInstance(v8_value, isolate_)) {
+    Node* node = V8Node::ToImplWithTypeCheck(isolate_, v8_value);
+    return SerializeNodeToWebDriverValue(node, isolate_, max_depth);
+  }
+
+  if (V8Window::HasInstance(v8_value, isolate_)) {
+    return std::make_unique<v8_inspector::WebDriverValue>(
+        ToV8InspectorStringBuffer("window"));
+  }
+  return nullptr;
+}
 
 std::unique_ptr<v8_inspector::StringBuffer> ThreadDebugger::valueSubtype(
     v8::Local<v8::Value> value) {
@@ -167,6 +332,8 @@ std::unique_ptr<v8_inspector::StringBuffer> ThreadDebugger::valueSubtype(
   static const char kArray[] = "array";
   static const char kError[] = "error";
   static const char kBlob[] = "blob";
+  static const char kTrustedType[] = "trustedtype";
+
   if (V8Node::HasInstance(value, isolate_))
     return ToV8InspectorStringBuffer(kNode);
   if (V8NodeList::HasInstance(value, isolate_) ||
@@ -179,11 +346,68 @@ std::unique_ptr<v8_inspector::StringBuffer> ThreadDebugger::valueSubtype(
     return ToV8InspectorStringBuffer(kError);
   if (V8Blob::HasInstance(value, isolate_))
     return ToV8InspectorStringBuffer(kBlob);
+  if (V8TrustedHTML::HasInstance(value, isolate_) ||
+      V8TrustedScript::HasInstance(value, isolate_) ||
+      V8TrustedScriptURL::HasInstance(value, isolate_)) {
+    return ToV8InspectorStringBuffer(kTrustedType);
+  }
   return nullptr;
 }
 
-bool ThreadDebugger::formatAccessorsAsProperties(v8::Local<v8::Value> value) {
-  return V8DOMWrapper::IsWrapper(isolate_, value);
+std::unique_ptr<v8_inspector::StringBuffer>
+ThreadDebugger::descriptionForValueSubtype(v8::Local<v8::Context> context,
+                                           v8::Local<v8::Value> value) {
+  if (V8TrustedHTML::HasInstance(value, isolate_)) {
+    TrustedHTML* trusted_html =
+        V8TrustedHTML::ToImplWithTypeCheck(isolate_, value);
+    return ToV8InspectorStringBuffer(trusted_html->toString());
+  } else if (V8TrustedScript::HasInstance(value, isolate_)) {
+    TrustedScript* trusted_script =
+        V8TrustedScript::ToImplWithTypeCheck(isolate_, value);
+    return ToV8InspectorStringBuffer(trusted_script->toString());
+  } else if (V8TrustedScriptURL::HasInstance(value, isolate_)) {
+    TrustedScriptURL* trusted_script_url =
+        V8TrustedScriptURL::ToImplWithTypeCheck(isolate_, value);
+    return ToV8InspectorStringBuffer(trusted_script_url->toString());
+  } else if (V8Node::HasInstance(value, isolate_)) {
+    Node* node = V8Node::ToImplWithTypeCheck(isolate_, value);
+    StringBuilder description;
+    switch (node->getNodeType()) {
+      case Node::kElementNode: {
+        const auto* element = To<blink::Element>(node);
+        description.Append(element->TagQName().ToString());
+
+        const AtomicString& id = element->GetIdAttribute();
+        if (!id.IsEmpty()) {
+          description.Append('#');
+          description.Append(id);
+        }
+        if (element->HasClass()) {
+          auto element_class_names = element->ClassNames();
+          auto n_classes = element_class_names.size();
+          for (unsigned i = 0; i < n_classes; ++i) {
+            description.Append('.');
+            description.Append(element_class_names[i]);
+          }
+        }
+        break;
+      }
+      case Node::kDocumentTypeNode: {
+        description.Append("<!DOCTYPE ");
+        description.Append(node->nodeName());
+        description.Append('>');
+        break;
+      }
+      default: {
+        description.Append(node->nodeName());
+        break;
+      }
+    }
+    DCHECK(description.length());
+
+    return ToV8InspectorStringBuffer(description.ToString());
+  }
+  return nullptr;
 }
 
 double ThreadDebugger::currentTimeMS() {
@@ -279,16 +503,34 @@ void ThreadDebugger::installAdditionalCommandLineAPI(
       "function getEventListeners(node) { [Command Line API] }",
       v8::SideEffectType::kHasNoSideEffect);
 
-  v8::Local<v8::Value> function_value;
-  bool success =
-      V8ScriptRunner::CompileAndRunInternalScript(
-          isolate_, ScriptState::From(context),
-          ScriptSourceCode("(function(e) { console.log(e.type, e); })",
-                           ScriptSourceLocationType::kInternal, nullptr, KURL(),
-                           TextPosition()))
-          .ToLocal(&function_value) &&
-      function_value->IsFunction();
-  DCHECK(success);
+  CreateFunctionProperty(
+      context, object, "getAccessibleName",
+      ThreadDebugger::GetAccessibleNameCallback,
+      "function getAccessibleName(node) { [Command Line API] }",
+      v8::SideEffectType::kHasNoSideEffect);
+
+  CreateFunctionProperty(
+      context, object, "getAccessibleRole",
+      ThreadDebugger::GetAccessibleRoleCallback,
+      "function getAccessibleRole(node) { [Command Line API] }",
+      v8::SideEffectType::kHasNoSideEffect);
+
+  ScriptEvaluationResult result =
+      ClassicScript::CreateUnspecifiedScript(
+          "(function(e) { console.log(e.type, e); })",
+          ScriptSourceLocationType::kInternal)
+          ->RunScriptOnScriptStateAndReturnValue(ScriptState::From(context));
+  if (result.GetResultType() != ScriptEvaluationResult::ResultType::kSuccess) {
+    // On pages where scripting is disabled or CSP sandbox directive is used,
+    // this can be blocked and thus early exited here.
+    // This is probably OK because `monitorEvents()` console API is anyway not
+    // working on such pages. For more discussion see
+    // https://crrev.com/c/3258735/9/third_party/blink/renderer/core/inspector/thread_debugger.cc#529
+    return;
+  }
+
+  v8::Local<v8::Value> function_value = result.GetSuccessValue();
+  DCHECK(function_value->IsFunction());
   CreateFunctionPropertyWithData(
       context, object, "monitorEvents", ThreadDebugger::MonitorEventsCallback,
       function_value,
@@ -396,15 +638,49 @@ void ThreadDebugger::UnmonitorEventsCallback(
 }
 
 // static
-void ThreadDebugger::GetEventListenersCallback(
+void ThreadDebugger::GetAccessibleNameCallback(
     const v8::FunctionCallbackInfo<v8::Value>& info) {
   if (info.Length() < 1)
     return;
 
-  ThreadDebugger* debugger = static_cast<ThreadDebugger*>(
-      v8::Local<v8::External>::Cast(info.Data())->Value());
-  DCHECK(debugger);
   v8::Isolate* isolate = info.GetIsolate();
+  v8::Local<v8::Value> value = info[0];
+
+  Node* node = V8Node::ToImplWithTypeCheck(isolate, value);
+  if (node && !node->GetLayoutObject())
+    return;
+  if (auto* element = DynamicTo<Element>(node)) {
+    V8SetReturnValueString(info, element->computedName(), isolate);
+  }
+}
+
+// static
+void ThreadDebugger::GetAccessibleRoleCallback(
+    const v8::FunctionCallbackInfo<v8::Value>& info) {
+  if (info.Length() < 1)
+    return;
+
+  v8::Isolate* isolate = info.GetIsolate();
+  v8::Local<v8::Value> value = info[0];
+
+  Node* node = V8Node::ToImplWithTypeCheck(isolate, value);
+  if (node && !node->GetLayoutObject())
+    return;
+  if (auto* element = DynamicTo<Element>(node)) {
+    V8SetReturnValueString(info, element->computedRole(), isolate);
+  }
+}
+
+// static
+void ThreadDebugger::GetEventListenersCallback(
+    const v8::FunctionCallbackInfo<v8::Value>& callback_info) {
+  if (callback_info.Length() < 1)
+    return;
+
+  ThreadDebugger* debugger = static_cast<ThreadDebugger*>(
+      v8::Local<v8::External>::Cast(callback_info.Data())->Value());
+  DCHECK(debugger);
+  v8::Isolate* isolate = callback_info.GetIsolate();
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
   int group_id = debugger->ContextGroupId(ToExecutionContext(context));
 
@@ -413,8 +689,8 @@ void ThreadDebugger::GetEventListenersCallback(
   // listener compilation.
   if (group_id)
     debugger->muteMetrics(group_id);
-  InspectorDOMDebuggerAgent::EventListenersInfoForTarget(isolate, info[0],
-                                                         &listener_info);
+  InspectorDOMDebuggerAgent::EventListenersInfoForTarget(
+      isolate, callback_info[0], &listener_info);
   if (group_id)
     debugger->unmuteMetrics(group_id);
 
@@ -450,7 +726,7 @@ void ThreadDebugger::GetEventListenersCallback(
     CreateDataPropertyInArray(context, listeners, output_index++,
                               listener_object);
   }
-  info.GetReturnValue().Set(result);
+  callback_info.GetReturnValue().Set(result);
 }
 
 void ThreadDebugger::consoleTime(const v8_inspector::StringView& title) {
@@ -471,9 +747,8 @@ void ThreadDebugger::consoleTimeStamp(const v8_inspector::StringView& title) {
   ExecutionContext* ec = CurrentExecutionContext(isolate_);
   // TODO(dgozman): we can save on a copy here if TracedValue would take a
   // StringView.
-  TRACE_EVENT_INSTANT1(
-      "devtools.timeline", "TimeStamp", TRACE_EVENT_SCOPE_THREAD, "data",
-      inspector_time_stamp_event::Data(ec, ToCoreString(title)));
+  DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT(
+      "TimeStamp", inspector_time_stamp_event::Data, ec, ToCoreString(title));
   probe::ConsoleTimeStamp(ec, ToCoreString(title));
 }
 
@@ -490,7 +765,7 @@ void ThreadDebugger::startRepeatingTimer(
           &ThreadDebugger::OnTimer);
   TaskRunnerTimer<ThreadDebugger>* timer_ptr = timer.get();
   timers_.push_back(std::move(timer));
-  timer_ptr->StartRepeating(base::TimeDelta::FromSecondsD(interval), FROM_HERE);
+  timer_ptr->StartRepeating(base::Seconds(interval), FROM_HERE);
 }
 
 void ThreadDebugger::cancelTimer(void* data) {
@@ -503,6 +778,12 @@ void ThreadDebugger::cancelTimer(void* data) {
       return;
     }
   }
+}
+
+int64_t ThreadDebugger::generateUniqueId() {
+  int64_t result;
+  base::RandBytes(&result, sizeof result);
+  return result;
 }
 
 void ThreadDebugger::OnTimer(TimerBase* timer) {

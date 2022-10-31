@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_MEDIA_CAPABILITIES_WEB_VIDEO_CONFIGURATION_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_MEDIA_CAPABILITIES_WEB_VIDEO_CONFIGURATION_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/platform/web_string.h"
 
 namespace blink {
@@ -19,9 +20,9 @@ struct WebVideoConfiguration {
   unsigned height;
   unsigned bitrate;
   double framerate;
-  base::Optional<WebString> hdr_metadata_type;
-  base::Optional<WebString> color_gamut;
-  base::Optional<WebString> transfer_function;
+  absl::optional<WebString> hdr_metadata_type;
+  absl::optional<WebString> color_gamut;
+  absl::optional<WebString> transfer_function;
 };
 
 }  // namespace blink

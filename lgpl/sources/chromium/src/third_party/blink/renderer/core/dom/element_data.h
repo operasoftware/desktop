@@ -36,7 +36,8 @@
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/attribute_collection.h"
 #include "third_party/blink/renderer/core/dom/space_split_string.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/bit_field.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
@@ -57,15 +58,18 @@ class ElementData : public GarbageCollected<ElementData> {
 
   void ClearClass() const { class_names_.Clear(); }
   void SetClass(const AtomicString& class_name, bool should_fold_case) const {
-    class_names_.Set(should_fold_case ? class_name.LowerASCII() : class_name);
+    AtomicString lower_class_name;
+    if (should_fold_case && !class_name.IsLowerASCII())
+      lower_class_name = class_name.LowerASCII();
+    class_names_.Set(lower_class_name ? lower_class_name : class_name);
   }
   const SpaceSplitString& ClassNames() const { return class_names_; }
 
   const AtomicString& IdForStyleResolution() const {
     return id_for_style_resolution_;
   }
-  void SetIdForStyleResolution(const AtomicString& new_id) const {
-    id_for_style_resolution_ = new_id;
+  AtomicString SetIdForStyleResolution(AtomicString new_id) const {
+    return std::exchange(id_for_style_resolution_, std::move(new_id));
   }
 
   const CSSPropertyValueSet* InlineStyle() const { return inline_style_.Get(); }
@@ -133,6 +137,7 @@ class ElementData : public GarbageCollected<ElementData> {
 
  private:
   friend class Element;
+  friend class HTMLImageElement;
   friend class ShareableElementData;
   friend class UniqueElementData;
   friend class SVGElement;
@@ -154,9 +159,10 @@ class ElementData : public GarbageCollected<ElementData> {
 // duplicate sets of attributes (ex. the same classes).
 class ShareableElementData final : public ElementData {
  public:
-  static ShareableElementData* CreateWithAttributes(const Vector<Attribute>&);
+  static ShareableElementData* CreateWithAttributes(
+      const Vector<Attribute, kAttributePrealloc>&);
 
-  explicit ShareableElementData(const Vector<Attribute>&);
+  explicit ShareableElementData(const Vector<Attribute, kAttributePrealloc>&);
   explicit ShareableElementData(const UniqueElementData&);
   ~ShareableElementData();
 

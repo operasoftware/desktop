@@ -27,8 +27,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_QUEUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_QUEUE_H_
 
+#include "base/location.h"
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/linked_hash_set.h"
 
 namespace blink {
@@ -38,11 +41,9 @@ class ExecutionContext;
 
 class CORE_EXPORT EventQueue final : public GarbageCollected<EventQueue>,
                                      public ExecutionContextLifecycleObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(EventQueue);
-
  public:
   EventQueue(ExecutionContext*, TaskType);
-  ~EventQueue();
+  ~EventQueue() override;
 
   void Trace(Visitor*) const override;
   bool EnqueueEvent(const base::Location&, Event&);

@@ -31,6 +31,8 @@
 #include <sys/ioctl.h>
 #include <asm/unistd.h>
 #include <linux/perf_event.h>
+#elif CONFIG_MACOS_KPERF
+#include "libavutil/macos_kperf.h"
 #endif
 
 #include "libavutil/avstring.h"
@@ -43,6 +45,7 @@ void checkasm_check_aacpsdsp(void);
 void checkasm_check_afir(void);
 void checkasm_check_alacdsp(void);
 void checkasm_check_audiodsp(void);
+void checkasm_check_av_tx(void);
 void checkasm_check_blend(void);
 void checkasm_check_blockdsp(void);
 void checkasm_check_bswapdsp(void);
@@ -58,20 +61,26 @@ void checkasm_check_h264pred(void);
 void checkasm_check_h264qpel(void);
 void checkasm_check_hevc_add_res(void);
 void checkasm_check_hevc_idct(void);
+void checkasm_check_hevc_pel(void);
 void checkasm_check_hevc_sao(void);
 void checkasm_check_huffyuvdsp(void);
+void checkasm_check_idctdsp(void);
 void checkasm_check_jpeg2000dsp(void);
 void checkasm_check_llviddsp(void);
 void checkasm_check_llviddspenc(void);
+void checkasm_check_motion(void);
 void checkasm_check_nlmeans(void);
 void checkasm_check_opusdsp(void);
 void checkasm_check_pixblockdsp(void);
 void checkasm_check_sbrdsp(void);
 void checkasm_check_synth_filter(void);
+void checkasm_check_sw_gbrp(void);
 void checkasm_check_sw_rgb(void);
+void checkasm_check_sw_scale(void);
 void checkasm_check_utvideodsp(void);
 void checkasm_check_v210dec(void);
 void checkasm_check_v210enc(void);
+void checkasm_check_vc1dsp(void);
 void checkasm_check_vf_eq(void);
 void checkasm_check_vf_gblur(void);
 void checkasm_check_vf_hflip(void);
@@ -176,17 +185,22 @@ void checkasm_stack_clobber(uint64_t clobber, ...);
 void checkasm_checked_call_vfp(void *func, int dummy, ...);
 void checkasm_checked_call_novfp(void *func, int dummy, ...);
 extern void (*checkasm_checked_call)(void *func, int dummy, ...);
-#define declare_new(ret, ...) ret (*checked_call)(void *, int dummy, __VA_ARGS__) = (void *)checkasm_checked_call;
-#define call_new(...) checked_call(func_new, 0, __VA_ARGS__)
+#define declare_new(ret, ...) ret (*checked_call)(void *, int dummy, __VA_ARGS__, \
+                                                  int, int, int, int, int, int, int, int, \
+                                                  int, int, int, int, int, int, int) = (void *)checkasm_checked_call;
+#define call_new(...) checked_call(func_new, 0, __VA_ARGS__, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0)
 #elif ARCH_AARCH64 && !defined(__APPLE__)
 void checkasm_stack_clobber(uint64_t clobber, ...);
 void checkasm_checked_call(void *func, ...);
-#define declare_new(ret, ...) ret (*checked_call)(void *, int, int, int, int, int, int, int, __VA_ARGS__)\
+#define declare_new(ret, ...) ret (*checked_call)(void *, int, int, int, int, int, int, int, __VA_ARGS__,\
+                                                  int, int, int, int, int, int, int, int,\
+                                                  int, int, int, int, int, int, int)\
                               = (void *)checkasm_checked_call;
 #define CLOB (UINT64_C(0xdeadbeefdeadbeef))
 #define call_new(...) (checkasm_stack_clobber(CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,\
                                               CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB,CLOB),\
-                      checked_call(func_new, 0, 0, 0, 0, 0, 0, 0, __VA_ARGS__))
+                      checked_call(func_new, 0, 0, 0, 0, 0, 0, 0, __VA_ARGS__,\
+                                   7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0))
 #else
 #define declare_new(ret, ...)
 #define declare_new_float(ret, ...)
@@ -208,7 +222,7 @@ typedef struct CheckasmPerf {
     int iterations;
 } CheckasmPerf;
 
-#if defined(AV_READ_TIME) || CONFIG_LINUX_PERF
+#if defined(AV_READ_TIME) || CONFIG_LINUX_PERF || CONFIG_MACOS_KPERF
 
 #if CONFIG_LINUX_PERF
 #define PERF_START(t) do {                              \
@@ -219,6 +233,9 @@ typedef struct CheckasmPerf {
     ioctl(sysfd, PERF_EVENT_IOC_DISABLE, 0);            \
     read(sysfd, &t, sizeof(t));                         \
 } while (0)
+#elif CONFIG_MACOS_KPERF
+#define PERF_START(t) t = ff_kperf_cycles()
+#define PERF_STOP(t)  t = ff_kperf_cycles() - t
 #else
 #define PERF_START(t) t = AV_READ_TIME()
 #define PERF_STOP(t)  t = AV_READ_TIME() - t
@@ -256,5 +273,21 @@ typedef struct CheckasmPerf {
 #define PERF_START(t)  while(0)
 #define PERF_STOP(t)   while(0)
 #endif
+
+#define DECL_CHECKASM_CHECK_FUNC(type) \
+int checkasm_check_##type(const char *const file, const int line, \
+                          const type *const buf1, const ptrdiff_t stride1, \
+                          const type *const buf2, const ptrdiff_t stride2, \
+                          const int w, const int h, const char *const name)
+
+DECL_CHECKASM_CHECK_FUNC(uint8_t);
+DECL_CHECKASM_CHECK_FUNC(uint16_t);
+DECL_CHECKASM_CHECK_FUNC(int16_t);
+DECL_CHECKASM_CHECK_FUNC(int32_t);
+
+#define PASTE(a,b) a ## b
+#define CONCAT(a,b) PASTE(a,b)
+
+#define checkasm_check(prefix, ...) CONCAT(checkasm_check_, prefix)(__FILE__, __LINE__, __VA_ARGS__)
 
 #endif /* TESTS_CHECKASM_CHECKASM_H */

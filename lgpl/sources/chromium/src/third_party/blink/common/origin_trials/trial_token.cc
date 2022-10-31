@@ -7,12 +7,13 @@
 #include "base/base64.h"
 #include "base/big_endian.h"
 #include "base/json/json_reader.h"
-#include "base/macros.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/optional.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/boringssl/src/include/openssl/curve25519.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -65,7 +66,7 @@ TrialToken::~TrialToken() = default;
 // static
 std::unique_ptr<TrialToken> TrialToken::From(
     base::StringPiece token_text,
-    base::StringPiece public_key,
+    const OriginTrialPublicKey& public_key,
     OriginTrialTokenStatus* out_status) {
   DCHECK(out_status);
   std::string token_payload;
@@ -74,13 +75,17 @@ std::unique_ptr<TrialToken> TrialToken::From(
   *out_status = Extract(token_text, public_key, &token_payload,
                         &token_signature, &token_version);
   if (*out_status != OriginTrialTokenStatus::kSuccess) {
+    DVLOG(2) << "Malformed origin trial token found (unable to extract)";
     return nullptr;
   }
   std::unique_ptr<TrialToken> token = Parse(token_payload, token_version);
   if (token) {
     token->signature_ = token_signature;
     *out_status = OriginTrialTokenStatus::kSuccess;
+    DVLOG(2) << "Well-formed origin trial token found for feature "
+             << token->feature_name();
   } else {
+    DVLOG(2) << "Malformed origin trial token found (unable to parse)";
     *out_status = OriginTrialTokenStatus::kMalformed;
   }
   return token;
@@ -91,20 +96,23 @@ OriginTrialTokenStatus TrialToken::IsValid(const url::Origin& origin,
   // The order of these checks is intentional. For example, will only report a
   // token as expired if it is valid for the origin.
   if (!ValidateOrigin(origin)) {
+    DVLOG(2) << "Origin trial token from different origin";
     return OriginTrialTokenStatus::kWrongOrigin;
   }
   if (!ValidateDate(now)) {
+    DVLOG(2) << "Origin trial token expired";
     return OriginTrialTokenStatus::kExpired;
   }
   return OriginTrialTokenStatus::kSuccess;
 }
 
 // static
-OriginTrialTokenStatus TrialToken::Extract(base::StringPiece token_text,
-                                           base::StringPiece public_key,
-                                           std::string* out_token_payload,
-                                           std::string* out_token_signature,
-                                           uint8_t* out_token_version) {
+OriginTrialTokenStatus TrialToken::Extract(
+    base::StringPiece token_text,
+    const OriginTrialPublicKey& public_key,
+    std::string* out_token_payload,
+    std::string* out_token_signature,
+    uint8_t* out_token_version) {
   if (token_text.empty()) {
     return OriginTrialTokenStatus::kMalformed;
   }
@@ -138,7 +146,9 @@ OriginTrialTokenStatus TrialToken::Extract(base::StringPiece token_text,
 
   // Extract the length of the signed data (Big-endian).
   uint32_t payload_length;
-  base::ReadBigEndian(&(token_contents[kPayloadLengthOffset]), &payload_length);
+  base::ReadBigEndian(
+      reinterpret_cast<const uint8_t*>(&(token_contents[kPayloadLengthOffset])),
+      &payload_length);
 
   // Validate that the stated length matches the actual payload length.
   if (payload_length != token_contents.length() - kPayloadOffset) {
@@ -153,8 +163,7 @@ OriginTrialTokenStatus TrialToken::Extract(base::StringPiece token_text,
                                   kPayloadLengthSize + payload_length);
 
   // The data which is covered by the signature is (version + length + payload).
-  std::string signed_data =
-      version_piece.as_string() + payload_piece.as_string();
+  std::string signed_data = base::StrCat({version_piece, payload_piece});
 
   // Validate the signature on the data before proceeding.
   if (!TrialToken::ValidateSignature(signature, signed_data, public_key)) {
@@ -164,7 +173,7 @@ OriginTrialTokenStatus TrialToken::Extract(base::StringPiece token_text,
   // Return the payload and signature, as new strings.
   *out_token_version = version;
   *out_token_payload = token_contents.substr(kPayloadOffset, payload_length);
-  *out_token_signature = signature.as_string();
+  *out_token_signature = std::string(signature);
   return OriginTrialTokenStatus::kSuccess;
 }
 
@@ -179,7 +188,7 @@ std::unique_ptr<TrialToken> TrialToken::Parse(const std::string& token_payload,
     return nullptr;
   }
 
-  base::Optional<base::Value> datadict = base::JSONReader::Read(token_payload);
+  absl::optional<base::Value> datadict = base::JSONReader::Read(token_payload);
   if (!datadict || !datadict->is_dict()) {
     return nullptr;
   }
@@ -231,13 +240,10 @@ std::unique_ptr<TrialToken> TrialToken::Parse(const std::string& token_payload,
       is_third_party = is_third_party_value->GetBool();
     }
 
-    // The |usage| field is optional and can only be set if |isThirdParty| flag
-    // is true. If found, ensure its value is either empty or "subset".
+    // The |usage| field is optional. If found, ensure its value is either empty
+    // or "subset".
     std::string* usage_value = datadict->FindStringKey("usage");
     if (usage_value) {
-      if (!is_third_party) {
-        return nullptr;
-      }
       if (usage_value->empty()) {
         usage = UsageRestriction::kNone;
       } else if (*usage_value == kUsageSubset) {
@@ -248,9 +254,9 @@ std::unique_ptr<TrialToken> TrialToken::Parse(const std::string& token_payload,
     }
   }
 
-  return base::WrapUnique(new TrialToken(origin, is_subdomain, *feature_name,
-                                         expiry_timestamp, is_third_party,
-                                         usage));
+  return base::WrapUnique(new TrialToken(
+      origin, is_subdomain, *feature_name,
+      base::Time::FromDoubleT(expiry_timestamp), is_third_party, usage));
 }
 
 bool TrialToken::ValidateOrigin(const url::Origin& origin) const {
@@ -272,10 +278,7 @@ bool TrialToken::ValidateDate(const base::Time& now) const {
 // static
 bool TrialToken::ValidateSignature(base::StringPiece signature,
                                    const std::string& data,
-                                   base::StringPiece public_key) {
-  // Public key must be 32 bytes long for Ed25519.
-  CHECK_EQ(public_key.length(), 32UL);
-
+                                   const OriginTrialPublicKey& public_key) {
   // Signature must be 64 bytes long.
   if (signature.length() != 64) {
     return false;
@@ -283,22 +286,34 @@ bool TrialToken::ValidateSignature(base::StringPiece signature,
 
   int result = ED25519_verify(
       reinterpret_cast<const uint8_t*>(data.data()), data.length(),
-      reinterpret_cast<const uint8_t*>(signature.data()),
-      reinterpret_cast<const uint8_t*>(public_key.data()));
+      reinterpret_cast<const uint8_t*>(signature.data()), public_key.data());
   return (result != 0);
 }
 
 TrialToken::TrialToken(const url::Origin& origin,
                        bool match_subdomains,
                        const std::string& feature_name,
-                       uint64_t expiry_timestamp,
+                       base::Time expiry_time,
                        bool is_third_party,
                        UsageRestriction usage_restriction)
     : origin_(origin),
       match_subdomains_(match_subdomains),
       feature_name_(feature_name),
-      expiry_time_(base::Time::FromDoubleT(expiry_timestamp)),
+      expiry_time_(expiry_time),
       is_third_party_(is_third_party),
       usage_restriction_(usage_restriction) {}
+
+// static
+std::unique_ptr<TrialToken> TrialToken::CreateTrialTokenForTesting(
+    const url::Origin& origin,
+    bool match_subdomains,
+    const std::string& feature_name,
+    base::Time expiry_time,
+    bool is_third_party,
+    UsageRestriction usage_restriction) {
+  return base::WrapUnique(new TrialToken(origin, match_subdomains, feature_name,
+                                         expiry_time, is_third_party,
+                                         usage_restriction));
+}
 
 }  // namespace blink

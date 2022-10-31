@@ -30,7 +30,7 @@
 #include "third_party/blink/renderer/core/css/keyframe_style_rule_css_style_declaration.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -44,7 +44,7 @@ CSSKeyframeRule::~CSSKeyframeRule() = default;
 
 void CSSKeyframeRule::setKeyText(const String& key_text,
                                  ExceptionState& exception_state) {
-  CSSStyleSheet::RuleMutationScope(this);
+  CSSStyleSheet::RuleMutationScope rule_mutation_scope(this);
 
   if (!keyframe_->SetKeyText(key_text))
     exception_state.ThrowDOMException(

@@ -29,6 +29,7 @@
 #include "libavutil/lzo.h"
 #include "libavutil/imgutils.h"
 #include "avcodec.h"
+#include "codec_internal.h"
 #include "idctdsp.h"
 #include "internal.h"
 #include "rtjpeg.h"
@@ -126,7 +127,7 @@ static int codec_reinit(AVCodecContext *avctx, int width, int height,
         get_quant_quality(c, quality);
     if (width != c->width || height != c->height) {
         // also reserve space for a possible additional header
-        int buf_size = height * width * 3 / 2
+        int64_t buf_size = height * (int64_t)width * 3 / 2
                      + FFMAX(AV_LZO_OUTPUT_PADDING, AV_INPUT_BUFFER_PADDING_SIZE)
                      + RTJPEG_HEADER_SIZE;
         if (buf_size > INT_MAX/8)
@@ -151,13 +152,12 @@ static int codec_reinit(AVCodecContext *avctx, int width, int height,
     return 0;
 }
 
-static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
-                        AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *picture,
+                        int *got_frame, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
     int buf_size       = avpkt->size;
     NuvContext *c      = avctx->priv_data;
-    AVFrame *picture   = data;
     int orig_size      = buf_size;
     int keyframe, ret;
     int size_change = 0;
@@ -362,15 +362,15 @@ static av_cold int decode_end(AVCodecContext *avctx)
     return 0;
 }
 
-AVCodec ff_nuv_decoder = {
-    .name           = "nuv",
-    .long_name      = NULL_IF_CONFIG_SMALL("NuppelVideo/RTJPEG"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_NUV,
+const FFCodec ff_nuv_decoder = {
+    .p.name         = "nuv",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("NuppelVideo/RTJPEG"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_NUV,
     .priv_data_size = sizeof(NuvContext),
     .init           = decode_init,
     .close          = decode_end,
-    .decode         = decode_frame,
-    .capabilities   = AV_CODEC_CAP_DR1,
+    FF_CODEC_DECODE_CB(decode_frame),
+    .p.capabilities = AV_CODEC_CAP_DR1,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

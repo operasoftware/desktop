@@ -28,10 +28,10 @@
 
 // https://www.w3.org/TR/webdatabase/#sqlresultset
 [
-    NoInterfaceObject
+    LegacyNoInterfaceObject
 ] interface SQLResultSet {
     readonly attribute SQLResultSetRowList rows;
 
     [RaisesException=Getter] readonly attribute long long insertId;
-    readonly attribute long rowsAffected;
+    readonly attribute long long rowsAffected;
 };

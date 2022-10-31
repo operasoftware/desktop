@@ -3,12 +3,16 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/animation/animation_timeline.h"
+
+#include "base/trace_event/trace_event.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_cssnumericvalue_double.h"
 #include "third_party/blink/renderer/core/animation/document_animations.h"
 #include "third_party/blink/renderer/core/animation/keyframe_effect.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/page/page_animator.h"
 
 namespace blink {
 
@@ -38,33 +42,51 @@ bool CompareAnimations(const Member<Animation>& left,
       Animation::CompareAnimationsOrdering::kPointerOrder);
 }
 
-base::Optional<double> AnimationTimeline::currentTime() {
-  base::Optional<base::TimeDelta> result = CurrentPhaseAndTime().time;
-  return result ? base::make_optional(result->InMillisecondsF())
-                : base::nullopt;
+V8CSSNumberish* AnimationTimeline::currentTime() {
+  const absl::optional<base::TimeDelta>& result = CurrentPhaseAndTime().time;
+  if (result)
+    return MakeGarbageCollected<V8CSSNumberish>(result->InMillisecondsF());
+  return nullptr;
 }
 
-base::Optional<double> AnimationTimeline::CurrentTimeSeconds() {
-  base::Optional<base::TimeDelta> result = CurrentPhaseAndTime().time;
-  return result ? base::make_optional(result->InSecondsF()) : base::nullopt;
+absl::optional<AnimationTimeDelta> AnimationTimeline::CurrentTime() {
+  absl::optional<base::TimeDelta> result = CurrentPhaseAndTime().time;
+  return result ? absl::make_optional(AnimationTimeDelta(result.value()))
+                : absl::nullopt;
 }
 
-String AnimationTimeline::phase() {
-  switch (CurrentPhaseAndTime().phase) {
-    case TimelinePhase::kInactive:
-      return "inactive";
-    case TimelinePhase::kBefore:
-      return "before";
-    case TimelinePhase::kActive:
-      return "active";
-    case TimelinePhase::kAfter:
-      return "after";
-  }
+absl::optional<double> AnimationTimeline::CurrentTimeMilliseconds() {
+  absl::optional<base::TimeDelta> result = CurrentPhaseAndTime().time;
+  return result ? absl::make_optional(result->InMillisecondsF())
+                : absl::nullopt;
+}
+
+absl::optional<double> AnimationTimeline::CurrentTimeSeconds() {
+  absl::optional<base::TimeDelta> result = CurrentPhaseAndTime().time;
+  return result ? absl::make_optional(result->InSecondsF()) : absl::nullopt;
+}
+
+V8CSSNumberish* AnimationTimeline::duration() {
+  return nullptr;
 }
 
 void AnimationTimeline::ClearOutdatedAnimation(Animation* animation) {
   DCHECK(!animation->Outdated());
   outdated_animation_count_--;
+}
+
+wtf_size_t AnimationTimeline::AnimationsNeedingUpdateCount() const {
+  wtf_size_t count = 0;
+  for (const auto& animation : animations_needing_update_) {
+    // Exclude animations which are not actively generating frames.
+    if ((!animation->CompositorPending() && !animation->Playing() &&
+         !IsScrollTimeline()) ||
+        animation->AnimationHasNoEffect()) {
+      continue;
+    }
+    count++;
+  }
+  return count;
 }
 
 bool AnimationTimeline::NeedsAnimationTimingUpdate() {
@@ -115,18 +137,11 @@ void AnimationTimeline::ServiceAnimations(TimingUpdateReason reason) {
   // Explicitly free the backing store to avoid memory regressions.
   // TODO(bikineev): Revisit when young generation is done.
   animations.clear();
-
-  if (RuntimeEnabledFeatures::WebAnimationsAPIEnabled() &&
-      reason == kTimingUpdateForAnimationFrame) {
-    RemoveReplacedAnimations();
-  }
 }
 
 // https://drafts.csswg.org/web-animations-1/#removing-replaced-animations
-void AnimationTimeline::RemoveReplacedAnimations() {
-  // Group replaceable animations by target element.
-  HeapHashMap<Member<Element>, Member<HeapVector<Member<Animation>>>>
-      replaceable_animations;
+void AnimationTimeline::getReplaceableAnimations(
+    AnimationTimeline::ReplaceableAnimationsMap* replaceable_animations_map) {
   for (Animation* animation : animations_) {
     // Initial conditions for removal:
     // * has an associated animation effect whose effect target is a descendant
@@ -140,61 +155,12 @@ void AnimationTimeline::RemoveReplacedAnimations() {
     if (target->GetDocument() != animation->GetDocument())
       continue;
 
-    auto inserted = replaceable_animations.insert(target, nullptr);
+    auto inserted = replaceable_animations_map->insert(target, nullptr);
     if (inserted.is_new_entry) {
       inserted.stored_value->value =
           MakeGarbageCollected<HeapVector<Member<Animation>>>();
     }
     inserted.stored_value->value->push_back(animation);
-  }
-
-  HeapVector<Member<Animation>> animations_to_remove;
-  for (auto& elem_it : replaceable_animations) {
-    HeapVector<Member<Animation>>* animations = elem_it.value;
-
-    // Only elements with multiple animations in the replaceable state need to
-    // be checked.
-    if (animations->size() == 1)
-      continue;
-
-    // By processing in decreasing order by priority, we can perform a single
-    // pass for discovery of replaced properties.
-    std::sort(animations->begin(), animations->end(), CompareAnimations);
-    PropertyHandleSet replaced_properties;
-    for (auto anim_it = animations->rbegin(); anim_it != animations->rend();
-         anim_it++) {
-      // Remaining conditions for removal:
-      // * has a replace state of active,  and
-      // * for which there exists for each target property of every animation
-      //   effect associated with animation, an animation effect associated with
-      //   a replaceable animation with a higher composite order than animation
-      //   that includes the same target property.
-
-      // Only active animations can be removed. We still need to go through
-      // the process of iterating over properties if not removable to update
-      // the set of properties being replaced.
-      bool replace = (*anim_it)->ReplaceStateActive();
-      PropertyHandleSet animation_properties =
-          To<KeyframeEffect>((*anim_it)->effect())->Model()->Properties();
-      for (const auto& property : animation_properties) {
-        auto inserted = replaced_properties.insert(property);
-        if (inserted.is_new_entry) {
-          // Top-most compositor order animation affecting this property.
-          replace = false;
-        }
-      }
-      if (replace)
-        animations_to_remove.push_back(*anim_it);
-    }
-  }
-
-  // The list of animations for removal is constructed in reverse composite
-  // ordering for efficiency. Flip the ordering to ensure that events are
-  // dispatched in composite order.
-  // TODO(crbug.com/981905): Add test for ordering once onremove is implemented.
-  for (auto it = animations_to_remove.rbegin();
-       it != animations_to_remove.rend(); it++) {
-    (*it)->RemoveReplacedAnimation();
   }
 }
 
@@ -202,8 +168,10 @@ void AnimationTimeline::SetOutdatedAnimation(Animation* animation) {
   DCHECK(animation->Outdated());
   outdated_animation_count_++;
   animations_needing_update_.insert(animation);
-  if (IsActive() && !document_->GetPage()->Animator().IsServicingAnimations())
+  if (IsActive() && document_->GetPage() &&
+      !document_->GetPage()->Animator().IsServicingAnimations()) {
     ScheduleServiceOnNextFrame();
+  }
 }
 
 void AnimationTimeline::ScheduleServiceOnNextFrame() {
@@ -211,12 +179,14 @@ void AnimationTimeline::ScheduleServiceOnNextFrame() {
     document_->View()->ScheduleAnimation();
 }
 
-Animation* AnimationTimeline::Play(AnimationEffect* child) {
-  Animation* animation = Animation::Create(child, this);
-  DCHECK(animations_.Contains(animation));
-
-  animation->play();
-  DCHECK(animations_needing_update_.Contains(animation));
+Animation* AnimationTimeline::Play(AnimationEffect* child,
+                                   ExceptionState& exception_state) {
+  Animation* animation = Animation::Create(child, this, exception_state);
+  if (animation) {
+    DCHECK(animations_.Contains(animation));
+    animation->play();
+    DCHECK(animations_needing_update_.Contains(animation));
+  }
 
   return animation;
 }
@@ -224,6 +194,14 @@ Animation* AnimationTimeline::Play(AnimationEffect* child) {
 void AnimationTimeline::MarkAnimationsCompositorPending(bool source_changed) {
   for (const auto& animation : animations_) {
     animation->SetCompositorPending(source_changed);
+  }
+}
+
+void AnimationTimeline::MarkPendingIfCompositorPropertyAnimationChanges(
+    const PaintArtifactCompositor* paint_artifact_compositor) {
+  for (const auto& animation : animations_) {
+    animation->MarkPendingIfCompositorPropertyAnimationChanges(
+        paint_artifact_compositor);
   }
 }
 

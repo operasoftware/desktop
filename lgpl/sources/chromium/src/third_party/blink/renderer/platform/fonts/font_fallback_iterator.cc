@@ -37,7 +37,14 @@ bool FontFallbackIterator::RangeSetContributesForHint(
     const FontDataForRangeSet* segmented_face) {
   for (auto* it = hint_list.begin(); it != hint_list.end(); ++it) {
     if (segmented_face->Contains(*it)) {
-      if (!AlreadyLoadingRangeForHintChar(*it))
+      // If it's a pending custom font, we need to make sure it can render any
+      // new characters, otherwise we may trigger a redundant load. In other
+      // cases (already loaded or not a custom font), we can use it right away.
+      // Loading data url fonts doesn't incur extra network cost, so we always
+      // load them.
+      if (!segmented_face->IsPendingCustomFont() ||
+          segmented_face->IsPendingDataUrlCustomFont() ||
+          !AlreadyLoadingRangeForHintChar(*it))
         return true;
     }
   }
@@ -128,10 +135,17 @@ scoped_refptr<FontDataForRangeSet> FontFallbackIterator::Next(
     // TODO: crbug.com/42217 Improve this by doing the last run with a last
     // resort font that has glyphs for everything, for example the Unicode
     // LastResort font, not just Times or Arial.
-    FontCache* font_cache = FontCache::GetFontCache();
+    FontCache& font_cache = FontCache::Get();
     fallback_stage_ = kFirstCandidateForNotdefGlyph;
     scoped_refptr<SimpleFontData> last_resort =
-        font_cache->GetLastResortFallbackFont(font_description_).get();
+        font_cache.GetLastResortFallbackFont(font_description_).get();
+
+    if (FontSelector* font_selector = font_fallback_list_->GetFontSelector()) {
+      font_selector->ReportLastResortFallbackFontLookup(
+          font_description_,
+          last_resort.get());
+    }
+
     return UniqueOrNext(
         base::AdoptRef(new FontDataForRangeSetFromCache(last_resort)),
         hint_list);
@@ -212,10 +226,17 @@ scoped_refptr<FontDataForRangeSet> FontFallbackIterator::Next(
 
 scoped_refptr<SimpleFontData> FontFallbackIterator::FallbackPriorityFont(
     UChar32 hint) {
-  return FontCache::GetFontCache()->FallbackFontForCharacter(
-      font_description_, hint,
-      font_fallback_list_->PrimarySimpleFontData(font_description_),
-      font_fallback_priority_);
+  scoped_refptr<SimpleFontData> font_data =
+      FontCache::Get().FallbackFontForCharacter(
+          font_description_, hint,
+          font_fallback_list_->PrimarySimpleFontData(font_description_),
+          font_fallback_priority_);
+
+  if (FontSelector* font_selector = font_fallback_list_->GetFontSelector()) {
+    font_selector->ReportFontLookupByFallbackCharacter(
+        hint, font_fallback_priority_, font_description_, font_data.get());
+  }
+  return font_data;
 }
 
 static inline unsigned ChooseHintIndex(const Vector<UChar32>& hint_list) {
@@ -246,15 +267,22 @@ scoped_refptr<SimpleFontData> FontFallbackIterator::UniqueSystemFontForHintList(
   if (!hint_list.size())
     return nullptr;
 
-  FontCache* font_cache = FontCache::GetFontCache();
+  FontCache& font_cache = FontCache::Get();
   UChar32 hint = hint_list[ChooseHintIndex(hint_list)];
 
   if (!hint || previously_asked_for_hint_.Contains(hint))
     return nullptr;
   previously_asked_for_hint_.insert(hint);
-  return font_cache->FallbackFontForCharacter(
+
+  scoped_refptr<SimpleFontData> font_data = font_cache.FallbackFontForCharacter(
       font_description_, hint,
       font_fallback_list_->PrimarySimpleFontData(font_description_));
+
+  if (FontSelector* font_selector = font_fallback_list_->GetFontSelector()) {
+    font_selector->ReportFontLookupByFallbackCharacter(
+        hint, FontFallbackPriority::kText, font_description_, font_data.get());
+  }
+  return font_data;
 }
 
 }  // namespace blink

@@ -1,6 +1,13 @@
+# Copyright © 2018 by André-Abush Clause <dev@andreabc.net>
+#
+# Copying and distribution of this file, with or without modification,
+# are permitted in any medium without royalty provided the copyright
+# notice and this notice are preserved. This file is offered as-is,
+# without any warranty.
+
 display: unicode-without-blank.dis
 table:
-  locale: fr
+  language: fr
   type: computer
   dots: 8
   system: bfu
@@ -41,7 +48,7 @@ tests:
   - ["ƒŠšŽžŸÿµÃãÅÅÆæÌìÐðÒòÕõØøÝýÞþ", "⢋⣮⢮⣵⢵⣹⢲⡒⣁⢁⡂⡂⡜⢜⣊⢊⣃⢃⣕⢕⣅⣨⣼⢰⣽⢽⣚⢚"]
 
 table:
-  locale: fr
+  language: fr
   type: computer
   dots: 8
   system: bfu

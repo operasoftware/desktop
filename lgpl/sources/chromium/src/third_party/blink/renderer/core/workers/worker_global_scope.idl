@@ -41,7 +41,9 @@
     // attribute EventHandler ononline;
 
     // https://html.spec.whatwg.org/C/#apis-available-to-workers
-    [RaisesException] void importScripts(ScriptURLString... urls);
+    // Although RaisesException is not specified, importScripts() can actually
+    // throw exceptions directly to V8.
+    void importScripts(ScriptURLString... urls);
     readonly attribute WorkerNavigator navigator;
 
 
@@ -50,10 +52,6 @@
     // [Replaceable] readonly attribute Console console;
     // Console is installed by v8 inspector when context is created
     // and is left commented here just for documentation.
-
-    // CORS and RFC1918
-    // https://wicg.github.io/cors-rfc1918/#feature-detect
-    [RuntimeEnabled=AddressSpace, ImplementedAs=addressSpaceForBindings] readonly attribute AddressSpace addressSpace;
 
     // Unhandled Promise Rejection Events
     attribute EventHandler onrejectionhandled;
@@ -74,7 +72,7 @@
     readonly attribute FontFaceSet fonts;
 
     // TrustedTypes API: http://github.com/wicg/trusted-types
-    [RuntimeEnabled=TrustedDOMTypes] readonly attribute TrustedTypePolicyFactory trustedTypes;
+    readonly attribute TrustedTypePolicyFactory trustedTypes;
 };
 
 WorkerGlobalScope includes WindowOrWorkerGlobalScope;

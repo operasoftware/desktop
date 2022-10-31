@@ -7,11 +7,12 @@
 
 #include <stdint.h>
 
-// Must be included before identifiable_surface.h.
-#include "third_party/blink/renderer/modules/canvas/canvas2d/blink_identifiability_digest_helpers.h"
-
 #include "third_party/blink/public/common/privacy_budget/identifiability_metrics.h"
-#include "third_party/blink/public/common/privacy_budget/identifiability_study_participation.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
+#include "third_party/blink/public/common/privacy_budget/identifiable_token_builder.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/privacy_budget/identifiability_digest_helpers.h"
 
 namespace blink {
 
@@ -28,32 +29,180 @@ namespace blink {
 // **Don't renumber after the privacy budget study has started to ensure
 // consistency.**
 enum class CanvasOps {
+  // CanvasPath operations.
+  kClosePath = 0,
+  kMoveTo,
+  kLineTo,
+  kQuadradicCurveTo,
+  kBezierCurveTo,
+  kArcTo,
+  kArc,
+  kEllipse,
+  kRect,
+  // Path2D operations.
+  kAddPath,
+  // BaseRenderingContext2D methods.
+  kSetStrokeStyle,
+  kSetFillStyle,
+  kSetLineWidth,
+  kSetLineCap,
+  kSetLineJoin,
+  kSetMiterLimit,
+  kSetLineDash,
+  kSetLineDashOffset,
+  kSetShadowOffsetX,
+  kSetShadowOffsetY,
+  kSetShadowBlur,
+  kSetShadowColor,
+  kSetGlobalAlpha,
+  kSetGlobalCompositeOpertion,
+  kSetFilter,
+  kSave,
+  kRestore,
+  kScale,
+  kRotate,
+  kTranslate,
+  kTransform,
+  kResetTransform,
+  kBeginPath,
+  kFill,
+  kFill__Path,
+  kStroke,
+  kStroke__Path,
+  kClip,
+  kClip__Path,
+  kClearRect,
+  kFillRect,
+  kStrokeRect,
+  kDrawImage,
+  kCreateLinearGradient,
+  kCreateRadialGradient,
+  kCreatePattern,
+  kPutImageData,
+  kSetImageSmoothingEnabled,
+  kSetImageSmoothingQuality,
+  kSetTextAlign,
+  kSetTextBaseline,
+  kReset,
   // CanvasRenderingContext2D / OffscreenCanvasRenderingContext2D methods.
   kSetFont,
   kFillText,
   kStrokeText,
+  kDrawFocusIfNeeded,  // CanvasRenderingContext2D only.
+  // CanvasGradient methods.
+  kAddColorStop,
 };
 
 // A helper class to simplify maintaining the current text digest for the canvas
 // context. An operation count is also maintained to limit the performance
 // impact of the study.
-class IdentifiabilityStudyHelper {
+class IdentifiabilityStudyHelper final {
+  DISALLOW_NEW();
+
  public:
-  template <typename... Ts>
-  void MaybeUpdateDigest(Ts... args) {
-    constexpr int kMaxOperations = 1 << 20;
-    if (!IsUserInIdentifiabilityStudy() || operation_count_ > kMaxOperations) {
-      return;
+  // UpdateBuilder() should be called iff ShouldUpdateBuilder() is true, to
+  // avoid unnecessary copies of parameters and hashing when GetToken() won't be
+  // called.
+  bool ShouldUpdateBuilder() {
+    if (!is_canvas_type_allowed_)
+      return false;
+    if (!execution_context_ ||
+        execution_context_->IsInRequestAnimationFrame() ||
+        operation_count_ >= max_operations_) {
+      encountered_skipped_ops_ = true;
+      return false;
     }
-    digest_ ^= IdentifiabilityDigestHelper(args...);
+    return true;
+  }
+
+  // Do *not* call this method if ShouldUpdateBuilder() is false -- updates
+  // the internal digest based on the series of digestable parameters.
+  template <typename... Ts>
+  void UpdateBuilder(Ts... tokens) {
+    AddTokens(tokens...);
     operation_count_++;
   }
 
-  uint64_t digest() { return digest_; }
+  // Returns an IdentifiableToken representing the internal computed digest.
+  IdentifiableToken GetToken() const { return builder_.GetToken(); }
+
+  [[nodiscard]] bool encountered_skipped_ops() const {
+    return encountered_skipped_ops_;
+  }
+
+  [[nodiscard]] bool encountered_sensitive_ops() const {
+    return encountered_sensitive_ops_;
+  }
+
+  [[nodiscard]] bool encountered_partially_digested_image() const {
+    return encountered_partially_digested_image_;
+  }
+
+  void set_encountered_skipped_ops() { encountered_skipped_ops_ = true; }
+
+  void set_encountered_sensitive_ops() { encountered_sensitive_ops_ = true; }
+
+  void set_encountered_partially_digested_image() {
+    encountered_partially_digested_image_ = true;
+  }
+
+  void SetExecutionContext(ExecutionContext* context) {
+    execution_context_ = context;
+  }
+
+  ExecutionContext* execution_context() const { return execution_context_; }
+
+  // For testing, allows scoped changing the max number of operations for all
+  // IdentifiabilityStudyHelper instances.
+  class ScopedMaxOperationsSetter {
+   public:
+    explicit ScopedMaxOperationsSetter(int new_value)
+        : old_max_operations_(IdentifiabilityStudyHelper::max_operations_) {
+      IdentifiabilityStudyHelper::max_operations_ = new_value;
+    }
+    ~ScopedMaxOperationsSetter() {
+      IdentifiabilityStudyHelper::max_operations_ = old_max_operations_;
+    }
+
+   private:
+    const int old_max_operations_;
+  };
+
+  void Trace(Visitor* visitor) const;
 
  private:
-  uint64_t digest_ = 0;
+  // Note that primitives are implicitly converted to IdentifiableTokens
+  template <typename... Ts>
+  void AddTokens(IdentifiableToken token, Ts... args) {
+    builder_.AddToken(token);
+    AddTokens(args...);
+  }
+  void AddTokens() {}
+
+  const bool is_canvas_type_allowed_ =
+      IdentifiabilityStudySettings::Get()->ShouldSampleType(
+          blink::IdentifiableSurface::Type::kCanvasReadback);
+
+  Member<ExecutionContext> execution_context_;
+
+  static MODULES_EXPORT int max_operations_;
+
+  IdentifiableTokenBuilder builder_;
   int operation_count_ = 0;
+
+  // If true, at least one op was skipped completely, for performance reasons.
+  bool encountered_skipped_ops_ = false;
+
+  // If true, encountered at least one "sensitive" operation -- for instance,
+  // strings may contain PII, so we only use a 16-bit digest for such strings.
+  //
+  // This must be set manually by calling set_encountered_sensitive_ops().
+  bool encountered_sensitive_ops_ = false;
+
+  // If true, at least one op was partially-digested -- for instance, images
+  // drawn to the canvas have their width, height, etc. digested, but not the
+  // image contents, for performance and complexity reasons.
+  bool encountered_partially_digested_image_ = false;
 };
 
 }  // namespace blink

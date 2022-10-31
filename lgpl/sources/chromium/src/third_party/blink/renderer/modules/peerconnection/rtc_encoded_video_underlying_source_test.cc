@@ -12,9 +12,10 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/core/streams/readable_stream.h"
 #include "third_party/blink/renderer/core/streams/readable_stream_default_controller_with_script_scope.h"
+#include "third_party/blink/renderer/modules/peerconnection/testing/mock_transformable_video_frame.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/webrtc/api/frame_transformer_interface.h"
-#include "third_party/webrtc/api/test/mock_transformable_video_frame.h"
 
 namespace blink {
 
@@ -38,13 +39,13 @@ TEST_F(RTCEncodedVideoUnderlyingSourceTest,
       ReadableStream::CreateWithCountQueueingStrategy(script_state, source, 0);
 
   NonThrowableExceptionState exception_state;
-  auto* reader = stream->getReader(script_state, exception_state);
+  auto* reader =
+      stream->GetDefaultReaderForTesting(script_state, exception_state);
 
   ScriptPromiseTester read_tester(script_state,
                                   reader->read(script_state, exception_state));
   EXPECT_FALSE(read_tester.IsFulfilled());
-  source->OnFrameFromSource(
-      std::make_unique<webrtc::MockTransformableVideoFrame>());
+  source->OnFrameFromSource(std::make_unique<MockTransformableVideoFrame>());
   read_tester.WaitUntilSettled();
   EXPECT_TRUE(read_tester.IsFulfilled());
 
@@ -73,14 +74,12 @@ TEST_F(RTCEncodedVideoUnderlyingSourceTest, QueuedFramesAreDroppedWhenOverflow) 
   for (int i = 0; i > RTCEncodedVideoUnderlyingSource::kMinQueueDesiredSize;
        --i) {
     EXPECT_EQ(source->Controller()->DesiredSize(), i);
-    source->OnFrameFromSource(
-        std::make_unique<webrtc::MockTransformableVideoFrame>());
+    source->OnFrameFromSource(std::make_unique<MockTransformableVideoFrame>());
   }
   EXPECT_EQ(source->Controller()->DesiredSize(),
             RTCEncodedVideoUnderlyingSource::kMinQueueDesiredSize);
 
-  source->OnFrameFromSource(
-      std::make_unique<webrtc::MockTransformableVideoFrame>());
+  source->OnFrameFromSource(std::make_unique<MockTransformableVideoFrame>());
   EXPECT_EQ(source->Controller()->DesiredSize(),
             RTCEncodedVideoUnderlyingSource::kMinQueueDesiredSize);
 

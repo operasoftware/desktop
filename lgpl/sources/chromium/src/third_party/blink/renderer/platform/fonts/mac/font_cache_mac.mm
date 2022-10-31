@@ -36,6 +36,8 @@
 
 #include "base/location.h"
 #include "base/mac/foundation_util.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/timer/elapsed_timer.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/font_family_names.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
@@ -49,6 +51,7 @@
 #include "third_party/blink/renderer/platform/web_test_support.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
+#include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 // Forward declare Mac SPIs.
 // Request for public API: rdar://13803570
@@ -62,22 +65,6 @@
              inLanguage:(id)useNil;
 @end
 
-namespace {
-
-NSString* GetLocalizedString(CTFontDescriptorRef fd, CFStringRef attribute) {
-  base::ScopedCFTypeRef<CFStringRef> cf_str(base::mac::CFCast<CFStringRef>(
-      CTFontDescriptorCopyLocalizedAttribute(fd, attribute, nullptr)));
-  return [base::mac::CFToNSCast(cf_str.release()) autorelease];
-}
-
-NSString* GetString(CTFontDescriptorRef fd, CFStringRef attribute) {
-  base::ScopedCFTypeRef<CFStringRef> cf_str(base::mac::CFCast<CFStringRef>(
-      CTFontDescriptorCopyAttribute(fd, attribute)));
-  return [base::mac::CFToNSCast(cf_str.release()) autorelease];
-}
-
-}  // namespace
-
 namespace blink {
 
 const char kColorEmojiFontMac[] = "Apple Color Emoji";
@@ -89,11 +76,11 @@ const AtomicString& FontCache::LegacySystemFontFamily() {
 
 static void InvalidateFontCache() {
   if (!IsMainThread()) {
-    Thread::MainThread()->GetTaskRunner()->PostTask(
+    Thread::MainThread()->GetDeprecatedTaskRunner()->PostTask(
         FROM_HERE, WTF::Bind(&InvalidateFontCache));
     return;
   }
-  FontCache::GetFontCache()->Invalidate();
+  FontCache::Get().Invalidate();
 }
 
 static void FontCacheRegisteredFontsChangedNotificationCallback(
@@ -102,7 +89,7 @@ static void FontCacheRegisteredFontsChangedNotificationCallback(
     CFStringRef name,
     const void*,
     CFDictionaryRef) {
-  DCHECK_EQ(observer, FontCache::GetFontCache());
+  DCHECK_EQ(observer, &FontCache::Get());
   DCHECK(CFEqual(name, kCTFontManagerRegisteredFontsChangedNotification));
   InvalidateFontCache();
 }
@@ -154,16 +141,14 @@ scoped_refptr<SimpleFontData> FontCache::PlatformFallbackFontForCharacter(
       font_data_to_substitute->PlatformData();
   NSFont* ns_font = base::mac::CFToNSCast(platform_data.CtFont());
 
-  NSString* string =
-      [[NSString alloc] initWithCharactersNoCopy:code_units
-                                          length:code_units_length
-                                    freeWhenDone:NO];
+  NSString* string = [[[NSString alloc]
+      initWithCharacters:reinterpret_cast<UniChar*>(code_units)
+                  length:code_units_length] autorelease];
   NSFont* substitute_font =
       [NSFont findFontLike:ns_font
                  forString:string
                  withRange:NSMakeRange(0, code_units_length)
                 inLanguage:nil];
-  [string release];
 
   // FIXME: Remove this SPI usage: http://crbug.com/255122
   if (!substitute_font && code_units_length == 1)
@@ -237,10 +222,12 @@ scoped_refptr<SimpleFontData> FontCache::PlatformFallbackFontForCharacter(
       ![substitute_font.familyName isEqual:@"Apple Color Emoji"];
 
   std::unique_ptr<FontPlatformData> alternate_font = FontPlatformDataFromNSFont(
-      substitute_font, platform_data.size(), synthetic_bold,
+      substitute_font, platform_data.size(), font_description.SpecifiedSize(),
+      synthetic_bold,
       (traits & NSFontItalicTrait) &&
           !(substitute_font_traits & NSFontItalicTrait),
-      platform_data.Orientation(), font_description.FontOpticalSizing(),
+      font_description.TextRendering(), platform_data.Orientation(),
+      font_description.FontOpticalSizing(),
       nullptr);  // No variation paramaters in fallback.
 
   if (!alternate_font)
@@ -301,59 +288,33 @@ std::unique_ptr<FontPlatformData> FontCache::CreateFontPlatformData(
   // TODO(eae): Remove once skia supports bold emoji. See
   // https://bugs.chromium.org/p/skia/issues/detail?id=4904
   // Bold emoji look the same as normal emoji, so syntheticBold isn't needed.
-  bool synthetic_bold = [platform_font.familyName isEqual:@"Apple Color Emoji"]
-                            ? false
-                            : (IsAppKitFontWeightBold(app_kit_weight) &&
-                               !IsAppKitFontWeightBold(actual_weight)) ||
+  bool synthetic_bold_requested = (IsAppKitFontWeightBold(app_kit_weight) &&
+                                   !IsAppKitFontWeightBold(actual_weight)) ||
                                   font_description.IsSyntheticBold();
+  bool synthetic_bold =
+      [platform_font.familyName isEqual:@"Apple Color Emoji"]
+          ? false
+          : synthetic_bold_requested && font_description.SyntheticBoldAllowed();
 
-  bool synthetic_italic =
+  bool synthetic_italic_requested =
       ((traits & NSFontItalicTrait) && !(actual_traits & NSFontItalicTrait)) ||
       font_description.IsSyntheticItalic();
+  bool synthetic_italic =
+      synthetic_italic_requested && font_description.SyntheticItalicAllowed();
 
   // FontPlatformData::typeface() is null in the case of Chromium out-of-process
   // font loading failing.  Out-of-process loading occurs for registered fonts
   // stored in non-system locations.  When loading fails, we do not want to use
   // the returned FontPlatformData since it will not have a valid SkTypeface.
   std::unique_ptr<FontPlatformData> platform_data = FontPlatformDataFromNSFont(
-      platform_font, size, synthetic_bold, synthetic_italic,
+      platform_font, size, font_description.SpecifiedSize(), synthetic_bold,
+      synthetic_italic, font_description.TextRendering(),
       font_description.Orientation(), font_description.FontOpticalSizing(),
       font_description.VariationSettings());
   if (!platform_data || !platform_data->Typeface()) {
     return nullptr;
   }
   return platform_data;
-}
-
-std::vector<FontEnumerationEntry> FontCache::EnumeratePlatformAvailableFonts() {
-  DCHECK(RuntimeEnabledFeatures::FontAccessEnabled());
-  @autoreleasepool {
-    std::vector<FontEnumerationEntry> output;
-
-    CFTypeRef values[1] = {kCFBooleanTrue};
-    base::ScopedCFTypeRef<CFDictionaryRef> options(CFDictionaryCreate(
-        kCFAllocatorDefault,
-        (const void**)kCTFontCollectionRemoveDuplicatesOption,
-        (const void**)&values,
-        /*numValues=*/1, &kCFTypeDictionaryKeyCallBacks,
-        &kCFTypeDictionaryValueCallBacks));
-    base::ScopedCFTypeRef<CTFontCollectionRef> collection(
-        CTFontCollectionCreateFromAvailableFonts(options));
-
-    base::ScopedCFTypeRef<CFArrayRef> font_descs(
-        CTFontCollectionCreateMatchingFontDescriptors(collection));
-
-    for (CFIndex i = 0; i < CFArrayGetCount(font_descs); ++i) {
-      CTFontDescriptorRef fd = base::mac::CFCast<CTFontDescriptorRef>(
-          CFArrayGetValueAtIndex(font_descs, i));
-      NSString* postscript_name = GetString(fd, kCTFontNameAttribute);
-      NSString* full_name = GetLocalizedString(fd, kCTFontDisplayNameAttribute);
-      NSString* family = GetLocalizedString(fd, kCTFontFamilyNameAttribute);
-      output.push_back(FontEnumerationEntry{String(postscript_name),
-                                            String(full_name), String(family)});
-    }
-    return output;
-  }
 }
 
 }  // namespace blink

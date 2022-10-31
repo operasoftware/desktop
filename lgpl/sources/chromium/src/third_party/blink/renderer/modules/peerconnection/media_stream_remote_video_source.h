@@ -7,8 +7,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "third_party/blink/public/platform/web_media_stream_source.h"
+#include "base/memory/scoped_refptr.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_source.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/webrtc/api/media_stream_interface.h"
@@ -26,7 +25,13 @@ class MODULES_EXPORT MediaStreamRemoteVideoSource
     : public MediaStreamVideoSource {
  public:
   explicit MediaStreamRemoteVideoSource(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       std::unique_ptr<TrackObserver> observer);
+
+  MediaStreamRemoteVideoSource(const MediaStreamRemoteVideoSource&) = delete;
+  MediaStreamRemoteVideoSource& operator=(const MediaStreamRemoteVideoSource&) =
+      delete;
+
   ~MediaStreamRemoteVideoSource() override;
 
   // Should be called when the remote video track this source originates from is
@@ -37,11 +42,14 @@ class MODULES_EXPORT MediaStreamRemoteVideoSource
   // MediaStreamVideoSource overrides.
   bool SupportsEncodedOutput() const override;
   void RequestRefreshFrame() override;
+  base::WeakPtr<MediaStreamVideoSource> GetWeakPtr() const override;
 
  protected:
   // Implements MediaStreamVideoSource.
-  void StartSourceImpl(VideoCaptureDeliverFrameCB frame_callback,
-                       EncodedVideoFrameCB encoded_frame_callback) override;
+  void StartSourceImpl(
+      VideoCaptureDeliverFrameCB frame_callback,
+      EncodedVideoFrameCB encoded_frame_callback,
+      VideoCaptureCropVersionCB crop_version_callback) override;
   void StopSourceImpl() override;
   void OnEncodedSinkEnabled() override;
   void OnEncodedSinkDisabled() override;
@@ -61,7 +69,7 @@ class MODULES_EXPORT MediaStreamRemoteVideoSource
   scoped_refptr<RemoteVideoSourceDelegate> delegate_;
   std::unique_ptr<TrackObserver> observer_;
 
-  DISALLOW_COPY_AND_ASSIGN(MediaStreamRemoteVideoSource);
+  base::WeakPtrFactory<MediaStreamVideoSource> weak_factory_{this};
 };
 
 }  // namespace blink

@@ -22,12 +22,11 @@ class NGInlineLayoutTest : public SimTest {
  public:
   NGConstraintSpace ConstraintSpaceForElement(LayoutBlockFlow* block_flow) {
     NGConstraintSpaceBuilder builder(block_flow->Style()->GetWritingMode(),
-                                     block_flow->Style()->GetWritingMode(),
+                                     block_flow->Style()->GetWritingDirection(),
                                      /* is_new_fc */ false);
     builder.SetAvailableSize(LogicalSize(LayoutUnit(), LayoutUnit()));
     builder.SetPercentageResolutionSize(
         LogicalSize(LayoutUnit(), LayoutUnit()));
-    builder.SetTextDirection(block_flow->Style()->Direction());
     return builder.ToConstraintSpace();
   }
 };
@@ -48,9 +47,9 @@ TEST_F(NGInlineLayoutTest, BlockWithSingleTextNode) {
   NGConstraintSpace constraint_space = ConstraintSpaceForElement(block_flow);
   NGBlockNode node(block_flow);
 
-  NGFragmentGeometry fragment_geometry =
-      CalculateInitialFragmentGeometry(constraint_space, node);
-  scoped_refptr<const NGLayoutResult> result =
+  NGFragmentGeometry fragment_geometry = CalculateInitialFragmentGeometry(
+      constraint_space, node, /* break_token */ nullptr);
+  const NGLayoutResult* result =
       NGBlockLayoutAlgorithm({node, fragment_geometry, constraint_space})
           .Layout();
   EXPECT_TRUE(result);
@@ -77,8 +76,9 @@ TEST_F(NGInlineLayoutTest, BlockWithTextAndAtomicInline) {
   NGBlockNode node(block_flow);
 
   NGFragmentGeometry fragment_geometry =
-      CalculateInitialFragmentGeometry(constraint_space, node);
-  scoped_refptr<const NGLayoutResult> result =
+      CalculateInitialFragmentGeometry(constraint_space, node,
+                                       /* break_token */ nullptr);
+  const NGLayoutResult* result =
       NGBlockLayoutAlgorithm({node, fragment_geometry, constraint_space})
           .Layout();
   EXPECT_TRUE(result);

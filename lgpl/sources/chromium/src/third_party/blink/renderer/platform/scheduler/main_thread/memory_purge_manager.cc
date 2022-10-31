@@ -8,6 +8,7 @@
 #include "base/memory/memory_pressure_listener.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/rand_util.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/page/launching_process_state.h"
@@ -23,8 +24,7 @@ base::TimeDelta FreezePurgeMemoryAllPagesFrozenDelay() {
           &blink::features::kFreezePurgeMemoryAllPagesFrozen,
           "delay-in-minutes",
           MemoryPurgeManager::kDefaultTimeToPurgeAfterFreezing};
-  return base::TimeDelta::FromMinutes(
-      kFreezePurgeMemoryAllPagesFrozenDelayInMinutes.Get());
+  return base::Minutes(kFreezePurgeMemoryAllPagesFrozenDelayInMinutes.Get());
 }
 
 int MinTimeToPurgeAfterBackgroundedInSeconds() {
@@ -138,6 +138,7 @@ void MemoryPurgeManager::RequestMemoryPurgeWithDelay(base::TimeDelta delay) {
 }
 
 void MemoryPurgeManager::PerformMemoryPurge() {
+  TRACE_EVENT0("blink", "MemoryPurgeManager::PerformMemoryPurge()");
   DCHECK(CanPurge());
 
   base::MemoryPressureListener::NotifyMemoryPressure(
@@ -145,11 +146,7 @@ void MemoryPurgeManager::PerformMemoryPurge() {
 
   if (AreAllPagesFrozen())
     base::MemoryPressureListener::SetNotificationsSuppressed(true);
-
-  if (backgrounded_purge_pending_) {
-    Platform::Current()->RecordMetricsForBackgroundedRendererPurge();
-    backgrounded_purge_pending_ = false;
-  }
+  backgrounded_purge_pending_ = false;
 }
 
 bool MemoryPurgeManager::CanPurge() const {
@@ -177,8 +174,7 @@ bool MemoryPurgeManager::AreAllPagesFrozen() const {
 base::TimeDelta MemoryPurgeManager::GetTimeToPurgeAfterBackgrounded() const {
   int min_time_in_seconds = MinTimeToPurgeAfterBackgroundedInSeconds();
   int max_time_in_seconds = MaxTimeToPurgeAfterBackgroundedInSeconds();
-  return base::TimeDelta::FromSeconds(
-      base::RandInt(min_time_in_seconds, max_time_in_seconds));
+  return base::Seconds(base::RandInt(min_time_in_seconds, max_time_in_seconds));
 }
 
 }  // namespace blink

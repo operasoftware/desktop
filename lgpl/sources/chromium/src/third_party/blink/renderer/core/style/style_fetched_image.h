@@ -26,24 +26,29 @@
 
 #include "third_party/blink/renderer/core/loader/resource/image_resource_observer.h"
 #include "third_party/blink/renderer/core/style/style_image.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
 class Document;
-class FetchParameters;
 
 // This class represents an <image> that loads a single image resource (the
 // url(...) function.)
-class StyleFetchedImage final : public StyleImage,
-                                public ImageResourceObserver {
-  USING_PRE_FINALIZER(StyleFetchedImage, Dispose);
+class CORE_EXPORT StyleFetchedImage final : public StyleImage,
+                                            public ImageResourceObserver {
+  USING_PRE_FINALIZER(StyleFetchedImage, Prefinalize);
 
  public:
-  StyleFetchedImage(const Document&,
-                    FetchParameters&,
-                    bool is_lazyload_deferred);
+  StyleFetchedImage(ImageResourceContent* image,
+                    const Document&,
+                    bool is_lazyload_possibly_deferred,
+                    bool origin_clean,
+                    bool is_ad_related,
+                    const KURL&);
   ~StyleFetchedImage() override;
 
   WrappedImagePtr Data() const override;
@@ -55,10 +60,11 @@ class StyleFetchedImage final : public StyleImage,
   bool CanRender() const override;
   bool IsLoaded() const override;
   bool ErrorOccurred() const override;
-  FloatSize ImageSize(const Document&,
-                      float multiplier,
-                      const LayoutSize& default_object_size,
-                      RespectImageOrientationEnum) const override;
+  bool IsAccessAllowed(String&) const override;
+
+  gfx::SizeF ImageSize(float multiplier,
+                       const gfx::SizeF& default_object_size,
+                       RespectImageOrientationEnum) const override;
   bool HasIntrinsicSize() const override;
   void AddClient(ImageResourceObserver*) override;
   void RemoveClient(ImageResourceObserver*) override;
@@ -66,23 +72,24 @@ class StyleFetchedImage final : public StyleImage,
   scoped_refptr<Image> GetImage(const ImageResourceObserver&,
                                 const Document&,
                                 const ComputedStyle&,
-                                const FloatSize& target_size) const override;
+                                const gfx::SizeF& target_size) const override;
   bool KnownToBeOpaque(const Document&, const ComputedStyle&) const override;
   ImageResourceContent* CachedImage() const override;
 
-  const KURL& Url() const { return url_; }
-
   void LoadDeferredImage(const Document& document);
+
+  RespectImageOrientationEnum ForceOrientationIfNecessary(
+      RespectImageOrientationEnum default_orientation) const override;
 
   void Trace(Visitor*) const override;
 
  private:
   bool IsEqual(const StyleImage&) const override;
-  void Dispose();
+  void Prefinalize();
 
   // ImageResourceObserver overrides
   void ImageNotifyFinished(ImageResourceContent*) override;
-  bool GetImageAnimationPolicy(ImageAnimationPolicy&) override;
+  bool GetImageAnimationPolicy(mojom::blink::ImageAnimationPolicy&) override;
 
   Member<ImageResourceContent> image_;
   Member<const Document> document_;
@@ -101,4 +108,4 @@ struct DowncastTraits<StyleFetchedImage> {
 };
 
 }  // namespace blink
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_STYLE_FETCHED_IMAGE_H_

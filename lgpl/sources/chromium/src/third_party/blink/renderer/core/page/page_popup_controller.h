@@ -32,7 +32,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_PAGE_POPUP_CONTROLLER_H_
 
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
@@ -46,7 +46,6 @@ class PagePopupClient;
 
 class PagePopupController : public ScriptWrappable, public Supplement<Page> {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(PagePopupController);
 
  public:
   static const char kSupplementName[];

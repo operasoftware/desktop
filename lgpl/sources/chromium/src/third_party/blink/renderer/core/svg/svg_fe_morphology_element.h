@@ -21,12 +21,14 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_FE_MORPHOLOGY_ELEMENT_H_
 
 #include "third_party/blink/renderer/core/svg/svg_animated_enumeration.h"
-#include "third_party/blink/renderer/core/svg/svg_animated_number_optional_number.h"
 #include "third_party/blink/renderer/core/svg/svg_filter_primitive_standard_attributes.h"
 #include "third_party/blink/renderer/platform/graphics/filters/fe_morphology.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
+
+class SVGAnimatedNumber;
+class SVGAnimatedNumberOptionalNumber;
 
 DECLARE_SVG_ENUM_MAP(MorphologyOperatorType);
 
@@ -37,8 +39,8 @@ class SVGFEMorphologyElement final
  public:
   explicit SVGFEMorphologyElement(Document&);
 
-  SVGAnimatedNumber* radiusX() { return radius_->FirstNumber(); }
-  SVGAnimatedNumber* radiusY() { return radius_->SecondNumber(); }
+  SVGAnimatedNumber* radiusX();
+  SVGAnimatedNumber* radiusY();
   SVGAnimatedString* in1() { return in1_.Get(); }
   SVGAnimatedEnumeration<MorphologyOperatorType>* svgOperator() {
     return svg_operator_.Get();
@@ -48,7 +50,7 @@ class SVGFEMorphologyElement final
 
  private:
   bool SetFilterEffectAttribute(FilterEffect*, const QualifiedName&) override;
-  void SvgAttributeChanged(const QualifiedName&) override;
+  void SvgAttributeChanged(const SvgAttributeChangedParams&) override;
   FilterEffect* Build(SVGFilterBuilder*, Filter*) override;
   bool TaintsOrigin() const override { return false; }
 

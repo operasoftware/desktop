@@ -5,8 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_CSS_STYLE_VALUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_CSS_STYLE_VALUE_H_
 
-#include "base/macros.h"
-#include "base/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
@@ -41,10 +39,12 @@ class CORE_EXPORT CSSStyleValue : public ScriptWrappable {
     kInvertType,
     kMinType,
     kMaxType,
+    kClampType,
     // End of CSSNumericValue subclasses
     kTransformType,
     kPositionType,
     kURLImageType,
+    kColorType,
     kUnsupportedColorType,
   };
 
@@ -57,11 +57,13 @@ class CORE_EXPORT CSSStyleValue : public ScriptWrappable {
                                       const String& value,
                                       ExceptionState&);
 
+  CSSStyleValue(const CSSStyleValue&) = delete;
+  CSSStyleValue& operator=(const CSSStyleValue&) = delete;
   ~CSSStyleValue() override = default;
 
   virtual StyleValueType GetType() const = 0;
   bool IsNumericValue() const {
-    return GetType() >= kUnitType && GetType() <= kMaxType;
+    return GetType() >= kUnitType && GetType() <= kClampType;
   }
 
   virtual const CSSValue* ToCSSValue() const = 0;
@@ -82,9 +84,8 @@ class CORE_EXPORT CSSStyleValue : public ScriptWrappable {
 
  private:
   String css_text_;
-  DISALLOW_COPY_AND_ASSIGN(CSSStyleValue);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_CSS_STYLE_VALUE_H_

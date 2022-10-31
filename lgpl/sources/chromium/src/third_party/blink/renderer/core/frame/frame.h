@@ -29,26 +29,41 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FRAME_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FRAME_H_
 
-#include "base/optional.h"
+#include "base/check_op.h"
+#include "base/i18n/rtl.h"
 #include "base/unguessable_token.h"
-#include "mojo/public/mojom/base/text_direction.mojom-blink-forward.h"
-#include "third_party/blink/public/common/feature_policy/document_policy.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/frame/frame_ad_evidence.h"
 #include "third_party/blink/public/common/frame/user_activation_state.h"
 #include "third_party/blink/public/common/frame/user_activation_update_source.h"
-#include "third_party/blink/public/mojom/ad_tagging/ad_frame.mojom-blink.h"
+#include "third_party/blink/public/common/permissions_policy/document_policy_features.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy_features.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
+#include "third_party/blink/public/mojom/fenced_frame/fenced_frame.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/frame/remote_frame.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/input/scroll_direction.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink-forward.h"
 #include "third_party/blink/public/web/web_frame_load_type.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/frame_lifecycle.h"
 #include "third_party/blink/renderer/core/frame/frame_view.h"
 #include "third_party/blink/renderer/core/frame/navigation_rate_limiter.h"
+#include "third_party/blink/renderer/core/frame/opened_frame_tracker.h"
 #include "third_party/blink/renderer/core/loader/frame_loader_types.h"
 #include "third_party/blink/renderer/core/page/frame_tree.h"
-#include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/platform/graphics/touch_action.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
+
+namespace ui {
+enum class ScrollGranularity : uint8_t;
+}  // namespace ui
 
 namespace blink {
 
@@ -70,8 +85,15 @@ class WindowProxy;
 class WindowProxyManager;
 struct FrameLoadRequest;
 class WindowAgentFactory;
+class WebFrame;
+class WebLocalFrame;
+class WebRemoteFrame;
 
 enum class FrameDetachType { kRemove, kSwap };
+
+// kInsertLater will create a provisional frame, i.e. it will have a parent
+// frame but not be inserted into the frame tree.
+enum class FrameInsertType { kInsertInConstructor, kInsertLater };
 
 // Frame is the base class of LocalFrame and RemoteFrame and should only contain
 // functionality shared between both. In particular, any method related to
@@ -80,7 +102,7 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
  public:
   // Returns the Frame instance for the given |frame_token|.
   // Note that this Frame can be either a LocalFrame or Remote instance.
-  static Frame* ResolveFrame(const base::UnguessableToken& frame_token);
+  static Frame* ResolveFrame(const FrameToken& frame_token);
 
   virtual ~Frame();
 
@@ -91,7 +113,20 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
 
   virtual void Navigate(FrameLoadRequest&, WebFrameLoadType) = 0;
 
-  void Detach(FrameDetachType);
+  // Releases the resources associated with a frame. Used for:
+  // - closing a `WebView`, which detaches the main frame
+  // - removing a `FrameOwner` from the DOM, which detaches the `FrameOwner`'s
+  //   content frame
+  // - preparing a frame to be replaced in `Frame::Swap()`.
+  //
+  // Since `Detach()` fires JS events and detaches all child frames, and JS can
+  // modify the DOM in ways that trigger frame removal, it is possible to
+  // reentrantly call `Detach() with `FrameDetachType::kRemove` before the
+  // original invocation of `Detach()` has completed. In that case, the
+  // interrupted invocation returns false to signal the interruption; otherwise,
+  // on successful completion (e.g. `Detach()` runs all the way through to the
+  // end), returns true.
+  bool Detach(FrameDetachType);
   void DisconnectOwnerElement();
   virtual bool ShouldClose() = 0;
   virtual void HookBackForwardCacheEviction() = 0;
@@ -110,23 +145,41 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // reach out to site-isolation-dev@chromium.org.
   bool IsMainFrame() const;
 
+  // Returns true if this frame is the top-level main frame (associated with
+  // the root Document in a WebContents). See content::Page for detailed
+  // documentation.
+  // This is false for main frames created for fenced-frames.
+  // TODO(khushalsagar) : Should also be the case for portals.
+  bool IsOutermostMainFrame() const;
+
   // Returns true if and only if:
   // - this frame is a subframe
   // - it is cross-origin to the main frame
   //
   // Important notes:
   // - This function is not appropriate for determining if a subframe is
-  //   cross-origin to its parent (see: |IsCrossOriginToParentFrame|).
+  //   cross-origin to its parent (see: |IsCrossOriginToParentOrOuterDocument|).
   // - The return value must NOT be cached. A frame can be reused across
   //   navigations, so the return value can change over time.
   // - The return value is inaccurate for a detached frame: it always
   //   returns true when the frame is detached.
   // TODO(dcheng): Move this to LocalDOMWindow and figure out the right
   // behavior for detached windows.
-  bool IsCrossOriginToMainFrame() const;
+  bool IsCrossOriginToNearestMainFrame() const;
+
+  // Returns true if and only if:
+  // - this frame is an embedded frame (i.e., a subframe or embedded main frame)
+  // - it is cross-origin to the outermost main frame.
+  //
+  // The notes for |IsCrossOriginToNearestMainFrame| apply here, but it's also
+  // important to note that any frame in a fenced frame tree is considered
+  // cross-origin with respect to the outermost main frame.
+  bool IsCrossOriginToOutermostMainFrame() const;
+
   // Returns true if this frame is a subframe and is cross-origin to the parent
-  // frame. See |IsCrossOriginToMainFrame| for important notes.
-  bool IsCrossOriginToParentFrame() const;
+  // frame or has an outer document in another frame tree.
+  // See |IsCrossOriginToNearestMainFrame| for important notes.
+  bool IsCrossOriginToParentOrOuterDocument() const;
 
   FrameOwner* Owner() const;
   void SetOwner(FrameOwner*);
@@ -141,10 +194,15 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
 
   Frame* FindUnsafeParentScrollPropagationBoundary();
 
-  // This prepares the Frame for the next commit. It will detach children,
-  // dispatch unload events, abort XHR requests and detach the document.
-  // Returns true if the frame is ready to receive the next commit, or false
-  // otherwise.
+  // Similar to `Detach()`, except that it does not completely detach `this`:
+  // instead, on successful completion (i.e. returns true), `this` will be ready
+  // to be swapped out (if necessary) and to commit the next navigation.
+  //
+  // Note that the caveats about `Detach()` being interrupted by reentrant
+  // removal also apply to this method; this method also returns false if
+  // interrupted by reentrant removal of `this`. A return value of false
+  // indicates that the caller should early return and skip any further work, as
+  // there is no longer a frame to commit a navigation into.
   virtual bool DetachDocument() = 0;
 
   // LayoutObject for the element that contains this frame.
@@ -159,6 +217,10 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   void SetIsLoading(bool is_loading) { is_loading_ = is_loading; }
   bool IsLoading() const { return is_loading_; }
 
+  // Determines if the frame should be allowed to pull focus from a JavaScript
+  // call.
+  bool ShouldAllowScriptFocus();
+
   // Tells the frame to check whether its load has completed, based on the state
   // of its subframes, etc.
   virtual void CheckCompleted() = 0;
@@ -167,17 +229,9 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
     return window_proxy_manager_;
   }
   WindowProxy* GetWindowProxy(DOMWrapperWorld&);
+  WindowProxy* GetWindowProxyMaybeUninitialized(DOMWrapperWorld&);
 
   virtual void DidChangeVisibilityState();
-
-  // This should never be called from outside Frame or WebFrame.
-  void NotifyUserActivationInLocalTree();
-
-  // This should never be called from outside Frame or WebFrame.
-  bool ConsumeTransientUserActivationInLocalTree();
-
-  // This should never be called from outside Frame or WebFrame.
-  void ClearUserActivationInLocalTree();
 
   // Returns the transient user activation state of this frame.
   bool HasTransientUserActivation() const {
@@ -189,11 +243,14 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
     return user_activation_state_.HasBeenActive();
   }
 
+  // Returns if the last user activation for this frame was restricted in
+  // nature.
+  bool LastActivationWasRestricted() const {
+    return user_activation_state_.LastActivationWasRestricted();
+  }
+
   // Resets the user activation state of this frame.
   void ClearUserActivation() { user_activation_state_.Clear(); }
-
-  // Transfers user activation state from |other| frame into |this|.
-  void TransferUserActivationFrom(Frame* other);
 
   void SetHadStickyUserActivationBeforeNavigation(bool value) {
     had_sticky_user_activation_before_nav_ = value;
@@ -207,14 +264,15 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
     return lifecycle_.GetState() == FrameLifecycle::kAttached;
   }
 
-  // Ad Tagging
-  bool IsAdSubframe() const {
-    return ad_frame_type_ != mojom::blink::AdFrameType::kNonAd;
+  // Note that IsAttached() and IsDetached() are not strict opposites: frames
+  // that are detaching are considered to be in neither state.
+  bool IsDetached() const {
+    return lifecycle_.GetState() == FrameLifecycle::kDetached;
   }
 
-  bool IsAdRoot() const {
-    return ad_frame_type_ == mojom::blink::AdFrameType::kRootAd;
-  }
+  // Whether the frame is considered to be an ad frame by Ad Tagging. Returns
+  // true for both root and child ad frames.
+  virtual bool IsAdFrame() const = 0;
 
   // Called to make a frame inert or non-inert. A frame is inert when there
   // is a modal dialog displayed within an ancestor frame, and this frame
@@ -231,47 +289,43 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
     return inherited_effective_touch_action_;
   }
 
-  // Continues to bubble logical scroll from |child| in this frame.
-  // Returns true if the scroll was consumed locally.
-  virtual bool BubbleLogicalScrollFromChildFrame(
-      mojom::blink::ScrollDirection direction,
-      ScrollGranularity granularity,
-      Frame* child) = 0;
-
   const base::UnguessableToken& GetDevToolsFrameToken() const {
     return devtools_frame_token_;
   }
   const std::string& ToTraceValue();
 
+  void SetEmbeddingToken(const base::UnguessableToken& embedding_token);
+  const absl::optional<base::UnguessableToken>& GetEmbeddingToken() const {
+    return embedding_token_;
+  }
+
   NavigationRateLimiter& navigation_rate_limiter() {
     return navigation_rate_limiter_;
   }
 
-  // Called to get the opener's FeatureState if any. This works with disowned
-  // openers, i.e., even if WebFrame::Opener() is nullptr, there could be a
-  // non-empty feature state which is taken from the the original opener of the
-  // frame. This is similar to how sandbox flags are propagated to the opened
-  // new browsing contexts.
-  const FeaturePolicy::FeatureState& OpenerFeatureState() const {
-    return opener_feature_state_;
+  // Called to get the opener's sandbox flags if any. This works with disowned
+  // openers, i.e., even if WebFrame::Opener() is nullptr,
+  network::mojom::blink::WebSandboxFlags OpenerSandboxFlags() const {
+    return opener_sandbox_flags_;
   }
 
-  // Sets the opener's FeatureState for the main frame. Once a non-empty
+  // Sets the opener's sandbox_flags for the main frame. Once a non-empty
   // |opener_feature_state| is set, it can no longer be modified (due to the
   // fact that the original opener which passed down the FeatureState cannot be
   // modified either).
-  void SetOpenerFeatureState(const FeaturePolicy::FeatureState& state) {
-    DCHECK(state.empty() || IsMainFrame());
-    DCHECK(opener_feature_state_.empty());
-    opener_feature_state_ = state;
+  void SetOpenerSandboxFlags(network::mojom::blink::WebSandboxFlags flags) {
+    DCHECK(IsMainFrame());
+    DCHECK_EQ(network::mojom::blink::WebSandboxFlags::kNone,
+              opener_sandbox_flags_);
+    opener_sandbox_flags_ = flags;
   }
 
-  const DocumentPolicy::FeatureState& GetRequiredDocumentPolicy() const {
+  const DocumentPolicyFeatureState& GetRequiredDocumentPolicy() const {
     return required_document_policy_;
   }
 
   void SetRequiredDocumentPolicy(
-      const DocumentPolicy::FeatureState& required_document_policy) {
+      const DocumentPolicyFeatureState& required_document_policy) {
     required_document_policy_ = required_document_policy;
   }
 
@@ -282,13 +336,13 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // This identifier represents the stable identifier between a
   // LocalFrame  <--> RenderFrameHostImpl or a
   // RemoteFrame <--> RenderFrameProxyHost in the browser process.
-  const base::UnguessableToken& GetFrameToken() const { return frame_token_; }
+  const FrameToken& GetFrameToken() const { return frame_token_; }
 
   bool GetVisibleToHitTesting() const { return visible_to_hit_testing_; }
   void UpdateVisibleToHitTesting();
 
-  void ScheduleFormSubmission(FrameScheduler* scheduler,
-                              FormSubmission* form_submission);
+  base::OnceClosure ScheduleFormSubmission(FrameScheduler* scheduler,
+                                           FormSubmission* form_submission);
   void CancelFormSubmission();
   bool IsFormSubmissionPending();
 
@@ -300,12 +354,95 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // Called when the focus controller changes the focus to this frame.
   virtual void DidFocus() = 0;
 
-  virtual IntSize GetMainFrameViewportSize() const = 0;
-  virtual IntPoint GetMainFrameScrollOffset() const = 0;
+  virtual gfx::Size GetMainFrameViewportSize() const = 0;
+  virtual gfx::Point GetMainFrameScrollPosition() const = 0;
 
   // Sets this frame's opener to another frame, or disowned the opener
   // if opener is null. See http://html.spec.whatwg.org/#dom-opener.
   virtual void SetOpener(Frame* opener) = 0;
+
+  void SetOpenerDoNotNotify(Frame* opener);
+
+  // Returns the frame that opened this frame or null if there is none.
+  Frame* Opener() const { return opener_; }
+
+  // Returns the parent frame or null if this is the top-most frame.
+  // When `frame_tree_boundary` is `kFenced`, returns null if this is a fenced
+  // frame root.
+  Frame* Parent(FrameTreeBoundary frame_tree_boundary =
+                    FrameTreeBoundary::kIgnoreFence) const;
+
+  // Returns the top-most frame in the hierarchy containing this frame.
+  // When `frame_tree_boundary` is `kFenced`, does not traverse out of fenced
+  // frame root nodes.
+  Frame* Top(
+      FrameTreeBoundary frame_tree_boundary = FrameTreeBoundary::kIgnoreFence);
+
+  // Returns the first child frame.
+  // When `frame_tree_boundary` is `kFenced`, skips over children that are
+  // fenced frame roots.
+  Frame* FirstChild(FrameTreeBoundary frame_tree_boundary =
+                        FrameTreeBoundary::kIgnoreFence) const;
+
+  // Returns the previous sibling frame.
+  Frame* PreviousSibling() const { return previous_sibling_; }
+
+  // Returns the next sibling frame.
+  // When `frame_tree_boundary` is `kFenced`, skips over siblings that are
+  // fenced frame roots.
+  Frame* NextSibling(FrameTreeBoundary frame_tree_boundary =
+                         FrameTreeBoundary::kIgnoreFence) const;
+
+  // Returns the last child frame.
+  Frame* LastChild() const { return last_child_; }
+
+  // TODO(dcheng): these should probably all have restricted visibility. They
+  // are not intended for general usage.
+  // Detaches a frame from its parent frame if it has one.
+  void DetachFromParent();
+
+  // Swap out this frame for a new local frame.
+  bool Swap(WebLocalFrame*);
+
+  // Swap out this frame for a new remote frame. This method takes the
+  // mojo interfaces because they are provided in the construction IPC
+  // as opposed to being fetched via an AssociatedInterfaceProvider which
+  // WebLocalFrame uses.
+  bool Swap(WebRemoteFrame*,
+            mojo::PendingAssociatedRemote<mojom::blink::RemoteFrameHost>
+                remote_frame_host,
+            mojo::PendingAssociatedReceiver<mojom::blink::RemoteFrame>
+                remote_frame_receiver);
+
+  // Removes the given child from this frame.
+  void RemoveChild(Frame* child);
+
+  LocalFrame* ProvisionalFrame() const { return provisional_frame_; }
+  void SetProvisionalFrame(LocalFrame* provisional_frame) {
+    // There should only be null -> non-null or non-null -> null transitions
+    // here. Anything else indicates a logic error in the code managing this
+    // state.
+    DCHECK_NE(!!provisional_frame, !!provisional_frame_);
+    provisional_frame_ = provisional_frame;
+  }
+
+  // Returns false if fenced frames are disabled. Returns true if the
+  // feature is enabled and if `this` or any of its ancestor nodes is a
+  // fenced frame. For MPArch based fenced frames returns the value of
+  // Page::IsMainFrameFencedFrameRoot and for shadowDOM based fenced frames
+  // returns true, if the FrameTree that this frame is in is not the outermost
+  // FrameTree.
+  bool IsInFencedFrameTree() const;
+
+  // Returns false if fenced frames are disabled. Otherwise, returns true if
+  // this frame is the main frame of a fenced frame tree. Works for both MPArch
+  // and ShadowDOM based fenced frames.
+  bool IsFencedFrameRoot() const;
+
+  // Returns the mode set on the fenced frame if the frame is inside a fenced
+  // frame tree. Otherwise returns `absl::nullopt`. This should not be called
+  // on a detached frame.
+  absl::optional<mojom::blink::FencedFrameMode> GetFencedFrameMode() const;
 
  protected:
   // |inheriting_agent_factory| should basically be set to the parent frame or
@@ -316,7 +453,11 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   Frame(FrameClient*,
         Page&,
         FrameOwner*,
-        const base::UnguessableToken& frame_token,
+        Frame* parent,
+        Frame* previous_sibling,
+        FrameInsertType insert_type,
+        const FrameToken& frame_token,
+        const base::UnguessableToken& devtools_frame_token,
         WindowProxyManager*,
         WindowAgentFactory* inheriting_agent_factory);
 
@@ -324,15 +465,11 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // that vtables are initialized.
   void Initialize();
 
-  // DetachImpl() may be re-entered multiple times, if a frame is detached while
-  // already being detached.
-  virtual void DetachImpl(FrameDetachType) = 0;
-
-  // Note that IsAttached() and IsDetached() are not strict opposites: frames
-  // that are detaching are considered to be in neither state.
-  bool IsDetached() const {
-    return lifecycle_.GetState() == FrameLifecycle::kDetached;
-  }
+  // DetachImpl() may be reentered if a frame is reentrantly removed whilst in
+  // the process of detaching (for removal or swap). Overrides should return
+  // false if interrupted by reentrant removal of `this`, and true otherwise.
+  // See `Detach()` for more information.
+  virtual bool DetachImpl(FrameDetachType) = 0;
 
   virtual void DidChangeVisibleToHitTesting() = 0;
 
@@ -340,6 +477,16 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
 
   void ApplyFrameOwnerProperties(
       mojom::blink::FrameOwnerPropertiesPtr properties);
+
+  void NotifyUserActivationInFrameTree(
+      mojom::blink::UserActivationNotificationType notification_type);
+  bool ConsumeTransientUserActivationInFrameTree();
+  void ClearUserActivationInFrameTree();
+
+  void RenderFallbackContent();
+  void RenderFallbackContentWithResourceTiming(
+      mojom::blink::ResourceTimingInfoPtr timing,
+      const String& server_timing_values);
 
   mutable FrameTree tree_node_;
 
@@ -356,45 +503,75 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
 
   bool visible_to_hit_testing_ = true;
 
-  // Type of frame detected by heuristics checking if the frame was created
-  // for advertising purposes. It's per-frame (as opposed to per-document)
-  // because when an iframe is created on behalf of ad script that same frame is
-  // not typically reused for non-ad purposes.
-  //
-  // For LocalFrame, it might be (1) calculated directly in the renderer based
-  // on script in the stack, or (2) replicated from the browser process, or (3)
-  // signaled from the browser process at ready-to-commit time. For RemoteFrame,
-  // it might be (1) replicated from the browser process or (2) signaled from
-  // the browser process at ready-to-commit time.
-  mojom::blink::AdFrameType ad_frame_type_;
-
  private:
+  // Inserts the given frame as a child of this frame, so that it is the next
+  // child after |previous_sibling|, or first child if |previous_sibling| is
+  // null. The child frame's parent must be set in the constructor.
+  void InsertAfter(Frame* new_child, Frame* previous_sibling);
+
+  // Returns true if this frame pulling focus will cause focus to traverse
+  // across a fenced frame boundary. This handles checking for focus entering
+  // a fenced frame, as well as focus leaving a fenced frames.
+  // Note: This is only called if fenced frames are enabled with ShadowDOM
+  bool FocusCrossesFencedBoundary();
+
+  void CancelFormSubmissionWithVersion(uint64_t version);
+
+  bool SwapImpl(WebFrame*,
+                mojo::PendingAssociatedRemote<mojom::blink::RemoteFrameHost>
+                    remote_frame_host,
+                mojo::PendingAssociatedReceiver<mojom::blink::RemoteFrame>
+                    remote_frame_receiver);
+
   Member<FrameClient> client_;
   const Member<WindowProxyManager> window_proxy_manager_;
   FrameLifecycle lifecycle_;
 
+  Member<Frame> opener_;
+  Member<Frame> parent_;
+  Member<Frame> previous_sibling_;
+  Member<Frame> next_sibling_;
+  Member<Frame> first_child_;
+  Member<Frame> last_child_;
+
+  Member<LocalFrame> provisional_frame_;
+
   NavigationRateLimiter navigation_rate_limiter_;
 
-  // Feature policy state inherited from an opener. It is always empty for child
+  // Sandbox flags inherited from an opener. It is always empty for child
   // frames.
-  FeaturePolicy::FeatureState opener_feature_state_;
+  network::mojom::blink::WebSandboxFlags opener_sandbox_flags_;
 
   // The required document policy for any subframes of this frame.
   // Note: current frame's document policy might not conform to
   // |required_document_policy_| here, as the Require-Document-Policy HTTP
   // header can specify required document policy which only takes effect for
   // subtree frames.
-  DocumentPolicy::FeatureState required_document_policy_;
+  DocumentPolicyFeatureState required_document_policy_;
 
   Member<WindowAgentFactory> window_agent_factory_;
 
   // TODO(sashab): Investigate if this can be represented with m_lifecycle.
   bool is_loading_;
+  // Contains token to be used as a frame id in the devtools protocol.
   base::UnguessableToken devtools_frame_token_;
-  base::Optional<std::string> trace_value_;
+  absl::optional<std::string> trace_value_;
+
+  // Embedding token, if existing, associated to this frame. For local frames
+  // this will only be valid if the frame has committed a navigation and will
+  // change when a new document is committed. For remote frames this will only
+  // be valid when owned by an HTMLFrameOwnerElement.
+  absl::optional<base::UnguessableToken> embedding_token_;
 
   // The user activation state of the current frame.  See |UserActivationState|
   // for details on how this state is maintained.
+  //
+  // TODO(https://crbug.com/1087963): Ideally this should be a state of
+  // |LocalDOMWindow| because user activation state never outlives JS Window
+  // object.  See related discussion on browser-side states in
+  // https://crbug.com/905448.  However, a legacy code relying on the user
+  // activation state of a |RemoteFrame| prevents us from moving this state to
+  // |LocalDOMWindow|.
   UserActivationState user_activation_state_;
 
   // The sticky user activation state of the current frame before eTLD+1
@@ -412,13 +589,20 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // will *not* have the same identifier. This is different than the
   // |devtools_frame_token_| in which all representations of this frame node
   // have the same value in all processes.
-  base::UnguessableToken frame_token_;
+  FrameToken frame_token_;
 
   // This task is used for the async step in form submission when a form is
   // targeting this frame. http://html.spec.whatwg.org/C/#plan-to-navigate
   // The reason it is stored here is so that it can handle both LocalFrames and
   // RemoteFrames, and so it can be canceled by FrameLoader.
   TaskHandle form_submit_navigation_task_;
+  // form_submit_navigation_task_version_ is incremented every time we make a
+  // new task for form_submit_navigation_task_. It is used in order to create a
+  // copyable Closure which can cancel a specific task that was assigned to
+  // form_submit_navigation_task_.
+  uint64_t form_submit_navigation_task_version_ = 0;
+
+  OpenedFrameTracker opened_frame_tracker_;
 };
 
 inline FrameClient* Frame::Client() const {

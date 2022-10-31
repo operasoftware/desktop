@@ -20,16 +20,15 @@
 
 // https://html.spec.whatwg.org/C/#the-object-element
 
-// TODO(yukishiino): HTMLObjectElement should not have [OverrideBuiltins].
+// TODO(yukishiino): HTMLObjectElement should not have [LegacyOverrideBuiltIns].
 [
     Exposed=Window,
-    OverrideBuiltins,
+    LegacyOverrideBuiltIns,
     ActiveScriptWrappable,
     HTMLConstructor
 ] interface HTMLObjectElement : HTMLElement {
     [CEReactions, Reflect, URL, RaisesException=Setter] attribute ScriptURLString data;
     [CEReactions, Reflect] attribute DOMString type;
-    // TODO(foolip): attribute boolean typeMustMatch;
     [CEReactions, Reflect] attribute DOMString name;
     [CEReactions, Reflect] attribute DOMString useMap;
     [ImplementedAs=formOwner] readonly attribute HTMLFormElement? form;

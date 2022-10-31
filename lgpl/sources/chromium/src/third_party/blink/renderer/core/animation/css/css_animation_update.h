@@ -5,15 +5,17 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_CSS_ANIMATION_UPDATE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_CSS_ANIMATION_UPDATE_H_
 
-#include "base/macros.h"
+#include "third_party/blink/renderer/core/animation/animation_timeline.h"
 #include "third_party/blink/renderer/core/animation/effect_stack.h"
 #include "third_party/blink/renderer/core/animation/inert_effect.h"
 #include "third_party/blink/renderer/core/animation/interpolation.h"
 #include "third_party/blink/renderer/core/animation/keyframe_effect_model.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_keyframes_rule.h"
 #include "third_party/blink/renderer/core/css/css_property_equality.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -28,10 +30,11 @@ class NewCSSAnimation {
  public:
   NewCSSAnimation(AtomicString name,
                   size_t name_index,
-                  size_t position_index,
+                  wtf_size_t position_index,
                   const InertEffect& effect,
                   Timing timing,
                   StyleRuleKeyframes* style_rule,
+                  AnimationTimeline* timeline,
                   const Vector<EAnimPlayState>& play_state_list)
       : name(name),
         name_index(name_index),
@@ -40,20 +43,23 @@ class NewCSSAnimation {
         timing(timing),
         style_rule(style_rule),
         style_rule_version(this->style_rule->Version()),
+        timeline(timeline),
         play_state_list(play_state_list) {}
 
   void Trace(Visitor* visitor) const {
     visitor->Trace(effect);
     visitor->Trace(style_rule);
+    visitor->Trace(timeline);
   }
 
   AtomicString name;
   size_t name_index;
-  size_t position_index;
+  wtf_size_t position_index;
   Member<const InertEffect> effect;
   Timing timing;
   Member<StyleRuleKeyframes> style_rule;
   unsigned style_rule_version;
+  Member<AnimationTimeline> timeline;
   Vector<EAnimPlayState> play_state_list;
 };
 
@@ -66,6 +72,7 @@ class UpdatedCSSAnimation {
                       const InertEffect& effect,
                       Timing specified_timing,
                       StyleRuleKeyframes* style_rule,
+                      AnimationTimeline* timeline,
                       const Vector<EAnimPlayState>& play_state_list)
       : index(index),
         animation(animation),
@@ -73,12 +80,14 @@ class UpdatedCSSAnimation {
         specified_timing(specified_timing),
         style_rule(style_rule),
         style_rule_version(this->style_rule->Version()),
+        timeline(timeline),
         play_state_list(play_state_list) {}
 
   void Trace(Visitor* visitor) const {
     visitor->Trace(animation);
     visitor->Trace(effect);
     visitor->Trace(style_rule);
+    visitor->Trace(timeline);
   }
 
   wtf_size_t index;
@@ -87,6 +96,7 @@ class UpdatedCSSAnimation {
   Timing specified_timing;
   Member<StyleRuleKeyframes> style_rule;
   unsigned style_rule_version;
+  Member<AnimationTimeline> timeline;
   Vector<EAnimPlayState> play_state_list;
 };
 
@@ -105,6 +115,8 @@ class CORE_EXPORT CSSAnimationUpdate final {
 
  public:
   CSSAnimationUpdate();
+  CSSAnimationUpdate(const CSSAnimationUpdate&) = delete;
+  CSSAnimationUpdate& operator=(const CSSAnimationUpdate&) = delete;
   ~CSSAnimationUpdate();
 
   void Copy(const CSSAnimationUpdate&);
@@ -116,10 +128,11 @@ class CORE_EXPORT CSSAnimationUpdate final {
                       const InertEffect& effect,
                       const Timing& timing,
                       StyleRuleKeyframes* style_rule,
+                      AnimationTimeline* timeline,
                       const Vector<EAnimPlayState>& play_state_list) {
-    new_animations_.push_back(NewCSSAnimation(animation_name, name_index,
-                                              position_index, effect, timing,
-                                              style_rule, play_state_list));
+    new_animations_.push_back(
+        NewCSSAnimation(animation_name, name_index, position_index, effect,
+                        timing, style_rule, timeline, play_state_list));
   }
   void CancelAnimation(wtf_size_t index, const Animation& animation) {
     cancelled_animation_indices_.push_back(index);
@@ -133,10 +146,11 @@ class CORE_EXPORT CSSAnimationUpdate final {
                        const InertEffect& effect,
                        const Timing& specified_timing,
                        StyleRuleKeyframes* style_rule,
+                       AnimationTimeline* timeline,
                        const Vector<EAnimPlayState>& play_state_list) {
     animations_with_updates_.push_back(
         UpdatedCSSAnimation(index, animation, effect, specified_timing,
-                            style_rule, play_state_list));
+                            style_rule, timeline, play_state_list));
     suppressed_animations_.insert(animation);
   }
   void UpdateCompositorKeyframes(Animation* animation) {
@@ -177,12 +191,10 @@ class CORE_EXPORT CSSAnimationUpdate final {
     return updated_compositor_keyframes_;
   }
 
-  struct NewTransition {
-    DISALLOW_NEW();
-
+  struct NewTransition : public GarbageCollected<NewTransition> {
    public:
     NewTransition();
-    ~NewTransition();
+    virtual ~NewTransition();
     void Trace(Visitor* visitor) const { visitor->Trace(effect); }
 
     PropertyHandle property = HashTraits<blink::PropertyHandle>::EmptyValue();
@@ -192,7 +204,7 @@ class CORE_EXPORT CSSAnimationUpdate final {
     double reversing_shortening_factor;
     Member<const InertEffect> effect;
   };
-  using NewTransitionMap = HeapHashMap<PropertyHandle, NewTransition>;
+  using NewTransitionMap = HeapHashMap<PropertyHandle, Member<NewTransition>>;
   const NewTransitionMap& NewTransitions() const { return new_transitions_; }
   const HashSet<PropertyHandle>& CancelledTransitions() const {
     return cancelled_transitions_;
@@ -201,58 +213,35 @@ class CORE_EXPORT CSSAnimationUpdate final {
     return finished_transitions_;
   }
 
-  void AdoptActiveInterpolationsForCustomAnimations(
+  void AdoptActiveInterpolationsForAnimations(
       ActiveInterpolationsMap& new_map) {
-    new_map.swap(active_interpolations_for_custom_animations_);
+    new_map.swap(active_interpolations_for_animations_);
   }
-  void AdoptActiveInterpolationsForStandardAnimations(
+  void AdoptActiveInterpolationsForTransitions(
       ActiveInterpolationsMap& new_map) {
-    new_map.swap(active_interpolations_for_standard_animations_);
+    new_map.swap(active_interpolations_for_transitions_);
   }
-  void AdoptActiveInterpolationsForCustomTransitions(
-      ActiveInterpolationsMap& new_map) {
-    new_map.swap(active_interpolations_for_custom_transitions_);
+  const ActiveInterpolationsMap& ActiveInterpolationsForAnimations() const {
+    return active_interpolations_for_animations_;
   }
-  void AdoptActiveInterpolationsForStandardTransitions(
-      ActiveInterpolationsMap& new_map) {
-    new_map.swap(active_interpolations_for_standard_transitions_);
+  ActiveInterpolationsMap& ActiveInterpolationsForAnimations() {
+    return active_interpolations_for_animations_;
   }
-  const ActiveInterpolationsMap& ActiveInterpolationsForCustomAnimations()
-      const {
-    return active_interpolations_for_custom_animations_;
-  }
-  ActiveInterpolationsMap& ActiveInterpolationsForCustomAnimations() {
-    return active_interpolations_for_custom_animations_;
-  }
-  const ActiveInterpolationsMap& ActiveInterpolationsForStandardAnimations()
-      const {
-    return active_interpolations_for_standard_animations_;
-  }
-  ActiveInterpolationsMap& ActiveInterpolationsForStandardAnimations() {
-    return active_interpolations_for_standard_animations_;
-  }
-  const ActiveInterpolationsMap& ActiveInterpolationsForCustomTransitions()
-      const {
-    return active_interpolations_for_custom_transitions_;
-  }
-  const ActiveInterpolationsMap& ActiveInterpolationsForStandardTransitions()
-      const {
-    return active_interpolations_for_standard_transitions_;
+  const ActiveInterpolationsMap& ActiveInterpolationsForTransitions() const {
+    return active_interpolations_for_transitions_;
   }
 
-  bool IsEmpty() const {
-    return new_animations_.IsEmpty() &&
-           cancelled_animation_indices_.IsEmpty() &&
-           suppressed_animations_.IsEmpty() &&
-           animation_indices_with_pause_toggled_.IsEmpty() &&
-           animations_with_updates_.IsEmpty() && new_transitions_.IsEmpty() &&
-           cancelled_transitions_.IsEmpty() &&
-           finished_transitions_.IsEmpty() &&
-           active_interpolations_for_custom_animations_.IsEmpty() &&
-           active_interpolations_for_standard_animations_.IsEmpty() &&
-           active_interpolations_for_custom_transitions_.IsEmpty() &&
-           active_interpolations_for_standard_transitions_.IsEmpty() &&
-           updated_compositor_keyframes_.IsEmpty();
+  bool IsEmpty() const { return !HasUpdates() && !HasActiveInterpolations(); }
+
+  bool HasUpdates() const {
+    return !new_animations_.IsEmpty() ||
+           !cancelled_animation_indices_.IsEmpty() ||
+           !suppressed_animations_.IsEmpty() ||
+           !animation_indices_with_pause_toggled_.IsEmpty() ||
+           !animations_with_updates_.IsEmpty() || !new_transitions_.IsEmpty() ||
+           !cancelled_transitions_.IsEmpty() ||
+           !finished_transitions_.IsEmpty() ||
+           !updated_compositor_keyframes_.IsEmpty();
   }
 
   void Trace(Visitor* visitor) const {
@@ -261,13 +250,16 @@ class CORE_EXPORT CSSAnimationUpdate final {
     visitor->Trace(suppressed_animations_);
     visitor->Trace(animations_with_updates_);
     visitor->Trace(updated_compositor_keyframes_);
-    visitor->Trace(active_interpolations_for_custom_animations_);
-    visitor->Trace(active_interpolations_for_standard_animations_);
-    visitor->Trace(active_interpolations_for_custom_transitions_);
-    visitor->Trace(active_interpolations_for_standard_transitions_);
+    visitor->Trace(active_interpolations_for_animations_);
+    visitor->Trace(active_interpolations_for_transitions_);
   }
 
  private:
+  bool HasActiveInterpolations() const {
+    return !active_interpolations_for_animations_.IsEmpty() ||
+           !active_interpolations_for_transitions_.IsEmpty();
+  }
+
   // Order is significant since it defines the order in which new animations
   // will be started. Note that there may be multiple animations present
   // with the same name, due to the way in which we split up animations with
@@ -283,15 +275,12 @@ class CORE_EXPORT CSSAnimationUpdate final {
   HashSet<PropertyHandle> cancelled_transitions_;
   HashSet<PropertyHandle> finished_transitions_;
 
-  ActiveInterpolationsMap active_interpolations_for_custom_animations_;
-  ActiveInterpolationsMap active_interpolations_for_standard_animations_;
-  ActiveInterpolationsMap active_interpolations_for_custom_transitions_;
-  ActiveInterpolationsMap active_interpolations_for_standard_transitions_;
+  ActiveInterpolationsMap active_interpolations_for_animations_;
+  ActiveInterpolationsMap active_interpolations_for_transitions_;
 
   friend class PendingAnimationUpdate;
-  DISALLOW_COPY_AND_ASSIGN(CSSAnimationUpdate);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_CSS_ANIMATION_UPDATE_H_

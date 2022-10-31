@@ -26,6 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_VIDEO_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_VIDEO_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/layout_media.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
@@ -33,7 +34,7 @@ namespace blink {
 
 class HTMLVideoElement;
 
-class LayoutVideo final : public LayoutMedia {
+class CORE_EXPORT LayoutVideo final : public LayoutMedia {
  public:
   explicit LayoutVideo(HTMLVideoElement*);
   ~LayoutVideo() override;
@@ -49,21 +50,29 @@ class LayoutVideo final : public LayoutMedia {
 
   HTMLVideoElement* VideoElement() const;
 
-  const char* GetName() const override { return "LayoutVideo"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutVideo";
+  }
 
   void IntrinsicSizeChanged() override;
 
-  bool ComputeShouldClipOverflow() const final { return true; }
+  OverflowClipAxes ComputeOverflowClipAxes() const final {
+    NOT_DESTROYED();
+    return RespectsCSSOverflow() ? LayoutMedia::ComputeOverflowClipAxes()
+                                 : kOverflowClipBothAxis;
+  }
 
  private:
   void UpdateFromElement() override;
 
-  LayoutSize CalculateIntrinsicSize();
+  LayoutSize CalculateIntrinsicSize(float scale);
   void UpdateIntrinsicSize(bool is_in_layout);
 
   void ImageChanged(WrappedImagePtr, CanDeferInvalidation) override;
 
   bool IsOfType(LayoutObjectType type) const override {
+    NOT_DESTROYED();
     return type == kLayoutObjectVideo || LayoutMedia::IsOfType(type);
   }
 
@@ -72,13 +81,12 @@ class LayoutVideo final : public LayoutMedia {
 
   void UpdateLayout() override;
 
-  LayoutUnit ComputeReplacedLogicalWidth(
-      ShouldComputePreferred = kComputeActual) const override;
-  LayoutUnit ComputeReplacedLogicalHeight(
-      LayoutUnit estimated_used_width = LayoutUnit()) const override;
   LayoutUnit MinimumReplacedHeight() const override;
 
-  bool CanHaveAdditionalCompositingReasons() const override { return true; }
+  bool CanHaveAdditionalCompositingReasons() const override {
+    NOT_DESTROYED();
+    return RuntimeEnabledFeatures::CompositeVideoElementEnabled();
+  }
   CompositingReasons AdditionalCompositingReasons() const override;
 
   void UpdatePlayer(bool is_in_layout);

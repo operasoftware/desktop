@@ -5,7 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_CUSTOM_PENDING_LAYOUT_REGISTRY_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_CUSTOM_PENDING_LAYOUT_REGISTRY_H_
 
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
 
@@ -19,6 +21,8 @@ class Node;
 class PendingLayoutRegistry : public GarbageCollected<PendingLayoutRegistry> {
  public:
   PendingLayoutRegistry() = default;
+  PendingLayoutRegistry(const PendingLayoutRegistry&) = delete;
+  PendingLayoutRegistry& operator=(const PendingLayoutRegistry&) = delete;
 
   void NotifyLayoutReady(const AtomicString& name);
   void AddPendingLayout(const AtomicString& name, Node*);
@@ -37,8 +41,6 @@ class PendingLayoutRegistry : public GarbageCollected<PendingLayoutRegistry> {
   using PendingSet = HeapHashSet<WeakMember<Node>>;
   using PendingLayoutMap = HeapHashMap<AtomicString, Member<PendingSet>>;
   PendingLayoutMap pending_layouts_;
-
-  DISALLOW_COPY_AND_ASSIGN(PendingLayoutRegistry);
 };
 
 }  // namespace blink

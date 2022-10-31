@@ -12,7 +12,7 @@
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 
@@ -31,6 +31,8 @@ class CORE_EXPORT TextSuggestionController final
     : public GarbageCollected<TextSuggestionController> {
  public:
   explicit TextSuggestionController(LocalDOMWindow&);
+  TextSuggestionController(const TextSuggestionController&) = delete;
+  TextSuggestionController& operator=(const TextSuggestionController&) = delete;
 
   bool IsMenuOpen() const;
 
@@ -72,11 +74,7 @@ class CORE_EXPORT TextSuggestionController final
 
   bool is_suggestion_menu_open_;
   const Member<LocalDOMWindow> window_;
-  HeapMojoRemote<mojom::blink::TextSuggestionHost,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      text_suggestion_host_;
-
-  DISALLOW_COPY_AND_ASSIGN(TextSuggestionController);
+  HeapMojoRemote<mojom::blink::TextSuggestionHost> text_suggestion_host_;
 };
 
 }  // namespace blink

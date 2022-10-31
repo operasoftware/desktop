@@ -36,13 +36,15 @@
 #include "third_party/blink/renderer/platform/text/tab_size.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
-#include "third_party/blink/renderer/platform/wtf/math_extras.h"
-#include "third_party/blink/renderer/platform/wtf/text/character_names.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier.h"
 
-// To avoid conflicts with the CreateWindow macro from the Windows SDK...
+// To avoid conflicts with the DrawText macro from the Windows SDK...
 #undef DrawText
+
+namespace gfx {
+class PointF;
+class RectF;
+}
 
 namespace cc {
 class PaintCanvas;
@@ -52,8 +54,6 @@ class PaintFlags;
 namespace blink {
 
 struct CharacterRange;
-class FloatPoint;
-class FloatRect;
 class FontSelector;
 class ShapeCache;
 class TextRun;
@@ -79,51 +79,54 @@ class PLATFORM_EXPORT Font {
     return font_description_;
   }
 
+  enum class DrawType { kGlyphsOnly, kGlyphsAndClusters };
+
   enum CustomFontNotReadyAction {
     kDoNotPaintIfFontNotReady,
     kUseFallbackIfFontNotReady
   };
 
-  // TODO(layout-dev): Once zoom-for-dsf launches on Mac the device_scale_factor
-  // parameter can be removed from all of these methods.
-  // https://crbug.com/716231
   void DrawText(cc::PaintCanvas*,
                 const TextRunPaintInfo&,
-                const FloatPoint&,
+                const gfx::PointF&,
                 float device_scale_factor,
-                const cc::PaintFlags&) const;
+                const cc::PaintFlags&,
+                DrawType = DrawType::kGlyphsOnly) const;
   void DrawText(cc::PaintCanvas*,
                 const TextRunPaintInfo&,
-                const FloatPoint&,
+                const gfx::PointF&,
                 float device_scale_factor,
                 cc::NodeId node_id,
-                const cc::PaintFlags&) const;
+                const cc::PaintFlags&,
+                DrawType = DrawType::kGlyphsOnly) const;
   void DrawText(cc::PaintCanvas*,
                 const NGTextFragmentPaintInfo&,
-                const FloatPoint&,
+                const gfx::PointF&,
                 float device_scale_factor,
                 cc::NodeId node_id,
-                const cc::PaintFlags&) const;
+                const cc::PaintFlags&,
+                DrawType = DrawType::kGlyphsOnly) const;
   bool DrawBidiText(cc::PaintCanvas*,
                     const TextRunPaintInfo&,
-                    const FloatPoint&,
+                    const gfx::PointF&,
                     CustomFontNotReadyAction,
                     float device_scale_factor,
-                    const cc::PaintFlags&) const;
+                    const cc::PaintFlags&,
+                    DrawType = DrawType::kGlyphsOnly) const;
   void DrawEmphasisMarks(cc::PaintCanvas*,
                          const TextRunPaintInfo&,
                          const AtomicString& mark,
-                         const FloatPoint&,
+                         const gfx::PointF&,
                          float device_scale_factor,
                          const cc::PaintFlags&) const;
   void DrawEmphasisMarks(cc::PaintCanvas*,
                          const NGTextFragmentPaintInfo&,
                          const AtomicString& mark,
-                         const FloatPoint&,
+                         const gfx::PointF&,
                          float device_scale_factor,
                          const cc::PaintFlags&) const;
 
-  FloatRect TextInkBounds(const NGTextFragmentPaintInfo&) const;
+  gfx::RectF TextInkBounds(const NGTextFragmentPaintInfo&) const;
 
   struct TextIntercept {
     float begin_, end_;
@@ -151,18 +154,17 @@ class PLATFORM_EXPORT Font {
   // origin.
   float Width(const TextRun&,
               HashSet<const SimpleFontData*>* fallback_fonts = nullptr,
-              FloatRect* glyph_bounds = nullptr) const;
+              gfx::RectF* glyph_bounds = nullptr) const;
 
   int OffsetForPosition(const TextRun&,
                         float position,
                         IncludePartialGlyphsOption,
                         BreakGlyphsOption) const;
-  FloatRect SelectionRectForText(const TextRun&,
-                                 const FloatPoint&,
-                                 float height,
-                                 int from = 0,
-                                 int to = -1) const;
-  FloatRect BoundingBox(const TextRun&, int from = 0, int to = -1) const;
+  gfx::RectF SelectionRectForText(const TextRun&,
+                                  const gfx::PointF&,
+                                  float height,
+                                  int from = 0,
+                                  int to = -1) const;
   CharacterRange GetCharacterRange(const TextRun&,
                                    unsigned from,
                                    unsigned to) const;
@@ -217,6 +219,9 @@ class PLATFORM_EXPORT Font {
 
   void ReportNotDefGlyph() const;
 
+  void ReportEmojiSegmentGlyphCoverage(unsigned num_clusters,
+                                       unsigned num_broken_clusters) const;
+
  private:
   enum ForTextEmphasisOrNot { kNotForTextEmphasis, kForTextEmphasis };
 
@@ -233,7 +238,6 @@ class PLATFORM_EXPORT Font {
 
   void WillUseFontData(const String& text) const;
 
-  bool LoadingCustomFonts() const;
   bool IsFallbackValid() const;
 
   bool ShouldSkipDrawing() const {
@@ -271,4 +275,14 @@ inline float Font::TabWidth(const SimpleFontData* font_data,
 
 }  // namespace blink
 
-#endif
+namespace WTF {
+
+template <>
+struct CrossThreadCopier<blink::Font>
+    : public CrossThreadCopierPassThrough<blink::Font> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+}  // namespace WTF
+
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_FONT_H_

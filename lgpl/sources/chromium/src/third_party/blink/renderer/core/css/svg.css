@@ -45,6 +45,10 @@
     https://svgwg.org/svg2-draft/single-page.html#render-OverflowAndClipProperties
 */
 
+/*
+  TODO(khushalsagar): Switch svg:not(:root) to use the overflow: clip; and
+  overflow-clip-margin: content-box; in the following style rules.
+*/
 svg:not(:root), symbol, image, marker, pattern, foreignObject {
     overflow: hidden
 }
@@ -85,22 +89,13 @@ tspan, textPath {
     transform-origin: 0 0;
 }
 
-/* TODO(crbug.com/976224): Support zoom on foreignObject */
-foreignObject {
-    zoom: -internal-reset-effective !important;
-}
-
 /*
    This is added as to not break SVG content in forced colors mode:
    https://drafts.csswg.org/css-color-adjust-1/#forced-colors-properties
 */
 @media ua-forced-colors {
-  svg:root {
-    color: CanvasText;
-  }
-
   svg {
-      forced-color-adjust: none;
+      forced-color-adjust: preserve-parent-color;
   }
 
   foreignObject {

@@ -19,6 +19,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/xml/xsl_style_sheet.h"
 
 #include <libxml/uri.h>
@@ -133,7 +134,7 @@ bool XSLStyleSheet::ParseString(const String& source) {
 
   xmlParserCtxtPtr ctxt = xmlCreateMemoryParserCtxt(input.Data(), input.size());
   if (!ctxt)
-    return 0;
+    return false;
 
   if (parent_style_sheet_) {
     // The XSL transform may leave the newly-transformed document
@@ -229,7 +230,8 @@ void XSLStyleSheet::LoadChildSheet(const String& href) {
   }
 
   const String& url_string = url.GetString();
-  ResourceLoaderOptions fetch_options;
+  ResourceLoaderOptions fetch_options(
+      OwnerDocument()->GetExecutionContext()->GetCurrentWorld());
   fetch_options.initiator_info.name = fetch_initiator_type_names::kXml;
   FetchParameters params(
       ResourceRequest(OwnerDocument()->CompleteURL(url_string)), fetch_options);

@@ -20,9 +20,11 @@
 #include "third_party/blink/renderer/core/svg/svg_fe_displacement_map_element.h"
 
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_number.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_string.h"
 #include "third_party/blink/renderer/core/svg/svg_enumeration_map.h"
 #include "third_party/blink/renderer/core/svg_names.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -89,7 +91,8 @@ bool SVGFEDisplacementMapElement::SetFilterEffectAttribute(
 }
 
 void SVGFEDisplacementMapElement::SvgAttributeChanged(
-    const QualifiedName& attr_name) {
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kXChannelSelectorAttr ||
       attr_name == svg_names::kYChannelSelectorAttr ||
       attr_name == svg_names::kScaleAttr) {
@@ -104,7 +107,7 @@ void SVGFEDisplacementMapElement::SvgAttributeChanged(
     return;
   }
 
-  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(attr_name);
+  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(params);
 }
 
 FilterEffect* SVGFEDisplacementMapElement::Build(

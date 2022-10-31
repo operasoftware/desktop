@@ -32,6 +32,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_COMMANDS_STYLE_COMMANDS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_COMMANDS_STYLE_COMMANDS_H_
 
+#include "mojo/public/mojom/base/text_direction.mojom-blink-forward.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/events/input_event.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -46,10 +48,9 @@ class LocalFrame;
 
 enum class EditingTriState;
 enum class EditorCommandSource;
-enum class WritingDirection;
 
 // This class provides static functions about commands related to style.
-class StyleCommands {
+class CORE_EXPORT StyleCommands {
   STATIC_ONLY(StyleCommands);
 
  public:
@@ -203,13 +204,13 @@ class StyleCommands {
 
   // TODO(editing-dev): We should make |textDirectionForSelection()| to take
   // |selectionInDOMTree|.
-  static WritingDirection TextDirectionForSelection(const VisibleSelection&,
-                                                    EditingStyle*,
-                                                    bool&);
-  static EditingTriState StateTextWritingDirection(LocalFrame&,
-                                                   WritingDirection);
+  static mojo_base::mojom::blink::TextDirection
+  TextDirectionForSelection(const VisibleSelection&, EditingStyle*, bool&);
+  static EditingTriState StateTextWritingDirection(
+      LocalFrame&,
+      mojo_base::mojom::blink::TextDirection);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_COMMANDS_STYLE_COMMANDS_H_

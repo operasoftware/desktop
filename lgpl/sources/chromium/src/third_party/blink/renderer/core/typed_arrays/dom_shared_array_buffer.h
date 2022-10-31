@@ -14,6 +14,7 @@ namespace blink {
 
 class CORE_EXPORT DOMSharedArrayBuffer final : public DOMArrayBufferBase {
   DEFINE_WRAPPERTYPEINFO();
+  static const WrapperTypeInfo wrapper_type_info_body_;
 
  public:
   static DOMSharedArrayBuffer* Create(ArrayBufferContents contents) {
@@ -55,8 +56,7 @@ class CORE_EXPORT DOMSharedArrayBuffer final : public DOMArrayBufferBase {
     return true;
   }
 
-  v8::Local<v8::Value> Wrap(v8::Isolate*,
-                            v8::Local<v8::Object> creation_context) override;
+  v8::MaybeLocal<v8::Value> Wrap(ScriptState*) override;
 };
 
 }  // namespace blink

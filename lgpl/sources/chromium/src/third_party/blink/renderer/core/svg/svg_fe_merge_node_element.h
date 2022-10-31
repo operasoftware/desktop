@@ -21,11 +21,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_FE_MERGE_NODE_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_FE_MERGE_NODE_ELEMENT_H_
 
-#include "third_party/blink/renderer/core/svg/svg_animated_string.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
+
+class SVGAnimatedString;
 
 class SVGFEMergeNodeElement final : public SVGElement {
   DEFINE_WRAPPERTYPEINFO();
@@ -38,7 +39,7 @@ class SVGFEMergeNodeElement final : public SVGElement {
   void Trace(Visitor*) const override;
 
  private:
-  void SvgAttributeChanged(const QualifiedName&) override;
+  void SvgAttributeChanged(const SvgAttributeChangedParams&) override;
 
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override {
     return false;

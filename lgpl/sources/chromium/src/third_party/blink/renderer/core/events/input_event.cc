@@ -4,7 +4,8 @@
 
 #include "third_party/blink/renderer/core/events/input_event.h"
 
-#include "base/stl_util.h"
+#include "base/cxx17_backports.h"
+#include "third_party/blink/renderer/core/clipboard/data_transfer.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
 #include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/editing/commands/editing_command_type.h"
@@ -60,7 +61,7 @@ const struct {
 };
 
 static_assert(
-    base::size(kInputTypeStringNameMap) ==
+    std::size(kInputTypeStringNameMap) ==
         static_cast<size_t>(InputEvent::InputType::kNumberOfInputTypes),
     "must handle all InputEvent::InputType");
 

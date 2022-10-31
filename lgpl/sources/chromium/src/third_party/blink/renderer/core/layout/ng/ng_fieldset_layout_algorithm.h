@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_FIELDSET_LAYOUT_ALGORITHM_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_FIELDSET_LAYOUT_ALGORITHM_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_algorithm.h"
 
 #include "third_party/blink/renderer/core/layout/geometry/logical_size.h"
@@ -21,43 +22,49 @@ class CORE_EXPORT NGFieldsetLayoutAlgorithm
                                NGBoxFragmentBuilder,
                                NGBlockBreakToken> {
  public:
-  NGFieldsetLayoutAlgorithm(const NGLayoutAlgorithmParams& params);
+  explicit NGFieldsetLayoutAlgorithm(const NGLayoutAlgorithmParams& params);
 
-  scoped_refptr<const NGLayoutResult> Layout() override;
+  const NGLayoutResult* Layout() override;
 
-  MinMaxSizesResult ComputeMinMaxSizes(const MinMaxSizesInput&) const override;
+  MinMaxSizesResult ComputeMinMaxSizes(const MinMaxSizesFloatInput&) override;
+
+  static LayoutUnit ComputeLegendInlineOffset(
+      const ComputedStyle& legend_style,
+      LayoutUnit legend_border_box_inline_size,
+      const NGBoxStrut& legend_margins,
+      const ComputedStyle& fieldset_style,
+      LayoutUnit fieldset_border_padding_inline_start,
+      LayoutUnit fieldset_content_inline_size);
 
  private:
   NGBreakStatus LayoutChildren();
-  NGBreakStatus LayoutLegend(
-      NGBlockNode& legend,
-      scoped_refptr<const NGBlockBreakToken> legend_break_token);
+  void LayoutLegend(NGBlockNode& legend);
   NGBreakStatus LayoutFieldsetContent(
       NGBlockNode& fieldset_content,
-      scoped_refptr<const NGBlockBreakToken> content_break_token,
+      const NGBlockBreakToken* content_break_token,
       LogicalSize adjusted_padding_box_size,
       bool has_legend);
 
   const NGConstraintSpace CreateConstraintSpaceForLegend(
       NGBlockNode legend,
       LogicalSize available_size,
-      LogicalSize percentage_size,
-      LayoutUnit block_offset);
+      LogicalSize percentage_size);
   const NGConstraintSpace CreateConstraintSpaceForFieldsetContent(
       NGBlockNode fieldset_content,
       LogicalSize padding_box_size,
       LayoutUnit block_offset);
 
-  bool IsFragmentainerOutOfSpace(LayoutUnit block_offset) const;
+  // Return the amount of block space available in the current fragmentainer
+  // for the node being laid out by this algorithm.
+  LayoutUnit FragmentainerSpaceAvailable() const;
 
-  const WritingMode writing_mode_;
+  // Consume all remaining fragmentainer space. This happens when we decide to
+  // break before a child.
+  //
+  // https://www.w3.org/TR/css-break-3/#box-splitting
+  void ConsumeRemainingFragmentainerSpace();
 
-  NGBoxStrut borders_;
-  NGBoxStrut padding_;
-
-  // The border and padding after adjusting to ensure that the leading border
-  // and padding are only applied to the first fragment.
-  NGBoxStrut adjusted_border_padding_;
+  const WritingDirectionMode writing_direction_;
 
   LayoutUnit intrinsic_block_size_;
   const LayoutUnit consumed_block_size_;
@@ -67,21 +74,6 @@ class CORE_EXPORT NGFieldsetLayoutAlgorithm
   // represents the minimum block size needed by the border box to encompass
   // the legend.
   LayoutUnit minimum_border_box_block_size_;
-
-  // The amount of the border block-start that was consumed in previous
-  // fragments.
-  LayoutUnit consumed_border_block_start_;
-
-  // If true, this indicates that the legend broke during the current layout
-  // pass.
-  bool legend_broke_ = false;
-
-  // If true, the legend is taller than the block-start border, so that it
-  // sticks below it, allowing for a class C breakpoint [1] before any fieldset
-  // content.
-  //
-  // [1] https://www.w3.org/TR/css-break-3/#possible-breaks
-  bool is_legend_past_border_ = false;
 };
 
 }  // namespace blink

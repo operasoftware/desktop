@@ -10,23 +10,27 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_property.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_state_observer.h"
 #include "third_party/blink/renderer/core/frame/platform_event_controller.h"
+#include "third_party/blink/renderer/modules/battery/battery_dispatcher.h"
 #include "third_party/blink/renderer/modules/battery/battery_status.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
 
+class Navigator;
+
 class BatteryManager final : public EventTargetWithInlineData,
                              public ActiveScriptWrappable<BatteryManager>,
+                             public Supplement<Navigator>,
                              public ExecutionContextLifecycleStateObserver,
                              public PlatformEventController {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(BatteryManager);
 
  public:
-  static BatteryManager* Create(ExecutionContext*);
-
-  explicit BatteryManager(ExecutionContext*);
+  static const char kSupplementName[];
+  static ScriptPromise getBattery(ScriptState*, Navigator&);
+  explicit BatteryManager(Navigator&);
   ~BatteryManager() override;
 
   // Returns a promise object that will be resolved with this BatteryManager.
@@ -70,6 +74,7 @@ class BatteryManager final : public EventTargetWithInlineData,
       ScriptPromiseProperty<Member<BatteryManager>, Member<DOMException>>;
   Member<BatteryProperty> battery_property_;
   BatteryStatus battery_status_;
+  Member<BatteryDispatcher> battery_dispatcher_;
 };
 
 }  // namespace blink

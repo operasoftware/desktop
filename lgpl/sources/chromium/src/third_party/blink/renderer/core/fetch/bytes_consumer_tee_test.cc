@@ -8,6 +8,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/fetch/bytes_consumer_test_util.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/loader/testing/bytes_consumer_test_reader.h"
@@ -24,8 +25,6 @@ using Result = BytesConsumer::Result;
 class BytesConsumerTestClient final
     : public GarbageCollected<BytesConsumerTestClient>,
       public BytesConsumer::Client {
-  USING_GARBAGE_COLLECTED_MIXIN(BytesConsumerTestClient);
-
  public:
   void OnStateChange() override { ++num_on_state_change_called_; }
   String DebugName() const override { return "BytesConsumerTestClient"; }
@@ -38,7 +37,7 @@ class BytesConsumerTestClient final
 class BytesConsumerTeeTest : public PageTestBase {
  public:
   using Command = ReplayingBytesConsumer::Command;
-  void SetUp() override { PageTestBase::SetUp(IntSize()); }
+  void SetUp() override { PageTestBase::SetUp(gfx::Size()); }
 };
 
 class FakeBlobBytesConsumer : public BytesConsumer {

@@ -22,8 +22,6 @@ blink_modules_sources("gamepad") {
     "gamepad_event.h",
     "gamepad_haptic_actuator.cc",
     "gamepad_haptic_actuator.h",
-    "gamepad_list.cc",
-    "gamepad_list.h",
     "gamepad_listener.h",
     "gamepad_shared_memory_reader.cc",
     "gamepad_shared_memory_reader.h",
@@ -33,6 +31,7 @@ blink_modules_sources("gamepad") {
 
   deps = [
     "//device/gamepad/public/cpp:shared_with_blink",
+    "//device/gamepad/public/cpp:switches",
     "//device/gamepad/public/mojom:mojom_blink",
     "//third_party/blink/public:blink_headers",
   ]
@@ -49,6 +48,7 @@ jumbo_source_set("unit_tests") {
   ]
 
   deps = [
+    "//device/gamepad/public/cpp:shared_with_blink",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/blink/renderer/modules",

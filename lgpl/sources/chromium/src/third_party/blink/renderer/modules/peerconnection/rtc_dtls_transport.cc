@@ -10,7 +10,7 @@
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
@@ -52,9 +52,8 @@ std::unique_ptr<DtlsTransportProxy> CreateProxy(
   scoped_refptr<base::SingleThreadTaskRunner> proxy_thread =
       frame->GetTaskRunner(TaskType::kNetworking);
   scoped_refptr<base::SingleThreadTaskRunner> host_thread =
-      PeerConnectionDependencyFactory::GetInstance()
-          ->GetWebRtcNetworkTaskRunner();
-
+      PeerConnectionDependencyFactory::From(*context)
+          .GetWebRtcNetworkTaskRunner();
   return DtlsTransportProxy::Create(*frame, proxy_thread, host_thread,
                                     native_transport, delegate);
 }
@@ -68,7 +67,7 @@ RTCDtlsTransport::RTCDtlsTransport(
     : ExecutionContextClient(context),
       current_state_(webrtc::DtlsTransportState::kNew),
       native_transport_(native_transport),
-      proxy_(CreateProxy(context, native_transport, this)),
+      proxy_(CreateProxy(context, native_transport.get(), this)),
       ice_transport_(ice_transport) {}
 
 RTCDtlsTransport::~RTCDtlsTransport() {}
@@ -94,7 +93,8 @@ webrtc::DtlsTransportInterface* RTCDtlsTransport::native_transport() {
 }
 
 void RTCDtlsTransport::ChangeState(webrtc::DtlsTransportInformation info) {
-  DCHECK(current_state_.state() != webrtc::DtlsTransportState::kClosed);
+  DCHECK(info.state() == webrtc::DtlsTransportState::kClosed ||
+         current_state_.state() != webrtc::DtlsTransportState::kClosed);
   current_state_ = info;
 }
 
@@ -153,10 +153,9 @@ void RTCDtlsTransport::OnStateChange(webrtc::DtlsTransportInformation info) {
             der_cert.data(), static_cast<unsigned int>(der_cert.size()));
         // Don't replace the certificate if it's unchanged.
         // Should have been "if (*dab_cert != *remote_certificates_[i])"
-        if (dab_cert->ByteLengthAsSizeT() !=
-                remote_certificates_[i]->ByteLengthAsSizeT() ||
+        if (dab_cert->ByteLength() != remote_certificates_[i]->ByteLength() ||
             memcmp(dab_cert->Data(), remote_certificates_[i]->Data(),
-                   dab_cert->ByteLengthAsSizeT()) != 0) {
+                   dab_cert->ByteLength()) != 0) {
           remote_certificates_[i] = dab_cert;
         }
       }

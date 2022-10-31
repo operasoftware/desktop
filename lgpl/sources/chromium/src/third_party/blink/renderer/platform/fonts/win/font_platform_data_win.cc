@@ -39,19 +39,19 @@
 
 namespace blink {
 
-void FontPlatformData::SetupSkFont(SkFont* font, float, const Font*) const {
-  font->setSize(SkFloatToScalar(text_size_));
-  font->setTypeface(typeface_);
-  font->setEmbolden(synthetic_bold_);
-  font->setSkewX(synthetic_italic_ ? -SK_Scalar1 / 4 : 0);
+SkFont FontPlatformData::CreateSkFont(bool, const FontDescription*) const {
+  SkFont font;
+  font.setSize(SkFloatToScalar(text_size_));
+  font.setTypeface(typeface_);
+  font.setEmbolden(synthetic_bold_);
+  font.setSkewX(synthetic_italic_ ? -SK_Scalar1 / 4 : 0);
 
-  uint32_t font_flags = FontFlags();
-  if (font_flags & kSubpixelsAntiAlias) {
-    font->setEdging(SkFont::Edging::kSubpixelAntiAlias);
-  } else if (font_flags & kAntiAlias) {
-    font->setEdging(SkFont::Edging::kAntiAlias);
+  if (style_.use_subpixel_rendering) {
+    font.setEdging(SkFont::Edging::kSubpixelAntiAlias);
+  } else if (style_.use_anti_alias) {
+    font.setEdging(SkFont::Edging::kAntiAlias);
   } else {
-    font->setEdging(SkFont::Edging::kAlias);
+    font.setEdging(SkFont::Edging::kAlias);
   }
 
   // Only use sub-pixel positioning if anti aliasing is enabled. Otherwise,
@@ -60,35 +60,35 @@ void FontPlatformData::SetupSkFont(SkFont* font, float, const Font*) const {
   // only has non-antialiased glyphs to draw, so they necessarily get clamped at
   // pixel positions, which leads to uneven spacing, either too close or too far
   // away from adjacent glyphs. We avoid this by linking the two flags.
-  if (font_flags & kAntiAlias)
-    font->setSubpixel(true);
+  if (style_.use_anti_alias)
+    font.setSubpixel(true);
 
   if (WebTestSupport::IsRunningWebTest() &&
       !WebTestSupport::IsTextSubpixelPositioningAllowedForTest())
-    font->setSubpixel(false);
+    font.setSubpixel(false);
 
-  font->setEmbeddedBitmaps(!avoid_embedded_bitmaps_);
+  font.setEmbeddedBitmaps(!avoid_embedded_bitmaps_);
+  return font;
 }
 
-static int ComputeFontFlags(String font_family_name) {
-  if (WebTestSupport::IsRunningWebTest())
-    return WebTestSupport::IsFontAntialiasingEnabledForTest()
-               ? FontPlatformData::kAntiAlias
-               : 0;
+WebFontRenderStyle FontPlatformData::QuerySystemForRenderStyle() {
+  WebFontRenderStyle style;
+  style.use_anti_alias = 0;
+  style.use_subpixel_rendering = 0;
 
-  int font_flags = 0;
-  if (FontCache::GetFontCache()->AntialiasedTextEnabled()) {
-    int lcd_flag = FontCache::GetFontCache()->LcdTextEnabled()
-                       ? FontPlatformData::kSubpixelsAntiAlias
-                       : 0;
-    font_flags = FontPlatformData::kAntiAlias | lcd_flag;
+  if (WebTestSupport::IsRunningWebTest()) {
+    if (WebTestSupport::IsFontAntialiasingEnabledForTest())
+      style.use_anti_alias = 1;
+    return style;
   }
 
-  return font_flags;
-}
+  if (FontCache::Get().AntialiasedTextEnabled()) {
+    style.use_anti_alias = 1;
+    if (FontCache::Get().LcdTextEnabled())
+      style.use_subpixel_rendering = 1;
+  }
 
-void FontPlatformData::QuerySystemForRenderStyle() {
-  font_flags_ = ComputeFontFlags(FontFamilyName());
+  return style;
 }
 
 }  // namespace blink

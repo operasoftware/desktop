@@ -8,7 +8,6 @@
 #include <memory>
 
 #include "third_party/blink/public/mojom/timing/performance_mark_or_measure.mojom-blink-forward.h"
-#include "third_party/blink/public/mojom/timing/worker_timing_container.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_property.h"
@@ -19,7 +18,7 @@
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/service_worker/extendable_event.h"
 #include "third_party/blink/renderer/modules/service_worker/wait_until_observer.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/data_pipe_bytes_consumer.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
@@ -46,7 +45,6 @@ class MODULES_EXPORT FetchEvent final
       public ActiveScriptWrappable<FetchEvent>,
       public ExecutionContextClient {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(FetchEvent);
 
  public:
   using PreloadResponseProperty =
@@ -60,8 +58,6 @@ class MODULES_EXPORT FetchEvent final
              const FetchEventInit*,
              FetchRespondWithObserver*,
              WaitUntilObserver*,
-             mojo::PendingRemote<mojom::blink::WorkerTimingContainer>
-                 worker_timing_remote,
              bool navigation_preload_sent);
   ~FetchEvent() override;
 
@@ -72,6 +68,11 @@ class MODULES_EXPORT FetchEvent final
 
   void respondWith(ScriptState*, ScriptPromise, ExceptionState&);
   ScriptPromise preloadResponse(ScriptState*);
+  ScriptPromise handled(ScriptState*);
+
+  void ResolveHandledPromise();
+  void RejectHandledPromise(const String& error_message);
+
   void addPerformanceEntry(PerformanceMark*);
   void addPerformanceEntry(PerformanceMeasure*);
 
@@ -99,11 +100,8 @@ class MODULES_EXPORT FetchEvent final
   Member<PreloadResponseProperty> preload_response_property_;
   std::unique_ptr<WebURLResponse> preload_response_;
   Member<DataPipeBytesConsumer::CompletionNotifier> body_completion_notifier_;
-  // This is currently null for navigation while https://crbug.com/900700 is
-  // being implemented.
-  HeapMojoRemote<mojom::blink::WorkerTimingContainer,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      worker_timing_remote_;
+  Member<ScriptPromiseProperty<ToV8UndefinedGenerator, Member<DOMException>>>
+      handled_property_;
   String client_id_;
   String resulting_client_id_;
   bool is_reload_;

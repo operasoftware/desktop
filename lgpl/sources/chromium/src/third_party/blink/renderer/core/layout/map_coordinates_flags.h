@@ -8,8 +8,6 @@
 namespace blink {
 
 enum MapCoordinatesMode {
-  kIsFixed = 1 << 0,
-
   // Only needed in some special cases to intentionally ignore transforms.
   kIgnoreTransforms = 1 << 2,
 
@@ -23,9 +21,9 @@ enum MapCoordinatesMode {
   // position.
   kIgnoreScrollOffset = 1 << 5,
 
-  // If the local root frame has a remote frame parent, apply the offset from
-  // the remote frame parent to the local root.
-  kApplyRemoteRootFrameOffset = 1 << 6,
+  // If the local root frame has a remote frame parent, apply the transformation
+  // from the local root frame to the remote main frame.
+  kApplyRemoteMainFrameTransform = 1 << 6,
 };
 typedef unsigned MapCoordinatesFlags;
 

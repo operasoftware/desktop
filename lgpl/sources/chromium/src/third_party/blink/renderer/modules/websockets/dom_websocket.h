@@ -31,9 +31,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBSOCKETS_DOM_WEBSOCKET_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBSOCKETS_DOM_WEBSOCKET_H_
 
-#include <stddef.h>
-#include <stdint.h>
-#include <memory>
+#include <cstddef>
+#include <cstdint>
+
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
@@ -46,7 +46,7 @@
 #include "third_party/blink/renderer/modules/websockets/websocket_channel_impl.h"
 #include "third_party/blink/renderer/modules/websockets/websocket_common.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
@@ -60,7 +60,7 @@ class DOMArrayBuffer;
 class DOMArrayBufferView;
 class ExceptionState;
 class ExecutionContext;
-class StringOrStringSequence;
+class V8UnionStringOrStringSequence;
 
 class MODULES_EXPORT DOMWebSocket
     : public EventTargetWithInlineData,
@@ -68,7 +68,6 @@ class MODULES_EXPORT DOMWebSocket
       public ExecutionContextLifecycleStateObserver,
       public WebSocketChannelClient {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(DOMWebSocket);
 
  public:
   // These definitions are required by V8DOMWebSocket.
@@ -83,10 +82,10 @@ class MODULES_EXPORT DOMWebSocket
   static DOMWebSocket* Create(ExecutionContext*,
                               const String& url,
                               ExceptionState&);
-  static DOMWebSocket* Create(ExecutionContext*,
+  static DOMWebSocket* Create(ExecutionContext* execution_context,
                               const String& url,
-                              const StringOrStringSequence& protocols,
-                              ExceptionState&);
+                              const V8UnionStringOrStringSequence* protocols,
+                              ExceptionState& exception_state);
 
   explicit DOMWebSocket(ExecutionContext*);
   ~DOMWebSocket() override;
@@ -203,13 +202,6 @@ class MODULES_EXPORT DOMWebSocket
     kMaxValue = kBlob,
   };
 
-  enum class WebSocketReceiveType {
-    kString,
-    kArrayBuffer,
-    kBlob,
-    kMaxValue = kBlob,
-  };
-
   enum BinaryType { kBinaryTypeBlob, kBinaryTypeArrayBuffer };
 
   // This function is virtual for unittests.
@@ -245,8 +237,6 @@ class MODULES_EXPORT DOMWebSocket
 
   void ReleaseChannel();
   void RecordSendTypeHistogram(WebSocketSendType);
-  void RecordSendMessageSizeHistogram(WebSocketSendType, size_t);
-  void RecordReceiveMessageSizeHistogram(WebSocketReceiveType, size_t);
 
   Member<WebSocketChannel> channel_;
 

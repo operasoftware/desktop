@@ -27,8 +27,8 @@
 #include "libavutil/pixdesc.h"
 #include "libavutil/opt.h"
 #include "libavcodec/avcodec.h"
+#include "codec_internal.h"
 #include "libavcodec/decode.h"
-#include "libavcodec/internal.h"
 
 #include "v4l2_context.h"
 #include "v4l2_m2m.h"
@@ -138,47 +138,44 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
     V4L2Context *const capture = &s->capture;
     V4L2Context *const output = &s->output;
-    AVPacket avpkt = {0};
     int ret;
 
-    if (s->buf_pkt.size) {
-        avpkt = s->buf_pkt;
-        memset(&s->buf_pkt, 0, sizeof(AVPacket));
-    } else {
-        ret = ff_decode_get_packet(avctx, &avpkt);
-        if (ret < 0 && ret != AVERROR_EOF)
-            return ret;
+    if (!s->buf_pkt.size) {
+        ret = ff_decode_get_packet(avctx, &s->buf_pkt);
+        if (ret < 0) {
+            if (ret == AVERROR(EAGAIN))
+                return ff_v4l2_context_dequeue_frame(capture, frame, 0);
+            else if (ret != AVERROR_EOF)
+                return ret;
+        }
     }
 
     if (s->draining)
         goto dequeue;
 
-    ret = ff_v4l2_context_enqueue_packet(output, &avpkt);
-    if (ret < 0) {
-        if (ret != AVERROR(EAGAIN))
-           return ret;
+    ret = ff_v4l2_context_enqueue_packet(output, &s->buf_pkt);
+    if (ret < 0 && ret != AVERROR(EAGAIN))
+        goto fail;
 
-        s->buf_pkt = avpkt;
-        /* no input buffers available, continue dequeing */
-    }
+    /* if EAGAIN don't unref packet and try to enqueue in the next iteration */
+    if (ret != AVERROR(EAGAIN))
+        av_packet_unref(&s->buf_pkt);
 
-    if (avpkt.size) {
+    if (!s->draining) {
         ret = v4l2_try_start(avctx);
         if (ret) {
-            av_packet_unref(&avpkt);
-
             /* cant recover */
-            if (ret == AVERROR(ENOMEM))
-                return ret;
-
-            return 0;
+            if (ret != AVERROR(ENOMEM))
+                ret = 0;
+            goto fail;
         }
     }
 
 dequeue:
-    if (!s->buf_pkt.size)
-        av_packet_unref(&avpkt);
     return ff_v4l2_context_dequeue_frame(capture, frame, -1);
+fail:
+    av_packet_unref(&s->buf_pkt);
+    return ret;
 }
 
 static av_cold int v4l2_decode_init(AVCodecContext *avctx)
@@ -212,9 +209,6 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     ret = ff_v4l2_m2m_codec_init(priv);
     if (ret) {
         av_log(avctx, AV_LOG_ERROR, "can't configure decoder\n");
-        s->self_ref = NULL;
-        av_buffer_unref(&priv->context_ref);
-
         return ret;
     }
 
@@ -223,10 +217,7 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
 static av_cold int v4l2_decode_close(AVCodecContext *avctx)
 {
-    V4L2m2mPriv *priv = avctx->priv_data;
-    V4L2m2mContext *s = priv->context;
-    av_packet_unref(&s->buf_pkt);
-    return ff_v4l2_m2m_codec_end(priv);
+    return ff_v4l2_m2m_codec_end(avctx->priv_data);
 }
 
 #define OFFSET(x) offsetof(V4L2m2mPriv, x)
@@ -249,20 +240,21 @@ static const AVOption options[] = {
 
 #define M2MDEC(NAME, LONGNAME, CODEC, bsf_name) \
     M2MDEC_CLASS(NAME) \
-    AVCodec ff_ ## NAME ## _v4l2m2m_decoder = { \
-        .name           = #NAME "_v4l2m2m" , \
-        .long_name      = NULL_IF_CONFIG_SMALL("V4L2 mem2mem " LONGNAME " decoder wrapper"), \
-        .type           = AVMEDIA_TYPE_VIDEO, \
-        .id             = CODEC , \
+    const FFCodec ff_ ## NAME ## _v4l2m2m_decoder = { \
+        .p.name         = #NAME "_v4l2m2m" , \
+        .p.long_name    = NULL_IF_CONFIG_SMALL("V4L2 mem2mem " LONGNAME " decoder wrapper"), \
+        .p.type         = AVMEDIA_TYPE_VIDEO, \
+        .p.id           = CODEC , \
         .priv_data_size = sizeof(V4L2m2mPriv), \
-        .priv_class     = &v4l2_m2m_ ## NAME ## _dec_class, \
+        .p.priv_class   = &v4l2_m2m_ ## NAME ## _dec_class, \
         .init           = v4l2_decode_init, \
-        .receive_frame  = v4l2_receive_frame, \
+        FF_CODEC_RECEIVE_FRAME_CB(v4l2_receive_frame), \
         .close          = v4l2_decode_close, \
         .bsfs           = bsf_name, \
-        .capabilities   = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING, \
-        .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS, \
-        .wrapper_name   = "v4l2m2m", \
+        .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING, \
+        .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE | \
+                          FF_CODEC_CAP_SETS_PKT_DTS | FF_CODEC_CAP_INIT_CLEANUP, \
+        .p.wrapper_name = "v4l2m2m", \
     }
 
 M2MDEC(h264,  "H.264", AV_CODEC_ID_H264,       "h264_mp4toannexb");

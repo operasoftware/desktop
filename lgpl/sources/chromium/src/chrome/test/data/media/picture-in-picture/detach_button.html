@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Picture-in-Picture Detach Button Test</title>
+</head>
+<body>
+  <video controls preload=auto src='../bigbuck.webm'></video>
+</body>
+<script>
+  video = document.querySelector('video');
+
+  function recreateVideo() {
+    const parent = video.parentElement;
+    video.remove();
+
+    video = document.createElement('video');
+    video.src='../video-only.webm';
+    parent.appendChild(video);
+  }
+
+  async function playAndCheckDetachButton() {
+    await video.play();
+    return hasDetachButton_();
+  }
+
+  function isPictureInPictureEnabled() {
+    return video.ownerDocument.pictureInPictureEnabled;
+  }
+
+  function canEnterPictureInPicture() {
+    return new Promise(resolve => {
+      video.requestPictureInPicture()
+          .then(_ => { resolve(true); })
+          .catch(_ => { resolve(false); });
+    });
+  }
+
+  function hasDetachButton_() {
+    return document.querySelector('#detach-button-host') != null;
+  }
+</script>
+</html>

@@ -26,15 +26,17 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SCRIPT_PENDING_SCRIPT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SCRIPT_PENDING_SCRIPT_H_
 
-#include "base/macros.h"
+#include "base/check_op.h"
+#include "base/time/time.h"
 #include "third_party/blink/public/mojom/script/script_type.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/scheduler/web_scoped_virtual_time_pauser.h"
+#include "third_party/blink/public/public_buildflags.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/script/script_element_base.h"
 #include "third_party/blink/renderer/core/script/script_scheduling_type.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_position.h"
 
@@ -42,6 +44,9 @@ namespace blink {
 
 class ExecutionContext;
 class PendingScript;
+#if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
+struct ScriptInfo;
+#endif
 
 class CORE_EXPORT PendingScriptClient : public GarbageCollectedMixin {
  public:
@@ -65,7 +70,9 @@ class CORE_EXPORT PendingScriptClient : public GarbageCollectedMixin {
 class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
                                   public NameClient {
  public:
-  virtual ~PendingScript();
+  PendingScript(const PendingScript&) = delete;
+  PendingScript& operator=(const PendingScript&) = delete;
+  ~PendingScript() override;
 
   TextPosition StartingPosition() const { return starting_position_; }
   void MarkParserBlockingLoadStartTime();
@@ -82,13 +89,13 @@ class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
 
   ScriptElementBase* GetElement() const;
 
-  virtual mojom::ScriptType GetScriptType() const = 0;
+  virtual mojom::blink::ScriptType GetScriptType() const = 0;
 
   virtual void Trace(Visitor*) const;
   const char* NameInHeapSnapshot() const override { return "PendingScript"; }
 
   // Returns nullptr when "script's script is null", i.e. an error occurred.
-  virtual Script* GetSource(const KURL& document_url) const = 0;
+  virtual Script* GetSource() const = 0;
 
   // https://html.spec.whatwg.org/C/#the-script-is-ready
   virtual bool IsReady() const = 0;
@@ -103,7 +110,7 @@ class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
 
   // Used for DCHECK()s.
   bool IsExternalOrModule() const {
-    return IsExternal() || GetScriptType() == mojom::ScriptType::kModule;
+    return IsExternal() || GetScriptType() == mojom::blink::ScriptType::kModule;
   }
 
   void Dispose();
@@ -117,6 +124,11 @@ class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
     DCHECK_EQ(scheduling_type_, ScriptSchedulingType::kNotSet);
     scheduling_type_ = scheduling_type;
   }
+#if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
+  void SetGeneratingScriptInfo(const ScriptInfo* script_info) {
+    generating_script_info_ = script_info;
+  }
+#endif
 
   bool WasCreatedDuringDocumentWrite() {
     return created_during_document_write_;
@@ -127,9 +139,11 @@ class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
   // PendingScript::Dispose() is called in ExecuteScriptBlock().
   //
   // This is virtual only for testing.
-  virtual void ExecuteScriptBlock(const KURL&);
+  virtual void ExecuteScriptBlock();
 
   virtual bool IsEligibleForDelay() const { return false; }
+
+  bool IsWatchingForLoad() const { return client_; }
 
  protected:
   PendingScript(ScriptElementBase*, const TextPosition& starting_position);
@@ -137,9 +151,15 @@ class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
   virtual void DisposeInternal() = 0;
 
   PendingScriptClient* Client() { return client_; }
-  bool IsWatchingForLoad() const { return client_; }
 
   virtual void CheckState() const = 0;
+
+  Document* OriginalElementDocument() const {
+    return original_element_document_;
+  }
+  ExecutionContext* OriginalExecutionContext() const {
+    return original_execution_context_;
+  }
 
  private:
   static void ExecuteScriptBlockInternal(
@@ -149,12 +169,22 @@ class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
       bool is_external,
       bool created_during_document_write,
       base::TimeTicks parser_blocking_load_start_time,
+#if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
+      const ScriptInfo* generating_script_info,
+#endif
       bool is_controlled_by_script_runner);
+
+  void RecordThirdPartyRequestWithCookieIfNeeded();
 
   // |m_element| must points to the corresponding ScriptLoader's
   // ScriptElementBase and thus must be non-null before dispose() is called
   // (except for unit tests).
   Member<ScriptElementBase> element_;
+
+#if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
+  // Information about the script that generated this script. Null if none.
+  Member<const ScriptInfo> generating_script_info_;
+#endif
 
   TextPosition starting_position_;  // Only used for inline script tags.
   base::TimeTicks parser_blocking_load_start_time_;
@@ -171,8 +201,6 @@ class CORE_EXPORT PendingScript : public GarbageCollected<PendingScript>,
   WeakMember<ExecutionContext> original_execution_context_;
 
   const bool created_during_document_write_;
-
-  DISALLOW_COPY_AND_ASSIGN(PendingScript);
 };
 
 }  // namespace blink

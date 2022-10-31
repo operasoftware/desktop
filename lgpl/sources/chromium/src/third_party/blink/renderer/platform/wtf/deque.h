@@ -35,7 +35,7 @@
 
 #include <iterator>
 
-#include "base/macros.h"
+#include "base/check_op.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/construct_traits.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -182,10 +182,10 @@ class Deque
    public:
     BackingBuffer() : Base() {}
     explicit BackingBuffer(wtf_size_t capacity) : Base(capacity) {}
+    BackingBuffer(const BackingBuffer&) = delete;
+    BackingBuffer& operator=(const BackingBuffer&) = delete;
 
     void SetSize(wtf_size_t size) { size_ = size; }
-
-    DISALLOW_COPY_AND_ASSIGN(BackingBuffer);
   };
 
   typedef VectorTypeOperations<T, Allocator> TypeOperations;
@@ -264,12 +264,23 @@ class DequeIterator : public DequeIteratorBase<T, inlineCapacity, Allocator> {
     Base::Increment();
     return *this;
   }
-  // postfix ++ intentionally omitted
+
+  Iterator operator++(int) {
+    Iterator tmp = *this;
+    ++*this;
+    return tmp;
+  }
+
   Iterator& operator--() {
     Base::Decrement();
     return *this;
   }
-  // postfix -- intentionally omitted
+
+  Iterator operator--(int) {
+    Iterator tmp = *this;
+    --*this;
+    return tmp;
+  }
 };
 
 template <typename T,
@@ -314,12 +325,23 @@ class DequeConstIterator
     Base::Increment();
     return *this;
   }
-  // postfix ++ intentionally omitted
+
+  Iterator operator++(int) {
+    Iterator tmp = *this;
+    ++*this;
+    return tmp;
+  }
+
   Iterator& operator--() {
     Base::Decrement();
     return *this;
   }
-  // postfix -- intentionally omitted
+
+  Iterator operator--(int) {
+    Iterator tmp = *this;
+    --*this;
+    return tmp;
+  }
 };
 
 template <typename T, wtf_size_t inlineCapacity, typename Allocator>
@@ -686,22 +708,12 @@ template <typename T, wtf_size_t inlineCapacity, typename Allocator>
 template <typename VisitorDispatcher, typename A>
 std::enable_if_t<A::kIsGarbageCollected>
 Deque<T, inlineCapacity, Allocator>::Trace(VisitorDispatcher visitor) const {
-  // Bail out for concurrent marking.
-  if (!VectorTraits<T>::kCanTraceConcurrently) {
-    if (visitor->DeferredTraceIfConcurrent(
-            {this, [](blink::Visitor* visitor, const void* object) {
-               reinterpret_cast<const Deque<T, inlineCapacity, Allocator>*>(
-                   object)
-                   ->Trace(visitor);
-             }}))
-      return;
-  }
-
   static_assert(inlineCapacity == 0,
                 "Heap allocated Deque should not use inline buffer");
   static_assert(Allocator::kIsGarbageCollected,
                 "Garbage collector must be enabled.");
   const T* buffer = buffer_.BufferSafe();
+
   DCHECK(!buffer || buffer_.IsOutOfLineBuffer(buffer));
   Allocator::TraceVectorBacking(visitor, buffer, buffer_.BufferSlot());
 }

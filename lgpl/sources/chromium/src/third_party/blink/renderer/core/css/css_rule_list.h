@@ -22,10 +22,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_RULE_LIST_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_RULE_LIST_H_
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -39,6 +39,9 @@ class CSSRuleList : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
+  CSSRuleList(const CSSRuleList&) = delete;
+  CSSRuleList& operator=(const CSSRuleList&) = delete;
+
   virtual unsigned length() const = 0;
   virtual CSSRule* item(unsigned index) const = 0;
 
@@ -46,9 +49,6 @@ class CSSRuleList : public ScriptWrappable {
 
  protected:
   CSSRuleList() = default;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CSSRuleList);
 };
 
 template <class Rule>

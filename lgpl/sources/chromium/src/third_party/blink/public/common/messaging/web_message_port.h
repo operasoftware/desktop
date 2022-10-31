@@ -5,9 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_COMMON_MESSAGING_WEB_MESSAGE_PORT_H_
 #define THIRD_PARTY_BLINK_PUBLIC_COMMON_MESSAGING_WEB_MESSAGE_PORT_H_
 
+#include <string>
 #include <utility>
 
-#include "base/strings/string16.h"
+#include "base/memory/raw_ptr.h"
 #include "mojo/public/cpp/bindings/connector.h"
 #include "mojo/public/cpp/bindings/message.h"
 #include "third_party/blink/public/common/common_export.h"
@@ -82,6 +83,10 @@ class BLINK_COMMON_EXPORT WebMessagePort : public mojo::MessageReceiver {
   // Factory function for creating two ends of a message channel. The two ports
   // are conjugates of each other.
   static std::pair<WebMessagePort, WebMessagePort> CreatePair();
+
+  // Wraps one end of a message channel. |port|'s mojo pipe must
+  // be paired, valid and not entangled.
+  static WebMessagePort Create(MessagePortDescriptor port);
 
   // Sets a message receiver for this message port. Once bound any incoming
   // messages to this port will be routed to the provided |receiver| with
@@ -170,7 +175,7 @@ class BLINK_COMMON_EXPORT WebMessagePort : public mojo::MessageReceiver {
   bool is_closed_ = true;
   bool is_errored_ = false;
   bool is_transferable_ = false;
-  MessageReceiver* receiver_ = nullptr;
+  raw_ptr<MessageReceiver> receiver_ = nullptr;
 };
 
 // A very simple message format. This is a subset of a TransferableMessage, as
@@ -185,7 +190,7 @@ struct BLINK_COMMON_EXPORT WebMessagePort::Message {
   ~Message();
 
   // Creates a message with the given |data|.
-  explicit Message(const base::string16& data);
+  explicit Message(const std::u16string& data);
 
   // Creates a message with the given collection of |ports| to be transferred.
   explicit Message(std::vector<WebMessagePort> ports);
@@ -195,13 +200,13 @@ struct BLINK_COMMON_EXPORT WebMessagePort::Message {
 
   // Creates a message with |data| and a collection of |ports| to be
   // transferred.
-  Message(const base::string16& data, std::vector<WebMessagePort> ports);
+  Message(const std::u16string& data, std::vector<WebMessagePort> ports);
 
   // Creates a message with |data| and a single |port| to be transferred.
-  Message(const base::string16& data, WebMessagePort port);
+  Message(const std::u16string& data, WebMessagePort port);
 
   // A UTF-16 message.
-  base::string16 data;
+  std::u16string data;
 
   // Other message ports that are to be transmitted as part of this message.
   std::vector<WebMessagePort> ports;
@@ -217,9 +222,9 @@ class BLINK_COMMON_EXPORT WebMessagePort::MessageReceiver {
   MessageReceiver& operator=(MessageReceiver&&) = delete;
   virtual ~MessageReceiver();
 
-  // Invoked by incoming messages. This should return true if the message was
-  // successfully handled, false otherwise. If this returns false the pipe
-  // will be torn down and a call to OnPipeError will be made.
+  // Called for each incoming |message|. Returns false if the message could not
+  // be successfully handled, in which case the pipe should be torn-down and
+  // OnPipeError() invoked.
   virtual bool OnMessage(Message message);
 
   // Invoked when the underlying pipe has experienced an error.

@@ -9,8 +9,8 @@
 #include "third_party/blink/public/common/mediastream/media_stream_controls.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
+#include "third_party/blink/public/platform/modules/mediastream/web_media_stream_source.h"
 #include "third_party/blink/public/platform/web_common.h"
-#include "third_party/blink/public/platform/web_media_stream_source.h"
 #include "third_party/blink/public/platform/web_private_ptr.h"
 
 namespace blink {
@@ -32,16 +32,32 @@ class BLINK_PLATFORM_EXPORT WebPlatformMediaStreamSource {
                               mojom::MediaStreamRequestResult result,
                               const WebString& result_name)>;
 
+  using KeepDeviceAliveForTransferCallback = base::OnceCallback<void(bool)>;
+
   // Source constraints key for
   // https://dev.w3.org/2011/webrtc/editor/getusermedia.html.
   static const char kSourceId[];
 
-  WebPlatformMediaStreamSource();
+  explicit WebPlatformMediaStreamSource(
+      scoped_refptr<base::SingleThreadTaskRunner>);
+  WebPlatformMediaStreamSource(const WebPlatformMediaStreamSource&) = delete;
+  WebPlatformMediaStreamSource& operator=(const WebPlatformMediaStreamSource&) =
+      delete;
   virtual ~WebPlatformMediaStreamSource();
 
   // Returns device information about a source that has been created by a
   // JavaScript call to GetUserMedia, e.g., a camera or microphone.
   const MediaStreamDevice& device() const { return device_; }
+
+  // Keeps a MediaStreamDevice alive until the MediaStreamTrack transfer
+  // corresponding to |transfer_id| is complete.
+  virtual void KeepDeviceAliveForTransfer(
+      base::UnguessableToken session_id,
+      base::UnguessableToken transfer_id,
+      KeepDeviceAliveForTransferCallback keep_alive_cb) {
+    NOTREACHED() << "KeepDeviceAliveForTransfer is not implemented.";
+    std::move(keep_alive_cb).Run(/*device_found=*/false);
+  }
 
   // Stops the source (by calling DoStopSource()) and runs FinalizeStopSource().
   void StopSource();
@@ -52,6 +68,10 @@ class BLINK_PLATFORM_EXPORT WebPlatformMediaStreamSource {
   // Sets device information about a source that has been created by a
   // JavaScript call to GetUserMedia. F.E a camera or microphone.
   void SetDevice(const MediaStreamDevice& device);
+
+  // Sets the capture-handle for a source that has been created by a
+  // JavaScript call to one of the display-capture APIs (e.g. getDisplayMedia).
+  void SetCaptureHandle(media::mojom::CaptureHandlePtr capture_handle);
 
   // Sets a callback that will be triggered when StopSource is called.
   void SetStopCallback(SourceStoppedCallback stop_callback);
@@ -82,6 +102,9 @@ class BLINK_PLATFORM_EXPORT WebPlatformMediaStreamSource {
   // implementations to implement custom stop methods.
   void FinalizeStopSource();
 
+  // Gets the TaskRunner for the main thread, for subclasses that need it.
+  base::SingleThreadTaskRunner* GetTaskRunner() const;
+
  private:
   MediaStreamDevice device_;
   SourceStoppedCallback stop_callback_;
@@ -90,7 +113,10 @@ class BLINK_PLATFORM_EXPORT WebPlatformMediaStreamSource {
                 WebPrivatePtrStrength::kWeak>
       owner_;
 
-  DISALLOW_COPY_AND_ASSIGN(WebPlatformMediaStreamSource);
+  // Task runner for the main thread. Also used to check that all methods that
+  // could cause object graph or data flow changes are being called on the main
+  // thread.
+  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 };
 
 }  // namespace blink

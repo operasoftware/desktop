@@ -25,12 +25,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOM_TOKEN_LIST_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOM_TOKEN_LIST_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/dom/space_split_string.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -45,6 +45,8 @@ class CORE_EXPORT DOMTokenList : public ScriptWrappable {
  public:
   DOMTokenList(Element& element, const QualifiedName& attr)
       : element_(element), attribute_name_(attr) {}
+  DOMTokenList(const DOMTokenList&) = delete;
+  DOMTokenList& operator=(const DOMTokenList&) = delete;
   ~DOMTokenList() override = default;
   void Trace(Visitor*) const override;
 
@@ -59,8 +61,8 @@ class CORE_EXPORT DOMTokenList : public ScriptWrappable {
                const AtomicString& new_token,
                ExceptionState&);
   bool supports(const AtomicString&, ExceptionState&);
-  virtual AtomicString value() const;
-  virtual void setValue(const AtomicString&);
+  AtomicString value() const;
+  void setValue(const AtomicString&);
   AtomicString toString() const { return value(); }
 
   // This function should be called when the associated attribute value was
@@ -91,7 +93,6 @@ class CORE_EXPORT DOMTokenList : public ScriptWrappable {
   // |attribute_name_| is |g_null_name| in that case.
   const QualifiedName attribute_name_;
   bool is_in_update_step_ = false;
-  DISALLOW_COPY_AND_ASSIGN(DOMTokenList);
 };
 
 }  // namespace blink

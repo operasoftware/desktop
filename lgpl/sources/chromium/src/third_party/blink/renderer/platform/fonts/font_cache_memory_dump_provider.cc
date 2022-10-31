@@ -5,7 +5,8 @@
 #include "third_party/blink/renderer/platform/fonts/font_cache_memory_dump_provider.h"
 
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
+#include "third_party/blink/renderer/platform/fonts/font_global_context.h"
+#include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
 
@@ -18,8 +19,11 @@ bool FontCacheMemoryDumpProvider::OnMemoryDump(
     const base::trace_event::MemoryDumpArgs&,
     base::trace_event::ProcessMemoryDump* memory_dump) {
   DCHECK(IsMainThread());
-  FontCache::GetFontCache()->DumpFontPlatformDataCache(memory_dump);
-  FontCache::GetFontCache()->DumpShapeResultCache(memory_dump);
+  if (auto* context = FontGlobalContext::TryGet()) {
+    FontCache& cache = context->GetFontCache();
+    cache.DumpFontPlatformDataCache(memory_dump);
+    cache.DumpShapeResultCache(memory_dump);
+  }
   return true;
 }
 

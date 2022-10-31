@@ -418,18 +418,6 @@ tests:
   - ['\x000d', '⡒']
   - ['\x0020', '\x0020']
   - ['\x00a0', '⢞']
-table: da-lt.ctb,spaces.uti
-flags: {testmode: bothDirections}
-tests:
-  - ['\x0009', '⣊']
-  - ['\x000a', '⣚']
-  - ['\x000b', '⣅']
-  - ['\x000c', '⣇']
-  - ['\x000d', '⣍']
-  - ['\x0020', '\x0020']
-flags: {testmode: forward}
-tests:
-  - ['\x00a0', '\x0020']
 table: de-de-comp8.ctb
 flags: {testmode: bothDirections}
 tests:
@@ -586,7 +574,6 @@ tests:
   - ['\x2007', '\x0020']
   - ['\x2008', '\x0020']
   - ['\x200a', '\x0020']
-  - ['\x200b', '\x0020']
   - ['\x200b', '\x0020']
   - ['\x202f', '\x0020']
 table: en-us-comp8.ctb,spaces.uti
@@ -774,30 +761,6 @@ flags: {testmode: bothDirections}
 tests:
   - ['\x0020', '\x0020']
   - ['\x00a0', 'a']
-table: fi1.ctb,spaces.uti
-flags: {testmode: bothDirections}
-tests:
-  - ['\x0009', '⣊']
-  - ['\x000a', '⣚']
-  - ['\x000b', '⣅']
-  - ['\x000c', '⣇']
-  - ['\x000d', '⣍']
-  - ['\x0020', '\x0020']
-flags: {testmode: forward}
-tests:
-  - ['\x00a0', '\x0020']
-table: fi2.ctb,spaces.uti
-flags: {testmode: bothDirections}
-tests:
-  - ['\x0009', '⣊']
-  - ['\x000a', '⣚']
-  - ['\x000b', '⣅']
-  - ['\x000c', '⣇']
-  - ['\x000d', '⣍']
-  - ['\x0020', '\x0020']
-flags: {testmode: forward}
-tests:
-  - ['\x00a0', '\x0020']
 table: fr-bfu-comp6.utb
 flags: {testmode: bothDirections}
 tests:
@@ -833,8 +796,8 @@ tests:
   - ['\x000a', '\x0020']
   - ['\x000c', '\x0020']
   - ['\x000d', '\x0020']
-table: {locale: ga, grade: 1}
-table: {locale: ga, grade: 2}
+table: {language: ga, grade: 1}
+table: {language: ga, grade: 2}
 flags: {testmode: bothDirections}
 tests:
   - ['\x0020', '\x0020']
@@ -957,7 +920,7 @@ tests:
   - ['\x200b', '\x0020']
   - ['\x202f', '\x0020']
   - ['\x202f', '\x0020']
-table: he.tbl,spaces.uti
+table: he-IL-comp8.utb,spaces.uti
 flags: {testmode: bothDirections}
 tests:
   - ['\x0020', '\x0020']
@@ -1495,12 +1458,6 @@ tests:
   - ['\x000a', '\x0020']
   - ['\x000c', '\x0020']
   - ['\x000d', '\x0020']
-table: nl_BE.tbl
-flags: {testmode: bothDirections}
-tests:
-  - ['\x0009', '9']
-  - ['\x0020', '\x0020']
-  - ['\x00a0', 'a']
 flags: {testmode: forward}
 tests:
   - ['\x000a', '\x0020']
@@ -1622,7 +1579,7 @@ tests:
   - ['\x000d', '⣍']
   - ['\x0020', '\x0020']
   - ['\x00a0', '⣈']
-table: no.tbl
+table: no-no-g3.ctb
 flags: {testmode: bothDirections}
 tests:
   - ['\x0009', '9']
@@ -1643,33 +1600,6 @@ tests:
   - ['\x2008', '\x0020']
   - ['\x2009', '\x0020']
 table: or.tbl
-flags: {testmode: bothDirections}
-tests:
-  - ['\x0009', '9']
-  - ['\x0020', '\x0020']
-  - ['\x00a0', 'a']
-flags: {testmode: forward}
-tests:
-  - ['\x000a', '\x0020']
-  - ['\x000b', '\x0020']
-  - ['\x000c', '\x0020']
-  - ['\x000d', '\x0020']
-  - ['\x2000', '\x0020']
-  - ['\x2001', '\x0020']
-  - ['\x2002', '\x0020']
-  - ['\x2003', '\x0020']
-  - ['\x2004', '\x0020']
-  - ['\x2005', '\x0020']
-  - ['\x2006', '\x0020']
-  - ['\x2007', '\x0020']
-  - ['\x2008', '\x0020']
-  - ['\x2009', '\x0020']
-  - ['\x200a', '\x0020']
-  - ['\x2028', '\x0020']
-  - ['\x2029', '\x0020']
-  - ['\x202f', '\x0020']
-  - ['\x205f', '\x0020']
-table: pa.tbl
 flags: {testmode: bothDirections}
 tests:
   - ['\x0009', '9']
@@ -1788,40 +1718,6 @@ tests:
   - ['\x000a', '\x0020']
   - ['\x000c', '\x0020']
   - ['\x000d', '\x0020']
-table: ru-ru-g1.utb
-flags: {testmode: bothDirections}
-tests:
-  - ['\x0020', '\x0020']
-  - ['\x00a0', 'a']
-flags: {testmode: forward}
-tests:
-  - ['\x0009', '\x0020']
-  - ['\x000a', '\x0020']
-  - ['\x000c', '\x0020']
-  - ['\x000d', '\x0020']
-table: ru.ctb,spaces.uti
-flags: {testmode: bothDirections}
-tests:
-  - ['\x0009', '⢪']
-  - ['\x000a', '⣠']
-  - ['\x000b', '⣼']
-  - ['\x000c', '⡧']
-  - ['\x000d', '⢘']
-  - ['\x0020', '\x0020']
-flags: {testmode: forward}
-tests:
-  - ['\x00a0', '\x0020']
-table: ru.tbl
-flags: {testmode: bothDirections}
-tests:
-  - ['\x0009', '9']
-  - ['\x0020', '\x0020']
-  - ['\x00a0', 'a']
-flags: {testmode: forward}
-tests:
-  - ['\x000a', '\x0020']
-  - ['\x000c', '\x0020']
-  - ['\x000d', '\x0020']
 table: sa.tbl
 flags: {testmode: bothDirections}
 tests:
@@ -1916,7 +1812,7 @@ tests:
   - ['\x0009', '\x0020']
   - ['\x000a', '\x0020']
   - ['\x000d', '\x0020']
-table: sk.tbl
+table: sk-g1.ctb
 flags: {testmode: bothDirections}
 tests:
   - ['\x0009', '9']
@@ -2074,16 +1970,6 @@ tests:
   - ['\x0020', '\x0020']
 flags: {testmode: forward}
 tests:
-  - ['\x00a0', '\x0020']
-table: vi.tbl
-flags: {testmode: bothDirections}
-tests:
-  - ['\x0020', '\x0020']
-flags: {testmode: forward}
-tests:
-  - ['\x0009', '\x0020']
-  - ['\x000a', '\x0020']
-  - ['\x000d', '\x0020']
   - ['\x00a0', '\x0020']
 table: zh_CHN.tbl
 flags: {testmode: bothDirections}

@@ -30,29 +30,33 @@
 
 #include <memory>
 
+#include "base/command_line.h"
+#include "base/no_destructor.h"
 #include "base/strings/pattern.h"
+#include "base/strings/string_split.h"
+#include "base/synchronization/lock.h"
+#include "build/build_config.h"
 #include "services/network/public/cpp/cors/origin_access_list.h"
 #include "services/network/public/mojom/referrer_policy.mojom-blink.h"
+#include "third_party/blink/public/common/loader/referrer_utils.h"
+#include "third_party/blink/public/common/switches.h"
 #include "third_party/blink/public/platform/web_string.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/parsing_utilities.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 #include "url/gurl.h"
 
 namespace blink {
 
-static Mutex& GetMutex() {
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(Mutex, mutex, ());
-  return mutex;
+static base::Lock& GetLock() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(base::Lock, lock, ());
+  return lock;
 }
 
 static network::cors::OriginAccessList& GetOriginAccessList() {
@@ -61,39 +65,12 @@ static network::cors::OriginAccessList& GetOriginAccessList() {
   return origin_access_list;
 }
 
-using OriginSet = HashSet<String>;
-
-static OriginSet& TrustworthyOriginSafelist() {
-  DEFINE_STATIC_LOCAL(OriginSet, safelist, ());
-  return safelist;
-}
-
 #if defined(OPERA_DESKTOP)
-static OriginSet& FirstPartyForSubframes() {
-  DEFINE_STATIC_LOCAL(OriginSet, first_party_for_subframes, ());
+static HashSet<String>& FirstPartyForSubframes() {
+  DEFINE_STATIC_LOCAL(HashSet<String>, first_party_for_subframes, ());
   return first_party_for_subframes;
 }
 #endif  // OPERA_DESKTOP
-
-network::mojom::ReferrerPolicy ReferrerPolicyResolveDefault(
-    network::mojom::ReferrerPolicy referrer_policy) {
-  if (referrer_policy == network::mojom::ReferrerPolicy::kDefault) {
-    if (RuntimeEnabledFeatures::ReducedReferrerGranularityEnabled()) {
-      return network::mojom::ReferrerPolicy::kStrictOriginWhenCrossOrigin;
-    } else {
-      return network::mojom::ReferrerPolicy::kNoReferrerWhenDowngrade;
-    }
-  }
-
-  return referrer_policy;
-}
-
-void SecurityPolicy::Init() {
-  TrustworthyOriginSafelist();
-#if defined(OPERA_DESKTOP)
-  FirstPartyForSubframes();
-#endif  // OPERA_DESKTOP
-}
 
 bool SecurityPolicy::ShouldHideReferrer(const KURL& url, const KURL& referrer) {
   bool referrer_is_secure_url = referrer.ProtocolIs("https");
@@ -117,17 +94,15 @@ Referrer SecurityPolicy::GenerateReferrer(
     const KURL& url,
     const String& referrer) {
   network::mojom::ReferrerPolicy referrer_policy_no_default =
-      ReferrerPolicyResolveDefault(referrer_policy);
-  if (referrer == Referrer::NoReferrer())
+      ReferrerUtils::MojoReferrerPolicyResolveDefault(referrer_policy);
+  // Empty (a possible input) and default (the value of `Referrer::NoReferrer`)
+  // strings are not equivalent.
+  if (referrer == Referrer::NoReferrer() || referrer.IsEmpty())
     return Referrer(Referrer::NoReferrer(), referrer_policy_no_default);
-  DCHECK(!referrer.IsEmpty());
 
   KURL referrer_url = KURL(NullURL(), referrer).UrlStrippedForUseAsReferrer();
 
   if (!referrer_url.IsValid())
-    return Referrer(Referrer::NoReferrer(), referrer_policy_no_default);
-
-  if (SecurityOrigin::ShouldUseInnerURL(url))
     return Referrer(Referrer::NoReferrer(), referrer_policy_no_default);
 
   // 5. Let referrerOrigin be the result of stripping referrerSource for use as
@@ -188,53 +163,10 @@ Referrer SecurityPolicy::GenerateReferrer(
                   referrer_policy_no_default);
 }
 
-void SecurityPolicy::AddOriginToTrustworthySafelist(
-    const String& origin_or_pattern) {
-#if DCHECK_IS_ON()
-  // Must be called before we start other threads.
-  DCHECK(WTF::IsBeforeThreadCreated());
-#endif
-  // Origins and hostname patterns must be canonicalized (including
-  // canonicalization to 8-bit strings) before being inserted into
-  // TrustworthyOriginSafelist().
-  CHECK(origin_or_pattern.Is8Bit());
-  TrustworthyOriginSafelist().insert(origin_or_pattern);
-}
-
-bool SecurityPolicy::IsOriginTrustworthySafelisted(
-    const SecurityOrigin& origin) {
-  // Early return if |origin| cannot possibly be matched.
-  if (origin.IsOpaque() || TrustworthyOriginSafelist().IsEmpty())
-    return false;
-
-  if (TrustworthyOriginSafelist().Contains(origin.ToRawString()))
-    return true;
-
-  // KURL and SecurityOrigin hosts should be canonicalized to 8-bit strings.
-  CHECK(origin.Host().Is8Bit());
-  StringUTF8Adaptor host_adaptor(origin.Host());
-  for (const auto& origin_or_pattern : TrustworthyOriginSafelist()) {
-    StringUTF8Adaptor origin_or_pattern_adaptor(origin_or_pattern);
-    if (base::MatchPattern(host_adaptor.AsStringPiece(),
-                           origin_or_pattern_adaptor.AsStringPiece())) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-bool SecurityPolicy::IsUrlTrustworthySafelisted(const KURL& url) {
-  // Early return to avoid initializing the SecurityOrigin.
-  if (TrustworthyOriginSafelist().IsEmpty())
-    return false;
-  return IsOriginTrustworthySafelisted(*SecurityOrigin::Create(url).get());
-}
-
 bool SecurityPolicy::IsOriginAccessAllowed(
     const SecurityOrigin* active_origin,
     const SecurityOrigin* target_origin) {
-  MutexLocker lock(GetMutex());
+  base::AutoLock locker(GetLock());
   return GetOriginAccessList().CheckAccessState(
              active_origin->ToUrlOrigin(),
              target_origin->ToUrlOrigin().GetURL()) ==
@@ -244,9 +176,9 @@ bool SecurityPolicy::IsOriginAccessAllowed(
 bool SecurityPolicy::IsOriginAccessToURLAllowed(
     const SecurityOrigin* active_origin,
     const KURL& url) {
-  MutexLocker lock(GetMutex());
+  base::AutoLock locker(GetLock());
   return GetOriginAccessList().CheckAccessState(active_origin->ToUrlOrigin(),
-                                                url) ==
+                                                GURL(url)) ==
          network::cors::OriginAccessList::AccessState::kAllowed;
 }
 
@@ -258,7 +190,7 @@ void SecurityPolicy::AddOriginAccessAllowListEntry(
     const network::mojom::CorsDomainMatchMode domain_match_mode,
     const network::mojom::CorsPortMatchMode port_match_mode,
     const network::mojom::CorsOriginAccessMatchPriority priority) {
-  MutexLocker lock(GetMutex());
+  base::AutoLock locker(GetLock());
   GetOriginAccessList().AddAllowListEntryForOrigin(
       source_origin.ToUrlOrigin(), destination_protocol.Utf8(),
       destination_domain.Utf8(), port, domain_match_mode, port_match_mode,
@@ -273,7 +205,7 @@ void SecurityPolicy::AddOriginAccessBlockListEntry(
     const network::mojom::CorsDomainMatchMode domain_match_mode,
     const network::mojom::CorsPortMatchMode port_match_mode,
     const network::mojom::CorsOriginAccessMatchPriority priority) {
-  MutexLocker lock(GetMutex());
+  base::AutoLock locker(GetLock());
   GetOriginAccessList().AddBlockListEntryForOrigin(
       source_origin.ToUrlOrigin(), destination_protocol.Utf8(),
       destination_domain.Utf8(), port, domain_match_mode, port_match_mode,
@@ -282,12 +214,12 @@ void SecurityPolicy::AddOriginAccessBlockListEntry(
 
 void SecurityPolicy::ClearOriginAccessListForOrigin(
     const SecurityOrigin& source_origin) {
-  MutexLocker lock(GetMutex());
+  base::AutoLock locker(GetLock());
   GetOriginAccessList().ClearForOrigin(source_origin.ToUrlOrigin());
 }
 
 void SecurityPolicy::ClearOriginAccessList() {
-  MutexLocker lock(GetMutex());
+  base::AutoLock locker(GetLock());
   GetOriginAccessList().Clear();
 }
 
@@ -332,9 +264,13 @@ bool SecurityPolicy::ReferrerPolicyFromString(
     *result = network::mojom::ReferrerPolicy::kStrictOriginWhenCrossOrigin;
     return true;
   }
-  if (EqualIgnoringASCIICase(policy, "no-referrer-when-downgrade") ||
-      (support_legacy_keywords && EqualIgnoringASCIICase(policy, "default"))) {
+  if (EqualIgnoringASCIICase(policy, "no-referrer-when-downgrade")) {
     *result = network::mojom::ReferrerPolicy::kNoReferrerWhenDowngrade;
+    return true;
+  }
+  if (support_legacy_keywords && EqualIgnoringASCIICase(policy, "default")) {
+    *result = ReferrerUtils::NetToMojoReferrerPolicy(
+        ReferrerUtils::GetDefaultNetReferrerPolicy());
     return true;
   }
   return false;
@@ -381,6 +317,47 @@ bool SecurityPolicy::ReferrerPolicyFromHeaderValue(
 
   *result = referrer_policy;
   return true;
+}
+
+#if BUILDFLAG(IS_FUCHSIA)
+namespace {
+std::vector<url::Origin> GetSharedArrayBufferOrigins() {
+  std::string switch_value =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kSharedArrayBufferAllowedOrigins);
+  std::vector<std::string> list =
+      SplitString(switch_value, ",", base::WhitespaceHandling::TRIM_WHITESPACE,
+                  base::SplitResult::SPLIT_WANT_NONEMPTY);
+  std::vector<url::Origin> result;
+  for (auto& origin : list) {
+    GURL url(origin);
+    if (!url.is_valid() || url.scheme() != url::kHttpsScheme) {
+      LOG(FATAL) << "Invalid --" << switches::kSharedArrayBufferAllowedOrigins
+                 << " specified: " << switch_value;
+    }
+    result.push_back(url::Origin::Create(url));
+  }
+  return result;
+}
+}  // namespace
+#endif  // BUILDFLAG(IS_FUCHSIA)
+
+// static
+bool SecurityPolicy::IsSharedArrayBufferAlwaysAllowedForOrigin(
+    const SecurityOrigin* security_origin) {
+#if BUILDFLAG(IS_FUCHSIA)
+  static base::NoDestructor<std::vector<url::Origin>> allowed_origins(
+      GetSharedArrayBufferOrigins());
+  url::Origin origin = security_origin->ToUrlOrigin();
+  for (const url::Origin& allowed_origin : *allowed_origins) {
+    if (origin.scheme() == allowed_origin.scheme() &&
+        origin.DomainIs(allowed_origin.host()) &&
+        origin.port() == allowed_origin.port()) {
+      return true;
+    }
+  }
+#endif
+  return false;
 }
 
 #if defined(OPERA_DESKTOP)

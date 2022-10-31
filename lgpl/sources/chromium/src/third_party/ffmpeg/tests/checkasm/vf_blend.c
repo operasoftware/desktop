@@ -20,7 +20,7 @@
 
 #include <string.h>
 #include "checkasm.h"
-#include "libavfilter/blend.h"
+#include "libavfilter/vf_blend_init.h"
 #include "libavutil/common.h"
 #include "libavutil/internal.h"
 #include "libavutil/intreadwrite.h"
@@ -99,7 +99,7 @@ void checkasm_check_blend(void)
 
 #define check_and_report(name, val, depth)        \
     param.mode = val;                             \
-    ff_blend_init(&param, depth - 1);             \
+    ff_blend_init(&param, depth * 8);             \
     if (check_func(param.blend, #name))           \
         check_blend_func(depth);
 

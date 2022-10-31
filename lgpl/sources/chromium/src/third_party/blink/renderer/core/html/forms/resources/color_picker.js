@@ -4,6 +4,8 @@
 
 /**
  * @fileoverview Color picker used by <input type='color' />
+ *
+ * This can be debugged with manual_tests/forms/color-suggestion-picker.html
  */
 
 function initializeColorPicker() {
@@ -433,10 +435,11 @@ class ColorPicker extends HTMLElement {
 
     this.visualColorPicker_ = new VisualColorPicker(initialColor);
     this.manualColorPicker_ = new ManualColorPicker(initialColor);
+    this.systemColorPicker_ = new SystemColorPicker();
     this.colorValueAXAnnouncer_ = new ColorValueAXAnnouncer();
     this.append(
         this.visualColorPicker_, this.manualColorPicker_,
-        this.colorValueAXAnnouncer_);
+        this.systemColorPicker_, this.colorValueAXAnnouncer_);
 
     this.visualColorPicker_.addEventListener(
         'visual-color-picker-initialized', this.initializeListeners_);
@@ -477,19 +480,7 @@ class ColorPicker extends HTMLElement {
     const newColor = event.detail.color;
     if (!this.selectedColor.equals(newColor)) {
       this.selectedColor = newColor;
-
-      // There may not be an exact match for newColor in the HueSlider or
-      // ColorWell, in which case we will display the closest match. When this
-      // happens though, we want the manually chosen values to remain the
-      // selected values (as they were explicitly specified by the user).
-      // Therefore, we need to prevent them from getting overwritten when
-      // onVisualColorChange_ runs. We do this by setting the
-      // processingManualColorChange_ flag here and checking for it inside
-      // onVisualColorChange_. If the flag is set, the manual color values
-      // will not be updated with the color shown in the visual color picker.
-      this.processingManualColorChange_ = true;
-      this.visualColorPicker_.color = newColor;
-      this.processingManualColorChange_ = false;
+      this.updateVisualColorPicker(newColor);
 
       const selectedValue = newColor.asHex();
       window.pagePopupController.setValue(selectedValue);
@@ -517,6 +508,25 @@ class ColorPicker extends HTMLElement {
       }
     }
   };
+
+  /**
+   * @param {!Color} newColor
+   */
+  updateVisualColorPicker(newColor) {
+    // There may not be an exact match for newColor in the HueSlider or
+    // ColorWell, in which case we will display the closest match. When this
+    // happens though, we want the manually chosen values to remain the
+    // selected values (as they were explicitly specified by the user).
+    // Therefore, we need to prevent them from getting overwritten when
+    // onVisualColorChange_ runs. We do this by setting the
+    // processingManualColorChange_ flag here and checking for it inside
+    // onVisualColorChange_. If the flag is set, the manual color values
+    // will not be updated with the color shown in the visual color picker.
+    this.processingManualColorChange_ = true;
+    this.visualColorPicker_.color = newColor;
+    this.processingManualColorChange_ = false;
+  }
+
 
   /**
    * @param {!Event} event
@@ -595,7 +605,7 @@ class ColorPicker extends HTMLElement {
       const selectedValue = new Color(window.updateData.color);
       this.selectedColor = selectedValue;
       this.manualColorPicker_.color = selectedValue;
-      this.visualColorPicker_.color = selectedValue;
+      this.updateVisualColorPicker(selectedValue);
 
       const hexValue = selectedValue.asHex();
       window.pagePopupController.setValue(hexValue);
@@ -706,7 +716,7 @@ class VisualColorPicker extends HTMLElement {
    * @param {!Event} event
    */
   onMouseMove_ = (event) => {
-    var point = new Point(event.clientX, event.clientY);
+    const point = new Point(event.clientX, event.clientY);
     this.colorWell_.pointerMove(point);
     this.hueSlider_.pointerMove(point);
   }
@@ -745,7 +755,7 @@ class VisualColorPicker extends HTMLElement {
    * @param {!Event} event
    */
   onTouchMove_ = (event) => {
-    var point = new Point(Math.round(event.touches[0].clientX), Math.round(event.touches[0].clientY));
+    const point = new Point(Math.round(event.touches[0].clientX), Math.round(event.touches[0].clientY));
     this.colorWell_.pointerMove(point);
     this.hueSlider_.pointerMove(point);
   }
@@ -811,6 +821,8 @@ class EyeDropper extends HTMLElement {
     }
 
     this.setAttribute('tabIndex', 0);
+    this.setAttribute('role', 'button');
+    this.setAttribute('aria-label', global.params.axEyedropperLabel);
     this.addEventListener('click', this.onClick_);
     this.addEventListener('keydown', this.onKeyDown_);
   }
@@ -1778,6 +1790,7 @@ class ChannelValueContainer extends HTMLInputElement {
 
     this.addEventListener('input', this.onValueChange_);
     this.addEventListener('blur', this.onBlur_);
+    this.addEventListener('focus', this.onFocus_);
   }
 
   get channelValue() {
@@ -1840,13 +1853,12 @@ class ChannelValueContainer extends HTMLInputElement {
     if (value) {
       switch (this.colorChannel_) {
         case ColorChannel.HEX:
-          if (value.startsWith('#')) {
+          if (value.startsWith('#'))
             value = value.substr(1).toLowerCase();
-            if (value.match(/^[0-9a-f]+$/)) {
-              // Ex. 'ffffff' => this.channelValue_ == 'ffffff'
-              // Ex. 'ff' => this.channelValue_ == '0000ff'
-              this.channelValue_ = ('000000' + value).slice(-6);
-            }
+          if (value.match(/^[0-9a-f]+$/)) {
+            // Ex. 'ffffff' => this.channelValue_ == 'ffffff'
+            // Ex. 'ff' => this.channelValue_ == '0000ff'
+            this.channelValue_ = ('000000' + value).slice(-6);
           }
           break;
         case ColorChannel.R:
@@ -1863,11 +1875,10 @@ class ChannelValueContainer extends HTMLInputElement {
           break;
         case ColorChannel.S:
         case ColorChannel.L:
-          if (value.endsWith('%')) {
+          if (value.endsWith('%'))
             value = value.substring(0, value.length - 1);
-            if (value.match(/^\d+$/) && (0 <= value) && (value <= 100)) {
-              this.channelValue_ = Number(value);
-            }
+          if (value.match(/^\d+$/) && (0 <= value) && (value <= 100)) {
+            this.channelValue_ = Number(value);
           }
           break;
       }
@@ -1897,6 +1908,10 @@ class ChannelValueContainer extends HTMLInputElement {
         }
         break;
     }
+  }
+
+  onFocus_ = () => {
+    this.select();
   }
 }
 window.customElements.define(
@@ -2169,3 +2184,40 @@ class ColorValueAXAnnouncer extends HTMLElement {
   static announcementDelayMS = 500;
 }
 window.customElements.define('color-value-ax-announcer', ColorValueAXAnnouncer);
+
+class SystemColorPicker extends HTMLElement {
+  constructor() {
+    super();
+    if (!global.params.isSystemColorChooserEnabled) {
+      this.classList.add('hidden');
+      return;
+    }
+    this.setAttribute('tabIndex', 0);
+    this.setAttribute('role', 'button');
+    this.textContent = global.params.systemColorChooserLabel;
+    this.setAttribute('aria-label', global.params.systemColorChooserLabel);
+    this.addEventListener('click', this.onClick_);
+    this.addEventListener('keydown', this.onKeyDown_);
+  }
+
+  onClick_ = () => {
+    this.classList.add('selected');
+    window.pagePopupController.openSystemColorChooser();
+  };
+
+  /**
+   * @param {!Event} event
+   */
+  onKeyDown_ = (event) => {
+    switch (event.key) {
+      case 'Enter':
+        this.onClick_();
+        break;
+    }
+  };
+
+  finished = () => {
+    this.classList.remove('selected');
+  }
+}
+window.customElements.define('system-color-picker', SystemColorPicker);

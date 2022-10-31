@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 GEN('#include "content/public/test/browser_test.h"');
-GEN('#include "services/network/public/cpp/features.h"');
 
 var TabStripBrowserTest = class extends testing.Test {
   get isAsync() {
@@ -11,35 +10,19 @@ var TabStripBrowserTest = class extends testing.Test {
   }
 
   get webuiHost() {
-    return 'tab-strip';
-  }
-
-  get extraLibraries() {
-    return [
-      '//third_party/mocha/mocha.js',
-      '//chrome/test/data/webui/mocha_adapter.js',
-    ];
-  }
-
-  /** @override */
-  get featureList() {
-    return {enabled: ['network::features::kOutOfBlinkCors']};
+    return 'tab-strip.top-chrome';
   }
 };
 
 var TabStripTabListTest = class extends TabStripBrowserTest {
   get browsePreload() {
-    return 'chrome://tab-strip/test_loader.html?module=tab_strip/tab_list_test.js';
+    return 'chrome://tab-strip.top-chrome/test_loader.html?module=tab_strip/tab_list_test.js';
   }
 };
 
-TEST_F('TabStripTabListTest', 'All', function() {
-  mocha.run();
-});
-
 var TabStripTabTest = class extends TabStripBrowserTest {
   get browsePreload() {
-    return 'chrome://tab-strip/test_loader.html?module=tab_strip/tab_test.js';
+    return 'chrome://tab-strip.top-chrome/test_loader.html?module=tab_strip/tab_test.js';
   }
 };
 
@@ -49,7 +32,7 @@ TEST_F('TabStripTabTest', 'All', function() {
 
 var TabStripAlertIndicatorsTest = class extends TabStripBrowserTest {
   get browsePreload() {
-    return 'chrome://tab-strip/test_loader.html?module=tab_strip/alert_indicators_test.js';
+    return 'chrome://tab-strip.top-chrome/test_loader.html?module=tab_strip/alert_indicators_test.js';
   }
 };
 
@@ -59,7 +42,7 @@ TEST_F('TabStripAlertIndicatorsTest', 'All', function() {
 
 var TabStripAlertIndicatorTest = class extends TabStripBrowserTest {
   get browsePreload() {
-    return 'chrome://tab-strip/test_loader.html?module=tab_strip/alert_indicator_test.js';
+    return 'chrome://tab-strip.top-chrome/test_loader.html?module=tab_strip/alert_indicator_test.js';
   }
 };
 
@@ -69,7 +52,7 @@ TEST_F('TabStripAlertIndicatorTest', 'All', function() {
 
 var TabStripTabSwiperTest = class extends TabStripBrowserTest {
   get browsePreload() {
-    return 'chrome://tab-strip/test_loader.html?module=tab_strip/tab_swiper_test.js';
+    return 'chrome://tab-strip.top-chrome/test_loader.html?module=tab_strip/tab_swiper_test.js';
   }
 };
 
@@ -79,7 +62,7 @@ TEST_F('TabStripTabSwiperTest', 'All', function() {
 
 var TabStripTabGroupTest = class extends TabStripBrowserTest {
   get browsePreload() {
-    return 'chrome://tab-strip/test_loader.html?module=tab_strip/tab_group_test.js';
+    return 'chrome://tab-strip.top-chrome/test_loader.html?module=tab_strip/tab_group_test.js';
   }
 };
 
@@ -89,7 +72,7 @@ TEST_F('TabStripTabGroupTest', 'All', function() {
 
 var TabStripDragManagerTest = class extends TabStripBrowserTest {
   get browsePreload() {
-    return 'chrome://tab-strip/test_loader.html?module=tab_strip/drag_manager_test.js';
+    return 'chrome://tab-strip.top-chrome/test_loader.html?module=tab_strip/drag_manager_test.js';
   }
 };
 

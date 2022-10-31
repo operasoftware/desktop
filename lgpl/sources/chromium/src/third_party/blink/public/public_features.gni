@@ -3,22 +3,15 @@
 # found in the LICENSE file.
 
 import("//build/config/ui.gni")
+import("//build/config/opera_desktop.gni")
+import("//build/config/product.gni")
 
 declare_args() {
-  # Enables additional Oilpan heap verification instrumentation.
-  enable_blink_heap_verification = false
+  # If true, adds support for JPEG XL image decoding.
+  enable_jxl_decoder = !is_ios
 
-  # Enables young generation collections in Oilpan.
-  enable_blink_heap_young_generation = false
-}
-
-declare_args() {
-  # If enable_additional_blink_object_names is set to true, then blink provides
-  # additional debug names of blink-internal (i.e. oilpan) object names at the
-  # cost of additional memory. Many of these objects only show up in heap
-  # snapshots if the parameter `treatGlobalObjectsAsRoots` of `takeHeapSnapshot`
-  # is set.
-  enable_additional_blink_object_names = enable_blink_heap_verification
+  # If true adds tracker reporting scripts using web3 object
+  opera_blink_feature_script_tracker = product == "crypto"
 }
 
 # Unhandled Tap enable means Contextual Search aka Touch to Search.
@@ -27,4 +20,4 @@ declare_args() {
 enable_unhandled_tap = is_android
 
 # Use Minikin hyphenation engine.
-use_minikin_hyphenation = is_android
+use_minikin_hyphenation = !is_mac && !opera_desktop

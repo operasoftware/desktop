@@ -30,20 +30,23 @@
 
 namespace blink {
 
-class IntRect;
-
 class LayoutVTTCue final : public LayoutBlockFlow {
  public:
   LayoutVTTCue(ContainerNode*, float snap_to_lines_position);
 
   // The computed line position for snap-to-lines layout, and NaN for
   // non-snap-to-lines layout where no adjustment should take place.
-  float SnapToLinesPosition() { return snap_to_lines_position_; }
+  float SnapToLinesPosition() {
+    NOT_DESTROYED();
+    return snap_to_lines_position_;
+  }
+
+  static gfx::Rect ComputeControlsRect(const LayoutObject& container);
 
  private:
   void UpdateLayout() override;
 
-  IntRect ComputeControlsRect() const;
+  gfx::Rect ComputeControlsRect() const;
   void RepositionCueSnapToLinesNotSet();
 
   float snap_to_lines_position_;

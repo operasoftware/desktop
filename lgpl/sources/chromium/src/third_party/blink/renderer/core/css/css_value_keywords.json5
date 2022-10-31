@@ -1,7 +1,8 @@
 {
   // The mode argument is used to limit the keyword to be used only for certain
   // CSSParserModes. Values that have the prefix -internal- are only allowed by
-  // CSSParserModes listed in allowInternalPropertyAndValue()
+  // CSSParserModes listed in CSSValueKeywordsWriter, which feeds the generated
+  // code for isValueAllowedInMode.
 
   parameters: {
     mode: {},
@@ -102,12 +103,18 @@
     "slashed-zero",
 
     //
-    // font-weigth
+    // font-weight
     //
     "normal",
     "bold",
     "bolder",
     "lighter",
+
+    // font-synthesis
+    // none
+    // style
+    // small-caps
+    "weight",
 
     //
     // font-stretch
@@ -135,16 +142,22 @@
     "smaller",
     "larger",
     "-webkit-xxx-large",
+    // math
 
     //
     // font-family (<generic-family> in CSS 2.1)
     //
+    // If you modify this list, please make sure you update css_parsing_utils's
+    // ConsumeGenericFamily, ComputedStyleUtils::IdentifierForFamily and
+    // FontFamily::InferredTypeFor accordingly.
     "serif",
     "sans-serif",
     "cursive",
     "fantasy",
     "monospace",
+    "system-ui",
     "-webkit-body",
+    "math",
 
     //
     // font-display
@@ -155,7 +168,6 @@
     "fallback",
     "optional",
 
-    //
     //
     // *-color
     //
@@ -184,6 +196,7 @@
     "activetext",
     "appworkspace",
     "background",
+    "buttonborder",
     "buttonface",
     "buttonhighlight",
     "buttonshadow",
@@ -202,7 +215,11 @@
     "infobackground",
     "infotext",
     "linktext",
+    "mark",
+    "marktext",
     "menutext",
+    "selecteditem",
+    "selecteditemtext",
     "scrollbar",
     "threeddarkshadow",
     "threedface",
@@ -227,6 +244,146 @@
     // Value used to implement the behavior in:
     // https://quirks.spec.whatwg.org/#the-tables-inherit-color-from-body-quirk
     "-internal-quirk-inherit",
+    //
+    // css-text-decor
+    // <https://github.com/w3c/csswg-drafts/issues/7522>
+    "-internal-spelling-error-color",
+    "-internal-grammar-error-color",
+
+    //
+    // "Extended" named colors
+    //
+    "aliceblue",
+    "antiquewhite",
+    "aquamarine",
+    "azure",
+    "beige",
+    "bisque",
+    "blanchedalmond",
+    "blueviolet",
+    "brown",
+    "burlywood",
+    "cadetblue",
+    "chartreuse",
+    "chocolate",
+    "coral",
+    "cornflowerblue",
+    "cornsilk",
+    "crimson",
+    "cyan",
+    "darkblue",
+    "darkcyan",
+    "darkgoldenrod",
+    "darkgray",
+    "darkgreen",
+    "darkgrey",
+    "darkkhaki",
+    "darkmagenta",
+    "darkolivegreen",
+    "darkorange",
+    "darkorchid",
+    "darkred",
+    "darksalmon",
+    "darkseagreen",
+    "darkslateblue",
+    "darkslategray",
+    "darkslategrey",
+    "darkturquoise",
+    "darkviolet",
+    "deeppink",
+    "deepskyblue",
+    "dimgray",
+    "dimgrey",
+    "dodgerblue",
+    "firebrick",
+    "floralwhite",
+    "forestgreen",
+    "gainsboro",
+    "ghostwhite",
+    "gold",
+    "goldenrod",
+    "greenyellow",
+    "honeydew",
+    "hotpink",
+    "indianred",
+    "indigo",
+    "ivory",
+    "khaki",
+    "lavender",
+    "lavenderblush",
+    "lawngreen",
+    "lemonchiffon",
+    "lightblue",
+    "lightcoral",
+    "lightcyan",
+    "lightgoldenrodyellow",
+    "lightgray",
+    "lightgreen",
+    "lightgrey",
+    "lightpink",
+    "lightsalmon",
+    "lightseagreen",
+    "lightskyblue",
+    "lightslategray",
+    "lightslategrey",
+    "lightsteelblue",
+    "lightyellow",
+    "limegreen",
+    "linen",
+    "magenta",
+    "mediumaquamarine",
+    "mediumblue",
+    "mediumorchid",
+    "mediumpurple",
+    "mediumseagreen",
+    "mediumslateblue",
+    "mediumspringgreen",
+    "mediumturquoise",
+    "mediumvioletred",
+    "midnightblue",
+    "mintcream",
+    "mistyrose",
+    "moccasin",
+    "navajowhite",
+    "oldlace",
+    "olivedrab",
+    "orangered",
+    "orchid",
+    "palegoldenrod",
+    "palegreen",
+    "paleturquoise",
+    "palevioletred",
+    "papayawhip",
+    "peachpuff",
+    "peru",
+    "pink",
+    "plum",
+    "powderblue",
+    "rebeccapurple",
+    "rosybrown",
+    "royalblue",
+    "saddlebrown",
+    "salmon",
+    "sandybrown",
+    "seagreen",
+    "seashell",
+    "sienna",
+    "skyblue",
+    "slateblue",
+    "slategray",
+    "slategrey",
+    "snow",
+    "springgreen",
+    "steelblue",
+    "tan",
+    "thistle",
+    "tomato",
+    "turquoise",
+    "violet",
+    "wheat",
+    "whitesmoke",
+    "yellowgreen",
+
     //
     // background-repeat
     //
@@ -267,13 +424,12 @@
     "-webkit-baseline-middle",
     //
     // text-align
-    // The order of this enum must match the order found in CSSParserFastPaths::IsValidKeywordPropertyAndValue().
+    // The order and contents this block MUST match the kTextAlign[Last] cases
+    // of CSSParserFastPaths::IsValidKeywordPropertyAndValue().
     //
     "-webkit-auto",
     "left",
     "right",
-    "inline-start",
-    "inline-end",
     "center",
     "justify",
     "-webkit-left",
@@ -281,6 +437,11 @@
     "-webkit-center",
     "-webkit-match-parent",
     "-internal-center",
+    //
+    // float, clear, etc.
+    //
+    "inline-start",
+    "inline-end",
     //
     // text-justify
     //
@@ -295,75 +456,28 @@
     "inside",
     //
     // list-style-type
-    // The order of this enum must match the order found in CSSParserFastPaths::IsValidKeywordPropertyAndValue().
     //
     "disc",
     "circle",
     "square",
+    "disclosure-open",
+    "disclosure-closed",
     "decimal",
-    "decimal-leading-zero",
-    "arabic-indic",
-    "bengali",
-    "cambodian",
-    "khmer",
-    "devanagari",
-    "gujarati",
-    "gurmukhi",
-    "kannada",
-    "lao",
-    "malayalam",
-    "mongolian",
-    "myanmar",
-    "oriya",
-    "persian",
-    "urdu",
-    "telugu",
-    "tibetan",
-    "thai",
-    "lower-roman",
-    "upper-roman",
-    "lower-greek",
-    "lower-alpha",
-    "lower-latin",
-    "upper-alpha",
-    "upper-latin",
-    "cjk-earthly-branch",
-    "cjk-heavenly-stem",
-    "ethiopic-halehame",
-    "ethiopic-halehame-am",
-    "ethiopic-halehame-ti-er",
-    "ethiopic-halehame-ti-et",
-    "hangul",
-    "hangul-consonant",
-    "korean-hangul-formal",
-    "korean-hanja-formal",
-    "korean-hanja-informal",
-    "hebrew",
-    "armenian",
-    "lower-armenian",
-    "upper-armenian",
-    "georgian",
-    "cjk-ideographic",
-    "simp-chinese-formal",
-    "simp-chinese-informal",
-    "trad-chinese-formal",
-    "trad-chinese-informal",
-    "hiragana",
-    "katakana",
-    "hiragana-iroha",
-    "katakana-iroha",
     //none
     //
-    // display
-    // The order of this enum must match the order found in CSSParserFastPaths::IsValidKeywordPropertyAndValue().
-    //
+    // The order must match the order found in IsDisplayOutside().
     "inline",
     "block",
+    // The order must match the order found in IsDisplayInside().
     "flow-root",
-    "list-item",
-    "inline-block",
     "table",
-    "inline-table",
+    "flex",
+    "grid",
+    //"math",
+    // The order must match the order found in IsDisplayBox().
+    "contents",
+    //none
+    // The order must match the order found in IsDisplayInternal().
     "table-row-group",
     "table-header-group",
     "table-footer-group",
@@ -372,20 +486,18 @@
     "table-column",
     "table-cell",
     "table-caption",
+    // The order must match the order found in IsDisplayLegacy().
+    "inline-block",
+    "inline-table",
+    "inline-flex",
+    "inline-grid",
     "-webkit-box",
     "-webkit-inline-box",
-    "flex",
-    "inline-flex",
-    "grid",
-    "inline-grid",
-    "math",
-    "inline-math",
-    "contents",
-    //none
     "-webkit-flex",
     "-webkit-inline-flex",
     "layout",
     "inline-layout",
+    "list-item",
     //
     // cursor
     // The order of this enum must match the order found in CSSPropertyParser::ConsumeCursor().
@@ -506,11 +618,13 @@
     "wavy",
     "-webkit-nowrap",
 
-    //
+    // math-shift
+    // normal
+    "compact",
+
     // math-style
-    //
-    // inline
-    "display",
+    // normal
+    // compact
 
     // CSS3 Values
     // box-align
@@ -617,6 +731,12 @@
     //
     "clip",
     "ellipsis",
+
+    //
+    // text-decoration-line
+    //
+    "spelling-error",
+    "grammar-error",
 
     //
     // text-decoration-skip-ink
@@ -791,7 +911,6 @@
     //
     "document",
     "reset",
-    "-internal-reset-effective",
 
     //
     // user-zoom
@@ -862,7 +981,7 @@
     "after",
     "before",
 
-    // -webkit-text-emphasis-position
+    // text-emphasis-position
     "over",
     "under",
     //right
@@ -923,10 +1042,12 @@
     "alphabetic",
 
     // (display-mode:) media feature
+    "borderless",
     "fullscreen",
     "standalone",
     "minimal-ui",
     "browser",
+    "window-controls-overlay",
 
     // position
     "sticky",
@@ -974,10 +1095,11 @@
 
     // grid-template-{columns|rows}
     "minmax",
+    "subgrid",
 
     // text-indent
     "each-line",
-    //hanging   // hanging exists in SVGCSSValueKeywords.in
+    "hanging",
 
     // (scan:) media feature
     "progressive",
@@ -990,6 +1112,53 @@
     // fill
     // stroke
     "markers",
+
+    // mask-type
+    "alpha",
+    "luminance",
+
+    // color-interpolation / color-interpolation-filters
+    // auto
+    "srgb",
+    "linearrgb",
+
+    // stroke-linecap
+    "butt",
+    // round
+    // square
+
+    // stroke-linejoin
+    "miter",
+    // round
+    "bevel",
+
+    // alignment-baseline
+    // auto
+    // baseline
+    "before-edge",
+    "after-edge",
+    // middle
+    "central",
+    "text-before-edge",
+    "text-after-edge",
+    "ideographic",
+    // hanging
+    "mathematical",
+
+    // dominant-baseline
+    // auto
+    "use-script",
+    "no-change",
+    "reset-size",
+
+    // buffered-rendering
+    // auto
+    // static
+    "dynamic",
+
+    // vector-effect
+    // none
+    "non-scaling-stroke",
 
     //
     // CSS3 viewport-length keywords
@@ -1044,6 +1213,7 @@
     // initial
     // inherit
     "revert",
+    "revert-layer",
     "unset",
 
     // background-image, etc.
@@ -1100,6 +1270,7 @@
     "rgba",
     "hsl",
     "hsla",
+    "hwb",
     "-internal-light-dark",
 
     // transform
@@ -1143,6 +1314,21 @@
     "max",
     "clamp",
 
+    // Trigonometic functions
+    "sin",
+    "cos",
+    // "tan" - already declared for color value
+    // "atan",
+    // "atan2",
+    // "acos",
+    // "asin",
+
+    //<calc-constant>
+    //https://drafts.csswg.org/css-values/#calc-syntax
+    "infinity",
+    "-infinity",
+    "nan",
+
     // scroll-snap-type
     // none
     // x
@@ -1169,6 +1355,12 @@
     "style",
     // layout
     "size",
+    "block-size",
+    "inline-size",
+
+    // @container
+    "name",
+    "type",
 
     // grid auto-repeat
     "auto-fill",
@@ -1190,9 +1382,9 @@
     "p3",
     "rec2020",
 
-    // math-script-level
+    // math-depth
     "add",
-    "scriptlevel",
+    "auto-add",
 
     // overscroll-behavior
     // auto,
@@ -1231,12 +1423,14 @@
     // none
     "active",
 
+    // forced-color-adjust
+    // auto
+    // none
+    "preserve-parent-color",
+
     // (navigation-controls) media feature
     // none
     "back-button",
-
-    // content-visibility
-    "hidden-matchable",
 
     // -internal-empty-line-height
     // none
@@ -1246,16 +1440,98 @@
     // https://drafts.csswg.org/css-conditional-4/#typedef-supports-selector-fn
     "selector",
 
-    // (screen-spanning) media feature
-    // none
-    "single-fold-vertical",
-    "single-fold-horizontal",
+    // (device-posture) media feature
+    "continuous",
+    "folded",
+    "folded-over",
 
     // scrollbar-gutter
     // auto
     "stable",
-    // always
-    // both
-    "force",
+    "both-edges",
+
+    // (prefers-contrast:) media feature
+    // no-preference
+    "more",
+    "less",
+    "custom",
+
+    // @counter-style system
+    "cyclic",
+    // fixed,
+    "symbolic",
+    // alphabetic,
+    "numeric",
+    "additive",
+    "extends",
+    // Predefined counter styles that don't use the above systems
+    "-internal-simp-chinese-informal",
+    "-internal-simp-chinese-formal",
+    "-internal-trad-chinese-informal",
+    "-internal-trad-chinese-formal",
+    "-internal-korean-hangul-formal",
+    "-internal-korean-hanja-informal",
+    "-internal-korean-hanja-formal",
+    "-internal-hebrew",
+    "-internal-lower-armenian",
+    "-internal-upper-armenian",
+    "-internal-ethiopic-numeric",
+
+    // @counter-style range
+    // infinite,
+
+    // @counter-style speak-as
+    // auto
+    "bullets",
+    "numbers",
+    "words",
+
+    // ([video]-dynamic-range) media feature
+    "standard",
+    "high",
+
+    // Layered @import rule
+    "layer",
+
+    // toggle-root
+    "group",
+    "self",
+    "cycle",
+    "cycle-on",
+
+    // toggle-trigger
+    "prev",
+    "next",
+    "set",
+
+    // color-contrast()
+    "color-contrast",
+    "vs",
+    "AA",
+    "AA-large",
+    "AAA",
+    "AAA-large",
+
+    // basic-shape functions.
+    "xywh",
+
+    // anchor positioning
+    "anchor",
+    // top,
+    // left,
+    // right,
+    // bottom,
+    // start,
+    // end,
+    // self-start,
+    // self-end,
+    // center,
+    "anchor-size",
+    "width",
+    "height",
+    // block,
+    // inline,
+    "self-block",
+    "self-inline",
   ],
 }

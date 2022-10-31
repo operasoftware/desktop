@@ -36,7 +36,7 @@ class SVGElement;
 //   flipped blocks direction in the "containing block".
 class LayoutSVGBlock : public LayoutBlockFlow {
  public:
-  explicit LayoutSVGBlock(SVGElement*);
+  explicit LayoutSVGBlock(ContainerNode*);
 
   // These mapping functions map coordinates in HTML spaces.
   void MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
@@ -45,19 +45,28 @@ class LayoutSVGBlock : public LayoutBlockFlow {
   void MapAncestorToLocal(const LayoutBoxModelObject* ancestor,
                           TransformState&,
                           MapCoordinatesFlags) const final;
-  const LayoutObject* PushMappingToContainer(
-      const LayoutBoxModelObject* ancestor_to_stop_at,
-      LayoutGeometryMap&) const final;
 
-  AffineTransform LocalSVGTransform() const final { return local_transform_; }
-  void SetNeedsTransformUpdate() override { needs_transform_update_ = true; }
+  AffineTransform LocalSVGTransform() const final {
+    NOT_DESTROYED();
+    return local_transform_;
+  }
+  void SetNeedsTransformUpdate() override {
+    NOT_DESTROYED();
+    needs_transform_update_ = true;
+  }
 
-  PaintLayerType LayerTypeRequired() const override { return kNoPaintLayer; }
+  PaintLayerType LayerTypeRequired() const override {
+    NOT_DESTROYED();
+    return kNoPaintLayer;
+  }
 
   SVGElement* GetElement() const;
 
  protected:
   void WillBeDestroyed() override;
+  void InsertedIntoTree() override;
+  void WillBeRemovedFromTree() override;
+
   bool MapToVisualRectInAncestorSpaceInternal(
       const LayoutBoxModelObject* ancestor,
       TransformState&,
@@ -68,12 +77,14 @@ class LayoutSVGBlock : public LayoutBlockFlow {
   bool transform_uses_reference_box_ : 1;
 
   bool IsOfType(LayoutObjectType type) const override {
+    NOT_DESTROYED();
     return type == kLayoutObjectSVG || LayoutBlockFlow::IsOfType(type);
   }
 
   bool CheckForImplicitTransformChange(bool bbox_changed) const;
   bool UpdateTransformAfterLayout(bool bounds_changed);
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
+  void UpdateFromStyle() override;
 
  private:
   // LayoutSVGBlock subclasses should use GetElement() instead.
@@ -81,12 +92,10 @@ class LayoutSVGBlock : public LayoutBlockFlow {
 
   PhysicalRect VisualRectInDocument(VisualRectFlags) const final;
 
-  void UpdateFromStyle() final;
-
   bool NodeAtPoint(HitTestResult&,
                    const HitTestLocation&,
                    const PhysicalOffset& accumulated_offset,
-                   HitTestAction) override;
+                   HitTestPhase) override;
 };
 
 }  // namespace blink

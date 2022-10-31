@@ -21,6 +21,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_PROGRESS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_PROGRESS_H_
 
+#include "base/time/time.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 
@@ -30,10 +31,18 @@ class HTMLProgressElement;
 
 class CORE_EXPORT LayoutProgress : public LayoutBlockFlow {
  public:
-  explicit LayoutProgress(Element* element);
+  explicit LayoutProgress(ContainerNode*);
   ~LayoutProgress() override;
 
-  double GetPosition() const { return position_; }
+  void Trace(Visitor* visitor) const override {
+    visitor->Trace(animation_timer_);
+    LayoutBlockFlow::Trace(visitor);
+  }
+
+  double GetPosition() const {
+    NOT_DESTROYED();
+    return position_;
+  }
   double AnimationProgress() const;
 
   bool IsDeterminate() const;
@@ -41,11 +50,15 @@ class CORE_EXPORT LayoutProgress : public LayoutBlockFlow {
 
   HTMLProgressElement* ProgressElement() const;
 
-  const char* GetName() const override { return "LayoutProgress"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutProgress";
+  }
 
  protected:
   void WillBeDestroyed() override;
   bool IsOfType(LayoutObjectType type) const override {
+    NOT_DESTROYED();
     return type == kLayoutObjectProgress || LayoutBlockFlow::IsOfType(type);
   }
 
@@ -58,15 +71,18 @@ class CORE_EXPORT LayoutProgress : public LayoutBlockFlow {
 
   double position_;
   base::TimeTicks animation_start_time_;
-  base::TimeDelta animation_repeat_interval_;
-  base::TimeDelta animation_duration_;
   bool animating_;
-  TaskRunnerTimer<LayoutProgress> animation_timer_;
+  HeapTaskRunnerTimer<LayoutProgress> animation_timer_;
 
   friend class LayoutProgressTest;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutProgress, IsProgress());
+template <>
+struct DowncastTraits<LayoutProgress> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsProgress();
+  }
+};
 
 }  // namespace blink
 

@@ -5,17 +5,20 @@
 #include "third_party/blink/renderer/core/fetch/bytes_consumer_tee.h"
 
 #include <string.h>
+
 #include <algorithm>
+
 #include "base/memory/scoped_refptr.h"
+#include "base/numerics/safe_conversions.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fetch/blob_bytes_consumer.h"
 #include "third_party/blink/renderer/core/fetch/form_data_bytes_consumer.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_deque.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/loader/fetch/bytes_consumer.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
-#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -24,8 +27,6 @@ namespace {
 
 class NoopClient final : public GarbageCollected<NoopClient>,
                          public BytesConsumer::Client {
-  USING_GARBAGE_COLLECTED_MIXIN(NoopClient);
-
  public:
   void OnStateChange() override {}
   String DebugName() const override { return "NoopClient"; }
@@ -33,8 +34,6 @@ class NoopClient final : public GarbageCollected<NoopClient>,
 
 class TeeHelper final : public GarbageCollected<TeeHelper>,
                         public BytesConsumer::Client {
-  USING_GARBAGE_COLLECTED_MIXIN(TeeHelper);
-
  public:
   TeeHelper(ExecutionContext* execution_context, BytesConsumer* consumer)
       : src_(consumer),
@@ -66,8 +65,8 @@ class TeeHelper final : public GarbageCollected<TeeHelper>,
       }
       Chunk* chunk = nullptr;
       if (result == Result::kOk) {
-        chunk = MakeGarbageCollected<Chunk>(buffer,
-                                            SafeCast<wtf_size_t>(available));
+        chunk = MakeGarbageCollected<Chunk>(
+            buffer, base::checked_cast<wtf_size_t>(available));
         result = src_->EndRead(available);
       }
       switch (result) {

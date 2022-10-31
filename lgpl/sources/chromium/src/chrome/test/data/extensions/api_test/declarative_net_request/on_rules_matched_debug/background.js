@@ -37,6 +37,20 @@ function verifyExpectedRuleInfo(expectedRuleInfo) {
   // The request ID may not be known but should be populated.
   chrome.test.assertTrue(matchedRule.request.hasOwnProperty('requestId'));
   delete matchedRule.request.requestId;
+  chrome.test.assertFalse(matchedRule.request.hasOwnProperty('documentId'));
+
+  // Remove frame/parentFrameId/parentDocumentId if not set in the
+  // expectedRules. The values of these fields vary depending on what type of
+  // extension ContextType is used.
+  if (!('frameId' in expectedRuleInfo.request)) {
+    delete matchedRule.request.frameId;
+  }
+  if (!('parentFrameId' in expectedRuleInfo.request)) {
+    delete matchedRule.request.parentFrameId;
+  }
+  if (!('parentDocumentId' in expectedRuleInfo.request)) {
+    delete matchedRule.request.parentDocumentId;
+  }
 
   chrome.test.assertEq(expectedRuleInfo, matchedRule);
 }
@@ -57,7 +71,6 @@ var tests = [
   function testDynamicRule() {
     resetMatchedRules();
 
-    const ruleIdsToRemove = [];
     const rule = {
       id: 1,
       priority: 1,
@@ -66,7 +79,7 @@ var tests = [
     };
 
     chrome.declarativeNetRequest.updateDynamicRules(
-        ruleIdsToRemove, [rule], function() {
+        {addRules: [rule]}, function() {
           chrome.test.assertNoLastError();
           const url = getServerURL('def.com');
           navigateTab(url, url, (tab) => {
@@ -74,6 +87,8 @@ var tests = [
               request: {
                 initiator: `chrome-extension://${chrome.runtime.id}`,
                 method: 'GET',
+                documentLifecycle: 'active',
+                frameType: 'outermost_frame',
                 frameId: 0,
                 parentFrameId: -1,
                 tabId: tab.id,
@@ -100,6 +115,8 @@ var tests = [
         request: {
           initiator: `chrome-extension://${chrome.runtime.id}`,
           method: 'GET',
+          documentLifecycle: 'active',
+          frameType: 'outermost_frame',
           frameId: 0,
           parentFrameId: -1,
           tabId: tab.id,
@@ -185,6 +202,36 @@ var tests = [
             expectedMatches[i].rulesetId, matchedRules[i].rule.rulesetId);
       }
 
+      chrome.test.succeed();
+    });
+  },
+
+  // Makes sure loads inside sandboxed iframes are considered thirdParty.
+  function testSandboxedFrame() {
+    resetMatchedRules();
+
+    const baseUrl = getServerURL('a.com') +
+          'extensions/api_test/declarative_net_request/on_rules_matched_debug/';
+    const url = baseUrl + 'sandbox_container.html';
+    const innerFrameUrl = baseUrl + 'blocked_frame.html';
+
+    // Initator inside sandbox is opaque.
+    const kOpaqueInitiator = 'null';
+
+    navigateTab(url, url, (tab) => {
+      const expectedRuleInfo = {
+        request: {
+          documentLifecycle: 'active',
+          frameType: 'sub_frame',
+          initiator: kOpaqueInitiator,
+          method: 'GET',
+          type: 'sub_frame',
+          tabId: tab.id,
+          url: innerFrameUrl
+        },
+        rule: {ruleId: 6, rulesetId: 'rules2'}
+      };
+      verifyExpectedRuleInfo(expectedRuleInfo);
       chrome.test.succeed();
     });
   }

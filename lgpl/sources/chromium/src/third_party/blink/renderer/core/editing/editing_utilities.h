@@ -30,10 +30,11 @@
 #include "third_party/blink/renderer/core/editing/editing_boundary.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/events/input_event.h"
-#include "third_party/blink/renderer/platform/geometry/float_quad.h"
+#include "third_party/blink/renderer/core/html/html_br_element.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
+#include "ui/gfx/geometry/quad_f.h"
 
 namespace blink {
 
@@ -53,6 +54,7 @@ enum class PositionMoveType {
 class Document;
 class Element;
 class HTMLElement;
+class HTMLImageElement;
 class HTMLSpanElement;
 struct LocalCaretRect;
 class Node;
@@ -74,8 +76,9 @@ bool IsUserSelectContain(const Node& /* node */);
 // Returns true if element is input element or has editable style.
 CORE_EXPORT bool IsEditableElement(const Node&);
 
-CORE_EXPORT bool HasEditableStyle(const Node&);
-CORE_EXPORT bool HasRichlyEditableStyle(const Node&);
+CORE_EXPORT bool IsEditable(const Node&);
+CORE_EXPORT bool IsRichlyEditable(const Node&);
+
 CORE_EXPORT bool IsRootEditableElement(const Node&);
 CORE_EXPORT Element* RootEditableElement(const Node&);
 Element* RootEditableElementOf(const Position&);
@@ -149,13 +152,14 @@ void WriteImageNodeToClipboard(SystemClipboard&, const Node&, const String&);
 // Returns true for nodes that either have no content, or have content that is
 // ignored (skipped over) while editing. There are no VisiblePositions inside
 // these nodes.
-bool EditingIgnoresContent(const Node&);
+CORE_EXPORT bool EditingIgnoresContent(const Node&);
 
 inline bool CanHaveChildrenForEditing(const Node* node) {
   return !node->IsTextNode() && node->CanContainRangeEndPoint();
 }
 
 bool IsAtomicNode(const Node*);
+bool IsAtomicNodeInFlatTree(const Node*);
 CORE_EXPORT bool IsEnclosingBlock(const Node*);
 CORE_EXPORT bool IsTabHTMLSpanElement(const Node*);
 bool IsTabHTMLSpanElementTextNode(const Node*);
@@ -166,6 +170,8 @@ bool IsDisplayInsideTable(const Node*);
 bool IsTableCell(const Node*);
 bool IsHTMLListElement(const Node*);
 bool IsListItem(const Node*);
+bool IsListItemTag(const Node*);
+bool IsListElementTag(const Node*);
 bool IsPresentationalHTMLElement(const Node*);
 bool IsRenderedAsNonInlineTableImageOrHR(const Node*);
 bool IsNonTableCellHTMLBlockElement(const Node*);
@@ -257,11 +263,22 @@ CORE_EXPORT bool IsEditablePosition(const Position&);
 bool IsEditablePosition(const PositionInFlatTree&);
 bool IsRichlyEditablePosition(const Position&);
 
-PositionWithAffinity PositionRespectingEditingBoundary(
-    const Position&,
-    const PhysicalOffset& local_point,
-    Node* target_node);
-Position ComputePositionForNodeRemoval(const Position&, const Node&);
+CORE_EXPORT PositionWithAffinity
+PositionRespectingEditingBoundary(const Position&, const HitTestResult&);
+
+// Move specified position to start/end of non-editable region.
+// If it can be found, we prefer a visually equivalent position that is
+// editable.
+// See also LayoutObject::CreatePositionWithAffinity()
+// Example:
+//  <editable><non-editable>|abc</non-editable></editable>
+//  =>
+//  <editable>|<non-editable>abc</non-editable></editable>
+PositionWithAffinity AdjustForEditingBoundary(const PositionWithAffinity&);
+PositionWithAffinity AdjustForEditingBoundary(const Position&);
+
+CORE_EXPORT Position ComputePositionForNodeRemoval(const Position&,
+                                                   const Node&);
 
 // TODO(editing-dev): These two functions should be eliminated.
 CORE_EXPORT Position PositionBeforeNode(const Node&);
@@ -280,6 +297,13 @@ EphemeralRange NormalizeRange(const EphemeralRange&);
 EphemeralRangeInFlatTree NormalizeRange(const EphemeralRangeInFlatTree&);
 CORE_EXPORT VisiblePosition VisiblePositionForIndex(int index,
                                                     ContainerNode* scope);
+
+bool AreSameRanges(Node* node,
+                   const Position& start_position,
+                   const Position& end_position);
+bool AreSameRanges(Node* node,
+                   const PositionInFlatTree& start_position,
+                   const PositionInFlatTree& end_position);
 
 // -------------------------------------------------------------------------
 // HTMLElement
@@ -345,13 +369,15 @@ wtf_size_t ComputeDistanceToRightGraphemeBoundary(const Position&);
 // LocalCaretRect conversions
 // -------------------------------------------------------------------------
 
-FloatQuad LocalToAbsoluteQuadOf(const LocalCaretRect&);
+gfx::QuadF LocalToAbsoluteQuadOf(const LocalCaretRect&);
 
 // -------------------------------------------------------------------------
 // Events
 // -------------------------------------------------------------------------
 
 // Functions dispatch InputEvent
+InputEvent::EventCancelable InputTypeIsCancelable(
+    InputEvent::InputType input_type);
 const StaticRangeVector* TargetRangesForInputEvent(const Node&);
 DispatchEventResult DispatchBeforeInputInsertText(
     Node*,
@@ -366,4 +392,4 @@ DispatchEventResult DispatchBeforeInputDataTransfer(Node*,
                                                     DataTransfer*);
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_EDITING_UTILITIES_H_

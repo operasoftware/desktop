@@ -31,15 +31,12 @@
 
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
-class LocalFrame;
-
 class BarProp final : public ScriptWrappable, public ExecutionContextClient {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(BarProp);
 
  public:
   enum Type {
@@ -51,7 +48,7 @@ class BarProp final : public ScriptWrappable, public ExecutionContextClient {
     kToolbar
   };
 
-  BarProp(LocalFrame*, Type);
+  BarProp(ExecutionContext*, Type);
 
   bool visible() const;
 

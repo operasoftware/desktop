@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/** @implements {settings.CrostiniBrowserProxy} */
-class TestCrostiniBrowserProxy extends TestBrowserProxy {
+import {webUIListenerCallback} from 'chrome://resources/js/cr.m.js';
+
+import {TestBrowserProxy} from '../../test_browser_proxy.js';
+
+/** @implements {CrostiniBrowserProxy} */
+export class TestCrostiniBrowserProxy extends TestBrowserProxy {
   constructor() {
     super([
       'requestCrostiniInstallerView',
       'requestRemoveCrostini',
-      'getCrostiniSharedPathsDisplayText',
-      'getCrostiniSharedUsbDevices',
-      'setCrostiniUsbDeviceShared',
-      'removeCrostiniSharedPath',
       'exportCrostiniContainer',
       'importCrostiniContainer',
       'requestCrostiniContainerUpgradeView',
@@ -20,7 +20,6 @@ class TestCrostiniBrowserProxy extends TestBrowserProxy {
       'addCrostiniPortForward',
       'getCrostiniDiskInfo',
       'resizeCrostiniDisk',
-      'checkCrostiniMicSharingStatus',
       'addCrostiniPortForward',
       'removeCrostiniPortForward',
       'removeAllCrostiniPortForwards',
@@ -31,13 +30,21 @@ class TestCrostiniBrowserProxy extends TestBrowserProxy {
       'shutdownCrostini',
       'setCrostiniMicSharingEnabled',
       'getCrostiniMicSharingEnabled',
+      'requestCrostiniInstallerStatus',
+      'requestArcAdbSideloadStatus',
+      'getCanChangeArcAdbSideloading',
+      'createContainer',
+      'deleteContainer',
+      'requestContainerInfo',
+      'setContainerBadgeColor',
+      'stopContainer',
+      'requestCrostiniExportImportOperationStatus',
     ]);
-    this.sharedUsbDevices = [];
-    this.removeSharedPathResult = true;
     this.crostiniMicSharingEnabled = false;
     this.crostiniIsRunning = true;
     this.methodCalls_ = {};
     this.portOperationSuccess = true;
+    this.containerInfo = [];
   }
 
   getNewPromiseFor(name) {
@@ -53,13 +60,6 @@ class TestCrostiniBrowserProxy extends TestBrowserProxy {
   }
 
   async resolvePromises(name, ...args) {
-    await this.whenCalled(name);
-    console.log(
-        name + ' has been called ' + this.getCallCount(name) +
-        ' times during this test');
-    console.log(
-        'Resolving :\'' + name + '\', ' + this.methodCalls_[name].length +
-        ' times.');
     for (const o of this.methodCalls_[name]) {
       await o.resolve(...args);
     }
@@ -73,22 +73,6 @@ class TestCrostiniBrowserProxy extends TestBrowserProxy {
     this.methodCalls_[name] = [];
   }
 
-  async rejectAllPromises(names) {
-    for (name of names) {
-      if (this.methodCalls_[name] == null) {
-        console.log('\'' + name + '\' wasn\'t called during this test.');
-        continue;
-      }
-      console.log(
-          'Rejecting ' + this.methodCalls_[name].length + ' \'' + name +
-          '\' promises.');
-      for (const o of this.methodCalls_[name]) {
-        await o.reject();
-      }
-      this.methodCalls_[name] = [];
-    }
-  }
-
   /** @override */
   requestCrostiniInstallerView() {
     this.methodCalled('requestCrostiniInstallerView');
@@ -99,48 +83,37 @@ class TestCrostiniBrowserProxy extends TestBrowserProxy {
     this.methodCalled('requestRemoveCrostini');
   }
 
-  /** override */
-  getCrostiniSharedPathsDisplayText(paths) {
-    this.methodCalled('getCrostiniSharedPathsDisplayText');
-    return Promise.resolve(paths.map(path => path + '-displayText'));
-  }
-
-  /** @override */
-  getCrostiniSharedUsbDevices() {
-    this.methodCalled('getCrostiniSharedUsbDevices');
-    return Promise.resolve(this.sharedUsbDevices);
-  }
-
-  /** @override */
-  setCrostiniUsbDeviceShared(guid, shared) {
-    this.methodCalled('setCrostiniUsbDeviceShared', [guid, shared]);
+  /**override */
+  requestArcAdbSideloadStatus() {
+    this.methodCalled('requestArcAdbSideloadStatus');
   }
 
   /** override */
-  removeCrostiniSharedPath(vmName, path) {
-    this.methodCalled('removeCrostiniSharedPath', [vmName, path]);
-    return Promise.resolve(this.removeSharedPathResult);
+  getCanChangeArcAdbSideloading() {
+    this.methodCalled('getCanChangeArcAdbSideloading');
   }
 
   /** @override */
   requestCrostiniInstallerStatus() {
-    cr.webUIListenerCallback('crostini-installer-status-changed', false);
+    this.methodCalled('requestCrostiniInstallerStatus');
+    webUIListenerCallback('crostini-installer-status-changed', false);
   }
 
   /** @override */
   requestCrostiniExportImportOperationStatus() {
-    cr.webUIListenerCallback(
+    this.methodCalled('requestCrostiniExportImportOperationStatus');
+    webUIListenerCallback(
         'crostini-export-import-operation-status-changed', false);
   }
 
   /** override */
-  exportCrostiniContainer() {
-    this.methodCalled('exportCrostiniContainer');
+  exportCrostiniContainer(containerId) {
+    this.methodCalled('exportCrostiniContainer', containerId);
   }
 
   /** override */
-  importCrostiniContainer() {
-    this.methodCalled('importCrostiniContainer');
+  importCrostiniContainer(containerId) {
+    this.methodCalled('importCrostiniContainer', containerId);
   }
 
   /** @override */
@@ -150,44 +123,53 @@ class TestCrostiniBrowserProxy extends TestBrowserProxy {
 
   /** @override */
   requestCrostiniUpgraderDialogStatus() {
-    cr.webUIListenerCallback('crostini-upgrader-status-changed', false);
+    webUIListenerCallback('crostini-upgrader-status-changed', false);
   }
 
   /** @override */
   requestCrostiniContainerUpgradeAvailable() {
-    cr.webUIListenerCallback(
-        'crostini-container-upgrade-available-changed', true);
+    webUIListenerCallback('crostini-container-upgrade-available-changed', true);
   }
 
   /** @override */
-  addCrostiniPortForward(
-      vmName, containerName, portNumber, protocolIndex, label) {
+  addCrostiniPortForward(containerId, portNumber, protocolIndex, label) {
     this.methodCalled(
-        'addCrostiniPortForward', vmName, containerName, portNumber,
-        protocolIndex, label);
+        'addCrostiniPortForward', containerId, portNumber, protocolIndex,
+        label);
     return Promise.resolve(this.portOperationSuccess);
   }
 
   /** @override */
-  removeCrostiniPortForward(vmName, containerName, portNumber, protocolIndex) {
+  removeCrostiniPortForward(containerId, portNumber, protocolIndex) {
     this.methodCalled(
-        'removeCrostiniPortForward', vmName, containerName, portNumber,
+        'removeCrostiniPortForward', containerId, portNumber, protocolIndex);
+    return Promise.resolve(this.portOperationSuccess);
+  }
+
+  /** @override */
+  activateCrostiniPortForward(containerId, portNumber, protocolIndex) {
+    this.methodCalled(
+        'activateCrostiniPortForward', containerId, portNumber, protocolIndex);
+    return Promise.resolve(this.portOperationSuccess);
+  }
+
+  /** @override */
+  deactivateCrostiniPortForward(containerId, portNumber, protocolIndex) {
+    this.methodCalled(
+        'deactivateCrostiniPortForward', containerId, portNumber,
         protocolIndex);
     return Promise.resolve(this.portOperationSuccess);
   }
 
   /** @override */
-  activateCrostiniPortForward(
-      vmName, containerName, portNumber, protocolIndex) {
-    this.methodCalled(
-        'activateCrostiniPortForward', vmName, containerName, portNumber,
-        protocolIndex);
-    return Promise.resolve(this.portOperationSuccess);
+  removeAllCrostiniPortForwards(containerId) {
+    this.methodCalled('removeAllCrostiniPortForwards', containerId);
   }
 
   /** @override */
-  removeAllCrostiniPortForwards(vmName, containerName) {
-    this.methodCalled('removeAllCrostiniPortForwards');
+  getCrostiniActivePorts() {
+    this.methodCalled('getCrostiniActivePorts');
+    return Promise.resolve([]);
   }
 
   /** @override */
@@ -203,32 +185,9 @@ class TestCrostiniBrowserProxy extends TestBrowserProxy {
   }
 
   /** @override */
-  checkCrostiniMicSharingStatus(proposedValue) {
-    this.methodCalled('checkCrostiniMicSharingStatus', proposedValue);
-    return Promise.resolve(
-        proposedValue !== this.crostiniMicSharingEnabled &&
-        this.crostiniIsRunning);
-  }
-
-  /** @override */
-  deactivateCrostiniPortForward(
-      vmName, containerName, portNumber, protocolIndex) {
-    this.methodCalled(
-        'deactivateCrostiniPortForward', vmName, containerName, portNumber,
-        protocolIndex);
-    return Promise.resolve(this.portOperationSuccess);
-  }
-
-  /** @override */
-  getCrostiniActivePorts() {
-    this.methodCalled('getCrostiniActivePorts');
-    return Promise.resolve(new Array());
-  }
-
-  /** @override */
   checkCrostiniIsRunning() {
     this.methodCalled('checkCrostiniIsRunning');
-    return Promise.resolve(true);
+    return Promise.resolve(this.crostiniIsRunning);
   }
 
   /** @override */
@@ -247,5 +206,31 @@ class TestCrostiniBrowserProxy extends TestBrowserProxy {
   getCrostiniMicSharingEnabled() {
     this.methodCalled('getCrostiniMicSharingEnabled');
     return Promise.resolve(this.CrostiniMicSharingEnabled);
+  }
+
+  /** @override */
+  createContainer(containerId, imageServer, imageAlias) {
+    this.methodCalled('createContainer');
+  }
+
+  /** @override */
+  deleteContainer(containerId) {
+    this.methodCalled('deleteContainer');
+  }
+
+  /** @override */
+  requestContainerInfo() {
+    this.methodCalled('requestContainerInfo');
+    webUIListenerCallback('crostini-container-info', this.containerInfo);
+  }
+
+  /** @override */
+  setContainerBadgeColor(containerId, badge_color) {
+    this.methodCalled('setContainerBadgeColor');
+  }
+
+  /** @override */
+  stopContainer(containerId) {
+    this.methodCalled('stopContainer');
   }
 }

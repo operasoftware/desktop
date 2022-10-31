@@ -4,7 +4,9 @@
 #-index-name: Norwegian, contracted, grade 1
 #-display-name: Norwegian grade 1 contracted braille
 #
-#+locale:no
+#+language:no
+#+language:nb
+#+language:nn
 #+type:literary
 #+direction:both
 #+contraction:partial
@@ -34,6 +36,9 @@
 # Official norwegian braille specifications are collected here:
 # http://liblouis.org/braille-specs/norwegian
 # This specific table is based on the document "Kortskrift i norsk punktskrift - KS04".
+#
+# Input is expected to be normalized to NFC (fully composed)
+#-unicode-form:nfc
 #
 #  This file is part of liblouis.
 #

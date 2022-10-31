@@ -22,8 +22,6 @@ class ScriptValue;
 class MODULES_EXPORT WaitUntilObserver final
     : public GarbageCollected<WaitUntilObserver>,
       public ExecutionContextClient {
-  USING_GARBAGE_COLLECTED_MIXIN(WaitUntilObserver);
-
  public:
   using PromiseSettledCallback =
       base::RepeatingCallback<void(const ScriptValue&)>;
@@ -129,7 +127,7 @@ class MODULES_EXPORT WaitUntilObserver final
   int pending_promises_ = 0;
   EventDispatchState event_dispatch_state_ = EventDispatchState::kInitial;
   bool has_rejected_promise_ = false;
-  TaskRunnerTimer<WaitUntilObserver> consume_window_interaction_timer_;
+  HeapTaskRunnerTimer<WaitUntilObserver> consume_window_interaction_timer_;
 };
 
 }  // namespace blink

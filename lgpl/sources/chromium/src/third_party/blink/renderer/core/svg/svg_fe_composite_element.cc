@@ -21,9 +21,11 @@
 #include "third_party/blink/renderer/core/svg/svg_fe_composite_element.h"
 
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_number.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_string.h"
 #include "third_party/blink/renderer/core/svg/svg_enumeration_map.h"
 #include "third_party/blink/renderer/core/svg_names.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -105,7 +107,8 @@ bool SVGFECompositeElement::SetFilterEffectAttribute(
 }
 
 void SVGFECompositeElement::SvgAttributeChanged(
-    const QualifiedName& attr_name) {
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kOperatorAttr ||
       attr_name == svg_names::kK1Attr || attr_name == svg_names::kK2Attr ||
       attr_name == svg_names::kK3Attr || attr_name == svg_names::kK4Attr) {
@@ -120,7 +123,7 @@ void SVGFECompositeElement::SvgAttributeChanged(
     return;
   }
 
-  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(attr_name);
+  SVGFilterPrimitiveStandardAttributes::SvgAttributeChanged(params);
 }
 
 FilterEffect* SVGFECompositeElement::Build(SVGFilterBuilder* filter_builder,

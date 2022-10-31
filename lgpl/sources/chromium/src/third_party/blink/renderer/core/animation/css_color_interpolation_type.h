@@ -7,6 +7,7 @@
 
 #include <memory>
 #include "third_party/blink/renderer/core/animation/css_interpolation_type.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
 
@@ -15,7 +16,7 @@ namespace blink {
 class StyleColor;
 struct OptionalStyleColor;
 
-class CSSColorInterpolationType : public CSSInterpolationType {
+class CORE_EXPORT CSSColorInterpolationType : public CSSInterpolationType {
  public:
   CSSColorInterpolationType(PropertyHandle property,
                             const PropertyRegistration* registration = nullptr)
@@ -43,6 +44,13 @@ class CSSColorInterpolationType : public CSSInterpolationType {
       const StyleResolverState&,
       bool is_visited = false,
       bool is_text_decoration = false);
+
+  // Extract color info from a InterpolableValue-result, the input value must be
+  // a InterpolableList.
+  static Color GetRGBA(const InterpolableValue&);
+
+  // Determines if an interpolation values represents an RGBA color value.
+  static bool IsRGBA(const InterpolableValue&);
 
  private:
   InterpolationValue MaybeConvertNeutral(const InterpolationValue& underlying,

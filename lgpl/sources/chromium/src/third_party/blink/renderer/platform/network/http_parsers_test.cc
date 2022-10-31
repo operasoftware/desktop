@@ -4,11 +4,11 @@
 
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
 
-#include "base/stl_util.h"
+#include "base/time/time.h"
+#include "services/network/public/mojom/content_security_policy.mojom-blink-forward.h"
 #include "services/network/public/mojom/content_security_policy.mojom-blink.h"
 #include "services/network/public/mojom/parsed_headers.mojom-blink.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
@@ -23,16 +23,16 @@ TEST(HTTPParsersTest, ParseCacheControl) {
   EXPECT_TRUE(header.contains_no_cache);
   EXPECT_FALSE(header.contains_no_store);
   EXPECT_FALSE(header.contains_must_revalidate);
-  EXPECT_EQ(base::nullopt, header.max_age);
-  EXPECT_EQ(base::nullopt, header.stale_while_revalidate);
+  EXPECT_EQ(absl::nullopt, header.max_age);
+  EXPECT_EQ(absl::nullopt, header.stale_while_revalidate);
 
   header = ParseCacheControlDirectives("no-cache no-store", AtomicString());
   EXPECT_TRUE(header.parsed);
   EXPECT_TRUE(header.contains_no_cache);
   EXPECT_FALSE(header.contains_no_store);
   EXPECT_FALSE(header.contains_must_revalidate);
-  EXPECT_EQ(base::nullopt, header.max_age);
-  EXPECT_EQ(base::nullopt, header.stale_while_revalidate);
+  EXPECT_EQ(absl::nullopt, header.max_age);
+  EXPECT_EQ(absl::nullopt, header.stale_while_revalidate);
 
   header =
       ParseCacheControlDirectives("no-store must-revalidate", AtomicString());
@@ -40,8 +40,8 @@ TEST(HTTPParsersTest, ParseCacheControl) {
   EXPECT_FALSE(header.contains_no_cache);
   EXPECT_TRUE(header.contains_no_store);
   EXPECT_FALSE(header.contains_must_revalidate);
-  EXPECT_EQ(base::nullopt, header.max_age);
-  EXPECT_EQ(base::nullopt, header.stale_while_revalidate);
+  EXPECT_EQ(absl::nullopt, header.max_age);
+  EXPECT_EQ(absl::nullopt, header.stale_while_revalidate);
 
   header = ParseCacheControlDirectives("max-age=0", AtomicString());
   EXPECT_TRUE(header.parsed);
@@ -49,15 +49,15 @@ TEST(HTTPParsersTest, ParseCacheControl) {
   EXPECT_FALSE(header.contains_no_store);
   EXPECT_FALSE(header.contains_must_revalidate);
   EXPECT_EQ(base::TimeDelta(), header.max_age.value());
-  EXPECT_EQ(base::nullopt, header.stale_while_revalidate);
+  EXPECT_EQ(absl::nullopt, header.stale_while_revalidate);
 
   header = ParseCacheControlDirectives("max-age", AtomicString());
   EXPECT_TRUE(header.parsed);
   EXPECT_FALSE(header.contains_no_cache);
   EXPECT_FALSE(header.contains_no_store);
   EXPECT_FALSE(header.contains_must_revalidate);
-  EXPECT_EQ(base::nullopt, header.max_age);
-  EXPECT_EQ(base::nullopt, header.stale_while_revalidate);
+  EXPECT_EQ(absl::nullopt, header.max_age);
+  EXPECT_EQ(absl::nullopt, header.stale_while_revalidate);
 
   header = ParseCacheControlDirectives("max-age=0 no-cache", AtomicString());
   EXPECT_TRUE(header.parsed);
@@ -65,47 +65,47 @@ TEST(HTTPParsersTest, ParseCacheControl) {
   EXPECT_FALSE(header.contains_no_store);
   EXPECT_FALSE(header.contains_must_revalidate);
   EXPECT_EQ(base::TimeDelta(), header.max_age.value());
-  EXPECT_EQ(base::nullopt, header.stale_while_revalidate);
+  EXPECT_EQ(absl::nullopt, header.stale_while_revalidate);
 
   header = ParseCacheControlDirectives("no-cache=foo", AtomicString());
   EXPECT_TRUE(header.parsed);
   EXPECT_FALSE(header.contains_no_cache);
   EXPECT_FALSE(header.contains_no_store);
   EXPECT_FALSE(header.contains_must_revalidate);
-  EXPECT_EQ(base::nullopt, header.max_age);
-  EXPECT_EQ(base::nullopt, header.stale_while_revalidate);
+  EXPECT_EQ(absl::nullopt, header.max_age);
+  EXPECT_EQ(absl::nullopt, header.stale_while_revalidate);
 
   header = ParseCacheControlDirectives("nonsense", AtomicString());
   EXPECT_TRUE(header.parsed);
   EXPECT_FALSE(header.contains_no_cache);
   EXPECT_FALSE(header.contains_no_store);
   EXPECT_FALSE(header.contains_must_revalidate);
-  EXPECT_EQ(base::nullopt, header.max_age);
-  EXPECT_EQ(base::nullopt, header.stale_while_revalidate);
+  EXPECT_EQ(absl::nullopt, header.max_age);
+  EXPECT_EQ(absl::nullopt, header.stale_while_revalidate);
 
   header = ParseCacheControlDirectives("\rno-cache\n\t\v\0\b", AtomicString());
   EXPECT_TRUE(header.parsed);
   EXPECT_TRUE(header.contains_no_cache);
   EXPECT_FALSE(header.contains_no_store);
   EXPECT_FALSE(header.contains_must_revalidate);
-  EXPECT_EQ(base::nullopt, header.max_age);
-  EXPECT_EQ(base::nullopt, header.stale_while_revalidate);
+  EXPECT_EQ(absl::nullopt, header.max_age);
+  EXPECT_EQ(absl::nullopt, header.stale_while_revalidate);
 
   header = ParseCacheControlDirectives("      no-cache       ", AtomicString());
   EXPECT_TRUE(header.parsed);
   EXPECT_TRUE(header.contains_no_cache);
   EXPECT_FALSE(header.contains_no_store);
   EXPECT_FALSE(header.contains_must_revalidate);
-  EXPECT_EQ(base::nullopt, header.max_age);
-  EXPECT_EQ(base::nullopt, header.stale_while_revalidate);
+  EXPECT_EQ(absl::nullopt, header.max_age);
+  EXPECT_EQ(absl::nullopt, header.stale_while_revalidate);
 
   header = ParseCacheControlDirectives(AtomicString(), "no-cache");
   EXPECT_TRUE(header.parsed);
   EXPECT_TRUE(header.contains_no_cache);
   EXPECT_FALSE(header.contains_no_store);
   EXPECT_FALSE(header.contains_must_revalidate);
-  EXPECT_EQ(base::nullopt, header.max_age);
-  EXPECT_EQ(base::nullopt, header.stale_while_revalidate);
+  EXPECT_EQ(absl::nullopt, header.max_age);
+  EXPECT_EQ(absl::nullopt, header.stale_while_revalidate);
 
   header = ParseCacheControlDirectives(
       "stale-while-revalidate=2,stale-while-revalidate=3", AtomicString());
@@ -113,7 +113,7 @@ TEST(HTTPParsersTest, ParseCacheControl) {
   EXPECT_FALSE(header.contains_no_cache);
   EXPECT_FALSE(header.contains_no_store);
   EXPECT_FALSE(header.contains_must_revalidate);
-  EXPECT_EQ(base::nullopt, header.max_age);
+  EXPECT_EQ(absl::nullopt, header.max_age);
   EXPECT_EQ(2.0, header.stale_while_revalidate.value().InSecondsF());
 }
 
@@ -254,40 +254,40 @@ TEST(HTTPParsersTest, ParseHTTPRefresh) {
   EXPECT_FALSE(ParseHTTPRefresh("1e1 url=foo", nullptr, delay, url));
 
   EXPECT_TRUE(ParseHTTPRefresh("123 ", nullptr, delay, url));
-  EXPECT_EQ(base::TimeDelta::FromSeconds(123), delay);
+  EXPECT_EQ(base::Seconds(123), delay);
   EXPECT_TRUE(url.IsEmpty());
 
   EXPECT_TRUE(ParseHTTPRefresh("1 ; url=dest", nullptr, delay, url));
-  EXPECT_EQ(base::TimeDelta::FromSeconds(1), delay);
+  EXPECT_EQ(base::Seconds(1), delay);
   EXPECT_EQ("dest", url);
   EXPECT_TRUE(
       ParseHTTPRefresh("1 ;\nurl=dest", IsASCIISpace<UChar>, delay, url));
-  EXPECT_EQ(base::TimeDelta::FromSeconds(1), delay);
+  EXPECT_EQ(base::Seconds(1), delay);
   EXPECT_EQ("dest", url);
   EXPECT_TRUE(ParseHTTPRefresh("1 ;\nurl=dest", nullptr, delay, url));
-  EXPECT_EQ(base::TimeDelta::FromSeconds(1), delay);
+  EXPECT_EQ(base::Seconds(1), delay);
   EXPECT_EQ("url=dest", url);
 
   EXPECT_TRUE(ParseHTTPRefresh("1 url=dest", nullptr, delay, url));
-  EXPECT_EQ(base::TimeDelta::FromSeconds(1), delay);
+  EXPECT_EQ(base::Seconds(1), delay);
   EXPECT_EQ("dest", url);
 
   EXPECT_TRUE(
       ParseHTTPRefresh("10\nurl=dest", IsASCIISpace<UChar>, delay, url));
-  EXPECT_EQ(base::TimeDelta::FromSeconds(10), delay);
+  EXPECT_EQ(base::Seconds(10), delay);
   EXPECT_EQ("dest", url);
 
   EXPECT_TRUE(
       ParseHTTPRefresh("1.5; url=dest", IsASCIISpace<UChar>, delay, url));
-  EXPECT_EQ(base::TimeDelta::FromSecondsD(1.5), delay);
+  EXPECT_EQ(base::Seconds(1.5), delay);
   EXPECT_EQ("dest", url);
   EXPECT_TRUE(
       ParseHTTPRefresh("1.5.9; url=dest", IsASCIISpace<UChar>, delay, url));
-  EXPECT_EQ(base::TimeDelta::FromSecondsD(1.5), delay);
+  EXPECT_EQ(base::Seconds(1.5), delay);
   EXPECT_EQ("dest", url);
   EXPECT_TRUE(
       ParseHTTPRefresh("7..; url=dest", IsASCIISpace<UChar>, delay, url));
-  EXPECT_EQ(base::TimeDelta::FromSeconds(7), delay);
+  EXPECT_EQ(base::Seconds(7), delay);
   EXPECT_EQ("dest", url);
 }
 
@@ -306,7 +306,7 @@ TEST(HTTPParsersTest, ParseMultipartHeadersResult) {
       {"Foo: bar\r\nBaz:\n", false, 0},
       {"\r\n", true, 2},
   };
-  for (size_t i = 0; i < base::size(tests); ++i) {
+  for (size_t i = 0; i < std::size(tests); ++i) {
     ResourceResponse response;
     wtf_size_t end = 0;
     bool result = ParseMultipartHeadersFromBody(
@@ -331,8 +331,8 @@ TEST(HTTPParsersTest, ParseMultipartHeaders) {
       "set-cookie: y=3\n"
       "\n";
   wtf_size_t end = 0;
-  bool result =
-      ParseMultipartHeadersFromBody(kData, strlen(kData), &response, &end);
+  bool result = ParseMultipartHeadersFromBody(
+      kData, static_cast<wtf_size_t>(strlen(kData)), &response, &end);
 
   EXPECT_TRUE(result);
   EXPECT_EQ(strlen(kData), end);
@@ -347,8 +347,8 @@ TEST(HTTPParsersTest, ParseMultipartHeadersContentCharset) {
   ResourceResponse response;
   const char kData[] = "content-type: text/html; charset=utf-8\n\n";
   wtf_size_t end = 0;
-  bool result =
-      ParseMultipartHeadersFromBody(kData, strlen(kData), &response, &end);
+  bool result = ParseMultipartHeadersFromBody(
+      kData, static_cast<wtf_size_t>(strlen(kData)), &response, &end);
 
   EXPECT_TRUE(result);
   EXPECT_EQ(strlen(kData), end);
@@ -557,8 +557,10 @@ TEST(HTTPParsersTest, ParseServerTimingHeader) {
                          {{"metric1", "0", "d1"}, {"metric2", "0", ""}});
 
   // nonsense - extraneous characters after entry name token
-  testServerTimingHeader("metric==   \"\"foo;dur=123.4", {{"metric", "0", ""}});
-  testServerTimingHeader("metric1==   \"\"foo,metric2", {{"metric1", "0", ""}});
+  testServerTimingHeader("metric==   \"\"foo;dur=123.4",
+                         {{"metric", "123.4", ""}});
+  testServerTimingHeader("metric1==   \"\"foo,metric2",
+                         {{"metric1", "0", ""}, {"metric2", "0", ""}});
 
   // nonsense - extraneous characters after param name token
   testServerTimingHeader("metric;dur foo=12", {{"metric", "0", ""}});
@@ -588,7 +590,8 @@ TEST(HTTPParsersTest, ParseServerTimingHeader) {
   testServerTimingHeader("{", {{"{", "0", ""}});
   testServerTimingHeader("}", {{"}", "0", ""}});
   testServerTimingHeader("{}", {{"{}", "0", ""}});
-  testServerTimingHeader("{\"foo\":\"bar\"},metric", {{"{", "0", ""}});
+  testServerTimingHeader("{\"foo\":\"bar\"},metric",
+                         {{"{", "0", ""}, {"metric", "0", ""}});
 }
 
 TEST(HTTPParsersTest, ParseContentTypeOptionsTest) {
@@ -623,96 +626,127 @@ TEST(HTTPParsersTest, ParseContentTypeOptionsTest) {
 // and fuzzed.
 // What needs to be tested is the basic conversion from/to blink types.
 // -----------------------------------------------------------------------------
-namespace {
-WTF::Vector<network::mojom::blink::ContentSecurityPolicyPtr>
-ParseContentSecurityPolicy(String http_headers) {
-  return std::move(ParseHeaders("HTTP/1.1 200 OK\r\n" + http_headers,
-                                KURL("http://example.com"))
-                       ->content_security_policy);
-}
-}  // namespace
 
-TEST(HTTPParsersTest, ParseContentSecurityPolicyEmpty) {
-  auto csp = ParseContentSecurityPolicy("");
+TEST(HTTPParsersTest, ParseContentSecurityPoliciesmpty) {
+  auto csp = ParseContentSecurityPolicies(
+      "", network::mojom::blink::ContentSecurityPolicyType::kEnforce,
+      network::mojom::blink::ContentSecurityPolicySource::kHTTP,
+      KURL("http://example.com"));
   EXPECT_TRUE(csp.IsEmpty());
 }
 
-TEST(HTTPParsersTest, ParseContentSecurityPolicyMultiple) {
-  auto csp = ParseContentSecurityPolicy(
-      "Content-Security-Policy: frame-ancestors a.com\r\n"
-      "Content-Security-Policy: frame-ancestors b.com\r\n");
+TEST(HTTPParsersTest, ParseContentSecurityPoliciesMultiple) {
+  auto csp = ParseContentSecurityPolicies(
+      "frame-ancestors a.com, frame-ancestors b.com",
+      network::mojom::blink::ContentSecurityPolicyType::kEnforce,
+      network::mojom::blink::ContentSecurityPolicySource::kHTTP,
+      KURL("http://example.com"));
   ASSERT_EQ(2u, csp.size());
   EXPECT_EQ("frame-ancestors a.com", csp[0]->header->header_value);
   EXPECT_EQ("frame-ancestors b.com", csp[1]->header->header_value);
 }
 
-TEST(HTTPParsersTest, ParseContentSecurityPolicyCoalesce) {
-  auto csp = ParseContentSecurityPolicy(
-      "Content-Security-Policy:"
-      "frame-ancestors a.com, frame-ancestors b.com\r\n");
-  ASSERT_EQ(2u, csp.size());
-  EXPECT_EQ("frame-ancestors a.com", csp[0]->header->header_value);
-  EXPECT_EQ("frame-ancestors b.com", csp[1]->header->header_value);
-}
-
-TEST(HTTPParsersTest, ParseContentSecurityPolicyHeader) {
-  auto csp = ParseContentSecurityPolicy(
-      "Content-Security-Policy: frame-ancestors a.com\r\n"
-      "Content-Security-Policy-Report-Only: frame-ancestors b.com");
-  ASSERT_EQ(2u, csp.size());
+TEST(HTTPParsersTest, ParseContentSecurityPoliciesSingle) {
+  auto csp = ParseContentSecurityPolicies(
+      "frame-ancestors a.com",
+      network::mojom::blink::ContentSecurityPolicyType::kEnforce,
+      network::mojom::blink::ContentSecurityPolicySource::kHTTP,
+      KURL("http://example.com"));
+  ASSERT_EQ(1u, csp.size());
 
   // Header source:
   EXPECT_EQ(network::mojom::ContentSecurityPolicySource::kHTTP,
             csp[0]->header->source);
-  EXPECT_EQ(network::mojom::ContentSecurityPolicySource::kHTTP,
-            csp[1]->header->source);
 
   // Header type:
   EXPECT_EQ(network::mojom::ContentSecurityPolicyType::kEnforce,
             csp[0]->header->type);
-  EXPECT_EQ(network::mojom::ContentSecurityPolicyType::kReport,
-            csp[1]->header->type);
 
   // Header value
   EXPECT_EQ("frame-ancestors a.com", csp[0]->header->header_value);
-  EXPECT_EQ("frame-ancestors b.com", csp[1]->header->header_value);
 }
 
-TEST(HTTPParsersTest, ParseContentSecurityPolicyDirectiveName) {
-  auto policies = ParseContentSecurityPolicy(
-      "Content-Security-Policy: frame-ancestors 'none'\r\n"
-      "Content-Security-Policy: sandbox allow-script\r\n"
-      "Content-Security-Policy: form-action 'none'\r\n"
-      "Content-Security-Policy: navigate-to'none'\r\n"
-      "Content-Security-Policy: frame-src 'none'\r\n"
-      "Content-Security-Policy: child-src 'none'\r\n"
-      "Content-Security-Policy: script-src 'none'\r\n"
-      "Content-Security-Policy: default-src 'none'\r\n"
-      "Content-Security-Policy: upgrade-insecure-requests\r\n");
+TEST(HTTPParsersTest, ParseContentSecurityPoliciesMeta) {
+  auto csp = ParseContentSecurityPolicies(
+      "default-src a.com",
+      network::mojom::blink::ContentSecurityPolicyType::kEnforce,
+      network::mojom::blink::ContentSecurityPolicySource::kMeta,
+      KURL("http://example.com"));
+  ASSERT_EQ(1u, csp.size());
+
+  // Header source:
+  EXPECT_EQ(network::mojom::ContentSecurityPolicySource::kMeta,
+            csp[0]->header->source);
+
+  // Header type:
+  EXPECT_EQ(network::mojom::ContentSecurityPolicyType::kEnforce,
+            csp[0]->header->type);
+
+  // Header value
+  EXPECT_EQ("default-src a.com", csp[0]->header->header_value);
+}
+
+TEST(HTTPParsersTest, ParseContentSecurityPoliciesReportOnly) {
+  auto csp = ParseContentSecurityPolicies(
+      "frame-ancestors a.com",
+      network::mojom::blink::ContentSecurityPolicyType::kReport,
+      network::mojom::blink::ContentSecurityPolicySource::kHTTP,
+      KURL("http://example.com"));
+  ASSERT_EQ(1u, csp.size());
+
+  // Header source:
+  EXPECT_EQ(network::mojom::ContentSecurityPolicySource::kHTTP,
+            csp[0]->header->source);
+
+  // Header type:
+  EXPECT_EQ(network::mojom::ContentSecurityPolicyType::kReport,
+            csp[0]->header->type);
+
+  // Header value
+  EXPECT_EQ("frame-ancestors a.com", csp[0]->header->header_value);
+}
+
+TEST(HTTPParsersTest, ParseContentSecurityPoliciesDirectiveName) {
+  auto policies = ParseContentSecurityPolicies(
+      "frame-ancestors 'none', "
+      "sandbox allow-script, "
+      "form-action 'none', "
+      "navigate-to 'none', "
+      "frame-src 'none', "
+      "child-src 'none', "
+      "script-src 'none', "
+      "default-src 'none', "
+      "upgrade-insecure-requests",
+      network::mojom::blink::ContentSecurityPolicyType::kEnforce,
+      network::mojom::blink::ContentSecurityPolicySource::kHTTP,
+      KURL("http://example.com"));
   EXPECT_EQ(9u, policies.size());
   // frame-ancestors
   EXPECT_EQ(1u, policies[0]->directives.size());
   // sandbox. TODO(https://crbug.com/1041376) Implement this.
   EXPECT_EQ(0u, policies[1]->directives.size());
-  // form-action. Not parsed.
-  EXPECT_EQ(0u, policies[2]->directives.size());
-  // navigate-to. Not parsed.
-  EXPECT_EQ(0u, policies[3]->directives.size());
-  // frame-src. Not parsed.
-  EXPECT_EQ(0u, policies[4]->directives.size());
-  // child-src. Not parsed.
-  EXPECT_EQ(0u, policies[5]->directives.size());
-  // script-src. Not parsed.
-  EXPECT_EQ(0u, policies[6]->directives.size());
-  // default-src. Not parsed.
-  EXPECT_EQ(0u, policies[7]->directives.size());
+  // form-action.
+  EXPECT_EQ(1u, policies[2]->directives.size());
+  // navigate-to.
+  EXPECT_EQ(1u, policies[3]->directives.size());
+  // frame-src.
+  EXPECT_EQ(1u, policies[4]->directives.size());
+  // child-src.
+  EXPECT_EQ(1u, policies[5]->directives.size());
+  // script-src.
+  EXPECT_EQ(1u, policies[6]->directives.size());
+  // default-src.
+  EXPECT_EQ(1u, policies[7]->directives.size());
   // upgrade-insecure-policies.
   EXPECT_EQ(true, policies[8]->upgrade_insecure_requests);
 }
 
-TEST(HTTPParsersTest, ParseContentSecurityPolicyReportTo) {
-  auto policies =
-      ParseContentSecurityPolicy("Content-Security-Policy: report-to a b\r\n");
+TEST(HTTPParsersTest, ParseContentSecurityPoliciesReportTo) {
+  auto policies = ParseContentSecurityPolicies(
+      "report-to a b",
+      network::mojom::blink::ContentSecurityPolicyType::kEnforce,
+      network::mojom::blink::ContentSecurityPolicySource::kHTTP,
+      KURL("http://example.com"));
   EXPECT_TRUE(policies[0]->use_reporting_api);
   // The specification https://w3c.github.io/webappsec-csp/#directive-report-to
   // only allows for one endpoints to be defined. The other ones are ignored.
@@ -720,23 +754,29 @@ TEST(HTTPParsersTest, ParseContentSecurityPolicyReportTo) {
   EXPECT_EQ("a", policies[0]->report_endpoints[0]);
 }
 
-TEST(HTTPParsersTest, ParseContentSecurityPolicyReportUri) {
-  auto policies = ParseContentSecurityPolicy(
-      "Content-Security-Policy: report-uri ./report.py\r\n");
+TEST(HTTPParsersTest, ParseContentSecurityPoliciesReportUri) {
+  auto policies = ParseContentSecurityPolicies(
+      "report-uri ./report.py",
+      network::mojom::blink::ContentSecurityPolicyType::kEnforce,
+      network::mojom::blink::ContentSecurityPolicySource::kHTTP,
+      KURL("http://example.com"));
   EXPECT_FALSE(policies[0]->use_reporting_api);
   ASSERT_EQ(1u, policies[0]->report_endpoints.size());
   EXPECT_EQ("http://example.com/report.py", policies[0]->report_endpoints[0]);
 }
 
-TEST(HTTPParsersTest, ParseContentSecurityPolicySourceBasic) {
+TEST(HTTPParsersTest, ParseContentSecurityPoliciesSourceBasic) {
   auto frame_ancestors = network::mojom::CSPDirectiveName::FrameAncestors;
-  auto policies = ParseContentSecurityPolicy(
-      "Content-Security-Policy: frame-ancestors 'none'\r\n"
-      "Content-Security-Policy: frame-ancestors *\r\n"
-      "Content-Security-Policy: frame-ancestors 'self'\r\n"
-      "Content-Security-Policy: frame-ancestors http://a.com:22/path\r\n"
-      "Content-Security-Policy: frame-ancestors a.com:*\r\n"
-      "Content-Security-Policy: frame-ancestors */report.py\r\n");
+  auto policies = ParseContentSecurityPolicies(
+      "frame-ancestors 'none', "
+      "frame-ancestors *, "
+      "frame-ancestors 'self', "
+      "frame-ancestors http://a.com:22/path, "
+      "frame-ancestors a.com:*, "
+      "frame-ancestors */report.py",
+      network::mojom::blink::ContentSecurityPolicyType::kEnforce,
+      network::mojom::blink::ContentSecurityPolicySource::kHTTP,
+      KURL("http://example.com"));
   // 'none'
   {
     auto source_list = policies[0]->directives.Take(frame_ancestors);

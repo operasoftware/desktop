@@ -5,8 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_SUGGESTION_MARKER_LIST_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_SUGGESTION_MARKER_LIST_IMPL_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_list.h"
 #include "third_party/blink/renderer/core/editing/markers/suggestion_marker.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
@@ -19,6 +21,8 @@ namespace blink {
 class CORE_EXPORT SuggestionMarkerListImpl final : public DocumentMarkerList {
  public:
   SuggestionMarkerListImpl() = default;
+  SuggestionMarkerListImpl(const SuggestionMarkerListImpl&) = delete;
+  SuggestionMarkerListImpl& operator=(const SuggestionMarkerListImpl&) = delete;
 
   // DocumentMarkerList implementations
   DocumentMarker::MarkerType MarkerType() const final;
@@ -58,8 +62,6 @@ class CORE_EXPORT SuggestionMarkerListImpl final : public DocumentMarkerList {
                                                     unsigned new_length);
 
   HeapVector<Member<DocumentMarker>> markers_;
-
-  DISALLOW_COPY_AND_ASSIGN(SuggestionMarkerListImpl);
 };
 
 template <>

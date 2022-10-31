@@ -33,8 +33,6 @@
 
 namespace blink {
 
-const int kButtonShadowHeight = 2;
-
 LayoutFileUploadControl::LayoutFileUploadControl(Element* input)
     : LayoutBlockFlow(input) {
   DCHECK_EQ(To<HTMLInputElement>(input)->type(), input_type_names::kFile);
@@ -44,6 +42,7 @@ LayoutFileUploadControl::~LayoutFileUploadControl() = default;
 
 bool LayoutFileUploadControl::IsChildAllowed(LayoutObject* child,
                                              const ComputedStyle& style) const {
+  NOT_DESTROYED();
   const Node* child_node = child->GetNode();
   // Reject shadow nodes other than UploadButton.
   if (child_node && child_node->OwnerShadowHost() == GetNode() &&
@@ -53,6 +52,7 @@ bool LayoutFileUploadControl::IsChildAllowed(LayoutObject* child,
 }
 
 int LayoutFileUploadControl::MaxFilenameWidth() const {
+  NOT_DESTROYED();
   int upload_button_width =
       (UploadButton() && UploadButton()->GetLayoutBox())
           ? UploadButton()->GetLayoutBox()->PixelSnappedWidth()
@@ -64,14 +64,17 @@ int LayoutFileUploadControl::MaxFilenameWidth() const {
 void LayoutFileUploadControl::PaintObject(
     const PaintInfo& paint_info,
     const PhysicalOffset& paint_offset) const {
+  NOT_DESTROYED();
   FileUploadControlPainter(*this).PaintObject(paint_info, paint_offset);
 }
 
 HTMLInputElement* LayoutFileUploadControl::UploadButton() const {
+  NOT_DESTROYED();
   return To<HTMLInputElement>(GetNode())->UploadButton();
 }
 
 String LayoutFileUploadControl::FileTextValue() const {
+  NOT_DESTROYED();
   int width = MaxFilenameWidth();
   if (width <= 0)
     return String();
@@ -81,18 +84,6 @@ String LayoutFileUploadControl::FileTextValue() const {
   if (input->files()->length() >= 2)
     return StringTruncator::RightTruncate(text, width, StyleRef().GetFont());
   return StringTruncator::CenterTruncate(text, width, StyleRef().GetFont());
-}
-
-// Override to allow effective clip rect to be bigger than the padding box
-// because of kButtonShadowHeight.
-PhysicalRect LayoutFileUploadControl::OverflowClipRect(
-    const PhysicalOffset& additional_offset,
-    OverlayScrollbarClipBehavior) const {
-  PhysicalRect rect(additional_offset, Size());
-  rect.Expand(BorderInsets());
-  rect.offset.top -= LayoutUnit(kButtonShadowHeight);
-  rect.size.height += LayoutUnit(kButtonShadowHeight) * 2;
-  return rect;
 }
 
 }  // namespace blink

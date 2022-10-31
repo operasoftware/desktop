@@ -24,10 +24,10 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_numeric_literal_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
-#include "third_party/blink/renderer/core/svg/properties/svg_property.h"
+#include "third_party/blink/renderer/core/svg/properties/svg_listable_property.h"
 #include "third_party/blink/renderer/core/svg/svg_length_context.h"
 #include "third_party/blink/renderer/core/svg/svg_parsing_error.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
@@ -36,7 +36,7 @@ class QualifiedName;
 
 class SVGLengthTearOff;
 
-class CORE_EXPORT SVGLength final : public SVGPropertyBase {
+class CORE_EXPORT SVGLength final : public SVGListablePropertyBase {
  public:
   typedef SVGLengthTearOff TearOffType;
 
@@ -92,9 +92,6 @@ class CORE_EXPORT SVGLength final : public SVGPropertyBase {
   // value is 1.0).
   float ValueAsPercentage() const;
 
-  // Returns a number to be used as percentage (so full value is 100)
-  float ValueAsPercentage100() const;
-
   // Scale the input value by this SVGLength. Higher precision than input *
   // valueAsPercentage().
   float ScaleByPercentage(float) const;
@@ -117,6 +114,9 @@ class CORE_EXPORT SVGLength final : public SVGPropertyBase {
   }
   bool IsCalculated() const { return value_->IsCalculated(); }
   bool IsPercentage() const { return value_->IsPercentage(); }
+  bool HasContainerRelativeUnits() const {
+    return value_->HasContainerRelativeUnits();
+  }
 
   bool IsNegativeNumericLiteral() const;
   bool IsZero() const { return value_->GetFloatValue() == 0; }
@@ -126,16 +126,17 @@ class CORE_EXPORT SVGLength final : public SVGPropertyBase {
   static bool NegativeValuesForbiddenForAnimatedLengthAttribute(
       const QualifiedName&);
 
-  void Add(SVGPropertyBase*, SVGElement*) override;
-  void CalculateAnimatedValue(const SVGAnimateElement&,
-                              float percentage,
-                              unsigned repeat_count,
-                              SVGPropertyBase* from,
-                              SVGPropertyBase* to,
-                              SVGPropertyBase* to_at_end_of_duration_value,
-                              SVGElement* context_element) override;
-  float CalculateDistance(SVGPropertyBase* to,
-                          SVGElement* context_element) override;
+  void Add(const SVGPropertyBase*, const SVGElement*) override;
+  void CalculateAnimatedValue(
+      const SMILAnimationEffectParameters&,
+      float percentage,
+      unsigned repeat_count,
+      const SVGPropertyBase* from,
+      const SVGPropertyBase* to,
+      const SVGPropertyBase* to_at_end_of_duration_value,
+      const SVGElement* context_element) override;
+  float CalculateDistance(const SVGPropertyBase* to,
+                          const SVGElement* context_element) const override;
 
   static AnimatedPropertyType ClassType() { return kAnimatedLength; }
   AnimatedPropertyType GetType() const override { return ClassType(); }

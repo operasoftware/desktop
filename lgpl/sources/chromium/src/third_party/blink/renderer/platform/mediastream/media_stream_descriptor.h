@@ -32,7 +32,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_MEDIASTREAM_MEDIA_STREAM_DESCRIPTOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_MEDIASTREAM_MEDIA_STREAM_DESCRIPTOR_H_
 
-#include <memory>
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -46,11 +45,20 @@ class WebMediaStreamObserver;
 class PLATFORM_EXPORT MediaStreamDescriptorClient
     : public GarbageCollectedMixin {
  public:
+  // Describes how to fire events. Events that are fired immediately execute
+  // JavaScript synchronously, which could change the object's state. Events
+  // that are scheduled to be fired fire at the end of the task execution cycle.
+  enum class DispatchEventTiming {
+    kImmediately,
+    kScheduled,
+  };
+
   virtual ~MediaStreamDescriptorClient() = default;
 
-  virtual void StreamEnded() = 0;
-  virtual void AddTrackByComponentAndFireEvents(MediaStreamComponent*) = 0;
-  virtual void RemoveTrackByComponentAndFireEvents(MediaStreamComponent*) = 0;
+  virtual void AddTrackByComponentAndFireEvents(MediaStreamComponent*,
+                                                DispatchEventTiming) = 0;
+  virtual void RemoveTrackByComponentAndFireEvents(MediaStreamComponent*,
+                                                   DispatchEventTiming) = 0;
   void Trace(Visitor* visitor) const override {}
 };
 

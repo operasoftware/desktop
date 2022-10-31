@@ -22,7 +22,7 @@
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_radial_gradient.h"
 
 #include "third_party/blink/renderer/core/svg/svg_radial_gradient_element.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -34,22 +34,30 @@ LayoutSVGResourceRadialGradient::LayoutSVGResourceRadialGradient(
 
 LayoutSVGResourceRadialGradient::~LayoutSVGResourceRadialGradient() = default;
 
+void LayoutSVGResourceRadialGradient::Trace(Visitor* visitor) const {
+  visitor->Trace(attributes_wrapper_);
+  LayoutSVGResourceGradient::Trace(visitor);
+}
+
 void LayoutSVGResourceRadialGradient::CollectGradientAttributes() {
+  NOT_DESTROYED();
   DCHECK(GetElement());
   attributes_wrapper_->Set(RadialGradientAttributes());
   To<SVGRadialGradientElement>(GetElement())
       ->CollectGradientAttributes(MutableAttributes());
 }
 
-FloatPoint LayoutSVGResourceRadialGradient::CenterPoint(
+gfx::PointF LayoutSVGResourceRadialGradient::CenterPoint(
     const RadialGradientAttributes& attributes) const {
+  NOT_DESTROYED();
   return SVGLengthContext::ResolvePoint(GetElement(),
                                         attributes.GradientUnits(),
                                         *attributes.Cx(), *attributes.Cy());
 }
 
-FloatPoint LayoutSVGResourceRadialGradient::FocalPoint(
+gfx::PointF LayoutSVGResourceRadialGradient::FocalPoint(
     const RadialGradientAttributes& attributes) const {
+  NOT_DESTROYED();
   return SVGLengthContext::ResolvePoint(GetElement(),
                                         attributes.GradientUnits(),
                                         *attributes.Fx(), *attributes.Fy());
@@ -57,17 +65,20 @@ FloatPoint LayoutSVGResourceRadialGradient::FocalPoint(
 
 float LayoutSVGResourceRadialGradient::Radius(
     const RadialGradientAttributes& attributes) const {
+  NOT_DESTROYED();
   return SVGLengthContext::ResolveLength(
       GetElement(), attributes.GradientUnits(), *attributes.R());
 }
 
 float LayoutSVGResourceRadialGradient::FocalRadius(
     const RadialGradientAttributes& attributes) const {
+  NOT_DESTROYED();
   return SVGLengthContext::ResolveLength(
       GetElement(), attributes.GradientUnits(), *attributes.Fr());
 }
 
 scoped_refptr<Gradient> LayoutSVGResourceRadialGradient::BuildGradient() const {
+  NOT_DESTROYED();
   const RadialGradientAttributes& attributes = Attributes();
   scoped_refptr<Gradient> gradient = Gradient::CreateRadial(
       FocalPoint(attributes), FocalRadius(attributes), CenterPoint(attributes),

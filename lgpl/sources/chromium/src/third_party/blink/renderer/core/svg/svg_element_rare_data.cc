@@ -8,7 +8,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources.h"
 #include "third_party/blink/renderer/core/svg/animation/element_smil_animations.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -27,19 +27,24 @@ SVGElementRareData::EnsureAnimatedSMILStyleProperties() {
   return animated_smil_style_properties_.Get();
 }
 
-ComputedStyle* SVGElementRareData::OverrideComputedStyle(
+const ComputedStyle* SVGElementRareData::OverrideComputedStyle(
     Element* element,
     const ComputedStyle* parent_style) {
   DCHECK(element);
-  if (!use_override_computed_style_)
-    return nullptr;
   if (!override_computed_style_ || needs_override_computed_style_update_) {
+    auto style_recalc_context = StyleRecalcContext::FromAncestors(*element);
+
+    StyleRequest style_request;
+    style_request.parent_override = parent_style;
+    style_request.layout_parent_override = parent_style;
+    style_request.matching_behavior = kMatchAllRulesExcludingSMIL;
+
     // The style computed here contains no CSS Animations/Transitions or SMIL
     // induced rules - this is needed to compute the "base value" for the SMIL
     // animation sandwhich model.
     override_computed_style_ =
-        element->GetDocument().EnsureStyleResolver().StyleForElement(
-            element, parent_style, parent_style, kMatchAllRulesExcludingSMIL);
+        element->GetDocument().GetStyleResolver().ResolveStyle(
+            element, style_recalc_context, style_request);
     needs_override_computed_style_update_ = false;
   }
   DCHECK(override_computed_style_);

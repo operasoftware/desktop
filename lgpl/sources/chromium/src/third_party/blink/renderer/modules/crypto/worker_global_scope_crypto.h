@@ -32,7 +32,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_CRYPTO_WORKER_GLOBAL_SCOPE_CRYPTO_H_
 
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
@@ -43,8 +43,6 @@ class WorkerGlobalScope;
 class WorkerGlobalScopeCrypto final
     : public GarbageCollected<WorkerGlobalScopeCrypto>,
       public Supplement<WorkerGlobalScope> {
-  USING_GARBAGE_COLLECTED_MIXIN(WorkerGlobalScopeCrypto);
-
  public:
   static const char kSupplementName[];
 

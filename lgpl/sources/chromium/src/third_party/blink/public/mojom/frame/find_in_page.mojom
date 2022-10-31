@@ -26,8 +26,14 @@ interface FindInPage {
   // (and no longer highlight it with special coloring).
   ClearActiveFindMatch();
 
+  // Sets the client for this FindInPage instance. Should be called before
+  // calling ActivateNearestFindResult.
+  // TODO(rakina): Remove the need for this?
+  SetClient(pending_remote<FindInPageClient> client);
+
   // Request the distance to the nearest find result in a frame from |point|
   // defined in fractions of the content document's width and height.
+  [EnableIf=is_android]
   GetNearestFindResult(gfx.mojom.PointF point) => (float distance);
 
   // Activates a find result nearest to |point|, which is in fractions of the
@@ -35,12 +41,8 @@ interface FindInPage {
   // SetActiveMatch or SetNumberOfMatches on the FindInPageClient for this
   // FindInPage instance.
   // TODO(rakina): Find a way to remove |request_id|
+  [EnableIf=is_android]
   ActivateNearestFindResult(int32 request_id, gfx.mojom.PointF point);
-
-  // Sets the client for this FindInPage instance. Should be called before
-  // calling ActivateNearestFindResult.
-  // TODO(rakina): Remove the need for this?
-  SetClient(pending_remote<FindInPageClient> client);
 
   // Returns the bounding boxes of the find-in-page match markers from the
   // frame. The bounding boxes are returned in find-in-page coordinates.
@@ -60,6 +62,7 @@ interface FindInPage {
   // |active_rect| will contain the bounding box of the active find-in-page
   // match marker, in similarly normalized coords (or an empty rect if there
   // isn't one).
+  [EnableIf=is_android]
   FindMatchRects(int32 current_version) =>
                 (int32 version, array<gfx.mojom.RectF> rects,
                 gfx.mojom.RectF active_match_rect);
@@ -108,14 +111,13 @@ struct FindOptions {
   // Whether this operation is the first request or a follow-up.
   bool new_session = true;
 
+  // This controls whether to find a match or to only do match counts and
+  // highlighting.
+  bool find_match = true;
+
   // Force a re-search of the frame: typically used when forcing a re-search
   // after the frame navigates.
   bool force = false;
-
-  // Whether to keep searching if the result is an exact match of the selection.
-  // This should generally be set to true unless you're starting a new find
-  // based on the selection.
-  bool find_next_if_selection_matches = true;
 
   // Signifies whether we should force text scoping to happen immediately
   // or not. Only used for testing purposes.

@@ -15,7 +15,7 @@ namespace blink {
 
 class CoreProbeSink;
 class ResourceFetcherProperties;
-class WebWorkerFetchContext;
+class WorkerFetchContext;
 
 // ResourceLoadObserver implementation associated with a worker or worklet.
 class ResourceLoadObserverForWorker final : public ResourceLoadObserver {
@@ -23,17 +23,18 @@ class ResourceLoadObserverForWorker final : public ResourceLoadObserver {
   ResourceLoadObserverForWorker(
       CoreProbeSink& probe,
       const ResourceFetcherProperties& properties,
-      scoped_refptr<WebWorkerFetchContext>,
+      WorkerFetchContext& worker_fetch_context,
       const base::UnguessableToken& devtools_worker_token);
   ~ResourceLoadObserverForWorker() override;
 
   // ResourceLoadObserver implementation.
   void DidStartRequest(const FetchParameters&, ResourceType) override;
-  void WillSendRequest(uint64_t identifier,
-                       const ResourceRequest&,
+  void WillSendRequest(const ResourceRequest&,
                        const ResourceResponse& redirect_response,
                        ResourceType,
-                       const FetchInitiatorInfo&) override;
+                       const ResourceLoaderOptions&,
+                       RenderBlockingBehavior,
+                       const Resource*) override;
   void DidChangePriority(uint64_t identifier,
                          ResourceLoadPriority,
                          int intra_priority_value) override;
@@ -57,12 +58,15 @@ class ResourceLoadObserverForWorker final : public ResourceLoadObserver {
                       const ResourceError&,
                       int64_t encoded_data_length,
                       IsInternalRequest) override;
+  void DidChangeRenderBlockingBehavior(Resource* resource,
+                                       const FetchParameters& params) override {
+  }
   void Trace(Visitor*) const override;
 
  private:
   const Member<CoreProbeSink> probe_;
   const Member<const ResourceFetcherProperties> fetcher_properties_;
-  const scoped_refptr<WebWorkerFetchContext> web_context_;
+  const Member<WorkerFetchContext> worker_fetch_context_;
   const base::UnguessableToken devtools_worker_token_;
 };
 

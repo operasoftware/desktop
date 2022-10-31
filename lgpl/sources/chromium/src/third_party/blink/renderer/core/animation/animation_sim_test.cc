@@ -10,12 +10,13 @@
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/css_test_helpers.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_compositor.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
@@ -59,13 +60,12 @@ TEST_F(AnimationSimTest, CustomPropertyBaseComputedStyle) {
 
   // target.animate({'--x': '100%'}, 1000);
   auto* keyframe = MakeGarbageCollected<StringKeyframe>();
-  keyframe->SetCSSPropertyValue("--x", "100%",
-                                GetDocument().GetSecureContextMode(),
+  keyframe->SetCSSPropertyValue("--x", "100%", Window().GetSecureContextMode(),
                                 GetDocument().ElementSheet().Contents());
   StringKeyframeVector keyframes;
   keyframes.push_back(keyframe);
   Timing timing;
-  timing.iteration_duration = AnimationTimeDelta::FromSecondsD(1);
+  timing.iteration_duration = ANIMATION_TIME_DELTA_FROM_SECONDS(1);
 
   auto* keyframe_effect = MakeGarbageCollected<KeyframeEffect>(
       target, MakeGarbageCollected<StringKeyframeEffectModel>(keyframes),
@@ -83,13 +83,12 @@ TEST_F(AnimationSimTest, CustomPropertyBaseComputedStyle) {
 
   // target.animate({'--x': '100%'}, 1000);
   keyframe = MakeGarbageCollected<StringKeyframe>();
-  keyframe->SetCSSPropertyValue("--x", "100%",
-                                GetDocument().GetSecureContextMode(),
+  keyframe->SetCSSPropertyValue("--x", "100%", Window().GetSecureContextMode(),
                                 GetDocument().ElementSheet().Contents());
   keyframes.clear();
   keyframes.push_back(std::move(keyframe));
   timing = Timing();
-  timing.iteration_duration = AnimationTimeDelta::FromSecondsD(1);
+  timing.iteration_duration = ANIMATION_TIME_DELTA_FROM_SECONDS(1);
 
   keyframe_effect = MakeGarbageCollected<KeyframeEffect>(
       target, MakeGarbageCollected<StringKeyframeEffectModel>(keyframes),

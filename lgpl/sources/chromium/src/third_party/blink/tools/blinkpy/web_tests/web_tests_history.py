@@ -97,7 +97,7 @@ class HistoryChecker(object):
 
     def _process_single(self, path):
         _init(self)
-        print _run(path)
+        print(_run(path))
         return 0
 
     def _process_many(self, paths):
@@ -107,10 +107,9 @@ class HistoryChecker(object):
             return 1
         _log.info("Total test files discovered: %d", len(files))
 
-        pool = multiprocessing.Pool(
-            processes=multiprocessing.cpu_count(),
-            initializer=_init,
-            initargs=(self, ))
+        pool = multiprocessing.Pool(processes=self.executive.cpu_count(),
+                                    initializer=_init,
+                                    initargs=(self, ))
 
         # Capture SIGTERM/INT to exit gracefully without leaving workers behind.
         def _handler(signum, _):
@@ -126,7 +125,7 @@ class HistoryChecker(object):
                 if isinstance(res, BaseException):
                     # Traceback is already printed in the worker; exit directly.
                     raise SystemExit
-                print res
+                print(res)
             pool.close()
         except Exception:
             # A user exception was raised from the manager (main) process.

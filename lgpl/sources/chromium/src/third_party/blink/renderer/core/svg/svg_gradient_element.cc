@@ -26,10 +26,12 @@
 #include "third_party/blink/renderer/core/dom/id_target_observer.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_container.h"
 #include "third_party/blink/renderer/core/svg/gradient_attributes.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_number.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_transform_list.h"
 #include "third_party/blink/renderer/core/svg/svg_enumeration_map.h"
 #include "third_party/blink/renderer/core/svg/svg_stop_element.h"
 #include "third_party/blink/renderer/core/svg/svg_transform_list.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -105,7 +107,9 @@ void SVGGradientElement::CollectStyleForPresentationAttribute(
   SVGElement::CollectStyleForPresentationAttribute(name, value, style);
 }
 
-void SVGGradientElement::SvgAttributeChanged(const QualifiedName& attr_name) {
+void SVGGradientElement::SvgAttributeChanged(
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   if (attr_name == svg_names::kGradientTransformAttr) {
     InvalidateSVGPresentationAttributeStyle();
     SetNeedsStyleRecalc(kLocalStyleChange,
@@ -126,7 +130,7 @@ void SVGGradientElement::SvgAttributeChanged(const QualifiedName& attr_name) {
     return;
   }
 
-  SVGElement::SvgAttributeChanged(attr_name);
+  SVGElement::SvgAttributeChanged(params);
 }
 
 Node::InsertionNotificationRequest SVGGradientElement::InsertedInto(
@@ -152,7 +156,7 @@ void SVGGradientElement::ChildrenChanged(const ChildrenChange& change) {
 
 void SVGGradientElement::InvalidateGradient(
     LayoutInvalidationReasonForTracing reason) {
-  if (auto* layout_object = ToLayoutSVGResourceContainer(GetLayoutObject()))
+  if (auto* layout_object = To<LayoutSVGResourceContainer>(GetLayoutObject()))
     layout_object->InvalidateCacheAndMarkForLayout(reason);
 }
 

@@ -4,44 +4,30 @@
 
 import("//chrome/browser/resources/settings/chromeos/os_settings.gni")
 import("//third_party/closure_compiler/compile_js.gni")
-import("//tools/polymer/polymer.gni")
-import("//ui/webui/resources/tools/js_modulizer.gni")
-import("./os_namespace_rewrites.gni")
 
 js_type_check("closure_compile") {
   deps = [
+    ":fake_cros_audio_config",
+    ":fake_personalization_search_handler",
     ":fake_settings_search_handler",
     ":fake_user_action_recorder",
   ]
 }
 
-js_library("fake_user_action_recorder") {
-  deps = [
-    "//chrome/browser/ui/webui/settings/chromeos/search:mojo_bindings_js_library_for_compile",
-    "//ui/webui/resources/js:cr",
-  ]
+js_library("fake_personalization_search_handler") {
+  deps = [ "//ash/webui/personalization_app/search:mojo_bindings_js_library_for_compile" ]
 }
 
 js_library("fake_settings_search_handler") {
-  deps = [
-    "//chrome/browser/ui/webui/settings/chromeos/search:mojo_bindings_js_library_for_compile",
-    "//ui/webui/resources/js:cr",
-  ]
+  deps = [ "//chrome/browser/ui/webui/settings/ash/search:mojo_bindings_js_library_for_compile" ]
 }
 
-js_modulizer("modulize") {
-  input_files = [
-    "bluetooth_page_tests.js",
-    "fake_bluetooth.js",
-    "fake_bluetooth_private.js",
-    "fake_settings_search_handler.js",
-    "fake_user_action_recorder.js",
-    "localized_link_test.js",
-    "nearby_share_subpage_tests.js",
-    "os_reset_page_test.js",
-    "test_os_reset_browser_proxy.js",
-    "test_os_lifetime_browser_proxy.js",
+js_library("fake_user_action_recorder") {
+  deps = [ "//chrome/browser/ui/webui/settings/ash/search:mojo_bindings_js_library_for_compile" ]
+}
+
+js_library("fake_cros_audio_config") {
+  deps = [
+    "//chromeos/ash/components/audio/public/mojom:mojom_js_library_for_compile",
   ]
-  namespace_rewrites =
-      os_settings_namespace_rewrites + os_test_namespace_rewrites
 }

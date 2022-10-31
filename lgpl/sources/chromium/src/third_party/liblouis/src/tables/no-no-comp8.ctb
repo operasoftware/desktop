@@ -4,10 +4,15 @@
 #-index-name: Norwegian, computer
 #-display-name: Norwegian computer braille
 #
-#+locale:no
+#+language:no
+#+language:nb
+#+language:nn
 #+type:computer
 #+dots:8
 #+grade:0
+# Marked as "direction:both" by Bue Vester-Andersen
+# as it is a computer Braille table.
+#+direction:both
 #
 #  Copyright (C) 1995-2004 The BRLTTY Team
 #  Copyright (C) 2004-2006 ViewPlus Technologies, Inc. www.viewplus.com

@@ -50,7 +50,10 @@ FakeGpuMemoryBufferSupport::CreateGpuMemoryBufferImplFromHandle(
     const gfx::Size& size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage,
-    gpu::GpuMemoryBufferImpl::DestructionCallback callback) {
+    gpu::GpuMemoryBufferImpl::DestructionCallback callback,
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+    scoped_refptr<base::UnsafeSharedMemoryPool> pool,
+    base::span<uint8_t> premapped_memory) {
   return std::make_unique<FakeGpuMemoryBufferImpl>(size, format);
 }
 

@@ -28,12 +28,17 @@
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
-BaseTextInputType::BaseTextInputType(HTMLInputElement& element)
-    : TextFieldInputType(element) {}
+void BaseTextInputType::Trace(Visitor* visitor) const {
+  visitor->Trace(regexp_);
+  TextFieldInputType::Trace(visitor);
+}
+
+BaseTextInputType::BaseTextInputType(Type type, HTMLInputElement& element)
+    : TextFieldInputType(type, element) {}
 
 BaseTextInputType::~BaseTextInputType() = default;
 
@@ -84,9 +89,9 @@ bool BaseTextInputType::PatternMismatch(const String& value) const {
   if (raw_pattern.IsNull() || value.IsEmpty())
     return false;
   if (!regexp_ || pattern_for_regexp_ != raw_pattern) {
-    std::unique_ptr<ScriptRegexp> raw_regexp(
-        new ScriptRegexp(raw_pattern, kTextCaseSensitive, kMultilineDisabled,
-                         ScriptRegexp::UTF16));
+    ScriptRegexp* raw_regexp = MakeGarbageCollected<ScriptRegexp>(
+        raw_pattern, kTextCaseSensitive, kMultilineDisabled,
+        ScriptRegexp::UTF16);
     if (!raw_regexp->IsValid()) {
       GetElement().GetDocument().AddConsoleMessage(
           MakeGarbageCollected<ConsoleMessage>(
@@ -95,13 +100,13 @@ bool BaseTextInputType::PatternMismatch(const String& value) const {
               "Pattern attribute value " + raw_pattern +
                   " is not a valid regular expression: " +
                   raw_regexp->ExceptionMessage()));
-      regexp_.reset(raw_regexp.release());
+      regexp_ = raw_regexp;
       pattern_for_regexp_ = raw_pattern;
       return false;
     }
     String pattern = "^(?:" + raw_pattern + ")$";
-    regexp_.reset(new ScriptRegexp(pattern, kTextCaseSensitive,
-                                   kMultilineDisabled, ScriptRegexp::UTF16));
+    regexp_ = MakeGarbageCollected<ScriptRegexp>(
+        pattern, kTextCaseSensitive, kMultilineDisabled, ScriptRegexp::UTF16);
     pattern_for_regexp_ = raw_pattern;
   } else if (!regexp_->IsValid()) {
     return false;

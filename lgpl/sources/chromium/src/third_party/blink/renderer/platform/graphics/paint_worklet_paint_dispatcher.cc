@@ -14,7 +14,10 @@
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
 
@@ -24,12 +27,12 @@ class AutoSignal {
   explicit AutoSignal(base::WaitableEvent* event) : event_(event) {
     DCHECK(event);
   }
+  AutoSignal(const AutoSignal&) = delete;
+  AutoSignal& operator=(const AutoSignal&) = delete;
   ~AutoSignal() { event_->Signal(); }
 
  private:
   base::WaitableEvent* event_;
-
-  DISALLOW_COPY_AND_ASSIGN(AutoSignal);
 };
 }  // namespace
 
@@ -92,7 +95,7 @@ void PaintWorkletPaintDispatcher::DispatchWorklets(
   ongoing_jobs_ = std::move(worklet_job_map);
 
   scoped_refptr<base::SingleThreadTaskRunner> runner =
-      Thread::Current()->GetTaskRunner();
+      Thread::Current()->GetDeprecatedTaskRunner();
   WTF::CrossThreadClosure on_done = CrossThreadBindRepeating(
       [](base::WeakPtr<PaintWorkletPaintDispatcher> dispatcher,
          scoped_refptr<base::SingleThreadTaskRunner> runner) {
@@ -101,7 +104,7 @@ void PaintWorkletPaintDispatcher::DispatchWorklets(
             CrossThreadBindOnce(&PaintWorkletPaintDispatcher::AsyncPaintDone,
                                 dispatcher));
       },
-      weak_factory_.GetWeakPtr(), WTF::Passed(std::move(runner)));
+      weak_factory_.GetWeakPtr(), std::move(runner));
 
   // Use a base::RepeatingClosure to make sure that AsyncPaintDone is only
   // called once, once all the worklets are done. If there are no inputs
@@ -142,8 +145,8 @@ void PaintWorkletPaintDispatcher::DispatchWorklets(
               }
               on_done_runner->RunAndReset();
             },
-            WrapCrossThreadPersistent(painter), WTF::Passed(std::move(jobs)),
-            WTF::Passed(std::move(on_done_runner))));
+            WrapCrossThreadPersistent(painter), std::move(jobs),
+            std::move(on_done_runner)));
   }
 }
 

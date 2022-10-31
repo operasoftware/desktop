@@ -8,15 +8,16 @@
 
 #include "services/device/public/cpp/generic_sensor/sensor_traits.h"
 #include "services/device/public/mojom/sensor.mojom-blink.h"
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
 #include "third_party/blink/renderer/modules/sensor/sensor_error_event.h"
 #include "third_party/blink/renderer/modules/sensor/sensor_provider_proxy.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/web_test_support.h"
 
 namespace blink {
@@ -26,9 +27,9 @@ const double kWaitingIntervalThreshold = 0.01;
 
 bool AreFeaturesEnabled(
     ExecutionContext* context,
-    const Vector<mojom::blink::FeaturePolicyFeature>& features) {
+    const Vector<mojom::blink::PermissionsPolicyFeature>& features) {
   return std::all_of(features.begin(), features.end(),
-                     [context](mojom::blink::FeaturePolicyFeature feature) {
+                     [context](mojom::blink::PermissionsPolicyFeature feature) {
                        return context->IsFeatureEnabled(
                            feature, ReportOptions::kReportOnFailure);
                      });
@@ -40,7 +41,7 @@ Sensor::Sensor(ExecutionContext* execution_context,
                const SensorOptions* sensor_options,
                ExceptionState& exception_state,
                device::mojom::blink::SensorType type,
-               const Vector<mojom::blink::FeaturePolicyFeature>& features)
+               const Vector<mojom::blink::PermissionsPolicyFeature>& features)
     : ExecutionContextLifecycleObserver(execution_context),
       frequency_(0.0),
       type_(type),
@@ -52,7 +53,7 @@ Sensor::Sensor(ExecutionContext* execution_context,
 
   if (!AreFeaturesEnabled(execution_context, features)) {
     exception_state.ThrowSecurityError(
-        "Access to sensor features is disallowed by feature policy");
+        "Access to sensor features is disallowed by permissions policy");
     return;
   }
 
@@ -78,7 +79,7 @@ Sensor::Sensor(ExecutionContext* execution_context,
                const SpatialSensorOptions* options,
                ExceptionState& exception_state,
                device::mojom::blink::SensorType sensor_type,
-               const Vector<mojom::blink::FeaturePolicyFeature>& features)
+               const Vector<mojom::blink::PermissionsPolicyFeature>& features)
     : Sensor(execution_context,
              static_cast<const SensorOptions*>(options),
              exception_state,
@@ -90,6 +91,8 @@ Sensor::Sensor(ExecutionContext* execution_context,
 Sensor::~Sensor() = default;
 
 void Sensor::start() {
+  if (!GetExecutionContext())
+    return;
   if (state_ != SensorState::kIdle)
     return;
   state_ = SensorState::kActivating;
@@ -115,29 +118,24 @@ bool Sensor::hasReading() const {
   return sensor_proxy_->GetReading().timestamp() != 0.0;
 }
 
-base::Optional<DOMHighResTimeStamp> Sensor::timestamp(
+absl::optional<DOMHighResTimeStamp> Sensor::timestamp(
     ScriptState* script_state) const {
   if (!hasReading()) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   LocalDOMWindow* window = LocalDOMWindow::From(script_state);
   if (!window) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   WindowPerformance* performance = DOMWindowPerformance::performance(*window);
   DCHECK(performance);
   DCHECK(sensor_proxy_);
 
-  if (WebTestSupport::IsRunningWebTest()) {
-    // In web tests performance.now() * 0.001 is passed to the shared buffer.
-    return sensor_proxy_->GetReading().timestamp() * 1000;
-  }
-
   return performance->MonotonicTimeToDOMHighResTimeStamp(
       base::TimeTicks() +
-      base::TimeDelta::FromSecondsD(sensor_proxy_->GetReading().timestamp()));
+      base::Seconds(sensor_proxy_->GetReading().timestamp()));
 }
 
 void Sensor::Trace(Visitor* visitor) const {
@@ -230,8 +228,7 @@ void Sensor::OnSensorReadingChanged() {
   } else {
     pending_reading_notification_ = PostDelayedCancellableTask(
         *GetExecutionContext()->GetTaskRunner(TaskType::kSensor), FROM_HERE,
-        std::move(sensor_reading_changed),
-        base::TimeDelta::FromSecondsD(waitingTime));
+        std::move(sensor_reading_changed), base::Seconds(waitingTime));
   }
 }
 
@@ -263,11 +260,7 @@ void Sensor::Activate() {
   DCHECK_EQ(state_, SensorState::kActivating);
 
   InitSensorProxyIfNeeded();
-  if (!sensor_proxy_) {
-    HandleError(DOMExceptionCode::kInvalidStateError,
-                "The Sensor is no longer associated to a frame.");
-    return;
-  }
+  DCHECK(sensor_proxy_);
 
   if (sensor_proxy_->IsInitialized())
     RequestAddConfiguration();
@@ -346,12 +339,7 @@ void Sensor::NotifyActivated() {
   DCHECK_EQ(state_, SensorState::kActivating);
   state_ = SensorState::kActivated;
 
-  // Explicitly call the Sensor implementation of hasReading(). Subclasses may
-  // override the method and introduce additional requirements, but in this case
-  // we are really only interested in whether there is data in the shared
-  // buffer, so that we can then process it possibly for the first time in
-  // OnSensorReadingChanged().
-  if (Sensor::hasReading()) {
+  if (hasReading()) {
     // If reading has already arrived, process the reading values (a subclass
     // may do some filtering, for example) and then send an initial "reading"
     // event right away.

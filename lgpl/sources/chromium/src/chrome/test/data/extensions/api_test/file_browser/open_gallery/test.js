@@ -36,20 +36,27 @@ function getFileEntry(volumeType, path) {
  * A method the camera app uses to open its "camera roll". Instrumented for
  * testing. See chromeos/camera/src/js/browser_proxy/browser_proxy.js.
  */
-function openGallery(entry) {
+function openGallery(entry, expectedResult) {
   // "jhdjimmaggjajfjphpljagpgkidjilnj" is the MediaApp app id. This task id is
   // hard-coded in the Camera component app.
-  const id = 'jhdjimmaggjajfjphpljagpgkidjilnj|web|open';
+  const descriptor = {
+    appId: 'jhdjimmaggjajfjphpljagpgkidjilnj',
+    taskType: 'web',
+    actionId: 'chrome://media-app/open'
+  };
   function taskCallback(taskResult) {
-    chrome.test.assertEq(
-        chrome.fileManagerPrivate.TaskResult.MESSAGE_SENT, taskResult);
+    chrome.test.assertEq(expectedResult, taskResult);
     chrome.test.succeed();
   }
-  chrome.fileManagerPrivate.executeTask(id, [entry], taskCallback);
+  chrome.fileManagerPrivate.executeTask(descriptor, [entry], taskCallback);
 }
 
-function testPngOpensGallery() {
-  getFileEntry('testing', kTestPng).then(openGallery);
+function openGalleryExpectOpened(entry) {
+  openGallery(entry, chrome.fileManagerPrivate.TaskResult.OPENED);
+}
+
+function testPngOpensGalleryReturnsOpened() {
+  getFileEntry('testing', kTestPng).then(openGalleryExpectOpened);
 }
 
 // Handle the case where JSTestStarter has already injected a test to run.

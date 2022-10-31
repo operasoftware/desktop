@@ -8,6 +8,7 @@
 #include <memory>
 #include "third_party/blink/renderer/core/animation/interpolation_value.h"
 #include "third_party/blink/renderer/core/animation/pairwise_interpolation_value.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -81,7 +82,7 @@ class CORE_EXPORT ListInterpolationFunctions {
                                             const NonInterpolableValue* b);
 };
 
-class CORE_EXPORT NonInterpolableList : public NonInterpolableValue {
+class CORE_EXPORT NonInterpolableList final : public NonInterpolableValue {
  public:
   ~NonInterpolableList() final = default;
 

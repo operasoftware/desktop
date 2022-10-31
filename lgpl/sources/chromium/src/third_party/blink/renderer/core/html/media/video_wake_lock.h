@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/html/media/remote_playback_observer.h"
 #include "third_party/blink/renderer/core/intersection_observer/intersection_observer.h"
 #include "third_party/blink/renderer/core/page/page_visibility_observer.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 
 namespace blink {
 
@@ -33,8 +34,6 @@ class CORE_EXPORT VideoWakeLock final
       public PageVisibilityObserver,
       public RemotePlaybackObserver,
       public ExecutionContextLifecycleStateObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(VideoWakeLock);
-
  public:
   explicit VideoWakeLock(HTMLVideoElement&);
 

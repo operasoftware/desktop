@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 GEN('#include "content/public/test/browser_test.h"');
-GEN('#include "services/network/public/cpp/features.h"');
 
 /**
  * TestFixture for Discards WebUI testing.
@@ -11,24 +10,7 @@ GEN('#include "services/network/public/cpp/features.h"');
 var DiscardsTest = class extends testing.Test {
   /** @override */
   get browsePreload() {
-    return 'chrome://test?module=discards/discards_test.js';
-  }
-
-  get extraLibraries() {
-    return [
-      '//third_party/mocha/mocha.js',
-      '//chrome/test/data/webui/mocha_adapter.js',
-    ];
-  }
-
-  /** @override */
-  get featureList() {
-    return {enabled: ['network::features::kOutOfBlinkCors']};
-  }
-
-  /** @override */
-  get webuiHost() {
-    return 'discards';
+    return 'chrome://discards/test_loader.html?module=discards/discards_test.js';
   }
 };
 

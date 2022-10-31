@@ -7,13 +7,13 @@
 #include <memory>
 #include <utility>
 
+#include "base/numerics/safe_conversions.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialization_tag.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_binding_for_modules.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_request.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_value.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
-#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -40,7 +40,7 @@ namespace {
 // will have to be bumped.
 
 // The SSV format version whose encoding hole is (ab)used for wrapping.
-const static uint8_t kRequiresProcessingSSVPseudoVersion = 17;
+static const uint8_t kRequiresProcessingSSVPseudoVersion = 17;
 
 // SSV processing command replacing the SSV data bytes with a Blob's contents.
 //
@@ -50,7 +50,7 @@ const static uint8_t kRequiresProcessingSSVPseudoVersion = 17;
 // 4) varint - Blob size
 // 5) varint - the offset of the SSV-wrapping Blob in the IDBValue list of Blobs
 //             (should always be the last Blob)
-const static uint8_t kReplaceWithBlob = 1;
+static const uint8_t kReplaceWithBlob = 1;
 
 }  // namespace
 
@@ -151,7 +151,7 @@ bool IDBValueWrapper::WrapIfBiggerThan(unsigned max_bytes) {
   wire_data_buffer_.push_back(kVersionTag);
   wire_data_buffer_.push_back(kRequiresProcessingSSVPseudoVersion);
   wire_data_buffer_.push_back(kReplaceWithBlob);
-  IDBValueWrapper::WriteVarInt(SafeCast<unsigned>(wire_data_size),
+  IDBValueWrapper::WriteVarInt(base::checked_cast<unsigned>(wire_data_size),
                                wire_data_buffer_);
   IDBValueWrapper::WriteVarInt(serialized_value_->BlobDataHandles().size(),
                                wire_data_buffer_);
@@ -207,6 +207,17 @@ bool IDBValueUnwrapper::IsWrapped(
   for (const auto& value : values) {
     if (IsWrapped(value.get()))
       return true;
+  }
+  return false;
+}
+
+// static
+bool IDBValueUnwrapper::IsWrapped(
+    const Vector<Vector<std::unique_ptr<IDBValue>>>& all_values) {
+  for (const auto& values : all_values) {
+    if (IsWrapped(values)) {
+      return true;
+    }
   }
   return false;
 }

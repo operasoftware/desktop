@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/modules/xr/xr_space.h"
 
-#include "base/stl_util.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/xr/xr_input_source.h"
 #include "third_party/blink/renderer/modules/xr/xr_pose.h"
@@ -17,14 +16,14 @@ XRSpace::XRSpace(XRSession* session) : session_(session) {}
 
 XRSpace::~XRSpace() = default;
 
-base::Optional<TransformationMatrix> XRSpace::NativeFromViewer(
-    const base::Optional<TransformationMatrix>& mojo_from_viewer) {
+absl::optional<TransformationMatrix> XRSpace::NativeFromViewer(
+    const absl::optional<TransformationMatrix>& mojo_from_viewer) const {
   if (!mojo_from_viewer)
-    return base::nullopt;
+    return absl::nullopt;
 
-  base::Optional<TransformationMatrix> native_from_mojo = NativeFromMojo();
+  absl::optional<TransformationMatrix> native_from_mojo = NativeFromMojo();
   if (!native_from_mojo)
-    return base::nullopt;
+    return absl::nullopt;
 
   native_from_mojo->Multiply(*mojo_from_viewer);
 
@@ -32,20 +31,20 @@ base::Optional<TransformationMatrix> XRSpace::NativeFromViewer(
   return native_from_mojo;
 }
 
-TransformationMatrix XRSpace::NativeFromOffsetMatrix() {
+TransformationMatrix XRSpace::NativeFromOffsetMatrix() const {
   TransformationMatrix identity;
   return identity;
 }
 
-TransformationMatrix XRSpace::OffsetFromNativeMatrix() {
+TransformationMatrix XRSpace::OffsetFromNativeMatrix() const {
   TransformationMatrix identity;
   return identity;
 }
 
-base::Optional<TransformationMatrix> XRSpace::MojoFromOffsetMatrix() {
+absl::optional<TransformationMatrix> XRSpace::MojoFromOffsetMatrix() const {
   auto maybe_mojo_from_native = MojoFromNative();
   if (!maybe_mojo_from_native) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   // Modifies maybe_mojo_from_native - it becomes mojo_from_offset_matrix.
@@ -54,34 +53,40 @@ base::Optional<TransformationMatrix> XRSpace::MojoFromOffsetMatrix() {
   return maybe_mojo_from_native;
 }
 
-base::Optional<TransformationMatrix> XRSpace::TryInvert(
-    const base::Optional<TransformationMatrix>& matrix) {
-  if (!matrix)
-    return base::nullopt;
+absl::optional<TransformationMatrix> XRSpace::NativeFromMojo() const {
+  absl::optional<TransformationMatrix> mojo_from_native = MojoFromNative();
+  if (!mojo_from_native)
+    return absl::nullopt;
 
-  DCHECK(matrix->IsInvertible());
-  return matrix->Inverse();
+  DCHECK(mojo_from_native->IsInvertible());
+  return mojo_from_native->Inverse();
 }
 
 bool XRSpace::EmulatedPosition() const {
   return session()->EmulatedPosition();
 }
 
-XRPose* XRSpace::getPose(XRSpace* other_space) {
+XRPose* XRSpace::getPose(const XRSpace* other_space) const {
+  DVLOG(2) << __func__ << ": ToString()=" << ToString()
+           << ", other_space->ToString()=" << other_space->ToString();
+
   // Named mojo_from_offset because that is what we will leave it as, though it
   // starts mojo_from_native.
-  base::Optional<TransformationMatrix> mojo_from_offset = MojoFromNative();
+  absl::optional<TransformationMatrix> mojo_from_offset = MojoFromNative();
   if (!mojo_from_offset) {
+    DVLOG(2) << __func__ << ": MojoFromNative() is not set";
     return nullptr;
   }
 
   // Add any origin offset now.
   mojo_from_offset->Multiply(NativeFromOffsetMatrix());
 
-  base::Optional<TransformationMatrix> other_from_mojo =
+  absl::optional<TransformationMatrix> other_from_mojo =
       other_space->NativeFromMojo();
-  if (!other_from_mojo)
+  if (!other_from_mojo) {
+    DVLOG(2) << __func__ << ": other_space->NativeFromMojo() is not set";
     return nullptr;
+  }
 
   // Add any origin offset from the other space now.
   TransformationMatrix other_offset_from_mojo =
@@ -97,13 +102,13 @@ XRPose* XRSpace::getPose(XRSpace* other_space) {
       EmulatedPosition() || other_space->EmulatedPosition());
 }
 
-base::Optional<TransformationMatrix> XRSpace::OffsetFromViewer() {
-  base::Optional<TransformationMatrix> native_from_viewer =
+absl::optional<TransformationMatrix> XRSpace::OffsetFromViewer() const {
+  absl::optional<TransformationMatrix> native_from_viewer =
       NativeFromViewer(session()->GetMojoFrom(
           device::mojom::blink::XRReferenceSpaceType::kViewer));
 
   if (!native_from_viewer) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   return OffsetFromNativeMatrix().Multiply(*native_from_viewer);

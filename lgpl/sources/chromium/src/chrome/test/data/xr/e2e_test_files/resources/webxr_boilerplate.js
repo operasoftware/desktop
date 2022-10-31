@@ -79,7 +79,7 @@ var immersiveSessionInit = {};
 // AR sessions will use the `immersiveSessionInit` and `immersiveArSessionInit`
 // to request a session. If they both contain the same keys, the one present in
 // `immersiveArSessionInit` will be chosen.
-var immersiveArSessionInit = { requiredFeatures: ['hit-test'] };
+var immersiveArSessionInit = { requiredFeatures: ['hit-test', 'anchors'] };
 var nonImmersiveSessionInit = {};
 
 function getSessionType(session) {
@@ -220,7 +220,7 @@ function onXRFrame(t, frame) {
       break;
     case sessionTypes.AR:
       if (onARFrameCallback) {
-        onARFrameCallback(session, frame);
+        onARFrameCallback(session, frame, t);
       }
       break;
     default:

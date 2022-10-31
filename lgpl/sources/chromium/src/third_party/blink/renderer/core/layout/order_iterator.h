@@ -31,7 +31,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_ORDER_ITERATOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_ORDER_ITERATOR_H_
 
-#include "base/macros.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 #include <set>
@@ -47,6 +48,8 @@ class OrderIterator {
   friend class OrderIteratorPopulator;
 
   explicit OrderIterator(const LayoutBox*);
+  OrderIterator(const OrderIterator&) = delete;
+  OrderIterator& operator=(const OrderIterator&) = delete;
 
   LayoutBox* CurrentChild() { return current_child_; }
   const LayoutBox* CurrentChild() const { return current_child_; }
@@ -59,22 +62,26 @@ class OrderIterator {
     return const_cast<OrderIterator*>(this)->Next();
   }
 
+  void Trace(Visitor* visitor) const {
+    visitor->Trace(container_box_);
+    visitor->Trace(current_child_);
+  }
+
  private:
   void Reset();
 
   // Returns the order to use for |child|.
   int ResolvedOrder(const LayoutBox& child) const;
 
-  const LayoutBox* container_box_;
+  Member<const LayoutBox> container_box_;
 
-  LayoutBox* current_child_ = nullptr;
+  Member<LayoutBox> current_child_;
 
   using OrderValues = std::set<int>;
   OrderValues order_values_;
   OrderValues::const_iterator order_values_iterator_;
   // Set by |Reset()|, triggers iteration to start from the beginning.
   bool is_reset_ = false;
-  DISALLOW_COPY_AND_ASSIGN(OrderIterator);
 };
 
 class OrderIteratorPopulator {

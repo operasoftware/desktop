@@ -1,0 +1,7 @@
+This library was imported by @amlynarczyk
+
+In order to update it, just drop the files from latest release to vendor subdirectory and make sure that platform.hpp in mac and win directories is a proper file for current version.
+
+Also make sure, that every needed file is included in sources inside BUILD.gn file
+
+Good Night and Good Luck

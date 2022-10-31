@@ -34,6 +34,7 @@
 
 #include <memory>
 
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
@@ -41,6 +42,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value_factory.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_event_source_init.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/event_target_names.h"
 #include "third_party/blink/renderer/core/events/message_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
@@ -50,7 +52,7 @@
 #include "third_party/blink/renderer/core/loader/threadable_loader.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_error.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
@@ -61,6 +63,28 @@
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
+namespace {
+// https://fetch.spec.whatwg.org/#cors-unsafe-request-header-byte
+bool IsCorsUnsafeRequestHeaderByte(char c) {
+  const auto u = static_cast<uint8_t>(c);
+  return (u < 0x20 && u != 0x09) || u == 0x22 || u == 0x28 || u == 0x29 ||
+         u == 0x3a || u == 0x3c || u == 0x3e || u == 0x3f || u == 0x40 ||
+         u == 0x5b || u == 0x5c || u == 0x5d || u == 0x7b || u == 0x7d ||
+         u == 0x7f;
+}
+
+void ReportUMA(ExecutionContext& context,
+               const std::string& value,
+               network::mojom::FetchResponseType response_type) {
+  if (response_type == network::mojom::FetchResponseType::kCors &&
+      (value.size() > 128 || std::any_of(value.begin(), value.end(),
+                                         IsCorsUnsafeRequestHeaderByte))) {
+    UseCounter::Count(context,
+                      WebFeature::kFetchEventSourceLastEventIdCorsUnSafe);
+  }
+}
+
+}  // anonymous namespace
 
 const uint64_t EventSource::kDefaultReconnectDelay = 3000;
 
@@ -75,22 +99,16 @@ inline EventSource::EventSource(ExecutionContext* context,
       connect_timer_(context->GetTaskRunner(TaskType::kRemoteEvent),
                      this,
                      &EventSource::ConnectTimerFired),
-      reconnect_delay_(kDefaultReconnectDelay) {}
+      reconnect_delay_(kDefaultReconnectDelay),
+      world_(context->GetCurrentWorld()) {}
 
 EventSource* EventSource::Create(ExecutionContext* context,
                                  const String& url,
                                  const EventSourceInit* event_source_init,
                                  ExceptionState& exception_state) {
-  UseCounter::Count(context, context->IsDocument()
+  UseCounter::Count(context, context->IsWindow()
                                  ? WebFeature::kEventSourceDocument
                                  : WebFeature::kEventSourceWorker);
-
-  if (url.IsEmpty()) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kSyntaxError,
-        "Cannot open an EventSource to an empty URL.");
-    return nullptr;
-  }
 
   KURL full_url = context->CompleteURL(url);
   if (!full_url.IsValid()) {
@@ -124,19 +142,19 @@ void EventSource::Connect() {
   DCHECK(!loader_);
   DCHECK(GetExecutionContext());
 
-  ExecutionContext& execution_context = *this->GetExecutionContext();
+  ExecutionContext& execution_context = *GetExecutionContext();
   ResourceRequest request(current_url_);
   request.SetHttpMethod(http_names::kGET);
   request.SetHttpHeaderField(http_names::kAccept, "text/event-stream");
   request.SetHttpHeaderField(http_names::kCacheControl, "no-cache");
-  request.SetRequestContext(mojom::RequestContextType::EVENT_SOURCE);
+  request.SetRequestContext(mojom::blink::RequestContextType::EVENT_SOURCE);
+  request.SetFetchLikeAPI(true);
   request.SetMode(network::mojom::RequestMode::kCors);
+  request.SetTargetAddressSpace(network::mojom::IPAddressSpace::kUnknown);
   request.SetCredentialsMode(
       with_credentials_ ? network::mojom::CredentialsMode::kInclude
                         : network::mojom::CredentialsMode::kSameOrigin);
   request.SetCacheMode(blink::mojom::FetchCacheMode::kNoStore);
-  request.SetExternalRequestStateFromRequestorAddressSpace(
-      execution_context.GetSecurityContext().AddressSpace());
   request.SetCorsPreflightPolicy(
       network::mojom::CorsPreflightPolicy::kPreventPreflight);
   if (parser_ && !parser_->LastEventId().IsEmpty()) {
@@ -151,7 +169,7 @@ void EventSource::Connect() {
                      last_event_id_utf8.length()));
   }
 
-  ResourceLoaderOptions resource_loader_options;
+  ResourceLoaderOptions resource_loader_options(world_);
   resource_loader_options.data_buffering_policy = kDoNotBufferData;
 
   probe::WillSendEventSourceRequest(&execution_context);
@@ -169,8 +187,7 @@ void EventSource::NetworkRequestEnded() {
 
 void EventSource::ScheduleReconnect() {
   state_ = kConnecting;
-  connect_timer_.StartOneShot(
-      base::TimeDelta::FromMilliseconds(reconnect_delay_), FROM_HERE);
+  connect_timer_.StartOneShot(base::Milliseconds(reconnect_delay_), FROM_HERE);
   DispatchEvent(*Event::Create(event_type_names::kError));
 }
 
@@ -272,6 +289,9 @@ void EventSource::DidReceiveResponse(uint64_t identifier,
     if (parser_) {
       // The new parser takes over the event ID.
       last_event_id = parser_->LastEventId();
+      DCHECK(GetExecutionContext());
+      ReportUMA(*GetExecutionContext(), last_event_id.Utf8(),
+                response.GetType());
     }
     parser_ = MakeGarbageCollected<EventSourceParser>(last_event_id, this);
     DispatchEvent(*Event::Create(event_type_names::kOpen));
@@ -295,7 +315,7 @@ void EventSource::DidFinishLoading(uint64_t) {
   NetworkRequestEnded();
 }
 
-void EventSource::DidFail(const ResourceError& error) {
+void EventSource::DidFail(uint64_t, const ResourceError& error) {
   DCHECK(loader_);
   if (error.IsCancellation() && state_ == kClosed) {
     NetworkRequestEnded();
@@ -318,7 +338,7 @@ void EventSource::DidFail(const ResourceError& error) {
   NetworkRequestEnded();
 }
 
-void EventSource::DidFailRedirectCheck() {
+void EventSource::DidFailRedirectCheck(uint64_t) {
   DCHECK(loader_);
 
   AbortConnectionAttempt();
@@ -362,6 +382,7 @@ bool EventSource::HasPendingActivity() const {
 void EventSource::Trace(Visitor* visitor) const {
   visitor->Trace(parser_);
   visitor->Trace(loader_);
+  visitor->Trace(connect_timer_);
   EventTargetWithInlineData::Trace(visitor);
   ThreadableLoaderClient::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);

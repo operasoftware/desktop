@@ -17,8 +17,6 @@ class MediaControlsImpl;
 // buttons and sliders.
 class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
                                                 public MediaControlElementBase {
-  USING_GARBAGE_COLLECTED_MIXIN(MediaControlInputElement);
-
  public:
   static bool ShouldRecordDisplayStates(const HTMLMediaElement&);
 
@@ -38,8 +36,8 @@ class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
   }
 
   // Get the size of the element in pixels or the default if we cannot get the
-  // size because the element has not been layed out yet.
-  WebSize GetSizeOrDefault() const override;
+  // size because the element has not been laid out yet.
+  gfx::Size GetSizeOrDefault() const override;
   bool IsDisabled() const override;
 
  protected:
@@ -80,6 +78,7 @@ class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
 
  private:
   friend class MediaControlInputElementTest;
+  friend class MediaControlPopupMenuElementTest;
 
   bool IsMouseFocusable() const override;
   bool IsMediaControlElement() const final;

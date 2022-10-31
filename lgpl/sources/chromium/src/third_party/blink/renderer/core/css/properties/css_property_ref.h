@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PROPERTIES_CSS_PROPERTY_REF_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PROPERTIES_CSS_PROPERTY_REF_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/properties/longhands/custom_property.h"
 
 namespace blink {
@@ -57,11 +58,11 @@ class CORE_EXPORT CSSPropertyRef {
     DCHECK(IsValid());
     if (property_id_ == CSSPropertyID::kVariable)
       return custom_property_;
-    return CSSProperty::Get(resolveCSSPropertyID(property_id_));
+    return CSSProperty::Get(ResolveCSSPropertyID(property_id_));
   }
 
   const CSSUnresolvedProperty& GetUnresolvedProperty() const {
-    if (isPropertyAlias(property_id_))
+    if (IsPropertyAlias(property_id_))
       return *CSSUnresolvedProperty::GetAliasProperty(property_id_);
     return GetProperty();
   }

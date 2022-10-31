@@ -24,6 +24,8 @@
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
+#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 
 namespace blink {
 
@@ -32,14 +34,12 @@ struct SameSizeAsCSSRule : public GarbageCollected<SameSizeAsCSSRule>,
   ~SameSizeAsCSSRule() override;
   unsigned char bitfields;
   Member<ScriptWrappable> member;
-#if !DCHECK_IS_ON()
-  static_assert(sizeof(Member<ScriptWrappable>) == sizeof(void*),
-                "Increasing size of Member increases size of CSSRule");
-#endif  // DCHECK_IS_ON()
+  static_assert(kBlinkMemberGCHasDebugChecks ||
+                    sizeof(Member<ScriptWrappable>) <= sizeof(void*),
+                "Member<ScriptWrappable> should stay small");
 };
 
-static_assert(sizeof(CSSRule) == sizeof(SameSizeAsCSSRule),
-              "CSSRule should stay small");
+ASSERT_SIZE(CSSRule, SameSizeAsCSSRule);
 
 CSSRule::CSSRule(CSSStyleSheet* parent)
     : has_cached_selector_text_(false),
@@ -51,6 +51,13 @@ const CSSParserContext* CSSRule::ParserContext(
   CSSStyleSheet* style_sheet = parentStyleSheet();
   return style_sheet ? style_sheet->Contents()->ParserContext()
                      : StrictCSSParserContext(secure_context_mode);
+}
+
+void CSSRule::CountUse(WebFeature feature) const {
+  CSSStyleSheet* style_sheet = parentStyleSheet();
+  Document* document = style_sheet ? style_sheet->OwnerDocument() : nullptr;
+  if (document)
+    document->CountUse(feature);
 }
 
 void CSSRule::SetParentStyleSheet(CSSStyleSheet* style_sheet) {

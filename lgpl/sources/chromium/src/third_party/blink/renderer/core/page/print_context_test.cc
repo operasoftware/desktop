@@ -6,12 +6,19 @@
 
 #include <memory>
 
+#include "base/test/scoped_feature_list.h"
+#include "components/viz/test/test_context_provider.h"
+#include "components/viz/test/test_gles2_interface.h"
+#include "components/viz/test/test_raster_interface.h"
+#include "gpu/config/gpu_finch_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/events/before_print_event.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
@@ -19,9 +26,12 @@
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
+#include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
+#include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
+#include "third_party/blink/renderer/platform/graphics/test/gpu_test_utils.h"
 #include "third_party/blink/renderer/platform/testing/paint_test_configurations.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -75,12 +85,17 @@ class MockPageContextCanvas : public SkCanvas {
                void(const SkPicture*, const SkMatrix*, const SkPaint*));
   MOCK_METHOD3(DrawPicture,
                void(const SkPicture*, const SkMatrix*, const SkPaint*));
-  MOCK_METHOD4(onDrawImage,
-               void(const SkImage*, SkScalar, SkScalar, const SkPaint*));
-  MOCK_METHOD5(onDrawImageRect,
+  MOCK_METHOD5(onDrawImage2,
                void(const SkImage*,
-                    const SkRect*,
+                    SkScalar,
+                    SkScalar,
+                    const SkSamplingOptions&,
+                    const SkPaint*));
+  MOCK_METHOD6(onDrawImageRect2,
+               void(const SkImage*,
                     const SkRect&,
+                    const SkRect&,
+                    const SkSamplingOptions&,
                     const SkPaint*,
                     SrcRectConstraint));
 
@@ -99,6 +114,13 @@ class PrintContextTest : public PaintTestConfigurations, public RenderingTest {
     print_context_ =
         MakeGarbageCollected<PrintContext>(GetDocument().GetFrame(),
                                            /*use_printing_layout=*/true);
+    CanvasResourceProvider::SetMaxPinnedImageBytesForTesting(100);
+  }
+
+  void TearDown() override {
+    RenderingTest::TearDown();
+    CanvasRenderingContext::GetCanvasPerformanceMonitor().ResetForTesting();
+    CanvasResourceProvider::ResetMaxPinnedImageBytesForTesting();
   }
 
   PrintContext& GetPrintContext() { return *print_context_.Get(); }
@@ -109,25 +131,25 @@ class PrintContextTest : public PaintTestConfigurations, public RenderingTest {
   }
 
   void PrintSinglePage(SkCanvas& canvas) {
-    IntRect page_rect(0, 0, kPageWidth, kPageHeight);
+    gfx::Rect page_rect(0, 0, kPageWidth, kPageHeight);
     GetDocument().SetPrinting(Document::kBeforePrinting);
     Event* event = MakeGarbageCollected<BeforePrintEvent>();
     GetPrintContext().GetFrame()->DomWindow()->DispatchEvent(*event);
-    GetPrintContext().BeginPrintMode(page_rect.Width(), page_rect.Height());
-    UpdateAllLifecyclePhasesForTest();
-    PaintRecordBuilder builder;
-    GraphicsContext& context = builder.Context();
+    GetPrintContext().BeginPrintMode(page_rect.width(), page_rect.height());
+    GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint(
+        DocumentUpdateReason::kTest);
+    auto* builder = MakeGarbageCollected<PaintRecordBuilder>();
+    GraphicsContext& context = builder->Context();
     context.SetPrinting(true);
-    GetDocument().View()->PaintContentsOutsideOfLifecycle(
-        context, kGlobalPaintPrinting | kGlobalPaintAddUrlMetadata,
-        CullRect(page_rect));
+    GetDocument().View()->PaintOutsideOfLifecycle(
+        context, PaintFlag::kAddUrlMetadata, CullRect(page_rect));
     {
       DrawingRecorder recorder(
           context, *GetDocument().GetLayoutView(),
           DisplayItem::kPrintedContentDestinationLocations);
       GetPrintContext().OutputLinkedDestinations(context, page_rect);
     }
-    builder.EndRecording()->Playback(&canvas);
+    builder->EndRecording()->Playback(&canvas);
     GetPrintContext().EndPrintMode();
   }
 
@@ -135,8 +157,8 @@ class PrintContextTest : public PaintTestConfigurations, public RenderingTest {
                                          int y,
                                          int width,
                                          int height,
-                                         const char* url,
-                                         const char* children = nullptr) {
+                                         String url,
+                                         String children = String()) {
     WTF::TextStream ts;
     ts << "<a style='position: absolute; left: " << x << "px; top: " << y
        << "px; width: " << width << "px; height: " << height << "px' href='"
@@ -144,17 +166,13 @@ class PrintContextTest : public PaintTestConfigurations, public RenderingTest {
     return ts.Release();
   }
 
-  static String InlineHtmlForLink(const char* url,
-                                  const char* children = nullptr) {
+  static String InlineHtmlForLink(String url, String children = String()) {
     WTF::TextStream ts;
     ts << "<a href='" << url << "'>" << (children ? children : url) << "</a>";
     return ts.Release();
   }
 
-  static String HtmlForAnchor(int x,
-                              int y,
-                              const char* name,
-                              const char* text_content) {
+  static String HtmlForAnchor(int x, int y, String name, String text_content) {
     WTF::TextStream ts;
     ts << "<a name='" << name << "' style='position: absolute; left: " << x
        << "px; top: " << y << "px'>" << text_content << "</a>";
@@ -288,26 +306,57 @@ TEST_P(PrintContextTest, LinkTargetSvg) {
 TEST_P(PrintContextTest, LinkedTarget) {
   MockPageContextCanvas canvas;
   GetDocument().SetBaseURLOverride(KURL("http://a.com/"));
+  // Careful about locations, the page is 800x600 and only one page is printed.
   SetBodyInnerHTML(
       AbsoluteBlockHtmlForLink(
-          50, 60, 70, 80,
+          50, 60, 10, 10,
           "#fragment")  // Generates a Link_Named_Dest_Key annotation
-      + AbsoluteBlockHtmlForLink(150, 160, 170, 180,
+      + AbsoluteBlockHtmlForLink(50, 160, 10, 10,
                                  "#not-found")  // Generates no annotation
+      + AbsoluteBlockHtmlForLink(
+            50, 260, 10, 10,
+            u"#\u00F6")  // Generates a Link_Named_Dest_Key annotation
+      + AbsoluteBlockHtmlForLink(
+            50, 360, 10, 10,
+            "#")  // Generates a Link_Named_Dest_Key annotation
+      + AbsoluteBlockHtmlForLink(
+            50, 460, 10, 10,
+            "#t%6Fp")  // Generates a Link_Named_Dest_Key annotation
       +
-      HtmlForAnchor(250, 260, "fragment",
+      HtmlForAnchor(450, 60, "fragment",
                     "fragment")  // Generates a Define_Named_Dest_Key annotation
-      + HtmlForAnchor(350, 360, "fragment-not-used",
-                      "fragment-not-used"));  // Generates no annotation
+      + HtmlForAnchor(450, 160, "fragment-not-used",
+                      "fragment-not-used")  // Generates no annotation
+      + HtmlForAnchor(450, 260, u"\u00F6",
+                      "O")  // Generates a Define_Named_Dest_Key annotation
+      // TODO(1117212): The escaped version currently takes precedence.
+      //+ HtmlForAnchor(450, 360, "%C3%B6",
+      //                "O2")  // Generates a Define_Named_Dest_Key annotation
+  );
   PrintSinglePage(canvas);
 
   const Vector<MockPageContextCanvas::Operation>& operations =
       canvas.RecordedOperations();
-  ASSERT_EQ(2u, operations.size());
+  ASSERT_EQ(8u, operations.size());
+  // The DrawRect operations come from a stable iterator.
   EXPECT_EQ(MockPageContextCanvas::kDrawRect, operations[0].type);
-  EXPECT_SKRECT_EQ(50, 60, 70, 80, operations[0].rect);
-  EXPECT_EQ(MockPageContextCanvas::kDrawPoint, operations[1].type);
-  EXPECT_SKRECT_EQ(250, 260, 0, 0, operations[1].rect);
+  EXPECT_SKRECT_EQ(50, 60, 10, 10, operations[0].rect);
+  EXPECT_EQ(MockPageContextCanvas::kDrawRect, operations[1].type);
+  EXPECT_SKRECT_EQ(50, 260, 10, 10, operations[1].rect);
+  EXPECT_EQ(MockPageContextCanvas::kDrawRect, operations[2].type);
+  EXPECT_SKRECT_EQ(50, 360, 10, 10, operations[2].rect);
+  EXPECT_EQ(MockPageContextCanvas::kDrawRect, operations[3].type);
+  EXPECT_SKRECT_EQ(50, 460, 10, 10, operations[3].rect);
+
+  // The DrawPoint operations come from an unstable iterator.
+  EXPECT_EQ(MockPageContextCanvas::kDrawPoint, operations[4].type);
+  EXPECT_SKRECT_EQ(450, 260, 0, 0, operations[4].rect);
+  EXPECT_EQ(MockPageContextCanvas::kDrawPoint, operations[5].type);
+  EXPECT_SKRECT_EQ(0, 0, 0, 0, operations[5].rect);
+  EXPECT_EQ(MockPageContextCanvas::kDrawPoint, operations[6].type);
+  EXPECT_SKRECT_EQ(450, 60, 0, 0, operations[6].rect);
+  EXPECT_EQ(MockPageContextCanvas::kDrawPoint, operations[7].type);
+  EXPECT_SKRECT_EQ(0, 0, 0, 0, operations[7].rect);
 }
 
 TEST_P(PrintContextTest, EmptyLinkedTarget) {
@@ -338,6 +387,18 @@ TEST_P(PrintContextTest, LinkTargetBoundingBox) {
   ASSERT_EQ(1u, operations.size());
   EXPECT_EQ(MockPageContextCanvas::kDrawRect, operations[0].type);
   EXPECT_SKRECT_EQ(50, 60, 200, 100, operations[0].rect);
+}
+
+TEST_P(PrintContextTest, ScaledVerticalRL) {
+  SetBodyInnerHTML(R"HTML(
+    <style>html { writing-mode:vertical-rl; }</style>
+    <div style="break-after:page;">x</div>
+    <div style="inline-size:10000px; block-size:10px;"></div>
+  )HTML");
+
+  int page_count = PrintContext::NumberOfPages(GetDocument().GetFrame(),
+                                               gfx::SizeF(500, 500));
+  EXPECT_EQ(2, page_count);
 }
 
 INSTANTIATE_PAINT_TEST_SUITE_P(PrintContextFrameTest);
@@ -404,7 +465,7 @@ TEST_P(PrintContextFrameTest, WithScrolledSubframe) {
 
 // This tests that we properly resize and re-layout pages for printing.
 TEST_P(PrintContextFrameTest, BasicPrintPageLayout) {
-  FloatSize page_size(400, 400);
+  gfx::SizeF page_size(400, 400);
   float maximum_shrink_ratio = 1.1;
   auto* node = GetDocument().documentElement();
 
@@ -459,7 +520,293 @@ TEST_P(PrintContextTest, Canvas2DPixelated) {
       "});");
   GetDocument().body()->AppendChild(script_element);
 
-  EXPECT_CALL(canvas, onDrawImageRect(_, _, _, _, _));
+  EXPECT_CALL(canvas, onDrawImageRect2(_, _, _, _, _, _));
+
+  PrintSinglePage(canvas);
+}
+
+TEST_P(PrintContextTest, Canvas2DAutoFlushingSuppressed) {
+  // When printing, we're supposed to make a best effore to avoid flushing
+  // a canvas's PaintOps in order to support vector printing whenever possible.
+  MockPageContextCanvas canvas;
+  SetBodyInnerHTML("<canvas id='c' width=200 height=100></canvas>");
+  GetDocument().GetSettings()->SetScriptEnabled(true);
+  Element* const script_element =
+      GetDocument().CreateRawElement(html_names::kScriptTag);
+  // Note: source_canvas is 10x10, which consumes 400 bytes for pixel data,
+  // which is larger than the 100 limit set in PrintContextTest::SetUp().
+  script_element->setTextContent(
+      "source_canvas = document.createElement('canvas');"
+      "source_canvas.width = 10;"
+      "source_canvas.height = 10;"
+      "source_ctx = source_canvas.getContext('2d');"
+      "source_ctx.fillRect(1000, 0, 1, 1);"
+      "window.addEventListener('beforeprint', (ev) => {"
+      "  ctx = document.getElementById('c').getContext('2d');"
+      "  ctx.fillStyle = 'green';"
+      "  ctx.fillRect(0, 0, 100, 100);"
+      "  ctx.drawImage(source_canvas, 101, 0);"
+      // Next op normally triggers an auto-flush due to exceeded memory limit
+      // but in this case, the auto-flush is suppressed.
+      "  ctx.fillRect(0, 0, 1, 1);"
+      "});");
+  GetDocument().body()->AppendChild(script_element);
+
+  // Verify that the auto-flush was suppressed by checking that the first
+  // fillRect call flowed through to 'canvas'.
+  testing::Sequence s;
+  // The initial clear and the first fillRect call
+  EXPECT_CALL(canvas, onDrawRect(_, _))
+      .Times(testing::Exactly(2))
+      .InSequence(s);
+  // The drawImage call
+  EXPECT_CALL(canvas, onDrawImageRect2(_, _, _, _, _, _)).InSequence(s);
+  // The secondFillRect
+  EXPECT_CALL(canvas, onDrawRect(_, _)).InSequence(s);
+
+  PrintSinglePage(canvas);
+}
+
+// For testing printing behavior when 2d canvases are gpu-accelerated.
+class PrintContextAcceleratedCanvasTest : public PrintContextTest {
+ public:
+  void SetUp() override {
+    accelerated_canvas_scope_ =
+        std::make_unique<ScopedAccelerated2dCanvasForTest>(true);
+    test_context_provider_ = viz::TestContextProvider::Create();
+    InitializeSharedGpuContext(test_context_provider_.get());
+
+    PrintContextTest::SetUp();
+
+    GetDocument().GetSettings()->SetAcceleratedCompositingEnabled(true);
+  }
+
+  void TearDown() override {
+    // Call base class TeardDown first to ensure Canvas2DLayerBridge is
+    // destroyed before the TestContextProvider.
+    PrintContextTest::TearDown();
+
+    SharedGpuContext::ResetForTesting();
+    test_context_provider_ = nullptr;
+    accelerated_canvas_scope_ = nullptr;
+  }
+
+ private:
+  scoped_refptr<viz::TestContextProvider> test_context_provider_;
+  std::unique_ptr<ScopedAccelerated2dCanvasForTest> accelerated_canvas_scope_;
+};
+
+INSTANTIATE_PAINT_TEST_SUITE_P(PrintContextAcceleratedCanvasTest);
+
+TEST_P(PrintContextAcceleratedCanvasTest, Canvas2DBeforePrint) {
+  MockPageContextCanvas canvas;
+  SetBodyInnerHTML("<canvas id='c' width=100 height=100></canvas>");
+  GetDocument().GetSettings()->SetScriptEnabled(true);
+  Element* const script_element =
+      GetDocument().CreateRawElement(html_names::kScriptTag);
+  script_element->setTextContent(
+      "window.addEventListener('beforeprint', (ev) => {"
+      "const ctx = document.getElementById('c').getContext('2d');"
+      "ctx.fillRect(0, 0, 10, 10);"
+      "ctx.fillRect(50, 50, 10, 10);"
+      "});");
+  GetDocument().body()->AppendChild(script_element);
+
+  // Initial clear + 2 fillRects.
+  EXPECT_CALL(canvas, onDrawRect(_, _)).Times(testing::Exactly(3));
+
+  PrintSinglePage(canvas);
+}
+
+// For testing printing behavior when 2d canvas contexts use oop rasterization.
+class PrintContextOOPRCanvasTest : public PrintContextTest {
+ public:
+  void SetUp() override {
+    accelerated_canvas_scope_ =
+        std::make_unique<ScopedAccelerated2dCanvasForTest>(true);
+    std::unique_ptr<viz::TestGLES2Interface> gl_context =
+        std::make_unique<viz::TestGLES2Interface>();
+    gl_context->set_supports_oop_raster(true);
+    std::unique_ptr<viz::TestContextSupport> context_support =
+        std::make_unique<viz::TestContextSupport>();
+    std::unique_ptr<viz::TestRasterInterface> raster_interface =
+        std::make_unique<viz::TestRasterInterface>();
+    test_context_provider_ = base::MakeRefCounted<viz::TestContextProvider>(
+        std::move(context_support), std::move(gl_context),
+        std::move(raster_interface),
+        /*shared_image_interface=*/nullptr,
+        /*support_locking=*/false);
+
+    InitializeSharedGpuContext(test_context_provider_.get());
+
+    PrintContextTest::SetUp();
+
+    GetDocument().GetSettings()->SetAcceleratedCompositingEnabled(true);
+  }
+
+  void TearDown() override {
+    // Call base class TeardDown first to ensure Canvas2DLayerBridge is
+    // destroyed before the TestContextProvider.
+    PrintContextTest::TearDown();
+
+    SharedGpuContext::ResetForTesting();
+    test_context_provider_ = nullptr;
+    accelerated_canvas_scope_ = nullptr;
+  }
+
+ private:
+  scoped_refptr<viz::TestContextProvider> test_context_provider_;
+  std::unique_ptr<ScopedAccelerated2dCanvasForTest> accelerated_canvas_scope_;
+};
+
+INSTANTIATE_PAINT_TEST_SUITE_P(PrintContextOOPRCanvasTest);
+
+TEST_P(PrintContextOOPRCanvasTest, Canvas2DBeforePrint) {
+  MockPageContextCanvas canvas;
+  SetBodyInnerHTML("<canvas id='c' width=100 height=100></canvas>");
+  GetDocument().GetSettings()->SetScriptEnabled(true);
+  Element* const script_element =
+      GetDocument().CreateRawElement(html_names::kScriptTag);
+  script_element->setTextContent(
+      "window.addEventListener('beforeprint', (ev) => {"
+      "const ctx = document.getElementById('c').getContext('2d');"
+      "ctx.fillRect(0, 0, 10, 10);"
+      "ctx.fillRect(50, 50, 10, 10);"
+      "});");
+  GetDocument().body()->AppendChild(script_element);
+
+  // Initial clear + 2 fillRects.
+  EXPECT_CALL(canvas, onDrawRect(_, _)).Times(testing::Exactly(3));
+
+  PrintSinglePage(canvas);
+}
+
+TEST_P(PrintContextOOPRCanvasTest, Canvas2DFlushForImageListener) {
+  base::test::ScopedFeatureList feature_list_;
+  feature_list_.InitAndEnableFeature(features::kCanvas2dStaysGPUOnReadback);
+  // Verifies that a flush triggered by a change to a source canvas results
+  // in printing falling out of vector print mode.
+
+  // This test needs to run with CanvasOopRasterization enabled in order to
+  // exercise the FlushForImageListener code path in CanvasResourceProvider.
+  MockPageContextCanvas canvas;
+  SetBodyInnerHTML("<canvas id='c' width=200 height=100></canvas>");
+  GetDocument().GetSettings()->SetScriptEnabled(true);
+  Element* const script_element =
+      GetDocument().CreateRawElement(html_names::kScriptTag);
+  script_element->setTextContent(
+      "source_canvas = document.createElement('canvas');"
+      "source_canvas.width = 5;"
+      "source_canvas.height = 5;"
+      "source_ctx = source_canvas.getContext('2d');"
+      "source_ctx.fillRect(0, 0, 1, 1);"
+      "image_data = source_ctx.getImageData(0, 0, 5, 5);"
+      "window.addEventListener('beforeprint', (ev) => {"
+      "  ctx = document.getElementById('c').getContext('2d');"
+      "  ctx.drawImage(source_canvas, 0, 0);"
+      // Touching source_ctx forces a flush of both contexts, which cancels
+      // vector printing.
+      "  source_ctx.putImageData(image_data, 0, 0);"
+      "  ctx.fillRect(0, 0, 1, 1);"
+      "});");
+  GetDocument().body()->AppendChild(script_element);
+
+  // Verify that the auto-flush caused the canvas printing to fall out of
+  // vector mode.
+  testing::Sequence s;
+  // The initial clear
+  EXPECT_CALL(canvas, onDrawRect(_, _)).InSequence(s);
+  // The bitmap blit
+  EXPECT_CALL(canvas, onDrawImageRect2(_, _, _, _, _, _)).InSequence(s);
+  // The fill rect in the event listener should leave no trace here because
+  // it is supposed to be included in the canvas blit.
+  EXPECT_CALL(canvas, onDrawRect(_, _))
+      .Times(testing::Exactly(0))
+      .InSequence(s);
+
+  PrintSinglePage(canvas);
+}
+
+TEST_P(PrintContextOOPRCanvasTest, Canvas2DNoFlushForImageListener) {
+  // Verifies that a the canvas printing stays in vector mode after a
+  // canvas to canvas drawImage, as long as the source canvas is not
+  // touched afterwards.
+  MockPageContextCanvas canvas;
+  SetBodyInnerHTML("<canvas id='c' width=200 height=100></canvas>");
+  GetDocument().GetSettings()->SetScriptEnabled(true);
+  Element* const script_element =
+      GetDocument().CreateRawElement(html_names::kScriptTag);
+  script_element->setTextContent(
+      "source_canvas = document.createElement('canvas');"
+      "source_canvas.width = 5;"
+      "source_canvas.height = 5;"
+      "source_ctx = source_canvas.getContext('2d');"
+      "source_ctx.fillRect(0, 0, 1, 1);"
+      "window.addEventListener('beforeprint', (ev) => {"
+      "  ctx = document.getElementById('c').getContext('2d');"
+      "  ctx.fillStyle = 'green';"
+      "  ctx.fillRect(0, 0, 100, 100);"
+      "  ctx.drawImage(source_canvas, 0, 0, 5, 5, 101, 0, 10, 10);"
+      "  ctx.fillRect(0, 0, 1, 1);"
+      "});");
+  GetDocument().body()->AppendChild(script_element);
+
+  // Verify that the auto-flush caused the canvas printing to fall out of
+  // vector mode.
+  testing::Sequence s;
+  // The initial clear and the fillRect call
+  EXPECT_CALL(canvas, onDrawRect(_, _))
+      .Times(testing::Exactly(2))
+      .InSequence(s);
+  // The drawImage
+  EXPECT_CALL(canvas, onDrawImageRect2(_, _, _, _, _, _)).InSequence(s);
+  // The fill rect after the drawImage
+  EXPECT_CALL(canvas, onDrawRect(_, _))
+      .Times(testing::Exactly(1))
+      .InSequence(s);
+
+  PrintSinglePage(canvas);
+}
+
+TEST_P(PrintContextTest, Canvas2DAutoFlushBeforePrinting) {
+  // This test verifies that if an autoflush is triggered before printing,
+  // and the canvas is not cleared in the beforeprint handler, then the canvas
+  // cannot be vector printed.
+  MockPageContextCanvas canvas;
+  SetBodyInnerHTML("<canvas id='c' width=200 height=100></canvas>");
+  GetDocument().GetSettings()->SetScriptEnabled(true);
+  Element* const script_element =
+      GetDocument().CreateRawElement(html_names::kScriptTag);
+  // Note: source_canvas is 10x10, which consumes 400 bytes for pixel data,
+  // which is larger than the 100 limit set in PrintContextTest::SetUp().
+  script_element->setTextContent(
+      "source_canvas = document.createElement('canvas');"
+      "source_canvas.width = 10;"
+      "source_canvas.height = 10;"
+      "source_ctx = source_canvas.getContext('2d');"
+      "source_ctx.fillRect(0, 0, 1, 1);"
+      "ctx = document.getElementById('c').getContext('2d');"
+      "ctx.fillRect(0, 0, 100, 100);"
+      "ctx.drawImage(source_canvas, 101, 0);"
+      // Next op triggers an auto-flush due to exceeded memory limit
+      "ctx.fillRect(0, 0, 1, 1);"
+      "window.addEventListener('beforeprint', (ev) => {"
+      "  ctx.fillRect(0, 0, 1, 1);"
+      "});");
+  GetDocument().body()->AppendChild(script_element);
+
+  // Verify that the auto-flush caused the canvas printing to fall out of
+  // vector mode.
+  testing::Sequence s;
+  // The initial clear
+  EXPECT_CALL(canvas, onDrawRect(_, _)).InSequence(s);
+  // The bitmap blit
+  EXPECT_CALL(canvas, onDrawImageRect2(_, _, _, _, _, _)).InSequence(s);
+  // The fill rect in the event listener should leave no trace here because
+  // it is supposed to be included in the canvas blit.
+  EXPECT_CALL(canvas, onDrawRect(_, _))
+      .Times(testing::Exactly(0))
+      .InSequence(s);
 
   PrintSinglePage(canvas);
 }
@@ -475,7 +822,7 @@ TEST_P(PrintContextFrameTest, DISABLED_SubframePrintPageLayout) {
       <iframe id="target" src='http://b.com/' width='100%' height='100%'
       style='border: 0px; margin: 0px; position: absolute; top: 0px;
       left: 0px'></iframe>)HTML");
-  FloatSize page_size(400, 400);
+  gfx::SizeF page_size(400, 400);
   float maximum_shrink_ratio = 1.1;
   auto* parent = GetDocument().documentElement();
   // The child document element inside iframe.

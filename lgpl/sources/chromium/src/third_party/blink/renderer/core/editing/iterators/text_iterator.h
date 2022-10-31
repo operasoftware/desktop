@@ -34,7 +34,7 @@
 #include "third_party/blink/renderer/core/editing/iterators/text_iterator_behavior.h"
 #include "third_party/blink/renderer/core/editing/iterators/text_iterator_text_node_handler.h"
 #include "third_party/blink/renderer/core/editing/iterators/text_iterator_text_state.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -42,8 +42,9 @@ CORE_EXPORT String
 PlainText(const EphemeralRange&,
           const TextIteratorBehavior& = TextIteratorBehavior());
 
-String PlainText(const EphemeralRangeInFlatTree&,
-                 const TextIteratorBehavior& = TextIteratorBehavior());
+CORE_EXPORT String
+PlainText(const EphemeralRangeInFlatTree&,
+          const TextIteratorBehavior& = TextIteratorBehavior());
 
 // Iterates through the DOM range, returning all the text, and 0-length
 // boundaries at points where replaced elements break up the text flow.  The
@@ -87,8 +88,7 @@ class TextIteratorAlgorithm {
   // Returns the position after |char16_offset| in current text run.
   PositionTemplate<Strategy> GetPositionAfter(int char16_offset) const;
 
-  // TODO(xiaochengh): Rename to |GetTextState()|.
-  const TextIteratorTextState& GetText() const { return text_state_; }
+  const TextIteratorTextState& GetTextState() const { return text_state_; }
   int length() const { return text_state_.length(); }
   UChar CharacterAt(unsigned index) const {
     return text_state_.CharacterAt(index);
@@ -189,8 +189,6 @@ class TextIteratorAlgorithm {
   bool SkipsUnselectableContent() const {
     return behavior_.SkipsUnselectableContent();
   }
-
-  bool ForInnerText() const { return behavior_.ForInnerText(); }
 
   bool IsBetweenSurrogatePair(unsigned position) const;
 

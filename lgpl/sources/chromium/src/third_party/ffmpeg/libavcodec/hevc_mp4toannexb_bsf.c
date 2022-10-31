@@ -24,9 +24,10 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mem.h"
 
-#include "avcodec.h"
 #include "bsf.h"
+#include "bsf_internal.h"
 #include "bytestream.h"
+#include "defs.h"
 #include "hevc.h"
 
 #define MIN_HEVCC_LENGTH 23
@@ -141,10 +142,14 @@ static int hevc_mp4toannexb_filter(AVBSFContext *ctx, AVPacket *out)
         int      nalu_type;
         int is_irap, add_extradata, extra_size, prev_size;
 
+        if (bytestream2_get_bytes_left(&gb) < s->length_size) {
+            ret = AVERROR_INVALIDDATA;
+            goto fail;
+        }
         for (i = 0; i < s->length_size; i++)
             nalu_size = (nalu_size << 8) | bytestream2_get_byte(&gb);
 
-        if (nalu_size < 2) {
+        if (nalu_size < 2 || nalu_size > bytestream2_get_bytes_left(&gb)) {
             ret = AVERROR_INVALIDDATA;
             goto fail;
         }
@@ -190,10 +195,10 @@ static const enum AVCodecID codec_ids[] = {
     AV_CODEC_ID_HEVC, AV_CODEC_ID_NONE,
 };
 
-const AVBitStreamFilter ff_hevc_mp4toannexb_bsf = {
-    .name           = "hevc_mp4toannexb",
+const FFBitStreamFilter ff_hevc_mp4toannexb_bsf = {
+    .p.name         = "hevc_mp4toannexb",
+    .p.codec_ids    = codec_ids,
     .priv_data_size = sizeof(HEVCBSFContext),
     .init           = hevc_mp4toannexb_init,
     .filter         = hevc_mp4toannexb_filter,
-    .codec_ids      = codec_ids,
 };

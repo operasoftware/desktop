@@ -21,10 +21,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_VALUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_VALUE_H_
 
-#include "base/memory/scoped_refptr.h"
+#include "base/memory/values_equivalent.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/style/data_equivalency.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/custom_spaces.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -33,16 +34,6 @@ class Length;
 
 class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
  public:
-  template <typename T>
-  static void* AllocateObject(size_t size) {
-    ThreadState* state =
-        ThreadStateFor<ThreadingTrait<CSSValue>::kAffinity>::GetState();
-    const char* type_name = "blink::CSSValue";
-    return state->Heap().AllocateOnArenaIndex(
-        state, size, BlinkGC::kCSSValueArenaIndex,
-        GCInfoTrait<GCInfoFoldedType<CSSValue>>::Index(), type_name);
-  }
-
   // TODO(sashab): Remove this method and move logic to the caller.
   static CSSValue* Create(const Length& value, float zoom);
 
@@ -63,7 +54,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
 
   bool IsBasicShapeValue() const {
     return class_type_ >= kBasicShapeCircleClass &&
-           class_type_ <= kBasicShapeInsetClass;
+           class_type_ <= kBasicShapeRectClass;
   }
   bool IsBasicShapeCircleValue() const {
     return class_type_ == kBasicShapeCircleClass;
@@ -76,6 +67,12 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   }
   bool IsBasicShapeInsetValue() const {
     return class_type_ == kBasicShapeInsetClass;
+  }
+  bool IsBasicShapeRectValue() const {
+    return class_type_ == kBasicShapeRectClass;
+  }
+  bool IsBasicShapeXYWHValue() const {
+    return class_type_ == kBasicShapeXYWHClass;
   }
 
   bool IsBorderImageSliceValue() const {
@@ -110,8 +107,9 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsInitialValue() const { return class_type_ == kInitialClass; }
   bool IsUnsetValue() const { return class_type_ == kUnsetClass; }
   bool IsRevertValue() const { return class_type_ == kRevertClass; }
+  bool IsRevertLayerValue() const { return class_type_ == kRevertLayerClass; }
   bool IsCSSWideKeyword() const {
-    return class_type_ >= kInheritedClass && class_type_ <= kRevertClass;
+    return class_type_ >= kInheritedClass && class_type_ <= kRevertLayerClass;
   }
   bool IsLayoutFunctionValue() const {
     return class_type_ == kLayoutFunctionClass;
@@ -163,8 +161,15 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsPendingSubstitutionValue() const {
     return class_type_ == kPendingSubstitutionValueClass;
   }
+  bool IsPendingSystemFontValue() const {
+    return class_type_ == kPendingSystemFontValueClass;
+  }
   bool IsInvalidVariableValue() const {
-    return class_type_ == kInvalidVariableValueClass;
+    return class_type_ == kInvalidVariableValueClass ||
+           class_type_ == kCyclicVariableValueClass;
+  }
+  bool IsCyclicVariableValue() const {
+    return class_type_ == kCyclicVariableValueClass;
   }
   bool IsAxisValue() const { return class_type_ == kAxisClass; }
   bool IsShorthandWrapperValue() const {
@@ -177,6 +182,10 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     return class_type_ == kLightDarkValuePairClass;
   }
   bool IsIdSelectorValue() const { return class_type_ == kIdSelectorClass; }
+  bool IsElementOffsetValue() const {
+    return class_type_ == kElementOffsetClass;
+  }
+  bool IsRatioValue() const { return class_type_ == kRatioClass; }
 
   bool HasFailedOrCanceledSubresources() const;
   bool MayContainUrl() const;
@@ -209,6 +218,8 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kValuePairClass,
     kLightDarkValuePairClass,
     kIdSelectorClass,
+    kElementOffsetClass,
+    kRatioClass,
 
     // Basic shape classes.
     // TODO(sashab): Represent these as a single subclass, BasicShapeClass.
@@ -216,6 +227,8 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kBasicShapeEllipseClass,
     kBasicShapePolygonClass,
     kBasicShapeInsetClass,
+    kBasicShapeRectClass,
+    kBasicShapeXYWHClass,
 
     // Image classes.
     kImageClass,
@@ -244,6 +257,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kInitialClass,
     kUnsetClass,
     kRevertClass,
+    kRevertLayerClass,
 
     kReflectClass,
     kShadowClass,
@@ -254,7 +268,9 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kVariableReferenceClass,
     kCustomPropertyDeclarationClass,
     kPendingSubstitutionValueClass,
+    kPendingSystemFontValueClass,
     kInvalidVariableValueClass,
+    kCyclicVariableValueClass,
     kLayoutFunctionClass,
 
     kCSSContentDistributionClass,
@@ -280,7 +296,6 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
 
   explicit CSSValue(ClassType class_type)
       : numeric_literal_unit_type_(0),
-        is_non_negative_math_function_(false),
         value_list_separator_(kSpaceSeparator),
         allows_negative_percentage_reference_(false),
         class_type_(class_type) {}
@@ -299,9 +314,6 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   // CSSNumericLiteralValue bits:
   // This field hold CSSPrimitiveValue::UnitType.
   uint8_t numeric_literal_unit_type_ : 7;  // NOLINT
-
-  // CSSMathFunctionValue:
-  uint8_t is_non_negative_math_function_ : 1;  // NOLINT
 
   // Force a new memory location. This will make TSAN treat the 2 fields above
   // this line as a separate memory location than the 2 fields below it.
@@ -327,7 +339,7 @@ inline bool CompareCSSValueVector(
   }
 
   for (wtf_size_t i = 0; i < size; i++) {
-    if (!DataEquivalent(first_vector[i], second_vector[i])) {
+    if (!base::ValuesEquivalent(first_vector[i], second_vector[i])) {
       return false;
     }
   }
@@ -335,5 +347,15 @@ inline bool CompareCSSValueVector(
 }
 
 }  // namespace blink
+
+namespace cppgc {
+// Assign CSSValue to be allocated on custom CSSValueSpace.
+template <typename T>
+struct SpaceTrait<
+    T,
+    std::enable_if_t<std::is_base_of<blink::CSSValue, T>::value>> {
+  using Space = blink::CSSValueSpace;
+};
+}  // namespace cppgc
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_VALUE_H_

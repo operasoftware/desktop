@@ -7,8 +7,6 @@
 
 #include "third_party/blink/renderer/core/script/modulator_impl_base.h"
 
-#include "third_party/blink/renderer/platform/heap/handle.h"
-
 namespace blink {
 
 class ModuleScriptFetcher;
@@ -24,12 +22,11 @@ class WorkletModulatorImpl final : public ModulatorImplBase {
   // Implements ModulatorImplBase.
   ModuleScriptFetcher* CreateModuleScriptFetcher(
       ModuleScriptCustomFetchType,
-      util::PassKey<ModuleScriptLoader>) override;
+      base::PassKey<ModuleScriptLoader>) override;
 
  private:
   // Implements ModulatorImplBase.
   bool IsDynamicImportForbidden(String* reason) override;
-  V8CacheOptions GetV8CacheOptions() const override;
 };
 
 }  // namespace blink

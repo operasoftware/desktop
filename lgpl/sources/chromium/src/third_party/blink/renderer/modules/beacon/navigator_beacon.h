@@ -5,8 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_BEACON_NAVIGATOR_BEACON_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_BEACON_NAVIGATOR_BEACON_H_
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
@@ -14,12 +15,9 @@ namespace blink {
 class ScriptState;
 class ExceptionState;
 class KURL;
-class ArrayBufferViewOrBlobOrStringOrFormDataOrReadableStream;
 
 class NavigatorBeacon final : public GarbageCollected<NavigatorBeacon>,
                               public Supplement<Navigator> {
-  USING_GARBAGE_COLLECTED_MIXIN(NavigatorBeacon);
-
  public:
   static const char kSupplementName[];
 
@@ -29,20 +27,19 @@ class NavigatorBeacon final : public GarbageCollected<NavigatorBeacon>,
   virtual ~NavigatorBeacon();
 
   static bool sendBeacon(
-      ScriptState*,
-      Navigator&,
-      const String&,
-      const ArrayBufferViewOrBlobOrStringOrFormDataOrReadableStream&,
-      ExceptionState&);
+      ScriptState* script_state,
+      Navigator& navigator,
+      const String& url_string,
+      const V8UnionReadableStreamOrXMLHttpRequestBodyInit* data,
+      ExceptionState& exception_state);
 
   void Trace(Visitor*) const override;
 
  private:
-  bool SendBeaconImpl(
-      ScriptState*,
-      const String&,
-      const ArrayBufferViewOrBlobOrStringOrFormDataOrReadableStream&,
-      ExceptionState&);
+  bool SendBeaconImpl(ScriptState* script_state,
+                      const String& url_string,
+                      const V8UnionReadableStreamOrXMLHttpRequestBodyInit* data,
+                      ExceptionState& exception_state);
   bool CanSendBeacon(ExecutionContext*, const KURL&, ExceptionState&);
 };
 

@@ -5,16 +5,18 @@
 #include "third_party/blink/renderer/modules/webgl/webgl2_rendering_context.h"
 
 #include <memory>
+
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
-#include "third_party/blink/renderer/bindings/modules/v8/offscreen_rendering_context.h"
-#include "third_party/blink/renderer/bindings/modules/v8/rendering_context.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_canvasrenderingcontext2d_gpucanvascontext_imagebitmaprenderingcontext_webgl2renderingcontext_webglrenderingcontext.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_union_gpucanvascontext_imagebitmaprenderingcontext_offscreencanvasrenderingcontext2d_webgl2renderingcontext_webglrenderingcontext.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/modules/webgl/ext_color_buffer_float.h"
+#include "third_party/blink/renderer/modules/webgl/ext_color_buffer_half_float.h"
 #include "third_party/blink/renderer/modules/webgl/ext_disjoint_timer_query_webgl2.h"
 #include "third_party/blink/renderer/modules/webgl/ext_float_blend.h"
 #include "third_party/blink/renderer/modules/webgl/ext_texture_compression_bptc.h"
@@ -40,6 +42,7 @@
 #include "third_party/blink/renderer/modules/webgl/webgl_multi_draw.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_multi_draw_instanced_base_vertex_base_instance.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_video_texture.h"
+#include "third_party/blink/renderer/modules/webgl/webgl_webcodecs_video_frame.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/drawing_buffer.h"
 
 namespace blink {
@@ -71,15 +74,31 @@ static bool ShouldCreateContext(WebGraphicsContext3DProvider* context_provider,
 CanvasRenderingContext* WebGL2RenderingContext::Factory::Create(
     CanvasRenderingContextHost* host,
     const CanvasContextCreationAttributesCore& attrs) {
-  bool using_gpu_compositing;
+  // Create a copy of attrs so flags can be modified if needed before passing
+  // into the WebGL2RenderingContext constructor.
+  CanvasContextCreationAttributesCore attribs = attrs;
+
+  // The xr_compatible attribute needs to be handled before creating the context
+  // because the GPU process may potentially be restarted in order to be XR
+  // compatible. This scenario occurs if the GPU process is not using the GPU
+  // that the VR headset is plugged into. If the GPU process is restarted, the
+  // WebGraphicsContext3DProvider must be created using the new one.
+  if (attribs.xr_compatible &&
+      !WebGLRenderingContextBase::MakeXrCompatibleSync(host)) {
+    // If xr compatibility is requested and we can't be xr compatible, return a
+    // context with the flag set to false.
+    attribs.xr_compatible = false;
+  }
+
+  Platform::GraphicsInfo graphics_info;
   std::unique_ptr<WebGraphicsContext3DProvider> context_provider(
       CreateWebGraphicsContext3DProvider(
-          host, attrs, Platform::kWebGL2ContextType, &using_gpu_compositing));
+          host, attribs, Platform::kWebGL2ContextType, &graphics_info));
   if (!ShouldCreateContext(context_provider.get(), host))
     return nullptr;
   WebGL2RenderingContext* rendering_context =
       MakeGarbageCollected<WebGL2RenderingContext>(
-          host, std::move(context_provider), using_gpu_compositing, attrs);
+          host, std::move(context_provider), graphics_info, attribs);
 
   if (!rendering_context->GetDrawingBuffer()) {
     host->HostDispatchEvent(
@@ -90,7 +109,6 @@ CanvasRenderingContext* WebGL2RenderingContext::Factory::Create(
 
   rendering_context->InitializeNewContext();
   rendering_context->RegisterContextExtensions();
-
   return rendering_context;
 }
 
@@ -103,22 +121,21 @@ void WebGL2RenderingContext::Factory::OnError(HTMLCanvasElement* canvas,
 WebGL2RenderingContext::WebGL2RenderingContext(
     CanvasRenderingContextHost* host,
     std::unique_ptr<WebGraphicsContext3DProvider> context_provider,
-    bool using_gpu_compositing,
+    const Platform::GraphicsInfo& graphics_info,
     const CanvasContextCreationAttributesCore& requested_attributes)
     : WebGL2RenderingContextBase(host,
                                  std::move(context_provider),
-                                 using_gpu_compositing,
+                                 graphics_info,
                                  requested_attributes,
                                  Platform::kWebGL2ContextType) {}
 
-void WebGL2RenderingContext::SetCanvasGetContextResult(
-    RenderingContext& result) {
-  result.SetWebGL2RenderingContext(this);
+V8RenderingContext* WebGL2RenderingContext::AsV8RenderingContext() {
+  return MakeGarbageCollected<V8RenderingContext>(this);
 }
 
-void WebGL2RenderingContext::SetOffscreenCanvasGetContextResult(
-    OffscreenRenderingContext& result) {
-  result.SetWebGL2RenderingContext(this);
+V8OffscreenRenderingContext*
+WebGL2RenderingContext::AsV8OffscreenRenderingContext() {
+  return MakeGarbageCollected<V8OffscreenRenderingContext>(this);
 }
 
 ImageBitmap* WebGL2RenderingContext::TransferToImageBitmap(
@@ -129,14 +146,17 @@ ImageBitmap* WebGL2RenderingContext::TransferToImageBitmap(
 void WebGL2RenderingContext::RegisterContextExtensions() {
   // Register extensions.
   RegisterExtension(ext_color_buffer_float_);
-  RegisterExtension(ext_disjoint_timer_query_web_gl2_);
+  RegisterExtension(ext_color_buffer_half_float_);
+  RegisterExtension(
+      ext_disjoint_timer_query_web_gl2_,
+      TimerQueryExtensionsEnabled() ? kApprovedExtension : kDeveloperExtension);
   RegisterExtension(ext_float_blend_);
   RegisterExtension(ext_texture_compression_bptc_);
   RegisterExtension(ext_texture_compression_rgtc_);
   RegisterExtension(ext_texture_filter_anisotropic_);
-  RegisterExtension(ext_texture_norm16_, kDraftExtension);
+  RegisterExtension(ext_texture_norm16_);
   RegisterExtension(khr_parallel_shader_compile_);
-  RegisterExtension(oes_draw_buffers_indexed_, kDraftExtension);
+  RegisterExtension(oes_draw_buffers_indexed_);
   RegisterExtension(oes_texture_float_linear_);
   RegisterExtension(webgl_compressed_texture_astc_);
   RegisterExtension(webgl_compressed_texture_etc_);
@@ -149,15 +169,17 @@ void WebGL2RenderingContext::RegisterContextExtensions() {
   RegisterExtension(webgl_draw_instanced_base_vertex_base_instance_,
                     kDraftExtension);
   RegisterExtension(webgl_lose_context_);
-  RegisterExtension(webgl_multi_draw_, kDraftExtension);
+  RegisterExtension(webgl_multi_draw_);
   RegisterExtension(webgl_multi_draw_instanced_base_vertex_base_instance_,
                     kDraftExtension);
   RegisterExtension(webgl_video_texture_, kDraftExtension);
+  RegisterExtension(webgl_webcodecs_video_frame_, kDraftExtension);
   RegisterExtension(ovr_multiview2_);
 }
 
 void WebGL2RenderingContext::Trace(Visitor* visitor) const {
   visitor->Trace(ext_color_buffer_float_);
+  visitor->Trace(ext_color_buffer_half_float_);
   visitor->Trace(ext_disjoint_timer_query_web_gl2_);
   visitor->Trace(ext_float_blend_);
   visitor->Trace(ext_texture_compression_bptc_);
@@ -181,6 +203,7 @@ void WebGL2RenderingContext::Trace(Visitor* visitor) const {
   visitor->Trace(webgl_multi_draw_);
   visitor->Trace(webgl_multi_draw_instanced_base_vertex_base_instance_);
   visitor->Trace(webgl_video_texture_);
+  visitor->Trace(webgl_webcodecs_video_frame_);
   WebGL2RenderingContextBase::Trace(visitor);
 }
 

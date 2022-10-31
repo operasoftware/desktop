@@ -26,25 +26,31 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SCROLL_SCROLLBAR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SCROLL_SCROLLBAR_H_
 
-#include "third_party/blink/public/platform/web_color_scheme.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
+#include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
-#include "third_party/blink/renderer/platform/graphics/paint/display_item.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/graphics/paint/display_item_client.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
+#include "ui/events/types/scroll_types.h"
+
+namespace gfx {
+class Rect;
+}
 
 namespace blink {
 
 class Element;
 class GraphicsContext;
-class IntRect;
-class ChromeClient;
 class ScrollableArea;
 class ScrollbarTheme;
 class WebGestureEvent;
 class WebMouseEvent;
+class WebPointerEvent;
 
 class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
                               public DisplayItemClient {
@@ -53,36 +59,33 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
   // scrollbar.
   static Scrollbar* CreateForTesting(ScrollableArea* scrollable_area,
                                      ScrollbarOrientation orientation,
-                                     ScrollbarControlSize size,
                                      ScrollbarTheme* theme) {
-    return MakeGarbageCollected<Scrollbar>(scrollable_area, orientation, size,
-                                           nullptr, nullptr, theme);
+    return MakeGarbageCollected<Scrollbar>(scrollable_area, orientation,
+                                           nullptr, theme);
   }
 
   Scrollbar(ScrollableArea*,
             ScrollbarOrientation,
-            ScrollbarControlSize,
             Element* style_source,
-            ChromeClient* = nullptr,
             ScrollbarTheme* = nullptr);
   ~Scrollbar() override;
 
-  int X() const { return frame_rect_.X(); }
-  int Y() const { return frame_rect_.Y(); }
-  int Width() const { return frame_rect_.Width(); }
-  int Height() const { return frame_rect_.Height(); }
-  IntSize Size() const { return frame_rect_.Size(); }
-  IntPoint Location() const { return frame_rect_.Location(); }
+  int X() const { return frame_rect_.x(); }
+  int Y() const { return frame_rect_.y(); }
+  int Width() const { return frame_rect_.width(); }
+  int Height() const { return frame_rect_.height(); }
+  gfx::Size Size() const { return frame_rect_.size(); }
+  gfx::Point Location() const { return frame_rect_.origin(); }
 
-  void SetFrameRect(const IntRect&);
-  const IntRect& FrameRect() const { return frame_rect_; }
+  void SetFrameRect(const gfx::Rect&);
+  const gfx::Rect& FrameRect() const { return frame_rect_; }
 
   ScrollbarOverlayColorTheme GetScrollbarOverlayColorTheme() const;
   bool HasTickmarks() const;
-  Vector<IntRect> GetTickmarks() const;
+  Vector<gfx::Rect> GetTickmarks() const;
   bool IsScrollableAreaActive() const;
 
-  IntPoint ConvertFromRootFrame(const IntPoint&) const;
+  gfx::Point ConvertFromRootFrame(const gfx::Point&) const;
 
   virtual bool IsCustomScrollbar() const { return false; }
   ScrollbarOrientation Orientation() const { return orientation_; }
@@ -93,7 +96,6 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
   int VisibleSize() const { return visible_size_; }
   int TotalSize() const { return total_size_; }
   int Maximum() const;
-  ScrollbarControlSize GetControlSize() const { return control_size_; }
 
   ScrollbarPart PressedPart() const { return pressed_part_; }
   ScrollbarPart HoveredPart() const { return hovered_part_; }
@@ -103,10 +105,6 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
   bool Enabled() const { return enabled_; }
   virtual void SetEnabled(bool);
 
-  // This returns device-scale-factor-aware pixel value.
-  // e.g. 15 in dsf=1.0, 30 in dsf=2.0.
-  // This returns 0 for overlay scrollbars.
-  // See also ScrolbarTheme::scrollbatThickness().
   int ScrollbarThickness() const;
 
   // Called by the ScrollableArea when the scroll offset changes.
@@ -124,10 +122,16 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
   void SetProportion(int visible_size, int total_size);
   void SetPressedPos(int p) { pressed_pos_ = p; }
 
-  void Paint(GraphicsContext&, const IntPoint& paint_offset) const;
+  void Paint(GraphicsContext&, const gfx::Vector2d& paint_offset) const;
 
   virtual bool IsSolidColor() const;
+
+  // Returns true if the scrollbar is a overlay scrollbar. This doesn't include
+  // overflow:overlay scrollbars. Probably this should be renamed to
+  // IsPlatformOverlayScrollbar() but we don't bother it because
+  // overflow:overlay might be deprecated soon.
   virtual bool IsOverlayScrollbar() const;
+
   bool ShouldParticipateInHitTesting();
 
   bool IsWindowActive() const;
@@ -136,6 +140,8 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
   // will be set to true if the handler should update the capture
   // state for this scrollbar.
   bool GestureEvent(const WebGestureEvent&, bool* should_update_capture);
+
+  bool HandlePointerEvent(const WebPointerEvent&);
 
   // These methods are used for platform scrollbars to give :hover feedback.
   // They will not get called when the mouse went down in a scrollbar, since it
@@ -152,8 +158,8 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
 
   ScrollbarTheme& GetTheme() const { return theme_; }
 
-  IntRect ConvertToContainingEmbeddedContentView(const IntRect&) const;
-  IntPoint ConvertFromContainingEmbeddedContentView(const IntPoint&) const;
+  gfx::Rect ConvertToContainingEmbeddedContentView(const gfx::Rect&) const;
+  gfx::Point ConvertFromContainingEmbeddedContentView(const gfx::Point&) const;
 
   void MoveThumb(int pos, bool dragging_document = false);
 
@@ -170,14 +176,11 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
   bool ThumbNeedsRepaint() const { return thumb_needs_repaint_; }
   void ClearThumbNeedsRepaint() { thumb_needs_repaint_ = false; }
 
-  // DisplayItemClient methods.
+  // DisplayItemClient.
   String DebugName() const final {
     return orientation_ == kHorizontalScrollbar ? "HorizontalScrollbar"
                                                 : "VerticalScrollbar";
   }
-  IntRect VisualRect() const final { return visual_rect_; }
-
-  virtual void SetVisualRect(const IntRect& r) { visual_rect_ = r; }
 
   // Marks the scrollbar as needing to be redrawn.
   //
@@ -194,17 +197,23 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
 
   CompositorElementId GetElementId() const;
 
+  // Used to scale a length in dip units into a length in layout/paint units.
+  float ScaleFromDIP() const;
+
   float EffectiveZoom() const;
   bool ContainerIsRightToLeft() const;
+
+  // scrollbar-width CSS property
+  EScrollbarWidth CSSScrollbarWidth() const;
 
   // The Element that supplies our style information. If the scrollbar is
   // for a document, this is either the <body> or <html> element. Otherwise, it
   // is the element that owns our PaintLayerScrollableArea.
   Element* StyleSource() const { return style_source_.Get(); }
 
-  WebColorScheme UsedColorScheme() const;
+  mojom::blink::ColorScheme UsedColorScheme() const;
 
-  virtual void Trace(Visitor*) const;
+  void Trace(Visitor*) const override;
 
  protected:
   void AutoscrollTimerFired(TimerBase*);
@@ -216,15 +225,13 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
   void InjectGestureScrollUpdateForThumbMove(float single_axis_target_offset);
   void InjectScrollGesture(WebInputEvent::Type type,
                            ScrollOffset delta,
-                           ScrollGranularity granularity);
+                           ui::ScrollGranularity granularity);
   ScrollDirectionPhysical PressedPartScrollDirectionPhysical();
-  ScrollGranularity PressedPartScrollGranularity();
+  ui::ScrollGranularity PressedPartScrollGranularity();
 
   Member<ScrollableArea> scrollable_area_;
   ScrollbarOrientation orientation_;
-  ScrollbarControlSize control_size_;
   ScrollbarTheme& theme_;
-  Member<ChromeClient> chrome_client_;
 
   int visible_size_;
   int total_size_;
@@ -240,7 +247,7 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
 
   bool enabled_;
 
-  TaskRunnerTimer<Scrollbar> scroll_timer_;
+  HeapTaskRunnerTimer<Scrollbar> scroll_timer_;
 
   float elastic_overscroll_;
 
@@ -250,7 +257,6 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
   bool ThumbWillBeUnderMouse() const;
   bool DeltaWillScroll(ScrollOffset delta) const;
 
-  int theme_scrollbar_thickness_;
   bool track_needs_repaint_;
   bool thumb_needs_repaint_;
   bool injected_gesture_scroll_begin_;
@@ -263,9 +269,15 @@ class CORE_EXPORT Scrollbar : public GarbageCollected<Scrollbar>,
   // additional state is necessary.
   bool scrollbar_manipulation_in_progress_on_cc_thread_;
 
-  IntRect visual_rect_;
-  IntRect frame_rect_;
+  gfx::Rect frame_rect_;
   Member<Element> style_source_;
+
+  // Tracks scroll delta that has been injected into the compositor thread as a
+  // GestureScrollUpdate but hasn't yet updated the scroll position on main.
+  // Scrollbar::MouseMoved needs this to calculate deltas during thumb drags.
+  // In particular we often process two mousemoves in the same frame thanks to
+  // MouseEventManager::RecomputeMouseHoverState sending fake ones.
+  ScrollOffset pending_injected_delta_;
 };
 
 }  // namespace blink

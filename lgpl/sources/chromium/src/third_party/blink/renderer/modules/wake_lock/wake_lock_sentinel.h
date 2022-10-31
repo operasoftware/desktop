@@ -8,12 +8,13 @@
 #include "base/gtest_prod_util.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_wake_lock_type.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/wake_lock/wake_lock_type.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
 
@@ -26,18 +27,18 @@ class MODULES_EXPORT WakeLockSentinel final
       public ActiveScriptWrappable<WakeLockSentinel>,
       public ExecutionContextLifecycleObserver {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(WakeLockSentinel);
 
  public:
   WakeLockSentinel(ScriptState* script_state,
-                   WakeLockType type,
+                   V8WakeLockType::Enum type,
                    WakeLockManager* manager);
   ~WakeLockSentinel() override;
 
   // Web-exposed interfaces
   DEFINE_ATTRIBUTE_EVENT_LISTENER(release, kRelease)
   ScriptPromise release(ScriptState*);
-  String type() const;
+  bool released() const;
+  V8WakeLockType type() const;
 
   // EventTarget overrides.
   ExecutionContext* GetExecutionContext() const override;
@@ -62,7 +63,8 @@ class MODULES_EXPORT WakeLockSentinel final
   void DoRelease();
 
   Member<WakeLockManager> manager_;
-  const WakeLockType type_;
+  bool released_ = false;
+  const V8WakeLockType::Enum type_;
 
   FRIEND_TEST_ALL_PREFIXES(WakeLockSentinelTest, MultipleReleaseCalls);
 };

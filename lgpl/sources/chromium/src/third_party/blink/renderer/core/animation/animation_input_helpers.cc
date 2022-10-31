@@ -4,14 +4,14 @@
 
 #include "third_party/blink/renderer/core/animation/animation_input_helpers.h"
 
-#include "base/stl_util.h"
 #include "third_party/blink/renderer/core/animation/property_handle.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css/parser/css_variable_parser.h"
 #include "third_party/blink/renderer/core/css/resolver/css_to_style_map.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/svg/animation/svg_smil_element.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg_names.h"
@@ -79,7 +79,7 @@ CSSPropertyID AnimationInputHelpers::KeyframeAttributeToCSSProperty(
       builder.Append('-');
     builder.Append(property[i]);
   }
-  return cssPropertyID(document.GetExecutionContext(), builder.ToString());
+  return CssPropertyID(document.GetExecutionContext(), builder.ToString());
 }
 
 CSSPropertyID AnimationInputHelpers::KeyframeAttributeToPresentationAttribute(
@@ -92,7 +92,7 @@ CSSPropertyID AnimationInputHelpers::KeyframeAttributeToPresentationAttribute(
   String unprefixed_property = RemoveSVGPrefix(property);
   if (SVGElement::IsAnimatableCSSProperty(QualifiedName(
           g_null_atom, AtomicString(unprefixed_property), g_null_atom))) {
-    return cssPropertyID(element->GetExecutionContext(), unprefixed_property);
+    return CssPropertyID(element->GetExecutionContext(), unprefixed_property);
   }
   return CSSPropertyID::kInvalid;
 }
@@ -201,7 +201,7 @@ const AttributeNameMap& GetSupportedAttributes() {
         &svg_names::kYChannelSelectorAttr,
         &svg_names::kZAttr,
     };
-    for (size_t i = 0; i < base::size(attributes); i++) {
+    for (size_t i = 0; i < std::size(attributes); i++) {
       DCHECK(!SVGElement::IsAnimatableCSSProperty(*attributes[i]));
       supported_attributes.Set(*attributes[i], attributes[i]);
     }
@@ -248,8 +248,9 @@ scoped_refptr<TimingFunction> AnimationInputHelpers::ParseTimingFunction(
   // Fallback to an insecure parsing mode if we weren't provided with a
   // document.
   SecureContextMode secure_context_mode =
-      document ? document->GetSecureContextMode()
-               : SecureContextMode::kInsecureContext;
+      document && document->GetExecutionContext()
+          ? document->GetExecutionContext()->GetSecureContextMode()
+          : SecureContextMode::kInsecureContext;
   const CSSValue* value = CSSParser::ParseSingleValue(
       CSSPropertyID::kTransitionTimingFunction, string,
       StrictCSSParserContext(secure_context_mode));

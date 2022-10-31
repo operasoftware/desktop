@@ -35,43 +35,48 @@ _log = logging.getLogger(__name__)
 
 
 class MacPort(base.Port):
-    SUPPORTED_VERSIONS = ('mac10.10', 'mac10.11', 'mac10.12', 'mac10.13',
-                          'mac10.14', 'mac10.15', 'retina')
+    SUPPORTED_VERSIONS = ('mac10.13', 'mac10.14', 'mac10.15', 'mac11',
+                          'mac11-arm64', 'mac12', 'mac12-arm64')
     port_name = 'mac'
-
-    # FIXME: We treat Retina (High-DPI) devices as if they are running a
-    # different operating system version. This is lame and should be fixed.
-    # Note that the retina versions fallback to the non-retina versions and so
-    # no baselines are shared between retina versions; this keeps the fallback
-    # graph as a tree and maximizes the number of baselines we can share that
-    # way. We also currently only support Retina on 10.13.
 
     FALLBACK_PATHS = {}
 
-    FALLBACK_PATHS['mac10.15'] = ['mac']
+    FALLBACK_PATHS['mac12'] = ['mac']
+    FALLBACK_PATHS['mac12-arm64'] = ['mac-mac12-arm64'
+                                     ] + FALLBACK_PATHS['mac12']
+    FALLBACK_PATHS['mac11'] = ['mac-mac11'] + FALLBACK_PATHS['mac12']
+    FALLBACK_PATHS['mac11-arm64'] = ['mac-mac11-arm64'
+                                     ] + FALLBACK_PATHS['mac11']
+    FALLBACK_PATHS['mac10.15'] = ['mac-mac10.15'] + FALLBACK_PATHS['mac11']
     FALLBACK_PATHS['mac10.14'] = ['mac-mac10.14'] + FALLBACK_PATHS['mac10.15']
     FALLBACK_PATHS['mac10.13'] = ['mac-mac10.13'] + FALLBACK_PATHS['mac10.14']
-    FALLBACK_PATHS['mac10.12'] = ['mac-mac10.12'] + FALLBACK_PATHS['mac10.13']
-    FALLBACK_PATHS['mac10.11'] = ['mac-mac10.11'] + FALLBACK_PATHS['mac10.12']
-    FALLBACK_PATHS['mac10.10'] = ['mac-mac10.10'] + FALLBACK_PATHS['mac10.11']
-    FALLBACK_PATHS['retina'] = ['mac-retina'] + FALLBACK_PATHS['mac10.13']
 
     CONTENT_SHELL_NAME = 'Content Shell'
 
-    BUILD_REQUIREMENTS_URL = 'https://chromium.googlesource.com/chromium/src/+/master/docs/mac_build_instructions.md'
+    BUILD_REQUIREMENTS_URL = 'https://chromium.googlesource.com/chromium/src/+/main/docs/mac_build_instructions.md'
 
     @classmethod
     def determine_full_port_name(cls, host, options, port_name):
         if port_name.endswith('mac'):
-            version = host.platform.os_version
-            if host.platform.is_highdpi():
-                version = 'retina'
-            return port_name + '-' + version
+            parts = [port_name, host.platform.os_version]
+            # Maybe add an architecture suffix.
+            # In this context, 'arm64' refers to Apple M1.
+            # No suffix is appended for Intel-based ports.
+            if (host.platform.get_machine() == 'arm64'
+                    or host.platform.is_running_rosetta()):
+                # TODO(crbug.com/1253659): verify this under native arm.
+                parts.append('arm64')
+            return '-'.join(parts)
         return port_name
 
     def __init__(self, host, port_name, **kwargs):
         super(MacPort, self).__init__(host, port_name, **kwargs)
+
         self._version = port_name[port_name.index('mac-') + len('mac-'):]
+
+        if self._version.endswith('arm64'):
+            self._architecture = 'arm64'
+
         assert self._version in self.SUPPORTED_VERSIONS
 
     def check_build(self, needs_http, printer):
@@ -80,7 +85,7 @@ class MacPort(base.Port):
             _log.error('For complete Mac build requirements, please see:')
             _log.error('')
             _log.error(
-                '    https://chromium.googlesource.com/chromium/src/+/master/docs/mac_build_instructions.md'
+                '    https://chromium.googlesource.com/chromium/src/+/main/docs/mac_build_instructions.md'
             )
 
         return result
@@ -93,14 +98,25 @@ class MacPort(base.Port):
     #
 
     def path_to_apache(self):
-        return self._path_from_chromium_base('third_party', 'apache-mac',
-                                             'bin', 'httpd')
+        import platform
+        if platform.machine() == 'arm64':
+            return self._path_from_chromium_base('third_party',
+                                                 'apache-mac-arm64', 'bin',
+                                                 'httpd')
+        return self._path_from_chromium_base(
+            'third_party', 'apache-mac', 'bin', 'httpd')
 
     def path_to_apache_config_file(self):
-        config_file_basename = 'apache2-httpd-%s-php7.conf' % (
-            self._apache_version(), )
-        return self._filesystem.join(self.apache_config_directory(),
-                                     config_file_basename)
+        config_file_basename = 'apache2-httpd-%s-php7.conf' % (self._apache_version(),)
+        return self._filesystem.join(self.apache_config_directory(), config_file_basename)
+
+    def default_smoke_test_only(self):
+        # only run platform specific tests on older mac versions
+        return self._version in {'mac10.13', 'mac10.14'}
+
+    def path_to_smoke_tests_file(self):
+        return self._filesystem.join(self.web_tests_dir(), 'SmokeTests',
+                                     'Mac.txt')
 
     def _path_to_driver(self, target=None):
         return self._build_path_with_target(target,

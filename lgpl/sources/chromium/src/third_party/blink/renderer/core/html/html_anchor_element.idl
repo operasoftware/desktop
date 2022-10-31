@@ -44,4 +44,5 @@
     [CEReactions, Reflect] attribute DOMString shape;
 };
 
+HTMLAnchorElement includes HTMLAttributionSrcElementUtils;
 HTMLAnchorElement includes HTMLHyperlinkElementUtils;

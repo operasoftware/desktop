@@ -5,16 +5,19 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_AUDIO_CONTEXT_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_AUDIO_CONTEXT_H_
 
+#include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
 #include "third_party/blink/public/mojom/webaudio/audio_context_manager.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_context_options.h"
 #include "third_party/blink/renderer/core/html/media/autoplay_policy.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/self_keep_alive.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
@@ -32,7 +35,8 @@ class WebAudioLatencyHint;
 
 // This is an BaseAudioContext which actually plays sound, unlike an
 // OfflineAudioContext which renders sound into a buffer.
-class MODULES_EXPORT AudioContext : public BaseAudioContext {
+class MODULES_EXPORT AudioContext : public BaseAudioContext,
+                                    public mojom::blink::PermissionObserver {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -42,7 +46,7 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext {
 
   AudioContext(Document&,
                const WebAudioLatencyHint&,
-               base::Optional<float> sample_rate);
+               absl::optional<float> sample_rate);
   ~AudioContext() override;
   void Trace(Visitor*) const override;
 
@@ -51,9 +55,9 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext {
   bool HasPendingActivity() const override;
 
   ScriptPromise closeContext(ScriptState*, ExceptionState&);
-  bool IsContextClosed() const final;
+  bool IsContextCleared() const final;
 
-  ScriptPromise suspendContext(ScriptState*);
+  ScriptPromise suspendContext(ScriptState*, ExceptionState&);
   ScriptPromise resumeContext(ScriptState*, ExceptionState&);
 
   bool HasRealtimeConstraint() final { return true; }
@@ -62,6 +66,7 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext {
 
   AudioTimestamp* getOutputTimestamp(ScriptState*) const;
   double baseLatency() const;
+  double outputLatency() const;
 
   MediaElementAudioSourceNode* createMediaElementSource(HTMLMediaElement*,
                                                         ExceptionState&);
@@ -86,6 +91,9 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext {
   void HandleAudibility(AudioBus* destination_bus);
 
   AudioCallbackMetric GetCallbackMetric() const;
+
+  // mojom::blink::PermissionObserver
+  void OnPermissionStatusChange(mojom::blink::PermissionStatus) override;
 
  protected:
   void Uninitialize() final;
@@ -164,6 +172,12 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext {
   void EnsureAudioContextManagerService();
   void OnAudioContextManagerServiceConnectionError();
 
+  void SendLogMessage(const String& message);
+
+  void DidInitialPermissionCheck(mojom::blink::PermissionDescriptorPtr,
+                                 mojom::blink::PermissionStatus);
+  double GetOutputLatencyQuantizingFactor() const;
+
   unsigned context_id_;
   Member<ScriptPromiseResolver> close_resolver_;
 
@@ -176,26 +190,24 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext {
   // Autoplay status associated with this AudioContext, if any.
   // Will only be set if there is an autoplay policy in place.
   // Will never be set for OfflineAudioContext.
-  base::Optional<AutoplayStatus> autoplay_status_;
+  absl::optional<AutoplayStatus> autoplay_status_;
 
   // Autoplay unlock type for this AudioContext.
   // Will only be set if there is an autoplay policy in place.
   // Will never be set for OfflineAudioContext.
-  base::Optional<AutoplayUnlockType> autoplay_unlock_type_;
+  absl::optional<AutoplayUnlockType> autoplay_unlock_type_;
 
   // Records if start() was ever called for any source node in this context.
   bool source_node_started_ = false;
 
-  // Represents whether a context is suspended by explicit |context.suspend()|.
+  // Represents whether a context is suspended by explicit `context.suspend()`.
   bool suspended_by_user_ = false;
 
   // baseLatency for this context
   double base_latency_ = 0;
 
   // AudioContextManager for reporting audibility.
-  HeapMojoRemote<mojom::blink::AudioContextManager,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
-      audio_context_manager_;
+  HeapMojoRemote<mojom::blink::AudioContextManager> audio_context_manager_;
 
   // Keeps track if the output of this destination was audible, before the
   // current rendering quantum.  Used for recording "playback" time.
@@ -206,7 +218,16 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext {
   // all that's needed.
   size_t total_audible_renders_ = 0;
 
-  SelfKeepAlive<AudioContext> keep_alive_;
+  SelfKeepAlive<AudioContext> keep_alive_{this};
+
+  // Initially, we assume that the microphone permission is denied. But this
+  // will be corrected after the actual construction.
+  mojom::blink::PermissionStatus
+      microphone_permission_status_ = mojom::blink::PermissionStatus::DENIED;
+
+  HeapMojoRemote<mojom::blink::PermissionService> permission_service_;
+  HeapMojoReceiver<mojom::blink::PermissionObserver, AudioContext>
+      permission_receiver_;
 };
 
 }  // namespace blink

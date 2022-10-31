@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/frame/device_single_window_event_controller.h"
 
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
@@ -66,30 +67,11 @@ void DeviceSingleWindowEventController::DidRemoveAllEventListeners(
   has_event_listener_ = false;
 }
 
-bool DeviceSingleWindowEventController::IsSameSecurityOriginAsMainFrame()
-    const {
-  LocalFrame* frame = GetWindow().GetFrame();
-  if (!frame)
-    return false;
-
-  if (frame->IsMainFrame())
-    return true;
-
-  const SecurityOrigin* main_security_origin =
-      frame->GetPage()->MainFrame()->GetSecurityContext()->GetSecurityOrigin();
-
-  if (main_security_origin &&
-      GetWindow().GetSecurityOrigin()->CanAccess(main_security_origin))
-    return true;
-
-  return false;
-}
-
 bool DeviceSingleWindowEventController::CheckPolicyFeatures(
-    const Vector<mojom::blink::FeaturePolicyFeature>& features) const {
-  const LocalDOMWindow& window = GetWindow();
+    const Vector<mojom::blink::PermissionsPolicyFeature>& features) const {
+  LocalDOMWindow& window = GetWindow();
   return std::all_of(features.begin(), features.end(),
-                     [&window](mojom::blink::FeaturePolicyFeature feature) {
+                     [&window](mojom::blink::PermissionsPolicyFeature feature) {
                        return window.IsFeatureEnabled(
                            feature, ReportOptions::kReportOnFailure);
                      });

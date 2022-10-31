@@ -8,7 +8,6 @@
 #include "third_party/blink/public/platform/web_input_event_result.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_offset.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/page/event_with_hit_test_results.h"
@@ -42,8 +41,8 @@ bool IsInDocument(EventTarget*);
 ContainerNode* ParentForClickEvent(const Node&);
 ContainerNode* ParentForClickEventInteractiveElementSensitive(const Node&);
 
-PhysicalOffset ContentPointFromRootFrame(LocalFrame*,
-                                         const FloatPoint& point_in_root_frame);
+CORE_EXPORT PhysicalOffset
+ContentPointFromRootFrame(LocalFrame*, const gfx::PointF& point_in_root_frame);
 
 MouseEventWithHitTestResults PerformMouseEventHitTest(LocalFrame*,
                                                       const HitTestRequest&,
@@ -55,8 +54,8 @@ LocalFrame* GetTargetSubframe(const MouseEventWithHitTestResults&,
 
 LocalFrame* SubframeForTargetNode(Node*, bool* is_remote_frame = nullptr);
 
-// Intervention: if an input event lands on a cross-origin iframe that has
-// moved or resized recently (recent==500ms), and which contains an
+// Intervention: if an input event lands on a cross-origin iframe or fencedframe
+// that has moved or resized recently (recent==500ms), and which contains an
 // IntersectionObserver that is tracking visibility, then the event is quietly
 // discarded.
 bool ShouldDiscardEventTargetingFrame(const WebInputEvent& event,
@@ -66,13 +65,11 @@ class PointerEventTarget {
   DISALLOW_NEW();
 
  public:
-  void Trace(Visitor* visitor) const {
-    visitor->Trace(target_element);
-    visitor->Trace(target_frame);
-  }
+  void Trace(Visitor* visitor) const;
 
   Member<Element> target_element;
   Member<LocalFrame> target_frame;
+  Member<Scrollbar> scrollbar;
   String region;
 };
 

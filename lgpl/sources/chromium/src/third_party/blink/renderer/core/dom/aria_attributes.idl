@@ -5,9 +5,7 @@
 // ARIA reflection, note this doesn't include relationship properties,
 // which is defined in AriaRelationshipAttributes.
 // https://w3c.github.io/aria/#idl-interface
-[
-    RuntimeEnabled=AOMAriaProperties
-] interface mixin AriaAttributes {
+interface mixin AriaAttributes {
     [CEReactions, Reflect=aria_atomic] attribute DOMString? ariaAtomic;
     [CEReactions, Reflect=aria_autocomplete] attribute DOMString? ariaAutoComplete;
     [CEReactions, Reflect=aria_busy] attribute DOMString? ariaBusy;
@@ -16,11 +14,12 @@
     [CEReactions, Reflect=aria_colindex] attribute DOMString? ariaColIndex;
     [CEReactions, Reflect=aria_colspan] attribute DOMString? ariaColSpan;
     [CEReactions, Reflect=aria_current] attribute DOMString? ariaCurrent;
-    [RuntimeEnabled=AccessibilityExposeARIAAnnotations, CEReactions, Reflect=aria_description] attribute DOMString? ariaDescription;
+    [CEReactions, Reflect=aria_description] attribute DOMString? ariaDescription;
     [CEReactions, Reflect=aria_disabled] attribute DOMString? ariaDisabled;
     [CEReactions, Reflect=aria_expanded] attribute DOMString? ariaExpanded;
     [CEReactions, Reflect=aria_haspopup] attribute DOMString? ariaHasPopup;
     [CEReactions, Reflect=aria_hidden] attribute DOMString? ariaHidden;
+    [CEReactions, Reflect=aria_invalid] attribute DOMString? ariaInvalid;
     [CEReactions, Reflect=aria_keyshortcuts] attribute DOMString? ariaKeyShortcuts;
     [CEReactions, Reflect=aria_label] attribute DOMString? ariaLabel;
     [CEReactions, Reflect=aria_level] attribute DOMString? ariaLevel;
@@ -46,6 +45,7 @@
     [CEReactions, Reflect=aria_valuemin] attribute DOMString? ariaValueMin;
     [CEReactions, Reflect=aria_valuenow] attribute DOMString? ariaValueNow;
     [CEReactions, Reflect=aria_valuetext] attribute DOMString? ariaValueText;
+    [RuntimeEnabled=AccessibilityAriaVirtualContent, CEReactions, Reflect=aria_virtualcontent] attribute DOMString? ariaVirtualContent;
 };
 
 Element includes AriaAttributes;

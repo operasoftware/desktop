@@ -30,11 +30,16 @@
 
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 
+#include "base/test/scoped_command_line.h"
+#include "base/test/scoped_feature_list.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
+#include "services/network/public/cpp/network_switches.h"
 #include "services/network/public/mojom/cors.mojom-blink.h"
 #include "services/network/public/mojom/cors_origin_pattern.mojom-blink.h"
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/loader/referrer_utils.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
@@ -102,9 +107,10 @@ TEST(SecurityPolicyTest, GenerateReferrer) {
       "blob:http://a.test/b3aae9c8-7f90-440d-8d7c-43aa20d72fde";
   const char kFilesystemURL[] = "filesystem:http://a.test/path/t/file.html";
   const char kInvalidURL[] = "not-a-valid-url";
+  const char kEmptyURL[] = "";
 
   bool reduced_granularity =
-      RuntimeEnabledFeatures::ReducedReferrerGranularityEnabled();
+      base::FeatureList::IsEnabled(features::kReducedReferrerGranularity);
 
   TestCase inputs[] = {
       // HTTP -> HTTP: Same Origin
@@ -142,6 +148,10 @@ TEST(SecurityPolicyTest, GenerateReferrer) {
        kInsecureURLB, kInsecureOriginA},
       {network::mojom::ReferrerPolicy::kSameOrigin, kInsecureURLA,
        kInsecureURLB, nullptr},
+      {network::mojom::ReferrerPolicy::kSameOrigin, kInsecureURLB,
+       kFilesystemURL, nullptr},
+      {network::mojom::ReferrerPolicy::kSameOrigin, kInsecureURLB, kBlobURL,
+       nullptr},
       {network::mojom::ReferrerPolicy::kStrictOrigin, kInsecureURLA,
        kInsecureURLB, kInsecureOriginA},
       {network::mojom::ReferrerPolicy::kStrictOriginWhenCrossOrigin,
@@ -229,16 +239,18 @@ TEST(SecurityPolicyTest, GenerateReferrer) {
 
       // blob, filesystem, and invalid URL handling
       {network::mojom::ReferrerPolicy::kAlways, kInsecureURLA, kBlobURL,
-       nullptr},
+       kInsecureURLA},
       {network::mojom::ReferrerPolicy::kAlways, kBlobURL, kInsecureURLA,
        nullptr},
       {network::mojom::ReferrerPolicy::kAlways, kInsecureURLA, kFilesystemURL,
-       nullptr},
+       kInsecureURLA},
       {network::mojom::ReferrerPolicy::kAlways, kFilesystemURL, kInsecureURLA,
        nullptr},
       {network::mojom::ReferrerPolicy::kAlways, kInsecureURLA, kInvalidURL,
        kInsecureURLA},
       {network::mojom::ReferrerPolicy::kAlways, kInvalidURL, kInsecureURLA,
+       nullptr},
+      {network::mojom::ReferrerPolicy::kAlways, kEmptyURL, kInsecureURLA,
        nullptr},
   };
 
@@ -261,7 +273,7 @@ TEST(SecurityPolicyTest, GenerateReferrer) {
 
     network::mojom::ReferrerPolicy expected_policy = test.policy;
     if (expected_policy == network::mojom::ReferrerPolicy::kDefault) {
-      if (RuntimeEnabledFeatures::ReducedReferrerGranularityEnabled()) {
+      if (reduced_granularity) {
         expected_policy =
             network::mojom::ReferrerPolicy::kStrictOriginWhenCrossOrigin;
       } else {
@@ -355,8 +367,17 @@ TEST(SecurityPolicyTest, TrustworthySafelist) {
     scoped_refptr<const SecurityOrigin> origin =
         SecurityOrigin::CreateFromString(url);
     EXPECT_FALSE(origin->IsPotentiallyTrustworthy());
-    SecurityPolicy::AddOriginToTrustworthySafelist(origin->ToString());
-    EXPECT_TRUE(origin->IsPotentiallyTrustworthy());
+
+    {
+      base::test::ScopedCommandLine scoped_command_line;
+      base::CommandLine* command_line =
+          scoped_command_line.GetProcessCommandLine();
+      command_line->AppendSwitchASCII(
+          network::switches::kUnsafelyTreatInsecureOriginAsSecure,
+          origin->ToString().Latin1());
+      network::SecureOriginAllowlist::GetInstance().ResetForTesting();
+      EXPECT_TRUE(origin->IsPotentiallyTrustworthy());
+    }
   }
 
   // Tests that adding URLs that have inner-urls to the safelist
@@ -382,15 +403,25 @@ TEST(SecurityPolicyTest, TrustworthySafelist) {
 
     EXPECT_FALSE(origin1->IsPotentiallyTrustworthy());
     EXPECT_FALSE(origin2->IsPotentiallyTrustworthy());
-    SecurityPolicy::AddOriginToTrustworthySafelist(origin1->ToString());
-    EXPECT_TRUE(origin1->IsPotentiallyTrustworthy());
-    EXPECT_TRUE(origin2->IsPotentiallyTrustworthy());
+    {
+      base::test::ScopedCommandLine scoped_command_line;
+      base::CommandLine* command_line =
+          scoped_command_line.GetProcessCommandLine();
+      command_line->AppendSwitchASCII(
+          network::switches::kUnsafelyTreatInsecureOriginAsSecure,
+          origin1->ToString().Latin1());
+      network::SecureOriginAllowlist::GetInstance().ResetForTesting();
+      EXPECT_TRUE(origin1->IsPotentiallyTrustworthy());
+      EXPECT_TRUE(origin2->IsPotentiallyTrustworthy());
+    }
   }
 }
 
 class SecurityPolicyAccessTest : public testing::Test {
  public:
   SecurityPolicyAccessTest() = default;
+  SecurityPolicyAccessTest(const SecurityPolicyAccessTest&) = delete;
+  SecurityPolicyAccessTest& operator=(const SecurityPolicyAccessTest&) = delete;
   ~SecurityPolicyAccessTest() override = default;
 
   void SetUp() override {
@@ -430,8 +461,6 @@ class SecurityPolicyAccessTest : public testing::Test {
   scoped_refptr<const SecurityOrigin> http_example_origin_;
   scoped_refptr<const SecurityOrigin> https_chromium_origin_;
   scoped_refptr<const SecurityOrigin> https_google_origin_;
-
-  DISALLOW_COPY_AND_ASSIGN(SecurityPolicyAccessTest);
 };
 
 // TODO(toyoshim): Simplify origin access related tests since all we need here
@@ -613,36 +642,20 @@ TEST(SecurityPolicyTest, ReferrerForCustomScheme) {
   String kFullReferrer = "my-new-scheme://com.foo.me/this-should-be-truncated";
   String kTruncatedReferrer = "my-new-scheme://com.foo.me/";
 
-  bool initially_enabled =
-      RuntimeEnabledFeatures::ReducedReferrerGranularityEnabled();
+  // The default policy of strict-origin-when-cross-origin should truncate the
+  // referrer.
+  EXPECT_EQ(SecurityPolicy::GenerateReferrer(
+                network::mojom::ReferrerPolicy::kDefault,
+                KURL("https://www.example.com/"), kFullReferrer)
+                .referrer,
+            kTruncatedReferrer);
 
-  {
-    // With the feature off, the old default policy of
-    // no-referrer-when-downgrade should preserve the entire URL.
-    RuntimeEnabledFeatures::SetReducedReferrerGranularityEnabled(false);
-
-    EXPECT_EQ(SecurityPolicy::GenerateReferrer(
-                  network::mojom::ReferrerPolicy::kDefault,
-                  KURL("https://www.example.com/"), kFullReferrer)
-                  .referrer,
-              kFullReferrer);
-  }
-
-  {
-    // With the feature on, the new default policy of
-    // strict-origin-when-cross-origin should truncate the referrer.
-    RuntimeEnabledFeatures::SetReducedReferrerGranularityEnabled(true);
-
-    ASSERT_TRUE(RuntimeEnabledFeatures::ReducedReferrerGranularityEnabled());
-    EXPECT_EQ(SecurityPolicy::GenerateReferrer(
-                  network::mojom::ReferrerPolicy::kDefault,
-                  KURL("https://www.example.com/"), kFullReferrer)
-                  .referrer,
-              kTruncatedReferrer);
-  }
-
-  RuntimeEnabledFeatures::SetReducedReferrerGranularityEnabled(
-      initially_enabled);
+  // no-referrer-when-downgrade shouldn't truncate the referrer.
+  EXPECT_EQ(SecurityPolicy::GenerateReferrer(
+                network::mojom::ReferrerPolicy::kNoReferrerWhenDowngrade,
+                KURL("https://www.example.com/"), kFullReferrer)
+                .referrer,
+            kFullReferrer);
 }
 
 }  // namespace blink

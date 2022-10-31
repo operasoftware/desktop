@@ -26,14 +26,11 @@ namespace blink {
 
 BluetoothRemoteGATTServer::BluetoothRemoteGATTServer(ExecutionContext* context,
                                                      BluetoothDevice* device)
-    : ExecutionContextLifecycleObserver(context),
+    :  // See https://bit.ly/2S0zRAS for task types.
+      task_runner_(context->GetTaskRunner(TaskType::kMiscPlatformAPI)),
       client_receivers_(this, context),
       device_(device),
       connected_(false) {}
-
-void BluetoothRemoteGATTServer::ContextDestroyed() {
-  Dispose();
-}
 
 void BluetoothRemoteGATTServer::GATTServerDisconnected() {
   DispatchDisconnected();
@@ -54,20 +51,10 @@ bool BluetoothRemoteGATTServer::RemoveFromActiveAlgorithms(
   return true;
 }
 
-void BluetoothRemoteGATTServer::DisconnectIfConnected() {
-  if (connected_) {
-    SetConnected(false);
-    ClearActiveAlgorithms();
-    mojom::blink::WebBluetoothService* service =
-        device_->GetBluetooth()->Service();
-    service->RemoteServerDisconnect(device_->id());
-  }
-}
-
 void BluetoothRemoteGATTServer::CleanupDisconnectedDeviceAndFireEvent() {
   DCHECK(connected_);
-  SetConnected(false);
-  ClearActiveAlgorithms();
+  connected_ = false;
+  active_algorithms_.clear();
   device_->ClearAttributeInstanceMapAndFireEvent();
 }
 
@@ -78,16 +65,11 @@ void BluetoothRemoteGATTServer::DispatchDisconnected() {
   CleanupDisconnectedDeviceAndFireEvent();
 }
 
-void BluetoothRemoteGATTServer::Dispose() {
-  DisconnectIfConnected();
-}
-
 void BluetoothRemoteGATTServer::Trace(Visitor* visitor) const {
   visitor->Trace(client_receivers_);
   visitor->Trace(active_algorithms_);
   visitor->Trace(device_);
   ScriptWrappable::Trace(visitor);
-  ExecutionContextLifecycleObserver::Trace(visitor);
 }
 
 void BluetoothRemoteGATTServer::ConnectCallback(
@@ -98,42 +80,59 @@ void BluetoothRemoteGATTServer::ConnectCallback(
     return;
 
   if (result == mojom::blink::WebBluetoothResult::SUCCESS) {
-    SetConnected(true);
+    connected_ = true;
     resolver->Resolve(this);
   } else {
     resolver->Reject(BluetoothError::CreateDOMException(result));
   }
 }
 
-ScriptPromise BluetoothRemoteGATTServer::connect(ScriptState* script_state) {
+ScriptPromise BluetoothRemoteGATTServer::connect(
+    ScriptState* script_state,
+    ExceptionState& exception_state) {
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
+
+  if (!device_->GetBluetooth()->IsServiceBound()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNetworkError,
+        BluetoothError::CreateNotConnectedExceptionMessage(
+            BluetoothOperation::kServicesRetrieval));
+    return ScriptPromise();
+  }
 
   mojom::blink::WebBluetoothService* service =
       device_->GetBluetooth()->Service();
   mojo::PendingAssociatedRemote<mojom::blink::WebBluetoothServerClient> client;
-  // See https://bit.ly/2S0zRAS for task types.
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-      GetExecutionContext()->GetTaskRunner(TaskType::kMiscPlatformAPI);
   client_receivers_.Add(client.InitWithNewEndpointAndPassReceiver(),
-                        std::move(task_runner));
+                        task_runner_);
 
   service->RemoteServerConnect(
-      device_->id(), std::move(client),
+      device_->GetDevice()->id, std::move(client),
       WTF::Bind(&BluetoothRemoteGATTServer::ConnectCallback,
                 WrapPersistent(this), WrapPersistent(resolver)));
 
   return promise;
 }
 
-void BluetoothRemoteGATTServer::disconnect(ScriptState* script_state) {
+void BluetoothRemoteGATTServer::disconnect(ScriptState* script_state,
+                                           ExceptionState& exception_state) {
   if (!connected_)
     return;
+
+  if (!device_->GetBluetooth()->IsServiceBound()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNetworkError,
+        BluetoothError::CreateNotConnectedExceptionMessage(
+            BluetoothOperation::kServicesRetrieval));
+    return;
+  }
+
   CleanupDisconnectedDeviceAndFireEvent();
   client_receivers_.Clear();
   mojom::blink::WebBluetoothService* service =
       device_->GetBluetooth()->Service();
-  service->RemoteServerDisconnect(device_->id());
+  service->RemoteServerDisconnect(device_->GetDevice()->id);
 }
 
 // Callback that allows us to resolve the promise with a single service or
@@ -143,7 +142,7 @@ void BluetoothRemoteGATTServer::GetPrimaryServicesCallback(
     mojom::blink::WebBluetoothGATTQueryQuantity quantity,
     ScriptPromiseResolver* resolver,
     mojom::blink::WebBluetoothResult result,
-    base::Optional<Vector<mojom::blink::WebBluetoothRemoteGATTServicePtr>>
+    absl::optional<Vector<mojom::blink::WebBluetoothRemoteGATTServicePtr>>
         services) {
   if (!resolver->GetExecutionContext() ||
       resolver->GetExecutionContext()->IsContextDestroyed())
@@ -188,7 +187,7 @@ void BluetoothRemoteGATTServer::GetPrimaryServicesCallback(
 
 ScriptPromise BluetoothRemoteGATTServer::getPrimaryService(
     ScriptState* script_state,
-    const StringOrUnsignedLong& service,
+    const V8BluetoothServiceUUID* service,
     ExceptionState& exception_state) {
   String service_uuid = BluetoothUUID::getService(service, exception_state);
   if (exception_state.HadException())
@@ -201,7 +200,7 @@ ScriptPromise BluetoothRemoteGATTServer::getPrimaryService(
 
 ScriptPromise BluetoothRemoteGATTServer::getPrimaryServices(
     ScriptState* script_state,
-    const StringOrUnsignedLong& service,
+    const V8BluetoothServiceUUID* service,
     ExceptionState& exception_state) {
   String service_uuid = BluetoothUUID::getService(service, exception_state);
   if (exception_state.HadException())
@@ -225,7 +224,7 @@ ScriptPromise BluetoothRemoteGATTServer::GetPrimaryServicesImpl(
     ExceptionState& exception_state,
     mojom::blink::WebBluetoothGATTQueryQuantity quantity,
     String services_uuid) {
-  if (!connected_) {
+  if (!connected_ || !device_->GetBluetooth()->IsServiceBound()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNetworkError,
         BluetoothError::CreateNotConnectedExceptionMessage(
@@ -240,7 +239,7 @@ ScriptPromise BluetoothRemoteGATTServer::GetPrimaryServicesImpl(
   mojom::blink::WebBluetoothService* service =
       device_->GetBluetooth()->Service();
   service->RemoteServerGetPrimaryServices(
-      device_->id(), quantity, services_uuid,
+      device_->GetDevice()->id, quantity, services_uuid,
       WTF::Bind(&BluetoothRemoteGATTServer::GetPrimaryServicesCallback,
                 WrapPersistent(this), services_uuid, quantity,
                 WrapPersistent(resolver)));

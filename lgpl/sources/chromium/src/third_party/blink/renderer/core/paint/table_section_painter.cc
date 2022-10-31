@@ -48,8 +48,7 @@ void TableSectionPainter::Paint(const PaintInfo& paint_info) {
   for (const auto* fragment = &layout_table_section_.FirstFragment(); fragment;
        fragment = fragment->NextFragment()) {
     PaintInfo fragment_paint_info = paint_info;
-    fragment_paint_info.SetFragmentLogicalTopInFlowThread(
-        fragment->LogicalTopInFlowThread());
+    fragment_paint_info.SetFragmentID(fragment->FragmentID());
     ScopedDisplayItemFragment scoped_display_item_fragment(
         fragment_paint_info.context, fragment_index++);
     PaintSection(fragment_paint_info);
@@ -106,11 +105,13 @@ void TableSectionPainter::PaintCollapsedBorders(const PaintInfo& paint_info) {
     return;
   }
 
+  unsigned fragment_index = 0;
   for (const auto* fragment = &layout_table_section_.FirstFragment(); fragment;
        fragment = fragment->NextFragment()) {
     PaintInfo fragment_paint_info = paint_info;
-    fragment_paint_info.SetFragmentLogicalTopInFlowThread(
-        fragment->LogicalTopInFlowThread());
+    fragment_paint_info.SetFragmentID(fragment->FragmentID());
+    ScopedDisplayItemFragment scoped_display_item_fragment(
+        fragment_paint_info.context, fragment_index++);
     PaintCollapsedSectionBorders(fragment_paint_info);
   }
 }
@@ -133,8 +134,10 @@ void TableSectionPainter::PaintCollapsedSectionBorders(
       !layout_table_section_.Table()->EffectiveColumns().size())
     return;
 
-  ScopedPaintState paint_state(layout_table_section_, paint_info);
-  base::Optional<ScopedBoxContentsPaintState> contents_paint_state;
+  ScopedPaintState paint_state(
+      layout_table_section_, paint_info,
+      /*painting_legacy_table_part_in_ancestor_layer*/ true);
+  absl::optional<ScopedBoxContentsPaintState> contents_paint_state;
   if (paint_info.phase != PaintPhase::kMask)
     contents_paint_state.emplace(paint_state, layout_table_section_);
   const auto& local_paint_info = contents_paint_state
@@ -145,16 +148,9 @@ void TableSectionPainter::PaintCollapsedSectionBorders(
 
   CellSpan dirtied_rows;
   CellSpan dirtied_columns;
-  if (UNLIKELY(
-          layout_table_section_.Table()->ShouldPaintAllCollapsedBorders())) {
-    // Ignore paint cull rect to simplify paint invalidation in such rare case.
-    dirtied_rows = layout_table_section_.FullSectionRowSpan();
-    dirtied_columns = layout_table_section_.FullTableEffectiveColumnSpan();
-  } else {
-    layout_table_section_.DirtiedRowsAndEffectiveColumns(
-        TableAlignedRect(local_paint_info, paint_offset), dirtied_rows,
-        dirtied_columns);
-  }
+  layout_table_section_.DirtiedRowsAndEffectiveColumns(
+      TableAlignedRect(local_paint_info, paint_offset), dirtied_rows,
+      dirtied_columns);
 
   if (dirtied_columns.Start() >= dirtied_columns.End())
     return;
@@ -239,10 +235,10 @@ void TableSectionPainter::PaintObject(const PaintInfo& paint_info,
     // This path paints section with a reasonable number of overflowing cells.
     // This is the "partial paint path" for overflowing cells referred in
     // LayoutTableSection::ComputeOverflowFromDescendants().
-    Vector<const LayoutTableCell*> cells;
+    HeapVector<Member<const LayoutTableCell>> cells;
     CopyToVector(visually_overflowing_cells, cells);
 
-    HashSet<const LayoutTableCell*> spanning_cells;
+    HeapHashSet<Member<const LayoutTableCell>> spanning_cells;
     for (unsigned r = dirtied_rows.Start(); r < dirtied_rows.End(); r++) {
       const LayoutTableRow* row = layout_table_section_.RowLayoutObjectAt(r);
       // TODO(crbug.com/577282): This painting order is inconsistent with other
@@ -263,7 +259,7 @@ void TableSectionPainter::PaintObject(const PaintInfo& paint_info,
 
     // Sort the dirty cells by paint order.
     std::sort(cells.begin(), cells.end(), LayoutTableCell::CompareInDOMOrder);
-    for (const auto* cell : cells)
+    for (const auto& cell : cells)
       PaintCell(*cell, paint_info_for_descendants);
   }
 }
@@ -292,8 +288,9 @@ void TableSectionPainter::PaintBoxDecorationBackground(
           DisplayItem::kBoxDecorationBackground))
     return;
 
-  DrawingRecorder recorder(paint_info.context, layout_table_section_,
-                           DisplayItem::kBoxDecorationBackground);
+  BoxDrawingRecorder recorder(paint_info.context, layout_table_section_,
+                              DisplayItem::kBoxDecorationBackground,
+                              paint_offset);
   PhysicalRect paint_rect(paint_offset, layout_table_section_.Size());
 
   if (has_box_shadow) {
@@ -304,11 +301,14 @@ void TableSectionPainter::PaintBoxDecorationBackground(
   if (may_have_background) {
     PaintInfo paint_info_for_cells = paint_info.ForDescendants();
     for (auto r = dirtied_rows.Start(); r < dirtied_rows.End(); r++) {
-      base::Optional<ScopedPaintState> row_paint_state;
+      absl::optional<ScopedPaintState> row_paint_state;
       for (auto c = dirtied_columns.Start(); c < dirtied_columns.End(); c++) {
         if (const auto* cell = layout_table_section_.OriginatingCellAt(r, c)) {
-          if (!row_paint_state)
-            row_paint_state.emplace(*cell->Row(), paint_info_for_cells);
+          if (!row_paint_state) {
+            row_paint_state.emplace(
+                *cell->Row(), paint_info_for_cells,
+                /*painting_legacy_table_part_in_ancestor_layer*/ true);
+          }
           PaintBackgroundsBehindCell(*cell, row_paint_state->GetPaintInfo());
         }
       }

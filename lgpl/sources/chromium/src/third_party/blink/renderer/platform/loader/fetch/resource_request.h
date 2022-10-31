@@ -30,20 +30,24 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "base/optional.h"
+#include "base/containers/flat_set.h"
 #include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "net/cookies/site_for_cookies.h"
+#include "net/filter/source_stream.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/chunked_data_pipe_getter.mojom-blink.h"
 #include "services/network/public/mojom/cors.mojom-blink-forward.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink-forward.h"
 #include "services/network/public/mojom/ip_address_space.mojom-blink-forward.h"
 #include "services/network/public/mojom/trust_tokens.mojom-blink.h"
+#include "services/network/public/mojom/url_loader.mojom-blink.h"
+#include "services/network/public/mojom/web_bundle_handle.mojom-blink.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/resource_request_blocked_reason.h"
-#include "third_party/blink/public/platform/web_url_request.h"
+#include "third_party/blink/public/platform/web_url_request_extra_data.h"
+#include "third_party/blink/renderer/platform/loader/fetch/render_blocking_behavior.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
 #include "third_party/blink/renderer/platform/network/http_header_map.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
@@ -80,6 +84,24 @@ class PLATFORM_EXPORT ResourceRequestHead {
         : original_url(original_url), previous_url(previous_url) {}
   };
 
+  struct PLATFORM_EXPORT WebBundleTokenParams {
+    WebBundleTokenParams() = delete;
+    WebBundleTokenParams(const WebBundleTokenParams& other);
+    WebBundleTokenParams& operator=(const WebBundleTokenParams& other);
+
+    WebBundleTokenParams(
+        const KURL& bundle_url,
+        const base::UnguessableToken& token,
+        mojo::PendingRemote<network::mojom::blink::WebBundleHandle> handle);
+
+    mojo::PendingRemote<network::mojom::blink::WebBundleHandle> CloneHandle()
+        const;
+
+    KURL bundle_url;
+    base::UnguessableToken token;
+    mojo::PendingRemote<network::mojom::blink::WebBundleHandle> handle;
+  };
+
   ResourceRequestHead();
   explicit ResourceRequestHead(const KURL&);
 
@@ -108,8 +130,8 @@ class PLATFORM_EXPORT ResourceRequestHead {
 
   void RemoveUserAndPassFromURL();
 
-  mojom::FetchCacheMode GetCacheMode() const;
-  void SetCacheMode(mojom::FetchCacheMode);
+  mojom::blink::FetchCacheMode GetCacheMode() const;
+  void SetCacheMode(mojom::blink::FetchCacheMode);
 
   base::TimeDelta TimeoutInterval() const;
   void SetTimeoutInterval(base::TimeDelta);
@@ -136,6 +158,15 @@ class PLATFORM_EXPORT ResourceRequestHead {
     requestor_origin_ = std::move(origin);
   }
 
+  // The chain of URLs seen during navigation redirects.  This should only
+  // contain values if the mode is `RedirectMode::kNavigate`.
+  const WTF::Vector<KURL>& NavigationRedirectChain() const {
+    return navigation_redirect_chain_;
+  }
+  void SetNavigationRedirectChain(const WTF::Vector<KURL>& value) {
+    navigation_redirect_chain_ = value;
+  }
+
   // The origin of the isolated world - set if this is a fetch/XHR initiated by
   // an isolated world.
   const scoped_refptr<const SecurityOrigin>& IsolatedWorldOrigin() const {
@@ -160,6 +191,11 @@ class PLATFORM_EXPORT ResourceRequestHead {
   }
   void SetHTTPContentType(const AtomicString& http_content_type) {
     SetHttpHeaderField(http_names::kContentType, http_content_type);
+  }
+
+  bool IsFormSubmission() const { return is_form_submission_; }
+  void SetFormSubmission(bool is_form_submission) {
+    is_form_submission_ = is_form_submission;
   }
 
   void SetReferrerPolicy(network::mojom::ReferrerPolicy referrer_policy) {
@@ -194,8 +230,14 @@ class PLATFORM_EXPORT ResourceRequestHead {
   bool AllowStoredCredentials() const;
   void SetAllowStoredCredentials(bool allow_credentials);
 
-  // TODO(yhirano): Describe what Priority and IntraPriorityValue are.
+  // The initial priority for the request.
+  ResourceLoadPriority InitialPriority() const;
+
+  // The current priority for the request (in case it was changed).
   ResourceLoadPriority Priority() const;
+
+  // Sub-priority for ordering requests at the same priority level.
+  // Used for visible images to load larger images before small.
   int IntraPriorityValue() const;
   bool PriorityHasBeenSet() const;
   void SetPriority(ResourceLoadPriority, int intra_priority_value = 0);
@@ -209,20 +251,12 @@ class PLATFORM_EXPORT ResourceRequestHead {
     report_upload_progress_ = report_upload_progress;
   }
 
-  // Whether actual headers being sent/received should be collected and reported
-  // for the request.
-  bool ReportRawHeaders() const { return report_raw_headers_; }
-  void SetReportRawHeaders(bool report_raw_headers) {
-    report_raw_headers_ = report_raw_headers;
-  }
-
-  // Allows the request to be matched up with its requestor.
-  int RequestorID() const { return requestor_id_; }
-  void SetRequestorID(int requestor_id) { requestor_id_ = requestor_id; }
-
   // True if request was user initiated.
   bool HasUserGesture() const { return has_user_gesture_; }
   void SetHasUserGesture(bool);
+
+  bool HasTextFragmentToken() const { return has_text_fragment_token_; }
+  void SetHasTextFragmentToken(bool);
 
   // True if request shuold be downloaded to blob.
   bool DownloadToBlob() const { return download_to_blob_; }
@@ -247,18 +281,13 @@ class PLATFORM_EXPORT ResourceRequestHead {
     skip_service_worker_ = skip_service_worker;
   }
 
-  // True if corresponding AppCache group should be resetted.
-  bool ShouldResetAppCache() const { return should_reset_app_cache_; }
-  void SetShouldResetAppCache(bool should_reset_app_cache) {
-    should_reset_app_cache_ = should_reset_app_cache;
-  }
-
   // Extra data associated with this request.
-  const scoped_refptr<WebURLRequest::ExtraData>& GetExtraData() const {
-    return extra_data_;
+  const scoped_refptr<WebURLRequestExtraData>& GetURLRequestExtraData() const {
+    return url_request_extra_data_;
   }
-  void SetExtraData(scoped_refptr<WebURLRequest::ExtraData> extra_data) {
-    extra_data_ = extra_data;
+  void SetURLRequestExtraData(
+      scoped_refptr<WebURLRequestExtraData> url_request_extra_data) {
+    url_request_extra_data_ = std::move(url_request_extra_data);
   }
 
   bool IsDownloadToNetworkCacheOnly() const { return download_to_cache_only_; }
@@ -267,10 +296,10 @@ class PLATFORM_EXPORT ResourceRequestHead {
     download_to_cache_only_ = download_to_cache_only;
   }
 
-  mojom::RequestContextType GetRequestContext() const {
+  mojom::blink::RequestContextType GetRequestContext() const {
     return request_context_;
   }
-  void SetRequestContext(mojom::RequestContextType context) {
+  void SetRequestContext(mojom::blink::RequestContextType context) {
     request_context_ = context;
   }
 
@@ -284,19 +313,29 @@ class PLATFORM_EXPORT ResourceRequestHead {
   network::mojom::RequestMode GetMode() const { return mode_; }
   void SetMode(network::mojom::RequestMode mode) { mode_ = mode; }
 
-  // A resource request's fetch_importance_mode_ is a developer-set priority
+  network::mojom::IPAddressSpace GetTargetAddressSpace() const {
+    return target_address_space_;
+  }
+  void SetTargetAddressSpace(
+      network::mojom::IPAddressSpace target_address_space) {
+    target_address_space_ = target_address_space;
+  }
+
+  // A resource request's fetch_priority_hint_ is a developer-set priority
   // hint that differs from priority_. It is used in
   // ResourceFetcher::ComputeLoadPriority to possibly influence the resolved
   // priority of a resource request.
   // This member exists both here and in FetchParameters, as opposed just in
   // the latter because the fetch() API creates a ResourceRequest object long
   // before its associaed FetchParameters, so this makes it easier to
-  // communicate an importance value down to the lower-level fetching code.
-  mojom::FetchImportanceMode GetFetchImportanceMode() const {
-    return fetch_importance_mode_;
+  // communicate a fetch_priority_hint value down to the lower-level fetching
+  // code.
+  mojom::blink::FetchPriorityHint GetFetchPriorityHint() const {
+    return fetch_priority_hint_;
   }
-  void SetFetchImportanceMode(mojom::FetchImportanceMode mode) {
-    fetch_importance_mode_ = mode;
+  void SetFetchPriorityHint(
+      mojom::blink::FetchPriorityHint fetch_priority_hint) {
+    fetch_priority_hint_ = fetch_priority_hint;
   }
 
   network::mojom::CredentialsMode GetCredentialsMode() const {
@@ -318,21 +357,9 @@ class PLATFORM_EXPORT ResourceRequestHead {
     fetch_integrity_ = integrity;
   }
 
-  WebURLRequest::PreviewsState GetPreviewsState() const {
-    return previews_state_;
-  }
-  void SetPreviewsState(WebURLRequest::PreviewsState previews_state) {
-    previews_state_ = previews_state;
-  }
-
   bool CacheControlContainsNoCache() const;
   bool CacheControlContainsNoStore() const;
   bool HasCacheValidatorFields() const;
-
-  // https://wicg.github.io/cors-rfc1918/#external-request
-  bool IsExternalRequest() const { return is_external_request_; }
-  void SetExternalRequestStateFromRequestorAddressSpace(
-      network::mojom::IPAddressSpace);
 
   network::mojom::CorsPreflightPolicy CorsPreflightPolicy() const {
     return cors_preflight_policy_;
@@ -341,14 +368,14 @@ class PLATFORM_EXPORT ResourceRequestHead {
     cors_preflight_policy_ = policy;
   }
 
-  const base::Optional<RedirectInfo>& GetRedirectInfo() const {
+  const absl::optional<RedirectInfo>& GetRedirectInfo() const {
     return redirect_info_;
   }
 
-  void SetSuggestedFilename(const base::Optional<String>& suggested_filename) {
+  void SetSuggestedFilename(const absl::optional<String>& suggested_filename) {
     suggested_filename_ = suggested_filename;
   }
-  const base::Optional<String>& GetSuggestedFilename() const {
+  const absl::optional<String>& GetSuggestedFilename() const {
     return suggested_filename_;
   }
 
@@ -370,16 +397,28 @@ class PLATFORM_EXPORT ResourceRequestHead {
   void SetAllowStaleResponse(bool value) { allow_stale_response_ = value; }
   bool AllowsStaleResponse() const { return allow_stale_response_; }
 
-  const base::Optional<base::UnguessableToken>& GetDevToolsToken() const {
+  const absl::optional<base::UnguessableToken>& GetDevToolsToken() const {
     return devtools_token_;
   }
   void SetDevToolsToken(
-      const base::Optional<base::UnguessableToken>& devtools_token) {
+      const absl::optional<base::UnguessableToken>& devtools_token) {
     devtools_token_ = devtools_token;
   }
 
-  const base::Optional<String>& GetDevToolsId() const { return devtools_id_; }
-  void SetDevToolsId(const base::Optional<String>& devtools_id) {
+  const scoped_refptr<
+      base::RefCountedData<base::flat_set<net::SourceStream::SourceType>>>&
+  GetDevToolsAcceptedStreamTypes() const {
+    return devtools_accepted_stream_types_;
+  }
+  void SetDevToolsAcceptedStreamTypes(
+      const scoped_refptr<
+          base::RefCountedData<base::flat_set<net::SourceStream::SourceType>>>&
+          types) {
+    devtools_accepted_stream_types_ = types;
+  }
+
+  const absl::optional<String>& GetDevToolsId() const { return devtools_id_; }
+  void SetDevToolsId(const absl::optional<String>& devtools_id) {
     devtools_id_ = devtools_id;
   }
 
@@ -396,6 +435,17 @@ class PLATFORM_EXPORT ResourceRequestHead {
   void SetPurposeHeader(const String& value) { purpose_header_ = value; }
   const String& GetPurposeHeader() const { return purpose_header_; }
 
+  // A V8 stack id string describing where the request was initiated. DevTools
+  // can use this to display the initiator call stack when debugging a process
+  // that later intercepts the request, e.g., in a service worker fetch event
+  // handler.
+  const absl::optional<String>& GetDevToolsStackId() const {
+    return devtools_stack_id_;
+  }
+  void SetDevToolsStackId(const absl::optional<String>& devtools_stack_id) {
+    devtools_stack_id_ = devtools_stack_id;
+  }
+
   void SetUkmSourceId(ukm::SourceId ukm_source_id) {
     ukm_source_id_ = ukm_source_id;
   }
@@ -411,21 +461,16 @@ class PLATFORM_EXPORT ResourceRequestHead {
   }
 
   void SetRecursivePrefetchToken(
-      const base::Optional<base::UnguessableToken>& token) {
+      const absl::optional<base::UnguessableToken>& token) {
     recursive_prefetch_token_ = token;
   }
-  const base::Optional<base::UnguessableToken>& RecursivePrefetchToken() const {
+  const absl::optional<base::UnguessableToken>& RecursivePrefetchToken() const {
     return recursive_prefetch_token_;
   }
 
   void SetInspectorId(uint64_t inspector_id) { inspector_id_ = inspector_id; }
   uint64_t InspectorId() const { return inspector_id_; }
 
-  // Temporary for metrics. True if the request was initiated by a stylesheet
-  // that is not origin-clean:
-  // https://drafts.csswg.org/cssom-1/#concept-css-style-sheet-origin-clean-flag
-  //
-  // TODO(crbug.com/898497): Remove this when there is enough data.
   bool IsFromOriginDirtyStyleSheet() const {
     return is_from_origin_dirty_style_sheet_;
   }
@@ -440,6 +485,14 @@ class PLATFORM_EXPORT ResourceRequestHead {
     is_signed_exchange_prefetch_cache_enabled_ = enabled;
   }
 
+  bool IsFetchLikeAPI() const { return is_fetch_like_api_; }
+
+  void SetFetchLikeAPI(bool enabled) { is_fetch_like_api_ = enabled; }
+
+  bool IsFavicon() const { return is_favicon_; }
+
+  void SetFavicon(bool enabled) { is_favicon_ = enabled; }
+
   bool PrefetchMaybeForTopLeveNavigation() const {
     return prefetch_maybe_for_top_level_navigation_;
   }
@@ -449,12 +502,12 @@ class PLATFORM_EXPORT ResourceRequestHead {
         prefetch_maybe_for_top_level_navigation;
   }
 
-  const base::Optional<network::mojom::blink::TrustTokenParams>&
+  const absl::optional<network::mojom::blink::TrustTokenParams>&
   TrustTokenParams() const {
     return trust_token_params_;
   }
   void SetTrustTokenParams(
-      base::Optional<network::mojom::blink::TrustTokenParams> params) {
+      absl::optional<network::mojom::blink::TrustTokenParams> params) {
     trust_token_params_ = std::move(params);
   }
 
@@ -462,11 +515,29 @@ class PLATFORM_EXPORT ResourceRequestHead {
   // |url|,
   bool CanDisplay(const KURL&) const;
 
-  void SetAllowHTTP1ForStreamingUpload(bool allow) {
-    allowHTTP1ForStreamingUpload_ = allow;
+  // The original destination of a request passed through by a service worker.
+  network::mojom::RequestDestination GetOriginalDestination() const {
+    return original_destination_;
   }
-  bool AllowHTTP1ForStreamingUpload() const {
-    return allowHTTP1ForStreamingUpload_;
+  void SetOriginalDestination(network::mojom::RequestDestination value) {
+    original_destination_ = value;
+  }
+
+  const absl::optional<ResourceRequestHead::WebBundleTokenParams>&
+  GetWebBundleTokenParams() const {
+    return web_bundle_token_params_;
+  }
+
+  void SetWebBundleTokenParams(
+      ResourceRequestHead::WebBundleTokenParams params) {
+    web_bundle_token_params_ = params;
+  }
+
+  void SetRenderBlockingBehavior(RenderBlockingBehavior behavior) {
+    render_blocking_behavior_ = behavior;
+  }
+  RenderBlockingBehavior GetRenderBlockingBehavior() const {
+    return render_blocking_behavior_;
   }
 
  private:
@@ -482,43 +553,43 @@ class PLATFORM_EXPORT ResourceRequestHead {
   scoped_refptr<const SecurityOrigin> top_frame_origin_;
 
   scoped_refptr<const SecurityOrigin> requestor_origin_;
+  WTF::Vector<KURL> navigation_redirect_chain_;
   scoped_refptr<const SecurityOrigin> isolated_world_origin_;
 
   AtomicString http_method_;
   HTTPHeaderMap http_header_fields_;
   bool allow_stored_credentials_ : 1;
   bool report_upload_progress_ : 1;
-  bool report_raw_headers_ : 1;
   bool has_user_gesture_ : 1;
+  bool has_text_fragment_token_ : 1;
   bool download_to_blob_ : 1;
   bool use_stream_on_response_ : 1;
   bool keepalive_ : 1;
-  bool should_reset_app_cache_ : 1;
   bool allow_stale_response_ : 1;
-  mojom::FetchCacheMode cache_mode_;
+  mojom::blink::FetchCacheMode cache_mode_;
   bool skip_service_worker_ : 1;
   bool download_to_cache_only_ : 1;
   bool site_for_cookies_set_ : 1;
+  bool is_form_submission_ : 1;
+  ResourceLoadPriority initial_priority_;
   ResourceLoadPriority priority_;
   int intra_priority_value_;
-  int requestor_id_;
-  WebURLRequest::PreviewsState previews_state_;
-  scoped_refptr<WebURLRequest::ExtraData> extra_data_;
-  mojom::RequestContextType request_context_;
+  scoped_refptr<WebURLRequestExtraData> url_request_extra_data_;
+  mojom::blink::RequestContextType request_context_;
   network::mojom::RequestDestination destination_;
   network::mojom::RequestMode mode_;
-  mojom::FetchImportanceMode fetch_importance_mode_;
+  mojom::blink::FetchPriorityHint fetch_priority_hint_;
   network::mojom::CredentialsMode credentials_mode_;
   network::mojom::RedirectMode redirect_mode_;
   String fetch_integrity_;
   String referrer_string_;
   network::mojom::ReferrerPolicy referrer_policy_;
-  bool is_external_request_;
   network::mojom::CorsPreflightPolicy cors_preflight_policy_;
-  base::Optional<RedirectInfo> redirect_info_;
-  base::Optional<network::mojom::blink::TrustTokenParams> trust_token_params_;
+  absl::optional<RedirectInfo> redirect_info_;
+  absl::optional<network::mojom::blink::TrustTokenParams> trust_token_params_;
+  network::mojom::IPAddressSpace target_address_space_;
 
-  base::Optional<String> suggested_filename_;
+  absl::optional<String> suggested_filename_;
 
   mutable CacheControlHeader cache_control_header_cache_;
 
@@ -531,15 +602,20 @@ class PLATFORM_EXPORT ResourceRequestHead {
 
   bool is_automatic_upgrade_ = false;
 
-  base::Optional<base::UnguessableToken> devtools_token_;
-  base::Optional<String> devtools_id_;
+  absl::optional<base::UnguessableToken> devtools_token_;
+  absl::optional<String> devtools_id_;
   String requested_with_header_;
   String client_data_header_;
   String purpose_header_;
 
+  absl::optional<String> devtools_stack_id_;
+
   ukm::SourceId ukm_source_id_ = ukm::kInvalidSourceId;
 
   base::UnguessableToken fetch_window_id_;
+
+  network::mojom::RequestDestination original_destination_ =
+      network::mojom::RequestDestination::kEmpty;
 
   uint64_t inspector_id_ = 0;
 
@@ -547,18 +623,40 @@ class PLATFORM_EXPORT ResourceRequestHead {
 
   bool is_signed_exchange_prefetch_cache_enabled_ = false;
 
+  bool is_fetch_like_api_ = false;
+
+  bool is_favicon_ = false;
+
   // Currently this is only used when a prefetch request has `as=document`
   // specified. If true, and the request is cross-origin, the browser will cache
   // the request under the cross-origin's partition. Furthermore, its reuse from
   // the prefetch cache will be restricted to top-level-navigations.
   bool prefetch_maybe_for_top_level_navigation_ = false;
 
-  bool allowHTTP1ForStreamingUpload_ = false;
-
   // This is used when fetching preload header requests from cross-origin
   // prefetch responses. The browser process uses this token to ensure the
   // request is cached correctly.
-  base::Optional<base::UnguessableToken> recursive_prefetch_token_;
+  absl::optional<base::UnguessableToken> recursive_prefetch_token_;
+
+  // This is used when fetching either a WebBundle or a subresrouce in the
+  // WebBundle. The network process uses this token to associate the request to
+  // the bundle.
+  absl::optional<WebBundleTokenParams> web_bundle_token_params_;
+
+  // Render blocking behavior of the resource. Used in maintaining correct
+  // reporting for redirects.
+  RenderBlockingBehavior render_blocking_behavior_ =
+      RenderBlockingBehavior::kUnset;
+
+  // If not null, the network service will not advertise any stream types
+  // (via Accept-Encoding) that are not listed. Also, it will not attempt
+  // decoding any non-listed stream types.
+  // Instead of using absl::optional, we use scoped_refptr to reduce
+  // blink memory footprint because the attribute is only used by DevTools
+  // and we should keep the footprint minimal when DevTools is closed.
+  scoped_refptr<
+      base::RefCountedData<base::flat_set<net::SourceStream::SourceType>>>
+      devtools_accepted_stream_types_;
 };
 
 class PLATFORM_EXPORT ResourceRequestBody {
@@ -606,7 +704,7 @@ class PLATFORM_EXPORT ResourceRequestBody {
 // This class is thread-bound. Do not copy/pass an instance across threads.
 //
 // Although request consists head and body, ResourceRequest is implemented by
-// inheriting ResourceRequestHead due in order to make it possible to use
+// inheriting ResourceRequestHead in order to make it possible to use
 // property accessors through both ResourceRequestHead and ResourceRequest while
 // avoiding duplicate accessor definitions.
 // For those who want to add a new property in request, please implement its
@@ -622,13 +720,11 @@ class PLATFORM_EXPORT ResourceRequest final : public ResourceRequestHead {
 
   ResourceRequest(const ResourceRequest&) = delete;
   ResourceRequest(ResourceRequest&&);
+  ResourceRequest& operator=(const ResourceRequest&) = delete;
   ResourceRequest& operator=(ResourceRequest&&);
 
   ~ResourceRequest();
 
-  // TODO(yoichio): Use move semantics as much as possible.
-  // See crbug.com/787704.
-  void CopyFrom(const ResourceRequest&);
   void CopyHeadFrom(const ResourceRequestHead&);
 
   const scoped_refptr<EncodedFormData>& HttpBody() const;
@@ -637,8 +733,6 @@ class PLATFORM_EXPORT ResourceRequest final : public ResourceRequestHead {
   ResourceRequestBody& MutableBody() { return body_; }
 
  private:
-  ResourceRequest& operator=(const ResourceRequest&);
-
   ResourceRequestBody body_;
 };
 

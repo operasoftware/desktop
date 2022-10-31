@@ -5,10 +5,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_INDEXEDDB_IDB_VALUE_WRAPPING_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_INDEXEDDB_IDB_VALUE_WRAPPING_H_
 
+#include <memory>
+#include <utility>
+
+#include "base/dcheck_is_on.h"
 #include "base/feature_list.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
+#include "third_party/blink/renderer/modules/indexeddb/idb_any.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -47,7 +52,7 @@ class SerializedScriptValue;
 //     auto wrapper = new IDBValueWrapper();
 //     wrapper.Clone(...);  // Structured clone used to extract keys.
 //     wrapper.DoneCloning();
-//     wrapper.WrapIfBiggerThan(kWrapThreshold);
+//     wrapper.WrapIfBiggerThan(kIDBWrapThreshold);
 //     wrapper.TakeWireBytes();
 //     wrapper.TakeBlobDataHandles();
 //     wrapper.TakeBlobInfo();
@@ -79,7 +84,7 @@ class SerializedScriptValue;
 //               blobs: SSV Blob attachments + [wrapper Blob(SSV byte array)] ->
 //     LevelDB
 class MODULES_EXPORT IDBValueWrapper {
-  STACK_ALLOCATED();
+  DISALLOW_NEW();
 
  public:
   // Wrapper for an IndexedDB value.
@@ -116,7 +121,7 @@ class MODULES_EXPORT IDBValueWrapper {
   // Conditionally wraps the serialized value's byte array into a Blob.
   //
   // The byte array is wrapped if its size exceeds max_bytes. In production, the
-  // max_bytes threshold is currently always kWrapThreshold.
+  // max_bytes threshold is currently always kIDBWrapThreshold.
   //
   // This method must be called before the Take*() methods are called.
   bool WrapIfBiggerThan(unsigned max_bytes);
@@ -154,26 +159,17 @@ class MODULES_EXPORT IDBValueWrapper {
     return std::move(blob_info_);
   }
 
-  Vector<mojo::PendingRemote<mojom::blink::NativeFileSystemTransferToken>>
-  TakeNativeFileSystemTransferTokens() {
+  Vector<mojo::PendingRemote<mojom::blink::FileSystemAccessTransferToken>>
+  TakeFileSystemAccessTransferTokens() {
 #if DCHECK_IS_ON()
     DCHECK(done_cloning_) << __func__ << " called before DoneCloning()";
     DCHECK(owns_file_system_handles_) << __func__ << " called twice";
     owns_file_system_handles_ = false;
 #endif  // DCHECK_IS_ON()
-    return std::move(serialized_value_->NativeFileSystemTokens());
+    return std::move(serialized_value_->FileSystemAccessTokens());
   }
 
   size_t DataLengthBeforeWrapInBytes() { return original_data_length_; }
-
-  // Default threshold for WrapIfBiggerThan().
-  //
-  // This should be tuned to achieve a compromise between short-term IndexedDB
-  // throughput and long-term I/O load and memory usage. LevelDB, the underlying
-  // storage for IndexedDB, was not designed with large values in mind. At the
-  // very least, large values will slow down compaction, causing occasional I/O
-  // spikes.
-  static constexpr unsigned kWrapThreshold = 64 * 1024;
 
   // MIME type used for Blobs that wrap IDBValues.
   static constexpr const char* kWrapMimeType =
@@ -229,6 +225,8 @@ class MODULES_EXPORT IDBValueUnwrapper {
 
   // True if at least one of the IDBValues' data was wrapped in a Blob.
   static bool IsWrapped(const Vector<std::unique_ptr<IDBValue>>&);
+
+  static bool IsWrapped(const Vector<Vector<std::unique_ptr<IDBValue>>>&);
 
   // Unwraps an IDBValue that has wrapped Blob data.
   //

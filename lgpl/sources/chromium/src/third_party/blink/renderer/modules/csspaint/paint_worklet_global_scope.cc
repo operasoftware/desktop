@@ -59,7 +59,7 @@ bool ParseInputArguments(v8::Local<v8::Context> context,
         return false;
 
       for (const auto& type : argument_types) {
-        base::Optional<CSSSyntaxDefinition> syntax_definition =
+        absl::optional<CSSSyntaxDefinition> syntax_definition =
             CSSSyntaxStringParser(type).Parse();
         if (!syntax_definition) {
           exception_state->ThrowTypeError("Invalid argument types.");
@@ -147,6 +147,12 @@ void PaintWorkletGlobalScope::Dispose() {
         ScriptController()->GetScriptState());
   }
   WorkletGlobalScope::Dispose();
+
+  if (WTF::IsMainThread()) {
+    // For off-the-main-thread paint worklet, this will be called in
+    // WorkerThread::PrepareForShutdownOnWorkerThread().
+    NotifyContextDestroyed();
+  }
 }
 
 void PaintWorkletGlobalScope::registerPaint(const ScriptState* script_state,
@@ -219,7 +225,7 @@ void PaintWorkletGlobalScope::registerPaint(const ScriptState* script_state,
   auto* definition = MakeGarbageCollected<CSSPaintDefinition>(
       ScriptController()->GetScriptState(), paint_ctor, paint,
       native_invalidation_properties, custom_invalidation_properties,
-      input_argument_types, context_settings);
+      input_argument_types, context_settings, this);
   paint_definitions_.Set(name, definition);
 
   if (!WTF::IsMainThread()) {
@@ -236,7 +242,8 @@ void PaintWorkletGlobalScope::registerPaint(const ScriptState* script_state,
 
 CSSPaintDefinition* PaintWorkletGlobalScope::FindDefinition(
     const String& name) {
-  return paint_definitions_.at(name);
+  auto it = paint_definitions_.find(name);
+  return it != paint_definitions_.end() ? it->value : nullptr;
 }
 
 double PaintWorkletGlobalScope::devicePixelRatio() const {

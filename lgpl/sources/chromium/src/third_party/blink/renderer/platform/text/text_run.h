@@ -26,9 +26,9 @@
 
 #include <unicode/utf16.h>
 
+#include "base/check_op.h"
 #include "base/containers/span.h"
-#include "base/optional.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/text/tab_size.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
@@ -314,4 +314,4 @@ inline void TextRun::SetTabSize(bool allow, TabSize size) {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_TEXT_RUN_H_

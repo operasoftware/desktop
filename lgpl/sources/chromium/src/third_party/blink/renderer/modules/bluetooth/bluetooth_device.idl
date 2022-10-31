@@ -17,9 +17,15 @@
     MeasureAs=WebBluetoothWatchAdvertisements
   ] Promise<void> watchAdvertisements(
       optional WatchAdvertisementsOptions options = {});
+  [
+    RuntimeEnabled=WebBluetoothGetDevices,
+    CallWith=ScriptState,
+    RaisesException,
+    MeasureAs=BluetoothDeviceForget
+  ] Promise<void> forget();
 
   readonly attribute DOMString id;
-  readonly attribute DOMString? name;
+  [HighEntropy=Direct, MeasureAs=BluetoothDeviceName] readonly attribute DOMString? name;
   readonly attribute BluetoothRemoteGATTServer gatt;
   [RuntimeEnabled=WebBluetoothWatchAdvertisements] readonly attribute boolean watchingAdvertisements;
 

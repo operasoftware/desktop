@@ -2,15 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// #import 'chrome://os-settings/chromeos/os_settings.js';
+import {bluetoothApis, BluetoothPageBrowserProxyImpl, Router, routes} from 'chrome://os-settings/chromeos/os_settings.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {getDeepActiveElement} from 'chrome://resources/js/util.m.js';
+import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {eventToPromise, flushTasks, waitAfterNextRender} from 'chrome://test/test_util.js';
 
-// #import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-// #import {FakeBluetooth} from './fake_bluetooth.m.js'
-// #import {FakeBluetoothPrivate} from './fake_bluetooth_private.m.js';
-// #import {assertEquals, assertFalse, assertNotEquals, assertTrue} from '../../chai_assert.js';
-// #import {eventToPromise, flushTasks} from 'chrome://test/test_util.m.js';
-// #import {flush} from'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-// #import {bluetoothApis} from 'chrome://os-settings/chromeos/os_settings.js';
+import {assertEquals, assertFalse, assertTrue} from '../../chai_assert.js';
+
+import {FakeBluetooth} from './fake_bluetooth.js';
+import {FakeBluetoothPrivate} from './fake_bluetooth_private.js';
+import {TestBluetoothPageBrowserProxy} from './test_bluetooth_page_browser_proxy.js';
 
 function getFakePrefs() {
   return {
@@ -21,16 +23,16 @@ function getFakePrefs() {
             key: 'ash.user.bluetooth.adapter_enabled',
             type: chrome.settingsPrivate.PrefType.BOOLEAN,
             value: false,
-          }
-        }
-      }
-    }
+          },
+        },
+      },
+    },
   };
 }
 
 /**
  * @param {number} numPairedDevices Number of paired devices to generate.
- * @param {number} numUnpairedDevices Number of unparied devices to generate.
+ * @param {number} numUnpairedDevices Number of unpaired devices to generate.
  * @return {!Array<!chrome.bluetooth.Device>} An array of fake bluetooth
  *     devices.
  */
@@ -47,6 +49,12 @@ function generateFakeDevices(numPairedDevices, numUnpairedDevices) {
   return devices;
 }
 
+function flushAsync() {
+  flush();
+  // Use setTimeout to wait for the next macrotask.
+  return new Promise(resolve => setTimeout(resolve));
+}
+
 suite('Bluetooth', function() {
   let bluetoothPage = null;
 
@@ -55,6 +63,9 @@ suite('Bluetooth', function() {
 
   /** @type {BluetoothPrivate} */
   let bluetoothPrivateApi;
+
+  /** @type {BluetoothPageBrowserProxy} */
+  let browserProxy;
 
   /** @type {!chrome.bluetooth.Device} */
   const fakeUnpairedDevice1 = {
@@ -119,12 +130,15 @@ suite('Bluetooth', function() {
   });
 
   setup(function() {
-    bluetoothApi = new settings.FakeBluetooth();
-    bluetoothPrivateApi = new settings.FakeBluetoothPrivate(bluetoothApi);
+    bluetoothApi = new FakeBluetooth();
+    bluetoothPrivateApi = new FakeBluetoothPrivate(bluetoothApi);
 
     // Set globals to override Settings Bluetooth Page apis.
     bluetoothApis.bluetoothApiForTest = bluetoothApi;
     bluetoothApis.bluetoothPrivateApiForTest = bluetoothPrivateApi;
+
+    browserProxy = new TestBluetoothPageBrowserProxy();
+    BluetoothPageBrowserProxyImpl.setInstanceForTesting(browserProxy);
 
     PolymerTest.clearBody();
     bluetoothPage = document.createElement('settings-bluetooth-page');
@@ -133,10 +147,11 @@ suite('Bluetooth', function() {
 
     bluetoothApi.clearDevicesForTest();
     document.body.appendChild(bluetoothPage);
-    Polymer.dom.flush();
+    flush();
   });
 
   teardown(function() {
+    Router.getInstance().resetRouteForTesting();
     bluetoothPage.remove();
   });
 
@@ -146,7 +161,7 @@ suite('Bluetooth', function() {
     assertTrue(bluetoothPage.isToggleEnabled_());
 
     // Test that tapping the single settings-box div enables bluetooth.
-    const div = bluetoothPage.$$('.link-wrapper');
+    const div = bluetoothPage.shadowRoot.querySelector('.link-wrapper');
     assertTrue(!!div);
     div.click();
 
@@ -193,28 +208,37 @@ suite('Bluetooth', function() {
     assertTrue(bluetoothPage.isToggleEnabled_());
   });
 
+  test('Main page deep link to on/off toggle', async function() {
+    assertTrue(bluetoothPage.isToggleEnabled_());
+
+    const params = new URLSearchParams();
+    params.append('settingId', '100');
+    Router.getInstance().navigateTo(routes.BLUETOOTH, params);
+
+    const toggle = bluetoothPage.shadowRoot.querySelector('#enableBluetooth');
+    await waitAfterNextRender(toggle);
+    assertEquals(
+        toggle, getDeepActiveElement(),
+        'Main page on/off toggle should be focused for settingId=100.');
+  });
+
   suite('SubPage', function() {
     let subpage;
-
-    function flushAsync() {
-      Polymer.dom.flush();
-      return new Promise(resolve => {
-        bluetoothPage.async(resolve);
-      });
-    }
 
     setup(async function() {
       bluetoothApi.simulateAdapterStateChangedForTest({
         available: true,
         powered: true,
+        discovering: true,
       });
 
-      Polymer.dom.flush();
-      const div = bluetoothPage.$$('.link-wrapper');
+      flush();
+      const div = bluetoothPage.shadowRoot.querySelector('.link-wrapper');
       div.click();
 
       await flushAsync();
-      subpage = bluetoothPage.$$('settings-bluetooth-subpage');
+      subpage =
+          bluetoothPage.shadowRoot.querySelector('settings-bluetooth-subpage');
       subpage.listUpdateFrequencyMs = 0;
       assertTrue(!!subpage);
       assertTrue(subpage.bluetoothToggleState);
@@ -244,6 +268,54 @@ suite('Bluetooth', function() {
       assertFalse(subpage.stateChangeInProgress);
     });
 
+    test('Sub page deep link to on/off toggle', async function() {
+      const params = new URLSearchParams();
+      params.append('settingId', '100');
+      Router.getInstance().navigateTo(routes.BLUETOOTH_DEVICES, params);
+
+      await waitAfterNextRender(subpage.$.enableToggle);
+      assertEquals(
+          subpage.$.enableToggle, getDeepActiveElement(),
+          'Subpage on/off toggle should be focused for settingId=100.');
+    });
+
+    test('Discovery starts/stops when navigating to/from subpage', function() {
+      Router.getInstance().navigateTo(routes.BASIC, null);
+      assertFalse(bluetoothApi.getAdapterStateForTest().discovering);
+
+      Router.getInstance().navigateTo(routes.BLUETOOTH_DEVICES, null);
+      assertTrue(bluetoothApi.getAdapterStateForTest().discovering);
+    });
+
+    test('Discovery starts/stops when subpage focused/blurred', function() {
+      subpage.isWindowFocusedFunction_ = function() {
+        return false;
+      };
+      window.dispatchEvent(new FocusEvent('blur'));
+      assertFalse(bluetoothApi.getAdapterStateForTest().discovering);
+
+      subpage.isWindowFocusedFunction_ = function() {
+        return true;
+      };
+      window.dispatchEvent(new FocusEvent('focus'));
+      assertTrue(bluetoothApi.getAdapterStateForTest().discovering);
+    });
+
+    test(
+        'Repeated focus events do not cause duplicate event listener registrations',
+        function() {
+          subpage.isWindowFocusedFunction_ = function() {
+            return true;
+          };
+
+          assertTrue(bluetoothApi.getAdapterStateForTest().discovering);
+
+          for (let i = 0; i < 2; i++) {
+            window.dispatchEvent(new FocusEvent('focus'));
+            assertTrue(bluetoothApi.getAdapterStateForTest().discovering);
+          }
+        });
+
     async function waitForListUpdateTimeout() {
       // listUpdateFrequencyMs is set to 0 for tests, but we still need to wait
       // for the callback of setTimeout(0) to be processed in the message queue.
@@ -253,14 +325,16 @@ suite('Bluetooth', function() {
 
       // Adding two flushTasks ensures that all events are fully handled after
       // being fired.
-      await test_util.flushTasks();
-      await test_util.flushTasks();
+      await flushTasks();
+      await flushTasks();
     }
 
     test('pair device', async function() {
       bluetoothApi.simulateDevicesAddedForTest([
-        fakeUnpairedDevice1, fakeUnpairedDevice2, fakePairedDevice1,
-        fakePairedDevice2
+        fakeUnpairedDevice1,
+        fakeUnpairedDevice2,
+        fakePairedDevice1,
+        fakePairedDevice2,
       ]);
 
       await waitForListUpdateTimeout();
@@ -283,8 +357,10 @@ suite('Bluetooth', function() {
 
     test('pair dialog', async function() {
       bluetoothApi.simulateDevicesAddedForTest([
-        fakeUnpairedDevice1, fakeUnpairedDevice2, fakePairedDevice1,
-        fakePairedDevice2
+        fakeUnpairedDevice1,
+        fakeUnpairedDevice2,
+        fakePairedDevice1,
+        fakePairedDevice2,
       ]);
       await waitForListUpdateTimeout();
 
@@ -294,7 +370,7 @@ suite('Bluetooth', function() {
 
       // Simulate selecting an unpaired device; should show the pair dialog.
       subpage.connectDevice_(subpage.unpairedDeviceList_[0]);
-      Polymer.dom.flush();
+      flush();
       assertTrue(dialog.$.dialog.open);
     });
 
@@ -348,7 +424,7 @@ suite('Bluetooth', function() {
         assertEquals(
             unpairedDeviceList()[1].address, fakeUnpairedDevice2.address);
 
-        Polymer.dom.flush();
+        flush();
 
         const devices = unpairedDeviceIronList.querySelectorAll(
             'bluetooth-device-list-item');
@@ -361,7 +437,7 @@ suite('Bluetooth', function() {
             [fakeUnpairedDevice1.address]);
 
         await waitForListUpdateTimeout();
-        Polymer.dom.flush();
+        flush();
 
         assertEquals(1, deviceList().length);
         assertEquals(1, unpairedDeviceList().length);
@@ -446,7 +522,7 @@ suite('Bluetooth', function() {
         assertFalse(subpage.$.noUnpairedDevices.hidden);
         assertTrue(subpage.$.noPairedDevices.hidden);
 
-        Polymer.dom.flush();
+        flush();
 
         const devices =
             pairedDeviceIronList.querySelectorAll('bluetooth-device-list-item');
@@ -593,8 +669,10 @@ suite('Bluetooth', function() {
 
       test('Unpaired and paired devices: devices added', async function() {
         bluetoothApi.simulateDevicesAddedForTest([
-          fakeUnpairedDevice1, fakeUnpairedDevice2, fakePairedDevice1,
-          fakePairedDevice2
+          fakeUnpairedDevice1,
+          fakeUnpairedDevice2,
+          fakePairedDevice1,
+          fakePairedDevice2,
         ]);
 
         await waitForListUpdateTimeout();
@@ -605,7 +683,7 @@ suite('Bluetooth', function() {
         assertTrue(subpage.$.noUnpairedDevices.hidden);
         assertTrue(subpage.$.noPairedDevices.hidden);
 
-        Polymer.dom.flush();
+        flush();
 
         const unpairedDevices = unpairedDeviceIronList.querySelectorAll(
             'bluetooth-device-list-item');
@@ -620,6 +698,20 @@ suite('Bluetooth', function() {
         assertTrue(pairedDevices[0].device.connected);
         assertTrue(pairedDevices[1].device.paired);
         assertFalse(pairedDevices[1].device.connected);
+      });
+
+      test('Deep link to connect device with empty list', async function() {
+        assertEquals(0, pairedDeviceList().length);
+        loadTimeData.overrideValues({isDeepLinkingEnabled: true});
+        assertTrue(loadTimeData.getBoolean('isDeepLinkingEnabled'));
+
+        const params = new URLSearchParams();
+        params.append('settingId', '101');
+        Router.getInstance().navigateTo(routes.BLUETOOTH_DEVICES, params);
+
+        // There should be no errors generated by deep linking to an element
+        // that does not exist.
+        await waitAfterNextRender();
       });
 
       test.skip(
@@ -643,6 +735,74 @@ suite('Bluetooth', function() {
                 'bluetooth-device-list-item');
             assertEquals(5, pairedDevices.length);
           });
+    });
+  });
+
+  suite('ListItem', function() {
+    /** @type {!BluetoothDeviceListItem|undefined} */
+    let listItem;
+
+    setup(async function() {
+      listItem = document.createElement('bluetooth-device-list-item');
+      document.body.appendChild(listItem);
+      flush();
+    });
+
+    test('Enterprise-managed icon UI state', async function() {
+      const getManagedIcon = () => {
+        return listItem.shadowRoot.querySelector('#managedIcon');
+      };
+      assertFalse(!!getManagedIcon());
+
+      browserProxy.setIsDeviceBlockedByPolicyForTest(true);
+      listItem.device = fakePairedDevice1;
+
+      await browserProxy.whenCalled('isDeviceBlockedByPolicy');
+      await flushAsync();
+
+      // The icon should now be showing.
+      const managedIcon = getManagedIcon();
+      assertTrue(!!managedIcon);
+
+      // Simulate hovering over the icon.
+      const showTooltipPromise =
+          eventToPromise('blocked-tooltip-state-change', listItem);
+      managedIcon.dispatchEvent(new Event('mouseenter'));
+
+      // The blocked-tooltip-state-changed event should have been fired.
+      const showTooltipEvent = await showTooltipPromise;
+      assertEquals(showTooltipEvent.detail.show, true);
+      assertEquals(showTooltipEvent.detail.element, managedIcon);
+      assertEquals(showTooltipEvent.detail.address, fakePairedDevice1.address);
+
+      // Simulate the device being unblocked by policy.
+      const hideTooltipPromise =
+          eventToPromise('blocked-tooltip-state-change', listItem);
+      browserProxy.setIsDeviceBlockedByPolicyForTest(false);
+      listItem.device = fakePairedDevice2;
+
+      await browserProxy.whenCalled('isDeviceBlockedByPolicy');
+      await flushAsync();
+      // The icon should now be hidden.
+      assertFalse(!!getManagedIcon());
+
+      // The blocked-tooltip-state-changed event should have been fired again.
+      const hideTooltipEvent = await hideTooltipPromise;
+      assertEquals(hideTooltipEvent.detail.show, false);
+      assertEquals(hideTooltipEvent.detail.element, undefined);
+      assertEquals(hideTooltipEvent.detail.address, fakePairedDevice2.address);
+
+      // Remove the listItem from the DOM.
+      const hideTooltipPromise2 =
+          eventToPromise('blocked-tooltip-state-change', listItem);
+      listItem.remove();
+      await flushAsync();
+
+      // The blocked-tooltip-state-changed event should have been fired again.
+      const hideTooltipEvent2 = await hideTooltipPromise2;
+      assertEquals(hideTooltipEvent2.detail.show, false);
+      assertEquals(hideTooltipEvent2.detail.element, undefined);
+      assertEquals(hideTooltipEvent2.detail.address, fakePairedDevice2.address);
     });
   });
 });

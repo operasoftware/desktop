@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/core/css/css_string_value.h"
 #include "third_party/blink/renderer/core/css/css_unicode_range_value.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
+#include "third_party/blink/renderer/core/css/css_value_pair.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_mode.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
@@ -79,7 +80,7 @@ CSSValue* ConsumeFontFaceSrcURI(CSSParserTokenRange& range,
     return nullptr;
   CSSFontFaceSrcValue* uri_value(CSSFontFaceSrcValue::Create(
       url, context.CompleteURL(url), context.GetReferrer(),
-      context.ShouldCheckContentSecurityPolicy(),
+      context.JavascriptWorld(),
       context.IsOriginClean() ? OriginClean::kTrue : OriginClean::kFalse,
       context.IsAdRelated()));
 
@@ -100,14 +101,12 @@ CSSValue* ConsumeFontFaceSrcURI(CSSParserTokenRange& range,
 CSSValue* ConsumeFontFaceSrcLocal(CSSParserTokenRange& range,
                                   const CSSParserContext& context) {
   CSSParserTokenRange args = css_parsing_utils::ConsumeFunction(range);
-  network::mojom::CSPDisposition should_check_content_security_policy =
-      context.ShouldCheckContentSecurityPolicy();
   if (args.Peek().GetType() == kStringToken) {
     const CSSParserToken& arg = args.ConsumeIncludingWhitespace();
     if (!args.AtEnd())
       return nullptr;
     return CSSFontFaceSrcValue::CreateLocal(
-        arg.Value().ToString(), should_check_content_security_policy,
+        arg.Value().ToString(), context.JavascriptWorld(),
         context.IsOriginClean() ? OriginClean::kTrue : OriginClean::kFalse,
         context.IsAdRelated());
   }
@@ -115,8 +114,10 @@ CSSValue* ConsumeFontFaceSrcLocal(CSSParserTokenRange& range,
     String family_name = css_parsing_utils::ConcatenateFamilyName(args);
     if (!args.AtEnd())
       return nullptr;
+    if (family_name.IsEmpty())
+      return nullptr;
     return CSSFontFaceSrcValue::CreateLocal(
-        family_name, should_check_content_security_policy,
+        family_name, context.JavascriptWorld(),
         context.IsOriginClean() ? OriginClean::kTrue : OriginClean::kFalse,
         context.IsAdRelated());
   }
@@ -143,20 +144,12 @@ CSSValueList* ConsumeFontFaceSrc(CSSParserTokenRange& range,
 }
 
 CSSValue* ConsumeScrollTimelineSource(CSSParserTokenRange& range) {
-  if (range.Peek().FunctionId() == CSSValueID::kSelector) {
-    auto block = css_parsing_utils::ConsumeFunction(range);
-    block.ConsumeWhitespace();
-    if (auto* id_value = css_parsing_utils::ConsumeIdSelector(block)) {
-      if (!block.AtEnd())
-        return nullptr;
-      auto* selector_function =
-          MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kSelector);
-      selector_function->Append(*id_value);
-      return selector_function;
-    }
-    return nullptr;
+  if (auto* selector_function =
+          css_parsing_utils::ConsumeSelectorFunction(range)) {
+    return selector_function;
   }
-  return css_parsing_utils::ConsumeIdent<CSSValueID::kNone>(range);
+  return css_parsing_utils::ConsumeIdent<CSSValueID::kAuto, CSSValueID::kNone>(
+      range);
 }
 
 CSSValue* ConsumeScrollTimelineOrientation(CSSParserTokenRange& range) {
@@ -165,40 +158,54 @@ CSSValue* ConsumeScrollTimelineOrientation(CSSParserTokenRange& range) {
       CSSValueID::kHorizontal, CSSValueID::kVertical>(range);
 }
 
-CSSValue* ConsumeTimeRange(CSSParserTokenRange& range,
-                           const CSSParserContext& context) {
-  if (auto* value = css_parsing_utils::ConsumeIdent<CSSValueID::kAuto>(range))
-    return value;
-  return css_parsing_utils::ConsumeTime(range, context, kValueRangeAll);
-}
-
 CSSValue* ConsumeDescriptor(StyleRule::RuleType rule_type,
                             AtRuleDescriptorID id,
-                            CSSParserTokenRange& range,
+                            const CSSTokenizedValue& tokenized_value,
                             const CSSParserContext& context) {
   using Parser = AtRuleDescriptorParser;
+  CSSParserTokenRange range = tokenized_value.range;
 
   switch (rule_type) {
     case StyleRule::kFontFace:
       return Parser::ParseFontFaceDescriptor(id, range, context);
+    case StyleRule::kFontPaletteValues:
+      return Parser::ParseAtFontPaletteValuesDescriptor(id, range, context);
     case StyleRule::kProperty:
-      return Parser::ParseAtPropertyDescriptor(id, range, context);
+      return Parser::ParseAtPropertyDescriptor(id, tokenized_value, context);
+    case StyleRule::kCounterStyle:
+      return Parser::ParseAtCounterStyleDescriptor(id, range, context);
     case StyleRule::kScrollTimeline:
       return Parser::ParseAtScrollTimelineDescriptor(id, range, context);
     case StyleRule::kCharset:
+    case StyleRule::kContainer:
     case StyleRule::kStyle:
     case StyleRule::kImport:
     case StyleRule::kMedia:
     case StyleRule::kPage:
     case StyleRule::kKeyframes:
     case StyleRule::kKeyframe:
+    case StyleRule::kLayerBlock:
+    case StyleRule::kLayerStatement:
     case StyleRule::kNamespace:
+    case StyleRule::kScope:
     case StyleRule::kSupports:
     case StyleRule::kViewport:
+    case StyleRule::kPositionFallback:
+    case StyleRule::kTry:
       // TODO(andruud): Handle other descriptor types here.
       NOTREACHED();
       return nullptr;
   }
+}
+
+CSSValue* ConsumeFontMetricOverride(CSSParserTokenRange& range,
+                                    const CSSParserContext& context) {
+  if (CSSIdentifierValue* normal =
+          css_parsing_utils::ConsumeIdent<CSSValueID::kNormal>(range)) {
+    return normal;
+  }
+  return css_parsing_utils::ConsumePercent(
+      range, context, CSSPrimitiveValue::ValueRange::kNonNegative);
 }
 
 }  // namespace
@@ -211,6 +218,11 @@ CSSValue* AtRuleDescriptorParser::ParseFontFaceDescriptor(
   range.ConsumeWhitespace();
   switch (id) {
     case AtRuleDescriptorID::FontFamily:
+      // In order to avoid confusion, <family-name> does not accept unquoted
+      // <generic-family> keywords and general CSS keywords.
+      // ConsumeGenericFamily will take care of excluding the former while the
+      // ConsumeFamilyName will take care of excluding the latter.
+      // See https://drafts.csswg.org/css-fonts/#family-name-syntax,
       if (css_parsing_utils::ConsumeGenericFamily(range))
         return nullptr;
       parsed_value = css_parsing_utils::ConsumeFamilyName(range);
@@ -250,6 +262,15 @@ CSSValue* AtRuleDescriptorParser::ParseFontFaceDescriptor(
       parsed_value =
           css_parsing_utils::ConsumeFontFeatureSettings(range, context);
       break;
+    case AtRuleDescriptorID::AscentOverride:
+    case AtRuleDescriptorID::DescentOverride:
+    case AtRuleDescriptorID::LineGapOverride:
+      parsed_value = ConsumeFontMetricOverride(range, context);
+      break;
+    case AtRuleDescriptorID::SizeAdjust:
+      parsed_value = css_parsing_utils::ConsumePercent(
+          range, context, CSSPrimitiveValue::ValueRange::kNonNegative);
+      break;
     default:
       break;
   }
@@ -285,9 +306,10 @@ CSSValue* AtRuleDescriptorParser::ParseFontFaceDeclaration(
 
 CSSValue* AtRuleDescriptorParser::ParseAtPropertyDescriptor(
     AtRuleDescriptorID id,
-    CSSParserTokenRange& range,
+    const CSSTokenizedValue& tokenized_value,
     const CSSParserContext& context) {
   CSSValue* parsed_value = nullptr;
+  CSSParserTokenRange range = tokenized_value.range;
   switch (id) {
     case AtRuleDescriptorID::Syntax:
       range.ConsumeWhitespace();
@@ -296,7 +318,7 @@ CSSValue* AtRuleDescriptorParser::ParseAtPropertyDescriptor(
     case AtRuleDescriptorID::InitialValue: {
       // Note that we must retain leading whitespace here.
       return CSSVariableParser::ParseDeclarationValue(
-          g_null_atom, range, false /* is_animation_tainted */, context);
+          tokenized_value, false /* is_animation_tainted */, context);
     }
     case AtRuleDescriptorID::Inherits:
       range.ConsumeWhitespace();
@@ -332,9 +354,6 @@ CSSValue* AtRuleDescriptorParser::ParseAtScrollTimelineDescriptor(
     case AtRuleDescriptorID::End:
       parsed_value = css_parsing_utils::ConsumeScrollOffset(range, context);
       break;
-    case AtRuleDescriptorID::TimeRange:
-      parsed_value = ConsumeTimeRange(range, context);
-      break;
     default:
       break;
   }
@@ -348,10 +367,10 @@ CSSValue* AtRuleDescriptorParser::ParseAtScrollTimelineDescriptor(
 bool AtRuleDescriptorParser::ParseAtRule(
     StyleRule::RuleType rule_type,
     AtRuleDescriptorID id,
-    CSSParserTokenRange& range,
+    const CSSTokenizedValue& tokenized_value,
     const CSSParserContext& context,
-    HeapVector<CSSPropertyValue, 256>& parsed_descriptors) {
-  CSSValue* result = ConsumeDescriptor(rule_type, id, range, context);
+    HeapVector<CSSPropertyValue, 64>& parsed_descriptors) {
+  CSSValue* result = ConsumeDescriptor(rule_type, id, tokenized_value, context);
 
   if (!result)
     return false;
@@ -360,7 +379,8 @@ bool AtRuleDescriptorParser::ParseAtRule(
   // the CSSPropertyID.
   CSSPropertyID equivalent_property_id = AtRuleDescriptorIDAsCSSPropertyID(id);
   parsed_descriptors.push_back(
-      CSSPropertyValue(CSSProperty::Get(equivalent_property_id), *result));
+      CSSPropertyValue(CSSPropertyName(equivalent_property_id), *result));
+  context.Count(context.Mode(), equivalent_property_id);
   return true;
 }
 

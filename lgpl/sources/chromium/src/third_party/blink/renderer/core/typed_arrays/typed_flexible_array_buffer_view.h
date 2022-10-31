@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_TYPED_ARRAYS_TYPED_FLEXIBLE_ARRAY_BUFFER_VIEW_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_TYPED_ARRAYS_TYPED_FLEXIBLE_ARRAY_BUFFER_VIEW_H_
 
-#include "base/macros.h"
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/typed_arrays/flexible_array_buffer_view.h"
 
 namespace blink {
@@ -26,9 +26,9 @@ class TypedFlexibleArrayBufferView final : public FlexibleArrayBufferView {
     return static_cast<ValueType*>(BaseAddressMaybeOnStack());
   }
 
-  size_t lengthAsSizeT() const {
-    DCHECK_EQ(ByteLengthAsSizeT() % sizeof(ValueType), 0u);
-    return ByteLengthAsSizeT() / sizeof(ValueType);
+  size_t length() const {
+    DCHECK_EQ(ByteLength() % sizeof(ValueType), 0u);
+    return ByteLength() / sizeof(ValueType);
   }
 };
 

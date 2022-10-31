@@ -43,12 +43,12 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 SearchInputType::SearchInputType(HTMLInputElement& element)
-    : BaseTextInputType(element),
+    : BaseTextInputType(Type::kSearch, element),
       search_event_timer_(
           element.GetDocument().GetTaskRunner(TaskType::kUserInteraction),
           this,
@@ -62,6 +62,10 @@ const AtomicString& SearchInputType::FormControlType() const {
   return input_type_names::kSearch;
 }
 
+ControlPart SearchInputType::AutoAppearance() const {
+  return kSearchFieldPart;
+}
+
 bool SearchInputType::NeedsContainer() const {
   return true;
 }
@@ -70,7 +74,7 @@ void SearchInputType::CreateShadowSubtree() {
   TextFieldInputType::CreateShadowSubtree();
   Element* container = ContainerElement();
   Element* view_port = GetElement().UserAgentShadowRoot()->getElementById(
-      shadow_element_names::EditingViewPort());
+      shadow_element_names::kIdEditingViewPort);
   DCHECK(container);
   DCHECK(view_port);
   container->InsertBefore(MakeGarbageCollected<SearchFieldCancelButtonElement>(
@@ -84,7 +88,7 @@ void SearchInputType::HandleKeydownEvent(KeyboardEvent& event) {
     return;
   }
 
-  if (event.key() == "Escape") {
+  if (event.key() == "Escape" && GetElement().InnerEditorValue().length()) {
     GetElement().SetValueForUser("");
     GetElement().OnSearch();
     event.SetDefaultHandled();
@@ -110,7 +114,7 @@ void SearchInputType::StartSearchEventTimer() {
   // After typing the first key, we wait 500ms.
   // After the second key, 400ms, then 300, then 200 from then on.
   unsigned step = std::min(length, 4u) - 1;
-  base::TimeDelta timeout = base::TimeDelta::FromMilliseconds(500 - 100 * step);
+  base::TimeDelta timeout = base::Milliseconds(500 - 100 * step);
   search_event_timer_.StartOneShot(timeout, FROM_HERE);
 }
 
@@ -144,10 +148,10 @@ void SearchInputType::UpdateView() {
 
 void SearchInputType::UpdateCancelButtonVisibility() {
   Element* button = GetElement().UserAgentShadowRoot()->getElementById(
-      shadow_element_names::SearchClearButton());
+      shadow_element_names::kIdSearchClearButton);
   if (!button)
     return;
-  if (GetElement().value().IsEmpty()) {
+  if (GetElement().Value().IsEmpty()) {
     button->SetInlineStyleProperty(CSSPropertyID::kOpacity, 0.0,
                                    CSSPrimitiveValue::UnitType::kNumber);
     button->SetInlineStyleProperty(CSSPropertyID::kPointerEvents,
@@ -160,6 +164,11 @@ void SearchInputType::UpdateCancelButtonVisibility() {
 
 bool SearchInputType::SupportsInputModeAttribute() const {
   return true;
+}
+
+void SearchInputType::Trace(Visitor* visitor) const {
+  visitor->Trace(search_event_timer_);
+  BaseTextInputType::Trace(visitor);
 }
 
 }  // namespace blink

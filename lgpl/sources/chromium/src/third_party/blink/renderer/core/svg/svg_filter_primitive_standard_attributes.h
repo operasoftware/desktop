@@ -21,16 +21,20 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_FILTER_PRIMITIVE_STANDARD_ATTRIBUTES_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_FILTER_PRIMITIVE_STANDARD_ATTRIBUTES_H_
 
-#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
-#include "third_party/blink/renderer/core/svg/svg_animated_string.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_unit_types.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+
+namespace gfx {
+class RectF;
+}
 
 namespace blink {
 
 class Filter;
 class FilterEffect;
+class SVGAnimatedLength;
+class SVGAnimatedString;
 class SVGFilterBuilder;
 
 class SVGFilterPrimitiveStandardAttributes : public SVGElement {
@@ -40,7 +44,7 @@ class SVGFilterPrimitiveStandardAttributes : public SVGElement {
  public:
   void SetStandardAttributes(FilterEffect*,
                              SVGUnitTypes::SVGUnitType,
-                             const FloatRect& reference_box) const;
+                             const gfx::RectF& reference_box) const;
 
   virtual FilterEffect* Build(SVGFilterBuilder*, Filter*) = 0;
   // Returns true, if the new value is different from the old one.
@@ -63,7 +67,7 @@ class SVGFilterPrimitiveStandardAttributes : public SVGElement {
  protected:
   SVGFilterPrimitiveStandardAttributes(const QualifiedName&, Document&);
 
-  void SvgAttributeChanged(const QualifiedName&) override;
+  void SvgAttributeChanged(const SvgAttributeChangedParams&) override;
   void ChildrenChanged(const ChildrenChange&) override;
 
  private:

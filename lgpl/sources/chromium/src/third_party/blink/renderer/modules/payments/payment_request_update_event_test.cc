@@ -6,12 +6,14 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/core/event_type_names.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/testing/mock_function_scope.h"
 #include "third_party/blink/renderer/modules/payments/payment_request.h"
 #include "third_party/blink/renderer/modules/payments/payment_request_delegate.h"
 #include "third_party/blink/renderer/modules/payments/payment_test_helper.h"
@@ -23,10 +25,12 @@ namespace {
 
 class MockPaymentRequest : public GarbageCollected<MockPaymentRequest>,
                            public PaymentRequestDelegate {
-  USING_GARBAGE_COLLECTED_MIXIN(MockPaymentRequest);
-
  public:
   MockPaymentRequest() = default;
+
+  MockPaymentRequest(const MockPaymentRequest&) = delete;
+  MockPaymentRequest& operator=(const MockPaymentRequest&) = delete;
+
   ~MockPaymentRequest() override = default;
 
   MOCK_METHOD1(OnUpdatePaymentDetails,
@@ -35,9 +39,6 @@ class MockPaymentRequest : public GarbageCollected<MockPaymentRequest>,
   bool IsInteractive() const override { return true; }
 
   void Trace(Visitor* visitor) const override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockPaymentRequest);
 };
 
 TEST(PaymentRequestUpdateEventTest, OnUpdatePaymentDetailsCalled) {
@@ -47,7 +48,7 @@ TEST(PaymentRequestUpdateEventTest, OnUpdatePaymentDetailsCalled) {
   MockPaymentRequest* request = MakeGarbageCollected<MockPaymentRequest>();
   event->SetTrusted(true);
   event->SetPaymentRequest(request);
-  event->SetEventPhase(Event::kCapturingPhase);
+  event->SetEventPhase(Event::PhaseType::kCapturingPhase);
   auto* payment_details =
       MakeGarbageCollected<ScriptPromiseResolver>(scope.GetScriptState());
   event->updateWith(scope.GetScriptState(), payment_details->Promise(),
@@ -67,7 +68,7 @@ TEST(PaymentRequestUpdateEventTest, OnUpdatePaymentDetailsFailureCalled) {
   MockPaymentRequest* request = MakeGarbageCollected<MockPaymentRequest>();
   event->SetTrusted(true);
   event->SetPaymentRequest(request);
-  event->SetEventPhase(Event::kCapturingPhase);
+  event->SetEventPhase(Event::PhaseType::kCapturingPhase);
   auto* payment_details =
       MakeGarbageCollected<ScriptPromiseResolver>(scope.GetScriptState());
   event->updateWith(scope.GetScriptState(), payment_details->Promise(),
@@ -102,7 +103,7 @@ TEST(PaymentRequestUpdateEventTest, CannotUpdateTwice) {
   MockPaymentRequest* request = MakeGarbageCollected<MockPaymentRequest>();
   event->SetTrusted(true);
   event->SetPaymentRequest(request);
-  event->SetEventPhase(Event::kCapturingPhase);
+  event->SetEventPhase(Event::PhaseType::kCapturingPhase);
   event->updateWith(
       scope.GetScriptState(),
       MakeGarbageCollected<ScriptPromiseResolver>(scope.GetScriptState())
@@ -136,7 +137,7 @@ TEST(PaymentRequestUpdateEventTest, UpdaterNotRequired) {
 
 TEST(PaymentRequestUpdateEventTest, AddressChangeUpdateWithTimeout) {
   PaymentRequestV8TestingScope scope;
-  PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
+  MockFunctionScope funcs(scope.GetScriptState());
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), scope.GetExceptionState());
@@ -146,6 +147,8 @@ TEST(PaymentRequestUpdateEventTest, AddressChangeUpdateWithTimeout) {
   event->SetTrusted(true);
   EXPECT_FALSE(scope.GetExceptionState().HadException());
 
+  LocalFrame::NotifyUserActivation(
+      &scope.GetFrame(), mojom::UserActivationNotificationType::kTest);
   String error_message;
   request->show(scope.GetScriptState(), scope.GetExceptionState())
       .Then(funcs.ExpectNoCall(), funcs.ExpectCall(&error_message));
@@ -173,7 +176,7 @@ TEST(PaymentRequestUpdateEventTest, AddressChangeUpdateWithTimeout) {
 
 TEST(PaymentRequestUpdateEventTest, OptionChangeUpdateWithTimeout) {
   PaymentRequestV8TestingScope scope;
-  PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
+  MockFunctionScope funcs(scope.GetScriptState());
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), scope.GetExceptionState());
@@ -183,6 +186,8 @@ TEST(PaymentRequestUpdateEventTest, OptionChangeUpdateWithTimeout) {
   event->SetPaymentRequest(request);
   EXPECT_FALSE(scope.GetExceptionState().HadException());
 
+  LocalFrame::NotifyUserActivation(
+      &scope.GetFrame(), mojom::UserActivationNotificationType::kTest);
   String error_message;
   request->show(scope.GetScriptState(), scope.GetExceptionState())
       .Then(funcs.ExpectNoCall(), funcs.ExpectCall(&error_message));
@@ -210,7 +215,7 @@ TEST(PaymentRequestUpdateEventTest, OptionChangeUpdateWithTimeout) {
 
 TEST(PaymentRequestUpdateEventTest, AddressChangePromiseTimeout) {
   PaymentRequestV8TestingScope scope;
-  PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
+  MockFunctionScope funcs(scope.GetScriptState());
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), scope.GetExceptionState());
@@ -219,7 +224,10 @@ TEST(PaymentRequestUpdateEventTest, AddressChangePromiseTimeout) {
       scope.GetExecutionContext(), event_type_names::kShippingaddresschange);
   event->SetTrusted(true);
   event->SetPaymentRequest(request);
-  event->SetEventPhase(Event::kCapturingPhase);
+  event->SetEventPhase(Event::PhaseType::kCapturingPhase);
+
+  LocalFrame::NotifyUserActivation(
+      &scope.GetFrame(), mojom::UserActivationNotificationType::kTest);
   String error_message;
   request->show(scope.GetScriptState(), scope.GetExceptionState())
       .Then(funcs.ExpectNoCall(), funcs.ExpectCall(&error_message));
@@ -244,7 +252,7 @@ TEST(PaymentRequestUpdateEventTest, AddressChangePromiseTimeout) {
 
 TEST(PaymentRequestUpdateEventTest, OptionChangePromiseTimeout) {
   PaymentRequestV8TestingScope scope;
-  PaymentRequestMockFunctionScope funcs(scope.GetScriptState());
+  MockFunctionScope funcs(scope.GetScriptState());
   PaymentRequest* request = PaymentRequest::Create(
       scope.GetExecutionContext(), BuildPaymentMethodDataForTest(),
       BuildPaymentDetailsInitForTest(), scope.GetExceptionState());
@@ -253,7 +261,10 @@ TEST(PaymentRequestUpdateEventTest, OptionChangePromiseTimeout) {
       scope.GetExecutionContext(), event_type_names::kShippingoptionchange);
   event->SetTrusted(true);
   event->SetPaymentRequest(request);
-  event->SetEventPhase(Event::kCapturingPhase);
+  event->SetEventPhase(Event::PhaseType::kCapturingPhase);
+
+  LocalFrame::NotifyUserActivation(
+      &scope.GetFrame(), mojom::UserActivationNotificationType::kTest);
   String error_message;
   request->show(scope.GetScriptState(), scope.GetExceptionState())
       .Then(funcs.ExpectNoCall(), funcs.ExpectCall(&error_message));

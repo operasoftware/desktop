@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/platform/fonts/shaping/shape_result_spacing.h"
 
+#include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
 #include "third_party/blink/renderer/platform/text/text_run.h"
 
@@ -12,13 +13,20 @@ namespace blink {
 template <typename TextContainerType>
 bool ShapeResultSpacing<TextContainerType>::SetSpacing(
     const FontDescription& font_description) {
-  if (!font_description.LetterSpacing() && !font_description.WordSpacing()) {
+  return SetSpacing(font_description.LetterSpacing(),
+                    font_description.WordSpacing());
+}
+
+template <typename TextContainerType>
+bool ShapeResultSpacing<TextContainerType>::SetSpacing(float letter_spacing,
+                                                       float word_spacing) {
+  if (!letter_spacing && !word_spacing) {
     has_spacing_ = false;
     return false;
   }
 
-  letter_spacing_ = font_description.LetterSpacing();
-  word_spacing_ = font_description.WordSpacing();
+  letter_spacing_ = letter_spacing;
+  word_spacing_ = word_spacing;
   DCHECK(!normalize_space_);
   allow_tabs_ = true;
   has_spacing_ = true;
@@ -118,9 +126,11 @@ float ShapeResultSpacing<TextContainerType>::NextExpansion() {
 }
 
 template <typename TextContainerType>
-float ShapeResultSpacing<TextContainerType>::ComputeSpacing(unsigned index,
-                                                            float& offset) {
+float ShapeResultSpacing<TextContainerType>::ComputeSpacing(
+    const ComputeSpacingParameters& parameters,
+    float& offset) {
   DCHECK(has_spacing_);
+  unsigned index = parameters.index;
   UChar32 character = text_[index];
   bool treat_as_space =
       (Character::TreatAsSpace(character) ||
@@ -131,10 +141,13 @@ float ShapeResultSpacing<TextContainerType>::ComputeSpacing(unsigned index,
     character = kSpaceCharacter;
 
   float spacing = 0;
-  if (letter_spacing_ && !Character::TreatAsZeroWidthSpace(character))
+
+  bool has_letter_spacing = letter_spacing_;
+  if (has_letter_spacing && !Character::TreatAsZeroWidthSpace(character))
     spacing += letter_spacing_;
 
-  if (treat_as_space && (index || character == kNoBreakSpaceCharacter))
+  if (treat_as_space && (allow_word_spacing_anywhere_ || index ||
+                         character == kNoBreakSpaceCharacter))
     spacing += word_spacing_;
 
   if (!HasExpansion())

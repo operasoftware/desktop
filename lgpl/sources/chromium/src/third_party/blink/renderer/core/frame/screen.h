@@ -29,28 +29,32 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_SCREEN_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_SCREEN_H_
 
-#include "base/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
-#include "third_party/blink/renderer/core/frame/web_feature_forward.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
-#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "ui/display/mojom/display.mojom-blink.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
+
+namespace display {
+struct ScreenInfo;
+}
 
 namespace blink {
 
-class LocalFrame;
+class LocalDOMWindow;
 
-class CORE_EXPORT Screen final : public ScriptWrappable,
-                                 public ExecutionContextClient,
-                                 public Supplementable<Screen> {
+class CORE_EXPORT Screen : public EventTargetWithInlineData,
+                           public ExecutionContextClient,
+                           public Supplementable<Screen> {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(Screen);
 
  public:
-  explicit Screen(LocalFrame*);
+  explicit Screen(LocalDOMWindow*, int64_t display_id);
+
+  static bool AreWebExposedScreenPropertiesEqual(
+      const display::ScreenInfo& prev,
+      const display::ScreenInfo& current);
 
   int height() const;
   int width() const;
@@ -63,42 +67,24 @@ class CORE_EXPORT Screen final : public ScriptWrappable,
 
   void Trace(Visitor*) const override;
 
-  // Proposed extensions to the Screen interface.
-  // https://github.com/webscreens/screen-enumeration
-  // TODO(msw): Resolve different info sources, caching, and lifetimes.
-  Screen(display::mojom::blink::DisplayPtr display,
-         bool internal,
-         bool primary,
-         const String& id);
-  int left() const;
-  int top() const;
-  bool internal() const;
-  bool primary() const;
-  float scaleFactor() const;
-  const String id() const;
-  bool touchSupport() const;
+  // EventTargetWithInlineData:
+  const WTF::AtomicString& InterfaceName() const override;
+  ExecutionContext* GetExecutionContext() const override;
+
+  // Proposed: https://github.com/webscreens/window-placement
+  // Whether this Screen is part of a multi-screen extended visual workspace.
+  bool isExtended() const;
+  // An event fired when Screen attributes change.
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(change, kChange)
 
   // Not web-exposed; for internal usage only.
   static constexpr int64_t kInvalidDisplayId = -1;
-  int64_t DisplayId() const;
+  int64_t DisplayId() const { return display_id_; }
+  void UpdateDisplayId(int64_t display_id) { display_id_ = display_id; }
 
- private:
-  // A static snapshot of the display's information, provided upon construction.
-  // This member is only valid for Screen objects obtained via the experimental
-  // Screen Enumeration API.
-  const display::mojom::blink::DisplayPtr display_;
-  // True if this is an internal display of the device; it is a static value
-  // provided upon construction. This member is only valid for Screen objects
-  // obtained via the experimental Screen Enumeration API.
-  const base::Optional<bool> internal_;
-  // True if this is the primary screen of the operating system; it is a static
-  // value provided upon construction. This member is only valid for Screen
-  // objects obtained via the experimental Screen Enumeration API.
-  const base::Optional<bool> primary_;
-  // A web-exposed device id; it is a static value provided upon construction.
-  // This member is only valid for Screen objects obtained via the experimental
-  // Screen Enumeration API.
-  const String id_;
+ protected:
+  const display::ScreenInfo& GetScreenInfo() const;
+  int64_t display_id_;
 };
 
 }  // namespace blink

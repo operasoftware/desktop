@@ -8,7 +8,7 @@ import unittest
 from blinkpy.common.checkout.git_mock import MockGit
 from blinkpy.common.host_mock import MockHost
 from blinkpy.common.path_finder import RELATIVE_WEB_TESTS
-from blinkpy.common.system.executive_mock import mock_git_commands
+from blinkpy.common.system.executive_mock import mock_git_commands, MockExecutive
 from blinkpy.common.system.filesystem_mock import MockFileSystem
 from blinkpy.w3c.local_wpt_mock import MockLocalWPT
 from blinkpy.w3c.import_notifier import ImportNotifier, TestFailure
@@ -25,7 +25,8 @@ class ImportNotifierTest(unittest.TestCase):
         # Mock a virtual test suite at virtual/gpu/external/wpt/foo.
         self.host.filesystem = MockFileSystem({
             MOCK_WEB_TESTS + 'VirtualTestSuites':
-            '[{"prefix": "gpu", "bases": ["external/wpt/foo"], "args": ["--foo"]}]'
+            b'[{"prefix": "gpu", "platforms": ["Linux", "Mac", "Win"], '
+            b'"bases": ["external/wpt/foo"], "args": ["--foo"]}]'
         })
         self.git = self.host.git()
         self.local_wpt = MockLocalWPT()
@@ -70,7 +71,7 @@ class ImportNotifierTest(unittest.TestCase):
             self.notifier.more_failures_in_baseline('foo-expected.txt'))
         self.assertEqual(
             executive.calls,
-            [['git', 'diff', '-U0', 'origin/master', '--', 'foo-expected.txt']
+            [['git', 'diff', '-U0', 'origin/main', '--', 'foo-expected.txt']
              ])
 
     def test_more_failures_in_baseline_fewer_fails(self):
@@ -96,6 +97,66 @@ class ImportNotifierTest(unittest.TestCase):
         })
         self.notifier.git = MockGit(executive=executive)
         self.assertFalse(
+            self.notifier.more_failures_in_baseline('foo-expected.txt'))
+
+    def test_more_failures_in_baseline_new_error(self):
+        executive = mock_git_commands({
+            'diff': ('diff --git a/foo-expected.txt b/foo-expected.txt\n'
+                     '--- a/foo-expected.txt\n'
+                     '+++ b/foo-expected.txt\n'
+                     '-PASS an existing pass\n'
+                     '+Harness Error. harness_status.status = 1 , harness_status.message = bad\n')
+        })
+        self.notifier.git = MockGit(executive=executive)
+        self.assertTrue(
+            self.notifier.more_failures_in_baseline('foo-expected.txt'))
+
+    def test_more_failures_in_baseline_remove_error(self):
+        executive = mock_git_commands({
+            'diff': ('diff --git a/foo-expected.txt b/foo-expected.txt\n'
+                     '--- a/foo-expected.txt\n'
+                     '+++ b/foo-expected.txt\n'
+                     '-Harness Error. harness_status.status = 1 , harness_status.message = bad\n'
+                     '+PASS a new pass\n')
+        })
+        self.notifier.git = MockGit(executive=executive)
+        self.assertFalse(
+            self.notifier.more_failures_in_baseline('foo-expected.txt'))
+
+    def test_more_failures_in_baseline_changing_error(self):
+        executive = mock_git_commands({
+            'diff': ('diff --git a/foo-expected.txt b/foo-expected.txt\n'
+                     '--- a/foo-expected.txt\n'
+                     '+++ b/foo-expected.txt\n'
+                     '-Harness Error. harness_status.status = 1 , harness_status.message = bad\n'
+                     '+Harness Error. new text, still an error\n')
+        })
+        self.notifier.git = MockGit(executive=executive)
+        self.assertFalse(
+            self.notifier.more_failures_in_baseline('foo-expected.txt'))
+
+    def test_more_failures_in_baseline_fail_to_error(self):
+        executive = mock_git_commands({
+            'diff': ('diff --git a/foo-expected.txt b/foo-expected.txt\n'
+                     '--- a/foo-expected.txt\n'
+                     '+++ b/foo-expected.txt\n'
+                     '-FAIL a previous failure\n'
+                     '+Harness Error. harness_status.status = 1 , harness_status.message = bad\n')
+        })
+        self.notifier.git = MockGit(executive=executive)
+        self.assertTrue(
+            self.notifier.more_failures_in_baseline('foo-expected.txt'))
+
+    def test_more_failures_in_baseline_error_to_fail(self):
+        executive = mock_git_commands({
+            'diff': ('diff --git a/foo-expected.txt b/foo-expected.txt\n'
+                     '--- a/foo-expected.txt\n'
+                     '+++ b/foo-expected.txt\n'
+                     '-Harness Error. harness_status.status = 1 , harness_status.message = bad\n'
+                     '+FAIL a new failure\n')
+        })
+        self.notifier.git = MockGit(executive=executive)
+        self.assertTrue(
             self.notifier.more_failures_in_baseline('foo-expected.txt'))
 
     def test_examine_baseline_changes(self):
@@ -200,14 +261,39 @@ class ImportNotifierTest(unittest.TestCase):
             self.notifier.find_owned_directory(
                 'virtual/gpu/external/wpt/foo/bar.html'), 'external/wpt/foo')
 
+    def test_create_bugs_for_product(self):
+        expectation_lines = {}
+        expectation_lines['external/wpt/foo/baz.html'] = \
+            'crbug/123456 external/wpt/foo/baz.html [ Failure ]'
+
+        bugs = self.notifier.create_bugs_for_product(
+            'SHA_START', 'SHA_END', 'https://crrev.com/c/12345',
+            'android_weblayer', expectation_lines)
+
+        self.assertEqual(len(bugs), 1)
+        self.assertEqual(bugs[0].body['components'], ['Internals>WebLayer'])
+        self.assertEqual(
+            bugs[0].body['summary'],
+            '[WPT] New failures introduced by import https://crrev.com/c/12345')
+
     def test_create_bugs_from_new_failures(self):
         self.host.filesystem.write_text_file(
-            MOCK_WEB_TESTS + 'external/wpt/foo/OWNERS',
-            '# COMPONENT: Blink>Infra>Ecosystem\n'
-            '# WPT-NOTIFY: true\n'
-            'foolip@chromium.org\n')
+            MOCK_WEB_TESTS + 'external/wpt/foo/OWNERS', 'foolip@chromium.org')
         self.host.filesystem.write_text_file(
             MOCK_WEB_TESTS + 'external/wpt/bar/OWNERS', 'test@chromium.org')
+
+        data = ('{"dirs":{"third_party/blink/web_tests/external/wpt/foo":{"monorail":{"component":'
+                '"Blink>Infra>Ecosystem"},"teamEmail":"email","wpt":{'
+                '"notify":"YES"}}}}')
+
+        def mock_run_command(args):
+            if args[-1].endswith('external/wpt/foo'):
+                return data
+            return ''
+
+        self.notifier.owners_extractor.executive = MockExecutive(
+            run_command_fn=mock_run_command)
+
         self.notifier.new_failures_by_directory = {
             'external/wpt/foo': [
                 TestFailure(

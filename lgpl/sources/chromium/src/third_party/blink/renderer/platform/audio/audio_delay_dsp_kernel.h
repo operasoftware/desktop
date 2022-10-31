@@ -28,12 +28,15 @@
 
 #include "third_party/blink/renderer/platform/audio/audio_array.h"
 #include "third_party/blink/renderer/platform/audio/audio_dsp_kernel.h"
+#include "third_party/blink/renderer/platform/platform_export.h"
 
 namespace blink {
 
 class PLATFORM_EXPORT AudioDelayDSPKernel : public AudioDSPKernel {
  public:
-  AudioDelayDSPKernel(double max_delay_time, float sample_rate);
+  AudioDelayDSPKernel(double max_delay_time,
+                      float sample_rate,
+                      unsigned render_quantum_frames);
 
   // Process the delay.  Basically dispatches to either ProcessKRate or
   // ProcessARate.
@@ -62,6 +65,11 @@ class PLATFORM_EXPORT AudioDelayDSPKernel : public AudioDSPKernel {
   std::tuple<unsigned, int> ProcessARateVector(
       float* destination,
       uint32_t frames_to_process) const;
+
+  // Handle an NaN values in |delay_times|.  Replace NaN with |max_time|.
+  void HandleNaN(float* delay_times,
+                 uint32_t frames_to_process,
+                 float max_time);
 
   void Reset() override;
 
@@ -100,7 +108,9 @@ class PLATFORM_EXPORT AudioDelayDSPKernel : public AudioDSPKernel {
   // needed.
   AudioFloatArray temp_buffer_;
 
-  size_t BufferLengthForDelay(double delay_time, double sample_rate) const;
+  size_t BufferLengthForDelay(double delay_time,
+                              double sample_rate,
+                              unsigned render_quantum_frames) const;
 };
 
 }  // namespace blink

@@ -31,12 +31,16 @@
 #include "xf86drm.h"
 #include "nouveau.h"
 
-static typeof(ioctl) *old_ioctl;
+static __typeof__(ioctl) *old_ioctl;
 static int failed;
 
 static int import_fd;
 
+#if defined(__GLIBC__) || defined(__FreeBSD__)
 int ioctl(int fd, unsigned long request, ...)
+#else
+int ioctl(int fd, int request, ...)
+#endif
 {
 	va_list va;
 	int ret;

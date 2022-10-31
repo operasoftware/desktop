@@ -35,8 +35,14 @@ import os
 import pprint
 import re
 import shutil
+import sys
 import tempfile
 import types
+
+BLINK_TOOLS_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..', '..'))
+if BLINK_TOOLS_PATH not in sys.path:
+    sys.path.append(BLINK_TOOLS_PATH)
 
 from blinkpy.common.system.filesystem import FileSystem
 from blinkpy.common.system.log_utils import configure_logging
@@ -161,8 +167,8 @@ class JSONMerger(Merger):
         Merger.__init__(self)
 
         self.add_helper(
-            TypeMatch(types.ListType, types.TupleType), self.merge_listlike)
-        self.add_helper(TypeMatch(types.DictType), self.merge_dictlike)
+            TypeMatch(list, tuple), self.merge_listlike)
+        self.add_helper(TypeMatch(dict), self.merge_dictlike)
 
     def fallback_matcher(self, objs, name=None):
         raise MergeFailure("No merge helper found!", name, objs)
@@ -210,7 +216,7 @@ class JSONMerger(Merger):
                 dict_mid.setdefault(key, []).append(dobj[key])
 
         dict_out = dicts[0].__class__({})
-        for k, v in dict_mid.iteritems():
+        for k, v in dict_mid.items():
             assert v
             if len(v) == 1:
                 dict_out[k] = v[0]
@@ -295,9 +301,9 @@ class MergeFilesMatchingContents(MergeFiles):
                 nonmatching.append(filename)
 
         if nonmatching:
-            raise MergeFailure(
-                '\n'.join(['File contents don\'t match:'] + nonmatching),
-                out_filename, to_merge)
+            # TODO: revert this once crbug/1353056 is fixed
+            _log.warning('\n'.join(['File contents don\'t match:'] +
+                                   nonmatching))
 
         self.filesystem.write_binary_file(out_filename, data)
 
@@ -389,15 +395,15 @@ class MergeFilesJSONP(MergeFiles):
         """
         in_data = fd.read()
 
-        begin = in_data.find('{')
-        end = in_data.rfind('}') + 1
+        begin = in_data.find(b'{')
+        end = in_data.rfind(b'}') + 1
 
         before = in_data[:begin]
         data = in_data[begin:end]
         after = in_data[end:]
 
         # If just a JSON file, use json.load to get better error message output.
-        if before == '' and after == '':
+        if before == b'' and after == b'':
             fd.seek(0)
             json_data = json.load(fd)
         else:
@@ -413,9 +419,9 @@ class MergeFilesJSONP(MergeFiles):
         other non-JSON data.
         """
         fd.write(before)
-        fd.write(
-            re.subn('\\s+\n', '\n',
-                    json.dumps(json_data, indent=2, sort_keys=True))[0])
+        fd.write(json.dumps(json_data,
+                            separators=(",", ":"),
+                            sort_keys=True).encode('utf-8'))
         fd.write(after)
 
 
@@ -492,7 +498,7 @@ class DirMerger(Merger):
 
         # Go through each file and try to merge it.
         # partial_file_path is the file relative to the directories.
-        for partial_file_path, in_dirs in sorted(files.iteritems()):
+        for partial_file_path, in_dirs in sorted(files.items()):
             out_path = self.filesystem.join(output_dir, partial_file_path)
             if self.filesystem.exists(out_path):
                 raise MergeFailure('File %s already exist in output.',
@@ -522,6 +528,38 @@ class DirMerger(Merger):
 
 # Classes specific to merging web test results directory.
 # ------------------------------------------------------------------------
+
+
+class JSONWptReportsMerger(JSONMerger):
+    """Merger for the 'wpt report' format.
+
+    The JSON format is described at
+    https://github.com/web-platform-tests/wpt.fyi/tree/main/api#apiresultsupload
+
+    """
+
+    def __init__(self):
+        JSONMerger.__init__(self)
+
+        # results is a list, and we want to add them together.
+        self.add_helper(
+            NameRegexMatch(':results$'),
+            self.merge_listlike)
+
+        # pick run_info from shard 0.
+        self.add_helper(
+            NameRegexMatch(':run_info$'),
+            lambda o, name=None: o[0])
+
+        # We just take the earliest for time_start.
+        self.add_helper(
+            NameRegexMatch(':time_start$'),
+            lambda o, name=None: min(*o))
+
+        # and the last for time_end.
+        self.add_helper(
+            NameRegexMatch(':time_end$'),
+            lambda o, name=None: max(*o))
 
 
 class JSONTestResultsMerger(JSONMerger):
@@ -628,6 +666,24 @@ class WebTestDirMerger(DirMerger):
         self.add_helper(
             FilenameRegexMatch(r'wptserve_stderr\.txt$'),
             MergeFilesKeepFiles(self.filesystem))
+        self.add_helper(FilenameRegexMatch(r'wptserve_stdout\.txt$'),
+                        MergeFilesKeepFiles(self.filesystem))
+        # keep chromedriver log for webdriver tests
+        self.add_helper(FilenameRegexMatch(r'chromedriver\.log$'),
+                        MergeFilesKeepFiles(self.filesystem))
+
+        # keep system log for tests on fuchsia platform. See ./port/fuchsia.py
+        self.add_helper(FilenameRegexMatch(r'system_log$'),
+                        MergeFilesKeepFiles(self.filesystem))
+
+        # Merge WPT report JSON files
+        # https://github.com/web-platform-tests/wpt.fyi/tree/main/api#apiresultsupload
+        wpt_reports_json_merger = MergeFilesJSONP(
+            self.filesystem,
+            JSONWptReportsMerger())
+        self.add_helper(
+            FilenameRegexMatch(r'reports\.json$'),
+            wpt_reports_json_merger)
 
         # These JSON files have "result style" JSON in them.
         results_json_file_merger = MergeFilesJSONP(
@@ -673,13 +729,113 @@ def ensure_empty_dir(fs, directory, allow_existing, remove_existing):
         return
 
     layout_test_results = fs.join(directory, 'layout-test-results')
-    merged_output_json = fs.join(directory, 'output.json')
     if (fs.exists(layout_test_results)
             and not fs.remove_contents(layout_test_results)):
         raise IOError(('Unable to remove output directory %s contents!\n'
                        'See log output for errors.') % layout_test_results)
-    if fs.exists(merged_output_json):
-        fs.remove(merged_output_json)
+
+    profraw = fs.join(directory, 'profraw')
+    if (fs.exists(profraw) and not fs.remove_contents(profraw)):
+        raise IOError(('Unable to remove output directory %s contents!\n'
+                       'See log output for errors.') % profraw)
+
+    merged_output_jsons = ['output.json', 'run_histories.json']
+    for output_json in merged_output_jsons:
+        output_json_fullpath = fs.join(directory, output_json)
+        if fs.exists(output_json_fullpath):
+            fs.remove(output_json_fullpath)
+
+    # Fuchsia specific additional logs to be cleaned. Check if 'ffx_log' exists
+    # or not first, otherwise webgpu_blink_web_tests will hang forever.
+    # TODO: work with fuchsia team to remove this special case
+    if fs.exists(fs.join(directory, 'ffx_log')):
+        fuchsia_log_files = [
+            f for f in fs.listdir(directory)
+            if fs.isfile(fs.join(directory, f))
+        ]
+        for file_name in fuchsia_log_files:
+            path = fs.join(directory, file_name)
+            if fs.exists(path):
+                fs.remove(path)
+
+
+def mark_missing_shards(summary_json,
+                        input_directories,
+                        merged_output_json,
+                        fs=None):
+    """Merge the contents of one or more results JSONs into a single JSON.
+
+    Args:
+        summary_json: swarming summary containing shard info.
+        input_directories: A list of dir paths to JSON files that should be merged.
+        merged_output_json: A path to a JSON file to which the merged results should be
+        written.
+        fs: filesystem object - MockFileSystem or FileSystem.
+    """
+    # summary.json is produced by swarming client.
+    if fs != None:
+        filesystem = fs
+    else:
+        filesystem = FileSystem()
+
+    try:
+        with filesystem.open_binary_file_for_reading(summary_json) as f:
+            summary = json.load(f)
+    except (IOError, ValueError) as e:
+        raise MergeFailure('summary_json is missing or can not be read',
+                           summary_json, None)
+
+    missing_shards = []
+    _log.debug("Missing shard processing: %s", input_directories)
+    for index, result in enumerate(summary['shards']):
+        output_path = None
+        if result:
+            output_path = find_shard_output_path(index, result.get('task_id'),
+                                                 input_directories)
+            if not output_path:
+                missing_shards.append(index)
+
+    if missing_shards:
+        # TODO(crbug.com/1111954) - process summary_json along with others
+        # so the merged output json can be written once to disk.
+        with filesystem.open_binary_file_for_reading(merged_output_json) as f:
+            try:
+                json_contents_merged = json.load(f)
+            except ValueError:
+                raise MergeFailure(
+                    'Failed to parse JSON from merged output.json',
+                    merged_output_json, None)
+        json_contents_merged['missing_shards'] = missing_shards
+
+        with filesystem.open_binary_file_for_writing(merged_output_json) as f:
+            MergeFilesJSONP.dump_jsonp(f, b'', json_contents_merged, b'')
+
+
+def find_shard_output_path(index, task_id, input_directories):
+    """Finds the shard matching the index/task-id.
+
+    Args:
+        index: The index of the shard to load data for, this is for old api.
+        task_id: The directory of the shard to load data for, this is for new api.
+        input_directories: A container of file paths for shards that emitted output.
+
+    Returns:
+        The matching path, or None
+    """
+    matching_json_files = [
+        j for j in input_directories
+        if (os.path.basename(j) == str(index) or os.path.basename(j) == task_id
+            )
+    ]
+
+    if not matching_json_files:
+        _log.warning('shard %s test output missing', index)
+        return None
+    elif len(matching_json_files) > 1:
+        _log.warning('duplicate test output for shard %s', index)
+        return None
+
+    return matching_json_files[0]
 
 
 def main(argv):
@@ -863,6 +1019,9 @@ directory. The script will be given the arguments plus
 
     merged_output_json = os.path.join(args.output_directory, 'output.json')
     if os.path.exists(merged_output_json) and args.output_json:
+        # process summary_json to mark missing shards.
+        mark_missing_shards(args.summary_json, args.input_directories,
+                            merged_output_json)
         logging.debug('Copying output.json from %s to %s', merged_output_json,
                       args.output_json)
         shutil.copyfile(merged_output_json, args.output_json)
@@ -876,3 +1035,6 @@ directory. The script will be given the arguments plus
 
         logging.info('Running post merge script %r', post_script)
         os.execlp(post_script)
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

@@ -5,12 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_BACKGROUND_FETCH_BACKGROUND_FETCH_BRIDGE_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_BACKGROUND_FETCH_BACKGROUND_FETCH_BRIDGE_H_
 
-#include <memory>
-
-#include "base/macros.h"
 #include "third_party/blink/public/mojom/background_fetch/background_fetch.mojom-blink.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker_registration.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -27,8 +24,6 @@ class BackgroundFetchRegistration;
 class BackgroundFetchBridge final
     : public GarbageCollected<BackgroundFetchBridge>,
       public Supplement<ServiceWorkerRegistration> {
-  USING_GARBAGE_COLLECTED_MIXIN(BackgroundFetchBridge);
-
  public:
   static const char kSupplementName[];
 
@@ -43,6 +38,10 @@ class BackgroundFetchBridge final
   static BackgroundFetchBridge* From(ServiceWorkerRegistration* registration);
 
   explicit BackgroundFetchBridge(ServiceWorkerRegistration& registration);
+
+  BackgroundFetchBridge(const BackgroundFetchBridge&) = delete;
+  BackgroundFetchBridge& operator=(const BackgroundFetchBridge&) = delete;
+
   virtual ~BackgroundFetchBridge();
   void Trace(Visitor* visitor) const override;
 
@@ -83,8 +82,6 @@ class BackgroundFetchBridge final
 
   HeapMojoRemote<mojom::blink::BackgroundFetchService>
       background_fetch_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(BackgroundFetchBridge);
 };
 
 }  // namespace blink

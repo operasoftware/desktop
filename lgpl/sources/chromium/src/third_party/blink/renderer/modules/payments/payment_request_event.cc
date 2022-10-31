@@ -27,7 +27,7 @@
 #include "third_party/blink/renderer/modules/service_worker/service_worker_window_client.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
@@ -135,10 +135,10 @@ const ScriptValue PaymentRequestEvent::paymentOptions(
   return ScriptValue::From(script_state, payment_options_);
 }
 
-base::Optional<HeapVector<Member<PaymentShippingOption>>>
+absl::optional<HeapVector<Member<PaymentShippingOption>>>
 PaymentRequestEvent::shippingOptions() const {
   if (shipping_options_.IsEmpty())
-    return base::nullopt;
+    return absl::nullopt;
   return shipping_options_;
 }
 
@@ -208,7 +208,7 @@ ScriptPromise PaymentRequestEvent::changePaymentMethod(
   if (!method_details.IsNull()) {
     DCHECK(!method_details.IsEmpty());
     PaymentsValidators::ValidateAndStringifyObject(
-        script_state->GetIsolate(), "Method details", method_details,
+        script_state->GetIsolate(), method_details,
         method_data->stringified_data, exception_state);
     if (exception_state.HadException())
       return ScriptPromise();
@@ -359,8 +359,7 @@ void PaymentRequestEvent::OnChangePaymentRequestDetailsResponse(
                                  "PaymentDetailsModifier");
 
   if (response->modifiers) {
-    auto* modifiers =
-        MakeGarbageCollected<HeapVector<Member<PaymentDetailsModifier>>>();
+    HeapVector<Member<PaymentDetailsModifier>> modifiers;
     for (const auto& response_modifier : *response->modifiers) {
       if (!response_modifier)
         continue;
@@ -390,15 +389,14 @@ void PaymentRequestEvent::OnChangePaymentRequestDetailsResponse(
           return;
         }
         mod->setData(ScriptValue(script_state->GetIsolate(), parsed_value));
-        modifiers->emplace_back(mod);
+        modifiers.emplace_back(mod);
       }
     }
-    dictionary->setModifiers(*modifiers);
+    dictionary->setModifiers(modifiers);
   }
 
   if (response->shipping_options) {
-    auto* shipping_options =
-        MakeGarbageCollected<HeapVector<Member<PaymentShippingOption>>>();
+    HeapVector<Member<PaymentShippingOption>> shipping_options;
     for (const auto& response_shipping_option : *response->shipping_options) {
       if (!response_shipping_option)
         continue;
@@ -411,9 +409,9 @@ void PaymentRequestEvent::OnChangePaymentRequestDetailsResponse(
       shipping_option->setId(response_shipping_option->id);
       shipping_option->setLabel(response_shipping_option->label);
       shipping_option->setSelected(response_shipping_option->selected);
-      shipping_options->emplace_back(shipping_option);
+      shipping_options.emplace_back(shipping_option);
     }
-    dictionary->setShippingOptions(*shipping_options);
+    dictionary->setShippingOptions(shipping_options);
   }
 
   if (response->stringified_payment_method_errors &&

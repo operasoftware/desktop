@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/editing/suggestion/text_suggestion_controller.h"
 
+#include "build/build_config.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
@@ -13,6 +14,7 @@
 #include "third_party/blink/renderer/core/editing/testing/editing_test_base.h"
 #include "third_party/blink/renderer/core/editing/visible_selection.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 
 using ui::mojom::ImeTextSpanThickness;
 using ui::mojom::ImeTextSpanUnderlineStyle;
@@ -81,7 +83,13 @@ TEST_F(TextSuggestionControllerTest, ApplySpellCheckSuggestion) {
   EXPECT_EQ(10, selection.End().ComputeOffsetInContainerNode());
 }
 
-TEST_F(TextSuggestionControllerTest, ApplyTextSuggestion) {
+// Flaky on Android: http://crbug.com/1104700
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_ApplyTextSuggestion DISABLED_ApplyTextSuggestion
+#else
+#define MAYBE_ApplyTextSuggestion ApplyTextSuggestion
+#endif
+TEST_F(TextSuggestionControllerTest, MAYBE_ApplyTextSuggestion) {
   SetBodyContent(
       "<div contenteditable>"
       "word1 word2 word3 word4"
@@ -452,8 +460,7 @@ TEST_F(TextSuggestionControllerTest,
   EXPECT_NE(nullptr, GetDocument()
                          .GetFrame()
                          ->GetSpellChecker()
-                         .GetSpellCheckMarkerUnderSelection()
-                         .first);
+                         .GetSpellCheckMarkerGroupUnderSelection());
 
   // Add "embiggen" to the dictionary
   GetDocument()
@@ -464,8 +471,7 @@ TEST_F(TextSuggestionControllerTest,
   EXPECT_EQ(nullptr, GetDocument()
                          .GetFrame()
                          ->GetSpellChecker()
-                         .GetSpellCheckMarkerUnderSelection()
-                         .first);
+                         .GetSpellCheckMarkerGroupUnderSelection());
 }
 
 TEST_F(TextSuggestionControllerTest, CallbackHappensAfterDocumentDestroyed) {

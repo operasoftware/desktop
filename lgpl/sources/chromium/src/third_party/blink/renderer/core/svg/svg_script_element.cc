@@ -20,11 +20,13 @@
 
 #include "third_party/blink/renderer/core/svg/svg_script_element.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/html_script_element_or_svg_script_element.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_event_listener.h"
+#include "third_party/blink/renderer/bindings/core/v8/js_event_handler_for_content_attribute.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_htmlscriptelement_svgscriptelement.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/script/script_loader.h"
@@ -44,22 +46,23 @@ void SVGScriptElement::ParseAttribute(
   if (params.name == html_names::kOnerrorAttr) {
     SetAttributeEventListener(
         event_type_names::kError,
-        CreateAttributeEventListener(
-            this, params.name, params.new_value,
+        JSEventHandlerForContentAttribute::Create(
+            GetExecutionContext(), params.name, params.new_value,
             JSEventHandler::HandlerType::kOnErrorEventHandler));
   } else {
     SVGElement::ParseAttribute(params);
   }
 }
 
-void SVGScriptElement::SvgAttributeChanged(const QualifiedName& attr_name) {
-  if (SVGURIReference::IsKnownAttribute(attr_name)) {
+void SVGScriptElement::SvgAttributeChanged(
+    const SvgAttributeChangedParams& params) {
+  if (SVGURIReference::IsKnownAttribute(params.name)) {
     SVGElement::InvalidationGuard invalidation_guard(this);
-    loader_->HandleSourceAttribute(HrefString());
+    loader_->HandleSourceAttribute(LegacyHrefString(*this));
     return;
   }
 
-  SVGElement::SvgAttributeChanged(attr_name);
+  SVGElement::SvgAttributeChanged(params);
 }
 
 Node::InsertionNotificationRequest SVGScriptElement::InsertedInto(
@@ -80,11 +83,6 @@ void SVGScriptElement::ChildrenChanged(const ChildrenChange& change) {
   loader_->ChildrenChanged();
 }
 
-void SVGScriptElement::DidMoveToNewDocument(Document& old_document) {
-  ScriptRunner::MovePendingScript(old_document, GetDocument(), loader_.Get());
-  SVGElement::DidMoveToNewDocument(old_document);
-}
-
 bool SVGScriptElement::IsURLAttribute(const Attribute& attribute) const {
   return attribute.GetName() == AtomicString(SourceAttributeValue());
 }
@@ -101,7 +99,7 @@ bool SVGScriptElement::HaveLoadedRequiredResources() {
 }
 
 String SVGScriptElement::SourceAttributeValue() const {
-  return HrefString();
+  return LegacyHrefString(*this);
 }
 
 String SVGScriptElement::TypeAttributeValue() const {
@@ -117,7 +115,7 @@ String SVGScriptElement::ScriptTextInternalSlot() const {
 }
 
 bool SVGScriptElement::HasSourceAttribute() const {
-  return href()->IsSpecified();
+  return !LegacyHrefString(*this).IsNull();
 }
 
 bool SVGScriptElement::IsConnected() const {
@@ -137,9 +135,10 @@ bool SVGScriptElement::AllowInlineScriptForCSP(
     const AtomicString& nonce,
     const WTF::OrdinalNumber& context_line,
     const String& script_content) {
-  return GetExecutionContext()->GetContentSecurityPolicyForWorld()->AllowInline(
-      ContentSecurityPolicy::InlineType::kScript, this, script_content, nonce,
-      GetDocument().Url(), context_line);
+  return GetExecutionContext()
+      ->GetContentSecurityPolicyForCurrentWorld()
+      ->AllowInline(ContentSecurityPolicy::InlineType::kScript, this,
+                    script_content, nonce, GetDocument().Url(), context_line);
 }
 
 Document& SVGScriptElement::GetDocument() const {
@@ -167,12 +166,6 @@ void SVGScriptElement::DispatchErrorEvent() {
   DispatchEvent(*Event::Create(event_type_names::kError));
 }
 
-void SVGScriptElement::SetScriptElementForBinding(
-    HTMLScriptElementOrSVGScriptElement& element) {
-  if (!IsInV1ShadowTree())
-    element.SetSVGScriptElement(this);
-}
-
 ScriptElementBase::Type SVGScriptElement::GetScriptElementType() {
   return ScriptElementBase::Type::kSVGScriptElement;
 }
@@ -194,6 +187,16 @@ const AttrNameToTrustedType& SVGScriptElement::GetCheckedAttributeTypes()
           {svg_names::kHrefAttr.LocalName(), SpecificTrustedType::kScriptURL},
       }));
   return attribute_map;
+}
+
+V8HTMLOrSVGScriptElement* SVGScriptElement::AsV8HTMLOrSVGScriptElement() {
+  if (IsInShadowTree())
+    return nullptr;
+  return MakeGarbageCollected<V8HTMLOrSVGScriptElement>(this);
+}
+
+DOMNodeId SVGScriptElement::GetDOMNodeId() {
+  return DOMNodeIds::IdForNode(this);
 }
 
 void SVGScriptElement::Trace(Visitor* visitor) const {

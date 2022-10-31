@@ -21,10 +21,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_STYLE_DECLARATION_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_STYLE_DECLARATION_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
-#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
@@ -37,15 +35,17 @@ class CSSRule;
 class CSSStyleSheet;
 class CSSValue;
 class ExceptionState;
+class ExecutionContext;
 enum class SecureContextMode;
 
 class CORE_EXPORT CSSStyleDeclaration : public ScriptWrappable,
                                         public ExecutionContextClient {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(CSSStyleDeclaration);
 
  public:
-  ~CSSStyleDeclaration() override = default;
+  CSSStyleDeclaration(const CSSStyleDeclaration&) = delete;
+  CSSStyleDeclaration& operator=(const CSSStyleDeclaration&) = delete;
+  ~CSSStyleDeclaration() override;
 
   void Trace(Visitor* visitor) const override;
 
@@ -53,11 +53,7 @@ class CORE_EXPORT CSSStyleDeclaration : public ScriptWrappable,
   String cssFloat() { return GetPropertyValueInternal(CSSPropertyID::kFloat); }
   void setCSSFloat(const ExecutionContext* execution_context,
                    const String& value,
-                   ExceptionState& exception_state) {
-    SetPropertyInternal(CSSPropertyID::kFloat, String(), value, false,
-                        execution_context->GetSecureContextMode(),
-                        exception_state);
-  }
+                   ExceptionState& exception_state);
   virtual String cssText() const = 0;
   virtual void setCSSText(const ExecutionContext*,
                           const String&,
@@ -83,8 +79,18 @@ class CORE_EXPORT CSSStyleDeclaration : public ScriptWrappable,
   // it may be used by multiple documents at the same time.
   virtual const CSSValue* GetPropertyCSSValueInternal(CSSPropertyID) = 0;
   virtual const CSSValue* GetPropertyCSSValueInternal(
-      AtomicString custom_property_name) = 0;
+      const AtomicString& custom_property_name) = 0;
   virtual String GetPropertyValueInternal(CSSPropertyID) = 0;
+  // When determining the index of a css property in CSSPropertyValueSet,
+  // the value and priority can be obtained directly through the index.
+  // GetPropertyValueWithHint and GetPropertyPriorityWithHint are O(1).
+  // getPropertyValue and getPropertyPriority are O(n),
+  // because the array needs to be traversed to find the index.
+  // See https://crbug.com/1339812 for more details.
+  virtual String GetPropertyValueWithHint(const String& property_name,
+                                          unsigned index) = 0;
+  virtual String GetPropertyPriorityWithHint(const String& property_name,
+                                             unsigned index) = 0;
   virtual void SetPropertyInternal(CSSPropertyID,
                                    const String& property_value,
                                    const String& value,
@@ -101,16 +107,13 @@ class CORE_EXPORT CSSStyleDeclaration : public ScriptWrappable,
   // an argument (see bug 829408).
   NamedPropertySetterResult AnonymousNamedSetter(ScriptState*,
                                                  const AtomicString& name,
-                                                 const String& value);
+                                                 const ScriptValue& value);
+  NamedPropertyDeleterResult AnonymousNamedDeleter(const AtomicString& name);
   void NamedPropertyEnumerator(Vector<String>& names, ExceptionState&);
   bool NamedPropertyQuery(const AtomicString&, ExceptionState&);
 
  protected:
-  CSSStyleDeclaration(ExecutionContext* context)
-      : ExecutionContextClient(context) {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CSSStyleDeclaration);
+  explicit CSSStyleDeclaration(ExecutionContext* context);
 };
 
 }  // namespace blink

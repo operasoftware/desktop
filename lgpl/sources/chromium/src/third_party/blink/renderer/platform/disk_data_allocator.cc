@@ -8,7 +8,9 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/synchronization/lock.h"
 #include "base/threading/thread_restrictions.h"
+#include "third_party/blink/renderer/platform/disk_data_metadata.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
@@ -20,20 +22,20 @@ DiskDataAllocator::DiskDataAllocator()
 DiskDataAllocator::~DiskDataAllocator() = default;
 
 bool DiskDataAllocator::may_write() {
-  MutexLocker locker(mutex_);
+  base::AutoLock locker(lock_);
   return may_write_;
 }
 
 void DiskDataAllocator::set_may_write_for_testing(bool may_write) {
-  MutexLocker locker(mutex_);
+  base::AutoLock locker(lock_);
   may_write_ = may_write;
 }
 
-DiskDataAllocator::Metadata DiskDataAllocator::FindChunk(size_t size) {
+DiskDataMetadata DiskDataAllocator::FindChunk(size_t size) {
   // Try to reuse some space. Policy:
   // 1. Exact fit
   // 2. Worst fit
-  Metadata chosen_chunk{-1, 0};
+  DiskDataMetadata chosen_chunk{-1, 0};
 
   size_t worst_fit_size = 0;
   for (const auto& chunk : free_chunks_) {
@@ -65,8 +67,8 @@ DiskDataAllocator::Metadata DiskDataAllocator::FindChunk(size_t size) {
   return chosen_chunk;
 }
 
-void DiskDataAllocator::ReleaseChunk(const Metadata& metadata) {
-  Metadata chunk = metadata;
+void DiskDataAllocator::ReleaseChunk(const DiskDataMetadata& metadata) {
+  DiskDataMetadata chunk = metadata;
   DCHECK(free_chunks_.find(chunk.start_offset()) == free_chunks_.end());
 
   auto lower_bound = free_chunks_.lower_bound(chunk.start_offset());
@@ -102,13 +104,12 @@ void DiskDataAllocator::ReleaseChunk(const Metadata& metadata) {
   free_chunks_size_ += chunk.size();
 }
 
-std::unique_ptr<DiskDataAllocator::Metadata> DiskDataAllocator::Write(
-    const void* data,
-    size_t size) {
-  Metadata chosen_chunk = {0, 0};
+std::unique_ptr<DiskDataMetadata> DiskDataAllocator::Write(const void* data,
+                                                           size_t size) {
+  DiskDataMetadata chosen_chunk = {0, 0};
 
   {
-    MutexLocker locker(mutex_);
+    base::AutoLock locker(lock_);
     if (!may_write_)
       return nullptr;
 
@@ -119,7 +120,7 @@ std::unique_ptr<DiskDataAllocator::Metadata> DiskDataAllocator::Write(
   const char* data_char = reinterpret_cast<const char*>(data);
   int written = DoWrite(chosen_chunk.start_offset(), data_char, size_int);
 
-  MutexLocker locker(mutex_);
+  base::AutoLock locker(lock_);
   if (size_int != written) {
     // Assume that the error is not transient. This can happen if the disk is
     // full for instance, in which case it is likely better not to try writing
@@ -132,21 +133,20 @@ std::unique_ptr<DiskDataAllocator::Metadata> DiskDataAllocator::Write(
   allocated_chunks_.insert({chosen_chunk.start_offset(), chosen_chunk.size()});
 #endif
 
-  return std::unique_ptr<Metadata>(
-      new Metadata(chosen_chunk.start_offset(), chosen_chunk.size()));
+  return std::unique_ptr<DiskDataMetadata>(
+      new DiskDataMetadata(chosen_chunk.start_offset(), chosen_chunk.size()));
 }
 
-void DiskDataAllocator::Read(const Metadata& metadata, void* data) {
-  DCHECK(IsMainThread());
-
+void DiskDataAllocator::Read(const DiskDataMetadata& metadata, void* data) {
   // Doesn't need locking as files support concurrent access, and we don't
   // update metadata.
   char* data_char = reinterpret_cast<char*>(data);
-  DoRead(metadata.start_offset(), data_char, metadata.size());
+  DoRead(metadata.start_offset(), data_char,
+         base::checked_cast<int>(metadata.size()));
 
 #if DCHECK_IS_ON()
   {
-    MutexLocker locker(mutex_);
+    base::AutoLock locker(lock_);
     auto it = allocated_chunks_.find(metadata.start_offset());
     DCHECK(it != allocated_chunks_.end());
     DCHECK_EQ(metadata.size(), it->second);
@@ -154,8 +154,8 @@ void DiskDataAllocator::Read(const Metadata& metadata, void* data) {
 #endif
 }
 
-void DiskDataAllocator::Discard(std::unique_ptr<Metadata> metadata) {
-  MutexLocker locker(mutex_);
+void DiskDataAllocator::Discard(std::unique_ptr<DiskDataMetadata> metadata) {
+  base::AutoLock locker(lock_);
   DCHECK(may_write_ || file_.IsValid());
 
 #if DCHECK_IS_ON()
@@ -191,7 +191,7 @@ void DiskDataAllocator::DoRead(int64_t offset, char* data, int size) {
 }
 
 void DiskDataAllocator::ProvideTemporaryFile(base::File file) {
-  MutexLocker locker(mutex_);
+  base::AutoLock locker(lock_);
   DCHECK(IsMainThread());
   DCHECK(!file_.IsValid());
   DCHECK(!may_write_);
@@ -202,7 +202,7 @@ void DiskDataAllocator::ProvideTemporaryFile(base::File file) {
 
 // static
 DiskDataAllocator& DiskDataAllocator::Instance() {
-  DEFINE_STATIC_LOCAL(DiskDataAllocator, instance, ());
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(DiskDataAllocator, instance, ());
   return instance;
 }
 

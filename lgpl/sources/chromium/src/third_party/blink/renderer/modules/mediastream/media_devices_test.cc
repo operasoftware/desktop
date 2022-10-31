@@ -7,35 +7,64 @@
 #include <memory>
 #include <utility>
 
+#include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/mojom/media/capture_handle_config.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_tester.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_capture_handle_config.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_crop_target.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_media_stream_constraints.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/testing/null_execution_context.h"
+#include "third_party/blink/renderer/core/testing/page_test_base.h"
+#include "third_party/blink/renderer/modules/mediastream/crop_target.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 using blink::mojom::blink::MediaDeviceInfoPtr;
+using ::testing::_;
 
 namespace blink {
 
 const char kFakeAudioInputDeviceId1[] = "fake_audio_input 1";
 const char kFakeAudioInputDeviceId2[] = "fake_audio_input 2";
+const char kFakeAudioInputDeviceId3[] = "fake_audio_input 3";
 const char kFakeVideoInputDeviceId1[] = "fake_video_input 1";
 const char kFakeVideoInputDeviceId2[] = "fake_video_input 2";
 const char kFakeCommonGroupId1[] = "fake_group 1";
+const char kFakeCommonGroupId2[] = "fake_group 2";
 const char kFakeVideoInputGroupId2[] = "fake_video_input_group 2";
 const char kFakeAudioOutputDeviceId1[] = "fake_audio_output 1";
+const char kFakeAudioOutputDeviceId2[] = "fake_audio_output 2";
 
-class MockMediaDevicesDispatcherHost
+String MaxLengthCaptureHandle() {
+  String maxHandle = "0123456789abcdef";  // 16 characters.
+  while (maxHandle.length() < 1024) {
+    maxHandle = maxHandle + maxHandle;
+  }
+  CHECK_EQ(maxHandle.length(), 1024u) << "Malformed test.";
+  return maxHandle;
+}
+
+class MockMediaDevicesDispatcherHost final
     : public mojom::blink::MediaDevicesDispatcherHost {
  public:
   MockMediaDevicesDispatcherHost() {}
+
+  ~MockMediaDevicesDispatcherHost() override {
+    EXPECT_FALSE(expected_capture_handle_config_);
+  }
 
   void EnumerateDevices(bool request_audio_input,
                         bool request_video_input,
@@ -59,8 +88,15 @@ class MockMediaDevicesDispatcherHost
           .push_back(device_info);
 
       device_info.device_id = kFakeAudioInputDeviceId2;
-      device_info.label = "Fake Audio Input 2";
-      device_info.group_id = "fake_group 2";
+      device_info.label = "X's AirPods";
+      device_info.group_id = kFakeCommonGroupId2;
+      enumeration[static_cast<size_t>(
+                      blink::mojom::blink::MediaDeviceType::MEDIA_AUDIO_INPUT)]
+          .push_back(device_info);
+
+      device_info.device_id = kFakeAudioInputDeviceId3;
+      device_info.label = "Fake Audio Input 3";
+      device_info.group_id = "fake_group 3";
       enumeration[static_cast<size_t>(
                       blink::mojom::blink::MediaDeviceType::MEDIA_AUDIO_INPUT)]
           .push_back(device_info);
@@ -88,13 +124,13 @@ class MockMediaDevicesDispatcherHost
             mojom::blink::VideoInputDeviceCapabilities::New();
         capabilities->device_id = kFakeVideoInputDeviceId1;
         capabilities->group_id = kFakeCommonGroupId1;
-        capabilities->facing_mode = media::MEDIA_VIDEO_FACING_NONE;
+        capabilities->facing_mode = mojom::blink::FacingMode::NONE;
         video_input_capabilities.push_back(std::move(capabilities));
 
         capabilities = mojom::blink::VideoInputDeviceCapabilities::New();
         capabilities->device_id = kFakeVideoInputDeviceId2;
         capabilities->group_id = kFakeVideoInputGroupId2;
-        capabilities->facing_mode = media::MEDIA_VIDEO_FACING_USER;
+        capabilities->facing_mode = mojom::blink::FacingMode::USER;
         video_input_capabilities.push_back(std::move(capabilities));
       }
     }
@@ -102,6 +138,13 @@ class MockMediaDevicesDispatcherHost
       device_info.device_id = kFakeAudioOutputDeviceId1;
       device_info.label = "Fake Audio Input 1";
       device_info.group_id = kFakeCommonGroupId1;
+      enumeration[static_cast<size_t>(
+                      blink::mojom::blink::MediaDeviceType::MEDIA_AUDIO_OUTPUT)]
+          .push_back(device_info);
+
+      device_info.device_id = kFakeAudioOutputDeviceId2;
+      device_info.label = "X's AirPods";
+      device_info.group_id = kFakeCommonGroupId2;
       enumeration[static_cast<size_t>(
                       blink::mojom::blink::MediaDeviceType::MEDIA_AUDIO_OUTPUT)]
           .push_back(device_info);
@@ -140,6 +183,55 @@ class MockMediaDevicesDispatcherHost
     listener_.Bind(std::move(listener));
   }
 
+  void SetCaptureHandleConfig(
+      mojom::blink::CaptureHandleConfigPtr config) override {
+    ASSERT_TRUE(config);
+
+    auto expected_config = std::move(expected_capture_handle_config_);
+    expected_capture_handle_config_ = nullptr;
+    ASSERT_TRUE(expected_config);
+
+    // TODO(crbug.com/1208868): Define CaptureHandleConfig traits that compare
+    // |permitted_origins| using SecurityOrigin::IsSameOriginWith(), thereby
+    // allowing this block to be replaced by a single EXPECT_EQ. (This problem
+    // only manifests in Blink.)
+    EXPECT_EQ(config->expose_origin, expected_config->expose_origin);
+    EXPECT_EQ(config->capture_handle, expected_config->capture_handle);
+    EXPECT_EQ(config->all_origins_permitted,
+              expected_config->all_origins_permitted);
+    ASSERT_EQ(config->permitted_origins.size(),
+              expected_config->permitted_origins.size());
+    for (wtf_size_t i = 0; i < config->permitted_origins.size(); ++i) {
+      EXPECT_TRUE(config->permitted_origins[i]->IsSameOriginWith(
+          expected_config->permitted_origins[i].get()));
+    }
+  }
+
+#if !BUILDFLAG(IS_ANDROID)
+  void CloseFocusWindowOfOpportunity(const String& label) override {}
+
+  void ProduceCropId(ProduceCropIdCallback callback) override {
+    String next_crop_id = "";  // Empty, not null.
+    std::swap(next_crop_id_, next_crop_id);
+    std::move(callback).Run(std::move(next_crop_id));
+  }
+
+  void SetNextCropId(String next_crop_id) {
+    next_crop_id_ = std::move(next_crop_id);
+  }
+#endif
+
+  void ExpectSetCaptureHandleConfig(
+      mojom::blink::CaptureHandleConfigPtr config) {
+    ASSERT_TRUE(config);
+    ASSERT_FALSE(expected_capture_handle_config_) << "Unfulfilled expectation.";
+    expected_capture_handle_config_ = std::move(config);
+  }
+
+  mojom::blink::CaptureHandleConfigPtr expected_capture_handle_config() {
+    return std::move(expected_capture_handle_config_);
+  }
+
   mojo::PendingRemote<mojom::blink::MediaDevicesDispatcherHost>
   CreatePendingRemoteAndBind() {
     mojo::PendingRemote<mojom::blink::MediaDevicesDispatcherHost> remote;
@@ -156,19 +248,26 @@ class MockMediaDevicesDispatcherHost
  private:
   mojo::Remote<mojom::blink::MediaDevicesListener> listener_;
   mojo::Receiver<mojom::blink::MediaDevicesDispatcherHost> receiver_{this};
+  mojom::blink::CaptureHandleConfigPtr expected_capture_handle_config_;
+#if !BUILDFLAG(IS_ANDROID)
+  String next_crop_id_ = "";  // Empty, not null.
+#endif
 };
 
-class MediaDevicesTest : public testing::Test {
+class MediaDevicesTest : public PageTestBase {
  public:
   using MediaDeviceInfos = HeapVector<Member<MediaDeviceInfo>>;
 
-  MediaDevicesTest() : device_infos_(MakeGarbageCollected<MediaDeviceInfos>()) {
-    dispatcher_host_ = std::make_unique<MockMediaDevicesDispatcherHost>();
+  MediaDevicesTest()
+      : dispatcher_host_(std::make_unique<MockMediaDevicesDispatcherHost>()),
+        device_infos_(MakeGarbageCollected<MediaDeviceInfos>()) {
+    scoped_feature_list_.InitAndEnableFeature(
+        blink::features::kRegionCaptureExperimentalSubtypes);
   }
 
-  MediaDevices* GetMediaDevices(ExecutionContext* context) {
+  MediaDevices* GetMediaDevices(LocalDOMWindow& window) {
     if (!media_devices_) {
-      media_devices_ = MakeGarbageCollected<MediaDevices>(context);
+      media_devices_ = MakeGarbageCollected<MediaDevices>(*window.navigator());
       media_devices_->SetDispatcherHostForTesting(
           dispatcher_host_->CreatePendingRemoteAndBind());
     }
@@ -179,8 +278,9 @@ class MediaDevicesTest : public testing::Test {
 
   void SimulateDeviceChange() {
     DCHECK(listener());
-    listener()->OnDevicesChanged(MEDIA_DEVICE_TYPE_AUDIO_INPUT,
-                                 Vector<WebMediaDeviceInfo>());
+    listener()->OnDevicesChanged(
+        blink::mojom::MediaDeviceType::MEDIA_AUDIO_INPUT,
+        Vector<WebMediaDeviceInfo>());
   }
 
   void DevicesEnumerated(const MediaDeviceInfoVector& device_infos) {
@@ -223,6 +323,15 @@ class MediaDevicesTest : public testing::Test {
     return platform_;
   }
 
+  MockMediaDevicesDispatcherHost& dispatcher_host() {
+    DCHECK(dispatcher_host_);
+    return *dispatcher_host_;
+  }
+
+  base::test::ScopedFeatureList& scoped_feature_list() {
+    return scoped_feature_list_;
+  }
+
  private:
   ScopedTestingPlatformSupport<TestingPlatformSupport> platform_;
   std::unique_ptr<MockMediaDevicesDispatcherHost> dispatcher_host_;
@@ -232,13 +341,14 @@ class MediaDevicesTest : public testing::Test {
   bool device_changed_ = false;
   bool listener_connection_error_ = false;
   Persistent<MediaDevices> media_devices_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 TEST_F(MediaDevicesTest, GetUserMediaCanBeCalled) {
   V8TestingScope scope;
   MediaStreamConstraints* constraints = MediaStreamConstraints::Create();
   ScriptPromise promise =
-      GetMediaDevices(scope.GetExecutionContext())
+      GetMediaDevices(scope.GetWindow())
           ->getUserMedia(scope.GetScriptState(), constraints,
                          scope.GetExceptionState());
   ASSERT_TRUE(promise.IsEmpty());
@@ -250,7 +360,7 @@ TEST_F(MediaDevicesTest, GetUserMediaCanBeCalled) {
 
 TEST_F(MediaDevicesTest, EnumerateDevices) {
   V8TestingScope scope;
-  auto* media_devices = GetMediaDevices(scope.GetExecutionContext());
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
   media_devices->SetEnumerateDevicesCallbackForTesting(
       WTF::Bind(&MediaDevicesTest::DevicesEnumerated, WTF::Unretained(this)));
   ScriptPromise promise = media_devices->enumerateDevices(
@@ -259,7 +369,7 @@ TEST_F(MediaDevicesTest, EnumerateDevices) {
   ASSERT_FALSE(promise.IsEmpty());
 
   EXPECT_TRUE(devices_enumerated());
-  EXPECT_EQ(5u, device_infos().size());
+  EXPECT_EQ(7u, device_infos().size());
 
   // Audio input device with matched output ID.
   Member<MediaDeviceInfo> device = device_infos()[0];
@@ -268,42 +378,64 @@ TEST_F(MediaDevicesTest, EnumerateDevices) {
   EXPECT_FALSE(device->label().IsEmpty());
   EXPECT_FALSE(device->groupId().IsEmpty());
 
-  // Audio input device without matched output ID.
+  // Audio input device with Airpods label.
   device = device_infos()[1];
   EXPECT_FALSE(device->deviceId().IsEmpty());
   EXPECT_EQ("audioinput", device->kind());
   EXPECT_FALSE(device->label().IsEmpty());
   EXPECT_FALSE(device->groupId().IsEmpty());
 
-  // Video input devices.
+  // Audio input device without matched output ID.
   device = device_infos()[2];
   EXPECT_FALSE(device->deviceId().IsEmpty());
-  EXPECT_EQ("videoinput", device->kind());
+  EXPECT_EQ("audioinput", device->kind());
   EXPECT_FALSE(device->label().IsEmpty());
   EXPECT_FALSE(device->groupId().IsEmpty());
 
+  // Video input devices.
   device = device_infos()[3];
   EXPECT_FALSE(device->deviceId().IsEmpty());
   EXPECT_EQ("videoinput", device->kind());
   EXPECT_FALSE(device->label().IsEmpty());
   EXPECT_FALSE(device->groupId().IsEmpty());
 
-  // Audio output device.
   device = device_infos()[4];
+  EXPECT_FALSE(device->deviceId().IsEmpty());
+  EXPECT_EQ("videoinput", device->kind());
+  EXPECT_FALSE(device->label().IsEmpty());
+  EXPECT_FALSE(device->groupId().IsEmpty());
+
+  // Audio output device.
+  device = device_infos()[5];
+  EXPECT_FALSE(device->deviceId().IsEmpty());
+  EXPECT_EQ("audiooutput", device->kind());
+  EXPECT_FALSE(device->label().IsEmpty());
+  EXPECT_FALSE(device->groupId().IsEmpty());
+
+  // Audio output device with Airpods label.
+  device = device_infos()[6];
   EXPECT_FALSE(device->deviceId().IsEmpty());
   EXPECT_EQ("audiooutput", device->kind());
   EXPECT_FALSE(device->label().IsEmpty());
   EXPECT_FALSE(device->groupId().IsEmpty());
 
   // Verify group IDs.
-  EXPECT_EQ(device_infos()[0]->groupId(), device_infos()[2]->groupId());
-  EXPECT_EQ(device_infos()[0]->groupId(), device_infos()[4]->groupId());
-  EXPECT_NE(device_infos()[1]->groupId(), device_infos()[4]->groupId());
+  EXPECT_EQ(device_infos()[0]->groupId(), device_infos()[3]->groupId());
+  EXPECT_EQ(device_infos()[0]->groupId(), device_infos()[5]->groupId());
+  EXPECT_NE(device_infos()[2]->groupId(), device_infos()[5]->groupId());
+
+  // Verify device labels do not expose user's information.
+  EXPECT_EQ(device_infos()[1]->label(), "AirPods");
+  EXPECT_EQ(device_infos()[6]->label(), "AirPods");
+
+  // Verify the code does not change non-sensitive device labels.
+  EXPECT_EQ(device_infos()[0]->label(), "Fake Audio Input 1");
+  EXPECT_EQ(device_infos()[3]->label(), "Fake Video Input 1");
 }
 
 TEST_F(MediaDevicesTest, EnumerateDevicesAfterConnectionError) {
   V8TestingScope scope;
-  auto* media_devices = GetMediaDevices(scope.GetExecutionContext());
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
   media_devices->SetEnumerateDevicesCallbackForTesting(
       WTF::Bind(&MediaDevicesTest::DevicesEnumerated, WTF::Unretained(this)));
   media_devices->SetConnectionErrorCallbackForTesting(
@@ -323,9 +455,31 @@ TEST_F(MediaDevicesTest, EnumerateDevicesAfterConnectionError) {
   EXPECT_FALSE(devices_enumerated());
 }
 
+TEST_F(MediaDevicesTest, SetCaptureHandleConfigAfterConnectionError) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+
+  media_devices->SetConnectionErrorCallbackForTesting(
+      WTF::Bind(&MediaDevicesTest::OnDispatcherHostConnectionError,
+                WTF::Unretained(this)));
+  ASSERT_FALSE(dispatcher_host_connection_error());
+
+  // Simulate a connection error by closing the binding.
+  CloseBinding();
+  platform()->RunUntilIdle();
+
+  // Note: SetCaptureHandleConfigEmpty proves the following is a valid call.
+  CaptureHandleConfig input_config;
+  media_devices->setCaptureHandleConfig(scope.GetScriptState(), &input_config,
+                                        scope.GetExceptionState());
+
+  platform()->RunUntilIdle();
+  EXPECT_TRUE(dispatcher_host_connection_error());
+}
+
 TEST_F(MediaDevicesTest, EnumerateDevicesBeforeConnectionError) {
   V8TestingScope scope;
-  auto* media_devices = GetMediaDevices(scope.GetExecutionContext());
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
   media_devices->SetEnumerateDevicesCallbackForTesting(
       WTF::Bind(&MediaDevicesTest::DevicesEnumerated, WTF::Unretained(this)));
   media_devices->SetConnectionErrorCallbackForTesting(
@@ -347,7 +501,7 @@ TEST_F(MediaDevicesTest, EnumerateDevicesBeforeConnectionError) {
 
 TEST_F(MediaDevicesTest, ObserveDeviceChangeEvent) {
   V8TestingScope scope;
-  auto* media_devices = GetMediaDevices(scope.GetExecutionContext());
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
   media_devices->SetDeviceChangeCallbackForTesting(
       WTF::Bind(&MediaDevicesTest::OnDevicesChanged, WTF::Unretained(this)));
   EXPECT_FALSE(listener());
@@ -374,5 +528,390 @@ TEST_F(MediaDevicesTest, ObserveDeviceChangeEvent) {
   platform()->RunUntilIdle();
   EXPECT_FALSE(device_changed());
 }
+
+TEST_F(MediaDevicesTest, SetCaptureHandleConfigEmpty) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+
+  CaptureHandleConfig input_config;
+
+  // Expected output.
+  auto expected_config = mojom::blink::CaptureHandleConfig::New();
+  expected_config->expose_origin = false;
+  expected_config->capture_handle = "";
+  expected_config->all_origins_permitted = false;
+  expected_config->permitted_origins = {};
+  dispatcher_host().ExpectSetCaptureHandleConfig(std::move(expected_config));
+
+  media_devices->setCaptureHandleConfig(scope.GetScriptState(), &input_config,
+                                        scope.GetExceptionState());
+
+  platform()->RunUntilIdle();
+
+  EXPECT_FALSE(scope.GetExceptionState().HadException());
+}
+
+TEST_F(MediaDevicesTest, SetCaptureHandleConfigWithExposeOrigin) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+
+  CaptureHandleConfig input_config;
+  input_config.setExposeOrigin(true);
+
+  // Expected output.
+  auto expected_config = mojom::blink::CaptureHandleConfig::New();
+  expected_config->expose_origin = true;
+  expected_config->capture_handle = "";
+  expected_config->all_origins_permitted = false;
+  expected_config->permitted_origins = {};
+  dispatcher_host().ExpectSetCaptureHandleConfig(std::move(expected_config));
+
+  media_devices->setCaptureHandleConfig(scope.GetScriptState(), &input_config,
+                                        scope.GetExceptionState());
+
+  platform()->RunUntilIdle();
+
+  EXPECT_FALSE(scope.GetExceptionState().HadException());
+}
+
+TEST_F(MediaDevicesTest, SetCaptureHandleConfigCaptureWithHandle) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+
+  CaptureHandleConfig input_config;
+  input_config.setHandle("0xabcdef0123456789");
+
+  // Expected output.
+  auto expected_config = mojom::blink::CaptureHandleConfig::New();
+  expected_config->expose_origin = false;
+  expected_config->capture_handle = "0xabcdef0123456789";
+  expected_config->all_origins_permitted = false;
+  expected_config->permitted_origins = {};
+  dispatcher_host().ExpectSetCaptureHandleConfig(std::move(expected_config));
+
+  media_devices->setCaptureHandleConfig(scope.GetScriptState(), &input_config,
+                                        scope.GetExceptionState());
+
+  platform()->RunUntilIdle();
+
+  EXPECT_FALSE(scope.GetExceptionState().HadException());
+}
+
+TEST_F(MediaDevicesTest, SetCaptureHandleConfigCaptureWithMaxHandle) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+
+  const String maxHandle = MaxLengthCaptureHandle();
+
+  CaptureHandleConfig input_config;
+  input_config.setHandle(maxHandle);
+
+  // Expected output.
+  auto expected_config = mojom::blink::CaptureHandleConfig::New();
+  expected_config->expose_origin = false;
+  expected_config->capture_handle = maxHandle;
+  expected_config->all_origins_permitted = false;
+  expected_config->permitted_origins = {};
+  dispatcher_host().ExpectSetCaptureHandleConfig(std::move(expected_config));
+
+  media_devices->setCaptureHandleConfig(scope.GetScriptState(), &input_config,
+                                        scope.GetExceptionState());
+
+  platform()->RunUntilIdle();
+
+  EXPECT_FALSE(scope.GetExceptionState().HadException());
+}
+
+TEST_F(MediaDevicesTest,
+       SetCaptureHandleConfigCaptureWithOverMaxHandleRejected) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+
+  CaptureHandleConfig input_config;
+  input_config.setHandle(MaxLengthCaptureHandle() + "a");  // Over max length.
+
+  // Note: dispatcher_host().ExpectSetCaptureHandleConfig() not called.
+
+  media_devices->setCaptureHandleConfig(scope.GetScriptState(), &input_config,
+                                        scope.GetExceptionState());
+
+  platform()->RunUntilIdle();
+
+  ASSERT_TRUE(scope.GetExceptionState().HadException());
+  EXPECT_EQ(scope.GetExceptionState().Code(),
+            ToExceptionCode(ESErrorType::kTypeError));
+}
+
+TEST_F(MediaDevicesTest,
+       SetCaptureHandleConfigCaptureWithPermittedOriginsWildcard) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+
+  CaptureHandleConfig input_config;
+  input_config.setPermittedOrigins({"*"});
+
+  // Expected output.
+  auto expected_config = mojom::blink::CaptureHandleConfig::New();
+  expected_config->expose_origin = false;
+  expected_config->capture_handle = "";
+  expected_config->all_origins_permitted = true;
+  expected_config->permitted_origins = {};
+  dispatcher_host().ExpectSetCaptureHandleConfig(std::move(expected_config));
+
+  media_devices->setCaptureHandleConfig(scope.GetScriptState(), &input_config,
+                                        scope.GetExceptionState());
+
+  platform()->RunUntilIdle();
+
+  EXPECT_FALSE(scope.GetExceptionState().HadException());
+}
+
+TEST_F(MediaDevicesTest, SetCaptureHandleConfigCaptureWithPermittedOrigins) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+
+  CaptureHandleConfig input_config;
+  input_config.setPermittedOrigins(
+      {"https://chromium.org", "ftp://chromium.org:1234"});
+
+  // Expected output.
+  auto expected_config = mojom::blink::CaptureHandleConfig::New();
+  expected_config->expose_origin = false;
+  expected_config->capture_handle = "";
+  expected_config->all_origins_permitted = false;
+  expected_config->permitted_origins = {
+      SecurityOrigin::CreateFromString("https://chromium.org"),
+      SecurityOrigin::CreateFromString("ftp://chromium.org:1234")};
+  dispatcher_host().ExpectSetCaptureHandleConfig(std::move(expected_config));
+
+  media_devices->setCaptureHandleConfig(scope.GetScriptState(), &input_config,
+                                        scope.GetExceptionState());
+
+  platform()->RunUntilIdle();
+
+  EXPECT_FALSE(scope.GetExceptionState().HadException());
+}
+
+TEST_F(MediaDevicesTest,
+       SetCaptureHandleConfigCaptureWithWildcardAndSomethingElseRejected) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+
+  CaptureHandleConfig input_config;
+  input_config.setPermittedOrigins({"*", "https://chromium.org"});
+
+  // Note: dispatcher_host().ExpectSetCaptureHandleConfig() not called.
+
+  media_devices->setCaptureHandleConfig(scope.GetScriptState(), &input_config,
+                                        scope.GetExceptionState());
+
+  platform()->RunUntilIdle();
+
+  ASSERT_TRUE(scope.GetExceptionState().HadException());
+  EXPECT_EQ(scope.GetExceptionState().Code(),
+            ToExceptionCode(DOMExceptionCode::kNotSupportedError));
+}
+
+TEST_F(MediaDevicesTest,
+       SetCaptureHandleConfigCaptureWithMalformedOriginRejected) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+
+  CaptureHandleConfig input_config;
+  input_config.setPermittedOrigins({"https://chromium.org:99999"});  // Invalid.
+
+  // Note: dispatcher_host().ExpectSetCaptureHandleConfig() not called.
+
+  media_devices->setCaptureHandleConfig(scope.GetScriptState(), &input_config,
+                                        scope.GetExceptionState());
+
+  platform()->RunUntilIdle();
+
+  ASSERT_TRUE(scope.GetExceptionState().HadException());
+  EXPECT_EQ(scope.GetExceptionState().Code(),
+            ToExceptionCode(DOMExceptionCode::kNotSupportedError));
+}
+
+// Note: This test runs on non-Android too in order to prove that the test
+// itself is sane. (Rather than, for example, an exception always being thrown.)
+TEST_F(MediaDevicesTest, ProduceCropIdUnsupportedOnAndroid) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+  ASSERT_TRUE(media_devices);
+
+  SetBodyContent(R"HTML(
+    <div id='test-div'></div>
+    <iframe id='test-iframe' src="about:blank" />
+  )HTML");
+
+  Document& document = GetDocument();
+  Element* const div = document.getElementById("test-div");
+  const ScriptPromise div_promise = media_devices->ProduceCropTarget(
+      scope.GetScriptState(), div, scope.GetExceptionState());
+  platform()->RunUntilIdle();
+#if BUILDFLAG(IS_ANDROID)
+  EXPECT_TRUE(scope.GetExceptionState().HadException());
+#else  // Non-Android shown to work, proving the test is sane.
+  EXPECT_FALSE(div_promise.IsEmpty());
+  EXPECT_FALSE(scope.GetExceptionState().HadException());
+#endif
+}
+
+#if !BUILDFLAG(IS_ANDROID)
+TEST_F(MediaDevicesTest, ProduceCropIdWithValidElement) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+  ASSERT_TRUE(media_devices);
+
+  SetBodyContent(R"HTML(
+    <div id='test-div'></div>
+    <iframe id='test-iframe' src="about:blank"></iframe>
+    <p id='test-p'>
+      <var id='test-var'>e</var> equals mc<sup id='test-sup'>2</sup>, or is
+      <wbr id='test-wbr'>it mc<sub id='test-sub'>2</sub>?
+      <u id='test-u'>probz</u>.
+    </p>
+    <select id='test-select'></select>
+
+    <svg id='test-svg' width="400" height="110">
+      <rect id='test-rect' width="300" height="100"/>
+    </svg>
+
+    <math id='test-math' xmlns='http://www.w3.org/1998/Math/MathML'>
+    </math>
+  )HTML");
+
+  Document& document = GetDocument();
+  static const std::vector<const char*> kElementIds{
+      "test-div",    "test-iframe", "test-p",    "test-var",
+      "test-sup",    "test-wbr",    "test-sub",  "test-u",
+      "test-select", "test-svg",    "test-rect", "test-math"};
+
+  for (const char* id : kElementIds) {
+    Element* const element = document.getElementById(id);
+    dispatcher_host().SetNextCropId(
+        String(base::GUID::GenerateRandomV4().AsLowercaseString()));
+    const ScriptPromise promise = media_devices->ProduceCropTarget(
+        scope.GetScriptState(), element, scope.GetExceptionState());
+
+    ScriptPromiseTester script_promise_tester(scope.GetScriptState(), promise);
+    script_promise_tester.WaitUntilSettled();
+    EXPECT_TRUE(script_promise_tester.IsFulfilled())
+        << "Failed promise for element id=" << id;
+    EXPECT_FALSE(scope.GetExceptionState().HadException());
+  }
+}
+
+TEST_F(MediaDevicesTest, ProduceCropIdRejectedIfUnsupportedElementType) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+  ASSERT_TRUE(media_devices);
+
+  // Currently if the experimental subtypes feature is not enabled, only
+  // <div> and <iframe> are supported.
+  scoped_feature_list().Reset();
+  SetBodyContent(R"HTML(
+    <button id='test-button'>Click!</button>
+  )HTML");
+
+  Document& document = GetDocument();
+  Element* const button = document.getElementById("test-button");
+  const ScriptPromise button_promise = media_devices->ProduceCropTarget(
+      scope.GetScriptState(), button, scope.GetExceptionState());
+  platform()->RunUntilIdle();
+  EXPECT_TRUE(button_promise.IsEmpty());
+  EXPECT_TRUE(scope.GetExceptionState().HadException());
+  EXPECT_EQ(scope.GetExceptionState().CodeAs<DOMExceptionCode>(),
+            DOMExceptionCode::kNotSupportedError);
+  EXPECT_EQ(scope.GetExceptionState().Message(),
+            String("Support for this subtype is not yet implemented."));
+}
+
+TEST_F(MediaDevicesTest, ProduceCropIdRejectedIfDifferentWindow) {
+  V8TestingScope scope;
+  // Intentionally sets up a MediaDevices object in a different window.
+  auto* media_devices = GetMediaDevices(scope.GetWindow());
+  ASSERT_TRUE(media_devices);
+
+  SetBodyContent(R"HTML(
+    <div id='test-div'></div>
+    <iframe id='test-iframe' src="about:blank" />
+  )HTML");
+
+  Document& document = GetDocument();
+  Element* const div = document.getElementById("test-div");
+  const ScriptPromise element_promise = media_devices->ProduceCropTarget(
+      scope.GetScriptState(), div, scope.GetExceptionState());
+  platform()->RunUntilIdle();
+  EXPECT_TRUE(element_promise.IsEmpty());
+  EXPECT_TRUE(scope.GetExceptionState().HadException());
+  EXPECT_EQ(scope.GetExceptionState().CodeAs<DOMExceptionCode>(),
+            DOMExceptionCode::kNotSupportedError);
+  EXPECT_EQ(
+      scope.GetExceptionState().Message(),
+      String("The Element and the MediaDevices object must be same-window."));
+}
+
+TEST_F(MediaDevicesTest, ProduceCropIdDuplicate) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+  ASSERT_TRUE(media_devices);
+  dispatcher_host().SetNextCropId(
+      String(base::GUID::GenerateRandomV4().AsLowercaseString()));
+
+  SetBodyContent(R"HTML(
+    <div id='test-div'></div>
+  )HTML");
+
+  Document& document = GetDocument();
+  Element* const div = document.getElementById("test-div");
+  const ScriptPromise first_promise = media_devices->ProduceCropTarget(
+      scope.GetScriptState(), div, scope.GetExceptionState());
+  ScriptPromiseTester first_tester(scope.GetScriptState(), first_promise);
+  first_tester.WaitUntilSettled();
+  EXPECT_TRUE(first_tester.IsFulfilled());
+  EXPECT_FALSE(scope.GetExceptionState().HadException());
+
+  // The second call to |produceCropId| should return the same ID.
+  const ScriptPromise second_promise = media_devices->ProduceCropTarget(
+      scope.GetScriptState(), div, scope.GetExceptionState());
+  ScriptPromiseTester second_tester(scope.GetScriptState(), second_promise);
+  second_tester.WaitUntilSettled();
+  EXPECT_TRUE(second_tester.IsFulfilled());
+  EXPECT_FALSE(scope.GetExceptionState().HadException());
+
+  WTF::String first_result, second_result;
+  first_tester.Value().ToString(first_result);
+  second_tester.Value().ToString(second_result);
+  EXPECT_EQ(first_result, second_result);
+}
+
+TEST_F(MediaDevicesTest, ProduceCropIdStringFormat) {
+  V8TestingScope scope;
+  auto* media_devices = GetMediaDevices(*GetDocument().domWindow());
+  ASSERT_TRUE(media_devices);
+
+  SetBodyContent(R"HTML(
+    <div id='test-div'></div>
+  )HTML");
+
+  Document& document = GetDocument();
+  Element* const div = document.getElementById("test-div");
+  dispatcher_host().SetNextCropId(
+      String(base::GUID::GenerateRandomV4().AsLowercaseString()));
+  const ScriptPromise promise = media_devices->ProduceCropTarget(
+      scope.GetScriptState(), div, scope.GetExceptionState());
+  ScriptPromiseTester tester(scope.GetScriptState(), promise);
+  tester.WaitUntilSettled();
+  EXPECT_TRUE(tester.IsFulfilled());
+  EXPECT_FALSE(scope.GetExceptionState().HadException());
+
+  const CropTarget* const crop_target =
+      V8CropTarget::ToImpl(tester.Value().V8Value().As<v8::Object>());
+  const WTF::String& crop_id = crop_target->GetCropId();
+  EXPECT_TRUE(crop_id.ContainsOnlyASCIIOrEmpty());
+  EXPECT_TRUE(base::GUID::ParseLowercase(crop_id.Ascii()).is_valid());
+}
+#endif
 
 }  // namespace blink

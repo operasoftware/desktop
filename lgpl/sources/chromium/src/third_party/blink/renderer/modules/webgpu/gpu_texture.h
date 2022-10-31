@@ -6,13 +6,17 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGPU_GPU_TEXTURE_H_
 
 #include "third_party/blink/renderer/modules/webgpu/dawn_object.h"
+#include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 
 namespace blink {
 
 class ExceptionState;
+class HTMLCanvasElement;
 class GPUTextureDescriptor;
 class GPUTextureView;
 class GPUTextureViewDescriptor;
+class StaticBitmapImage;
+class WebGPUMailboxTexture;
 
 class GPUTexture : public DawnObject<WGPUTexture> {
   DEFINE_WRAPPERTYPEINFO();
@@ -21,20 +25,49 @@ class GPUTexture : public DawnObject<WGPUTexture> {
   static GPUTexture* Create(GPUDevice* device,
                             const GPUTextureDescriptor* webgpu_desc,
                             ExceptionState& exception_state);
-  explicit GPUTexture(GPUDevice* device,
-                      WGPUTexture texture,
-                      WGPUTextureFormat format);
-  ~GPUTexture() override;
+  static GPUTexture* CreateError(GPUDevice* device,
+                                 const WGPUTextureDescriptor* desc);
+  static GPUTexture* FromCanvas(GPUDevice* device,
+                                HTMLCanvasElement* canvas,
+                                WGPUTextureUsage usage,
+                                ExceptionState& exception_state);
+
+  GPUTexture(GPUDevice* device, WGPUTexture texture);
+  GPUTexture(GPUDevice* device,
+             WGPUTextureFormat format,
+             WGPUTextureUsage usage,
+             scoped_refptr<WebGPUMailboxTexture> mailbox_texture);
+
+  GPUTexture(const GPUTexture&) = delete;
+  GPUTexture& operator=(const GPUTexture&) = delete;
 
   // gpu_texture.idl
-  GPUTextureView* createView(const GPUTextureViewDescriptor* webgpu_desc);
+  GPUTextureView* createView(const GPUTextureViewDescriptor* webgpu_desc,
+                             ExceptionState& exception_state);
   void destroy();
+  uint32_t width() const;
+  uint32_t height() const;
+  uint32_t depthOrArrayLayers() const;
+  uint32_t mipLevelCount() const;
+  uint32_t sampleCount() const;
+  String dimension() const;
+  String format() const;
+  uint32_t usage() const;
 
+  WGPUTextureDimension Dimension() { return dimension_; }
   WGPUTextureFormat Format() { return format_; }
+  WGPUTextureUsage Usage() { return usage_; }
 
  private:
+  void setLabelImpl(const String& value) override {
+    std::string utf8_label = value.Utf8();
+    GetProcs().textureSetLabel(GetHandle(), utf8_label.c_str());
+  }
+
+  WGPUTextureDimension dimension_;
   WGPUTextureFormat format_;
-  DISALLOW_COPY_AND_ASSIGN(GPUTexture);
+  WGPUTextureUsage usage_;
+  scoped_refptr<WebGPUMailboxTexture> mailbox_texture_;
 };
 
 }  // namespace blink

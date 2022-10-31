@@ -17,7 +17,7 @@ class LayoutRect;
 // LogicalRect is the position and size of a rect (typically a fragment)
 // relative to the parent in the logical coordinate system.
 // For more information about physical and logical coordinate systems, see:
-// https://chromium.googlesource.com/chromium/src/+/master/third_party/blink/renderer/core/layout/README.md#coordinate-spaces
+// https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/core/layout/README.md#coordinate-spaces
 struct CORE_EXPORT LogicalRect {
   constexpr LogicalRect() = default;
   constexpr LogicalRect(const LogicalOffset& offset, const LogicalSize& size)
@@ -28,11 +28,17 @@ struct CORE_EXPORT LogicalRect {
                         LayoutUnit block_size)
       : offset(inline_offset, block_offset), size(inline_size, block_size) {}
 
-  // For testing only. It's defined in core/testing/core_unit_test_helpers.h.
-  inline LogicalRect(int inline_offset,
-                     int block_offset,
-                     int inline_size,
-                     int block_size);
+  // This is deleted to avoid unwanted lossy conversion from float or double to
+  // LayoutUnit or int. Use explicit LayoutUnit constructor for each parameter
+  // instead.
+  LogicalRect(double, double, double, double) = delete;
+
+  // For testing only. It's defined in core/testing/core_unit_test_helper.h.
+  // 'constexpr' is to let compiler detect usage from production code.
+  constexpr LogicalRect(int inline_offset,
+                        int block_offset,
+                        int inline_size,
+                        int block_size);
 
   constexpr explicit LogicalRect(const LayoutRect& source)
       : LogicalRect({source.X(), source.Y()},
@@ -60,11 +66,12 @@ struct CORE_EXPORT LogicalRect {
     return other.offset == offset && other.size == size;
   }
 
-  LogicalRect operator+(const LogicalOffset&) const {
+  LogicalRect operator+(const LogicalOffset& offset) const {
     return {this->offset + offset, size};
   }
 
   void Unite(const LogicalRect&);
+  void UniteEvenIfEmpty(const LogicalRect&);
 
   String ToString() const;
 };

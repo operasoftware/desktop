@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/threading/thread_checker.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_encoding_parameters.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_send_parameters.h"
@@ -56,15 +57,15 @@ class RTCRtpSender final : public ScriptWrappable {
                String kind,
                MediaStreamTrack*,
                MediaStreamVector streams,
-               bool force_encoded_audio_insertable_streams,
-               bool force_encoded_video_insertable_streams);
+               bool encoded_insertable_streams);
 
   MediaStreamTrack* track();
   RTCDtlsTransport* transport();
   RTCDtlsTransport* rtcpTransport();
   ScriptPromise replaceTrack(ScriptState*, MediaStreamTrack*);
   RTCDTMFSender* dtmf();
-  static RTCRtpCapabilities* getCapabilities(const String& kind);
+  static RTCRtpCapabilities* getCapabilities(ScriptState* state,
+                                             const String& kind);
   RTCRtpSendParameters* getParameters();
   ScriptPromise setParameters(ScriptState*, const RTCRtpSendParameters*);
   ScriptPromise getStats(ScriptState*);
@@ -114,17 +115,21 @@ class RTCRtpSender final : public ScriptWrappable {
   Member<RTCRtpSendParameters> last_returned_parameters_;
   Member<RTCRtpTransceiver> transceiver_;
 
-  // Insertable Streams audio support
-  bool force_encoded_audio_insertable_streams_;
+  // Insertable Streams flag, |True| if the sender has been configured to
+  // use Encoded Insertable Streams.
+  bool encoded_insertable_streams_;
+
+  // Insertable Streams audio support.
   Member<RTCEncodedAudioUnderlyingSource> audio_from_encoder_underlying_source_;
   Member<RTCEncodedAudioUnderlyingSink> audio_to_packetizer_underlying_sink_;
   Member<RTCInsertableStreams> encoded_audio_streams_;
 
-  // Insertable Streams video support
-  bool force_encoded_video_insertable_streams_;
+  // Insertable Streams video support.
   Member<RTCEncodedVideoUnderlyingSource> video_from_encoder_underlying_source_;
   Member<RTCEncodedVideoUnderlyingSink> video_to_packetizer_underlying_sink_;
   Member<RTCInsertableStreams> encoded_video_streams_;
+
+  THREAD_CHECKER(thread_checker_);
 };
 
 }  // namespace blink

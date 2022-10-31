@@ -18,7 +18,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "libavutil/avassert.h"
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "avformat.h"
@@ -86,7 +85,7 @@ static int subfile_open(URLContext *h, const char *filename, int flags,
         return ret;
     c->pos = c->start;
     if ((ret = slave_seek(h)) < 0) {
-        ffurl_close(c->h);
+        ffurl_closep(&c->h);
         return ret;
     }
     return 0;
@@ -95,7 +94,7 @@ static int subfile_open(URLContext *h, const char *filename, int flags,
 static int subfile_close(URLContext *h)
 {
     SubfileContext *c = h->priv_data;
-    return ffurl_close(c->h);
+    return ffurl_closep(&c->h);
 }
 
 static int subfile_read(URLContext *h, unsigned char *buf, int size)

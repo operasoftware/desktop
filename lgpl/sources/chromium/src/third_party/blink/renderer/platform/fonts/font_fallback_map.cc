@@ -15,22 +15,25 @@ void FontFallbackMap::Trace(Visitor* visitor) const {
 }
 
 FontFallbackMap::~FontFallbackMap() {
+  AutoLockForParallelTextShaping guard(lock_);
   InvalidateAll();
 }
 
 scoped_refptr<FontFallbackList> FontFallbackMap::Get(
     const FontDescription& font_description) {
+  AutoLockForParallelTextShaping guard(lock_);
   auto iter = fallback_list_for_description_.find(font_description);
   if (iter != fallback_list_for_description_.end()) {
     DCHECK(iter->value->IsValid());
     return iter->value;
   }
   auto add_result = fallback_list_for_description_.insert(
-      font_description, FontFallbackList::Create(font_selector_));
+      font_description, FontFallbackList::Create(*this));
   return add_result.stored_value->value;
 }
 
 void FontFallbackMap::Remove(const FontDescription& font_description) {
+  AutoLockForParallelTextShaping guard(lock_);
   auto iter = fallback_list_for_description_.find(font_description);
   DCHECK_NE(iter, fallback_list_for_description_.end());
   DCHECK(iter->value->IsValid());
@@ -39,6 +42,7 @@ void FontFallbackMap::Remove(const FontDescription& font_description) {
 }
 
 void FontFallbackMap::InvalidateAll() {
+  lock_.AssertAcquired();
   for (auto& entry : fallback_list_for_description_)
     entry.value->MarkInvalid();
   fallback_list_for_description_.clear();
@@ -46,6 +50,7 @@ void FontFallbackMap::InvalidateAll() {
 
 template <typename Predicate>
 void FontFallbackMap::InvalidateInternal(Predicate predicate) {
+  lock_.AssertAcquired();
   Vector<FontDescription> invalidated;
   for (auto& entry : fallback_list_for_description_) {
     if (predicate(*entry.value)) {
@@ -58,6 +63,7 @@ void FontFallbackMap::InvalidateInternal(Predicate predicate) {
 
 void FontFallbackMap::FontsNeedUpdate(FontSelector*,
                                       FontInvalidationReason reason) {
+  AutoLockForParallelTextShaping guard(lock_);
   switch (reason) {
     case FontInvalidationReason::kFontFaceLoaded:
       InvalidateInternal([](const FontFallbackList& fallback_list) {
@@ -75,6 +81,7 @@ void FontFallbackMap::FontsNeedUpdate(FontSelector*,
 }
 
 void FontFallbackMap::FontCacheInvalidated() {
+  AutoLockForParallelTextShaping guard(lock_);
   InvalidateAll();
 }
 

@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/core/svg/svg_enumeration.h"
 
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/svg/svg_enumeration_map.h"
 
 namespace blink {
@@ -71,22 +72,23 @@ uint16_t SVGEnumeration::MaxInternalEnumValue() const {
   return map_.ValueOfLast();
 }
 
-void SVGEnumeration::Add(SVGPropertyBase*, SVGElement*) {
+void SVGEnumeration::Add(const SVGPropertyBase*, const SVGElement*) {
   NOTREACHED();
 }
 
 void SVGEnumeration::CalculateAnimatedValue(
-    const SVGAnimateElement& animation_element,
+    const SMILAnimationEffectParameters&,
     float percentage,
     unsigned repeat_count,
-    SVGPropertyBase* from,
-    SVGPropertyBase* to,
-    SVGPropertyBase*,
-    SVGElement*) {
+    const SVGPropertyBase* from,
+    const SVGPropertyBase* to,
+    const SVGPropertyBase*,
+    const SVGElement*) {
   NOTREACHED();
 }
 
-float SVGEnumeration::CalculateDistance(SVGPropertyBase*, SVGElement*) {
+float SVGEnumeration::CalculateDistance(const SVGPropertyBase*,
+                                        const SVGElement*) const {
   // No paced animations for enumerations.
   return -1;
 }

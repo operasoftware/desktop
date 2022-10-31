@@ -24,7 +24,6 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -42,7 +41,11 @@ ScopedPagePauser::ScopedPagePauser() {
     return;
 
   SetPaused(true);
-  pause_handle_ = ThreadScheduler::Current()->PauseScheduler();
+  pause_handle_ = ThreadScheduler::Current()->ToMainThreadScheduler()
+                      ? ThreadScheduler::Current()
+                            ->ToMainThreadScheduler()
+                            ->PauseScheduler()
+                      : nullptr;
 }
 
 ScopedPagePauser::~ScopedPagePauser() {

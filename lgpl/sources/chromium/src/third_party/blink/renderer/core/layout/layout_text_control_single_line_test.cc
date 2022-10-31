@@ -23,29 +23,12 @@ TEST_F(LayoutTextControlSingleLineTest, VisualOverflowCleared) {
     </style>
     <input id=input type="text"></input.
   )HTML");
-  auto* input =
-      To<LayoutTextControlSingleLine>(GetLayoutObjectByElementId("input"));
-  if (::features::IsFormControlsRefreshEnabled()) {
-    EXPECT_EQ(LayoutRect(-3, -3, 74, 72), input->SelfVisualOverflowRect());
-  } else {
-#if defined(OS_MACOSX)
-    EXPECT_EQ(LayoutRect(-3, -3, 72, 72), input->SelfVisualOverflowRect());
-#else
-    EXPECT_EQ(LayoutRect(-3, -3, 70, 72), input->SelfVisualOverflowRect());
-#endif
-  }
+  auto* input = To<LayoutBox>(GetLayoutObjectByElementId("input"));
+  EXPECT_EQ(LayoutRect(-3, -3, 74, 72), input->SelfVisualOverflowRect());
   To<Element>(input->GetNode())
       ->setAttribute(html_names::kStyleAttr, "box-shadow: initial");
-  GetDocument().View()->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
-  if (::features::IsFormControlsRefreshEnabled()) {
-    EXPECT_EQ(LayoutRect(0, 0, 58, 56), input->SelfVisualOverflowRect());
-  } else {
-#if defined(OS_MACOSX)
-    EXPECT_EQ(LayoutRect(0, 0, 56, 56), input->SelfVisualOverflowRect());
-#else
-    EXPECT_EQ(LayoutRect(0, 0, 54, 56), input->SelfVisualOverflowRect());
-#endif
-  }
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(LayoutRect(0, 0, 58, 56), input->SelfVisualOverflowRect());
 }
 
 }  // anonymous namespace

@@ -31,13 +31,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_CHARACTER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_CHARACTER_H_
 
+#include <unicode/uchar.h>
+
 #include "base/containers/span.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/text/character_property.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/text/text_run.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/ascii_ctype.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -108,6 +109,15 @@ class PLATFORM_EXPORT Character {
   // http://unicode.org/reports/tr9/#Directional_Formatting_Characters
   static bool IsBidiControl(UChar32 character);
 
+  // Collapsible white space characters defined in CSS:
+  // https://drafts.csswg.org/css-text-3/#collapsible-white-space
+  static bool IsCollapsibleSpace(UChar c) {
+    return c == kSpaceCharacter || c == kNewlineCharacter ||
+           c == kTabulationCharacter || c == kCarriageReturnCharacter;
+  }
+  static bool IsOtherSpaceSeparator(UChar c) {
+    return c == kIdeographicSpaceCharacter;
+  }
   static bool TreatAsSpace(UChar32 c) {
     return c == kSpaceCharacter || c == kTabulationCharacter ||
            c == kNewlineCharacter || c == kNoBreakSpaceCharacter;
@@ -154,6 +164,8 @@ class PLATFORM_EXPORT Character {
   static bool IsModifier(UChar32 c) { return c >= 0x1F3FB && c <= 0x1F3FF; }
   // http://www.unicode.org/reports/tr51/proposed.html#flag-emoji-tag-sequences
   static bool IsEmojiTagSequence(UChar32);
+  static bool IsEmojiComponent(UChar32);
+  static bool IsExtendedPictographic(UChar32);
 
   static inline UChar NormalizeSpaces(UChar character) {
     if (TreatAsSpace(character))
@@ -202,6 +214,8 @@ class PLATFORM_EXPORT Character {
     return (c - (0x1C90 - 0x10D0));
   }
 
+  static bool IsVerticalMathCharacter(UChar32);
+
  private:
   static bool IsCJKIdeographOrSymbolSlow(UChar32);
   static bool IsHangulSlow(UChar32);
@@ -209,4 +223,4 @@ class PLATFORM_EXPORT Character {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_CHARACTER_H_

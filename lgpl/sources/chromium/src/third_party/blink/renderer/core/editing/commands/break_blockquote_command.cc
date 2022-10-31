@@ -40,25 +40,25 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/layout_list_item.h"
 #include "third_party/blink/renderer/core/layout/ng/list/layout_ng_list_item.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 namespace {
 
-base::Optional<int> GetListItemNumber(const Node* node) {
+absl::optional<int> GetListItemNumber(const Node* node) {
   if (!node)
-    return base::nullopt;
+    return absl::nullopt;
   // Because of elements with "display:list-item" has list item number,
   // we use layout object instead of checking |HTMLLIElement|.
   const LayoutObject* const layout_object = node->GetLayoutObject();
   if (!layout_object)
-    return base::nullopt;
+    return absl::nullopt;
   if (layout_object->IsLayoutNGListItem())
-    return ToLayoutNGListItem(layout_object)->Value();
+    return To<LayoutNGListItem>(layout_object)->Value();
   if (layout_object->IsListItem())
-    return ToLayoutListItem(layout_object)->Value();
-  return base::nullopt;
+    return To<LayoutListItem>(layout_object)->Value();
+  return absl::nullopt;
 }
 
 bool IsFirstVisiblePositionInNode(const VisiblePosition& visible_position,

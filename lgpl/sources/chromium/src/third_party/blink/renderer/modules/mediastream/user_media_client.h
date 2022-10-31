@@ -7,9 +7,9 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/threading/thread_checker.h"
+#include "build/build_config.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/common/mediastream/media_devices.h"
 #include "third_party/blink/public/mojom/mediastream/media_devices.mojom-blink-forward.h"
@@ -18,6 +18,7 @@
 #include "third_party/blink/renderer/modules/mediastream/user_media_processor.h"
 #include "third_party/blink/renderer/modules/mediastream/user_media_request.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_deque.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
@@ -36,8 +37,12 @@ class LocalFrame;
 // object. This includes getUserMedia and enumerateDevices. It must be created,
 // called and destroyed on the render thread.
 class MODULES_EXPORT UserMediaClient
-    : public GarbageCollected<UserMediaClient> {
+    : public GarbageCollected<UserMediaClient>,
+      public Supplement<LocalDOMWindow>,
+      public ExecutionContextLifecycleObserver {
  public:
+  static const char kSupplementName[];
+
   // TODO(guidou): Make all constructors private and replace with Create methods
   // that return a std::unique_ptr. This class is intended for instantiation on
   // the free store. https://crbug.com/764293
@@ -47,17 +52,29 @@ class MODULES_EXPORT UserMediaClient
   UserMediaClient(LocalFrame* frame,
                   UserMediaProcessor* user_media_processor,
                   scoped_refptr<base::SingleThreadTaskRunner> task_runner);
-  virtual ~UserMediaClient();
+
+  UserMediaClient(const UserMediaClient&) = delete;
+  UserMediaClient& operator=(const UserMediaClient&) = delete;
+
+  ~UserMediaClient() override;
 
   void RequestUserMedia(UserMediaRequest* user_media_request);
   void CancelUserMediaRequest(UserMediaRequest* user_media_request);
   void ApplyConstraints(blink::ApplyConstraintsRequest* user_media_request);
   void StopTrack(MediaStreamComponent* track);
-  void ContextDestroyed();
+
+  // ExecutionContextLifecycleObserver implementation.
+  void ContextDestroyed() override;
 
   bool IsCapturing();
 
-  void Trace(Visitor*) const;
+  static UserMediaClient* From(LocalDOMWindow*);
+
+#if !BUILDFLAG(IS_ANDROID)
+  void FocusCapturedSurface(const String& label, bool focus);
+#endif
+
+  void Trace(Visitor*) const override;
 
   void SetMediaDevicesDispatcherForTesting(
       mojo::PendingRemote<blink::mojom::blink::MediaDevicesDispatcherHost>
@@ -69,6 +86,10 @@ class MODULES_EXPORT UserMediaClient
     explicit Request(UserMediaRequest* request);
     explicit Request(blink::ApplyConstraintsRequest* request);
     explicit Request(MediaStreamComponent* request);
+
+    Request(const Request&) = delete;
+    Request& operator=(const Request&) = delete;
+
     ~Request();
 
     UserMediaRequest* MoveUserMediaRequest();
@@ -93,8 +114,6 @@ class MODULES_EXPORT UserMediaClient
     Member<UserMediaRequest> user_media_request_;
     Member<blink::ApplyConstraintsRequest> apply_constraints_request_;
     Member<MediaStreamComponent> track_to_stop_;
-
-    DISALLOW_COPY_AND_ASSIGN(Request);
   };
 
   void MaybeProcessNextRequestInfo();
@@ -104,8 +123,7 @@ class MODULES_EXPORT UserMediaClient
 
   blink::mojom::blink::MediaDevicesDispatcherHost* GetMediaDevicesDispatcher();
 
-  // LocalFrame instance associated with the UserMediaController that
-  // own this UserMediaClient.
+  // LocalFrame instance that own this UserMediaClient.
   WeakMember<LocalFrame> frame_;
 
   // |user_media_processor_| is a unique_ptr for testing purposes.
@@ -115,8 +133,7 @@ class MODULES_EXPORT UserMediaClient
   // problems in builds that do not include WebRTC.
   Member<ApplyConstraintsProcessor> apply_constraints_processor_;
 
-  HeapMojoRemote<blink::mojom::blink::MediaDevicesDispatcherHost,
-                 HeapMojoWrapperMode::kWithoutContextObserver>
+  HeapMojoRemote<blink::mojom::blink::MediaDevicesDispatcherHost>
       media_devices_dispatcher_;
 
   // UserMedia requests are processed sequentially. |is_processing_request_|
@@ -127,8 +144,6 @@ class MODULES_EXPORT UserMediaClient
   HeapDeque<Member<Request>> pending_request_infos_;
 
   THREAD_CHECKER(thread_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(UserMediaClient);
 };
 
 }  // namespace blink

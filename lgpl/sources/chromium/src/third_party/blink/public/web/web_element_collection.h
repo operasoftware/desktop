@@ -35,10 +35,6 @@
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_private_ptr.h"
 
-#if INSIDE_BLINK
-#include "third_party/blink/renderer/platform/heap/handle.h"  // nogncheck
-#endif
-
 namespace blink {
 
 class HTMLCollection;
@@ -77,4 +73,4 @@ class WebElementCollection {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_ELEMENT_COLLECTION_H_

@@ -19,15 +19,23 @@ namespace blink {
 class CORE_EXPORT HTMLParserMetrics {
  public:
   HTMLParserMetrics(int64_t source_id, ukm::UkmRecorder*);
+  HTMLParserMetrics(const HTMLParserMetrics&) = delete;
+  HTMLParserMetrics& operator=(const HTMLParserMetrics&) = delete;
   ~HTMLParserMetrics() = default;
 
-  void AddChunk(base::TimeDelta elapsed_time, unsigned tokens_parsed);
+  void AddChunk(base::TimeDelta elapsed_time,
+                unsigned tokens_parsed,
+                base::TimeDelta time_in_next_token);
 
   void AddYieldInterval(base::TimeDelta elapsed_time);
+
+  void AddInput(unsigned length);
 
   void ReportMetricsAtParseEnd();
 
  private:
+  void ReportUMAs();
+
   // UKM System data.
   const int64_t source_id_;
   ukm::UkmRecorder* const recorder_;
@@ -41,6 +49,9 @@ class CORE_EXPORT HTMLParserMetrics {
   unsigned min_tokens_parsed_ = UINT_MAX;
   unsigned max_tokens_parsed_ = 0;
 
+  // Total time spent in Tokenizer::NextToken().
+  base::TimeDelta accumulated_time_in_next_token_;
+
   // Yield count may not equal chunk count - 1. That is, there is not
   // always one yield between every pair of chunks.
   unsigned yield_count_ = 0;
@@ -48,7 +59,9 @@ class CORE_EXPORT HTMLParserMetrics {
   base::TimeDelta min_yield_interval_ = base::TimeDelta::Max();
   base::TimeDelta max_yield_interval_;  // Constructed with 0 value
 
-  DISALLOW_COPY_AND_ASSIGN(HTMLParserMetrics);
+  // Track total number of characters parsed in one instantiation of the
+  // parser.
+  unsigned input_character_count_ = 0;
 };
 
 }  // namespace blink

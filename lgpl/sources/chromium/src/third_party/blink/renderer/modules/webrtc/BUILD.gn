@@ -14,4 +14,9 @@ blink_modules_sources("webrtc") {
     "webrtc_audio_renderer.cc",
     "webrtc_audio_renderer.h",
   ]
+
+  deps = [ "//third_party/blink/renderer/modules/mediastream" ]
+
+  allow_circular_includes_from =
+      [ "//third_party/blink/renderer/modules/mediastream" ]
 }

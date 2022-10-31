@@ -5,8 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_CASCADE_INTERPOLATIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_CASCADE_INTERPOLATIONS_H_
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/animation/interpolation.h"
 #include "third_party/blink/renderer/core/animation/property_handle.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/resolver/cascade_origin.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
@@ -25,14 +27,14 @@ inline uint32_t EncodeInterpolationPosition(CSSPropertyID id,
   static_assert(kIntLastCSSProperty < std::numeric_limits<uint16_t>::max(),
                 "Enough bits for CSSPropertyID");
   DCHECK_NE(id, CSSPropertyID::kInvalid);
-  DCHECK_LE(id, lastCSSProperty);
+  DCHECK_LE(id, kLastCSSProperty);
   return (static_cast<uint32_t>(!is_presentation_attribute) << 24) |
          (static_cast<uint32_t>(index & 0xFF) << 16) |
          (static_cast<uint32_t>(id) & 0xFFFF);
 }
 
 inline CSSPropertyID DecodeInterpolationPropertyID(uint32_t position) {
-  return convertToCSSPropertyID(position & 0xFFFF);
+  return ConvertToCSSPropertyID(position & 0xFFFF);
 }
 
 inline uint8_t DecodeInterpolationIndex(uint32_t position) {

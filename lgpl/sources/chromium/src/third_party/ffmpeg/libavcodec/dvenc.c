@@ -30,15 +30,18 @@
 
 #include "libavutil/attributes.h"
 #include "libavutil/internal.h"
+#include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
+#include "libavutil/thread.h"
 
 #include "avcodec.h"
+#include "codec_internal.h"
 #include "dv.h"
 #include "dv_profile_internal.h"
 #include "dv_tablegen.h"
+#include "encode.h"
 #include "fdctdsp.h"
-#include "internal.h"
 #include "mathops.h"
 #include "me_cmp.h"
 #include "pixblockdsp.h"
@@ -67,8 +70,6 @@ static av_cold int dvvideo_encode_init(AVCodecContext *avctx)
         return ret;
     }
 
-    dv_vlc_map_tableinit();
-
     memset(&fdsp,0, sizeof(fdsp));
     memset(&mecc,0, sizeof(mecc));
     memset(&pdsp,0, sizeof(pdsp));
@@ -82,6 +83,13 @@ static av_cold int dvvideo_encode_init(AVCodecContext *avctx)
 
     s->fdct[0]    = fdsp.fdct;
     s->fdct[1]    = fdsp.fdct248;
+
+#if !CONFIG_HARDCODED_TABLES
+    {
+        static AVOnce init_static_once = AV_ONCE_INIT;
+        ff_thread_once(&init_static_once, dv_vlc_map_tableinit);
+    }
+#endif
 
     return ff_dvvideo_init(avctx);
 }
@@ -215,8 +223,8 @@ static av_always_inline int dv_guess_dct_mode(DVVideoContext *s, uint8_t *data,
     if (s->avctx->flags & AV_CODEC_FLAG_INTERLACED_DCT) {
         int ps = s->ildct_cmp(NULL, data, NULL, linesize, 8) - 400;
         if (ps > 0) {
-            int is = s->ildct_cmp(NULL, data,            NULL, linesize << 1, 4) +
-                     s->ildct_cmp(NULL, data + linesize, NULL, linesize << 1, 4);
+            int is = s->ildct_cmp(NULL, data,            NULL, linesize * 2, 4) +
+                     s->ildct_cmp(NULL, data + linesize, NULL, linesize * 2, 4);
             return ps > is;
         }
     }
@@ -317,9 +325,8 @@ static const int dv100_qstep_inv[16] = {
         65536,  65536,  32768,  21845,  16384,  13107,  10923,  9362,  8192,  4096,  3641,  3277,  2979,  2731,  2341,  1260,
 };
 
-/* DV100 weights are pre-zigzagged, inverted and multiplied by 2^(dv100_weight_shift)
+/* DV100 weights are pre-zigzagged, inverted and multiplied by 2^16
    (in DV100 the AC components are divided by the spec weights) */
-static const int dv100_weight_shift = 16;
 static const int dv_weight_1080[2][64] = {
     { 8192, 65536, 65536, 61681, 61681, 61681, 58254, 58254,
       58254, 58254, 58254, 58254, 55188, 58254, 58254, 55188,
@@ -511,7 +518,7 @@ static av_always_inline int dv_init_enc_block(EncBlockInfo* bi, uint8_t *data, i
 
     if (data) {
         if (DV_PROFILE_IS_HD(s->sys)) {
-            s->get_pixels(blk, data, linesize << bi->dct_mode);
+            s->get_pixels(blk, data, linesize * (1 << bi->dct_mode));
             s->fdct[0](blk);
         } else {
             bi->dct_mode = dv_guess_dct_mode(s, data, linesize);
@@ -860,7 +867,7 @@ static int dv_encode_video_segment(AVCodecContext *avctx, void *arg)
 
         qnos[mb_index] = DV_PROFILE_IS_HD(s->sys) ? 1 : 15;
 
-        y_ptr    = s->frame->data[0] + ((mb_y * s->frame->linesize[0] + mb_x) << 3);
+        y_ptr    = s->frame->data[0] + (mb_y * s->frame->linesize[0] + mb_x) * 8;
         linesize = s->frame->linesize[0];
 
         if (s->sys->height == 1080 && mb_y < 134)
@@ -874,12 +881,12 @@ static int dv_encode_video_segment(AVCodecContext *avctx, void *arg)
         if ((s->sys->pix_fmt == AV_PIX_FMT_YUV420P)                      ||
             (s->sys->pix_fmt == AV_PIX_FMT_YUV411P && mb_x >= (704 / 8)) ||
             (s->sys->height >= 720 && mb_y != 134)) {
-            y_stride = s->frame->linesize[0] << (3*!enc_blk->dct_mode);
+            y_stride = s->frame->linesize[0] * (1 << (3*!enc_blk->dct_mode));
         } else {
             y_stride = 16;
         }
         y_ptr    = s->frame->data[0] +
-                   ((mb_y * s->frame->linesize[0] + mb_x) << 3);
+                   (mb_y * s->frame->linesize[0] + mb_x) * 8;
         linesize = s->frame->linesize[0];
 
         if (s->sys->video_stype == 4) { /* SD 422 */
@@ -898,17 +905,17 @@ static int dv_encode_video_segment(AVCodecContext *avctx, void *arg)
         enc_blk += 4;
 
         /* initializing chrominance blocks */
-        c_offset = (((mb_y >>  (s->sys->pix_fmt == AV_PIX_FMT_YUV420P)) * s->frame->linesize[1] +
-                     (mb_x >> ((s->sys->pix_fmt == AV_PIX_FMT_YUV411P) ? 2 : 1))) << 3);
+        c_offset = ((mb_y >>  (s->sys->pix_fmt == AV_PIX_FMT_YUV420P)) * s->frame->linesize[1] +
+                    (mb_x >> ((s->sys->pix_fmt == AV_PIX_FMT_YUV411P) ? 2 : 1))) * 8;
         for (j = 2; j; j--) {
             uint8_t *c_ptr = s->frame->data[j] + c_offset;
             linesize = s->frame->linesize[j];
-            y_stride = (mb_y == 134) ? 8 : (s->frame->linesize[j] << (3*!enc_blk->dct_mode));
+            y_stride = (mb_y == 134) ? 8 : (s->frame->linesize[j] * (1 << (3*!enc_blk->dct_mode)));
             if (s->sys->pix_fmt == AV_PIX_FMT_YUV411P && mb_x >= (704 / 8)) {
                 uint8_t *d;
                 uint8_t *b = scratch;
                 for (i = 0; i < 8; i++) {
-                    d      = c_ptr + (linesize << 3);
+                    d      = c_ptr + linesize * 8;
                     b[0]   = c_ptr[0];
                     b[1]   = c_ptr[1];
                     b[2]   = c_ptr[2];
@@ -976,16 +983,8 @@ static int dv_encode_video_segment(AVCodecContext *avctx, void *arg)
     }
 
     for (j = 0; j < 5 * s->sys->bpm; j++) {
-        int pos;
-        int size = pbs[j].size_in_bits >> 3;
         flush_put_bits(&pbs[j]);
-        pos = put_bits_count(&pbs[j]) >> 3;
-        if (pos > size) {
-            av_log(avctx, AV_LOG_ERROR,
-                   "bitstream written beyond buffer size\n");
-            return -1;
-        }
-        memset(pbs[j].buf + pos, 0xff, size - pos);
+        memset(put_bits_ptr(&pbs[j]), 0xff, put_bytes_left(&pbs[j], 0));
     }
 
     if (DV_PROFILE_IS_HD(s->sys))
@@ -1172,17 +1171,13 @@ static int dvvideo_encode_frame(AVCodecContext *c, AVPacket *pkt,
     DVVideoContext *s = c->priv_data;
     int ret;
 
-    if ((ret = ff_alloc_packet2(c, pkt, s->sys->frame_size, 0)) < 0)
+    if ((ret = ff_get_encode_buffer(c, pkt, s->sys->frame_size, 0)) < 0)
         return ret;
+    /* Fixme: Only zero the part that is not overwritten later. */
+    memset(pkt->data, 0, pkt->size);
 
     c->pix_fmt                = s->sys->pix_fmt;
     s->frame                  = frame;
-#if FF_API_CODED_FRAME
-FF_DISABLE_DEPRECATION_WARNINGS
-    c->coded_frame->key_frame = 1;
-    c->coded_frame->pict_type = AV_PICTURE_TYPE_I;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
     s->buf = pkt->data;
 
     dv_format_frame(s, pkt->data);
@@ -1192,7 +1187,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
     emms_c();
 
-    pkt->flags |= AV_PKT_FLAG_KEY;
     *got_packet = 1;
 
     return 0;
@@ -1212,18 +1206,19 @@ static const AVClass dvvideo_encode_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-AVCodec ff_dvvideo_encoder = {
-    .name           = "dvvideo",
-    .long_name      = NULL_IF_CONFIG_SMALL("DV (Digital Video)"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_DVVIDEO,
+const FFCodec ff_dvvideo_encoder = {
+    .p.name         = "dvvideo",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("DV (Digital Video)"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_DVVIDEO,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS |
+                      AV_CODEC_CAP_SLICE_THREADS,
     .priv_data_size = sizeof(DVVideoContext),
     .init           = dvvideo_encode_init,
-    .encode2        = dvvideo_encode_frame,
-    .capabilities   = AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS | AV_CODEC_CAP_INTRA_ONLY,
-    .pix_fmts       = (const enum AVPixelFormat[]) {
+    FF_CODEC_ENCODE_CB(dvvideo_encode_frame),
+    .p.pix_fmts     = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_YUV411P, AV_PIX_FMT_YUV422P,
         AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE
     },
-    .priv_class     = &dvvideo_encode_class,
+    .p.priv_class   = &dvvideo_encode_class,
 };

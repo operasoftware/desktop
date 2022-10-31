@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/dom/document_statistics_collector.h"
 
+#include "base/trace_event/trace_event.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_distillability.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
@@ -191,7 +192,7 @@ WebDistillabilityFeatures DocumentStatisticsCollector::CollectStatistics(
 
   WebDistillabilityFeatures features = WebDistillabilityFeatures();
 
-  if (!document.GetFrame() || !document.GetFrame()->IsMainFrame())
+  if (!document.GetFrame() || !document.GetFrame()->IsOutermostMainFrame())
     return features;
 
   DCHECK(document.HasFinishedParsing());

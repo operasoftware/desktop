@@ -7,6 +7,8 @@
 #include "services/network/public/cpp/web_sandbox_flags.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
 #include "third_party/blink/public/common/security_context/insecure_request_policy.h"
+#include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink.h"
+#include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
 #include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -19,13 +21,14 @@
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/report.h"
 #include "third_party/blink/renderer/core/frame/reporting_context.h"
+#include "third_party/blink/renderer/core/inspector/inspector_audits_issue.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/ping_loader.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
+#include "third_party/blink/renderer/core/workers/worklet_global_scope.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
@@ -60,33 +63,35 @@ void ExecutionContextCSPDelegate::SetSandboxFlags(
   WorkerOrWorkletGlobalScope* worklet_or_worker =
       DynamicTo<WorkerOrWorkletGlobalScope>(execution_context_.Get());
   if (worklet_or_worker) {
-    worklet_or_worker->ApplySandboxFlags(mask);
+    worklet_or_worker->SetSandboxFlags(mask);
   }
   // Just check that all the sandbox flags that are set by CSP have
   // already been set on the security context. Meta tags can't set them
   // and we should have already constructed the document with the correct
   // sandbox flags from CSP already.
   network::mojom::blink::WebSandboxFlags flags =
-      GetSecurityContext().GetSandboxFlags();
+      execution_context_->GetSandboxFlags();
   CHECK_EQ(flags | mask, flags);
 }
 
 void ExecutionContextCSPDelegate::SetRequireTrustedTypes() {
-  GetSecurityContext().SetRequireTrustedTypes();
+  execution_context_->SetRequireTrustedTypes();
 }
 
 void ExecutionContextCSPDelegate::AddInsecureRequestPolicy(
     mojom::blink::InsecureRequestPolicy policy) {
   SecurityContext& security_context = GetSecurityContext();
 
-  Document* document = GetDocument();
+  auto* window = DynamicTo<LocalDOMWindow>(execution_context_.Get());
 
   // Step 2. Set settings’s insecure requests policy to Upgrade. [spec text]
   // Upgrade Insecure Requests: Update the policy.
   security_context.SetInsecureRequestPolicy(
       security_context.GetInsecureRequestPolicy() | policy);
-  if (document)
-    document->DidEnforceInsecureRequestPolicy();
+  if (window && window->GetFrame()) {
+    window->GetFrame()->GetLocalFrameHostRemote().EnforceInsecureRequestPolicy(
+        security_context.GetInsecureRequestPolicy());
+  }
 
   // Upgrade Insecure Requests: Update the set of insecure URLs to upgrade.
   if ((policy &
@@ -99,14 +104,18 @@ void ExecutionContextCSPDelegate::AddInsecureRequestPolicy(
     // Step 4. Insert tuple into settings’s upgrade insecure navigations set.
     // [spec text]
     Count(WebFeature::kUpgradeInsecureRequestsEnabled);
-    // We don't add the hash if |document| is null, to prevent
+    // We don't add the hash if |window| is null, to prevent
     // WorkerGlobalScope::Url() before it's ready. https://crbug.com/861564
     // This should be safe, because the insecure navigations set is not used
     // in non-Document contexts.
-    if (document && !Url().Host().IsEmpty()) {
+    if (window && !Url().Host().IsEmpty()) {
       uint32_t hash = Url().Host().Impl()->GetHash();
       security_context.AddInsecureNavigationUpgrade(hash);
-      document->DidEnforceInsecureNavigationsSet();
+      if (auto* frame = window->GetFrame()) {
+        frame->GetLocalFrameHostRemote().EnforceInsecureNavigationsSet(
+            SecurityContext::SerializeInsecureNavigationSet(
+                GetSecurityContext().InsecureNavigationsToUpgrade()));
+      }
     }
   }
 }
@@ -116,16 +125,14 @@ ExecutionContextCSPDelegate::GetSourceLocation() {
   return SourceLocation::Capture(execution_context_);
 }
 
-base::Optional<uint16_t> ExecutionContextCSPDelegate::GetStatusCode() {
-  base::Optional<uint16_t> status_code;
+absl::optional<uint16_t> ExecutionContextCSPDelegate::GetStatusCode() {
+  absl::optional<uint16_t> status_code;
 
   // TODO(mkwst): We only have status code information for Documents. It would
   // be nice to get them for Workers as well.
   Document* document = GetDocument();
-  if (document && !SecurityOrigin::IsSecure(document->Url()) &&
-      document->Loader()) {
+  if (document && document->Loader())
     status_code = document->Loader()->GetResponse().HttpStatusCode();
-  }
 
   return status_code;
 }
@@ -159,17 +166,16 @@ void ExecutionContextCSPDelegate::PostViolationReport(
     const Vector<String>& report_endpoints,
     bool use_reporting_api) {
   DCHECK_EQ(is_frame_ancestors_violation,
-            ContentSecurityPolicy::DirectiveType::kFrameAncestors ==
+            network::mojom::blink::CSPDirectiveName::FrameAncestors ==
                 ContentSecurityPolicy::GetDirectiveType(
                     violation_data.effectiveDirective()));
 
-  // TODO(crbug/929370): Support POSTing violation reports from a Worker.
-  Document* document = GetDocument();
-  if (!document)
-    return;
-
-  LocalFrame* frame = document->GetFrame();
-  if (!frame)
+  // We do not support reporting for worklets, since they don't have a
+  // ResourceFetcher.
+  //
+  // TODO(https://crbug.com/1222576): Send CSP reports for worklets using the
+  // owner document's ResourceFetcher.
+  if (DynamicTo<WorkletGlobalScope>(execution_context_.Get()))
     return;
 
   scoped_refptr<EncodedFormData> report =
@@ -178,8 +184,11 @@ void ExecutionContextCSPDelegate::PostViolationReport(
   // Construct and route the report to the ReportingContext, to be observed
   // by any ReportingObservers.
   auto* body = MakeGarbageCollected<CSPViolationReportBody>(violation_data);
+  String url_sending_report = is_frame_ancestors_violation
+                                  ? violation_data.documentURI()
+                                  : Url().GetString();
   Report* observed_report = MakeGarbageCollected<Report>(
-      ReportType::kCSPViolation, Url().GetString(), body);
+      ReportType::kCSPViolation, url_sending_report, body);
   ReportingContext::From(execution_context_.Get())
       ->QueueReport(observed_report,
                     use_reporting_api ? report_endpoints : Vector<String>());
@@ -188,24 +197,8 @@ void ExecutionContextCSPDelegate::PostViolationReport(
     return;
 
   for (const auto& report_endpoint : report_endpoints) {
-    // Use the frame's document to complete the endpoint URL, overriding its URL
-    // with the blocked document's URL.
-    // https://w3c.github.io/webappsec-csp/#report-violation
-    // Step 3.4.2.1. Let endpoint be the result of executing the URL parser with
-    // token as the input, and violation’s url as the base URL. [spec text]
-    KURL url = is_frame_ancestors_violation
-                   ? document->CompleteURLWithOverride(
-                         report_endpoint, KURL(violation_data.blockedURI()))
-                   // We use the FallbackBaseURL to ensure that we don't
-                   // respect base elements when determining the report
-                   // endpoint URL.
-                   // Note: According to Step 3.4.2.1 mentioned above, the base
-                   // URL is "violation’s url" which should be violation's
-                   // global object's URL. So using FallbackBaseURL() might be
-                   // inconsistent.
-                   : document->CompleteURLWithOverride(
-                         report_endpoint, document->FallbackBaseURL());
-    PingLoader::SendViolationReport(frame, url, report);
+    PingLoader::SendViolationReport(execution_context_.Get(),
+                                    KURL(report_endpoint), report);
   }
 }
 
@@ -218,8 +211,17 @@ void ExecutionContextCSPDelegate::AddConsoleMessage(
   execution_context_->AddConsoleMessage(console_message);
 }
 
+void ExecutionContextCSPDelegate::AddInspectorIssue(AuditsIssue issue) {
+  execution_context_->AddInspectorIssue(std::move(issue));
+}
+
 void ExecutionContextCSPDelegate::DisableEval(const String& error_message) {
   execution_context_->DisableEval(error_message);
+}
+
+void ExecutionContextCSPDelegate::SetWasmEvalErrorMessage(
+    const String& error_message) {
+  execution_context_->SetWasmEvalErrorMessage(error_message);
 }
 
 void ExecutionContextCSPDelegate::ReportBlockedScriptExecutionToInspector(
@@ -237,8 +239,21 @@ void ExecutionContextCSPDelegate::DidAddContentSecurityPolicies(
   if (!frame)
     return;
 
-  frame->GetLocalFrameHostRemote().DidAddContentSecurityPolicies(
-      std::move(policies));
+  // Record what source was used to find main frame CSP. Do not record
+  // this for fence frame roots since they will never become an
+  // outermost main frame, but we do wish to record this for portals.
+  if (frame->IsMainFrame() && !frame->IsInFencedFrameTree()) {
+    for (const auto& policy : policies) {
+      switch (policy->header->source) {
+        case network::mojom::ContentSecurityPolicySource::kHTTP:
+          Count(WebFeature::kMainFrameCSPViaHTTP);
+          break;
+        case network::mojom::ContentSecurityPolicySource::kMeta:
+          Count(WebFeature::kMainFrameCSPViaMeta);
+          break;
+      }
+    }
+  }
 }
 
 SecurityContext& ExecutionContextCSPDelegate::GetSecurityContext() {
@@ -273,11 +288,11 @@ void ExecutionContextCSPDelegate::DispatchViolationEventInternal(
 
   if (auto* document = GetDocument()) {
     if (element && element->isConnected() && element->GetDocument() == document)
-      element->EnqueueEvent(event, TaskType::kInternalDefault);
+      element->DispatchEvent(event);
     else
-      document->EnqueueEvent(event, TaskType::kInternalDefault);
+      document->DispatchEvent(event);
   } else if (auto* scope = DynamicTo<WorkerGlobalScope>(*execution_context_)) {
-    scope->EnqueueEvent(event, TaskType::kInternalDefault);
+    scope->DispatchEvent(event);
   }
 }
 
