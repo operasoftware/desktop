@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,6 +61,9 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
   out->web_security_enabled = data.web_security_enabled();
   out->loads_images_automatically = data.loads_images_automatically();
   out->images_enabled = data.images_enabled();
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  out->gpu_shader_css_filters_enabled = data.gpu_shader_css_filters_enabled();
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
   out->plugins_enabled = data.plugins_enabled();
   out->dom_paste_enabled = data.dom_paste_enabled();
   out->shrinks_standalone_images_to_fit =
@@ -69,7 +72,6 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
   out->allow_scripts_to_close_windows = data.allow_scripts_to_close_windows();
   out->remote_fonts_enabled = data.remote_fonts_enabled();
   out->javascript_can_access_clipboard = data.javascript_can_access_clipboard();
-  out->xslt_enabled = data.xslt_enabled();
   out->dns_prefetching_enabled = data.dns_prefetching_enabled();
   out->data_saver_enabled = data.data_saver_enabled();
   out->local_storage_enabled = data.local_storage_enabled();

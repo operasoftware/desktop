@@ -1,10 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/paint/pre_paint_tree_walk.h"
 
-#include "base/stl_util.h"
+#include "base/types/optional_util.h"
 #include "third_party/blink/renderer/core/dom/document_lifecycle.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -85,6 +85,7 @@ void PrePaintTreeWalk::WalkTree(LocalFrameView& root_frame_view) {
     if (auto* client = root_frame_view.GetChromeClient())
       client->InvalidateContainer();
   }
+  root_frame_view.UpdateAllPendingTransforms();
 }
 
 void PrePaintTreeWalk::Walk(LocalFrameView& frame_view,
@@ -448,9 +449,8 @@ void PrePaintTreeWalk::UpdateContextForOOFContainer(
   // contained by the object participates in the current block fragmentation
   // context. If we're not participating in block fragmentation, the containing
   // fragment of an OOF fragment is always simply the parent.
-  const LayoutBox* box = DynamicTo<LayoutBox>(&object);
   if (!context.current_container.IsInFragmentationContext() ||
-      (box && box->GetNGPaginationBreakability() == LayoutBox::kForbidBreaks)) {
+      (fragment && fragment->IsMonolithic())) {
     context.current_container.fragment = fragment;
   }
 
@@ -501,7 +501,7 @@ void PrePaintTreeWalk::WalkInternal(const LayoutObject& object,
 
   if (paint_invalidator_.InvalidatePaint(
           object, pre_paint_info,
-          base::OptionalOrNullptr(context.tree_builder_context),
+          base::OptionalToPtr(context.tree_builder_context),
           paint_invalidator_context))
     needs_invalidate_chrome_client_ = true;
 
@@ -583,7 +583,7 @@ void PrePaintTreeWalk::WalkMissedChildren(
     const LayoutObject& ancestor,
     const NGPhysicalBoxFragment& fragment,
     const PrePaintTreeWalkContext& context) {
-  if (pending_missables_.IsEmpty())
+  if (pending_missables_.empty())
     return;
 
   for (const NGLink& child : fragment.Children()) {
@@ -690,19 +690,19 @@ void PrePaintTreeWalk::WalkFragmentationContextRootChildren(
       containing_block_context = &fragment_context.current;
       containing_block_context->paint_offset += child.offset;
 
-      if (object.IsLayoutView()) {
-        // Out-of-flow positioned descendants are positioned relatively to this
-        // fragmentainer (page).
-        fragment_context.absolute_position = *containing_block_context;
-        fragment_context.fixed_position = *containing_block_context;
-      }
-
       // Keep track of the paint offset at the fragmentainer. This is needed
       // when entering OOF descendants. OOFs have the nearest fragmentainer as
       // their containing block, so when entering them during LayoutObject tree
       // traversal, we have to compensate for this.
       containing_block_context->paint_offset_for_oof_in_fragmentainer =
           containing_block_context->paint_offset;
+
+      if (object.IsLayoutView()) {
+        // Out-of-flow positioned descendants are positioned relatively to this
+        // fragmentainer (page).
+        fragment_context.absolute_position = *containing_block_context;
+        fragment_context.fixed_position = *containing_block_context;
+      }
     }
 
     WalkChildren(actual_parent, box_fragment, fragmentainer_context);

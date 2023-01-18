@@ -25,6 +25,7 @@
 #include "third_party/blink/public/platform/file_path_conversion.h"
 #include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
@@ -63,7 +64,7 @@ Vector<String> CollectAcceptTypes(const HTMLInputElement& input) {
   Vector<String> extensions = input.AcceptFileExtensions();
 
   Vector<String> accept_types;
-  accept_types.ReserveCapacity(mime_types.size() + extensions.size());
+  accept_types.reserve(mime_types.size() + extensions.size());
   accept_types.AppendVector(mime_types);
   accept_types.AppendVector(extensions);
   return accept_types;
@@ -146,7 +147,7 @@ void FileInputType::AppendToFormData(FormData& form_data) const {
 }
 
 bool FileInputType::ValueMissing(const String& value) const {
-  return GetElement().IsRequired() && value.IsEmpty();
+  return GetElement().IsRequired() && value.empty();
 }
 
 String FileInputType::ValueMissingText() const {
@@ -212,10 +213,11 @@ void FileInputType::OpenPopupView() {
     auto iter = std::find_if(
         elements.begin(), elements.end(), [&body](Element* element) {
           return element && element != body &&
-                 !element->VisibleBoundsInVisualViewport().IsEmpty();
+                 !element->VisibleBoundsInLocalRoot().IsEmpty();
         });
     if (iter != elements.end()) {
-      params.triggering_rect = (*iter)->VisibleBoundsInVisualViewport();
+      params.triggering_rect = chrome_client->LocalRootToScreenDIPs(
+          (*iter)->VisibleBoundsInLocalRoot(), body->GetDocument().View());
     }
 
     UseCounter::Count(
@@ -254,7 +256,7 @@ bool FileInputType::CanSetValue(const String& value) {
   // the value attribute isn't applicable to the file upload control at all, but
   // for now we are keeping this behavior to avoid breaking existing websites
   // that may be relying on this.
-  return value.IsEmpty();
+  return value.empty();
 }
 
 String FileInputType::ValueInFilenameValueMode() const {
@@ -443,7 +445,7 @@ void FileInputType::FilesChosen(FileChooserFileInfoList files,
     // Drop files of which names can not be converted to WTF String. We
     // can't expose such files via File API.
     if (files[i]->is_native_file() &&
-        FilePathToString(files[i]->get_native_file()->file_path).IsEmpty()) {
+        FilePathToString(files[i]->get_native_file()->file_path).empty()) {
       files.EraseAt(i);
       // Do not increment |i|.
       continue;
@@ -473,7 +475,7 @@ void FileInputType::SetFilesFromDirectory(const String& path) {
 }
 
 void FileInputType::SetFilesFromPaths(const Vector<String>& paths) {
-  if (paths.IsEmpty())
+  if (paths.empty())
     return;
 
   HTMLInputElement& input = GetElement();
@@ -498,7 +500,7 @@ void FileInputType::SetFilesFromPaths(const Vector<String>& paths) {
 bool FileInputType::ReceiveDroppedFiles(const DragData* drag_data) {
   Vector<String> paths;
   drag_data->AsFilePaths(paths);
-  if (paths.IsEmpty())
+  if (paths.empty())
     return false;
 
   if (!GetElement().FastHasAttribute(html_names::kWebkitdirectoryAttr)) {

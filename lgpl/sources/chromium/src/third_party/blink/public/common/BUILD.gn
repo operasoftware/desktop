@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,6 +10,14 @@ import("//third_party/blink/public/public_features.gni")
 import("//third_party/blink/renderer/build/scripts/scripts.gni")
 import("//third_party/protobuf/proto_library.gni")
 import("//third_party/webrtc/webrtc.gni")
+
+if (opera_feature_blink_gpu_shader_css_filter) {
+  import("//cc/cc.gni")
+
+  assert(
+      opera_feature_cc_gpu_shader_filters,
+      "Blink gpu shader filters require |opera_feature_cc_gpu_shader_filters| to be turned on")
+}
 
 if (is_android) {
   import("//build/config/android/rules.gni")
@@ -79,6 +87,7 @@ buildflag_header("buildflags") {
   flags = [
     "RTC_USE_H264=$rtc_use_h264",
     "ENABLE_JXL_DECODER=$enable_jxl_decoder",
+    "OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER=$opera_feature_blink_gpu_shader_css_filter",
   ]
 }
 
@@ -135,7 +144,6 @@ source_set("headers") {
     "fetch/fetch_api_request_headers_map.h",
     "fetch/fetch_api_request_headers_mojom_traits.h",
     "forcedark/forcedark_switches.h",
-    "frame/event_page_show_persisted.h",
     "frame/fenced_frame_permissions_policies.h",
     "frame/fenced_frame_sandbox_flags.h",
     "frame/frame_ad_evidence.h",
@@ -240,7 +248,6 @@ source_set("headers") {
     "page/drag_mojom_traits.h",
     "page/drag_operation.h",
     "page/launching_process_state.h",
-    "page/page_lifecycle_state_updater.h",
     "page/page_zoom.h",
     "page_state/page_state.h",
     "page_state/page_state_serialization.h",
@@ -293,6 +300,7 @@ source_set("headers") {
   sources += get_target_outputs(":make_generated_permissions_policy_helper")
 
   public_deps = [
+    ":buildflags",
     ":make_generated_origin_trial_feature",
     ":make_generated_permissions_policy_helper",
     "//base",
@@ -301,6 +309,7 @@ source_set("headers") {
     "//services/network/public/cpp:cpp",
     "//skia",
     "//skia/public/mojom:shared_typemap_traits",
+    "//third_party/blink/public:runtime_features_for_public",
     "//third_party/blink/public/common/privacy_budget",
     "//third_party/blink/public/common/tokens:tokens_headers",
     "//third_party/blink/public/mojom:mobile_metrics_shared_cpp_sources",
@@ -369,8 +378,12 @@ if (is_android) {
   java_cpp_features("java_features_srcjar") {
     # External code should depend on ":common_java" instead.
     visibility = [ ":*" ]
-    sources = [ "//third_party/blink/common/features.cc" ]
+    sources = [
+      "$root_gen_dir/third_party/blink/common/features_generated.cc",
+      "//third_party/blink/common/features.cc",
+    ]
     template = "//third_party/blink/public/common/android/java_templates/BlinkFeatures.java.tmpl"
+    deps = [ "//third_party/blink/common:make_generated_features" ]
   }
 
   android_library("common_java") {

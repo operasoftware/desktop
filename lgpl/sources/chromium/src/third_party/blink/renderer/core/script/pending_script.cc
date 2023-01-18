@@ -173,8 +173,9 @@ void PendingScript::ExecuteScriptBlock() {
     DCHECK(ThreadScheduler::Current());
     if (auto* tracker =
             ThreadScheduler::Current()->GetTaskAttributionTracker()) {
-      task_attribution_scope =
-          tracker->CreateTaskScope(script_state, absl::nullopt);
+      task_attribution_scope = tracker->CreateTaskScope(
+          script_state, absl::nullopt,
+          scheduler::TaskAttributionTracker::TaskScopeType::kScriptExecution);
     }
   }
 
@@ -263,6 +264,9 @@ void PendingScript::ExecuteScriptBlockInternal(
     // Document.</spec>
     IgnoreDestructiveWriteCountIncrementer incrementer(
         needs_increment ? context_document : nullptr);
+
+    if (script->GetScriptType() == mojom::blink::ScriptType::kModule)
+      context_document->IncrementIgnoreDestructiveWriteModuleScriptCount();
 
 #if BUILDFLAG(OPERA_BLINK_FEATURE_SCRIPT_TRACKER)
     // Push information about any 'generating' script onto the script tracker

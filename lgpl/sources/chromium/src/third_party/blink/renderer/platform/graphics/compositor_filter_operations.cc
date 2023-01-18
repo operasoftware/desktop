@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,6 +98,17 @@ void CompositorFilterOperations::AppendReferenceFilter(
   filter_operations_.Append(
       cc::FilterOperation::CreateReferenceFilter(std::move(image_filter)));
 }
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+void CompositorFilterOperations::AppendGpuShaderFilter(
+    std::string source,
+    const gfx::SizeF& filter_size,
+    float frame_id,
+    bool expects_input) {
+  filter_operations_.Append(cc::FilterOperation::CreateGpuShaderFilter(
+      std::move(source), filter_size, frame_id, expects_input));
+}
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 void CompositorFilterOperations::Clear() {
   filter_operations_.Clear();

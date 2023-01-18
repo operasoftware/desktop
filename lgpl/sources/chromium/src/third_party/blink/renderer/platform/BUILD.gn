@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -47,6 +47,7 @@ blink_python_runner("runtime_enabled_features") {
              "../build/scripts/templates/runtime_enabled_features.cc.tmpl",
              "../build/scripts/templates/runtime_enabled_features.h.tmpl",
              "../build/scripts/templates/runtime_enabled_features_test_helpers.h.tmpl",
+             "../build/scripts/templates/web_runtime_features_base.cc.tmpl",
            ]
 
   build_scripts_output_dir = "$blink_platform_output_dir/../build/scripts"
@@ -54,6 +55,7 @@ blink_python_runner("runtime_enabled_features") {
     "$blink_platform_output_dir/runtime_enabled_features.cc",
     "$blink_platform_output_dir/runtime_enabled_features.h",
     "$blink_platform_output_dir/testing/runtime_enabled_features_test_helpers.h",
+    "$blink_platform_output_dir/exported/web_runtime_features_base.cc",
     "$build_scripts_output_dir/runtime_enabled_features.pickle",
   ]
 
@@ -397,8 +399,6 @@ jumbo_component("platform") {
     "bindings/extensions_registry.h",
     "bindings/idl_member_installer.cc",
     "bindings/idl_member_installer.h",
-    "bindings/microtask.cc",
-    "bindings/microtask.h",
     "bindings/multi_worlds_v8_reference.cc",
     "bindings/multi_worlds_v8_reference.h",
     "bindings/name_client.h",
@@ -423,8 +423,12 @@ jumbo_component("platform") {
     "bindings/script_state.h",
     "bindings/script_wrappable.cc",
     "bindings/script_wrappable.h",
+    "bindings/source_location.cc",
+    "bindings/source_location.h",
     "bindings/string_resource.cc",
     "bindings/string_resource.h",
+    "bindings/thread_debugger.cc",
+    "bindings/thread_debugger.h",
     "bindings/to_v8.h",
     "bindings/trace_wrapper_v8_reference.h",
     "bindings/trace_wrapper_v8_string.cc",
@@ -919,6 +923,8 @@ jumbo_component("platform") {
     "graphics/gpu/webgpu_resource_provider_cache.h",
     "graphics/gpu/webgpu_swap_buffer_provider.cc",
     "graphics/gpu/webgpu_swap_buffer_provider.h",
+    "graphics/gpu/webgpu_texture_alpha_clearer.cc",
+    "graphics/gpu/webgpu_texture_alpha_clearer.h",
     "graphics/gpu/xr_frame_transport.cc",
     "graphics/gpu/xr_frame_transport.h",
     "graphics/gpu/xr_webgl_drawing_buffer.cc",
@@ -1228,7 +1234,6 @@ jumbo_component("platform") {
     "mojo/heap_mojo_wrapper_mode.h",
     "mojo/kurl_mojom_traits.h",
     "mojo/mojo_binding_context.h",
-    "mojo/mojo_helper.h",
     "mojo/security_origin_mojom_traits.h",
     "mojo/shared_storage_mojom_traits.cc",
     "mojo/shared_storage_mojom_traits.h",
@@ -1399,7 +1404,6 @@ jumbo_component("platform") {
     "text/text_direction.h",
     "text/text_encoding_detector.cc",
     "text/text_encoding_detector.h",
-    "text/text_justify.h",
     "text/text_run.cc",
     "text/text_run.h",
     "text/text_run_iterator.h",
@@ -1606,7 +1610,15 @@ jumbo_component("platform") {
     "peerconnection/rtc_video_decoder_stream_adapter.cc",
     "peerconnection/webrtc_audio_sink.cc",
     "peerconnection/webrtc_decoding_info_handler.cc",
+    "text/platform_locale.cc",
+    "theme/web_theme_engine_helper.cc",
+    "timer.cc",
     "transforms/transformation_matrix.cc",
+    "video_capture/video_capture_impl.cc",
+    "webrtc/convert_to_webrtc_video_frame_buffer.cc",
+    "webrtc/webrtc_video_frame_adapter.cc",
+    "widget/compositing/categorized_worker_pool.cc",
+    "widget/compositing/layer_tree_settings.cc",
     "widget/compositing/layer_tree_view.cc",
     "widget/input/elastic_overscroll_controller.cc",
     "widget/input/widget_input_handler_manager.cc",
@@ -1739,7 +1751,6 @@ jumbo_component("platform") {
     "//third_party/blink/renderer/platform/wtf",
     "//third_party/ced",
     "//third_party/emoji-segmenter",
-    "//third_party/harfbuzz-ng:hb_scoped_util",
     "//third_party/icu",
     "//third_party/libyuv",
     "//third_party/one_euro_filter",
@@ -1880,6 +1891,13 @@ jumbo_component("platform") {
 
   configs -= [ "//build/config/compiler:default_symbols" ]
   configs += blink_symbols_config
+
+  if (opera_feature_blink_gpu_shader_css_filter) {
+    sources += [
+      "graphics/gpu_shader.cc",
+      "graphics/gpu_shader.h",
+    ]
+  }
 }
 
 jumbo_static_library("test_support") {
@@ -1945,6 +1963,7 @@ jumbo_static_library("test_support") {
     "testing/testing_platform_support.h",
     "testing/testing_platform_support_with_mock_scheduler.cc",
     "testing/testing_platform_support_with_mock_scheduler.h",
+    "testing/transformation_matrix_test_helpers.h",
     "testing/unit_test_helpers.cc",
     "testing/unit_test_helpers.h",
     "testing/url_test_helpers.cc",
@@ -1987,6 +2006,7 @@ jumbo_static_library("test_support") {
     "//third_party/blink/renderer/platform/loader:test_support",
     "//third_party/blink/renderer/platform/media:test_support",
     "//third_party/blink/renderer/platform/scheduler:test_support",
+    "//ui/gfx:test_support",
   ]
 
   deps = [
@@ -2013,9 +2033,10 @@ test("blink_platform_unittests") {
   deps = [ ":blink_platform_unittests_sources" ]
 
   if (is_fuchsia) {
-    use_cfv1 = false
-    additional_manifest_fragments =
-        [ "//build/config/fuchsia/test/test_fonts.shard.test-cml" ]
+    additional_manifest_fragments = [
+      "//build/config/fuchsia/test/test_fonts.shard.test-cml",
+      "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
+    ]
 
     # Oilpan reuses V8's v8::PageAllocator which generally requires JIT
     # permissions.
@@ -2239,7 +2260,6 @@ jumbo_source_set("blink_platform_unittests_sources") {
     "transforms/rotation_test.cc",
     "transforms/transform_operations_test.cc",
     "transforms/transformation_matrix_test.cc",
-    "transforms/transformation_matrix_test_helpers.h",
     "video_capture/gpu_memory_buffer_test_support.cc",
     "video_capture/gpu_memory_buffer_test_support.h",
     "video_capture/video_capture_impl_test.cc",
@@ -2283,6 +2303,7 @@ jumbo_source_set("blink_platform_unittests_sources") {
     "peerconnection/stats_collector_test.cc",
     "peerconnection/webrtc_decoding_info_handler_test.cc",
     "peerconnection/webrtc_encoding_info_handler_test.cc",
+    "text/mathml_operator_dictionary_test.cc",
     "widget/compositing/widget_compositor_unittest.cc",
     "widget/input/input_handler_proxy_unittest.cc",
   ]
@@ -2351,6 +2372,7 @@ jumbo_source_set("blink_platform_unittests_sources") {
     "//build:chromeos_buildflags",
     "//cc",
     "//cc:test_support",
+    "//gin:gin",
     "//media:test_support",
     "//media/capture/mojom:video_capture",
     "//mojo/core/embedder",
@@ -2376,6 +2398,7 @@ jumbo_source_set("blink_platform_unittests_sources") {
     "//third_party/libavif:libavif",
     "//third_party/libjxl:libjxl",
     "//third_party/libyuv",
+    "//third_party/openh264:openh264_buildflags",
     "//third_party/webrtc/api/task_queue:task_queue_test",
     "//third_party/webrtc_overrides:metronome_like_task_queue_test",
     "//third_party/webrtc_overrides:webrtc_component",
@@ -2465,6 +2488,7 @@ test("blink_platform_perftests") {
     ":test_support",
     "//base",
     "//base/test:test_support",
+    "//gin:gin",
     "//mojo/public/cpp/bindings/tests:for_blink_tests",
     "//mojo/public/cpp/test_support:test_utils",
     "//mojo/public/interfaces/bindings/tests:test_interfaces_blink",
@@ -2515,6 +2539,7 @@ test("blink_fuzzer_unittests") {
   deps = [
     ":test_support",
     "//base/test:test_support",
+    "//gin:gin",
     "//mojo/core/embedder:embedder",
     "//third_party/blink/public:test_support",
   ]
@@ -2528,11 +2553,12 @@ test("blink_fuzzer_unittests") {
   }
 
   if (is_fuchsia) {
-    use_cfv1 = false
     deps += [ "//skia:test_fonts_cfv2" ]
     test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
-    additional_manifest_fragments =
-        [ "//build/config/fuchsia/test/test_fonts.shard.test-cml" ]
+    additional_manifest_fragments = [
+      "//build/config/fuchsia/test/test_fonts.shard.test-cml",
+      "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
+    ]
   } else {
     deps += [ "//skia:test_fonts" ]
   }

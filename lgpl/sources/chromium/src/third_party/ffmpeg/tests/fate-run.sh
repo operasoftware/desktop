@@ -247,12 +247,13 @@ transcode(){
     ffprobe_opts=$6
     additional_input=$7
     final_decode=$8
+    enc_opt_in=$9
     test -z "$additional_input" || additional_input="$DEC_OPTS $additional_input"
     encfile="${outdir}/${test}.${enc_fmt}"
     test $keep -ge 1 || cleanfiles="$cleanfiles $encfile"
     tsrcfile=$(target_path $srcfile)
     tencfile=$(target_path $encfile)
-    ffmpeg -f $src_fmt $DEC_OPTS -i $tsrcfile $additional_input \
+    ffmpeg -f $src_fmt $DEC_OPTS $enc_opt_in -i $tsrcfile $additional_input \
            $ENC_OPTS $enc_opt $FLAGS -f $enc_fmt -y $tencfile || return
     do_md5sum $encfile
     echo $(wc -c $encfile)
@@ -362,6 +363,7 @@ lavf_container_fate()
 }
 
 lavf_image(){
+    no_file_checksums="$3"
     nb_frames=13
     t="${test#lavf-}"
     outdir="tests/data/images/$t"
@@ -374,9 +376,11 @@ lavf_image(){
         done
     fi
     run_avconv $DEC_OPTS -f image2 -c:v pgmyuv -i $raw_src $1 "$ENC_OPTS -metadata title=lavftest" -vf scale -frames $nb_frames -y -qscale 10 $target_path/$file
-    do_md5sum ${outdir}/02.$t
+    if [ -z "$no_file_checksums" ]; then
+        do_md5sum ${outdir}/02.$t
+        echo $(wc -c ${outdir}/02.$t)
+    fi
     do_avconv_crc $file -auto_conversion_filters $DEC_OPTS $2 -i $target_path/$file $2
-    echo $(wc -c ${outdir}/02.$t)
 }
 
 lavf_image2pipe(){

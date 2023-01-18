@@ -46,6 +46,8 @@ class Layer;
 
 namespace media {
 enum class MediaContentType;
+enum class VideoCodec;
+enum class AudioCodec;
 }  // namespace media
 
 namespace blink {
@@ -190,6 +192,8 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
   virtual void DidMediaMetadataChange(
       bool has_audio,
       bool has_video,
+      media::AudioCodec audio_codec,
+      media::VideoCodec video_codec,
       media::MediaContentType media_content_type) = 0;
 
   // Notify the client that the playback position has changed.
@@ -208,6 +212,9 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
   // TODO(crbug.com/1039252): Remove by merging this method into SizeChanged().
   virtual void DidPlayerSizeChange(const gfx::Size& size) = 0;
 
+  virtual void OnFirstFrame(base::TimeTicks first_frame,
+                            size_t bytes_to_first_frame) = 0;
+
   // Notify the client that one of the state used by Picture-in-Picture has
   // changed. The client will then have to poll the states from the associated
   // WebMediaPlayer.
@@ -221,6 +228,9 @@ class BLINK_PLATFORM_EXPORT WebMediaPlayerClient {
   // request was initiated via WebMediaPlayer::RequestVideoFrameCallback().
   // See https://wicg.github.io/video-rvfc/.
   virtual void OnRequestVideoFrameCallback() {}
+
+  // Notify the client that the RemotePlayback has been disabled/enabled.
+  virtual void OnRemotePlaybackDisabled(bool disabled) = 0;
 
  protected:
   ~WebMediaPlayerClient() = default;

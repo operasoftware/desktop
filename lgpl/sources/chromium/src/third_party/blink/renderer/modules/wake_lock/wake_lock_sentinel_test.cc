@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,9 +24,9 @@ namespace blink {
 
 namespace {
 
-class SyncReleaseEventListener final : public NativeEventListener {
+class SyncEventListener final : public NativeEventListener {
  public:
-  explicit SyncReleaseEventListener(base::OnceClosure invocation_callback)
+  explicit SyncEventListener(base::OnceClosure invocation_callback)
       : invocation_callback_(std::move(invocation_callback)) {}
   void Invoke(ExecutionContext*, Event*) override {
     DCHECK(invocation_callback_);
@@ -89,7 +89,7 @@ TEST(WakeLockSentinelTest, MultipleReleaseCalls) {
 
   base::RunLoop run_loop;
   auto* event_listener =
-      MakeGarbageCollected<SyncReleaseEventListener>(run_loop.QuitClosure());
+      MakeGarbageCollected<SyncEventListener>(run_loop.QuitClosure());
   sentinel->addEventListener(event_type_names::kRelease, event_listener,
                              /*use_capture=*/false);
   sentinel->release(context.GetScriptState());
@@ -100,10 +100,9 @@ TEST(WakeLockSentinelTest, MultipleReleaseCalls) {
   EXPECT_EQ(nullptr, sentinel->manager_);
   EXPECT_TRUE(sentinel->released());
 
-  event_listener =
-      MakeGarbageCollected<SyncReleaseEventListener>(WTF::Bind([]() {
-        EXPECT_TRUE(false) << "This event handler should not be reached.";
-      }));
+  event_listener = MakeGarbageCollected<SyncEventListener>(WTF::BindOnce([]() {
+    EXPECT_TRUE(false) << "This event handler should not be reached.";
+  }));
   sentinel->addEventListener(event_type_names::kRelease, event_listener);
   sentinel->release(context.GetScriptState());
   EXPECT_TRUE(sentinel->released());
@@ -133,7 +132,7 @@ TEST(WakeLockSentinelTest, ContextDestruction) {
   ASSERT_TRUE(sentinel);
 
   auto* event_listener =
-      MakeGarbageCollected<SyncReleaseEventListener>(WTF::Bind([]() {
+      MakeGarbageCollected<SyncEventListener>(WTF::BindOnce([]() {
         EXPECT_TRUE(false) << "This event handler should not be reached.";
       }));
   sentinel->addEventListener(event_type_names::kRelease, event_listener);
@@ -165,7 +164,7 @@ TEST(WakeLockSentinelTest, HasPendingActivityConditions) {
 
   base::RunLoop run_loop;
   auto* event_listener =
-      MakeGarbageCollected<SyncReleaseEventListener>(run_loop.QuitClosure());
+      MakeGarbageCollected<SyncEventListener>(run_loop.QuitClosure());
   sentinel->addEventListener(event_type_names::kRelease, event_listener);
 
   // The sentinel cannot be GC'ed, it has an event listener and it has not been

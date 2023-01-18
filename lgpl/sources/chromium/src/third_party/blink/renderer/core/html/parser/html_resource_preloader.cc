@@ -29,6 +29,7 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_prescient_networking.h"
@@ -112,8 +113,13 @@ bool HTMLResourcePreloader::AllowPreloadRequest(PreloadRequest* preload) const {
     case ResourceType::kVideo:
     case ResourceType::kManifest:
     case ResourceType::kMock:
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+    case ResourceType::kGpuShader:
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
       return !GetFieldTrialParamByFeatureAsBool(
           features::kLightweightNoStatePrefetch, "skip_other", true);
+    case ResourceType::kSpeculationRules:
+      return false;
     case ResourceType::kImage:
       return false;
     case ResourceType::kCSSStyleSheet:

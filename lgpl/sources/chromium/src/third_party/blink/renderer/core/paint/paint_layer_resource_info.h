@@ -30,11 +30,16 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_PAINT_LAYER_RESOURCE_INFO_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_PAINT_LAYER_RESOURCE_INFO_H_
 
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/svg/svg_resource_client.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "ui/gfx/geometry/rect_f.h"
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include "third_party/blink/renderer/core/style/gpu_shader_resource_client.h"
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 namespace blink {
 
@@ -51,7 +56,12 @@ class PaintLayer;
 // accelerated CSS filters use CompositorFilterOperations, that is backed by cc.
 class PaintLayerResourceInfo final
     : public GarbageCollected<PaintLayerResourceInfo>,
-      public SVGResourceClient {
+      public SVGResourceClient
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+    ,
+      public GpuShaderResourceClient
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+{
  public:
   explicit PaintLayerResourceInfo(PaintLayer*);
   PaintLayerResourceInfo(const PaintLayerResourceInfo&) = delete;
@@ -66,10 +76,15 @@ class PaintLayerResourceInfo final
   void ClearLayer() { layer_ = nullptr; }
 
   void ResourceContentChanged(SVGResource*) override;
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  void ResourceContentChanged(GpuShaderResource*) override;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
   void Trace(Visitor* visitor) const override { visitor->Trace(layer_); }
 
  private:
+  void ResourceContentChanged();
+
   // |ClearLayer| must be called before *layer_ becomes invalid.
   Member<PaintLayer> layer_;
   gfx::RectF filter_reference_box_;

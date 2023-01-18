@@ -32,6 +32,7 @@
 #include "mojo/public/cpp/base/big_buffer.h"
 #include "net/base/schemeful_site.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/public/mojom/loader/code_cache.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/scheduler/web_scoped_virtual_time_pauser.h"
 #include "third_party/blink/renderer/platform/bindings/parkable_string.h"
@@ -89,8 +90,14 @@ enum class ResourceType : uint8_t {
   kAudio,
   kVideo,
   kManifest,
+  kSpeculationRules,
   kMock,  // Only for testing
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  kGpuShader,
+  kMaxValue = kGpuShader
+#else
   kMaxValue = kMock
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 };
 
 // A resource that is held in the cache. Classes who want to use this object
@@ -444,8 +451,8 @@ class PLATFORM_EXPORT Resource : public GarbageCollected<Resource>,
   void MarkClientFinished(ResourceClient*);
 
   virtual bool HasClientsOrObservers() const {
-    return !clients_.IsEmpty() || !clients_awaiting_callback_.IsEmpty() ||
-           !finished_clients_.IsEmpty() || !finish_observers_.IsEmpty();
+    return !clients_.empty() || !clients_awaiting_callback_.empty() ||
+           !finished_clients_.empty() || !finish_observers_.empty();
   }
   virtual void DestroyDecodedDataForFailedRevalidation() {}
 

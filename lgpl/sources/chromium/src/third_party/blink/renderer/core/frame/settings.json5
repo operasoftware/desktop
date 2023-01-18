@@ -510,6 +510,11 @@
       invalidate: ["ImageLoading"],
     },
     {
+      name: "gpuShaderCssFiltersEnabled",
+      initial: false,
+      invalidate: ["Style", "Paint"],
+    },
+    {
       name: "imageAnimationPolicy",
       initial: "mojom::blink::ImageAnimationPolicy::kImageAnimationPolicyAllowed",
       type: "mojom::blink::ImageAnimationPolicy",
@@ -726,7 +731,7 @@
     {
       name: "viewportStyle",
       initial: "mojom::blink::ViewportStyle::kDefault",
-      invalidate: ["ViewportRule"],
+      invalidate: ["ViewportStyle"],
       type: "mojom::blink::ViewportStyle",
     },
 

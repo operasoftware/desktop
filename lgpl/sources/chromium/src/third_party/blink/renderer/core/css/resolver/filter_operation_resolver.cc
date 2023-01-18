@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/core/css/resolver/filter_operation_resolver.h"
 
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/css/css_function_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value_mappings.h"
 #include "third_party/blink/renderer/core/css/css_uri_value.h"
@@ -39,6 +40,10 @@
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include "third_party/blink/renderer/core/css/css_shader_value.h"
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 namespace blink {
 
@@ -68,6 +73,10 @@ FilterOperation::OperationType FilterOperationResolver::FilterOperationForType(
       return FilterOperation::OperationType::kBlur;
     case CSSValueID::kDropShadow:
       return FilterOperation::OperationType::kDropShadow;
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+    case CSSValueID::kShader:
+      return FilterOperation::OperationType::kGpuShader;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
     default:
       NOTREACHED();
       // FIXME: We shouldn't have a type None since we never create them
@@ -127,6 +136,10 @@ static void CountFilterUse(FilterOperation::OperationType operation_type,
     case FilterOperation::OperationType::kDropShadow:
       feature = WebFeature::kCSSFilterDropShadow;
       break;
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+    case FilterOperation::OperationType::kGpuShader:
+      return;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
   };
   document.CountUse(feature);
 }
@@ -240,6 +253,28 @@ FilterOperations FilterOperationResolver::CreateFilterOperations(
             MakeGarbageCollected<DropShadowFilterOperation>(shadow));
         break;
       }
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+      case CSSValueID::kShader: {
+        // For now we support only single shader value
+        if (filter_value->length() == 1) {
+          const auto* shader_value =
+              DynamicTo<CSSShaderValue>(filter_value->Item(0));
+          if (!shader_value)
+            break;
+
+          auto* resource =
+              state.GetElementStyleResources().GetGpuShaderResourceFromValue(
+                  property_id, *shader_value);
+
+          operations.Operations().push_back(
+              MakeGarbageCollected<GpuShaderFilterOperation>(
+                  shader_value->RelativeUrl(), shader_value->AbsoluteUrl(),
+                  shader_value->GetReferrer(), resource,
+                  shader_value->AnimationFrame()));
+        }
+        break;
+      }
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
       default:
         NOTREACHED();
         break;
@@ -266,9 +301,9 @@ FilterOperations FilterOperationResolver::CreateOffscreenFilterOperations(
   CSSToLengthConversionData::ViewportSize viewport_size(0, 0);
   CSSToLengthConversionData::ContainerSizes container_sizes;
   CSSToLengthConversionData conversion_data(
-      nullptr,  // ComputedStyle
+      nullptr /* element_style */, nullptr /* parent_style */,
       WritingMode::kHorizontalTb, font_sizes, viewport_size, container_sizes,
-      1);  // zoom
+      1 /* zoom */);
 
   for (auto& curr_value : To<CSSValueList>(in_value)) {
     if (curr_value->IsURIValue())

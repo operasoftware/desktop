@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component_impl.h"
 #include "third_party/blink/renderer/platform/testing/io_task_runner_testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+#include "third_party/openh264/openh264_buildflags.h"
 
 using base::test::RunOnceClosure;
 using ::testing::_;
@@ -77,7 +78,8 @@ struct MediaRecorderTestParams {
 static const MediaRecorderTestParams kMediaRecorderTestParams[] = {
     {true, false, true, "video/webm", "vp8", true},
     {true, false, true, "video/webm", "vp9", true},
-#if BUILDFLAG(RTC_USE_H264) || defined(OPERA_DESKTOP)
+#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+    defined(USE_SYSTEM_PROPRIETARY_CODECS)
     {true, false, false, "video/x-matroska", "avc1", false},
     {true, false, true, "video/x-matroska", "avc1", false},
 #endif
@@ -112,7 +114,7 @@ class MockMediaRecorder : public MediaRecorder {
                       CreateMediaStream(scope),
                       MediaRecorderOptions::Create(),
                       scope.GetExceptionState()) {}
-  virtual ~MockMediaRecorder() = default;
+  ~MockMediaRecorder() override = default;
 
   MOCK_METHOD4(WriteData, void(const char*, size_t, bool, double));
   MOCK_METHOD1(OnError, void(const String& message));
@@ -144,10 +146,10 @@ class MediaRecorderHandlerFixture : public ScopedMockOverlayScrollbars {
 
   bool recording() const { return media_recorder_handler_->recording_; }
   bool hasVideoRecorders() const {
-    return !media_recorder_handler_->video_recorders_.IsEmpty();
+    return !media_recorder_handler_->video_recorders_.empty();
   }
   bool hasAudioRecorders() const {
-    return !media_recorder_handler_->audio_recorders_.IsEmpty();
+    return !media_recorder_handler_->audio_recorders_.empty();
   }
 
   void OnVideoFrameForTesting(scoped_refptr<media::VideoFrame> frame) {
@@ -266,7 +268,8 @@ TEST_P(MediaRecorderHandlerTest, CanSupportMimeType) {
   EXPECT_TRUE(media_recorder_handler_->CanSupportMimeType(
       mime_type_video, example_good_codecs_3));
   const String example_good_codecs_4("H264");
-#if BUILDFLAG(RTC_USE_H264) || defined(OPERA_DESKTOP)
+#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+    defined(USE_SYSTEM_PROPRIETARY_CODECS)
   EXPECT_TRUE(media_recorder_handler_->CanSupportMimeType(
       mime_type_video, example_good_codecs_4));
 #else
@@ -454,8 +457,8 @@ TEST_P(MediaRecorderHandlerTest, OpusEncodeAudioFrames) {
   const std::unique_ptr<media::AudioBus> audio_bus2 = NextAudioBus();
 
   media::AudioParameters params(
-      media::AudioParameters::AUDIO_PCM_LINEAR, media::CHANNEL_LAYOUT_STEREO,
-      kTestAudioSampleRate,
+      media::AudioParameters::AUDIO_PCM_LINEAR,
+      media::ChannelLayoutConfig::Stereo(), kTestAudioSampleRate,
       kTestAudioSampleRate * kTestAudioBufferDurationMs / 1000);
   SetAudioFormatForTesting(params);
 
@@ -641,7 +644,8 @@ TEST_P(MediaRecorderHandlerTest, StartStopStartRecorderForVideo) {
   media_recorder_handler_ = nullptr;
 }
 
-#if BUILDFLAG(RTC_USE_H264) || defined(OPERA_DESKTOP)
+#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+    defined(USE_SYSTEM_PROPRIETARY_CODECS)
 
 struct H264ProfileTestParams {
   const bool enable_platform_sw_encoder;
@@ -732,7 +736,8 @@ static const MediaRecorderPassthroughTestParams
     kMediaRecorderPassthroughTestParams[] = {
         {true, "video/webm;codecs=vp8", media::VideoCodec::kVP8},
         {true, "video/webm;codecs=vp9", media::VideoCodec::kVP9},
-#if BUILDFLAG(RTC_USE_H264) || defined(OPERA_DESKTOP)
+#if BUILDFLAG(RTC_USE_H264) || BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || \
+    defined(USE_SYSTEM_PROPRIETARY_CODECS)
         {false, "video/x-matroska;codecs=avc1", media::VideoCodec::kH264},
         {true, "video/x-matroska;codecs=avc1", media::VideoCodec::kH264},
 #endif

@@ -32,6 +32,10 @@
 #include "third_party/blink/renderer/platform/graphics/filters/filter.h"
 #include "third_party/blink/renderer/platform/graphics/filters/filter_effect.h"
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include "third_party/blink/renderer/core/style/gpu_shader_resource.h"
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
 namespace blink {
 
 void ReferenceFilterOperation::Trace(Visitor* visitor) const {
@@ -90,5 +94,47 @@ bool BoxReflectFilterOperation::IsEqualAssumingSameType(
   const auto& other = static_cast<const BoxReflectFilterOperation&>(o);
   return reflection_ == other.reflection_;
 }
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+GpuShaderFilterOperation::GpuShaderFilterOperation(
+    const AtomicString& relative_url,
+    const AtomicString& absolute_url,
+    const Referrer& referrer,
+    GpuShaderResource* resource,
+    float animation_frame)
+    : FilterOperation(OperationType::kGpuShader),
+      relative_url_(relative_url),
+      absolute_url_(absolute_url),
+      referrer_(referrer),
+      resource_(resource),
+      animation_frame_(animation_frame) {}
+
+gfx::RectF GpuShaderFilterOperation::MapRect(const gfx::RectF& rect) const {
+  return rect;
+}
+
+void GpuShaderFilterOperation::AddClient(GpuShaderResourceClient& client) {
+  if (resource_)
+    resource_->AddClient(client);
+}
+
+void GpuShaderFilterOperation::RemoveClient(GpuShaderResourceClient& client) {
+  if (resource_)
+    resource_->RemoveClient(client);
+}
+
+bool GpuShaderFilterOperation::IsEqualAssumingSameType(
+    const FilterOperation& o) const {
+  const auto& other = To<GpuShaderFilterOperation>(o);
+  return relative_url_ == other.relative_url_ &&
+         absolute_url_ == other.absolute_url_ && resource_ == other.resource_ &&
+         animation_frame_ == other.animation_frame_;
+}
+
+void GpuShaderFilterOperation::Trace(Visitor* visitor) const {
+  visitor->Trace(resource_);
+  FilterOperation::Trace(visitor);
+}
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 }  // namespace blink

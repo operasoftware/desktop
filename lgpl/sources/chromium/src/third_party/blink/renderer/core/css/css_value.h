@@ -22,6 +22,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_VALUE_H_
 
 #include "base/memory/values_equivalent.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/heap/custom_spaces.h"
@@ -178,13 +179,14 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsInitialColorValue() const {
     return class_type_ == kInitialColorValueClass;
   }
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  bool IsShaderValue() const { return class_type_ == kShaderValueClass; }
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
   bool IsLightDarkValuePair() const {
     return class_type_ == kLightDarkValuePairClass;
   }
-  bool IsIdSelectorValue() const { return class_type_ == kIdSelectorClass; }
-  bool IsElementOffsetValue() const {
-    return class_type_ == kElementOffsetClass;
-  }
+
+  bool IsScrollValue() const { return class_type_ == kScrollClass; }
   bool IsRatioValue() const { return class_type_ == kRatioClass; }
 
   bool HasFailedOrCanceledSubresources() const;
@@ -194,15 +196,8 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool operator==(const CSSValue&) const;
   bool operator!=(const CSSValue& o) const { return !(*this == o); }
 
-  void FinalizeGarbageCollectedObject();
   void TraceAfterDispatch(blink::Visitor* visitor) const {}
   void Trace(Visitor*) const;
-
-  // ~CSSValue should be public, because non-public ~CSSValue causes C2248
-  // error: 'blink::CSSValue::~CSSValue' : cannot access protected member
-  // declared in class 'blink::CSSValue' when compiling
-  // 'source\wtf\refcounted.h' by using msvc.
-  ~CSSValue() = default;
 
  protected:
   enum ClassType {
@@ -217,8 +212,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kURIClass,
     kValuePairClass,
     kLightDarkValuePairClass,
-    kIdSelectorClass,
-    kElementOffsetClass,
+    kScrollClass,
     kRatioClass,
 
     // Basic shape classes.
@@ -277,6 +271,9 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
 
     kKeyframeShorthandClass,
     kInitialColorValueClass,
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+    kShaderValueClass,
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
     // List class types must appear after ValueListClass.
     kValueListClass,

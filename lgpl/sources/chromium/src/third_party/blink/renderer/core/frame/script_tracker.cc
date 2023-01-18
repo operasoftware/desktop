@@ -19,7 +19,7 @@ String FindNonEmptyUrlOnStack(
     const HeapVector<Member<const ScriptInfo>>& stack) {
   auto ordered_stack = base::Reversed(stack);
   auto it = base::ranges::find_if(ordered_stack, [](auto info) {
-    return !info->url.IsEmpty();
+    return !info->url.empty();
   });
   if (it != ordered_stack.end())
     return (*it)->url;
@@ -89,7 +89,7 @@ void ScriptTracker::Trace(Visitor* visitor) const {
 }
 
 const ScriptInfo* ScriptTracker::GetActiveScriptInfo() const {
-  return active_scripts_.IsEmpty() ? nullptr : active_scripts_.front();
+  return active_scripts_.empty() ? nullptr : active_scripts_.front();
 }
 
 String ScriptTracker::FindIndirectScriptSourceUrl() const {

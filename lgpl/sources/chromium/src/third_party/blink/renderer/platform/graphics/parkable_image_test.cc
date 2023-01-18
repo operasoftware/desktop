@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
-#include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/disk_data_allocator_test_utils.h"
@@ -42,17 +41,16 @@ class ParkableImageBaseTest : public ::testing::Test {
                   ThreadPoolExecutionMode::DEFAULT) {}
 
   void SetUp() override {
-    Platform::SetMainThreadTaskRunnerForTesting();
     auto& manager = ParkableImageManager::Instance();
     manager.ResetForTesting();
     manager.SetDataAllocatorForTesting(
         std::make_unique<InMemoryDataAllocator>());
+    manager.SetTaskRunnerForTesting(task_env_.GetMainThreadTaskRunner());
   }
 
   void TearDown() override {
     CHECK_EQ(ParkableImageManager::Instance().Size(), 0u);
     task_env_.FastForwardUntilNoTasksRemain();
-    Platform::UnsetMainThreadTaskRunnerForTesting();
   }
 
  protected:
@@ -74,8 +72,8 @@ class ParkableImageBaseTest : public ::testing::Test {
     return task_env_.GetPendingMainThreadTaskCount();
   }
 
-  static bool MaybePark(scoped_refptr<ParkableImage> pi) {
-    return pi->impl_->MaybePark();
+  bool MaybePark(scoped_refptr<ParkableImage> pi) {
+    return pi->impl_->MaybePark(task_env_.GetMainThreadTaskRunner());
   }
   static void Unpark(scoped_refptr<ParkableImage> pi) {
     base::AutoLock lock(pi->impl_->lock_);
@@ -146,10 +144,8 @@ class ParkableImageBaseTest : public ::testing::Test {
   // "Memory.ParkableImage.Write.Size", since the others can't be easily tested.
   void ExpectWriteStatistics(base::HistogramBase::Sample sample,
                              base::HistogramBase::Count expected_count) {
-    if (base::TimeTicks::IsHighResolution()) {
-      histogram_tester_.ExpectTotalCount("Memory.ParkableImage.Write.Latency",
-                                         expected_count);
-    }
+    histogram_tester_.ExpectTotalCount("Memory.ParkableImage.Write.Latency",
+                                       expected_count);
     histogram_tester_.ExpectTotalCount("Memory.ParkableImage.Write.Throughput",
                                        expected_count);
     histogram_tester_.ExpectBucketCount("Memory.ParkableImage.Write.Size",
@@ -166,10 +162,8 @@ class ParkableImageBaseTest : public ::testing::Test {
   // "Memory.ParkableImage.Read.Size", since the others can't be easily tested.
   void ExpectReadStatistics(base::HistogramBase::Sample sample,
                             base::HistogramBase::Count expected_count) {
-    if (base::TimeTicks::IsHighResolution()) {
-      histogram_tester_.ExpectTotalCount("Memory.ParkableImage.Read.Latency",
-                                         expected_count);
-    }
+    histogram_tester_.ExpectTotalCount("Memory.ParkableImage.Read.Latency",
+                                       expected_count);
     histogram_tester_.ExpectTotalCount("Memory.ParkableImage.Read.Throughput",
                                        expected_count);
     histogram_tester_.ExpectTotalCount(

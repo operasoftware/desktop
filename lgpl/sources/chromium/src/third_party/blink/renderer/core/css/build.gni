@@ -1,6 +1,8 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+import("//third_party/blink/public/public_features.gni")
 
 blink_core_hot_sources_css = [
   "element_rule_collector.cc",
@@ -51,6 +53,8 @@ blink_core_sources_css = [
   "container_query_data.h",
   "container_query_evaluator.cc",
   "container_query_evaluator.h",
+  "container_selector.cc",
+  "container_selector.h",
   "counter_style.cc",
   "counter_style.h",
   "counter_style_map.cc",
@@ -95,8 +99,6 @@ blink_core_sources_css = [
   "css_cyclic_variable_value.h",
   "css_default_style_sheets.cc",
   "css_default_style_sheets.h",
-  "css_element_offset_value.cc",
-  "css_element_offset_value.h",
   "css_font_face.cc",
   "css_font_face.h",
   "css_font_face_rule.cc",
@@ -133,8 +135,6 @@ blink_core_sources_css = [
   "css_grid_template_areas_value.h",
   "css_grouping_rule.cc",
   "css_grouping_rule.h",
-  "css_id_selector_value.cc",
-  "css_id_selector_value.h",
   "css_identifier_value.cc",
   "css_identifier_value.h",
   "css_image_generator_value.cc",
@@ -233,8 +233,8 @@ blink_core_sources_css = [
   "css_rule_list.h",
   "css_scope_rule.cc",
   "css_scope_rule.h",
-  "css_scroll_timeline_rule.cc",
-  "css_scroll_timeline_rule.h",
+  "css_scroll_value.cc",
+  "css_scroll_value.h",
   "css_segmented_font_face.cc",
   "css_segmented_font_face.h",
   "css_selector.cc",
@@ -469,6 +469,7 @@ blink_core_sources_css = [
   "offscreen_font_selector.h",
   "page_rule_collector.cc",
   "page_rule_collector.h",
+  "parser/arena.cc",
   "parser/at_rule_counter_style_descriptor_parser.cc",
   "parser/at_rule_descriptor_parser.cc",
   "parser/at_rule_descriptor_parser.h",
@@ -697,11 +698,9 @@ blink_core_tests_css = [
   "counter_style_map_test.cc",
   "counter_style_test.cc",
   "css_computed_style_declaration_test.cc",
-  "css_element_offset_value_test.cc",
   "css_font_face_source_test.cc",
   "css_font_family_webkit_prefix_test.cc",
   "css_gradient_value_test.cc",
-  "css_id_selector_value_test.cc",
   "css_image_value_test.cc",
   "css_invalid_variable_value_test.cc",
   "css_light_dark_value_pair_test.cc",
@@ -814,3 +813,12 @@ blink_core_tests_css = [
   "threaded/font_object_threaded_test.cc",
   "threaded/text_renderer_threaded_test.cc",
 ]
+
+if (opera_feature_blink_gpu_shader_css_filter) {
+  blink_core_sources_css += [
+    "css_shader_value.cc",
+    "css_shader_value.h",
+    "style_shader_cache.cc",
+    "style_shader_cache.h",
+  ]
+}

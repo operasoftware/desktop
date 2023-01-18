@@ -27,6 +27,7 @@
 #include "third_party/blink/renderer/core/paint/filter_effect_builder.h"
 
 #include <algorithm>
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_container.h"
 #include "third_party/blink/renderer/core/style/filter_operations.h"
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_filter_builder.h"
@@ -49,6 +50,11 @@
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "ui/gfx/geometry/point_conversions.h"
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include "third_party/blink/renderer/core/style/gpu_shader_resource.h"
+#include "third_party/blink/renderer/platform/graphics/gpu_shader.h"
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 namespace blink {
 
@@ -336,6 +342,10 @@ FilterEffect* FilterEffectBuilder::BuildFilterEffect(
             turbulence_filter_operation->StitchTiles());
         break;
       }
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+      case FilterOperation::OperationType::kGpuShader:
+        break;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
       default:
         break;
     }
@@ -369,9 +379,12 @@ CompositorFilterOperations FilterEffectBuilder::BuildFilterOperations(
         Filter* reference_filter =
             BuildReferenceFilter(reference_operation, nullptr);
         if (reference_filter && reference_filter->LastEffect()) {
+          // Set the interpolation space for the source of the (sub)filter to
+          // match that of the previous primitive (or input).
+          auto* source = reference_filter->GetSourceGraphic();
+          source->SetOperatingInterpolationSpace(current_interpolation_space);
           paint_filter_builder::PopulateSourceGraphicImageFilters(
-              reference_filter->GetSourceGraphic(),
-              current_interpolation_space);
+              source, current_interpolation_space);
 
           FilterEffect* filter_effect = reference_filter->LastEffect();
           current_interpolation_space =
@@ -469,9 +482,27 @@ CompositorFilterOperations FilterEffectBuilder::BuildFilterOperations(
             paint_filter_builder::BuildBoxReflectFilter(reflection, nullptr));
         break;
       }
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+      case FilterOperation::OperationType::kGpuShader: {
+        auto& shader_operation = To<GpuShaderFilterOperation>(*op);
+        auto* resource = shader_operation.Resource();
+        if (resource && resource->IsLoaded()) {
+          auto* shader = resource->GetGpuShader();
+          filters.AppendGpuShaderFilter(shader->source(),
+                                        reference_box_.size(),
+                                        shader_operation.AnimationFrame(),
+                                        shader->NeedsMouseInput());
+        }
+
+        break;
+      }
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
       case FilterOperation::OperationType::kNone:
         break;
     }
+    // TODO(fs): When transitioning from a reference filter using "linearRGB"
+    // to a filter function we should insert a conversion (like the one below)
+    // for the results to be correct.
   }
   if (current_interpolation_space != kInterpolationSpaceSRGB) {
     // Transform to device color space at the end of processing, if required.

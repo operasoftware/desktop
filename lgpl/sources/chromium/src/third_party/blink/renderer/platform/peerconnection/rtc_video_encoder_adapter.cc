@@ -98,6 +98,7 @@ int RTCVideoEncoderAdapter::InitEncode(const webrtc::VideoCodec* codec_settings,
       base::BindRepeating(&RTCVideoEncoderAdapter::OnEncodedFrameReady,
                           weak_ptr_factory_.GetWeakPtr()));
 
+  encoder_initialized_ = false;
   const media::EncoderStatus result = RunOnEncoderTaskRunnerSync(base::BindOnce(
       std::move(init_task), encoder_options_, std::move(output_callback)));
 
@@ -140,13 +141,18 @@ int32_t RTCVideoEncoderAdapter::Encode(
 
   input_frames_.push_back(webrtc_frame);
 
-  DCHECK_EQ(webrtc_frame.video_frame_buffer()->type(),
-            webrtc::VideoFrameBuffer::Type::kNative)
-      << "Expected a kNative frame produced by blink::WebRTCVideoTrackSource";
+  // Normally RTCVideoEncoderAdapter is used with
+  // `webrtc::VideoFrameBuffer::Type::kNative` frames produced by
+  // blink::WebRTCVideoTrackSource, except when a video track is disabled and
+  // webrtc::VideoBroadcaster inserts non-native black frames.
   const scoped_refptr<media::VideoFrame> frame =
-      static_cast<const WebRtcVideoFrameAdapter*>(
-          webrtc_frame.video_frame_buffer().get())
-          ->getMediaVideoFrame();
+      webrtc_frame.video_frame_buffer()->type() ==
+              webrtc::VideoFrameBuffer::Type::kNative
+          ? static_cast<const WebRtcVideoFrameAdapter*>(
+                webrtc_frame.video_frame_buffer().get())
+                ->getMediaVideoFrame()
+          : media::VideoFrame::CreateBlackFrame(
+                {webrtc_frame.width(), webrtc_frame.height()});
   frame->set_timestamp(
       base::Microseconds(webrtc_frame.timestamp() * kUsPerRtpTick));
 
@@ -165,6 +171,11 @@ int32_t RTCVideoEncoderAdapter::Encode(
 void RTCVideoEncoderAdapter::SetRates(const RateControlParameters& parameters) {
   DVLOG(1) << __func__;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (!encoder_initialized_) {
+    DVLOG(1) << "Encoder not initialized";
+    return;
+  }
 
   if (parameters.bitrate.get_sum_bps() != 0) {
     encoder_options_.bitrate =

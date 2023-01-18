@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "media/video/gpu_video_accelerator_factories.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_video_encoder.h"
+#include "third_party/openh264/openh264_buildflags.h"
 #include "third_party/webrtc/api/video_codecs/h264_profile_level_id.h"
 #include "third_party/webrtc/api/video_codecs/sdp_video_format.h"
 #include "third_party/webrtc/api/video_codecs/video_encoder.h"
@@ -34,8 +35,8 @@ absl::optional<media::VideoCodecProfile> WebRTCFormatToCodecProfile(
     // checked by kWebRtcH264WithOpenH264FFmpeg flag. This check should be
     // removed when SW implementation is fully enabled.
     bool webrtc_h264_sw_enabled = false;
-#if defined(OPERA_DESKTOP)
-    // Opera uses its own SW fallback.
+#if BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || defined(USE_SYSTEM_PROPRIETARY_CODECS)
+    // Enable alternative SW fallback implementations.
     webrtc_h264_sw_enabled = true;
 #elif BUILDFLAG(RTC_USE_H264) && BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
     webrtc_h264_sw_enabled = base::FeatureList::IsEnabled(
@@ -73,8 +74,8 @@ absl::optional<webrtc::SdpVideoFormat> VEAToWebRTCFormat(
     // checked by kWebRtcH264WithOpenH264FFmpeg flag. This check should be
     // removed when SW implementation is fully enabled.
     bool webrtc_h264_sw_enabled = false;
-#if defined(OPERA_DESKTOP)
-    // Opera uses its own SW fallback.
+#if BUILDFLAG(ENABLE_EXTERNAL_OPENH264) || defined(USE_SYSTEM_PROPRIETARY_CODECS)
+    // Enable alternative SW fallback implementations.
     webrtc_h264_sw_enabled = true;
 #elif BUILDFLAG(RTC_USE_H264) && BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
     webrtc_h264_sw_enabled = base::FeatureList::IsEnabled(
@@ -180,9 +181,16 @@ SupportedFormats GetSupportedFormatsInternal(
       supported_formats.scalability_modes.push_back(profile.scalability_modes);
       supported_formats.sdp_formats.push_back(std::move(*format));
 
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
 #if BUILDFLAG(IS_WIN)
-      if (media::IsMediaFoundationH264CbpEncodingEnabled() &&
-          profile.profile == media::VideoCodecProfile::H264PROFILE_BASELINE) {
+      const bool kShouldAddH264Cbp =
+          media::IsMediaFoundationH264CbpEncodingEnabled() &&
+          profile.profile == media::VideoCodecProfile::H264PROFILE_BASELINE;
+#elif BUILDFLAG(IS_LINUX)
+      const bool kShouldAddH264Cbp =
+          profile.profile == media::VideoCodecProfile::H264PROFILE_BASELINE;
+#endif
+      if (kShouldAddH264Cbp) {
         supported_formats.profiles.push_back(profile.profile);
         supported_formats.scalability_modes.push_back(
             profile.scalability_modes);

@@ -26,6 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_FILTER_OPERATIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_FILTER_OPERATIONS_H_
 
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/style/filter_operation.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -36,6 +37,9 @@ class RectF;
 
 namespace blink {
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+class ShaderResourceClient;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 class SVGResourceClient;
 
 class CORE_EXPORT FilterOperations {
@@ -73,9 +77,18 @@ class CORE_EXPORT FilterOperations {
   bool HasFilterThatAffectsOpacity() const;
   bool HasFilterThatMovesPixels() const;
   bool HasReferenceFilter() const;
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  bool HasFilterThatNeedReferenceBox() const;
+  bool HasFilterOfType(FilterOperation::OperationType) const;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
   void AddClient(SVGResourceClient&) const;
   void RemoveClient(SVGResourceClient&) const;
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  void AddGpuShaderClient(GpuShaderResourceClient&) const;
+  void RemoveGpuShaderClient(GpuShaderResourceClient&) const;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
   void Trace(Visitor*) const;
 

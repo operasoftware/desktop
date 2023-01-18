@@ -27,6 +27,9 @@
 
 #include <numeric>
 
+#include "base/containers/contains.h"
+#include "base/ranges/algorithm.h"
+
 namespace blink {
 
 FilterOperations::FilterOperations() = default;
@@ -55,9 +58,8 @@ bool FilterOperations::CanInterpolateWith(const FilterOperations& other) const {
   auto can_interpolate = [](FilterOperation* operation) {
     return FilterOperation::CanInterpolate(operation->GetType());
   };
-  if (!std::all_of(Operations().begin(), Operations().end(), can_interpolate) ||
-      !std::all_of(other.Operations().begin(), other.Operations().end(),
-                   can_interpolate)) {
+  if (!base::ranges::all_of(Operations(), can_interpolate) ||
+      !base::ranges::all_of(other.Operations(), can_interpolate)) {
     return false;
   }
 
@@ -80,24 +82,36 @@ gfx::RectF FilterOperations::MapRect(const gfx::RectF& rect) const {
 }
 
 bool FilterOperations::HasFilterThatAffectsOpacity() const {
-  return std::any_of(
-      operations_.begin(), operations_.end(),
-      [](const auto& operation) { return operation->AffectsOpacity(); });
+  return base::ranges::any_of(operations_, [](const auto& operation) {
+    return operation->AffectsOpacity();
+  });
 }
 
 bool FilterOperations::HasFilterThatMovesPixels() const {
-  return std::any_of(
-      operations_.begin(), operations_.end(),
-      [](const auto& operation) { return operation->MovesPixels(); });
+  return base::ranges::any_of(operations_, [](const auto& operation) {
+    return operation->MovesPixels();
+  });
 }
 
 bool FilterOperations::HasReferenceFilter() const {
-  return std::any_of(operations_.begin(), operations_.end(),
-                     [](const auto& operation) {
-                       return operation->GetType() ==
-                              FilterOperation::OperationType::kReference;
-                     });
+  return base::Contains(operations_, FilterOperation::OperationType::kReference,
+                        &FilterOperation::GetType);
 }
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+bool FilterOperations::HasFilterThatNeedReferenceBox() const {
+  return base::ranges::any_of(operations_, [](const auto& operation) {
+    return operation->NeedsReferenceBox();
+  });
+}
+
+bool FilterOperations::HasFilterOfType(
+    FilterOperation::OperationType type) const {
+  return std::any_of(
+      operations_.begin(), operations_.end(),
+      [type](const auto& operation) { return operation->GetType() == type; });
+}
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 void FilterOperations::AddClient(SVGResourceClient& client) const {
   for (FilterOperation* operation : operations_) {
@@ -113,4 +127,21 @@ void FilterOperations::RemoveClient(SVGResourceClient& client) const {
   }
 }
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+void FilterOperations::AddGpuShaderClient(
+    GpuShaderResourceClient& client) const {
+  for (FilterOperation* operation : operations_) {
+    if (operation->GetType() == FilterOperation::OperationType::kGpuShader)
+      To<GpuShaderFilterOperation>(*operation).AddClient(client);
+  }
+}
+
+void FilterOperations::RemoveGpuShaderClient(
+    GpuShaderResourceClient& client) const {
+  for (FilterOperation* operation : operations_) {
+    if (operation->GetType() == FilterOperation::OperationType::kGpuShader)
+      To<GpuShaderFilterOperation>(*operation).RemoveClient(client);
+  }
+}
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 }  // namespace blink

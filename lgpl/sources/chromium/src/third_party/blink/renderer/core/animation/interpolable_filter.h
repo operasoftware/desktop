@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 
 namespace blink {
 
+class CSSProperty;
 class CSSValue;
 class StyleResolverState;
 
@@ -40,7 +41,8 @@ class CORE_EXPORT InterpolableFilter final : public InterpolableValue {
 
   // Convert this InterpolableFilter back into a FilterOperation class, usually
   // to be applied to the style after interpolating |this|.
-  FilterOperation* CreateFilterOperation(const StyleResolverState&) const;
+  FilterOperation* CreateFilterOperation(const CSSProperty&,
+                                         StyleResolverState&) const;
 
   // InterpolableValue implementation:
   void Interpolate(const InterpolableValue& to,

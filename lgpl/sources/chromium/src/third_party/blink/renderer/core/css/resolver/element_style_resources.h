@@ -24,6 +24,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_ELEMENT_STYLE_RESOURCES_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_ELEMENT_STYLE_RESOURCES_H_
 
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -37,6 +38,11 @@ class Element;
 class PseudoElement;
 class SVGResource;
 class StyleImage;
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+class CSSShaderValue;
+class GpuShaderResource;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 namespace cssvalue {
 class CSSURIValue;
@@ -77,6 +83,10 @@ class ElementStyleResources {
   SVGResource* GetSVGResourceFromValue(CSSPropertyID,
                                        const cssvalue::CSSURIValue&);
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  GpuShaderResource* GetGpuShaderResourceFromValue(CSSPropertyID,
+                                                   const CSSShaderValue&);
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
   void LoadPendingResources(ComputedStyle&);
 
   void UpdateLengthConversionData(const CSSToLengthConversionData*);
@@ -87,10 +97,16 @@ class ElementStyleResources {
 
   void LoadPendingSVGResources(ComputedStyle&);
   void LoadPendingImages(ComputedStyle&);
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  void LoadPendingGpuShaderResources(ComputedStyle&);
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
   Element& element_;
   HashSet<CSSPropertyID> pending_image_properties_;
   HashSet<CSSPropertyID> pending_svg_resource_properties_;
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  HashSet<CSSPropertyID> pending_gpu_shader_resource_properties_;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
   float device_scale_factor_;
   PseudoElement* pseudo_element_;
   PreCachedContainerSizes pre_cached_container_sizes_;

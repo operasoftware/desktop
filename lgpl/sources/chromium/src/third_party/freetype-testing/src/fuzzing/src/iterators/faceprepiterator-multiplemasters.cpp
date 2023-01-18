@@ -28,7 +28,7 @@
       FacePrepIteratorOutlines::get_prepared_face( face_loader, index );
 
     FT_Library             library;
-    FT_MM_Var*             master;
+    FT_MM_Var*             master = nullptr;
     std::vector<FT_Fixed>  coords;
 
 

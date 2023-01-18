@@ -49,6 +49,7 @@
 
 #include "base/dcheck_is_on.h"
 #include "base/gtest_prod_util.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_static_position.h"
@@ -446,6 +447,12 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
     return has_filter_that_moves_pixels_;
   }
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  bool HasFiltersThatNeedReferenceBox() const {
+    return has_filter_that_need_reference_box_;
+  }
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
   PaintLayerResourceInfo* ResourceInfo() const {
     return rare_data_ ? rare_data_->resource_info.Get() : nullptr;
   }
@@ -557,8 +564,12 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   bool DescendantNeedsCullRectUpdate() const {
     return descendant_needs_cull_rect_update_;
   }
+  bool SelfOrDescendantNeedsCullRectUpdate() const {
+    return needs_cull_rect_update_ || descendant_needs_cull_rect_update_;
+  }
   void SetNeedsCullRectUpdate();
   void SetForcesChildrenCullRectUpdate();
+  void MarkCompositingContainerChainForNeedsCullRectUpdate();
   void SetDescendantNeedsCullRectUpdate();
   void ClearNeedsCullRectUpdate() {
     needs_cull_rect_update_ = false;
@@ -573,10 +584,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   PaintResult PreviousPaintResult() const {
     return static_cast<PaintResult>(previous_paint_result_);
   }
-  void SetPreviousPaintResult(PaintResult result) {
-    previous_paint_result_ = static_cast<unsigned>(result);
-    DCHECK(previous_paint_result_ == static_cast<unsigned>(result));
-  }
+  void SetPreviousPaintResult(PaintResult result);
 
   // Used to skip PaintPhaseDescendantOutlinesOnly for layers that have never
   // had descendant outlines.  The flag is set during paint invalidation on a
@@ -603,7 +611,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   }
 
   // See
-  // https://chromium.googlesource.com/chromium/src.git/+/master/third_party/blink/renderer/core/paint/README.md
+  // https://chromium.googlesource.com/chromium/src.git/+/main/third_party/blink/renderer/core/paint/README.md
   // for the definition of a replaced normal-flow stacking element.
   bool IsReplacedNormalFlowStacking() const;
 
@@ -619,7 +627,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
                       : PhysicalOffset();
   }
 
-  bool KnownToClipSubtree() const;
+  bool KnownToClipSubtreeToPaddingBox() const;
 
   void Trace(Visitor*) const override;
 
@@ -650,6 +658,9 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
                         const FragmentData* root_fragment = nullptr) const;
 
   struct HitTestRecursionData {
+    STACK_ALLOCATED();
+
+   public:
     const PhysicalRect& rect;
     // Whether location.Intersects(rect) returns true.
     const HitTestLocation& location;
@@ -744,6 +755,8 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   void MarkAncestorChainForFlagsUpdate(
       DescendantDependentFlagsUpdateFlag = kNeedsDescendantDependentUpdate);
 
+  void SetNeedsDescendantDependentFlagsUpdate();
+
   void UpdateTransform(const ComputedStyle* old_style,
                        const ComputedStyle& new_style);
 
@@ -770,11 +783,12 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   // PaintLayerPaintOrderIterator.
   PaintLayerStackingNode* StackingNode() const { return stacking_node_; }
 
-  void SetNeedsReorderOverlayOverflowControls(bool b) {
-    needs_reorder_overlay_overflow_controls_ = b;
-  }
+  void SetNeedsReorderOverlayOverflowControls(bool);
 
   bool ComputeHasFilterThatMovesPixels() const;
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  bool ComputeHasFilterThatNeedReferenceBox() const;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
   // Self-painting layer is an optimization where we avoid the heavy Layer
   // painting machinery for a Layer allocated only to handle the overflow clip
@@ -831,6 +845,11 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
 
   // Caches |ComputeHasFilterThatMovesPixels()|, updated on style changes.
   unsigned has_filter_that_moves_pixels_ : 1;
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  // Caches |ComputeHasFilterThatNeedReferenceBox()|, updated on style changes.
+  unsigned has_filter_that_need_reference_box_ : 1;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
   // True if the current subtree is underneath a LayoutSVGHiddenContainer
   // ancestor.

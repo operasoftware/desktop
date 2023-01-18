@@ -27,6 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_FILTER_OPERATION_H_
 
 #include "base/notreached.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/style/shadow_data.h"
 #include "third_party/blink/renderer/platform/geometry/length.h"
@@ -40,8 +41,16 @@
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "ui/gfx/geometry/rect_f.h"
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include "third_party/blink/renderer/platform/weborigin/referrer.h"
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
 namespace blink {
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+class GpuShaderResource;
+class GpuShaderResourceClient;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 class Filter;
 class SVGResource;
 class SVGResourceClient;
@@ -68,6 +77,9 @@ class CORE_EXPORT FilterOperation : public GarbageCollected<FilterOperation> {
     kComponentTransfer,
     kConvolveMatrix,
     kTurbulence,
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+    kGpuShader,
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
     kNone
   };
 
@@ -91,6 +103,11 @@ class CORE_EXPORT FilterOperation : public GarbageCollected<FilterOperation> {
       case OperationType::kComponentTransfer:
       case OperationType::kConvolveMatrix:
       case OperationType::kBoxReflect:
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+      // Do not interpolate gpu shader filters in css - those filters are
+      // are animated in CC.
+      case OperationType::kGpuShader:
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
         return false;
       case OperationType::kNone:
         break;
@@ -117,6 +134,10 @@ class CORE_EXPORT FilterOperation : public GarbageCollected<FilterOperation> {
   // True if the the value of one pixel can affect the value of another pixel
   // under this operation, such as blur.
   virtual bool MovesPixels() const { return false; }
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  // True if the filter requires reference box to be calculated.
+  virtual bool NeedsReferenceBox() const { return false; }
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
   // Maps "forward" to determine which pixels in a destination rect are
   // affected by pixels in the source rect.
@@ -503,6 +524,53 @@ struct DowncastTraits<TurbulenceFilterOperation> {
     return op.GetType() == FilterOperation::OperationType::kTurbulence;
   }
 };
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+class CORE_EXPORT GpuShaderFilterOperation : public FilterOperation {
+ public:
+  GpuShaderFilterOperation(const AtomicString&,
+                           const AtomicString&,
+                           const Referrer&,
+                           GpuShaderResource*,
+                           float animation_frame);
+
+  bool AffectsOpacity() const override { return true; }
+  // Need to keep it |false| as it prevents animations to be driven by
+  // compositor.
+  bool MovesPixels() const override { return false; }
+  bool NeedsReferenceBox() const override { return true; }
+  gfx::RectF MapRect(const gfx::RectF&) const override;
+  void Trace(Visitor*) const override;
+
+  const AtomicString& RelativeUrl() const { return relative_url_; }
+  const AtomicString& AbsoluteUrl() const { return absolute_url_; }
+  const Referrer& GetReferrer() const { return referrer_; }
+
+  void AddClient(GpuShaderResourceClient&);
+  void RemoveClient(GpuShaderResourceClient&);
+
+  GpuShaderResource* Resource() const { return resource_; }
+  float AnimationFrame() const { return animation_frame_; }
+
+ protected:
+  bool IsEqualAssumingSameType(const FilterOperation& o) const override;
+
+ private:
+  AtomicString relative_url_;
+  AtomicString absolute_url_;
+  Referrer referrer_;
+  Member<GpuShaderResource> resource_;
+  float animation_frame_;
+};
+
+template <>
+struct DowncastTraits<GpuShaderFilterOperation> {
+  static bool AllowFrom(const FilterOperation& op) {
+    return op.GetType() == FilterOperation::OperationType::kGpuShader;
+  }
+};
+
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 #undef DEFINE_FILTER_OPERATION_TYPE_CASTS
 

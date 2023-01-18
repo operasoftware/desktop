@@ -33,7 +33,7 @@
 
     FT_Library       library;
     FT_Multi_Master  master;
-    FT_MM_Var*       var;
+    FT_MM_Var*       var = nullptr;
 
     std::vector<FT_Long>   coords_mm_design;
     std::vector<FT_Fixed>  coords_var_design;

@@ -41,6 +41,16 @@ PaintLayerResourceInfo::~PaintLayerResourceInfo() {
 }
 
 void PaintLayerResourceInfo::ResourceContentChanged(SVGResource*) {
+  ResourceContentChanged();
+}
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+void PaintLayerResourceInfo::ResourceContentChanged(GpuShaderResource*) {
+  ResourceContentChanged();
+}
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
+void PaintLayerResourceInfo::ResourceContentChanged() {
   DCHECK(layer_);
   LayoutObject& layout_object = layer_->GetLayoutObject();
   layout_object.SetShouldDoFullPaintInvalidation();

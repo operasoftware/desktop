@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_RESOURCE_TEXT_RESOURCE_H_
 
 #include <memory>
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/parser/text_resource_decoder.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
@@ -21,6 +22,12 @@ class CORE_EXPORT TextResource : public Resource {
   static TextResource* FetchSVGDocument(FetchParameters&,
                                         ResourceFetcher*,
                                         ResourceClient*);
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  static TextResource* FetchGpuShaderDocument(FetchParameters&,
+                                              ResourceFetcher*,
+                                              ResourceClient*);
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
   TextResource(const ResourceRequest&,
                ResourceType,
                const ResourceLoaderOptions&,
@@ -53,7 +60,12 @@ struct DowncastTraits<TextResource> {
     return resource.GetType() == ResourceType::kCSSStyleSheet ||
            resource.GetType() == ResourceType::kScript ||
            resource.GetType() == ResourceType::kXSLStyleSheet ||
-           resource.GetType() == ResourceType::kSVGDocument;
+           resource.GetType() == ResourceType::kSpeculationRules ||
+           resource.GetType() == ResourceType::kSVGDocument
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+           || resource.GetType() == ResourceType::kGpuShader
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+        ;
   }
 };
 

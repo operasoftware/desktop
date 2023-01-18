@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "build/build_config.h"
 #include "mojo/public/cpp/bindings/struct_traits.h"
 #include "net/nqe/effective_connection_type.h"
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "third_party/blink/public/mojom/webpreferences/web_preferences.mojom.h"
@@ -97,6 +98,13 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
     return r.images_enabled;
   }
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  static bool gpu_shader_css_filters_enabled(
+      const blink::web_pref::WebPreferences& r) {
+    return r.gpu_shader_css_filters_enabled;
+  }
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
   static bool plugins_enabled(const blink::web_pref::WebPreferences& r) {
     return r.plugins_enabled;
   }
@@ -127,10 +135,6 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
   static bool javascript_can_access_clipboard(
       const blink::web_pref::WebPreferences& r) {
     return r.javascript_can_access_clipboard;
-  }
-
-  static bool xslt_enabled(const blink::web_pref::WebPreferences& r) {
-    return r.xslt_enabled;
   }
 
   static bool dns_prefetching_enabled(
@@ -761,6 +765,11 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
   static bool renderer_wide_named_frame_lookup(
       const blink::web_pref::WebPreferences& r) {
     return r.renderer_wide_named_frame_lookup;
+  }
+
+  static bool strict_mime_type_check_for_worker_scripts_enabled(
+      const blink::web_pref::WebPreferences& r) {
+    return r.strict_mime_type_check_for_worker_scripts_enabled;
   }
 
   static bool Read(blink::mojom::WebPreferencesDataView r,

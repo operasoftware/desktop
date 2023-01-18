@@ -42,6 +42,8 @@
 #include "services/network/public/mojom/fetch_api.mojom-blink-forward.h"
 #include "third_party/blink/public/common/frame/frame_ad_evidence.h"
 #include "third_party/blink/public/common/frame/transient_allow_fullscreen.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
+#include "third_party/blink/public/mojom/back_forward_cache_not_restored_reasons.mojom-blink.h"
 #include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/devtools/devtools_agent.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink-forward.h"
@@ -58,8 +60,10 @@
 #include "third_party/blink/public/mojom/loader/pause_subresource_loading_handle.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/navigation/renderer_eviction_reason.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/reporting/reporting.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/script/script_evaluation_params.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/public/public_buildflags.h"
 #include "third_party/blink/public/web/web_script_execution_callback.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -149,6 +153,9 @@ class WebPluginContainerImpl;
 class WebPrescientNetworking;
 class WebURLLoaderFactory;
 struct BlinkTransferableMessage;
+struct WebScriptSource;
+
+enum class BackForwardCacheAware;
 
 #if !BUILDFLAG(IS_ANDROID)
 class WindowControlsOverlayChangedDelegate;
@@ -205,8 +212,9 @@ class CORE_EXPORT LocalFrame final
   // response to the creation of a RenderFrameHost) or by blink if this is a
   // synchronously created LocalFrame child.
   void Init(Frame* opener,
+            const DocumentToken& document_token,
             std::unique_ptr<PolicyContainer> policy_container,
-            const blink::StorageKey& storage_key);
+            const StorageKey& storage_key);
   void SetView(LocalFrameView*);
   void CreateView(const gfx::Size&, const Color&);
 
@@ -503,8 +511,8 @@ class CORE_EXPORT LocalFrame final
   void SetViewportIntersectionFromParent(
       const mojom::blink::ViewportIntersectionState& intersection_state);
 
-  gfx::Size GetMainFrameViewportSize() const override;
-  gfx::Point GetMainFrameScrollPosition() const override;
+  gfx::Size GetOutermostMainFrameSize() const override;
+  gfx::Point GetOutermostMainFrameScrollPosition() const override;
 
   void SetOpener(Frame* opener) override;
 
@@ -607,6 +615,15 @@ class CORE_EXPORT LocalFrame final
   // by an associated interface with the legacy Chrome IPC channel.
   mojom::blink::BackForwardCacheControllerHost&
   GetBackForwardCacheControllerHostRemote();
+
+  // Sets back/forward cache NotRestoredReasons for this frame. Only set for
+  // outermost main frame.
+  void SetNotRestoredReasons(
+      mojom::blink::BackForwardCacheNotRestoredReasonsPtr);
+  const mojom::blink::BackForwardCacheNotRestoredReasonsPtr&
+  GetNotRestoredReasons();
+  // Returns if the saved NotRestoredReasons has any blocking reasons.
+  bool HasBlockingReasons();
 
   const AtomicString& GetReducedAcceptLanguage() const {
     return reduced_accept_language_;
@@ -750,6 +767,15 @@ class CORE_EXPORT LocalFrame final
   bool SwapIn();
 
   void LoadJavaScriptURL(const KURL& url);
+  void RequestExecuteScript(int32_t world_id,
+                            base::span<const WebScriptSource> sources,
+                            mojom::blink::UserActivationOption,
+                            mojom::blink::EvaluationTiming,
+                            mojom::blink::LoadEventBlockingOption,
+                            WebScriptExecutionCallback,
+                            BackForwardCacheAware back_forward_cache_aware,
+                            mojom::blink::WantResultOption,
+                            mojom::blink::PromiseResultOption);
 
   void SetEvictCachedSessionStorageOnFreezeOrUnload();
 
@@ -772,8 +798,6 @@ class CORE_EXPORT LocalFrame final
   // Invokes on first paint, this method could be invoked multiple times, refer
   // to FrameFirstPaint.
   void OnFirstPaint(bool text_painted, bool image_painted);
-  void IncrementNavigationId() { navigation_id_++; }
-  uint32_t GetNavigationId() { return navigation_id_; }
 
 #if BUILDFLAG(IS_MAC)
   void ResetTextInputHostForTesting();
@@ -789,6 +813,8 @@ class CORE_EXPORT LocalFrame final
 
   void SetBackgroundColorPaintImageGeneratorForTesting(
       BackgroundColorPaintImageGenerator* generator);
+
+  absl::optional<SkColor> GetFrameOverlayColorForTesting() const;
 
  private:
   friend class FrameNavigationDisabler;
@@ -863,6 +889,10 @@ class CORE_EXPORT LocalFrame final
                                     String& clip_text,
                                     String& clip_html,
                                     gfx::Rect& clip_rect);
+
+  // Helper function for |HasBlockingReasons()|.
+  bool HasBlockingReasonsHelper(
+      const mojom::blink::BackForwardCacheNotRestoredReasonsPtr&);
 
 #if !BUILDFLAG(IS_ANDROID)
   void SetTitlebarAreaDocumentStyleEnvironmentVariables() const;
@@ -941,6 +971,9 @@ class CORE_EXPORT LocalFrame final
   InterfaceRegistry* const interface_registry_;
 
   mojom::blink::ViewportIntersectionState intersection_state_;
+
+  // Only set for outermost main frame.
+  mojom::blink::BackForwardCacheNotRestoredReasonsPtr not_restored_reasons_;
 
   // Per-frame URLLoader factory.
   std::unique_ptr<WebURLLoaderFactory> url_loader_factory_;
@@ -1028,9 +1061,6 @@ class CORE_EXPORT LocalFrame final
 
   // Indicate if the current document's color scheme was notified.
   bool notified_color_scheme_ = false;
-  // Tracks the number of times this document has been retrieved from the
-  // bfcache.
-  uint32_t navigation_id_ = 1;
 
   // Stores whether this frame is affected by a CSPEE policy (from any ancestor
   // frame). Calculated browser-side and used to help determine if this frame

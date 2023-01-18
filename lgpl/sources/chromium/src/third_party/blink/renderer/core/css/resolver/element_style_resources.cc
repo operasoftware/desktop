@@ -57,6 +57,11 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include "third_party/blink/renderer/core/css/css_shader_value.h"
+#include "third_party/blink/renderer/core/style/gpu_shader_resource.h"
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
 namespace blink {
 
 namespace {
@@ -263,6 +268,15 @@ SVGResource* ElementStyleResources::GetSVGResourceFromValue(
   return nullptr;
 }
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+GpuShaderResource* ElementStyleResources::GetGpuShaderResourceFromValue(
+    CSSPropertyID property,
+    const CSSShaderValue& value) {
+  pending_gpu_shader_resource_properties_.insert(property);
+  return value.CacheShader(element_.GetDocument());
+}
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
 static void LoadResourcesForFilter(
     FilterOperations::FilterOperationVector& filter_operations,
     Document& document) {
@@ -275,6 +289,21 @@ static void LoadResourcesForFilter(
       resource->Load(document);
   }
 }
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+static void LoadResourcesForShader(
+    FilterOperations::FilterOperationVector& filter_operations,
+    Document& document) {
+  for (const auto& filter_operation : filter_operations) {
+    auto* shader_operation =
+        DynamicTo<GpuShaderFilterOperation>(filter_operation.Get());
+    if (!shader_operation)
+      continue;
+    if (auto* resource = shader_operation->Resource())
+      resource->Load(document);
+  }
+}
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 void ElementStyleResources::LoadPendingSVGResources(ComputedStyle& style) {
   Document& document = element_.GetDocument();
@@ -292,6 +321,22 @@ void ElementStyleResources::LoadPendingSVGResources(ComputedStyle& style) {
     }
   }
 }
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+void ElementStyleResources::LoadPendingGpuShaderResources(
+    ComputedStyle& style) {
+  Document& document = element_.GetDocument();
+  for (CSSPropertyID property : pending_gpu_shader_resource_properties_) {
+    switch (property) {
+      case CSSPropertyID::kFilter:
+        LoadResourcesForShader(style.MutableFilter().Operations(), document);
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+}
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 static CSSValue* PendingCssValue(StyleImage* style_image) {
   if (auto* pending_image = DynamicTo<StylePendingImage>(style_image))
@@ -420,6 +465,9 @@ void ElementStyleResources::LoadPendingResources(
     ComputedStyle& computed_style) {
   LoadPendingImages(computed_style);
   LoadPendingSVGResources(computed_style);
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+  LoadPendingGpuShaderResources(computed_style);
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 }
 
 void ElementStyleResources::UpdateLengthConversionData(

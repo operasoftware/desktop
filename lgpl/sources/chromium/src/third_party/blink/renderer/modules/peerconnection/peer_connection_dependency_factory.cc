@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,6 +63,7 @@
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
+#include "third_party/openh264/openh264_buildflags.h"
 #include "third_party/re2/src/re2/re2.h"
 #include "third_party/webrtc/api/call/call_factory_interface.h"
 #include "third_party/webrtc/api/peer_connection_interface.h"
@@ -354,9 +355,8 @@ void ReportUmaEncodeDecodeCapabilities(
   std::unique_ptr<webrtc::VideoEncoderFactory> webrtc_encoder_factory =
       blink::CreateWebrtcVideoEncoderFactory(
 #if BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
-          // TODO(wdzierzanowski): Wait until encode capabilities known,
-          // DNA-101798.
-          external_software_factories,
+          // This has no effect on HW capabilities, anyway.
+          nullptr,
 #endif  // BUILDFLAG(ENABLE_EXTERNAL_OPENH264)
           gpu_factories, base::DoNothing());
   std::unique_ptr<webrtc::VideoDecoderFactory> webrtc_decoder_factory =
@@ -695,8 +695,8 @@ void PeerConnectionDependencyFactory::InitializeSignalingThread(
   pcf_deps.signaling_thread = GetSignalingThread();
   pcf_deps.network_thread = GetNetworkThread();
   pcf_deps.task_queue_factory = CreateWebRtcTaskQueueFactory();
-  DCHECK(metronome_source_);
-  pcf_deps.metronome = metronome_source_->CreateWebRtcMetronome();
+  if (base::FeatureList::IsEnabled(blink::features::kWebRtcMetronome))
+    pcf_deps.metronome = metronome_source_->CreateWebRtcMetronome();
   pcf_deps.call_factory = webrtc::CreateCallFactory();
   pcf_deps.event_log_factory = std::make_unique<webrtc::RtcEventLogFactory>(
       pcf_deps.task_queue_factory.get());

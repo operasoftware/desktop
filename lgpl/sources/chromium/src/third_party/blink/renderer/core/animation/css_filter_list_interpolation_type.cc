@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -258,11 +258,11 @@ void CSSFilterListInterpolationType::ApplyStandardPropertyValue(
   wtf_size_t length = interpolable_list.length();
 
   FilterOperations filter_operations;
-  filter_operations.Operations().ReserveCapacity(length);
+  filter_operations.Operations().reserve(length);
   for (wtf_size_t i = 0; i < length; i++) {
     filter_operations.Operations().push_back(
         To<InterpolableFilter>(interpolable_list.Get(i))
-            ->CreateFilterOperation(state));
+            ->CreateFilterOperation(CssProperty(), state));
   }
   SetFilterList(CssProperty(), *state.Style(), std::move(filter_operations));
 }

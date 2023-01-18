@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,23 @@ class SVGDocumentResourceFactory : public ResourceFactory {
   }
 };
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+class GpuShaderDocumentResourceFactory : public ResourceFactory {
+ public:
+  GpuShaderDocumentResourceFactory()
+      : ResourceFactory(ResourceType::kGpuShader,
+                        TextResourceDecoderOptions::kPlainTextContent) {}
+
+  Resource* Create(
+      const ResourceRequest& request,
+      const ResourceLoaderOptions& options,
+      const TextResourceDecoderOptions& decoder_options) const override {
+    return MakeGarbageCollected<TextResource>(request, ResourceType::kGpuShader,
+                                              options, decoder_options);
+  }
+};
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
 }  // namespace
 
 TextResource* TextResource::FetchSVGDocument(FetchParameters& params,
@@ -38,6 +55,15 @@ TextResource* TextResource::FetchSVGDocument(FetchParameters& params,
   return To<TextResource>(
       fetcher->RequestResource(params, SVGDocumentResourceFactory(), client));
 }
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+TextResource* TextResource::FetchGpuShaderDocument(FetchParameters& params,
+                                                   ResourceFetcher* fetcher,
+                                                   ResourceClient* client) {
+  return To<TextResource>(fetcher->RequestResource(
+      params, GpuShaderDocumentResourceFactory(), client));
+}
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 TextResource::TextResource(const ResourceRequest& resource_request,
                            ResourceType type,

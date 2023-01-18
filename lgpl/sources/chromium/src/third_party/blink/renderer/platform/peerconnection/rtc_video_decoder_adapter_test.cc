@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -155,7 +155,7 @@ class RTCVideoDecoderAdapterTest : public ::testing::Test {
 #endif
   }
 
-  ~RTCVideoDecoderAdapterTest() {
+  ~RTCVideoDecoderAdapterTest() override {
     if (!rtc_video_decoder_adapter_)
       return;
 
@@ -193,6 +193,20 @@ class RTCVideoDecoderAdapterTest : public ::testing::Test {
     return !!rtc_video_decoder_adapter_;
   }
 
+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+  // Pass owned_video_decoder_ directly instead of using gpu_factories_.
+  bool CreateAndInitializeDirectly() {
+    EXPECT_CALL(*video_decoder_, Initialize_(_, _, _, _, _, _))
+        .WillOnce(DoAll(
+            SaveArg<0>(&vda_config_), SaveArg<4>(&output_cb_),
+            base::test::RunOnceCallback<3>(media::DecoderStatus::Codes::kOk)));
+    rtc_video_decoder_adapter_ = RTCVideoDecoderAdapter::Create(
+        std::move(owned_video_decoder_), gpu_factories_.GetTaskRunner(),
+        sdp_format_);
+    return !!rtc_video_decoder_adapter_;
+  }
+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
+
   bool InitDecode() {
     webrtc::VideoDecoder::Settings settings;
     settings.set_codec_type(webrtc::kVideoCodecVP9);
@@ -208,6 +222,8 @@ class RTCVideoDecoderAdapterTest : public ::testing::Test {
     webrtc::EncodedImage input_image;
     static const uint8_t data[1] = {0};
     input_image.SetSpatialIndex(spatial_index_);
+    for (int i = 0; i <= spatial_index_; i++)
+      input_image.SetSpatialLayerFrameSize(i, 4);
     input_image.SetEncodedData(
         webrtc::EncodedImageBuffer::Create(data, sizeof(data)));
     input_image._frameType = webrtc::VideoFrameType::kVideoFrameKey;
@@ -250,6 +266,21 @@ class RTCVideoDecoderAdapterTest : public ::testing::Test {
     webrtc_color_space.set_matrix_from_uint8(1);
     webrtc_color_space.set_range_from_uint8(1);
     input_image.SetColorSpace(webrtc_color_space);
+    return input_image;
+  }
+
+  webrtc::EncodedImage GetEncodedImageWithSingleSpatialLayer(
+      uint32_t timestamp) {
+    constexpr int kSpatialIndex = 1;
+    webrtc::EncodedImage input_image;
+    static const uint8_t data[1] = {0};
+    input_image.SetEncodedData(
+        webrtc::EncodedImageBuffer::Create(data, sizeof(data)));
+    input_image._frameType = webrtc::VideoFrameType::kVideoFrameKey;
+    input_image.SetTimestamp(timestamp);
+    // Input image only has 1 spatial layer, but non-zero spatial index.
+    input_image.SetSpatialIndex(kSpatialIndex);
+    input_image.SetSpatialLayerFrameSize(kSpatialIndex, sizeof(data));
     return input_image;
   }
 
@@ -541,6 +572,26 @@ TEST_F(RTCVideoDecoderAdapterTest, DoesNotFallBackForHighResolution) {
     RTCVideoDecoderAdapter::DecrementCurrentDecoderCountForTesting();
 }
 
+TEST_F(RTCVideoDecoderAdapterTest, DecodesImageWithSingleSpatialLayer) {
+  ASSERT_TRUE(BasicSetup());
+  webrtc::EncodedImage input_image = GetEncodedImageWithSingleSpatialLayer(0);
+  scoped_refptr<media::DecoderBuffer> decoder_buffer;
+  EXPECT_CALL(*video_decoder_, Decode_(_, _))
+      .WillOnce(::testing::DoAll(
+          ::testing::SaveArg<0>(&decoder_buffer),
+          base::test::RunOnceCallback<1>(media::DecoderStatus::Codes::kOk)));
+  EXPECT_EQ(rtc_video_decoder_adapter_->Decode(input_image, false, 0),
+            WEBRTC_VIDEO_CODEC_OK);
+
+  EXPECT_CALL(decoded_cb_, Run(_));
+  FinishDecode(0);
+  media_thread_.FlushForTesting();
+
+  // Check the side data was not set as there was only 1 spatial layer.
+  ASSERT_TRUE(decoder_buffer);
+  EXPECT_EQ(0u, decoder_buffer->side_data_size());
+}
+
 #if BUILDFLAG(IS_WIN)
 TEST_F(RTCVideoDecoderAdapterTest, UseD3D11ToDecodeVP9kSVCStream) {
   ASSERT_TRUE(BasicSetup());
@@ -558,12 +609,13 @@ TEST_F(RTCVideoDecoderAdapterTest, UseD3D11ToDecodeVP9kSVCStream) {
 }
 #endif
 
-// On ChromeOS, only based on x86(use VaapiDecoder) architecture has the ability
-// to decode VP9 kSVC Stream. Other cases should fallback to sw decoder.
+// ChromeOS has the ability to decode VP9 kSVC Stream. Other cases should
+// fallback to sw decoder.
 #if !(defined(ARCH_CPU_X86_FAMILY) && BUILDFLAG(IS_CHROMEOS))
 TEST_F(RTCVideoDecoderAdapterTest,
        FallbackToSWSinceDecodeVP9kSVCStreamWithoutD3D11) {
   ASSERT_TRUE(BasicSetup());
+  EXPECT_FALSE(base::FeatureList::IsEnabled(media::kVp9kSVCHWDecoding));
   SetSpatialIndex(2);
   // kTesting will represent hw decoders for other use cases mentioned above.
   EXPECT_CALL(*video_decoder_, Decode_(_, _)).Times(0);
@@ -573,5 +625,35 @@ TEST_F(RTCVideoDecoderAdapterTest,
   media_thread_.FlushForTesting();
 }
 #endif
+
+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
+TEST_F(RTCVideoDecoderAdapterTest, IsHardwareAccelerated_UseGpuFactories) {
+  video_decoder_->SetDecoderType(media::VideoDecoderType::kMojo);
+  ASSERT_TRUE(CreateAndInitialize());
+  EXPECT_TRUE(
+      rtc_video_decoder_adapter_->GetDecoderInfo().is_hardware_accelerated);
+}
+
+TEST_F(RTCVideoDecoderAdapterTest, IsHardwareAccelerated_Mojo) {
+  video_decoder_->SetDecoderType(media::VideoDecoderType::kMojo);
+  ASSERT_TRUE(CreateAndInitializeDirectly());
+  EXPECT_TRUE(
+      rtc_video_decoder_adapter_->GetDecoderInfo().is_hardware_accelerated);
+}
+
+TEST_F(RTCVideoDecoderAdapterTest, IsHardwareAccelerated_VT) {
+  video_decoder_->SetDecoderType(media::VideoDecoderType::kVT);
+  ASSERT_TRUE(CreateAndInitializeDirectly());
+  EXPECT_FALSE(
+      rtc_video_decoder_adapter_->GetDecoderInfo().is_hardware_accelerated);
+}
+
+TEST_F(RTCVideoDecoderAdapterTest, IsHardwareAccelerated_WMF) {
+  video_decoder_->SetDecoderType(media::VideoDecoderType::kWMF);
+  ASSERT_TRUE(CreateAndInitializeDirectly());
+  EXPECT_FALSE(
+      rtc_video_decoder_adapter_->GetDecoderInfo().is_hardware_accelerated);
+}
+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
 
 }  // namespace blink

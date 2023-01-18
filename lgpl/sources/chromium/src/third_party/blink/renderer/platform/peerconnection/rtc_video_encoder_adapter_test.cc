@@ -20,6 +20,7 @@
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/webrtc/webrtc_video_frame_adapter.h"
+#include "third_party/webrtc/api/video/i420_buffer.h"
 #include "third_party/webrtc/api/video/video_bitrate_allocation.h"
 #include "third_party/webrtc/modules/video_coding/include/video_error_codes.h"
 
@@ -45,6 +46,18 @@ webrtc::VideoFrame CreateTestFrame(const gfx::Size& size,
   auto frame = media::VideoFrame::CreateColorFrame(size, 12, 13, 14, timestamp);
   auto buffer =
       rtc::make_ref_counted<WebRtcVideoFrameAdapter>(std::move(frame));
+  return webrtc::VideoFrame::Builder()
+      .set_video_frame_buffer(buffer)
+      .set_ntp_time_ms(timestamp.InMilliseconds())
+      .set_timestamp_rtp(timestamp.InMilliseconds() * kRtpTicksPerMs)
+      .build();
+}
+
+webrtc::VideoFrame CreateBlackFrame(const gfx::Size& size,
+                                    base::TimeDelta timestamp) {
+  rtc::scoped_refptr<webrtc::I420Buffer> buffer =
+      webrtc::I420Buffer::Create(size.width(), size.height());
+  webrtc::I420Buffer::SetBlack(buffer.get());
   return webrtc::VideoFrame::Builder()
       .set_video_frame_buffer(buffer)
       .set_ntp_time_ms(timestamp.InMilliseconds())
@@ -87,6 +100,7 @@ class TestEncoder final : public media::VideoEncoder {
     profile_ = profile;
     options_ = options;
     output_cb_ = std::move(output_cb);
+    initialized_ = status_ == media::EncoderStatus::Codes::kOk;
     RespondWithStatus(std::move(done_cb), status_);
   }
   void Encode(scoped_refptr<media::VideoFrame> frame,
@@ -107,6 +121,7 @@ class TestEncoder final : public media::VideoEncoder {
     options_ = options;
     if (output_cb)
       output_cb_ = std::move(output_cb);
+    initialized_ = status_ == media::EncoderStatus::Codes::kOk;
     RespondWithStatus(std::move(done_cb), status_);
   }
   void Flush(EncoderStatusCB done_cb) override {
@@ -116,10 +131,7 @@ class TestEncoder final : public media::VideoEncoder {
   }
 
  private:
-  bool is_initialized() const {
-    return task_runner_ != nullptr &&
-           status_ == media::EncoderStatus::Codes::kOk;
-  }
+  bool is_initialized() const { return initialized_; }
 
   void RespondWithStatus(EncoderStatusCB callback,
                          media::EncoderStatus status,
@@ -134,6 +146,7 @@ class TestEncoder final : public media::VideoEncoder {
   OutputCB output_cb_;
   std::vector<PendingEncode> pending_encodes_;
   media::EncoderStatus::Codes status_ = media::EncoderStatus::Codes::kOk;
+  bool initialized_ = false;
 };
 
 class TestEncodedImageCallback final : public webrtc::EncodedImageCallback {
@@ -330,6 +343,28 @@ TEST_F(RTCVideoEncoderAdapterTest, ReInitEncode) {
   }
 }
 
+TEST_F(RTCVideoEncoderAdapterTest, EncodeNonNativeFrame) {
+  webrtc::VideoCodec codec;
+  codec.width = kFrameSize1.width();
+  codec.height = kFrameSize1.height();
+  ASSERT_EQ(adapter().InitEncode(&codec, kVideoEncoderSettings),
+            WEBRTC_VIDEO_CODEC_OK);
+
+  TestEncodedImageCallback encoded_image_callback(1);
+  ASSERT_EQ(adapter().RegisterEncodeCompleteCallback(&encoded_image_callback),
+            WEBRTC_VIDEO_CODEC_OK);
+
+  std::vector<webrtc::VideoFrameType> frame_types = {
+      webrtc::VideoFrameType::kVideoFrameKey};
+  EXPECT_EQ(adapter().Encode(CreateBlackFrame(kFrameSize1, base::TimeDelta()),
+                             &frame_types),
+            WEBRTC_VIDEO_CODEC_OK);
+
+  test_encoder().ReturnAllFrames();
+  const auto images = encoded_image_callback.WaitAndGetImages();
+  EXPECT_EQ(images.size(), 1u);
+}
+
 TEST_F(RTCVideoEncoderAdapterTest, CorruptEncoderOutput) {
   webrtc::VideoCodec codec;
   codec.width = kFrameSize1.width();
@@ -385,6 +420,43 @@ TEST_F(RTCVideoEncoderAdapterTest, Rates) {
   EXPECT_EQ(
       test_encoder().options().bitrate.value_or(media::Bitrate()).target_bps(),
       new_bitrate.GetBitrate(0, 0));
+}
+
+TEST_F(RTCVideoEncoderAdapterTest, SetRatesUninitialized) {
+  // Since we didn't initialize the encoder, SetRates() should do
+  // nothing (if it does, TestEncoder will fail assertions).
+  webrtc::VideoBitrateAllocation new_bitrate;
+  new_bitrate.SetBitrate(0, 0, 18000);
+  const auto new_framerate = 30;
+  adapter().SetRates({new_bitrate, new_framerate});
+}
+
+TEST_F(RTCVideoEncoderAdapterTest, ReleaseUninitialized) {
+  // Since we didn't initialize the encoder, Release() should do
+  // nothing (if it does, TestEncoder will fail assertions).
+  EXPECT_EQ(adapter().Release(), WEBRTC_VIDEO_CODEC_OK);
+}
+
+TEST_F(RTCVideoEncoderAdapterTest, ReleaseAfterFailedReInit) {
+  webrtc::VideoCodec codec;
+  codec.width = kFrameSize1.width();
+  codec.height = kFrameSize1.height();
+  ASSERT_EQ(adapter().InitEncode(&codec, kVideoEncoderSettings),
+            WEBRTC_VIDEO_CODEC_OK);
+
+  // Re-initialization must be preceded by a Release().
+  ASSERT_EQ(adapter().Release(), WEBRTC_VIDEO_CODEC_OK);
+
+  codec.width = kFrameSize2.width();
+  codec.height = kFrameSize2.height();
+  test_encoder().set_status(
+      media::EncoderStatus::Codes::kEncoderInitializationError);
+  ASSERT_EQ(adapter().InitEncode(&codec, kVideoEncoderSettings),
+            WEBRTC_VIDEO_CODEC_UNINITIALIZED);
+
+  // Since we failed to re-initialize the encoder, Release() should do
+  // nothing (if it does, TestEncoder will fail assertions).
+  EXPECT_EQ(adapter().Release(), WEBRTC_VIDEO_CODEC_OK);
 }
 
 }  // namespace blink

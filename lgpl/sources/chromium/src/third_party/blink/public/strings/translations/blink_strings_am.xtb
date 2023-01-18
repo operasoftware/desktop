@@ -7,7 +7,6 @@
 <translation id="1178581264944972037">ለአፍታ አቁም</translation>
 <translation id="1306460908038601864">ጠፍቷል</translation>
 <translation id="1311894908970423688">እሴት <ph name="VALUE_DATE_OR_TIME" /> መሆን አለበት።</translation>
-<translation id="145015347812617860"><ph name="COUNT" /> ንጥሎች</translation>
 <translation id="1480676835519562650">በብዛት ሊመረጥ የሚችል፣ <ph name="SELECTED" /> ከ<ph name="COUNT" /> ተመርጠዋል።</translation>
 <translation id="1588438908519853928">መደበኛ</translation>
 <translation id="1591562245178063882">በዚህ ወር</translation>
@@ -19,7 +18,7 @@
 <translation id="1758486001363313524">ሌላ...</translation>
 <translation id="1787192514241997742">ጠቅላላ ጊዜ፦ <ph name="REMAINING_TIME" /></translation>
 <translation id="1822429046913737220">ጥዋት/ከሰዓት</translation>
-<translation id="1832974991323546415">በርቀት መሳሪያ ላይ አጫውት</translation>
+<translation id="1832974991323546415">በርቀት መሣሪያ ላይ አጫውት</translation>
 <translation id="1921819250265091946">ቀቀ</translation>
 <translation id="1938124657309484470">ዋጋ <ph name="MAXIMUM_DATE_OR_TIME" /> ወይም ከዚያ በፊት መሆን አለበት።</translation>
 <translation id="1946271899482435442">የቀን መልቀሚያ አሳይ</translation>
@@ -31,7 +30,6 @@
 <translation id="2246498165605549352">አካባቢያዊ ፋይል</translation>
 <translation id="2247351761944213033">ሳምንት <ph name="WEEKNUMBER" />፣ <ph name="YEAR" /></translation>
 <translation id="2277199496770840904">ትራክ <ph name="NUMBER" /></translation>
-<translation id="2307576640803031502">በዝርዝር ውስጥ፣ ንጥል <ph name="INDEX" /> ከ<ph name="COUNT" /></translation>
 <translation id="2393030564806080191">ባለአስራስድስትዮሽ የቀለም እሴት</translation>
 <translation id="2398813069815436052">መገናኛ ተከፍቷል።</translation>
 <translation id="245932805758469625">የቪዲዮ ቀሪ ሰከንዶች ብዛት</translation>
@@ -43,7 +41,7 @@
 <translation id="2613802280814924224">እባክዎ የሚሰራ ዋጋ ያስገቡ። የሚቀርበው ዋጋ <ph name="VALID_VALUE" /> ነው።</translation>
 <translation id="2634240155926812724">አረንጓዴ ሰርጥ</translation>
 <translation id="2653659639078652383">አስገባ</translation>
-<translation id="2723001399770238859">ድምጽ</translation>
+<translation id="2723001399770238859">ድምፅ</translation>
 <translation id="2746543609216772311">ዋጋ <ph name="MINIMUM_DATE_OR_TIME" /> ወይም ከዚያ በኋላ መሆን አለበት።</translation>
 <translation id="2761667185364618470">ለመቀጠል ከፈለጉ እባክዎ ይህ ሳጥን ላይ ምልክት ያድርጉ።</translation>
 <translation id="2908441821576996758">እባክዎ በኮማ የተለዩ የኢሜይል አድራሻዎች ዝርዝር ያስገቡ።</translation>
@@ -97,7 +95,7 @@
 <translation id="5546461542133609677">ድምፅ-ከልን አንሳ</translation>
 <translation id="5630795885300617244">10 ሴ ለመዝለል ወደ ግራ ወይም ቀኝ ሁለቴ መታ ያድርጉ</translation>
 <translation id="5677946354068040947">ተጨማሪ አማራጮች</translation>
-<translation id="57838592816432529">ድምጽ ይዝጉ</translation>
+<translation id="57838592816432529">ድምፅ ይዝጉ</translation>
 <translation id="5786442179789148008">የመልሶ ማጫወት ፍጥነት ምናሌን አሳይ</translation>
 <translation id="5787939484346677755">ተዘርግቷል፣ የራስ-ማጠናቀቅ አማራጮች አሉ።</translation>
 <translation id="5860033963881614850">አጥፋ</translation>
@@ -112,7 +110,7 @@
 <translation id="6165053282446038410">ተዘርግቷል፣ <ph name="COUNT" /> የራስ-ማጠናቀቅ አማራጮች አሉ።</translation>
 <translation id="6212595056017402527">የአሁኑ ገጽ</translation>
 <translation id="6281588256137006900">ፍካት</translation>
-<translation id="6310801910862476708">ከስዕል-ውስጥ-ስዕል ውጣ</translation>
+<translation id="6310801910862476708">ከሥዕል-ውስጥ-ሥዕል ውጣ</translation>
 <translation id="6398862346408813489">የወር መምረጫ ፓነል አሳይ</translation>
 <translation id="6404546809543547843">የኦዲዮ ሰዓት አንፏቃቂ</translation>
 <translation id="6443871981718447451">የተዘጉ የመግለጫ ጽሁፎችን ምናሌ አሳይ</translation>
@@ -175,10 +173,10 @@
 <translation id="894736920926684893">የቅርጸት መቀያየሪያ</translation>
 <translation id="8987927404178983737">ወር</translation>
 <translation id="901493112792887934">የአሁኑ ጊዜ በሰከንዶች</translation>
-<translation id="9093215626363556771">ከስዕል-ውስጥ-ስዕል ውጣ</translation>
+<translation id="9093215626363556771">ከሥዕል-ውስጥ-ሥዕል ውጣ</translation>
 <translation id="9132465097189459683">ሌላ...</translation>
 <translation id="9155987714137265666"><ph name="WEEK" />፣ የሚጀምረው በ<ph name="WEEK_START_DATE" /></translation>
 <translation id="916607977885256133">በሥዕል ላይ ሥዕል</translation>
 <translation id="945780513535800434">በከፊል ምልክት ተደርጎበታል</translation>
-<translation id="954003015749068518">ወደ ስዕል-ውስጥ-ስዕል ይግቡ</translation>
+<translation id="954003015749068518">ወደ ሥዕል-ውስጥ-ሥዕል ይግቡ</translation>
 </translationbundle>

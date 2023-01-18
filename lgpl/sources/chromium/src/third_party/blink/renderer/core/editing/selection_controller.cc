@@ -495,7 +495,6 @@ bool SelectionController::HandleTapInsideSelection(
 
 void SelectionController::UpdateSelectionForMouseDrag(
     const HitTestResult& hit_test_result,
-    const PhysicalOffset& drag_start_pos,
     const PhysicalOffset& last_known_mouse_position) {
   if (!mouse_down_may_start_select_ && !link_selection_might_start_during_drag_)
     return;
@@ -1048,7 +1047,6 @@ bool SelectionController::HandleMousePressEvent(
 void SelectionController::HandleMouseDraggedEvent(
     const MouseEventWithHitTestResults& event,
     const gfx::Point& mouse_down_pos,
-    const PhysicalOffset& drag_start_pos,
     const PhysicalOffset& last_known_mouse_position) {
   TRACE_EVENT0("blink", "SelectionController::handleMouseDraggedEvent");
 
@@ -1077,10 +1075,9 @@ void SelectionController::HandleMouseDraggedEvent(
     HitTestResult result(request, location);
     frame_->GetDocument()->GetLayoutView()->HitTest(location, result);
 
-    UpdateSelectionForMouseDrag(result, drag_start_pos,
-                                last_known_mouse_position);
+    UpdateSelectionForMouseDrag(result, last_known_mouse_position);
   }
-  UpdateSelectionForMouseDrag(event.GetHitTestResult(), drag_start_pos,
+  UpdateSelectionForMouseDrag(event.GetHitTestResult(),
                               last_known_mouse_position);
 }
 
@@ -1100,8 +1097,7 @@ void SelectionController::UpdateSelectionForMouseDrag(
       view->ConvertFromRootFrame(last_known_mouse_position_in_root_frame));
   HitTestResult result(request, location);
   layout_view->HitTest(location, result);
-  UpdateSelectionForMouseDrag(result, drag_start_pos_in_root_frame,
-                              last_known_mouse_position_in_root_frame);
+  UpdateSelectionForMouseDrag(result, last_known_mouse_position_in_root_frame);
 }
 
 bool SelectionController::HandleMouseReleaseEvent(

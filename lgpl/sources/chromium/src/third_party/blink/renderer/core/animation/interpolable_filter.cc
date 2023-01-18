@@ -1,7 +1,8 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/renderer/core/animation/interpolable_filter.h"
 #include "third_party/blink/renderer/core/animation/interpolable_length.h"
 #include "third_party/blink/renderer/core/animation/interpolable_shadow.h"
@@ -11,6 +12,12 @@
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/core/css/resolver/filter_operation_resolver.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+#include "third_party/blink/renderer/core/animation/interpolable_shader.h"
+#include "third_party/blink/renderer/core/css/css_shader_value.h"
+#include "third_party/blink/renderer/core/css/properties/css_property.h"
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
 namespace blink {
 namespace {
@@ -70,6 +77,16 @@ std::unique_ptr<InterpolableFilter> InterpolableFilter::MaybeCreate(
           To<DropShadowFilterOperation>(filter).Shadow(), zoom);
       break;
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+    case FilterOperation::OperationType::kGpuShader: {
+      const auto& shader = To<GpuShaderFilterOperation>(filter);
+      value = std::make_unique<InterpolableShader>(
+          shader.RelativeUrl(), shader.AbsoluteUrl(), shader.GetReferrer(),
+          shader.Resource(), shader.AnimationFrame());
+      break;
+    }
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
     case FilterOperation::OperationType::kReference:
       return nullptr;
 
@@ -118,6 +135,12 @@ std::unique_ptr<InterpolableFilter> InterpolableFilter::MaybeConvertCSSValue(
       value = InterpolableShadow::MaybeConvertCSSValue(filter.Item(0));
       break;
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+    case FilterOperation::OperationType::kGpuShader:
+      value = InterpolableShader::MaybeConvertCSSValue(filter.Item(0));
+      break;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
     default:
       NOTREACHED();
       return nullptr;
@@ -157,6 +180,12 @@ std::unique_ptr<InterpolableFilter> InterpolableFilter::CreateInitialValue(
       value = InterpolableShadow::CreateNeutral();
       break;
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+    case FilterOperation::OperationType::kGpuShader:
+      value = InterpolableShader::CreateNeutral();
+      break;
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
     default:
       NOTREACHED();
       return nullptr;
@@ -166,7 +195,8 @@ std::unique_ptr<InterpolableFilter> InterpolableFilter::CreateInitialValue(
 }
 
 FilterOperation* InterpolableFilter::CreateFilterOperation(
-    const StyleResolverState& state) const {
+    const CSSProperty& property,
+    StyleResolverState& state) const {
   switch (type_) {
     case FilterOperation::OperationType::kGrayscale:
     case FilterOperation::OperationType::kHueRotate:
@@ -201,6 +231,23 @@ FilterOperation* InterpolableFilter::CreateFilterOperation(
         shadow_data.OverrideColor(Color::kBlack);
       return MakeGarbageCollected<DropShadowFilterOperation>(shadow_data);
     }
+
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+    case FilterOperation::OperationType::kGpuShader: {
+      const auto& shader = To<InterpolableShader>(*value_);
+      const auto* shader_value = MakeGarbageCollected<CSSShaderValue>(
+          shader.relative_url(), KURL(shader.absolute_url()), shader.referrer(),
+          shader.animation_frame());
+
+      auto* resource =
+          state.GetElementStyleResources().GetGpuShaderResourceFromValue(
+              property.PropertyID(), *shader_value);
+
+      return MakeGarbageCollected<GpuShaderFilterOperation>(
+          shader.relative_url(), shader.absolute_url(), shader.referrer(),
+          resource, shader.animation_frame());
+    }
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
 
     default:
       NOTREACHED();

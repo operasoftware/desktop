@@ -27,6 +27,7 @@ nv21                0fdeb2cdd56cf5a7147dc273456fa217
 nv24                193b9eadcc06ad5081609f76249b3e47
 nv42                1738ad3c31c6c16e17679f5b09ce4677
 p010le              fbbc23cc1d764a5e6fb71883d985f3ed
+p012le              3a92c1bd3e9de050bf6abcc3fd911ab7
 p016le              fbbc23cc1d764a5e6fb71883d985f3ed
 p210le              680912c059de39c3401cac856bd1b0c1
 p216le              8718662e226a4581561e7bb532af2d83
@@ -35,6 +36,8 @@ p416le              fa4e023d0bf4b03b0ffef3d4d35abf7e
 rgb0                0984eb985dabbe757ed6beb53db84eff
 rgb24               17f9e2e0c609009acaf2175c42d4a2a5
 rgba                b157c90191463d34fb3ce77b36c96386
+vuya                44368c0a758ee68e24ce976e3b1b8535
+vuyx                bc7c4f693a22cd1ac95e33d473086474
 xyz12le             23dadbbba70b2925ce75fb8ba8080ba3
 ya16le              8dbfcb586abf626da7d1aca887a581b9
 ya8                 495daaca2dcb4f7aeba7652768b41ced

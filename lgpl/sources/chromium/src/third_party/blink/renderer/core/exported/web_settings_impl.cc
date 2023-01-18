@@ -243,6 +243,12 @@ void WebSettingsImpl::SetImagesEnabled(bool enabled) {
   settings_->SetImagesEnabled(enabled);
 }
 
+#if BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+void WebSettingsImpl::SetGpuShaderCssFiltersEnabled(bool enabled) {
+  settings_->SetGpuShaderCssFiltersEnabled(enabled);
+}
+#endif  // BUILDFLAG(OPERA_FEATURE_BLINK_GPU_SHADER_CSS_FILTER)
+
 void WebSettingsImpl::SetLoadWithOverviewMode(bool enabled) {
   settings_->SetLoadWithOverviewMode(enabled);
 }

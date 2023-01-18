@@ -289,8 +289,6 @@ void FrameFetchContext::AddAdditionalRequestHeaders(ResourceRequest& request) {
 
   if (GetResourceFetcherProperties().IsDetached())
     return;
-
-  AddBackForwardCacheExperimentHTTPHeaderIfNeeded(request);
 }
 
 // TODO(toyoshim, arthursonzogni): PlzNavigate doesn't use this function to set
@@ -440,6 +438,7 @@ void FrameFetchContext::AddClientHintsIfNecessary(
 
   absl::optional<ClientHintImageInfo> image_info;
   absl::optional<WTF::AtomicString> prefers_color_scheme;
+  absl::optional<WTF::AtomicString> prefers_reduced_motion;
 
   if (document_) {  // Only get frame info if the frame is not detached
     image_info = ClientHintImageInfo();
@@ -450,7 +449,12 @@ void FrameFetchContext::AddClientHintsIfNecessary(
       image_info->viewport_height = GetFrame()->View()->ViewportHeight();
     }
 
-    prefers_color_scheme = document_->InDarkMode() ? "dark" : "light";
+    prefers_color_scheme = document_->InDarkMode()
+                               ? network::kPrefersColorSchemeDark
+                               : network::kPrefersColorSchemeLight;
+    prefers_reduced_motion = GetSettings()->GetPrefersReducedMotion()
+                                 ? network::kPrefersReducedMotionReduce
+                                 : network::kPrefersReducedMotionNoPreference;
   }
 
   // GetClientHintsPreferences() has things parsed for this document
@@ -458,7 +462,7 @@ void FrameFetchContext::AddClientHintsIfNecessary(
   // with renderer-parsed http-equiv merged in.
   BaseFetchContext::AddClientHintsIfNecessary(
       GetClientHintsPreferences(), resource_origin, is_1p_origin, ua, policy,
-      image_info, prefers_color_scheme, request);
+      image_info, prefers_color_scheme, prefers_reduced_motion, request);
 }
 
 void FrameFetchContext::AddReducedAcceptLanguageIfNecessary(
@@ -473,8 +477,8 @@ void FrameFetchContext::AddReducedAcceptLanguageIfNecessary(
     return;
 
   const String& reduced_accept_language = GetReducedAcceptLanguage();
-  if (!reduced_accept_language.IsEmpty() &&
-      request.HttpHeaderField(http_names::kAcceptLanguage).IsEmpty()) {
+  if (!reduced_accept_language.empty() &&
+      request.HttpHeaderField(http_names::kAcceptLanguage).empty()) {
     request.SetHttpHeaderField(http_names::kAcceptLanguage,
                                reduced_accept_language.Ascii().c_str());
   }
@@ -637,7 +641,7 @@ bool FrameFetchContext::ShouldBlockFetchAsCredentialedSubresource(
     const ResourceRequest& resource_request,
     const KURL& url) const {
   // URLs with no embedded credentials should load correctly.
-  if (url.User().IsEmpty() && url.Pass().IsEmpty())
+  if (url.User().empty() && url.Pass().empty())
     return false;
 
   if (resource_request.GetRequestContext() ==
@@ -744,7 +748,7 @@ String FrameFetchContext::GetReducedAcceptLanguage() const {
   // header as the overridden value.
   String override_accept_language;
   probe::ApplyAcceptLanguageOverride(Probe(), &override_accept_language);
-  return override_accept_language.IsEmpty()
+  return override_accept_language.empty()
              ? frame->GetReducedAcceptLanguage().GetString()
              : network_utils::GenerateAcceptLanguageHeader(
                    override_accept_language);
